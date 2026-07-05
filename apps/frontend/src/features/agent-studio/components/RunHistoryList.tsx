@@ -68,56 +68,65 @@ export function RunHistoryList({
             </button>
             {!collapsed ? (
               <div className={runHistoryManagementMode ? 'run-history-group-list managing' : 'run-history-group-list'}>
-                {group.runs.map((run) => (
-                  <div
-                    className={run.run_id === selectedRunId ? 'run-list-row active' : 'run-list-row'}
-                    data-run-group-id={run.run_group_id || ''}
-                    data-run-id={run.run_id}
-                    data-run-kind={run.kind}
-                    data-run-status={run.status}
-                    data-runtime-capability-id={run.runtime_debug?.current_capability_id || ''}
-                    data-runtime-deferred-tool={run.runtime_debug?.latest_deferred_tool || ''}
-                    data-runtime-doctrine={run.runtime_debug?.runtime_doctrine || ''}
-                    data-runtime-replan-request-id={run.runtime_debug?.latest_replan_request_id || ''}
-                    data-runtime-role={run.runtime_debug?.runtime_role || ''}
-                    data-runtime-stage={run.runtime_debug?.runtime_stage || ''}
-                    data-task-id={run.task_id || ''}
-                    data-testid="agent-run-history-row"
-                    key={run.run_id}
-                  >
-                    <label className="run-list-select" aria-label={`选择 Run ${run.run_id}`}>
-                      <input
-                        data-testid="agent-run-history-select-run"
-                        type="checkbox"
-                        checked={selectedRunIdSet.has(run.run_id)}
-                        disabled={busy || !runHistoryManagementMode}
-                        onChange={() => onToggleRunSelected(run.run_id)}
-                      />
-                    </label>
-                    <button
-                      type="button"
-                      className={run.run_id === selectedRunId ? 'run-list-item active' : 'run-list-item'}
+                {group.runs.map((run) => {
+                  const runtimePlanSummary = runHistoryRuntimePlanSummary(run);
+                  const taskProgressSummary = runHistoryTaskProgressSummary(run);
+                  return (
+                    <div
+                      className={run.run_id === selectedRunId ? 'run-list-row active' : 'run-list-row'}
+                      data-replan-recovery-count={run.replan_recoveries?.length || 0}
+                      data-run-group-id={run.run_group_id || ''}
                       data-run-id={run.run_id}
+                      data-run-kind={run.kind}
                       data-run-status={run.status}
-                      data-testid="agent-run-history-open-run"
-                      onClick={() => onOpenRunDetail(run.run_id)}
+                      data-runtime-capability-id={run.runtime_debug?.current_capability_id || ''}
+                      data-runtime-deferred-tool={run.runtime_debug?.latest_deferred_tool || ''}
+                      data-runtime-doctrine={run.runtime_debug?.runtime_doctrine || ''}
+                      data-runtime-replan-request-id={run.runtime_debug?.latest_replan_request_id || ''}
+                      data-runtime-request-count={run.runtime_execution_envelope?.requests?.length || 0}
+                      data-runtime-role={run.runtime_debug?.runtime_role || ''}
+                      data-runtime-stage={run.runtime_debug?.runtime_stage || ''}
+                      data-task-id={run.task_id || ''}
+                      data-task-progress-status={run.task_progress?.status || ''}
+                      data-testid="agent-run-history-row"
+                      key={run.run_id}
                     >
-                      <span className={`run-list-status-dot ${runStatusTone(run.status)}`} aria-hidden="true" />
-                      <span className="run-list-item-copy">
-                        <strong>{run.user_goal || run.runnable_name || run.runnable_id}</strong>
-                        <span>{runKindLabel(run.kind)} · {runStatusLabel(run.status)} · {formatRunDate(run.updated_at || run.created_at)}</span>
-                        {run.result ? <small>{run.result}</small> : null}
-                      </span>
-                    </button>
-                    <RuntimeDebugSummary
-                      className="run-history-runtime-debug"
-                      compact
-                      sourceLabel="Run list"
-                      summary={run.runtime_debug}
-                      testId="agent-run-history-runtime-debug"
-                    />
-                  </div>
-                ))}
+                      <label className="run-list-select" aria-label={`选择 Run ${run.run_id}`}>
+                        <input
+                          data-testid="agent-run-history-select-run"
+                          type="checkbox"
+                          checked={selectedRunIdSet.has(run.run_id)}
+                          disabled={busy || !runHistoryManagementMode}
+                          onChange={() => onToggleRunSelected(run.run_id)}
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        className={run.run_id === selectedRunId ? 'run-list-item active' : 'run-list-item'}
+                        data-run-id={run.run_id}
+                        data-run-status={run.status}
+                        data-testid="agent-run-history-open-run"
+                        onClick={() => onOpenRunDetail(run.run_id)}
+                      >
+                        <span className={`run-list-status-dot ${runStatusTone(run.status)}`} aria-hidden="true" />
+                        <span className="run-list-item-copy">
+                          <strong>{run.user_goal || run.runnable_name || run.runnable_id}</strong>
+                          <span>{runKindLabel(run.kind)} · {runStatusLabel(run.status)} · {formatRunDate(run.updated_at || run.created_at)}</span>
+                          {run.result ? <small>{run.result}</small> : null}
+                          {runtimePlanSummary ? <small data-testid="agent-run-history-runtime-plan">Runtime plan · {runtimePlanSummary}</small> : null}
+                          {taskProgressSummary ? <small data-testid="agent-run-history-task-progress">Task progress · {taskProgressSummary}</small> : null}
+                        </span>
+                      </button>
+                      <RuntimeDebugSummary
+                        className="run-history-runtime-debug"
+                        compact
+                        sourceLabel="Run list"
+                        summary={run.runtime_debug}
+                        testId="agent-run-history-runtime-debug"
+                      />
+                    </div>
+                  );
+                })}
               </div>
             ) : null}
           </section>
@@ -144,4 +153,37 @@ function runHistoryInitial(name: string): string {
   const clean = name.trim();
   if (!clean) return 'A';
   return Array.from(clean)[0]?.toUpperCase() || 'A';
+}
+
+function runHistoryRuntimePlanSummary(run: RunSpec): string {
+  const requests = run.runtime_execution_envelope?.requests || [];
+  const tools = uniqueRunHistoryStrings(requests.map((request) => request.tool_name));
+  const parts = [
+    requests.length ? `${requests.length} requests` : '',
+    tools.length ? tools.slice(0, 3).join(', ') : '',
+    run.replan_recoveries?.length ? `${run.replan_recoveries.length} replans` : '',
+  ].filter(Boolean);
+  return parts.join(' · ');
+}
+
+function runHistoryTaskProgressSummary(run: RunSpec): string {
+  const progress = run.task_progress || null;
+  if (!progress) return '';
+  return [
+    progress.progress_text || progress.status || '',
+    typeof progress.completed_todos === 'number' || typeof progress.total_todos === 'number'
+      ? `todo ${progress.completed_todos ?? 0}/${progress.total_todos ?? 0}`
+      : '',
+    progress.needs_replan ? 'replan' : '',
+    progress.needs_user_action ? 'user action' : '',
+  ].filter(Boolean).join(' · ');
+}
+
+function uniqueRunHistoryStrings(values: unknown[]): string[] {
+  const result: string[] = [];
+  values.forEach((value) => {
+    const text = typeof value === 'string' ? value.trim() : '';
+    if (text && !result.includes(text)) result.push(text);
+  });
+  return result;
 }

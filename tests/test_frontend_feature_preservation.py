@@ -4096,8 +4096,18 @@ def test_agent_studio_uses_extracted_runtime_shared_components() -> None:
             "data-runtime-capability-id={run.runtime_debug?.current_capability_id || ''}",
             "data-runtime-stage={run.runtime_debug?.runtime_stage || ''}",
             "data-runtime-replan-request-id={run.runtime_debug?.latest_replan_request_id || ''}",
+            "data-runtime-request-count={run.runtime_execution_envelope?.requests?.length || 0}",
+            "data-task-progress-status={run.task_progress?.status || ''}",
+            "data-replan-recovery-count={run.replan_recoveries?.length || 0}",
+            "const runtimePlanSummary = runHistoryRuntimePlanSummary(run);",
+            "const taskProgressSummary = runHistoryTaskProgressSummary(run);",
+            'data-testid="agent-run-history-runtime-plan"',
+            'data-testid="agent-run-history-task-progress"',
             "className=\"run-history-runtime-debug\"",
             "testId=\"agent-run-history-runtime-debug\"",
+            "function runHistoryRuntimePlanSummary",
+            "function runHistoryTaskProgressSummary",
+            "function uniqueRunHistoryStrings",
         ],
     )
     _assert_contains(
