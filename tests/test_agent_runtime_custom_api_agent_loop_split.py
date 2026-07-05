@@ -24527,6 +24527,123 @@ def test_runtime_planner_task_progress_uses_workflow_scope_context() -> None:
     assert blocked_todo["workflow_run_id"] == "workflow-run-1"
 
 
+def test_runtime_planner_task_progress_keeps_operate_step_pending_verification() -> None:
+    decision = RuntimePlanner().decision(
+        "在 Notion 点击 New Page",
+        allowed_tools=[
+            "desktop.inspect_app",
+            "app.focus_and_click_ui_element",
+            "desktop.ui_elements",
+        ],
+    )
+    loop = _private_runtime_loop()
+    timeline = [
+        _timeline(
+            "agent.tool.call",
+            "app.focus_and_click_ui_element",
+            input_preview={"app_name": "Notion", "target": "New Page"},
+            result={"ok": True, "summary": "clicked"},
+            status="completed",
+        )
+    ]
+
+    loop._record_runtime_planner_task_progress_events(
+        decision,
+        timeline=timeline,
+        tool_timeline_start=0,
+        run_id="run-click-pending-verification",
+    )
+
+    todo_event = next(
+        event
+        for event in timeline
+        if event["event"] == "agent.task.todo.updated"
+        and event["step_id"] == "operate-foreground-ui"
+    )
+    checkpoint_event = next(
+        event
+        for event in timeline
+        if event["event"] == "agent.task.checkpoint.updated"
+        and event["step_id"] == "operate-foreground-ui"
+    )
+    assert todo_event["status"] == "in_progress"
+    assert checkpoint_event["status"] == "ready"
+    assert todo_event["todo"]["metadata"]["requires_post_action_verification"] is True
+    assert checkpoint_event["checkpoint"]["payload"][
+        "requires_post_action_verification"
+    ] is True
+
+
+def test_model_followup_task_progress_keeps_operate_step_pending_verification() -> None:
+    loop = _private_runtime_loop()
+    followup_context = {
+        "decision_id": "decision-followup-click",
+        "plan_id": "plan-followup-click",
+        "task_core": {
+            "core_id": "task-core-followup-click",
+            "workspace": {"workspace_id": "task-workspace-followup-click"},
+            "todos": [
+                {
+                    "todo_id": "todo-followup-click",
+                    "step_id": "operate-foreground-ui",
+                    "title": "Click New Page",
+                    "status": "pending",
+                    "tool_name": "app.focus_and_click_ui_element",
+                    "metadata": {"requires_post_action_verification": True},
+                }
+            ],
+            "checkpoints": [
+                {
+                    "checkpoint_id": "checkpoint-followup-click",
+                    "after_step_id": "operate-foreground-ui",
+                    "title": "Click awaits verification",
+                    "status": "planned",
+                    "payload": {"requires_post_action_verification": True},
+                }
+            ],
+        },
+    }
+    requests = [
+        {
+            "tool": "app.focus_and_click_ui_element",
+            "step_id": "operate-foreground-ui",
+            "requires_post_action_verification": True,
+        }
+    ]
+    timeline = [
+        _timeline(
+            "agent.tool.call",
+            "app.focus_and_click_ui_element",
+            input_preview={"app_name": "Notion", "target": "New Page"},
+            result={"ok": True, "summary": "clicked"},
+            status="completed",
+        )
+    ]
+
+    loop._record_model_followup_pending_plan_progress_events(
+        followup_context,
+        requests,
+        timeline=timeline,
+        tool_timeline_start=0,
+        run_id="run-followup-click-pending-verification",
+    )
+
+    todo_event = next(
+        event
+        for event in timeline
+        if event["event"] == "agent.task.todo.updated"
+        and event["step_id"] == "operate-foreground-ui"
+    )
+    checkpoint_event = next(
+        event
+        for event in timeline
+        if event["event"] == "agent.task.checkpoint.updated"
+        and event["step_id"] == "operate-foreground-ui"
+    )
+    assert todo_event["status"] == "in_progress"
+    assert checkpoint_event["status"] == "ready"
+
+
 def test_auto_replan_fallback_recovery_reuses_safe_file_inputs() -> None:
     decision = RuntimePlanner().decision(
         "请分析 legacy-report.xls 并输出报告",

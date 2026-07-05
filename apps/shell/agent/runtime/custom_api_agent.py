@@ -3572,11 +3572,21 @@ class RuntimeCustomApiAgentLoop:
             if tool_event is None:
                 continue
             result = tool_event.get("result") if isinstance(tool_event.get("result"), dict) else {}
+            todo = todo_by_step.get(step_id)
+            checkpoints = checkpoints_by_step.get(step_id, [])
+            requires_post_action_verification = (
+                _task_progress_requires_post_action_verification(todo, *checkpoints)
+            )
             todo_status = _task_todo_status_for_tool_result(
                 str(tool_event.get("event") or ""),
                 result,
+                requires_post_action_verification=requires_post_action_verification,
             )
-            checkpoint_status = _task_checkpoint_status_for_todo_status(todo_status, result)
+            checkpoint_status = _task_checkpoint_status_for_todo_status(
+                todo_status,
+                result,
+                requires_post_action_verification=requires_post_action_verification,
+            )
             skip_statuses = {todo_status}
             if todo_status != "completed":
                 skip_statuses.add("completed")
@@ -3653,7 +3663,7 @@ class RuntimeCustomApiAgentLoop:
                     append_run_event=self._append_run_event,
                     run_id=run_id,
                 )
-            for checkpoint in checkpoints_by_step.get(step_id, []):
+            for checkpoint in checkpoints:
                 checkpoint_payload = _snapshot_payload(checkpoint)
                 checkpoint_payload["status"] = checkpoint_status
                 payload = {
@@ -3785,11 +3795,27 @@ class RuntimeCustomApiAgentLoop:
             if tool_event is None:
                 continue
             result = tool_event.get("result") if isinstance(tool_event.get("result"), dict) else {}
+            todo = todos_by_step.get(step_id)
+            if todo is not None and not _task_core_todo_matches_request(todo, request):
+                continue
+            checkpoints = checkpoints_by_step.get(step_id, [])
+            requires_post_action_verification = (
+                _task_progress_requires_post_action_verification(
+                    request,
+                    todo,
+                    *checkpoints,
+                )
+            )
             todo_status = _task_todo_status_for_tool_result(
                 str(tool_event.get("event") or ""),
                 result,
+                requires_post_action_verification=requires_post_action_verification,
             )
-            checkpoint_status = _task_checkpoint_status_for_todo_status(todo_status, result)
+            checkpoint_status = _task_checkpoint_status_for_todo_status(
+                todo_status,
+                result,
+                requires_post_action_verification=requires_post_action_verification,
+            )
             skip_statuses = {todo_status}
             if todo_status != "completed":
                 skip_statuses.add("completed")
@@ -3799,9 +3825,6 @@ class RuntimeCustomApiAgentLoop:
                 step_id=step_id,
                 statuses=skip_statuses,
             ):
-                continue
-            todo = todos_by_step.get(step_id)
-            if todo is not None and not _task_core_todo_matches_request(todo, request):
                 continue
             source_event = {
                 "event": str(tool_event.get("event") or ""),
@@ -3876,7 +3899,7 @@ class RuntimeCustomApiAgentLoop:
                         append_run_event=self._append_run_event,
                         run_id=run_id,
                     )
-            for checkpoint in checkpoints_by_step.get(step_id, []):
+            for checkpoint in checkpoints:
                 checkpoint_payload = dict(checkpoint)
                 checkpoint_payload["status"] = checkpoint_status
                 payload = {
@@ -10254,25 +10277,61 @@ def _non_negative_int(value: Any) -> int | None:
     return parsed if parsed >= 0 else None
 
 
-def _task_todo_status_for_tool_result(event_type: str, result: Mapping[str, Any]) -> str:
+def _task_todo_status_for_tool_result(
+    event_type: str,
+    result: Mapping[str, Any],
+    *,
+    requires_post_action_verification: bool = False,
+) -> str:
     if not isinstance(result, Mapping):
         return "blocked"
     if result.get("approval_required"):
         return "blocked"
     if str(event_type or "").strip() == "agent.tool.skipped":
         return "skipped" if result.get("blocked_by_user_goal") else "blocked"
+    if result.get("ok") is True and requires_post_action_verification:
+        return "in_progress"
     return "blocked" if _tool_result_requests_replan(result) else "completed"
 
 
 def _task_checkpoint_status_for_todo_status(
     todo_status: str,
     result: Mapping[str, Any],
+    *,
+    requires_post_action_verification: bool = False,
 ) -> str:
     if isinstance(result, Mapping) and result.get("approval_required"):
         return "waiting_approval"
+    if todo_status == "in_progress" and requires_post_action_verification:
+        return "ready"
     if todo_status == "completed":
         return "completed"
     return "blocked"
+
+
+def _task_progress_requires_post_action_verification(*values: Any) -> bool:
+    for value in values:
+        if value in (None, "", [], {}):
+            continue
+        if _task_progress_mapping_requires_post_action_verification(value):
+            return True
+        for attr in ("metadata", "payload", "checkpoint_policy", "desktop_loop"):
+            nested = getattr(value, attr, None)
+            if _task_progress_mapping_requires_post_action_verification(nested):
+                return True
+    return False
+
+
+def _task_progress_mapping_requires_post_action_verification(value: Any) -> bool:
+    if not isinstance(value, Mapping):
+        return False
+    if value.get("requires_post_action_verification") is True:
+        return True
+    for key in ("metadata", "payload", "checkpoint_policy", "desktop_loop"):
+        nested = value.get(key)
+        if isinstance(nested, Mapping) and nested.get("requires_post_action_verification") is True:
+            return True
+    return False
 
 
 def _task_progress_result_preview(result: Mapping[str, Any]) -> dict[str, Any]:
