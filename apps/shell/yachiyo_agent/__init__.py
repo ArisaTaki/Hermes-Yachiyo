@@ -105,6 +105,7 @@ from .links import studio_run_url
 from .capability_registry import (
     capability_definition_map,
     capability_definitions,
+    capability_recovery_tools,
     capability_snapshots,
 )
 from .policy import (
@@ -165,6 +166,7 @@ __all__ = [
     "CapabilitySnapshot",
     "capability_definition_map",
     "capability_definitions",
+    "capability_recovery_tools",
     "capability_snapshots",
     "ChatRunnableCatalogSnapshot",
     "ChatRunnableParticipantSnapshot",

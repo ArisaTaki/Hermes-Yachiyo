@@ -13,6 +13,7 @@ from apps.shell.agent.runtime.event_scopes import (
     runtime_replan_request_event_type as _runtime_replan_event_type,
 )
 from apps.shell.agent.runtime.task_progress import append_task_progress_events_for_tool_result
+from apps.shell.yachiyo_agent.capability_registry import capability_recovery_tools
 from packages.security import redact_api_error_text
 
 _TOOL_REQUEST_TRACE_TEXT_KEYS = (
@@ -290,6 +291,8 @@ def _tool_result_with_runtime_recovery_defaults(
     if tool_result.get("ok") is not False and tool_result.get("verification_failed") is not True:
         return tool_result
     fallback_tools = _runtime_default_replan_fallback_tools(tool_name)
+    if not fallback_tools:
+        fallback_tools = _runtime_capability_replan_fallback_tools(tool_request)
     recovery_actions = _runtime_default_replan_recovery_actions(
         tool_name,
         raw_input,
@@ -2420,7 +2423,18 @@ def _runtime_replan_fallback_tools(
                 tools.extend(_string_list(action.get("tool")))
     if not _string_list(tools):
         tools.extend(_runtime_default_replan_fallback_tools(tool_name))
+    if not _string_list(tools):
+        tools.extend(_runtime_capability_replan_fallback_tools(tool_request))
     return _string_list(tools)
+
+
+def _runtime_capability_replan_fallback_tools(
+    tool_request: Mapping[str, Any],
+) -> list[str]:
+    capability_id = str(
+        tool_request.get("target_capability_id") or tool_request.get("capability_id") or ""
+    ).strip()
+    return capability_recovery_tools(capability_id)
 
 
 def _runtime_default_replan_fallback_tools(tool_name: str) -> list[str]:
@@ -2514,6 +2528,17 @@ def _runtime_default_recovery_input(
         return {"query": query, "limit": 20} if query else {"limit": 20}
     if fallback_tool == "desktop.running_apps":
         return {}
+    if fallback_tool == "browser.current_page":
+        return {}
+    if fallback_tool in {"workspace.read", "fs.read_file", "file.read"}:
+        path = str(
+            raw_input.get("path")
+            or raw_input.get("file_path")
+            or raw_input.get("source_path")
+            or raw_input.get("data_source_hint")
+            or ""
+        ).strip()
+        return {"path": path} if path else None
     if fallback_tool in {"app.open", "desktop.open_app"}:
         return {"app_name": app_name} if app_name else None
     if fallback_tool == "desktop.active_window":
@@ -2530,7 +2555,7 @@ def _runtime_default_recovery_input(
         return {"reason": "recover failed desktop tool"}
     if fallback_tool == "desktop.permissions":
         return {}
-    return {}
+    return None
 
 
 def _runtime_default_recovery_label(tool_name: str) -> str:

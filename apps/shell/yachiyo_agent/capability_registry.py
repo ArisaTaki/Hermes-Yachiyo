@@ -608,12 +608,54 @@ _DYNAMIC_CAPABILITY_TOOL_NAMES: dict[str, tuple[str, ...]] = {
 }
 
 
+_CAPABILITY_RECOVERY_TOOLS: dict[str, tuple[str, ...]] = {
+    "browser.research": ("browser.current_page", "screen.capture", "desktop.active_window"),
+    "communication.compose": ("desktop.active_window", "desktop.ui_elements", "screen.capture"),
+    "data.analysis": ("python.run", "terminal.run"),
+    "desktop.app_control": (
+        "desktop.list_apps",
+        "desktop.running_apps",
+        "app.open",
+        "desktop.active_window",
+    ),
+    "desktop.app_discovery": ("desktop.permissions", "screen.capture", "desktop.active_window"),
+    "desktop.ui_operation": ("desktop.active_window", "desktop.ui_elements", "screen.capture"),
+    "desktop.visual_verification": (
+        "desktop.active_window",
+        "desktop.ui_elements",
+        "screen.capture",
+        "desktop.permissions",
+    ),
+    "file.desktop_access": ("desktop.open_path", "desktop.active_window"),
+    "file.workspace_read": ("workspace.read", "fs.read_file", "file.read"),
+    "information.capture": ("browser.current_page", "desktop.active_window", "screen.capture"),
+    "media.playback": ("desktop.list_apps", "app.open", "desktop.active_window"),
+    "system.control": ("desktop.active_window", "desktop.permissions", "screen.capture"),
+}
+
+
 def capability_definitions() -> tuple[CapabilityDefinition, ...]:
     return CAPABILITY_DEFINITIONS
 
 
 def capability_definition_map() -> dict[str, CapabilityDefinition]:
     return {definition.capability_id: definition for definition in CAPABILITY_DEFINITIONS}
+
+
+def capability_recovery_tools(
+    capability_id: str,
+    *,
+    allowed_tools: Iterable[str] | None = None,
+) -> list[str]:
+    clean_id = str(capability_id or "").strip()
+    if not clean_id:
+        return []
+    tools = _CAPABILITY_RECOVERY_TOOLS.get(clean_id, ())
+    if not tools:
+        return []
+    allowed_provided = allowed_tools is not None
+    allowed = {str(tool or "").strip() for tool in allowed_tools or [] if str(tool or "").strip()}
+    return _dedupe(tool for tool in tools if not allowed_provided or tool in allowed)
 
 
 def runtime_execution_tool_names(

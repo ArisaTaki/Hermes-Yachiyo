@@ -14756,7 +14756,7 @@ def _replan_fallback_request_needs_model_followup(
     payload: Mapping[str, Any],
 ) -> bool:
     clean_tool = str(tool_name or "").strip()
-    if clean_tool == "terminal.run" and _replan_payload_is_data_analysis_fallback(payload):
+    if clean_tool in {"terminal.run", "python.run"} and _replan_payload_is_data_analysis_fallback(payload):
         return False
     return True
 
@@ -14796,12 +14796,39 @@ def _replan_fallback_tool_input(
     }
     if clean_tool in {"browser.current_page", "desktop.active_window"}:
         return {}
+    if clean_tool == "desktop.list_apps":
+        query = _first_replan_fallback_app_query(source_input, payload, metadata)
+        request: dict[str, Any] = {"limit": 20}
+        if query:
+            request["query"] = query
+        return request
+    if clean_tool == "desktop.running_apps":
+        return {}
+    if clean_tool in {"app.open", "desktop.open_app", "app.focus", "desktop.focus_app"}:
+        app_name = _first_replan_fallback_app_name(source_input, payload, metadata)
+        return {"app_name": app_name} if app_name else None
+    if clean_tool in {"desktop.ui_elements", "desktop.read_ui"}:
+        request = {"limit": source_input.get("limit", 80)}
+        app_name = _first_replan_fallback_app_name(source_input, payload, metadata)
+        if app_name:
+            request["app_name"] = app_name
+        role_filter = str(source_input.get("role_filter") or "").strip()
+        if role_filter:
+            request["role_filter"] = role_filter
+        return request
+    if clean_tool == "screen.capture":
+        reason = str(
+            payload.get("failure_detail")
+            or metadata.get("failure_detail")
+            or "recover failed runtime step"
+        ).strip()
+        return {"reason": reason} if reason else {}
     if clean_tool in {"desktop.open_path", "workspace.read", "fs.read_file", "file.read"}:
         path = _first_replan_fallback_path(source_input, payload, metadata)
         if not path:
             return None
         return {"path": path}
-    if clean_tool == "terminal.run":
+    if clean_tool in {"terminal.run", "python.run"}:
         return _terminal_data_analysis_replan_input(source_input, payload, metadata)
     return None
 
@@ -14939,6 +14966,34 @@ def _first_replan_fallback_path(
         ):
             value = str(source.get(key) or "").strip()
             if value and not value.startswith("captured:"):
+                return value
+    return ""
+
+
+def _first_replan_fallback_app_query(
+    *sources: Mapping[str, Any],
+) -> str:
+    for source in sources:
+        for key in (
+            "target_app_query",
+            "app_query",
+            "query",
+            "target_app_name",
+            "app_name",
+        ):
+            value = str(source.get(key) or "").strip()
+            if value and value != "<selected app from desktop.list_apps>":
+                return value
+    return ""
+
+
+def _first_replan_fallback_app_name(
+    *sources: Mapping[str, Any],
+) -> str:
+    for source in sources:
+        for key in ("target_app_name", "app_name", "target_app_query", "app_query", "query"):
+            value = str(source.get(key) or "").strip()
+            if value and value != "<selected app from desktop.list_apps>":
                 return value
     return ""
 

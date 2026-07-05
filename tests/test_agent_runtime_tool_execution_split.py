@@ -929,6 +929,65 @@ def test_runtime_tool_request_runner_records_replan_request_for_failed_planned_s
     assert run_replan_event["replan_signal_ids"] == ["signal-analyze-failed"]
 
 
+def test_runtime_tool_request_runner_uses_capability_recovery_for_generic_media_tool() -> None:
+    run_events: list[tuple[str, str, dict[str, Any]]] = []
+    timeline: list[dict[str, Any]] = []
+
+    runner = _runner(
+        call_agent_tool=lambda *_args, **_kwargs: {
+            "ok": False,
+            "error": "media bridge unavailable",
+        },
+        run_events=run_events,
+    )
+
+    runner.run(
+        [
+            {
+                "tool": "media.spotify_open_and_play",
+                "input": {"app_name": "Spotify", "query": "lofi study"},
+                "source": "runtime_planner",
+                "step_id": "play-media",
+                "capability_id": "media.playback",
+            }
+        ],
+        ["media.spotify_open_and_play", "desktop.list_apps", "app.open", "desktop.active_window"],
+        FakeBroker({"ok": True}),
+        [{"role": "user", "content": "play lofi in Spotify"}],
+        timeline,
+        [],
+        next_iteration=1,
+        run_id="run-generic-media-recovery",
+        budget=FakeBudget(),
+    )
+
+    replan_event = next(event for event in timeline if event["event"] == "agent.replan.requested")
+    payload = replan_event["payload"]
+    assert payload["trigger"] == "tool_unavailable"
+    assert payload["source_tool_name"] == "media.spotify_open_and_play"
+    assert payload["target_capability_id"] == "media.playback"
+    assert payload["fallback_tools"] == [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.active_window",
+    ]
+    recovery_actions = payload["metadata"]["recovery_actions"]
+    assert [action["tool"] for action in recovery_actions] == [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.active_window",
+    ]
+    assert recovery_actions[0]["input"] == {"query": "lofi study", "limit": 20}
+    assert recovery_actions[1]["input"] == {"app_name": "Spotify"}
+    assert recovery_actions[2]["input"] == {}
+    run_replan_event = next(
+        payload
+        for _run_id, event_type, payload in run_events
+        if event_type == "agent.replan.requested"
+    )
+    assert run_replan_event["fallback_tools"] == payload["fallback_tools"]
+
+
 def test_runtime_tool_request_runner_records_group_scoped_replan_request() -> None:
     run_events: list[tuple[str, str, dict[str, Any]]] = []
     timeline: list[dict[str, Any]] = []

@@ -3324,26 +3324,34 @@ def test_custom_api_agent_loop_records_replan_request_for_runtime_planner_tool_f
     assert payload["failure_event_type"] == "agent.tool.call"
     assert "unsupported chart type" in payload["failure_detail"]
     assert "terminal.run" in payload["replan_prompt"]
+    def runtime_event_payload(event: dict[str, Any]) -> dict[str, Any]:
+        payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+        return {**event, **payload}
+
     todo_events = [
-        event for event in timeline if event["event"] == "agent.task.todo.updated"
+        runtime_event_payload(event)
+        for event in timeline
+        if event["event"] == "agent.task.todo.updated"
     ]
     checkpoint_events = [
-        event for event in timeline if event["event"] == "agent.task.checkpoint.updated"
+        runtime_event_payload(event)
+        for event in timeline
+        if event["event"] == "agent.task.checkpoint.updated"
     ]
     initial_todo = [
         event
         for event in todo_events
-        if event["step_id"] == "analyze-data-file" and event["status"] == "pending"
+        if event.get("step_id") == "analyze-data-file" and event["status"] == "pending"
     ][0]
     blocked_todo = [
         event
         for event in todo_events
-        if event["step_id"] == "analyze-data-file" and event["status"] == "blocked"
+        if event.get("step_id") == "analyze-data-file" and event["status"] == "blocked"
     ][0]
     blocked_checkpoint = [
         event
         for event in checkpoint_events
-        if event["step_id"] == "analyze-data-file" and event["status"] == "blocked"
+        if event.get("step_id") == "analyze-data-file" and event["status"] == "blocked"
     ][0]
     workspace_item_events = [
         event
@@ -3367,7 +3375,7 @@ def test_custom_api_agent_loop_records_replan_request_for_runtime_planner_tool_f
     completed_todo = [
         event
         for event in todo_events
-        if event["step_id"] == "analyze-data-file" and event["status"] == "completed"
+        if event.get("step_id") == "analyze-data-file" and event["status"] == "completed"
     ][0]
     assert completed_todo["previous_status"] == "pending"
     assert completed_todo["source_event"] == {
@@ -23152,6 +23160,39 @@ def test_auto_replan_fallback_recovery_reuses_safe_file_inputs() -> None:
     assert terminal_requests[0]["planner_step_id"] == "analyze-data-file"
     assert terminal_requests[0]["capability_id"] == "data.analysis"
     assert "continue_to_model" not in terminal_requests[0]
+
+    media_failure = [
+        {
+            "request_id": "replan-media",
+            "trigger": "tool_unavailable",
+            "source_step_id": "play-media",
+            "source_tool_name": "media.spotify_open_and_play",
+            "target_capability_id": "media.playback",
+            "fallback_tools": ["desktop.list_apps", "app.open", "desktop.active_window"],
+            "metadata": {
+                "input_preview": {
+                    "app_name": "Spotify",
+                    "query": "lofi study",
+                }
+            },
+        }
+    ]
+    media_requests = custom_api_agent_module._auto_replan_fallback_recovery_requests(
+        media_failure,
+        ["desktop.list_apps", "app.open", "desktop.active_window"],
+    )
+    assert [request["tool"] for request in media_requests] == [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.active_window",
+    ]
+    assert media_requests[0]["input"] == {"limit": 20, "query": "lofi study"}
+    assert media_requests[1]["input"] == {"app_name": "Spotify"}
+    assert media_requests[2]["input"] == {}
+    assert {request["replan_request_id"] for request in media_requests} == {"replan-media"}
+    assert {request["replan_trigger"] for request in media_requests} == {
+        "tool_unavailable"
+    }
 
 
 def test_auto_replan_recovery_requests_carry_task_core_context() -> None:

@@ -13,6 +13,7 @@ from apps.shell.yachiyo_agent import (
     RuntimeExecutionEnvelopeSnapshot,
     RuntimePlanner,
     YachiyoAgentService,
+    capability_recovery_tools,
     capability_snapshots,
 )
 from apps.shell.yachiyo_agent.app_name_hints import (
@@ -25428,6 +25429,17 @@ def test_capability_registry_covers_desktop_agent_capability_domains() -> None:
     assert by_id["memory.runtime"].approval_required is True
     assert "retrieve_memory" in by_id["memory.runtime"].discovery_actions
     assert "dispatch_skill" in by_id["skill.runtime"].execution_actions
+
+
+def test_capability_registry_exposes_filtered_recovery_tools() -> None:
+    assert capability_recovery_tools(
+        "media.playback",
+        allowed_tools=["desktop.list_apps", "app.open", "terminal.run"],
+    ) == ["desktop.list_apps", "app.open"]
+    assert capability_recovery_tools(
+        "data.analysis",
+        allowed_tools=["terminal.run", "artifact.write"],
+    ) == ["terminal.run"]
 
 
 def test_capability_registry_exposes_dynamic_memory_and_skill_tools() -> None:
