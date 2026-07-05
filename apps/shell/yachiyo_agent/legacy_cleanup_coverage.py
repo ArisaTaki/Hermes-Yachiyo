@@ -25,6 +25,29 @@ def _samples(area: str, *prompts: str) -> tuple[LegacyDesktopMigrationSample, ..
     return tuple(LegacyDesktopMigrationSample(prompt, area) for prompt in prompts)
 
 
+def _fallback_contract(
+    fallback_id: str,
+    title: str,
+    reason: str,
+    example_prompts: list[str],
+    required_before_delete: list[str],
+) -> dict[str, Any]:
+    return {
+        "fallback_id": fallback_id,
+        "title": title,
+        "reason": reason,
+        "owner": "runtime_planner",
+        "planner_owner": "runtime_planner",
+        "legacy_boundary": "legacy_daily_desktop_intent",
+        "status": "planner_covered_compat_cleanup_pending",
+        "planner_coverage_status": "planner_covered",
+        "cleanup_blocker": "legacy_response_shape_compatibility",
+        "example_prompts": example_prompts,
+        "planner_evidence_prompts": example_prompts,
+        "required_before_delete": required_before_delete,
+    }
+
+
 AREA_PLANNER_CONTRACTS: dict[str, LegacyDesktopPlannerContract] = {
     "app_launch": LegacyDesktopPlannerContract(
         ("desktop_operation",),
@@ -231,46 +254,46 @@ PLANNER_OWNED_LEGACY_ENTRYPOINTS: tuple[dict[str, Any], ...] = (
 
 
 REMAINING_FALLBACK_CONTRACTS: tuple[dict[str, Any], ...] = (
-    {
-        "fallback_id": "finder_item_shortcuts",
-        "title": "Finder selected-item shortcuts",
-        "reason": "Finder item actions still have open/focus differences and selected-file safety constraints.",
-        "example_prompts": ["Finder 重命名选中文件", "Finder 上一级目录", "打开 Finder 复制选中文件"],
-        "required_before_delete": [
+    _fallback_contract(
+        "finder_item_shortcuts",
+        "Finder selected-item shortcuts",
+        "Finder item actions are now planner-covered, but legacy facade response-shape callers still need cleanup.",
+        ["Finder 重命名选中文件", "Finder 上一级目录", "打开 Finder 复制选中文件"],
+        [
             "Planner must preserve open-vs-focus action shape for Finder item prompts.",
             "Planner must keep delete/trash operations rejected or approval-gated.",
         ],
-    },
-    {
-        "fallback_id": "spotlight_and_foreground_search",
-        "title": "Spotlight and foreground search sequences",
-        "reason": "Foreground search can be a multi-step shortcut-plus-type sequence, not a browser search.",
-        "example_prompts": ["Spotlight 搜索 yachiyo", "打开聚焦搜索 yachiyo", "提交当前搜索"],
-        "required_before_delete": [
+    ),
+    _fallback_contract(
+        "spotlight_and_foreground_search",
+        "Spotlight and foreground search sequences",
+        "Foreground search is now planner-covered as a multi-step shortcut/type/submit chain; legacy facade callers still need cleanup.",
+        ["Spotlight 搜索 yachiyo", "打开聚焦搜索 yachiyo", "提交当前搜索"],
+        [
             "Planner must distinguish Spotlight search from browser/web search.",
             "Planner must preserve shortcut/type/submit sequence shape for legacy facade callers.",
         ],
-    },
-    {
-        "fallback_id": "browser_search_and_app_scoped_search",
-        "title": "Browser search and app-scoped search sequences",
-        "reason": "Legacy facade still preserves app focus plus browser.open_url or app search-box sequences.",
-        "example_prompts": ["Chrome 搜索 OpenAI", "微信打开搜索", "把当前页面内容输入到搜索框"],
-        "required_before_delete": [
+    ),
+    _fallback_contract(
+        "browser_search_and_app_scoped_search",
+        "Browser search and app-scoped search sequences",
+        "Browser and app-scoped search are now planner-covered; legacy facade callers still need response-shape cleanup.",
+        ["Chrome 搜索 OpenAI", "微信打开搜索", "把当前页面内容输入到搜索框"],
+        [
             "Planner must preserve app focus before browser search when requested.",
             "Planner must keep context-transfer search-box prompts as inspectable UI plans.",
         ],
-    },
-    {
-        "fallback_id": "semantic_ui_targeting",
-        "title": "Semantic UI click/type targeting",
-        "reason": "Semantic UI operations require inspect-before-act behavior and recovery coordinates.",
-        "example_prompts": ["Chrome 点登录", "在 Linear 上的创建按钮点击", "Can you type hello into the search field?"],
-        "required_before_delete": [
+    ),
+    _fallback_contract(
+        "semantic_ui_targeting",
+        "Semantic UI click/type targeting",
+        "Semantic UI operations are now planner-covered with inspect-before-act and recovery evidence; legacy facade callers still need cleanup.",
+        ["Chrome 点登录", "在 Linear 上的创建按钮点击", "Can you type hello into the search field?"],
+        [
             "Planner execution must keep read_ui/click/type verification events observable.",
             "Retry/recovery artifacts must remain linked to target UI evidence.",
         ],
-    },
+    ),
 )
 
 
@@ -368,10 +391,24 @@ def legacy_daily_desktop_cleanup_coverage() -> dict[str, Any]:
         areas[sample.area] = areas.get(sample.area, 0) + 1
     area_contracts = legacy_daily_desktop_cleanup_area_contracts()
     sample_contracts = legacy_daily_desktop_cleanup_sample_contracts()
+    planner_covered_fallback_count = sum(
+        1
+        for contract in REMAINING_FALLBACK_CONTRACTS
+        if contract.get("planner_coverage_status") == "planner_covered"
+    )
+    compatibility_cleanup_pending_count = sum(
+        1
+        for contract in REMAINING_FALLBACK_CONTRACTS
+        if contract.get("cleanup_blocker") == "legacy_response_shape_compatibility"
+    )
     return {
         "legacy_boundary": "legacy_daily_desktop_intent",
         "planner_owner": "runtime_planner",
         "total_samples": len(MIGRATED_DAILY_DESKTOP_SAMPLES),
+        "cleanup_readiness": "planner_covered_compat_cleanup_pending",
+        "remaining_fallback_count": len(REMAINING_FALLBACK_CONTRACTS),
+        "planner_covered_fallback_count": planner_covered_fallback_count,
+        "compatibility_cleanup_pending_count": compatibility_cleanup_pending_count,
         "areas": dict(sorted(areas.items())),
         "prompts": migrated_daily_desktop_prompts(),
         "covered_intents": _sorted_unique(

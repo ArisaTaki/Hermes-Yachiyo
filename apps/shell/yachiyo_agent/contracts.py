@@ -205,9 +205,14 @@ class LegacyCleanupFallbackContractSnapshot(_PublicSnapshot):
     fallback_id: str
     title: str
     reason: str = ""
-    owner: str = "legacy_daily_desktop_intent"
-    status: str = "keep_until_planner_parity"
+    owner: str = "runtime_planner"
+    planner_owner: str = "runtime_planner"
+    legacy_boundary: str = "legacy_daily_desktop_intent"
+    status: str = "planner_covered_compat_cleanup_pending"
+    planner_coverage_status: str = "planner_covered"
+    cleanup_blocker: str = "legacy_response_shape_compatibility"
     example_prompts: list[str] = Field(default_factory=list)
+    planner_evidence_prompts: list[str] = Field(default_factory=list)
     required_before_delete: list[str] = Field(default_factory=list)
 
 
@@ -224,6 +229,10 @@ class LegacyCleanupCoverageSnapshot(_PublicSnapshot):
     legacy_boundary: str = "legacy_daily_desktop_intent"
     planner_owner: str = "runtime_planner"
     total_samples: int = 0
+    cleanup_readiness: str = "planner_covered_compat_cleanup_pending"
+    remaining_fallback_count: int = 0
+    planner_covered_fallback_count: int = 0
+    compatibility_cleanup_pending_count: int = 0
     areas: dict[str, int] = Field(default_factory=dict)
     prompts: list[str] = Field(default_factory=list)
     covered_intents: list[str] = Field(default_factory=list)

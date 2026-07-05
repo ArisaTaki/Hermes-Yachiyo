@@ -102,6 +102,10 @@ export type LegacyCleanupCoverageSnapshot = {
   legacy_boundary?: string;
   planner_owner?: string;
   total_samples?: number;
+  cleanup_readiness?: string;
+  remaining_fallback_count?: number;
+  planner_covered_fallback_count?: number;
+  compatibility_cleanup_pending_count?: number;
   areas?: Record<string, number>;
   prompts?: string[];
   covered_intents?: string[];
@@ -146,8 +150,13 @@ export type LegacyCleanupFallbackContractSnapshot = {
   title: string;
   reason?: string;
   owner?: string;
+  planner_owner?: string;
+  legacy_boundary?: string;
   status?: string;
+  planner_coverage_status?: string;
+  cleanup_blocker?: string;
   example_prompts?: string[];
+  planner_evidence_prompts?: string[];
   required_before_delete?: string[];
 };
 

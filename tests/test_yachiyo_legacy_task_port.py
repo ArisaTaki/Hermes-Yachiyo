@@ -785,6 +785,10 @@ def test_runtime_planner_covers_migrated_desktop_samples_before_cleanup() -> Non
     assert coverage["legacy_boundary"] == "legacy_daily_desktop_intent"
     assert coverage["planner_owner"] == "runtime_planner"
     assert coverage["total_samples"] == len(prompts)
+    assert coverage["cleanup_readiness"] == "planner_covered_compat_cleanup_pending"
+    assert coverage["remaining_fallback_count"] == 4
+    assert coverage["planner_covered_fallback_count"] == 4
+    assert coverage["compatibility_cleanup_pending_count"] == 4
     assert "context_transfer" in coverage["areas"]
     assert len(sample_contracts) == len(prompts)
     assert "desktop_operation" in coverage["covered_intents"]
@@ -811,6 +815,32 @@ def test_runtime_planner_covers_migrated_desktop_samples_before_cleanup() -> Non
         assert selected_tools.issubset(contract_tools)
 
     assert remaining_legacy_prompts == []
+    assert legacy_calls == []
+
+
+def test_runtime_planner_covers_remaining_fallback_contracts_before_compat_cleanup() -> None:
+    legacy_calls: list[dict[str, Any]] = []
+    coverage = legacy_daily_desktop_cleanup_coverage()
+    allowed_tools = daily_desktop_allowed_tools()
+    fallback_contracts = coverage["remaining_fallback_contracts"]
+
+    assert fallback_contracts
+    for contract in fallback_contracts:
+        assert contract["status"] == "planner_covered_compat_cleanup_pending"
+        assert contract["planner_coverage_status"] == "planner_covered"
+        assert contract["cleanup_blocker"] == "legacy_response_shape_compatibility"
+        assert contract["planner_evidence_prompts"] == contract["example_prompts"]
+        for prompt in contract["planner_evidence_prompts"]:
+            selection = planner_first_direct_tool_selection(
+                prompt,
+                allowed_tools,
+                legacy_tool_requests=_recording_legacy_requests(legacy_calls),
+            )
+
+            assert selection.selected_source == "runtime_planner"
+            assert selection.event_payload["legacy_request_count"] == 0
+            assert selection.event_payload["selected_tools"]
+
     assert legacy_calls == []
 
 
