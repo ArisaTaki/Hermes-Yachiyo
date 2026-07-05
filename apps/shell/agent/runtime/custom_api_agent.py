@@ -2913,6 +2913,7 @@ class RuntimeCustomApiAgentLoop:
         )
         tool_timeline_start = len(timeline)
         try:
+            completed_requests: list[dict[str, Any]] = list(requests)
             self._run_tool_requests(
                 requests,
                 allowed_tools,
@@ -2931,6 +2932,7 @@ class RuntimeCustomApiAgentLoop:
                 tool_timeline_start=tool_timeline_start,
             )
             if continuation_requests:
+                completed_requests = [*completed_requests, *continuation_requests]
                 self._record_auto_model_followup_app_write_plan(
                     continuation_requests,
                     timeline=timeline,
@@ -2966,6 +2968,12 @@ class RuntimeCustomApiAgentLoop:
                 tool_timeline_start=tool_timeline_start,
                 run_id=run_id,
             )
+            self._record_tool_request_task_progress_events(
+                requests,
+                timeline=timeline,
+                tool_timeline_start=tool_timeline_start,
+                run_id=run_id,
+            )
             pending_approval = (
                 exc.pending_approval if isinstance(exc.pending_approval, dict) else {}
             )
@@ -2994,6 +3002,12 @@ class RuntimeCustomApiAgentLoop:
             raise
         self._record_runtime_planner_task_progress_events(
             runtime_planner_decision,
+            timeline=timeline,
+            tool_timeline_start=tool_timeline_start,
+            run_id=run_id,
+        )
+        self._record_tool_request_task_progress_events(
+            completed_requests,
             timeline=timeline,
             tool_timeline_start=tool_timeline_start,
             run_id=run_id,
@@ -3462,6 +3476,27 @@ class RuntimeCustomApiAgentLoop:
             if run_id and self._append_run_event is not None:
                 self._append_run_event(run_id, event_type, event_payload)
         return recorded
+
+    def _record_tool_request_task_progress_events(
+        self,
+        planned_tool_requests: list[dict[str, Any]],
+        *,
+        timeline: list[dict[str, Any]],
+        tool_timeline_start: int,
+        run_id: str = "",
+    ) -> None:
+        followup_context = _tool_request_task_progress_followup_context(
+            planned_tool_requests,
+        )
+        if not followup_context:
+            return
+        self._record_model_followup_pending_plan_progress_events(
+            followup_context,
+            planned_tool_requests,
+            timeline=timeline,
+            tool_timeline_start=tool_timeline_start,
+            run_id=run_id,
+        )
 
     def _record_runtime_planner_task_progress_events(
         self,
@@ -15846,6 +15881,8 @@ def _replan_recovery_requests_with_task_context(
         return []
     task_core = _runtime_replan_task_core_payload(replan_payloads, timeline)
     if not task_core:
+        task_core = _runtime_replan_task_core_context_payload(replan_payloads)
+    if not task_core:
         return requests
     return [
         _replan_recovery_request_with_task_context(request, task_core)
@@ -15996,7 +16033,7 @@ def _replan_recovery_request_with_task_context(
     if workspace_id:
         enriched.setdefault("workspace_id", workspace_id)
     todo = _task_core_todo_for_step(task_core, step_id)
-    if todo and "task_todo" not in enriched:
+    if todo and "task_todo" not in enriched and _task_core_todo_matches_request(todo, request):
         enriched["task_todo"] = todo
     checkpoints = _task_core_checkpoints_for_step(task_core, step_id)
     if checkpoints and "task_checkpoints" not in enriched:
@@ -16005,6 +16042,15 @@ def _replan_recovery_request_with_task_context(
     if workspace_items and "task_workspace_items" not in enriched:
         enriched["task_workspace_items"] = workspace_items
     return enriched
+
+
+def _task_core_todo_matches_request(
+    todo: Mapping[str, Any],
+    request: Mapping[str, Any],
+) -> bool:
+    todo_tool = str(todo.get("tool_name") or todo.get("tool") or "").strip()
+    request_tool = str(request.get("tool") or request.get("tool_name") or "").strip()
+    return not todo_tool or not request_tool or todo_tool == request_tool
 
 
 def _task_core_todo_for_step(
@@ -16038,6 +16084,131 @@ def _task_core_workspace_items_for_step(
         for item in _mapping_list(workspace.get("items"))
         if str(item.get("source_step_id") or "").strip() == step_id
     ]
+
+
+def _tool_request_task_progress_followup_context(
+    requests: Iterable[Mapping[str, Any]],
+) -> dict[str, Any]:
+    normalized = [request for request in requests if isinstance(request, Mapping)]
+    if not normalized:
+        return {}
+    todos: list[dict[str, Any]] = []
+    checkpoints: list[dict[str, Any]] = []
+    workspace_items: list[dict[str, Any]] = []
+    pending_steps: list[dict[str, Any]] = []
+    for request in normalized:
+        task_todo = (
+            request.get("task_todo")
+            if isinstance(request.get("task_todo"), Mapping)
+            else {}
+        )
+        if task_todo:
+            todos.append(dict(task_todo))
+        checkpoints.extend(dict(item) for item in _mapping_list(request.get("task_checkpoints")))
+        workspace_items.extend(
+            dict(item) for item in _mapping_list(request.get("task_workspace_items"))
+        )
+        if task_todo:
+            pending_steps.append(
+                _tool_request_task_progress_pending_step(request, task_todo)
+            )
+    if not todos and not checkpoints and not workspace_items:
+        return {}
+    first = normalized[0]
+    core_id = _first_request_text(normalized, "core_id")
+    workspace_id = _first_request_text(normalized, "workspace_id")
+    task_core = {
+        "core_id": core_id,
+        "workspace": {
+            "workspace_id": workspace_id,
+            "items": _dedupe_task_core_rows(workspace_items, "item_id"),
+        },
+        "todos": _dedupe_task_core_rows(todos, "todo_id"),
+        "checkpoints": _dedupe_task_core_rows(checkpoints, "checkpoint_id"),
+    }
+    context = {
+        "source": "runtime_planner",
+        "decision_id": str(first.get("decision_id") or "").strip(),
+        "plan_id": str(first.get("plan_id") or "").strip(),
+        "core_id": core_id,
+        "workspace_id": workspace_id,
+        "task_id": _first_request_text(normalized, "task_id"),
+        "task_core": {
+            key: value
+            for key, value in task_core.items()
+            if value not in ("", [], {})
+        },
+        "pending_plan_steps": [
+            step for step in pending_steps if step
+        ],
+    }
+    for key in _RUNTIME_ORCHESTRATION_SCOPE_KEYS:
+        value = _first_request_text(normalized, key)
+        if value:
+            context[key] = value
+    return {key: value for key, value in context.items() if value not in ("", [], {})}
+
+
+def _tool_request_task_progress_pending_step(
+    request: Mapping[str, Any],
+    task_todo: Mapping[str, Any],
+) -> dict[str, Any]:
+    step_id = str(
+        request.get("step_id")
+        or request.get("planner_step_id")
+        or task_todo.get("step_id")
+        or ""
+    ).strip()
+    tool_name = str(request.get("tool") or request.get("tool_name") or "").strip()
+    if not step_id or not tool_name:
+        return {}
+    payload = {
+        "step_id": step_id,
+        "tool_name": tool_name,
+        "capability_id": str(
+            request.get("capability_id") or task_todo.get("capability_id") or ""
+        ).strip(),
+        "input_preview": (
+            dict(request.get("input"))
+            if isinstance(request.get("input"), Mapping)
+            else {}
+        ),
+        "task_todo": dict(task_todo),
+    }
+    for key in (
+        "runtime_doctrine",
+        "runtime_stage",
+        "runtime_role",
+        "requires_observation",
+        "requires_post_action_verification",
+    ):
+        value = request.get(key)
+        if value not in (None, "", [], {}):
+            payload[key] = value
+    return {key: value for key, value in payload.items() if value not in ("", [], {})}
+
+
+def _first_request_text(requests: Iterable[Mapping[str, Any]], key: str) -> str:
+    for request in requests:
+        value = str(request.get(key) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _dedupe_task_core_rows(
+    rows: Iterable[Mapping[str, Any]],
+    identity_key: str,
+) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for row in rows:
+        identity = str(row.get(identity_key) or row.get("step_id") or row).strip()
+        if identity in seen:
+            continue
+        seen.add(identity)
+        result.append(dict(row))
+    return result
 
 
 def _mapping_list(value: Any) -> list[Mapping[str, Any]]:

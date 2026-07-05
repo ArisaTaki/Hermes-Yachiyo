@@ -4968,6 +4968,133 @@ def test_auto_replan_focus_recovery_refocuses_expected_app_without_model_followu
     }
 
 
+def test_auto_replan_focus_recovery_updates_task_progress_from_context() -> None:
+    payloads = [
+        {
+            "request_id": "replan-focus-task",
+            "trigger": "verification_failed",
+            "decision_id": "decision-focus",
+            "plan_id": "plan-focus",
+            "core_id": "task-core-focus",
+            "workspace_id": "task-workspace-focus",
+            "source_step_id": "verify-desktop-result",
+            "source_tool_name": "desktop.active_window",
+            "target_capability_id": "desktop.app_discovery",
+            "failure_detail": "foreground_focus_unverified",
+            "metadata": {
+                "runtime_stage": "verify",
+                "runtime_role": "verify_result",
+                "expected_app_name": "PixelForge",
+                "blocking_conditions": ["foreground_focus_unverified"],
+                "task_core_context": {
+                    "core_id": "task-core-focus",
+                    "workspace_id": "task-workspace-focus",
+                    "source_step_id": "verify-desktop-result",
+                    "todos": [
+                        {
+                            "todo_id": "todo-verify-focus",
+                            "step_id": "verify-desktop-result",
+                            "title": "Verify PixelForge focus",
+                            "status": "pending",
+                            "tool_name": "desktop.active_window",
+                            "capability_id": "desktop.app_discovery",
+                        }
+                    ],
+                    "checkpoints": [
+                        {
+                            "checkpoint_id": "checkpoint-verify-focus",
+                            "after_step_id": "verify-desktop-result",
+                            "title": "PixelForge focused",
+                            "status": "planned",
+                        }
+                    ],
+                },
+            },
+        }
+    ]
+    requests = custom_api_agent_module._auto_replan_recovery_requests_with_task_context(
+        payloads,
+        ["app.focus", "desktop.active_window"],
+        [],
+    )
+    assert [request["tool"] for request in requests] == [
+        "app.focus",
+        "desktop.active_window",
+    ]
+    assert "task_todo" not in requests[0]
+    assert requests[1]["task_todo"]["todo_id"] == "todo-verify-focus"
+
+    timeline: list[dict[str, Any]] = []
+
+    def run_tool_requests(
+        tool_requests,
+        _allowed_tools,
+        _broker,
+        _messages,
+        timeline_arg,
+        _artifacts,
+        **_kwargs,
+    ) -> None:
+        for request in tool_requests:
+            tool_name = str(request.get("tool") or "")
+            result = (
+                {"ok": True, "data": {"app_name": "PixelForge"}}
+                if tool_name == "desktop.active_window"
+                else {"ok": True}
+            )
+            timeline_arg.append(
+                _timeline(
+                    "agent.tool.call",
+                    tool_name,
+                    input_preview=request.get("input") if isinstance(request.get("input"), dict) else {},
+                    result=result,
+                    **{
+                        key: request[key]
+                        for key in (
+                            "decision_id",
+                            "plan_id",
+                            "core_id",
+                            "workspace_id",
+                            "step_id",
+                            "planner_step_id",
+                            "capability_id",
+                            "runtime_stage",
+                            "runtime_role",
+                        )
+                        if key in request
+                    },
+                )
+            )
+
+    loop = _private_runtime_loop(run_tool_requests=run_tool_requests)
+    loop._run_auto_runtime_planner_requests(
+        requests,
+        ["app.focus", "desktop.active_window"],
+        {"broker": True},
+        [],
+        timeline,
+        [],
+        agent={"name": "Yachiyo"},
+        runtime_planner_decision=None,
+        run_id="run-focus-recovery",
+        budget=FakeBudget(),
+        next_iteration=1,
+    )
+
+    todo_events = [
+        event for event in timeline if event["event"] == "agent.task.todo.updated"
+    ]
+    checkpoint_events = [
+        event for event in timeline if event["event"] == "agent.task.checkpoint.updated"
+    ]
+    assert [(event["step_id"], event["status"]) for event in todo_events] == [
+        ("verify-desktop-result", "completed")
+    ]
+    assert [(event["step_id"], event["status"]) for event in checkpoint_events] == [
+        ("verify-desktop-result", "completed")
+    ]
+
+
 def test_auto_replan_focus_recovery_reopens_when_focus_tool_unavailable() -> None:
     requests = custom_api_agent_module._auto_replan_recovery_requests_with_task_context(
         [
