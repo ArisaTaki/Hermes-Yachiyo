@@ -54,6 +54,7 @@ export function RuntimeExecutionEnvelopeSummary({
   const retrySummaries = runtimeExecutionRetrySummaries(requests);
   const retryTools = uniqueStrings(retrySummaries.map((retry) => retry.tool));
   const blockers = runtimeExecutionBlockers(requests);
+  const riskCounts = runtimeExecutionRiskCounts(requests);
   const isChat = variant === 'chat';
   const classes = [
     isChat
@@ -71,6 +72,7 @@ export function RuntimeExecutionEnvelopeSummary({
       data-plan-id={envelope.plan_id || ''}
       data-runtime-blockers={blockers.join(',')}
       data-request-count={requests.length}
+      data-risk-levels={riskCounts.map(([risk, count]) => `${risk}:${count}`).join(',')}
       data-route-to-studio={envelope.route_to_studio === undefined ? '' : String(envelope.route_to_studio)}
       data-runtime-doctrine={envelope.runtime_doctrine || ''}
       data-runtime-retry-count={retrySummaries.length}
@@ -92,6 +94,7 @@ export function RuntimeExecutionEnvelopeSummary({
             debugPillsTestId={debugPillsTestId}
             openQuestions={openQuestions}
             retrySummaries={retrySummaries}
+            riskCounts={riskCounts}
             stageCounts={stageCounts}
             tools={tools}
             variant={variant}
@@ -128,6 +131,7 @@ export function RuntimeExecutionEnvelopeSummary({
             debugPillsTestId={debugPillsTestId}
             openQuestions={openQuestions}
             retrySummaries={retrySummaries}
+            riskCounts={riskCounts}
             stageCounts={stageCounts}
             tools={tools}
             variant={variant}
@@ -161,6 +165,7 @@ function RuntimeExecutionEnvelopePills({
   debugPillsTestId,
   openQuestions,
   retrySummaries,
+  riskCounts,
   stageCounts,
   tools,
   variant,
@@ -171,6 +176,7 @@ function RuntimeExecutionEnvelopePills({
   debugPillsTestId?: string;
   openQuestions: string[];
   retrySummaries: RuntimeExecutionRetrySummary[];
+  riskCounts: Array<[string, number]>;
   stageCounts: Array<[string, number]>;
   tools: string[];
   variant: RuntimeExecutionEnvelopeSummaryVariant;
@@ -183,6 +189,7 @@ function RuntimeExecutionEnvelopePills({
     && !artifacts.length
     && !openQuestions.length
     && !retrySummaries.length
+    && !riskCounts.length
     && !blockers.length
   ) {
     return null;
@@ -200,6 +207,11 @@ function RuntimeExecutionEnvelopePills({
       {tools.slice(0, isChat ? 5 : 8).map((toolName) => (
         <span className={pillClassName} data-runtime-tool={toolName} key={`tool:${toolName}`}>
           {isChat ? toolName : `tool · ${toolName}`}
+        </span>
+      ))}
+      {riskCounts.slice(0, isChat ? 2 : 4).map(([risk, count]) => (
+        <span className={pillClassName} data-runtime-risk={risk} key={`risk:${risk}`}>
+          {isChat ? `risk · ${risk}:${count}` : `risk · ${risk}: ${count}`}
         </span>
       ))}
       {isChat && approvals.length ? (
@@ -281,14 +293,19 @@ function RuntimeExecutionRequestRow({
       data-execution-request-id={request.request_id}
       data-execution-tool={request.tool_name}
       data-observation-retry={observationRetryPreview}
+      data-policy-reason={request.policy_reason || ''}
       data-request-action-target={actionTargetPreview}
       data-request-observation-evidence={observationEvidencePreview}
+      data-risk-level={request.risk_level || ''}
       data-runtime-stage={request.runtime_stage || ''}
       data-testid={testId}
     >
       <div>
         <strong>{index + 1}. {request.tool_name || request.capability_id || 'runtime request'}</strong>
         <span>{request.step_id || request.capability_id || request.request_id}</span>
+        {request.risk_level ? (
+          <span title={request.policy_reason || undefined}>risk: {request.risk_level}</span>
+        ) : null}
         {actionTargetPreview ? <span>target: {actionTargetPreview}</span> : null}
         {observationEvidencePreview ? <span>evidence: {observationEvidencePreview}</span> : null}
         {observationRetryPreview ? <span>retry: {observationRetryPreview}</span> : null}
@@ -301,6 +318,7 @@ function RuntimeExecutionRequestRow({
           observationRetry={objectRecord(request.observation_retry)}
           permissionTarget={request.approval_required ? 'approval_required' : ''}
           planningReason={request.planning_reason || ''}
+          riskLevel={request.risk_level || ''}
           status={request.status || ''}
           testId={`${testId}-evidence`}
           tool={request.tool_name || ''}
@@ -374,6 +392,20 @@ function runtimeExecutionBlockers(requests: RuntimeExecutionRequestSnapshot[]): 
     }
   });
   return values;
+}
+
+function runtimeExecutionRiskCounts(
+  requests: RuntimeExecutionRequestSnapshot[],
+): Array<[string, number]> {
+  const counts = new Map<string, number>();
+  requests.forEach((request) => {
+    const risk = stringValue(request.risk_level);
+    if (!risk) return;
+    counts.set(risk, (counts.get(risk) || 0) + 1);
+  });
+  return ['high', 'medium', 'low']
+    .map((risk): [string, number] => [risk, counts.get(risk) || 0])
+    .filter(([, count]) => count > 0);
 }
 
 function retryPreviewLabel(retry: RuntimeExecutionRetrySummary): string {

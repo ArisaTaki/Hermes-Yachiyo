@@ -177,7 +177,8 @@ function runtimeExecutionRequestRetryAction(
     prompt: label,
     recommended_tools: [tool],
     required_retry_fields: [],
-    risk_level: request.approval_required === true ? 'medium' : 'low',
+    risk_level: String(request.risk_level || '').trim()
+      || (request.approval_required === true ? 'medium' : 'low'),
     retry_input: input,
     retry_input_source: 'runtime_execution_envelope',
     retry_prompt: label,
