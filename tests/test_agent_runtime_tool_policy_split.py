@@ -28,6 +28,9 @@ from apps.shell.agent.tools.policy import (
 )
 from apps.shell.agent_runtime import AgentRuntimeService
 from apps.shell.credential_store import MemoryCredentialStore
+from apps.shell.yachiyo_agent.entrypoint_tool_selection import (
+    planner_first_direct_tool_selection,
+)
 
 
 def test_tool_policy_classes_and_constants_remain_exported_from_legacy_module() -> None:
@@ -222,6 +225,9 @@ def test_default_daily_agent_policy_exposes_desktop_tools_with_medium_risk_appro
     assert set(MEDIUM_RISK_DESKTOP_TOOL_NAMES).issubset(allowed_tools)
     assert set(HIGH_RISK_DESKTOP_TOOL_NAMES).issubset(allowed_tools)
     assert set(MEDIUM_RISK_BROWSER_TOOL_NAMES).issubset(allowed_tools)
+    assert {"workspace.list", "workspace.read", "data.analyze"}.issubset(
+        allowed_tools
+    )
     assert not (allowed_tools & set(HIGH_RISK_AGENT_TOOLS))
     assert policy["approval_required"] == {
         "app.quit": True,
@@ -244,9 +250,26 @@ def test_default_daily_agent_policy_exposes_desktop_tools_with_medium_risk_appro
         "browser.click": True,
         "browser.type_text": True,
         "file.organize": True,
+        "fs.move_file": True,
+        "python.run": True,
         "terminal.run": True,
         "workspace.write_patch": True,
     }
+
+
+def test_default_custom_policy_routes_data_analysis_without_terminal() -> None:
+    policy = RuntimePolicyCompiler.default_tool_policy("custom")
+    allowed_tools = policy["allowed_tools"]
+
+    selection = planner_first_direct_tool_selection(
+        "请分析 data/sales.csv 并输出报告",
+        allowed_tools,
+        legacy_tool_requests=lambda _prompt, _allowed_tools: [],
+    )
+
+    assert "terminal.run" not in allowed_tools
+    assert selection.selected_source == "runtime_planner"
+    assert [request["tool"] for request in selection.requests] == ["data.analyze"]
 
 
 def test_default_orchestrator_policy_keeps_workspace_and_low_risk_desktop_tools() -> None:

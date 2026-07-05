@@ -2854,7 +2854,14 @@ class RuntimePolicyCompiler:
         memory_tools = list(MEMORY_TOOL_NAMES)
         future_task_tools = list(FUTURE_TASK_TOOL_NAMES)
         daily_tools = list(DAILY_DESKTOP_TOOL_NAMES)
-        tools = [*daily_tools, *memory_tools, *future_task_tools, "artifact.write"]
+        safe_workspace_tools = ["workspace.list", "workspace.read", "data.analyze"]
+        tools = [
+            *safe_workspace_tools,
+            *daily_tools,
+            *memory_tools,
+            *future_task_tools,
+            "artifact.write",
+        ]
         if category in {"coding", "review"}:
             tools = [
                 "workspace.list",
