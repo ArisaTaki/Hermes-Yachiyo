@@ -23,6 +23,7 @@ import {
   launcherTaskConversationId,
   launcherTaskTitle,
 } from '../features/yachiyo-chat/launcherTasks';
+import { yachiyoDailyDesktopTaskPrompt } from '../features/yachiyo-chat/mentions';
 import { startYachiyoTaskRecoveryAction } from '../features/yachiyo-chat/taskRecoveryActions';
 import { chatDesktopPermissionNotice } from '../features/yachiyo-chat/readiness';
 import type { AgentTaskSnapshot, ApprovalCardSnapshot, ChatNotice } from '../features/yachiyo-chat/types';
@@ -251,6 +252,7 @@ function useLauncher(mode: 'bubble' | 'live2d') {
   ) => {
     const text = prompt.trim();
     if (!text) return null;
+    const dailyDesktopTaskPrompt = yachiyoDailyDesktopTaskPrompt(text);
     const task = await startYachiyoTask({
       prompt: text,
       agent_id: LAUNCHER_MAIN_AGENT_ID,
@@ -261,7 +263,8 @@ function useLauncher(mode: 'bubble' | 'live2d') {
         launcher_mode: mode,
         runnable_kind: 'main',
         launcher_surface: 'desktop_launcher',
-        planner_entrypoint: `${mode}_default`,
+        daily_desktop_intent: Boolean(dailyDesktopTaskPrompt),
+        planner_entrypoint: dailyDesktopTaskPrompt ? `${mode}_daily_desktop` : `${mode}_default`,
         ...(options.metadata || {}),
       },
     });
