@@ -103,6 +103,7 @@ class MainChatRuntimeConfigBuilder:
             "workspace.write_patch",
             "file.organize",
             "terminal.run",
+            "python.run",
             *self._desktop_tool_names,
             *self._memory_tool_names,
             *self._future_task_tool_names,

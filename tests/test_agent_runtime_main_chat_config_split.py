@@ -140,6 +140,7 @@ def test_main_chat_config_builder_projects_daily_entrypoint_runtime(tmp_path) ->
     assert "data.analyze" in config["tool_policy"]["allowed_tools"]
     assert "workspace.write_patch" in config["tool_policy"]["allowed_tools"]
     assert "file.organize" in config["tool_policy"]["allowed_tools"]
+    assert "python.run" in config["tool_policy"]["allowed_tools"]
     assert "artifact.write" in config["tool_policy"]["allowed_tools"]
     allowed_tools = set(config["tool_policy"]["allowed_tools"])
     assert set(DAILY_DESKTOP_TOOL_NAMES).issubset(allowed_tools)
@@ -147,6 +148,7 @@ def test_main_chat_config_builder_projects_daily_entrypoint_runtime(tmp_path) ->
     assert set(FUTURE_TASK_TOOL_NAMES).issubset(allowed_tools)
     assert allowed_tools & set(HIGH_RISK_AGENT_TOOLS) == {
         "file.organize",
+        "python.run",
         "terminal.run",
         "workspace.write_patch",
     }
@@ -154,6 +156,7 @@ def test_main_chat_config_builder_projects_daily_entrypoint_runtime(tmp_path) ->
         tool: True
         for tool in (
             "file.organize",
+            "python.run",
             "terminal.run",
             "workspace.write_patch",
             *MEDIUM_RISK_DESKTOP_TOOL_NAMES,
@@ -196,8 +199,10 @@ def test_main_chat_config_builder_overlays_daily_desktop_tools_on_explicit_polic
         "file.organize",
         "artifact.write",
         "terminal.run",
+        "python.run",
     }.issubset(allowed_tools)
     assert policy["approval_required"]["file.organize"] is True
+    assert policy["approval_required"]["python.run"] is True
     assert policy["approval_required"]["terminal.run"] is True
     assert policy["approval_required"]["workspace.write_patch"] is True
     for tool in (

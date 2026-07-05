@@ -70,6 +70,8 @@ _DESKTOP_AGENT_ENTRYPOINT_EXTRA_TOOLS = (
     "workspace.write_patch",
     "file.organize",
     "terminal.run",
+    "python.run",
+    "artifact.write",
 )
 _DIRECT_BROWSER_ENTRYPOINT_TOOLS = frozenset(
     {

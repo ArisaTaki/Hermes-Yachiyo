@@ -43,6 +43,8 @@ def test_desktop_agent_entrypoint_fallback_includes_analysis_tools() -> None:
     assert "workspace.read" in allowed_tools
     assert "data.analyze" in allowed_tools
     assert "terminal.run" in allowed_tools
+    assert "python.run" in allowed_tools
+    assert "artifact.write" in allowed_tools
     assert len(allowed_tools) == len(set(allowed_tools))
 
 
