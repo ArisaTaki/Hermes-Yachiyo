@@ -17,6 +17,10 @@ from apps.shell.yachiyo_agent.legacy_ports import (
     LegacyStudioPort,
 )
 from apps.shell.yachiyo_agent.legacy_tasks import LegacyRuntimePort
+from apps.shell.yachiyo_agent.legacy_cleanup_coverage import (
+    legacy_daily_desktop_cleanup_coverage,
+    migrated_daily_desktop_prompts,
+)
 from apps.shell.yachiyo_agent.entrypoint_tool_selection import (
     DirectToolSelection,
     planner_first_direct_tool_selection,
@@ -768,25 +772,13 @@ def test_planner_first_direct_selection_owns_remaining_app_scoped_samples_withou
 
 def test_runtime_planner_covers_migrated_desktop_samples_before_cleanup() -> None:
     legacy_calls: list[dict[str, Any]] = []
-    prompts = (
-        "微信关闭窗口",
-        "在 VS Code 里执行命令 Format Document",
-        "把当前网页链接粘贴到 Slack",
-        "在 Slack 粘贴当前网页链接",
-        "复制当前网页内容",
-        "把选中的内容填到当前输入框",
-        "把当前网页链接输入到地址栏",
-        "把当前页面内容输入到搜索框",
-        "把当前网页链接输入到 Slack 搜索框",
-        "把当前页面内容输入到 Slack 搜索框",
-        "打开 Slack 搜索框输入选中的内容",
-        "Finder look for Downloads",
-        "微信打开搜索",
-        "Chrome 点登录",
-        "把当前网页链接加入提醒事项",
-        "把当前网页链接加入日历",
-        "创建备忘录",
-    )
+    prompts = migrated_daily_desktop_prompts()
+    coverage = legacy_daily_desktop_cleanup_coverage()
+
+    assert coverage["legacy_boundary"] == "legacy_daily_desktop_intent"
+    assert coverage["planner_owner"] == "runtime_planner"
+    assert coverage["total_samples"] == len(prompts)
+    assert "context_transfer" in coverage["areas"]
 
     remaining_legacy_prompts: list[str] = []
     for prompt in prompts:
