@@ -2399,6 +2399,97 @@ def test_runtime_tool_request_runner_keeps_readiness_blocker_after_failed_recove
     assert budget.claims == [("app.open_and_click_ui_element", False)]
 
 
+def test_runtime_tool_request_runner_replans_failed_recovery_with_parent_context() -> None:
+    timeline: list[dict[str, Any]] = []
+    run_events: list[tuple[str, str, dict[str, Any]]] = []
+
+    def call_agent_tool(
+        tool_request: dict[str, Any],
+        _allowed_tools: list[str],
+        _broker: Any,
+        timeline_arg: list[dict[str, Any]],
+        **_kwargs: Any,
+    ) -> dict[str, Any]:
+        tool_name = str(tool_request.get("tool") or "")
+        payload = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
+        result = {
+            "ok": False,
+            "error": "script failed",
+            "returncode": 1,
+        }
+        timeline_arg.append(
+            _timeline("agent.tool.call", tool_name, input_preview=payload, result=result)
+        )
+        return result
+
+    runner = _runner(call_agent_tool=call_agent_tool, run_events=run_events)
+    request = {
+        "tool": "terminal.run",
+        "input": {"command": "python analyze_sales.py"},
+        "source": "agent_studio_replan_recovery",
+        "step_id": "analyze-data-file",
+        "task_id": "task-1",
+        "workflow_run_id": "workflow-run-1",
+        "replan_request_id": "replan-parent-1",
+        "replan_recovery_action_id": "replan-parent-1:action:1:terminal.run",
+        "replan_trigger": "tool_failure",
+        "replan_triggers": ["tool_failure"],
+        "replan_signal_ids": ["signal-analyze"],
+        "recovery_action_label": "Run fallback analysis script",
+        "source_step_id": "analyze-data-file",
+        "source_tool_name": "data.analyze",
+        "target_capability_id": "data.analysis",
+        "task_verification_targets": [
+            {"step_id": "analyze-data-file", "todo_id": "todo-analyze"}
+        ],
+    }
+
+    with pytest.raises(AgentRuntimeError):
+        runner.run(
+            [request],
+            ["terminal.run"],
+            FakeBroker({"ok": True}),
+            [{"role": "user", "content": "Analyze sales.csv"}],
+            timeline,
+            [],
+            next_iteration=1,
+            run_id="workflow-run-1",
+            budget=FakeBudget(),
+        )
+
+    replan_event = next(
+        event
+        for event in timeline
+        if event["event"] == "workflow.run.replan.requested"
+    )
+    payload = replan_event["payload"]
+    assert payload["source"] == "runtime_tool_request_runner"
+    assert payload["trigger"] == "tool_failure"
+    assert payload["source_tool_name"] == "terminal.run"
+    assert payload["target_capability_id"] == "data.analysis"
+    metadata = payload["metadata"]
+    assert metadata["replan_recovery_failed"] is True
+    assert metadata["parent_replan_request_id"] == "replan-parent-1"
+    assert metadata["parent_replan_trigger"] == "tool_failure"
+    assert metadata["failed_recovery_action_id"] == (
+        "replan-parent-1:action:1:terminal.run"
+    )
+    assert metadata["failed_recovery_action_label"] == "Run fallback analysis script"
+    assert metadata["failed_recovery_tool"] == "terminal.run"
+    assert metadata["failed_recovery_input"] == {"command": "python analyze_sales.py"}
+    assert metadata["failed_recovery_source"] == "agent_studio_replan_recovery"
+    assert metadata["original_source_tool_name"] == "data.analyze"
+    assert metadata["replan_signal_ids"] == ["signal-analyze"]
+    assert metadata["failed_recovery_verification_targets"][0]["step_id"] == (
+        "analyze-data-file"
+    )
+    assert metadata["failed_recovery_result_preview"]["error"] == "script failed"
+    run_replan_event = next(
+        event for event in run_events if event[1] == "workflow.run.replan.requested"
+    )
+    assert run_replan_event[2]["metadata"]["parent_replan_request_id"] == "replan-parent-1"
+
+
 def test_runtime_tool_request_runner_clears_app_not_found_blocker_after_discovery() -> None:
     calls: list[str] = []
     run_events: list[tuple[str, str, dict[str, Any]]] = []

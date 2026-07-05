@@ -2232,11 +2232,13 @@ def _runtime_replan_request_payload_for_tool_result(
         return {}
     replan_signal_ids = _string_list(tool_request.get("replan_signal_ids"))
     replan_triggers = _string_list(tool_request.get("replan_triggers"))
+    parent_replan_request_id = str(tool_request.get("replan_request_id") or "").strip()
     request_fallback_tools = _string_list(tool_request.get("fallback_tools"))
     fallback_tools = _runtime_replan_fallback_tools(tool_request, result)
     if not (
         replan_signal_ids
         or replan_triggers
+        or parent_replan_request_id
         or request_fallback_tools
         or fallback_tools
         or bool(tool_request.get("requires_observation"))
@@ -2585,6 +2587,13 @@ def _runtime_replan_enrich_recovery_context(
             payload[key] = dict(value)
             metadata[key] = dict(value)
 
+    recovery_failure_metadata = _runtime_replan_recovery_failure_metadata(
+        tool_request,
+        result_preview=result_preview,
+    )
+    if recovery_failure_metadata:
+        metadata.update(recovery_failure_metadata)
+
     recovery_actions = _runtime_replan_recovery_actions(tool_request, result)
     if trigger == "verification_failed":
         verification_context = _runtime_replan_verification_failure_context(
@@ -2618,6 +2627,66 @@ def _runtime_replan_enrich_recovery_context(
     recovery_actions = _dedupe_runtime_replan_recovery_actions(recovery_actions)
     if recovery_actions:
         metadata["recovery_actions"] = recovery_actions
+
+
+def _runtime_replan_recovery_failure_metadata(
+    tool_request: Mapping[str, Any],
+    *,
+    result_preview: Mapping[str, Any],
+) -> dict[str, Any]:
+    parent_request_id = str(tool_request.get("replan_request_id") or "").strip()
+    if not parent_request_id:
+        return {}
+    request_input = (
+        tool_request.get("input") if isinstance(tool_request.get("input"), Mapping) else {}
+    )
+    metadata: dict[str, Any] = {
+        "replan_recovery_failed": True,
+        "parent_replan_request_id": parent_request_id,
+        "failed_recovery_tool": str(
+            tool_request.get("tool") or tool_request.get("tool_name") or ""
+        ).strip(),
+        "failed_recovery_input": dict(request_input),
+    }
+    for key, value in (
+        ("parent_replan_trigger", tool_request.get("replan_trigger")),
+        (
+            "failed_recovery_action_id",
+            tool_request.get("replan_recovery_action_id") or tool_request.get("action_id"),
+        ),
+        ("failed_recovery_action_label", tool_request.get("recovery_action_label")),
+        (
+            "failed_recovery_step_id",
+            tool_request.get("step_id") or tool_request.get("planner_step_id"),
+        ),
+        ("failed_recovery_source", tool_request.get("source")),
+        (
+            "failed_recovery_target_capability_id",
+            tool_request.get("target_capability_id") or tool_request.get("capability_id"),
+        ),
+        ("original_source_step_id", tool_request.get("source_step_id")),
+        ("original_source_tool_name", tool_request.get("source_tool_name")),
+    ):
+        text = str(value or "").strip()
+        if text:
+            metadata[key] = text
+    replan_triggers = _string_list(tool_request.get("replan_triggers"))
+    if replan_triggers:
+        metadata["replan_triggers"] = replan_triggers
+    replan_signal_ids = _string_list(tool_request.get("replan_signal_ids"))
+    if replan_signal_ids:
+        metadata["replan_signal_ids"] = replan_signal_ids
+    verification_targets = _mapping_list(
+        tool_request.get("verification_targets")
+        or tool_request.get("task_verification_targets")
+    )
+    if verification_targets:
+        metadata["failed_recovery_verification_targets"] = [
+            dict(target) for target in verification_targets
+        ]
+    if result_preview:
+        metadata["failed_recovery_result_preview"] = dict(result_preview)
+    return {key: value for key, value in metadata.items() if value not in ("", [], {})}
 
 
 def _runtime_replan_verification_failure_context(
