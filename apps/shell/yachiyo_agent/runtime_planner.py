@@ -789,6 +789,12 @@ class TaskIntentRouter:
             and _contains_any(text, ("搜索", "查找", "检索", "search", "find", "look up"))
         ):
             score = 0.18
+        if (
+            score <= 0
+            and _app_name_hint(text)
+            and _looks_like_app_scoped_create_followup(text)
+        ):
+            score = 0.18
         if score <= 0 and (spotlight_search_query or spotlight_open):
             score = 0.18
         if score <= 0 and dynamic_context_transfer:
@@ -1050,6 +1056,10 @@ class TaskIntentRouter:
             )
         ):
             app_search = {"app_name": app_name_hint, **app_search}
+        if safe_shortcut is None and app_name_hint and _looks_like_app_scoped_create_followup(text):
+            create_container_action = _generic_create_container_action_hint(text)
+            if create_container_action:
+                safe_shortcut = {"action": create_container_action}
         operation_hint = (
             str((desktop_discovery or {}).get("action") or "")
             or ("submit_search" if foreground_search_submit else "")
@@ -2446,6 +2456,8 @@ class TaskIntentRouter:
         ).strip()
         if scoped_action in {"new_reminder", "new_event"}:
             return _empty_intent("schedule", text)
+        if _explicit_app_open_request(text) and _app_name_hint(text):
+            return _empty_intent("schedule", text)
         shortcut_action = str((safe_shortcut_hint(text) or {}).get("action") or "").strip()
         if shortcut_action in {"new_note", "new_document"} and not _contains_any(
             text,
@@ -3239,6 +3251,7 @@ class RuntimePlanner:
             _safe_shortcut_targets_foreground(intent.user_goal, safe_shortcut, app_name)
             and not (foreground_paste and _foreground_compose_app_name_hint(intent.user_goal))
             and not app_scoped_safe_operation.get("safe_shortcut")
+            and not intent_safe_shortcut_from_inputs
         ):
             app_management = None
             app_name = ""
@@ -14959,6 +14972,12 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         score += 0.08
     if (
         intent.kind == "desktop_operation"
+        and intent.inputs.get("app_name_hint")
+        and _looks_like_app_scoped_create_followup(text)
+    ):
+        score += 0.36
+    if (
+        intent.kind == "desktop_operation"
         and isinstance(intent.inputs.get("desktop_discovery_hint"), Mapping)
         and str(intent.inputs["desktop_discovery_hint"].get("action") or "").strip()
         == "discover_apps"
@@ -18673,6 +18692,9 @@ def _explicit_generic_named_app_hint(text: str) -> str:
         r"(?:里|中|上|内)?\s*"
         r"(?=(?:新建|创建|打开|点击|点按|输入|写|搜索|查找|检索|按|操作|"
         r"create|new|open|click|press|type|search))",
+        r"(?:use|using|with)\s+"
+        r"(?P<use_app>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s+"
+        r"(?=(?:to\s+)?(?:create|new|open|click|press|type|search|write|make))",
         r"(?:打开|启动|开启|运行|拉起|切到|聚焦)?\s*"
         r"(?:一个|一款|这个|那个)?"
         r"(?:(?:我没提过的|我没有提过的|没提过的|没有提过的|从未提过的|"
@@ -19860,7 +19882,7 @@ def _generic_create_title_text_hint(text: str) -> str:
     container = (
         r"(?:页面|页|笔记|备忘录|日志|日记|文档|文件(?!夹)|演示|演示文稿|幻灯片|"
         r"项目|任务|卡片|工单|事项|page|note|document|file|presentation|slide|"
-        r"project|task|card|ticket|issue|bug)"
+        r"project|task|card|ticket|issue|bug|board|whiteboard|wireframe|mockup)"
     )
     chinese_patterns = (
         rf"(?:新建|创建|新增).{{0,80}}?"
@@ -19913,7 +19935,7 @@ def _generic_create_container_action_hint(text: str) -> str:
         r"(?:(?:标题|名称|名字|题目)\s*(?:是|为|叫|:|：)\s*[^。！？!?，,]{1,80}?\s*的\s*)?"
         r"(?:一页|一个页面|一张页面|页面|页|文档|(?:[A-Za-z0-9_+#.-]+\s*)?文件(?!夹)|图片|图像|图(?!标)|"
         r"流程图|思维导图|脑图|图表|画布|表格|工作簿|[^。！？!?，,]{0,20}?表|演示|演示文稿|幻灯片|"
-        r"项目|任务|卡片|工单|事项)",
+        r"项目|任务|卡片|工单|事项|board|whiteboard|wireframe|mockup)",
         value,
         flags=re.IGNORECASE,
     ) or re.search(
@@ -19930,7 +19952,8 @@ def _generic_create_container_action_hint(text: str) -> str:
     ) or re.search(
         r"\b(?:new|create|make)\b.{0,60}\b"
         r"(?:page|document|file|image|picture|diagram|flowchart|mind\s*map|canvas|"
-        r"spreadsheet|workbook|presentation|slide|project|task|card|ticket|issue|bug)\b",
+        r"spreadsheet|workbook|presentation|slide|project|task|card|ticket|issue|bug|"
+        r"board|whiteboard|wireframe|mockup)\b",
         value,
         flags=re.IGNORECASE,
     ):
@@ -19996,7 +20019,7 @@ def _looks_like_app_scoped_create_followup(text: str) -> bool:
             r"(?:(?:标题|名称|名字|题目)\s*(?:是|为|叫|:|：)\s*[^。！？!?，,]{1,80}?\s*的\s*)?"
             r"(?:一页|一个页面|一张页面|页面|页|笔记|备忘录|日志|日记|文档|(?:[A-Za-z0-9_+#.-]+\s*)?文件(?!夹)|"
             r"图片|图像|图(?!标)|流程图|思维导图|脑图|图表|画布|表格|工作簿|[^。！？!?，,]{0,20}?表|演示|演示文稿|"
-            r"幻灯片|项目|任务|卡片|工单|事项|ticket|issue|bug)",
+            r"幻灯片|项目|任务|卡片|工单|事项|ticket|issue|bug|board|whiteboard|wireframe|mockup)",
             value,
             flags=re.IGNORECASE,
         )
@@ -20010,7 +20033,8 @@ def _looks_like_app_scoped_create_followup(text: str) -> bool:
         or re.search(
             r"\b(?:new|create|make)\b.{0,40}\b"
             r"(?:page|note|document|file|image|picture|diagram|flowchart|mind\s*map|"
-            r"canvas|spreadsheet|workbook|presentation|slide|project|task|card|ticket|issue|bug)\b",
+            r"canvas|spreadsheet|workbook|presentation|slide|project|task|card|ticket|issue|bug|"
+            r"board|whiteboard|wireframe|mockup)\b",
             value,
             flags=re.IGNORECASE,
         )
@@ -21918,6 +21942,8 @@ def _desktop_operation_hint(text: str) -> str:
         return "click"
     if _contains_any(text, ["type", "input", "输入"]):
         return "type"
+    if _looks_like_app_scoped_create_followup(text):
+        return "create"
     if _contains_any(text, ["play", "播放"]):
         return "play"
     if _contains_any(text, ["open", "launch", "打开", "启动"]):
@@ -28197,7 +28223,25 @@ def _invalid_local_app_discovery_subject(value: str) -> bool:
 def _looks_like_ui_operation(text: str) -> bool:
     return _contains_any(
         text,
-        ["click", "type", "press", "shortcut", "scroll", "点击", "输入", "按", "快捷键", "滚动", "发送"],
+        [
+            "click",
+            "type",
+            "press",
+            "shortcut",
+            "scroll",
+            "create",
+            "new",
+            "make",
+            "点击",
+            "输入",
+            "按",
+            "快捷键",
+            "滚动",
+            "发送",
+            "新建",
+            "创建",
+            "新增",
+        ],
     )
 
 

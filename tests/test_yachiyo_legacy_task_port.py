@@ -1306,6 +1306,63 @@ def test_planner_first_direct_selection_owns_app_launch_without_legacy() -> None
     assert legacy_calls == []
 
 
+def test_planner_first_direct_selection_discovers_generic_app_create_targets() -> None:
+    legacy_calls: list[dict[str, Any]] = []
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open",
+        "app.focus",
+        "app.open_and_safe_shortcut",
+        "app.focus_and_safe_shortcut",
+        "desktop.safe_shortcut",
+        "desktop.ui_elements",
+    ]
+    cases = (
+        ("打开 Notion Calendar", "Notion Calendar", "app.open"),
+        ("Use Figma to create a wireframe", "Figma", "app.focus_and_safe_shortcut"),
+        ("在 FigJam 里新建一个 board", "FigJam", "app.focus_and_safe_shortcut"),
+    )
+
+    for prompt, app_name, primary_tool in cases:
+        selection = planner_first_direct_tool_selection(
+            prompt,
+            allowed_tools,
+            legacy_tool_requests=_recording_legacy_requests(legacy_calls),
+        )
+
+        assert selection.selected_source == "runtime_planner"
+        assert selection.event_payload["legacy_request_count"] == 0
+        assert selection.requests[0] == {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": app_name, "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        }
+        assert selection.requests[1]["tool"] == primary_tool
+        assert selection.requests[1]["input"]["app_name"] == app_name
+        assert selection.requests[1]["input"]["selection_source"] == "desktop.list_apps"
+        assert selection.requests[1]["input"]["query"] == app_name
+        if primary_tool.endswith("_safe_shortcut"):
+            assert selection.requests[1]["input"]["action"] == "new_document"
+
+    foreground_selection = planner_first_direct_tool_selection(
+        "当前窗口新建文档",
+        allowed_tools,
+        legacy_tool_requests=_recording_legacy_requests(legacy_calls),
+    )
+
+    assert foreground_selection.selected_source == "runtime_planner"
+    assert foreground_selection.requests[0] == {
+        "protocol": "json_fallback",
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "new_document"},
+        "source": "runtime_planner",
+        "planning_reason": "planner_desktop_operation",
+    }
+    assert legacy_calls == []
+
+
 def test_planner_first_direct_selection_owns_app_management_without_legacy() -> None:
     legacy_calls: list[dict[str, Any]] = []
     allowed_tools = [
