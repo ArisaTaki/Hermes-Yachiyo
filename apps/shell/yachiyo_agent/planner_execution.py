@@ -351,6 +351,7 @@ def _defer_unknown_app_ui_element_operations_to_observation(
                     requests,
                     index,
                     tool_name,
+                    allowed,
                 ),
             )
         )
@@ -458,6 +459,7 @@ def _unknown_app_ui_deferred_continuation(
     requests: list[dict[str, Any]],
     index: int,
     tool_name: str,
+    allowed: set[str],
 ) -> list[dict[str, Any]]:
     if tool_name not in {
         "app.open_and_type_into_ui_element",
@@ -467,6 +469,7 @@ def _unknown_app_ui_deferred_continuation(
     continuation, _continuation_indexes = _semantic_ui_type_deferred_continuation(
         requests,
         index,
+        allowed,
     )
     return continuation
 
@@ -643,6 +646,7 @@ def _defer_semantic_ui_types_to_observation(
         continuation, continuation_indexes = _semantic_ui_type_deferred_continuation(
             requests,
             index,
+            allowed,
         )
         if _has_later_mutation_before_verification(requests, index) and not continuation:
             normalized.append(request)
@@ -705,6 +709,7 @@ def _has_later_mutation_before_verification(
 def _semantic_ui_type_deferred_continuation(
     requests: list[dict[str, Any]],
     index: int,
+    allowed: set[str],
 ) -> tuple[list[dict[str, Any]], set[int]]:
     continuation: list[dict[str, Any]] = []
     continuation_indexes: set[int] = set()
@@ -716,6 +721,10 @@ def _semantic_ui_type_deferred_continuation(
                 return [], set()
             continuation.append(dict(later_request))
             continuation_indexes.add(later_index)
+            continuation = _defer_search_result_clicks_to_observation(
+                continuation,
+                allowed,
+            )
             return continuation, continuation_indexes
         if not (
             later_tool in _EXECUTION_MUTATION_TOOLS
@@ -725,7 +734,13 @@ def _semantic_ui_type_deferred_continuation(
         saw_mutation = True
         continuation.append(dict(later_request))
         continuation_indexes.add(later_index)
-    return (continuation, continuation_indexes) if saw_mutation else ([], set())
+    if not saw_mutation:
+        return [], set()
+    continuation = _defer_search_result_clicks_to_observation(
+        continuation,
+        allowed,
+    )
+    return continuation, continuation_indexes
 
 
 def _semantic_ui_type_observation_request(
