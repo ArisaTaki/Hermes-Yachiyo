@@ -1948,8 +1948,12 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "function runtimeRequestReplayOpenDetails(target: Element): void",
             "data-verification-status={evidence.verificationStatus}",
             "data-verification-step-id={evidence.verificationStepId}",
-            "data-runtime-request-evidence-kind={kind}",
+            "data-runtime-request-evidence-kind={evidenceKind || kind}",
             "data-runtime-request-evidence-kind=\"verification-status\"",
+            "evidenceKind=\"verification-event\"",
+            "evidenceKind=\"verification-artifact\"",
+            "values={evidence.verificationEventIds}",
+            "values={evidence.verificationArtifactPaths}",
         ],
     )
     _assert_contains(

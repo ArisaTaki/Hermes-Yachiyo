@@ -78,25 +78,29 @@ export function RuntimeRequestReplayEvidencePanel({
       {evidence.verificationStepId ? (
         <span data-runtime-request-evidence-kind="verification-step">verified by · {evidence.verificationStepId}</span>
       ) : null}
-      {evidence.verificationEventPreview ? (
-        <span data-runtime-request-evidence-kind="verification-event">
-          verification events · {evidence.verificationEventPreview}
-        </span>
-      ) : null}
-      {evidence.verificationArtifactPreview ? (
-        <span data-runtime-request-evidence-kind="verification-artifact">
-          verification artifacts · {evidence.verificationArtifactPreview}
-        </span>
-      ) : null}
+      <RuntimeRequestEvidenceTarget
+        evidenceKind="verification-event"
+        kind="event"
+        label="verification events"
+        values={evidence.verificationEventIds}
+      />
+      <RuntimeRequestEvidenceTarget
+        evidenceKind="verification-artifact"
+        kind="artifact-path"
+        label="verification artifacts"
+        values={evidence.verificationArtifactPaths}
+      />
     </div>
   );
 }
 
 function RuntimeRequestEvidenceTarget({
+  evidenceKind,
   kind,
   label,
   values,
 }: {
+  evidenceKind?: string;
   kind: RuntimeAnchorKind;
   label: string;
   values: string[];
@@ -109,7 +113,7 @@ function RuntimeRequestEvidenceTarget({
   return (
     <button
       type="button"
-      data-runtime-request-evidence-kind={kind}
+      data-runtime-request-evidence-kind={evidenceKind || kind}
       data-runtime-target-anchor={targetAnchor}
       data-runtime-target-kind={kind}
       data-runtime-target-selector={targetSelector}
