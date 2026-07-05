@@ -106,6 +106,27 @@ def test_desktop_operation_aliases_dispatch_to_stable_runtime_tools() -> None:
             self.calls.append(("desktop_type_text", text))
             return {"ok": True, "action": "desktop.type_text"}
 
+        def app_open_and_click_ui_element(
+            self,
+            app_name,
+            target,
+            *,
+            role_filter="",
+            limit=80,
+            click_count=1,
+        ):
+            self.calls.append(
+                (
+                    "app_open_and_click_ui_element",
+                    app_name,
+                    target,
+                    role_filter,
+                    limit,
+                    click_count,
+                )
+            )
+            return {"ok": True, "action": "app.open_and_click_ui_element"}
+
         def desktop_inspect_app(
             self,
             app_name,
@@ -146,7 +167,23 @@ def test_desktop_operation_aliases_dispatch_to_stable_runtime_tools() -> None:
         "desktop.shortcut",
         {"key": "l", "modifiers": ["command"]},
     )["ok"] is True
+    assert dispatch_tool_call(
+        broker,
+        "desktop.shortcut",
+        {"key": "return", "modifiers": []},
+    )["ok"] is True
     assert dispatch_tool_call(broker, "desktop.type", {"text": "hello"})["ok"] is True
+    assert dispatch_tool_call(
+        broker,
+        "app.open_and_click_ui_element",
+        {
+            "app_name": "Music",
+            "target": "first result",
+            "role_filter": "",
+            "limit": 80,
+            "click_count": 1,
+        },
+    )["ok"] is True
     verify = dispatch_tool_call(
         broker,
         "desktop.verify",
@@ -160,6 +197,8 @@ def test_desktop_operation_aliases_dispatch_to_stable_runtime_tools() -> None:
         ("desktop_windows", "Music"),
         ("desktop_ui_elements", "Music", "button", 10),
         ("desktop_hotkey", "l", ["command"]),
+        ("desktop_hotkey", "return", []),
         ("desktop_type_text", "hello"),
+        ("app_open_and_click_ui_element", "Music", "first result", "", 80, 1),
         ("desktop_inspect_app", "Music", False, False, "button", 5),
     ]
