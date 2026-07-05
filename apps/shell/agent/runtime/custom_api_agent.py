@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import posixpath
 import re
 from collections.abc import Iterable, Mapping
@@ -29,6 +30,8 @@ from apps.shell.agent.runtime.event_scopes import (
     runtime_progress_event_payload as _runtime_progress_event_payload,
     runtime_progress_event_type as _runtime_progress_event_type,
     runtime_replan_base_event_type as _runtime_replan_event_type,
+    runtime_replan_request_event_payload as _runtime_replan_request_event_payload,
+    runtime_replan_request_event_type as _runtime_replan_request_event_type,
     runtime_scope_context as _runtime_planner_scope_context,
 )
 from apps.shell.agent.runtime.followup_content_snapshot import (
@@ -2073,6 +2076,24 @@ class RuntimeCustomApiAgentLoop:
                                 tool_timeline_start=tool_timeline_start,
                                 run_id=run_id,
                             )
+                            replan_payloads = (
+                                self._record_model_followup_pending_plan_replan_events(
+                                    followup_context,
+                                    auto_pending_plan_requests,
+                                    timeline=timeline,
+                                    tool_timeline_start=tool_timeline_start,
+                                    run_id=run_id,
+                                )
+                            )
+                            if replan_payloads:
+                                self._append_replan_followup_context(
+                                    replan_payloads,
+                                    allowed_tools=allowed_tools,
+                                    messages=messages,
+                                    timeline=timeline,
+                                    run_id=run_id,
+                                )
+                                continue
                         direct_result = self._direct_daily_desktop_sequence_result(
                             auto_pending_plan_requests,
                             timeline,
@@ -2113,6 +2134,22 @@ class RuntimeCustomApiAgentLoop:
                     tool_timeline_start=tool_timeline_start,
                     run_id=run_id,
                 )
+                replan_payloads = self._record_model_followup_pending_plan_replan_events(
+                    followup_context,
+                    tool_requests,
+                    timeline=timeline,
+                    tool_timeline_start=tool_timeline_start,
+                    run_id=run_id,
+                )
+                if replan_payloads:
+                    self._append_replan_followup_context(
+                        replan_payloads,
+                        allowed_tools=allowed_tools,
+                        messages=messages,
+                        timeline=timeline,
+                        run_id=run_id,
+                    )
+                    continue
                 auto_pending_continuation_requests = (
                     _model_followup_pending_plan_continuation_requests(
                         followup_context,
@@ -2206,6 +2243,24 @@ class RuntimeCustomApiAgentLoop:
                         tool_timeline_start=continuation_timeline_start,
                         run_id=run_id,
                     )
+                    continuation_replan_payloads = (
+                        self._record_model_followup_pending_plan_replan_events(
+                            followup_context,
+                            auto_pending_continuation_requests,
+                            timeline=timeline,
+                            tool_timeline_start=continuation_timeline_start,
+                            run_id=run_id,
+                        )
+                    )
+                    if continuation_replan_payloads:
+                        self._append_replan_followup_context(
+                            continuation_replan_payloads,
+                            allowed_tools=allowed_tools,
+                            messages=messages,
+                            timeline=timeline,
+                            run_id=run_id,
+                        )
+                        continue
                     direct_result = self._direct_daily_desktop_sequence_result(
                         auto_pending_continuation_requests,
                         timeline,
@@ -3306,6 +3361,107 @@ class RuntimeCustomApiAgentLoop:
             if run_id and self._append_run_event is not None:
                 self._append_run_event(run_id, "agent.replan.requested", payload_dict)
         return payloads
+
+    def _record_model_followup_pending_plan_replan_events(
+        self,
+        followup_context: Mapping[str, Any],
+        planned_tool_requests: list[dict[str, Any]],
+        *,
+        timeline: list[dict[str, Any]],
+        tool_timeline_start: int,
+        run_id: str = "",
+    ) -> list[dict[str, Any]]:
+        payloads = _model_followup_pending_plan_replan_payloads(
+            followup_context,
+            planned_tool_requests,
+            timeline,
+            tool_timeline_start=tool_timeline_start,
+            run_id=run_id,
+        )
+        if not payloads:
+            return []
+        existing_request_ids = {
+            str(
+                (
+                    event.get("payload")
+                    if isinstance(event.get("payload"), Mapping)
+                    else {}
+                ).get("request_id")
+                or event.get("request_id")
+                or ""
+            ).strip()
+            for event in timeline
+            if isinstance(event, Mapping)
+            and _runtime_replan_event_type(
+                str(event.get("event") or event.get("event_type") or "").strip()
+            )
+            == "agent.replan.requested"
+        }
+        existing_keys = {
+            key
+            for event in timeline
+            if isinstance(event, Mapping)
+            and _runtime_replan_event_type(
+                str(event.get("event") or event.get("event_type") or "").strip()
+            )
+            == "agent.replan.requested"
+            for payload in [
+                (
+                    event.get("payload")
+                    if isinstance(event.get("payload"), Mapping)
+                    else event
+                )
+            ]
+            for key in [_replan_payload_dedupe_key(payload)]
+            if key
+        }
+        recorded: list[dict[str, Any]] = []
+        for payload in payloads:
+            request_id = str(payload.get("request_id") or "").strip()
+            if request_id and request_id in existing_request_ids:
+                continue
+            dedupe_key = _replan_payload_dedupe_key(payload)
+            if dedupe_key and dedupe_key in existing_keys:
+                continue
+            if request_id:
+                existing_request_ids.add(request_id)
+            if dedupe_key:
+                existing_keys.add(dedupe_key)
+            event_type = _runtime_replan_request_event_type(payload)
+            event_payload = _runtime_replan_request_event_payload(payload, event_type)
+            detail = str(
+                payload.get("reason")
+                or payload.get("failure_detail")
+                or payload.get("trigger")
+                or "Runtime requested a replan."
+            ).strip()
+            event_fields = {
+                "status": str(payload.get("status") or "requested"),
+                "source": str(payload.get("source") or "runtime_planner"),
+                "decision_id": str(payload.get("decision_id") or ""),
+                "plan_id": str(payload.get("plan_id") or ""),
+                "payload": event_payload,
+            }
+            for key in (
+                "task_id",
+                "run_id",
+                "core_id",
+                "group_run_id",
+                "run_group_id",
+                "group_id",
+                "workflow_run_id",
+                "workflow_id",
+                "workflow_node_id",
+                "workflow_node_label",
+            ):
+                value = str(event_payload.get(key) or payload.get(key) or "").strip()
+                if value:
+                    event_fields[key] = value
+            timeline.append(self._timeline(event_type, detail, **event_fields))
+            recorded.append(dict(payload))
+            if run_id and self._append_run_event is not None:
+                self._append_run_event(run_id, event_type, event_payload)
+        return recorded
 
     def _record_runtime_planner_task_progress_events(
         self,
@@ -18619,6 +18775,10 @@ def _model_followup_pending_plan_continuation_requests(
     )
     if last_completed_index < 0:
         return []
+    for step in steps[: last_completed_index + 1]:
+        step_id = str(step.get("step_id") or "").strip()
+        if step_id:
+            completed_step_ids.add(step_id)
     completed_step_ids.update(
         _model_followup_completed_step_ids_from_timeline(
             timeline,
@@ -18660,6 +18820,450 @@ def _model_followup_pending_plan_continuation_requests(
         if len(requests) >= _MODEL_FOLLOWUP_MAX_AUTO_PENDING_REQUESTS:
             break
     return requests
+
+
+def _model_followup_pending_plan_replan_payloads(
+    followup_context: Mapping[str, Any],
+    planned_tool_requests: Iterable[Mapping[str, Any]],
+    timeline: list[dict[str, Any]],
+    *,
+    tool_timeline_start: int,
+    run_id: str = "",
+) -> list[dict[str, Any]]:
+    if not isinstance(followup_context, Mapping):
+        return []
+    steps = [
+        step
+        for step in _model_followup_pending_trace_items(followup_context)
+        if isinstance(step, Mapping)
+    ]
+    requests = [
+        request for request in planned_tool_requests if isinstance(request, Mapping)
+    ]
+    if not steps or not requests:
+        return []
+    tool_events = [
+        event
+        for event in timeline[tool_timeline_start:]
+        if isinstance(event, Mapping)
+        and str(event.get("event") or "").strip()
+        in {"agent.tool.call", "agent.tool.failed", "agent.tool.skipped"}
+    ]
+    if not tool_events:
+        return []
+    payloads: list[dict[str, Any]] = []
+    step_cursor = 0
+    event_cursor = 0
+    for request in requests:
+        step_index, step = _next_matching_model_followup_pending_step(
+            request,
+            steps,
+            start_index=step_cursor,
+        )
+        if step_index >= 0:
+            step_cursor = step_index + 1
+        else:
+            step = None
+        event_index, tool_event = _next_matching_model_followup_tool_event(
+            request,
+            tool_events,
+            start_index=event_cursor,
+        )
+        if event_index >= 0:
+            event_cursor = event_index + 1
+        if not tool_event:
+            continue
+        result = (
+            dict(tool_event.get("result"))
+            if isinstance(tool_event.get("result"), Mapping)
+            else {}
+        )
+        if tool_event.get("verification_failed") is True:
+            result["verification_failed"] = True
+        if not _tool_result_requests_replan(result):
+            continue
+        step_mapping = step if isinstance(step, Mapping) else {}
+        source_step_id = str(
+            request.get("step_id")
+            or request.get("planner_step_id")
+            or step_mapping.get("step_id")
+            or ""
+        ).strip()
+        source_tool_name = str(
+            request.get("tool")
+            or request.get("tool_name")
+            or step_mapping.get("tool_name")
+            or tool_event.get("detail")
+            or ""
+        ).strip()
+        trigger = _model_followup_pending_plan_replan_trigger(
+            request,
+            step_mapping,
+            tool_event,
+            result,
+        )
+        target_capability_id = str(
+            request.get("capability_id") or step_mapping.get("capability_id") or ""
+        ).strip()
+        failure_event_type = str(tool_event.get("event") or "agent.tool.call").strip()
+        failure_detail = _model_followup_pending_plan_failure_detail(
+            tool_event,
+            result,
+        )
+        fallback_tools = (
+            _string_list(step_mapping.get("fallback_tools"))
+            or _string_list(request.get("fallback_tools"))
+            or _model_followup_default_replan_fallback_tools(
+                source_tool_name,
+                trigger=trigger,
+                capability_id=target_capability_id,
+            )
+        )
+        task_context = _model_followup_task_core_replan_context(
+            followup_context,
+            source_step_id,
+            matched_step_id=str(step_mapping.get("step_id") or source_step_id).strip(),
+        )
+        metadata = {
+            **_runtime_trace_metadata_from_mapping(followup_context),
+            **_runtime_trace_metadata_from_mapping(request),
+            **_runtime_trace_metadata_from_mapping(tool_event),
+            **_runtime_replan_failure_metadata(result),
+            "original_intent_kind": str(
+                request.get("intent_kind")
+                or followup_context.get("intent_kind")
+                or ""
+            ).strip(),
+            "input_preview": _model_followup_request_input_preview(request, tool_event),
+            "result_preview": _task_progress_result_preview(result),
+        }
+        if task_context:
+            metadata["task_core_context"] = task_context
+        metadata = {
+            key: value
+            for key, value in metadata.items()
+            if value not in (None, "", [], {})
+        }
+        payload: dict[str, Any] = {
+            "request_id": _model_followup_replan_stable_id(
+                "replan-request",
+                followup_context.get("decision_id"),
+                followup_context.get("plan_id"),
+                source_step_id,
+                source_tool_name,
+                trigger,
+                failure_detail,
+            ),
+            "trigger": trigger,
+            "status": "requested",
+            "source": "runtime_planner",
+            "run_id": str(run_id or request.get("run_id") or followup_context.get("run_id") or "").strip(),
+            "task_id": str(request.get("task_id") or followup_context.get("task_id") or "").strip(),
+            "decision_id": str(
+                request.get("decision_id") or followup_context.get("decision_id") or ""
+            ).strip(),
+            "plan_id": str(request.get("plan_id") or followup_context.get("plan_id") or "").strip(),
+            "core_id": str(request.get("core_id") or followup_context.get("core_id") or "").strip(),
+            "source_step_id": source_step_id,
+            "source_tool_name": source_tool_name,
+            "target_capability_id": target_capability_id,
+            "condition": _model_followup_pending_plan_replan_condition(trigger),
+            "reason": _model_followup_pending_plan_replan_reason(
+                trigger,
+                source_step_id=source_step_id,
+                source_tool_name=source_tool_name,
+            ),
+            "failure_event_type": failure_event_type,
+            "failure_detail": failure_detail,
+            "fallback_tools": fallback_tools,
+            "metadata": metadata,
+        }
+        for key in _RUNTIME_ORCHESTRATION_SCOPE_KEYS:
+            value = str(request.get(key) or followup_context.get(key) or "").strip()
+            if value:
+                payload[key] = value
+        prompt = _model_followup_pending_plan_replan_prompt(payload, task_context)
+        if prompt:
+            payload["replan_prompt"] = prompt
+        payloads.append(
+            {key: value for key, value in payload.items() if value not in ("", [], {})}
+        )
+    return payloads
+
+
+def _next_matching_model_followup_tool_event(
+    request: Mapping[str, Any],
+    tool_events: list[Mapping[str, Any]],
+    *,
+    start_index: int = 0,
+) -> tuple[int, Mapping[str, Any] | None]:
+    tool_name = str(request.get("tool") or request.get("tool_name") or "").strip()
+    step_id = str(request.get("step_id") or request.get("planner_step_id") or "").strip()
+    for index in range(max(0, start_index), len(tool_events)):
+        event = tool_events[index]
+        event_tool = str(event.get("detail") or event.get("tool") or "").strip()
+        event_step_id = str(
+            event.get("step_id") or event.get("planner_step_id") or ""
+        ).strip()
+        if step_id and event_step_id and step_id != event_step_id:
+            continue
+        if tool_name and event_tool and tool_name != event_tool:
+            continue
+        if step_id or tool_name:
+            return index, event
+    return -1, None
+
+
+def _model_followup_pending_plan_replan_trigger(
+    request: Mapping[str, Any],
+    step: Mapping[str, Any],
+    event: Mapping[str, Any],
+    result: Mapping[str, Any],
+) -> str:
+    runtime_stage = str(
+        request.get("runtime_stage") or step.get("runtime_stage") or ""
+    ).strip()
+    runtime_role = str(
+        request.get("runtime_role") or step.get("runtime_role") or ""
+    ).strip()
+    if (
+        result.get("verification_failed") is True
+        or runtime_stage == "verify"
+        or runtime_role == "verify_result"
+    ):
+        return "verification_failed"
+    haystack = " ".join(
+        [
+            str(event.get("event") or ""),
+            str(event.get("detail") or ""),
+            str(result.get("error") or ""),
+            str(result.get("hint") or ""),
+            str(result.get("summary") or ""),
+            str(result.get("stderr") or ""),
+        ]
+    ).lower()
+    if any(
+        marker in haystack
+        for marker in (
+            "unavailable",
+            "not available",
+            "not allowed",
+            "not enabled",
+            "missing permission",
+            "missing tool",
+        )
+    ):
+        return "tool_unavailable"
+    return "tool_failure"
+
+
+def _model_followup_pending_plan_failure_detail(
+    event: Mapping[str, Any],
+    result: Mapping[str, Any],
+) -> str:
+    parts = [
+        str(result.get("error") or "").strip(),
+        str(result.get("hint") or "").strip(),
+        str(result.get("summary") or "").strip(),
+        str(result.get("stderr") or "").strip()[:500],
+        str(result.get("stdout") or "").strip()[:500],
+    ]
+    for part in parts:
+        if part:
+            return part
+    exit_code = result.get("exit_code", result.get("returncode"))
+    if exit_code not in (None, "", 0, "0"):
+        return f"{str(event.get('detail') or 'tool').strip()} exited with {exit_code}"
+    return str(event.get("detail") or event.get("event") or "tool failure").strip()
+
+
+def _model_followup_request_input_preview(
+    request: Mapping[str, Any],
+    event: Mapping[str, Any],
+) -> dict[str, Any]:
+    input_preview = (
+        event.get("input_preview")
+        if isinstance(event.get("input_preview"), Mapping)
+        else {}
+    )
+    if input_preview:
+        return dict(input_preview)
+    request_input = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+    return dict(request_input)
+
+
+def _model_followup_pending_plan_replan_condition(trigger: str) -> str:
+    if trigger == "verification_failed":
+        return "Pending verification step failed."
+    if trigger == "tool_unavailable":
+        return "Pending plan tool was unavailable or blocked by missing capability."
+    return "Pending plan tool failed."
+
+
+def _model_followup_pending_plan_replan_reason(
+    trigger: str,
+    *,
+    source_step_id: str,
+    source_tool_name: str,
+) -> str:
+    target = source_step_id or source_tool_name or "pending step"
+    if trigger == "verification_failed":
+        return f"Runtime requested a replan after verification failed for {target}."
+    if trigger == "tool_unavailable":
+        return f"Runtime requested a replan because a required tool was unavailable for {target}."
+    return f"Runtime requested a replan after a failed pending step: {target}."
+
+
+def _model_followup_default_replan_fallback_tools(
+    tool_name: str,
+    *,
+    trigger: str,
+    capability_id: str,
+) -> list[str]:
+    if trigger == "verification_failed" or tool_name == "terminal.run":
+        return ["workspace.read", "workspace.write_patch", "terminal.run"]
+    if tool_name.startswith("app.") or tool_name.startswith("desktop."):
+        return ["screen.capture", "desktop.read_ui", "desktop.active_window"]
+    if capability_id.startswith("data."):
+        return ["workspace.read", "data.analyze", "artifact.write"]
+    return []
+
+
+def _model_followup_task_core_replan_context(
+    followup_context: Mapping[str, Any],
+    source_step_id: str,
+    *,
+    matched_step_id: str = "",
+) -> dict[str, Any]:
+    task_core = (
+        followup_context.get("task_core")
+        if isinstance(followup_context.get("task_core"), Mapping)
+        else {}
+    )
+    if not task_core:
+        return {}
+    workspace = (
+        task_core.get("workspace")
+        if isinstance(task_core.get("workspace"), Mapping)
+        else {}
+    )
+    plan_step = str(matched_step_id or source_step_id or "").strip()
+    context: dict[str, Any] = {
+        "core_id": str(task_core.get("core_id") or "").strip(),
+        "workspace_id": str(workspace.get("workspace_id") or "").strip(),
+        "workspace_title": str(workspace.get("title") or "").strip(),
+        "source_step_id": str(source_step_id or "").strip(),
+        "planner_step_id": plan_step,
+    }
+    workspace_items = _model_followup_task_core_context_rows(
+        workspace.get("items") if isinstance(workspace.get("items"), list) else [],
+        step_key="source_step_id",
+        step_id=plan_step,
+        keys=("item_id", "title", "kind", "path", "status", "source_step_id"),
+        limit=8,
+    )
+    todos = _model_followup_task_core_context_rows(
+        task_core.get("todos") if isinstance(task_core.get("todos"), list) else [],
+        step_key="step_id",
+        step_id=plan_step,
+        keys=(
+            "todo_id",
+            "title",
+            "status",
+            "step_id",
+            "tool_name",
+            "capability_id",
+            "approval_required",
+        ),
+        limit=8,
+    )
+    checkpoints = _model_followup_task_core_context_rows(
+        task_core.get("checkpoints")
+        if isinstance(task_core.get("checkpoints"), list)
+        else [],
+        step_key="after_step_id",
+        step_id=plan_step,
+        keys=("checkpoint_id", "title", "status", "after_step_id", "verifies"),
+        limit=5,
+    )
+    replan_signals = _model_followup_task_core_context_rows(
+        task_core.get("replan_signals")
+        if isinstance(task_core.get("replan_signals"), list)
+        else [],
+        step_key="source_step_id",
+        step_id=plan_step,
+        keys=("signal_id", "trigger", "source_step_id", "target", "fallback_tools"),
+        limit=5,
+    )
+    if workspace_items:
+        context["workspace_items"] = workspace_items
+    if todos:
+        context["todos"] = todos
+    if checkpoints:
+        context["checkpoints"] = checkpoints
+    if replan_signals:
+        context["replan_signals"] = replan_signals
+    return {key: value for key, value in context.items() if value not in ("", [], {})}
+
+
+def _model_followup_task_core_context_rows(
+    values: Iterable[Any],
+    *,
+    step_key: str,
+    step_id: str,
+    keys: tuple[str, ...],
+    limit: int,
+) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for value in values:
+        if not isinstance(value, Mapping):
+            continue
+        if step_id and str(value.get(step_key) or value.get("step_id") or "").strip() != step_id:
+            continue
+        row = {
+            key: value.get(key)
+            for key in keys
+            if value.get(key) not in (None, "", [], {})
+        }
+        if row:
+            rows.append(dict(row))
+        if len(rows) >= limit:
+            break
+    return rows
+
+
+def _model_followup_pending_plan_replan_prompt(
+    payload: Mapping[str, Any],
+    task_context: Mapping[str, Any],
+) -> str:
+    parts = [
+        "Runtime replan request:",
+        f"- trigger: {payload.get('trigger')}",
+    ]
+    for label, key in (
+        ("failed_step", "source_step_id"),
+        ("failed_tool", "source_tool_name"),
+        ("target_capability", "target_capability_id"),
+        ("failure_detail", "failure_detail"),
+    ):
+        value = str(payload.get(key) or "").strip()
+        if value:
+            parts.append(f"- {label}: {value}")
+    fallback_tools = _string_list(payload.get("fallback_tools"))
+    if fallback_tools:
+        parts.append(f"- preferred_fallback_tools: {', '.join(fallback_tools)}")
+    if task_context:
+        parts.append("- task_workspace: continue from existing task_core_context")
+    parts.append(
+        "Continue from the existing task workspace; do not restart completed steps."
+    )
+    return "\n".join(parts)
+
+
+def _model_followup_replan_stable_id(prefix: str, *parts: Any) -> str:
+    raw = "|".join(str(part or "") for part in parts)
+    digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:12]
+    return f"{prefix}-{digest}"
 
 
 def _model_followup_completed_step_ids(

@@ -3482,6 +3482,252 @@ def test_custom_api_agent_loop_runs_pending_verify_after_model_patch_tool_call()
     assert sum(1 for event in timeline if event["event"] == "agent.model.response") == 1
 
 
+def test_custom_api_agent_loop_replans_failed_pending_verify_after_model_patch_tool_call() -> None:
+    budget = FakeBudget()
+    tool_batches: list[list[dict[str, Any]]] = []
+    model_calls: list[list[dict[str, Any]]] = []
+    messages = [{"role": "user", "content": "修复这个仓库里的 failing tests"}]
+    timeline: list[dict[str, Any]] = [
+        _timeline(
+            "agent.model.followup_context",
+            "planner_fallback_code_diagnostic",
+            source="runtime_planner",
+            planning_reason="planner_fallback_code_diagnostic",
+            decision_id="decision-code",
+            plan_id="plan-code",
+            intent_kind="code_task",
+            core_id="task-core-code",
+            workspace_id="task-workspace-code",
+            task_id="task-code",
+            content_snapshot={
+                "source_tool": "terminal.run",
+                "ok": True,
+                "text": "FAILED tests/test_app.py::test_total",
+            },
+            task_core={
+                "core_id": "task-core-code",
+                "workspace": {
+                    "workspace_id": "task-workspace-code",
+                    "items": [],
+                },
+                "todos": [
+                    {
+                        "todo_id": "todo-apply",
+                        "step_id": "apply-code-changes",
+                        "title": "Apply code changes",
+                        "status": "pending",
+                    },
+                    {
+                        "todo_id": "todo-verify",
+                        "step_id": "verify-code-changes",
+                        "title": "Verify code changes",
+                        "status": "pending",
+                    },
+                ],
+                "checkpoints": [
+                    {
+                        "checkpoint_id": "checkpoint-apply",
+                        "after_step_id": "apply-code-changes",
+                        "title": "Code changes applied",
+                        "status": "planned",
+                    },
+                    {
+                        "checkpoint_id": "checkpoint-verify",
+                        "after_step_id": "verify-code-changes",
+                        "title": "Tests passed",
+                        "status": "planned",
+                    },
+                ],
+            },
+            pending_plan_steps=[
+                {
+                    "step_id": "apply-code-changes",
+                    "title": "Apply code changes",
+                    "tool_name": "workspace.write_patch",
+                    "capability_id": "file.workspace_write",
+                    "action": "apply_patch",
+                    "depends_on": ["run-code-diagnostic"],
+                },
+                {
+                    "step_id": "verify-code-changes",
+                    "title": "Verify code changes",
+                    "tool_name": "terminal.run",
+                    "capability_id": "terminal.execution",
+                    "input_preview": {"command": "python -m pytest"},
+                    "depends_on": ["apply-code-changes"],
+                    "runtime_doctrine": "discover_operate_verify",
+                    "runtime_stage": "verify",
+                    "runtime_role": "verify_result",
+                    "requires_observation": True,
+                },
+            ],
+        )
+    ]
+
+    def fake_run_tool_requests(
+        tool_requests,
+        _allowed_tools,
+        _broker,
+        messages_arg,
+        timeline_arg,
+        _artifacts,
+        **_kwargs,
+    ) -> None:
+        tool_batches.append([dict(request) for request in tool_requests])
+        for request in tool_requests:
+            tool_name = str(request.get("tool") or "")
+            input_preview = (
+                request.get("input") if isinstance(request.get("input"), dict) else {}
+            )
+            if tool_name == "workspace.write_patch":
+                result = {
+                    "ok": True,
+                    "path": input_preview.get("path"),
+                    "summary": "Patch applied",
+                }
+            elif tool_name == "terminal.run":
+                result = {
+                    "ok": False,
+                    "command": input_preview.get("command"),
+                    "stdout": "FAILED tests/test_app.py::test_total\n",
+                    "stderr": "",
+                    "exit_code": 1,
+                }
+            else:
+                raise AssertionError(f"unexpected tool: {tool_name}")
+            timeline_arg.append(
+                _timeline(
+                    "agent.tool.call",
+                    tool_name,
+                    input_preview=input_preview,
+                    result=result,
+                    **{
+                        key: request[key]
+                        for key in (
+                            "planning_reason",
+                            "decision_id",
+                            "plan_id",
+                            "intent_kind",
+                            "core_id",
+                            "workspace_id",
+                            "task_id",
+                            "step_id",
+                            "planner_step_id",
+                            "capability_id",
+                            "runtime_stage",
+                            "runtime_role",
+                        )
+                        if key in request
+                    },
+                )
+            )
+            messages_arg.append(
+                {"role": "user", "content": f"Tool result for {tool_name}: {result}"}
+            )
+
+    def fake_call_model(_base_url, _model, _api_key, model_messages, **_kwargs):
+        model_calls.append(list(model_messages))
+        if len(model_calls) == 1:
+            return {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_patch",
+                        "type": "function",
+                        "function": {
+                            "name": "workspace_write_patch",
+                            "arguments": "{}",
+                        },
+                    }
+                ],
+            }
+        return {"role": "assistant", "content": "replan ready"}
+
+    def fake_tool_requests_from_message(message, _content):
+        if not message.get("tool_calls"):
+            return []
+        return [
+            {
+                "protocol": "tool_calls",
+                "tool": "workspace.write_patch",
+                "input": {
+                    "path": "app.py",
+                    "patch": "--- app.py\n+++ app.py\n",
+                },
+                "source": "model_tool_call",
+            }
+        ]
+
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {
+            "base_url": "https://model.local",
+            "model": "m",
+            "api_key": "k",
+        },
+        compile_agent_runtime=lambda _agent: {
+            "tool_policy": {
+                "allowed_tools": [
+                    "workspace.write_patch",
+                    "terminal.run",
+                ]
+            }
+        },
+        run_budget=lambda _run_id, _timeline_value: budget,
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda allowed_tools: [{"name": tool} for tool in allowed_tools],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=4,
+        operating_doctrine="Use runtime planner for code diagnostics.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=fake_call_model,
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=fake_tool_requests_from_message,
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=fake_run_tool_requests,
+        error_type=agent_runtime.AgentRuntimeError,
+    )
+
+    result = loop.run(
+        {"name": "Coder"},
+        "ignored context",
+        broker={"broker": True},
+        timeline=timeline,
+        artifacts=[],
+        messages=messages,
+        start_iteration=1,
+        run_id="run-code-patch-auto-verify-replan",
+    )
+
+    assert str(result) == "replan ready"
+    assert len(model_calls) == 2
+    assert [[request["tool"] for request in batch] for batch in tool_batches] == [
+        ["workspace.write_patch"],
+        ["terminal.run"],
+    ]
+    replan_event = next(
+        event for event in timeline if event["event"] == "agent.replan.requested"
+    )
+    replan_payload = replan_event["payload"]
+    assert replan_payload["trigger"] == "verification_failed"
+    assert replan_payload["source_step_id"] == "verify-code-changes"
+    assert replan_payload["source_tool_name"] == "terminal.run"
+    assert replan_payload["target_capability_id"] == "terminal.execution"
+    assert "task_core_context" in replan_payload["metadata"]
+    followup_event = [
+        event for event in timeline if event["event"] == "agent.model.followup_context"
+    ][-1]
+    assert followup_event["planning_reason"] == "planner_replan_after_verification_failed"
+    assert followup_event["task_progress"]["completed_steps"] == ["apply-code-changes"]
+    assert followup_event["task_progress"]["blocked_steps"] == ["verify-code-changes"]
+
+
 def test_custom_api_agent_loop_runs_plain_test_command_without_model_followup() -> None:
     budget = FakeBudget()
     tool_runs: list[dict[str, Any]] = []
