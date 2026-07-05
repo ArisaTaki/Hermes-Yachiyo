@@ -67,17 +67,42 @@ export function RuntimeArtifactList({
           />
         );
         if (!onOpenArtifact) {
-          return <div data-artifact-source-run-id={item.source_run_id || ''} key={`${item.artifact_id}-${index}`}>{preview}</div>;
+          return (
+            <div
+              data-artifact-capability-id={item.capability_id || ''}
+              data-artifact-group-run-id={item.group_run_id || ''}
+              data-artifact-replan-request-id={item.replan_request_id || ''}
+              data-artifact-replan-trigger={item.replan_trigger || item.replan_triggers?.[0] || ''}
+              data-artifact-runtime-role={item.runtime_role || ''}
+              data-artifact-runtime-stage={item.runtime_stage || ''}
+              data-artifact-source-run-id={item.source_run_id || ''}
+              data-artifact-source-tool={item.source_tool || ''}
+              data-artifact-tool-plan-id={item.tool_plan_id || ''}
+              data-artifact-workflow-node-id={item.workflow_node_id || ''}
+              key={`${item.artifact_id}-${index}`}
+            >
+              {preview}
+            </div>
+          );
         }
         return (
           <button
             type="button"
+            data-artifact-capability-id={item.capability_id || ''}
+            data-artifact-group-run-id={item.group_run_id || ''}
             data-artifact-kind={item.kind}
             data-artifact-openable={openable ? 'true' : 'false'}
             data-artifact-path={item.path || ''}
+            data-artifact-replan-request-id={item.replan_request_id || ''}
+            data-artifact-replan-trigger={item.replan_trigger || item.replan_triggers?.[0] || ''}
             data-artifact-run-id={openRunId}
+            data-artifact-runtime-role={item.runtime_role || ''}
+            data-artifact-runtime-stage={item.runtime_stage || ''}
             data-artifact-source-label={item.source_label || ''}
             data-artifact-source-run-id={item.source_run_id || ''}
+            data-artifact-source-tool={item.source_tool || ''}
+            data-artifact-tool-plan-id={item.tool_plan_id || ''}
+            data-artifact-workflow-node-id={item.workflow_node_id || ''}
             data-testid={itemTestId}
             disabled={!openable}
             key={`${item.artifact_id}-${index}`}
