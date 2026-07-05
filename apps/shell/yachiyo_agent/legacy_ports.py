@@ -125,27 +125,6 @@ def _prefer_legacy_planned_timeline_for_metadata(metadata: dict[str, Any] | None
     return bool(metadata.get("daily_desktop_intent"))
 
 
-def _runtime_planner_compatible_legacy_plan_requests(
-    requests: list[dict[str, Any]],
-    metadata: dict[str, Any] | None,
-) -> list[dict[str, Any]]:
-    if not isinstance(metadata, dict) or not bool(metadata.get("yachiyo_runtime_planner")):
-        return requests
-    compatible: list[dict[str, Any]] = []
-    for request in requests:
-        if str(request.get("tool") or "").strip() == "media.apple_music_play":
-            compatible.append(
-                {
-                    **request,
-                    "source": "runtime_planner",
-                    "planning_reason": "planner_fallback_media_playback",
-                }
-            )
-            continue
-        compatible.append(request)
-    return compatible
-
-
 def _legacy_direct_execution_override_requests(
     prompt: str,
     metadata: dict[str, Any] | None,
@@ -172,13 +151,8 @@ def _legacy_direct_execution_override_requests(
     if not _prefer_legacy_planned_timeline_for_metadata(metadata):
         return []
     legacy_tools = _tool_names_for_requests(legacy_requests)
-    if "media.apple_music_play" in legacy_tools:
-        if _planner_media_requests_cover_legacy_apple_music(
-            legacy_requests,
-            planner_requests,
-        ):
-            return []
-        return legacy_requests
+    if legacy_tools and _planner_requests_cover_legacy_plan(legacy_requests, planner_requests):
+        return []
     if _has_approval_plan_tool(legacy_requests) and _planner_requests_need_model_followup(
         planner_requests
     ):
@@ -356,28 +330,46 @@ def _tool_names_for_requests(requests: list[dict[str, Any]]) -> list[str]:
     ]
 
 
-def _planner_media_requests_cover_legacy_apple_music(
+def _planner_requests_cover_legacy_plan(
     legacy_requests: list[dict[str, Any]],
     planner_requests: list[dict[str, Any]],
 ) -> bool:
-    legacy_tools = set(_tool_names_for_requests(legacy_requests))
-    if "media.apple_music_play" not in legacy_tools:
+    legacy_tools = _primary_tool_names_for_requests(legacy_requests)
+    planner_tools = _primary_tool_names_for_requests(planner_requests)
+    if not legacy_tools or not planner_tools:
         return False
-    planner_tools = set(_tool_names_for_requests(planner_requests))
-    if "media.music_app_open_and_play" not in planner_tools:
+    if _planner_requests_need_model_followup(planner_requests):
         return False
-    return bool(
-        planner_tools
-        & {
-            "desktop.list_apps",
-            "app.open_and_safe_shortcut",
-            "app.focus_and_safe_shortcut",
-            "desktop.safe_type_text",
-            "app.open_and_safe_type_text",
-            "app.focus_and_safe_type_text",
-            "desktop.search_submit",
-        }
-    )
+    legacy_families = {_tool_family(tool) for tool in legacy_tools}
+    planner_families = {_tool_family(tool) for tool in planner_tools}
+    return bool(legacy_families) and legacy_families <= planner_families
+
+
+def _primary_tool_names_for_requests(requests: list[dict[str, Any]]) -> list[str]:
+    non_primary = _DAILY_DESKTOP_METADATA_DISCOVERY_TOOLS | _DAILY_DESKTOP_METADATA_VERIFY_TOOLS
+    return [
+        tool
+        for tool in _tool_names_for_requests(requests)
+        if tool not in non_primary
+    ]
+
+
+def _tool_family(tool_name: str) -> str:
+    if tool_name.startswith("media."):
+        return "media"
+    if tool_name.startswith("browser."):
+        return "browser"
+    if tool_name.startswith("clipboard."):
+        return "clipboard"
+    if tool_name.startswith("system."):
+        return "system"
+    if tool_name.startswith(("app.", "desktop.")):
+        return "desktop"
+    if tool_name.startswith("file."):
+        return "file"
+    if tool_name.startswith("artifact."):
+        return "artifact"
+    return tool_name.split(".", 1)[0]
 
 
 def _visible_daily_desktop_metadata_requests(
@@ -672,10 +664,6 @@ class LegacyChatTaskStarter:
                 metadata=metadata,
                 allowed_tools=allowed_daily_desktop_tools,
             )
-            legacy_timeline_requests = _runtime_planner_compatible_legacy_plan_requests(
-                legacy_timeline_requests,
-                metadata,
-            )
         planned_requests = planner_first_daily_desktop_entrypoint_requests(
             prompt,
             metadata=metadata,
@@ -684,7 +672,7 @@ class LegacyChatTaskStarter:
             execution_normalized=True,
             include_runtime_context=True,
         )
-        if legacy_timeline_requests and not _planner_media_requests_cover_legacy_apple_music(
+        if legacy_timeline_requests and not _planner_requests_cover_legacy_plan(
             legacy_timeline_requests,
             planned_requests,
         ):

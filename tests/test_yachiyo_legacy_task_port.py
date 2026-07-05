@@ -2279,6 +2279,33 @@ def test_legacy_chat_task_starter_planned_timeline_keeps_runtime_planner_sequenc
     assert timeline[2]["input_preview"] == {}
 
 
+def test_legacy_chat_task_starter_uses_generic_planner_coverage_for_legacy_timeline() -> None:
+    starter = LegacyChatTaskStarter(_FakeAppRuntime(), _MainChatPlannerEventRuntime())
+    metadata = {"daily_desktop_intent": True, "yachiyo_runtime_planner": True}
+
+    app_timeline = starter._planner_first_planned_timeline("打开 PixelForge", metadata=metadata)
+    media_timeline = starter._planner_first_planned_timeline(
+        "打开 Spotify 搜索 Taylor Swift 并播放",
+        metadata=metadata,
+    )
+
+    assert [event["tool"] for event in app_timeline] == [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.active_window",
+    ]
+    assert {event["source"] for event in app_timeline} == {"runtime_planner"}
+    assert [event["tool"] for event in media_timeline] == [
+        "desktop.list_apps",
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "media.music_app_open_and_play",
+        "desktop.ui_elements",
+    ]
+    assert {event["source"] for event in media_timeline} == {"runtime_planner"}
+
+
 def test_legacy_chat_task_starter_records_known_site_selection_on_runtime_planner() -> None:
     app_runtime = _FakeAppRuntime()
     runtime = _MainChatPlannerEventRuntime()
