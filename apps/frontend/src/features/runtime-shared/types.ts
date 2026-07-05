@@ -596,6 +596,7 @@ export type RuntimeExecutionRequestSnapshot = {
   task_todo?: TaskTodoItemSnapshot | null;
   task_checkpoints?: TaskCheckpointSnapshot[];
   task_workspace_items?: TaskWorkspaceItemSnapshot[];
+  verification_targets?: Array<Record<string, unknown>>;
   task_verification_targets?: Array<Record<string, unknown>>;
   verification_status?: string | null;
   verification_step_id?: string | null;

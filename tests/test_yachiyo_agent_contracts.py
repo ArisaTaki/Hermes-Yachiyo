@@ -6479,6 +6479,12 @@ def test_run_timeline_snapshot_projects_runtime_envelope_retry_recovery() -> Non
                             "input": {"app_name": "Music"},
                             "reason": "foreground_focus_unavailable",
                         },
+                        "verification_targets": [
+                            {
+                                "step_id": "discover-app",
+                                "tool_name": "desktop.list_apps",
+                            }
+                        ],
                         "task_verification_targets": [
                             {
                                 "step_id": "open-app",
@@ -6505,12 +6511,26 @@ def test_run_timeline_snapshot_projects_runtime_envelope_retry_recovery() -> Non
     assert recovery.observation_evidence["blocking_condition"] == (
         "foreground_focus_unavailable"
     )
+    assert recovery.verification_targets == [
+        {
+            "step_id": "discover-app",
+            "tool_name": "desktop.list_apps",
+        },
+        {
+            "step_id": "open-app",
+            "todo_id": "todo-open-app",
+        },
+    ]
     assert recovery.recovery_actions[0].action_id == (
         "runtime-retry:runtime-request-open-app:action:1:desktop.open_app"
     )
     assert recovery.recovery_actions[0].input == {"app_name": "Music"}
     assert recovery.recovery_actions[0].selected is True
     assert recovery.recovery_actions[0].verification_targets == [
+        {
+            "step_id": "discover-app",
+            "tool_name": "desktop.list_apps",
+        },
         {
             "step_id": "open-app",
             "todo_id": "todo-open-app",
@@ -6524,7 +6544,8 @@ def test_run_timeline_snapshot_projects_runtime_envelope_retry_recovery() -> Non
         "replan-open-app-verify"
     ]
     assert recovery.recovery_actions[0].metadata["verification_target_step_ids"] == [
-        "open-app"
+        "discover-app",
+        "open-app",
     ]
 
 

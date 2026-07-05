@@ -414,7 +414,9 @@ export function runtimeToolRecoveryActionsFromRecord(
       required_retry_fields: recoveryStringList(action.required_retry_fields),
       risk_level: String(action.risk_level || '').trim() || undefined,
       selected: Boolean(action.selected),
-      verification_targets: recoveryRecordList(action.verification_targets),
+      verification_targets: recoveryRecordList(
+        action.verification_targets || source.verification_targets || source.task_verification_targets,
+      ),
       ...actionRetryContext,
       tool,
     }];

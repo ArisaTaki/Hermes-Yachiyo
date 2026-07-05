@@ -985,6 +985,20 @@ function replanRecoveryVerificationTargetsPreview(targets: Array<Record<string, 
   return truncatePlannerPreview(`${parts.join(' | ')}${suffix}`);
 }
 
+function mergedVerificationTargetRecords(...values: unknown[]): Array<Record<string, unknown>> {
+  const targets: Array<Record<string, unknown>> = [];
+  const seen = new Set<string>();
+  values.forEach((value) => {
+    arrayRecords(value).forEach((target) => {
+      const key = JSON.stringify(target);
+      if (seen.has(key)) return;
+      seen.add(key);
+      targets.push(target);
+    });
+  });
+  return targets;
+}
+
 function replanRecoveryDeferredContinuationPreview(items: Array<Record<string, unknown>>): string {
   const parts = items.slice(0, 3).map((item) => (
     stringValue(item.tool_name)
@@ -1047,6 +1061,28 @@ function ReplanRequestInspector({
           const stepStatus = stringValue(metadata.step_status);
           const stepTitle = stringValue(metadata.step_title);
           const inputPreview = plannerValuePreview(metadata.input_preview);
+          const actionTarget = {
+            ...objectRecord(metadata.action_target),
+            ...objectRecord(request.action_target),
+          };
+          const observationEvidence = {
+            ...objectRecord(metadata.observation_evidence),
+            ...objectRecord(request.observation_evidence),
+          };
+          const observationRetry = {
+            ...objectRecord(metadata.observation_retry),
+            ...objectRecord(request.observation_retry),
+          };
+          const verificationTargets = mergedVerificationTargetRecords(
+            metadata.verification_targets,
+            metadata.task_verification_targets,
+            request.verification_targets,
+            request.task_verification_targets,
+          );
+          const actionTargetPreview = replanRecoveryActionTargetPreview(actionTarget);
+          const observationEvidencePreview = replanRecoveryObservationEvidencePreview(observationEvidence);
+          const observationRetryPreview = replanRecoveryObservationRetryPreview(observationRetry);
+          const verificationTargetsPreview = replanRecoveryVerificationTargetsPreview(verificationTargets);
           const recoveryActions = replanRequestRecoveryActions(request, metadata);
           const missingPermissions = uniqueStrings(
             Array.isArray(metadata.missing_permissions) ? metadata.missing_permissions : [],
@@ -1058,7 +1094,10 @@ function ReplanRequestInspector({
             <Fragment key={request.request_id}>
               <span
                 className="studio-tool-permission"
+                data-replan-action-target={actionTargetPreview}
                 data-replan-metadata-capability={metadataCapabilityId}
+                data-replan-observation-evidence={observationEvidencePreview}
+                data-replan-observation-retry={observationRetryPreview}
                 data-replan-planned-tool={plannedToolName}
                 data-replan-request-id={request.request_id}
                 data-replan-source-step={request.source_step_id || ''}
@@ -1066,6 +1105,8 @@ function ReplanRequestInspector({
                 data-replan-step-status={stepStatus}
                 data-replan-target-capability={targetCapabilityId}
                 data-replan-trigger={request.trigger}
+                data-replan-verification-target-count={verificationTargets.length}
+                data-replan-verification-targets={verificationTargetsPreview}
                 key={request.request_id}
                 title={request.failure_detail || request.reason || request.condition}
               >
@@ -1117,6 +1158,46 @@ function ReplanRequestInspector({
                   title={inputPreview}
                 >
                   input · {inputPreview}
+                </span>
+              ) : null}
+              {actionTargetPreview ? (
+                <span
+                  className="studio-tool-permission"
+                  data-replan-action-target={actionTargetPreview}
+                  key={`${request.request_id}:action-target`}
+                  title={actionTargetPreview}
+                >
+                  target · {actionTargetPreview}
+                </span>
+              ) : null}
+              {observationEvidencePreview ? (
+                <span
+                  className="studio-tool-permission"
+                  data-replan-observation-evidence={observationEvidencePreview}
+                  key={`${request.request_id}:observation-evidence`}
+                  title={observationEvidencePreview}
+                >
+                  observed · {observationEvidencePreview}
+                </span>
+              ) : null}
+              {observationRetryPreview ? (
+                <span
+                  className="studio-tool-permission"
+                  data-replan-observation-retry={observationRetryPreview}
+                  key={`${request.request_id}:observation-retry`}
+                  title={observationRetryPreview}
+                >
+                  retry observe · {observationRetryPreview}
+                </span>
+              ) : null}
+              {verificationTargetsPreview ? (
+                <span
+                  className="studio-tool-permission"
+                  data-replan-verification-targets={verificationTargetsPreview}
+                  key={`${request.request_id}:verification-targets`}
+                  title={verificationTargetsPreview}
+                >
+                  verifies · {verificationTargetsPreview}
                 </span>
               ) : null}
               {recoveryActions.slice(0, 5).map((action, index) => (
@@ -1268,7 +1349,10 @@ function ExecutionRequestRow({
   const taskTodo = request.task_todo || null;
   const taskCheckpoints = request.task_checkpoints || [];
   const taskWorkspaceItems = request.task_workspace_items || [];
-  const taskVerificationTargets = request.task_verification_targets || [];
+  const taskVerificationTargets = mergedVerificationTargetRecords(
+    request.verification_targets,
+    request.task_verification_targets,
+  );
   const taskTodoLabel = taskTodo
     ? taskTodo.title || taskTodo.step_id || taskTodo.todo_id || ''
     : '';
@@ -1772,6 +1856,7 @@ function runtimeExecutionRequestSnapshot(value: unknown): RuntimeExecutionReques
     task_todo: taskTodo,
     task_checkpoints: taskCheckpoints,
     task_workspace_items: taskWorkspaceItems,
+    verification_targets: arrayRecords(record.verification_targets),
     task_verification_targets: arrayRecords(record.task_verification_targets),
     source: stringValue(record.source) || 'runtime_planner',
   };

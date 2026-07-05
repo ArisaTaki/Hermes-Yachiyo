@@ -1825,6 +1825,7 @@ def _runtime_execution_verification_targets(
     retry: Mapping[str, Any],
 ) -> list[dict[str, Any]]:
     targets: list[dict[str, Any]] = []
+    _extend_unique_mappings(targets, _runtime_request_value(request, "verification_targets"))
     _extend_unique_mappings(targets, _runtime_request_value(request, "task_verification_targets"))
     _extend_unique_mappings(targets, retry.get("verification_targets"))
     _extend_unique_mappings(targets, retry.get("task_verification_targets"))

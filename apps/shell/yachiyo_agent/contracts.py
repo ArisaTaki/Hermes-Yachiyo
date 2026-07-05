@@ -684,6 +684,7 @@ class RuntimeExecutionRequestSnapshot(_PublicSnapshot):
     task_todo: dict[str, Any] = Field(default_factory=dict)
     task_checkpoints: list[dict[str, Any]] = Field(default_factory=list)
     task_workspace_items: list[dict[str, Any]] = Field(default_factory=list)
+    verification_targets: list[dict[str, Any]] = Field(default_factory=list)
     task_verification_targets: list[dict[str, Any]] = Field(default_factory=list)
     verification_status: str | None = None
     verification_step_id: str | None = None
