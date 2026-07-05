@@ -127,7 +127,13 @@ def _planner_owned_legacy_compatible_entrypoint_requests(
     except Exception:
         logger.debug("Runtime planner legacy-compatible entrypoint unavailable", exc_info=True)
         return []
-    return _legacy_compatible_media_entrypoint_requests(planner_requests, text=text)
+    media_requests = _legacy_compatible_media_entrypoint_requests(
+        planner_requests,
+        text=text,
+    )
+    if media_requests:
+        return media_requests
+    return _legacy_compatible_simple_entrypoint_requests(planner_requests, text=text)
 
 
 def _legacy_compatible_media_entrypoint_requests(
@@ -160,6 +166,97 @@ def _legacy_compatible_media_entrypoint_requests(
     if _legacy_compatible_named_music_search_sequence(visible, tools, text=text):
         return [_legacy_shape_request(request) for request in visible]
     return []
+
+
+def _legacy_compatible_simple_entrypoint_requests(
+    requests: Sequence[Mapping[str, Any]] | None,
+    *,
+    text: str,
+) -> list[dict[str, Any]]:
+    if not requests:
+        return []
+    items = [dict(request) for request in requests if isinstance(request, Mapping)]
+    if not items:
+        return []
+    if not any(
+        str(request.get("planning_reason") or "").strip()
+        in {"planner_desktop_operation", "planner_fallback_file_access"}
+        for request in items
+    ):
+        return []
+    visible = _visible_entrypoint_plan_requests(items)
+    if len(visible) != 1:
+        return []
+    request = visible[0]
+    tool_name = str(request.get("tool") or "").strip()
+    if tool_name not in _LEGACY_COMPATIBLE_SIMPLE_PLANNER_TOOLS:
+        return []
+    if _request_has_selected_app_placeholder(request):
+        return []
+    if not _legacy_compatible_simple_request(text, request):
+        return []
+    return [_legacy_shape_request(request)]
+
+
+_LEGACY_COMPATIBLE_SIMPLE_PLANNER_TOOLS = frozenset(
+    {
+        "app.focus",
+        "app.open",
+        "app.status",
+        "desktop.open_path",
+        "desktop.reveal_path",
+        "desktop.running_apps",
+    }
+)
+
+
+def _legacy_compatible_simple_request(text: str, request: Mapping[str, Any]) -> bool:
+    tool_name = str(request.get("tool") or "").strip()
+    if tool_name in {"desktop.open_path", "desktop.reveal_path", "desktop.running_apps"}:
+        return True
+    if tool_name == "app.status":
+        payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+        return bool(str(payload.get("app_name") or "").strip())
+    if tool_name not in {"app.open", "app.focus"}:
+        return False
+    payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+    app_name = str(payload.get("app_name") or "").strip()
+    if not app_name:
+        return False
+    if _generic_non_app_name(app_name):
+        return False
+    return not _app_prompt_has_non_launch_followup(text)
+
+
+def _generic_non_app_name(app_name: str) -> bool:
+    compact = re.sub(r"\s+", "", str(app_name or "").strip().lower())
+    return compact in {
+        "project",
+        "repo",
+        "repository",
+        "workspace",
+        "项目",
+        "仓库",
+        "工作区",
+    }
+
+
+def _app_prompt_has_non_launch_followup(text: str) -> bool:
+    value = str(text or "")
+    lowered = value.lower()
+    return bool(
+        re.search(
+            r"(?:浏览器|新建|无痕|隐身|开发者|历史|地址栏|搜索|取消|全屏|设置|"
+            r"并|然后|之后|再|里|中|上|按|点击|点|输入|滚动|刷新|标签页|页面)",
+            value,
+        )
+        or re.search(
+            r"\b(?:browser|new|incognito|private|devtools|developer|history|address|"
+            r"search|find|cancel|escape|fullscreen|full\s+screen|settings?|and|then|after|"
+            r"in|inside|press|click|type|scroll|refresh|tab|page)\b",
+            lowered,
+        )
+    )
 
 
 def _legacy_compatible_simple_media_request(tools: Sequence[str]) -> bool:

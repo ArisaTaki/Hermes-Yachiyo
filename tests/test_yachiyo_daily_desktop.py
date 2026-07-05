@@ -2111,6 +2111,76 @@ def test_daily_desktop_entrypoint_requests_use_planner_for_compatible_media(monk
     ]
 
 
+def test_daily_desktop_entrypoint_requests_use_planner_for_simple_app_and_file(monkeypatch) -> None:
+    def fail_legacy(*_args, **_kwargs):
+        raise AssertionError("legacy desktop parser should not own compatible app/file entrypoints")
+
+    monkeypatch.setattr(
+        "apps.shell.yachiyo_agent.daily_desktop.daily_desktop_entrypoint_tool_requests",
+        fail_legacy,
+    )
+
+    cases = (
+        (
+            "可以帮我打开 Word 吗",
+            [
+                {
+                    "protocol": "json_fallback",
+                    "tool": "app.open",
+                    "input": {"app_name": "Microsoft Word"},
+                },
+            ],
+        ),
+        (
+            "切到 Slack",
+            [
+                {
+                    "protocol": "json_fallback",
+                    "tool": "app.focus",
+                    "input": {"app_name": "Slack"},
+                },
+            ],
+        ),
+        (
+            "Chrome 开着吗",
+            [
+                {
+                    "protocol": "json_fallback",
+                    "tool": "app.status",
+                    "input": {"app_name": "Google Chrome"},
+                },
+            ],
+        ),
+        (
+            "当前有哪些 App 在运行",
+            [{"protocol": "json_fallback", "tool": "desktop.running_apps", "input": {}}],
+        ),
+        (
+            "打开下载目录里的最新文件",
+            [
+                {
+                    "protocol": "json_fallback",
+                    "tool": "desktop.open_path",
+                    "input": {"path": "latest_download"},
+                },
+            ],
+        ),
+        (
+            "显示当前选中文件",
+            [
+                {
+                    "protocol": "json_fallback",
+                    "tool": "desktop.reveal_path",
+                    "input": {"path": "finder_selection"},
+                },
+            ],
+        ),
+    )
+
+    for prompt, expected in cases:
+        assert daily_desktop_entrypoint_requests(prompt) == expected
+
+
 def test_planner_first_daily_desktop_entrypoint_verifies_simple_media_playback() -> None:
     requests = planner_first_daily_desktop_entrypoint_requests(
         "能帮我播放 Apple Music 吗",
