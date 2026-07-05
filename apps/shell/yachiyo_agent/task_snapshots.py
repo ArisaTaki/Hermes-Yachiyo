@@ -33,6 +33,7 @@ from .recovery_actions import RECOVERY_RETRY_CONTEXT_EVENT_TYPE
 from .replan_event_projection import run_events_with_replan_requests
 from .replan_recovery_snapshots import replan_recovery_snapshots_from_events
 from .runtime_debug_snapshots import runtime_debug_summary_from_runtime_objects
+from .runtime_execution_status import runtime_execution_envelope_with_status_overlay
 from .timeline_metadata_snapshots import planner_trace_summary_from_payload
 from .tool_call_snapshots import tool_call_snapshots_from_payloads
 from .task_core_snapshots import task_core_snapshot_from_payload
@@ -208,6 +209,12 @@ def agent_task_snapshot_from_payload(
         task_core,
         events=all_events,
         needs_user_action=needs_user_action,
+    )
+    runtime_execution_envelope = runtime_execution_envelope_with_status_overlay(
+        runtime_execution_envelope,
+        tool_calls=tool_calls,
+        approvals=approvals,
+        task_progress=task_progress,
     )
     replan_recoveries = replan_recovery_snapshots_from_events(
         all_events,

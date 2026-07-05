@@ -12,7 +12,10 @@ _TERMINAL_RUNTIME_REQUEST_STATUSES = {
     "cancelled",
     "canceled",
     "completed",
+    "denied",
+    "expired",
     "failed",
+    "rejected",
     "skipped",
 }
 

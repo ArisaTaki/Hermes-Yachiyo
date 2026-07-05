@@ -37,6 +37,7 @@ from .replan_recovery_snapshots import (
     replan_recovery_snapshots_from_runtime_execution_envelope,
 )
 from .runtime_debug_snapshots import runtime_debug_summary_from_runtime_objects
+from .runtime_execution_status import runtime_execution_envelope_with_status_overlay
 from .timeline_metadata_snapshots import (
     merge_timeline_child_snapshots,
     planner_trace_summary_from_payload,
@@ -89,9 +90,21 @@ def run_timeline_snapshot_from_payload(
     )
     planner_summary = planner_trace_summary_from_payload(payload)
     workflow_run_id = workflow_run_id_from_payload(payload, run_id)
+    tool_calls = tool_call_snapshots_from_payloads(
+        payload.get("tool_calls"),
+        run_id=run_id,
+        events=events,
+    )
     runtime_execution_envelope = runtime_execution_envelope_from_payload(
         payload,
         events=events,
+    )
+    runtime_execution_envelope = runtime_execution_envelope_with_status_overlay(
+        runtime_execution_envelope,
+        tool_calls=tool_calls,
+        approvals=approvals,
+        pending_approval=pending_approval,
+        task_progress=task_progress,
     )
     replan_recoveries = merge_replan_recovery_snapshot_lists(
         replan_recovery_snapshots_from_events(
@@ -111,11 +124,6 @@ def run_timeline_snapshot_from_payload(
             created_at=_text(payload.get("created_at")),
             updated_at=_text(payload.get("updated_at")),
         ),
-    )
-    tool_calls = tool_call_snapshots_from_payloads(
-        payload.get("tool_calls"),
-        run_id=run_id,
-        events=events,
     )
     memory_traces = memory_trace_snapshots_from_events(events)
     skill_traces = skill_trace_snapshots_from_events(events)

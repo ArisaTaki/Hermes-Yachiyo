@@ -27,6 +27,7 @@ from .replan_recovery_snapshots import (
 )
 from .run_snapshots import RunSnapshotProjector
 from .runtime_debug_snapshots import runtime_debug_summary_from_runtime_objects
+from .runtime_execution_status import runtime_execution_envelope_with_status_overlay
 from .runtime_execution import runtime_execution_envelope_payload_with_request_context
 from .task_snapshots import runtime_execution_envelope_from_payload
 from .task_core_snapshots import task_core_snapshot_from_payload
@@ -109,6 +110,12 @@ def group_run_snapshot_from_payload(
     runtime_execution_envelope = runtime_execution_envelope_from_payload(
         payload,
         events=events,
+    )
+    runtime_execution_envelope = runtime_execution_envelope_with_status_overlay(
+        runtime_execution_envelope,
+        tool_calls=tool_calls,
+        approvals=pending_approvals,
+        task_progress=task_progress,
     )
     replan_recoveries = _group_run_replan_recoveries(
         runs,

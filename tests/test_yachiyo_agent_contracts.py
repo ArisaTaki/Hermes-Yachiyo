@@ -3432,6 +3432,67 @@ def test_agent_task_snapshot_projects_runtime_execution_envelope_from_metadata()
     assert envelope.approvals_required == ["open-or-focus-app"]
 
 
+def test_agent_task_snapshot_overlays_runtime_request_status_from_run_facts() -> None:
+    snapshot = agent_task_snapshot_from_payload(
+        {
+            "run_id": "run-1",
+            "task_id": "task-1",
+            "status": "waiting_approval",
+            "metadata": {
+                "yachiyo_execution_envelope": {
+                    "envelope_id": "execution-envelope-runtime-plan-1",
+                    "decision_id": "decision-1",
+                    "plan_id": "runtime-plan-1",
+                    "intent_kind": "data_analysis",
+                    "requests": [
+                        {
+                            "request_id": "request-read",
+                            "step_id": "inspect-data-source",
+                            "tool_name": "workspace.read",
+                            "runtime_stage": "discover",
+                        },
+                        {
+                            "request_id": "request-write",
+                            "step_id": "write-analysis-artifact",
+                            "tool_name": "artifact.write",
+                            "runtime_stage": "produce",
+                        },
+                    ],
+                    "runtime_stage_counts": {"discover": 1, "produce": 1},
+                }
+            },
+            "tool_calls": [
+                {
+                    "tool_call_id": "tool-call-read",
+                    "tool_name": "workspace.read",
+                    "step_id": "inspect-data-source",
+                    "status": "completed",
+                }
+            ],
+            "pending_approvals": [
+                {
+                    "approval_id": "approval-write",
+                    "tool_name": "artifact.write",
+                    "step_id": "write-analysis-artifact",
+                    "status": "pending",
+                    "title": "Write analysis artifact",
+                }
+            ],
+        }
+    )
+
+    envelope = snapshot.runtime_execution_envelope
+    assert envelope is not None
+    assert [request.status for request in envelope.requests] == [
+        "completed",
+        "waiting_approval",
+    ]
+    assert snapshot.runtime_debug is not None
+    assert snapshot.runtime_debug.completed_runtime_request_count == 1
+    assert snapshot.runtime_debug.waiting_runtime_request_count == 1
+    assert snapshot.runtime_debug.pending_runtime_request_count == 0
+
+
 def test_agent_task_snapshot_projects_runtime_execution_envelope_from_events() -> None:
     snapshot = agent_task_snapshot_from_payload(
         {
@@ -5739,6 +5800,63 @@ def test_run_timeline_snapshot_json_shape_covers_runtime_debug_objects() -> None
     assert payload["children"][0]["group_run_id"] == "group-run-1"
     assert payload["children"][0]["workflow_node_id"] == "review"
     assert payload["children"][0]["planner_summary"] is None
+
+
+def test_run_timeline_snapshot_overlays_runtime_request_status_for_studio() -> None:
+    snapshot = run_timeline_snapshot_from_payload(
+        {
+            "run_id": "run-1",
+            "task_id": "task-1",
+            "status": "waiting_approval",
+            "runtime_execution_envelope": {
+                "envelope_id": "execution-envelope-runtime-plan-1",
+                "decision_id": "decision-1",
+                "plan_id": "runtime-plan-1",
+                "intent_kind": "desktop_operation",
+                "requests": [
+                    {
+                        "request_id": "request-discover",
+                        "step_id": "discover-desktop-state",
+                        "tool_name": "desktop.list_apps",
+                        "runtime_stage": "discover",
+                    },
+                    {
+                        "request_id": "request-open",
+                        "step_id": "open-or-focus-app",
+                        "tool_name": "app.open",
+                        "runtime_stage": "operate",
+                    },
+                ],
+                "runtime_stage_counts": {"discover": 1, "operate": 1},
+            },
+            "tool_calls": [
+                {
+                    "tool_call_id": "tool-call-discover",
+                    "tool_name": "desktop.list_apps",
+                    "step_id": "discover-desktop-state",
+                    "status": "completed",
+                }
+            ],
+            "pending_approval": {
+                "approval_id": "approval-open",
+                "tool_name": "app.open",
+                "step_id": "open-or-focus-app",
+                "status": "pending",
+                "title": "Open app",
+            },
+        }
+    )
+
+    envelope = snapshot.runtime_execution_envelope
+    assert envelope is not None
+    assert [request.status for request in envelope.requests] == [
+        "completed",
+        "waiting_approval",
+    ]
+    assert snapshot.runtime_debug is not None
+    assert snapshot.runtime_debug.completed_runtime_request_count == 1
+    assert snapshot.runtime_debug.waiting_runtime_request_count == 1
+    assert snapshot.runtime_debug.current_request_tool_name == "app.open"
 
 
 def test_run_timeline_snapshot_projects_recovery_source_metadata() -> None:
