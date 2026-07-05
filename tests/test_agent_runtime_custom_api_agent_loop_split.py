@@ -28937,6 +28937,8 @@ def test_runtime_tool_executor_preserves_dov_replan_trace_fields() -> None:
             "runtime_doctrine": "discover_operate_verify",
             "runtime_stage": "verify",
             "runtime_role": "verify_result",
+            "risk_level": "medium",
+            "policy_reason": "Verification touches foreground UI.",
             "requires_observation": True,
             "requires_post_action_verification": False,
             "replan_triggers": ["verification_failed"],
@@ -28968,6 +28970,8 @@ def test_runtime_tool_executor_preserves_dov_replan_trace_fields() -> None:
     tool_call = next(event for event in timeline if event["event"] == "agent.tool.call")
     assert tool_call["runtime_stage"] == "verify"
     assert tool_call["runtime_role"] == "verify_result"
+    assert tool_call["risk_level"] == "medium"
+    assert tool_call["policy_reason"] == "Verification touches foreground UI."
     assert tool_call["requires_observation"] is True
     assert tool_call["requires_post_action_verification"] is False
     assert tool_call["replan_triggers"] == ["verification_failed"]
@@ -28984,6 +28988,8 @@ def test_runtime_tool_executor_preserves_dov_replan_trace_fields() -> None:
         event for event in run_events if event["event_type"] == "tool.completed"
     )
     assert completed["payload"]["runtime_stage"] == "verify"
+    assert completed["payload"]["risk_level"] == "medium"
+    assert completed["payload"]["policy_reason"] == "Verification touches foreground UI."
     assert completed["payload"]["replan_triggers"] == ["verification_failed"]
     assert completed["payload"]["action_target"]["app_name"] == "Music"
     assert completed["payload"]["observation_evidence"]["strategy"] == "observed_center_fallback"

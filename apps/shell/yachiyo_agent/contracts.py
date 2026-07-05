@@ -582,6 +582,8 @@ class RuntimeExecutionRequestSnapshot(_PublicSnapshot):
     input: dict[str, Any] = Field(default_factory=dict)
     planning_reason: str = ""
     approval_required: bool = False
+    risk_level: str = "low"
+    policy_reason: str = ""
     continue_to_model: bool = False
     deferred_tool: str | None = None
     deferred_input: dict[str, Any] = Field(default_factory=dict)

@@ -498,6 +498,8 @@ export type RuntimeExecutionRequestSnapshot = {
   input?: Record<string, unknown>;
   planning_reason?: string;
   approval_required?: boolean;
+  risk_level?: string;
+  policy_reason?: string;
   continue_to_model?: boolean;
   depends_on?: string[];
   fallback_tools?: string[];

@@ -1278,12 +1278,14 @@ function ExecutionRequestRow({
       data-observation-retry={observationRetryPreview}
       data-plan-id={request.plan_id || ''}
       data-planner-step-id={request.step_id || ''}
+      data-policy-reason={request.policy_reason || ''}
       data-planning-reason={request.planning_reason || ''}
       data-planning-reason-label={planningReasonLabel}
       data-request-action-target={actionTargetPreview}
       data-request-followup-target={followupTargetPreview}
       data-request-observation-evidence={observationEvidencePreview}
       data-replan-triggers={replanTriggers.join(',')}
+      data-risk-level={request.risk_level || ''}
       data-run-group-id={request.run_group_id || request.group_run_id || ''}
       data-runtime-role={request.runtime_role || ''}
       data-runtime-stage={request.runtime_stage || ''}
@@ -1338,6 +1340,9 @@ function ExecutionRequestRow({
         {request.runtime_stage || request.runtime_role ? (
           <span>runtime: {[request.runtime_stage, request.runtime_role].filter(Boolean).join(' / ')}</span>
         ) : null}
+        {request.risk_level ? (
+          <span title={request.policy_reason || undefined}>risk: {request.risk_level}</span>
+        ) : null}
         {inputPreview ? <span>input: {inputPreview}</span> : null}
         {dependsOn.length ? <span>depends on: {dependsOn.join(', ')}</span> : null}
         {fallbackTools.length ? <span>fallbacks: {fallbackTools.join(', ')}</span> : null}
@@ -1356,7 +1361,7 @@ function ExecutionRequestRow({
           observationRetry={objectRecord(request.observation_retry)}
           permissionTarget={request.approval_required ? 'approval_required' : ''}
           planningReason={planningReasonLabel || request.planning_reason || ''}
-          riskLevel=""
+          riskLevel={request.risk_level || ''}
           status={request.status || 'planned'}
           testId="agent-run-detail-planner-execution-request-evidence"
           tool={request.tool_name || ''}
@@ -1704,6 +1709,8 @@ function runtimeExecutionRequestSnapshot(value: unknown): RuntimeExecutionReques
     input: objectRecord(record.input),
     planning_reason: stringValue(record.planning_reason),
     approval_required: booleanValue(record.approval_required, false) || false,
+    risk_level: stringValue(record.risk_level) || 'low',
+    policy_reason: stringValue(record.policy_reason),
     continue_to_model: booleanValue(record.continue_to_model, false) || false,
     depends_on: uniqueStrings(Array.isArray(record.depends_on) ? record.depends_on : []),
     fallback_tools: uniqueStrings(Array.isArray(record.fallback_tools) ? record.fallback_tools : []),

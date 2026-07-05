@@ -492,6 +492,14 @@ def _execution_request_snapshot(
             request.get("approval_required")
             or (step.approval_required if step is not None else False)
         ),
+        risk_level=str(
+            request.get("risk_level")
+            or (step.risk_level if step is not None else "")
+            or "low"
+        ),
+        policy_reason=str(
+            request.get("policy_reason") or request.get("approval_reason") or ""
+        ),
         continue_to_model=bool(request.get("continue_to_model")),
         deferred_tool=_optional_text(request.get("deferred_tool")),
         deferred_input=_mapping(request.get("deferred_input")),
@@ -586,6 +594,8 @@ def _tool_request_from_execution_request(
         "workflow_node_label",
         "workflow_node_kind",
         "approval_required",
+        "risk_level",
+        "policy_reason",
         "continue_to_model",
         "deferred_tool",
         "deferred_input",

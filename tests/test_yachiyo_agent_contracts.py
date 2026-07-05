@@ -367,6 +367,8 @@ def test_runtime_execution_envelope_snapshot_is_public_contract() -> None:
         tool_name="desktop.list_apps",
         input={"query": "PixelForge", "limit": 20},
         planning_reason="planner_desktop_app_discovery",
+        risk_level="low",
+        policy_reason="Desktop app discovery is read-only.",
         runtime_doctrine="discover_operate_verify",
         runtime_stage="discover",
         runtime_role="find_target_app",
@@ -466,6 +468,8 @@ def test_runtime_execution_envelope_snapshot_is_public_contract() -> None:
     assert payload["requests"][0]["capability_title"] == "Discover Desktop Apps"
     assert payload["requests"][0]["capability_selected_tools"] == ["desktop.list_apps"]
     assert payload["requests"][0]["input"] == {"query": "PixelForge", "limit": 20}
+    assert payload["requests"][0]["risk_level"] == "low"
+    assert payload["requests"][0]["policy_reason"] == "Desktop app discovery is read-only."
     assert payload["requests"][0]["runtime_stage"] == "discover"
     assert payload["requests"][0]["replan_triggers"] == ["verification_failed"]
     assert payload["requests"][0]["followup_target"] == {

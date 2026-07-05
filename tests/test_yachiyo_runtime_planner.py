@@ -35032,6 +35032,7 @@ def test_runtime_execution_envelope_projects_full_desktop_plan_with_app_discover
     assert full_envelope.requests[0].runtime_stage == "discover"
     assert full_envelope.requests[0].runtime_role == "find_target_app"
     assert full_envelope.requests[2].approval_required is True
+    assert full_envelope.requests[2].risk_level == "medium"
     assert full_envelope.requests[2].runtime_role == "click_ui"
     assert full_envelope.requests[2].task_todo["step_id"] == "operate-foreground-ui"
     assert full_envelope.requests[3].runtime_stage == "verify"
@@ -35050,6 +35051,7 @@ def test_runtime_execution_envelope_projects_full_desktop_plan_with_app_discover
         "desktop.ui_elements",
     ]
     assert projected_requests[2]["approval_required"] is True
+    assert projected_requests[2]["risk_level"] == "medium"
     assert projected_requests[2]["requires_post_action_verification"] is True
     assert projected_requests[3]["task_verification_targets"][0]["todo"]["step_id"] == (
         "operate-foreground-ui"
