@@ -23689,6 +23689,7 @@ def test_runtime_planner_routes_visible_text_delivery_from_natural_phrase() -> N
         "submit-communication-recipient-search",
         "draft-communication-message",
         "send-communication-message",
+        "verify-communication-message",
     ]
     assert _step_by_id(decision, "read-communication-context").input_preview == {
         "role_filter": "text",
@@ -23915,6 +23916,7 @@ def test_runtime_planner_routes_screen_capture_delivery_to_communication() -> No
         "submit-communication-recipient-search",
         "draft-communication-message",
         "send-communication-message",
+        "verify-communication-message",
     ]
     assert _step_by_id(decision, "read-communication-context").tool_name == "screen.capture"
     assert _step_by_id(decision, "read-communication-context").input_preview == {
@@ -24008,6 +24010,7 @@ def test_runtime_planner_routes_generated_context_to_direct_communication() -> N
         "submit-communication-recipient-search",
         "draft-communication-message",
         "send-communication-message",
+        "verify-communication-message",
     ]
     assert _step_by_id(current_page, "read-communication-context").tool_name == (
         "browser.extract_text"
@@ -24081,6 +24084,7 @@ def test_runtime_planner_routes_generated_context_to_direct_communication() -> N
         "submit-communication-recipient-search",
         "draft-communication-message",
         "send-communication-message",
+        "verify-communication-message",
     ]
     assert _step_by_id(clipboard_summary, "read-communication-context").tool_name == (
         "clipboard.read"
@@ -24137,6 +24141,7 @@ def test_runtime_planner_prefetches_app_search_result_for_communication() -> Non
         "submit-communication-recipient-search",
         "draft-communication-message",
         "send-communication-message",
+        "verify-communication-message",
     ]
     assert _step_by_id(slack_result, "type-app-search-query").input_preview == {
         "text": "yachiyo"
@@ -24231,6 +24236,7 @@ def test_runtime_planner_prefetches_app_search_result_for_communication() -> Non
         "submit-communication-recipient-search",
         "draft-communication-message",
         "send-communication-message",
+        "verify-communication-message",
     ]
     assert _step_by_id(
         app_scoped_result,
@@ -35087,6 +35093,60 @@ def test_runtime_execution_envelope_can_project_full_data_analysis_plan() -> Non
     ]
     assert projected_requests[1]["depends_on"] == ["inspect-data-source"]
     assert projected_requests[2]["depends_on"] == ["run-analysis"]
+
+
+def test_runtime_execution_envelope_verifies_generic_communication_send() -> None:
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.shortcut",
+        "desktop.type",
+        "desktop.ui_elements",
+    ]
+    decision = RuntimePlanner().decision(
+        "帮我在微信给小王发消息说下午三点开会",
+        allowed_tools=allowed_tools,
+    )
+
+    full_envelope = runtime_execution_envelope_from_decision(
+        decision,
+        allowed_tools=allowed_tools,
+        full_plan=True,
+    )
+
+    assert full_envelope is not None
+    assert [request.tool_name for request in full_envelope.requests] == [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.shortcut",
+        "desktop.type",
+        "desktop.shortcut",
+        "desktop.type",
+        "desktop.shortcut",
+        "desktop.ui_elements",
+    ]
+    assert full_envelope.runtime_stage_counts == {
+        "discover": 1,
+        "operate": 6,
+        "verify": 1,
+    }
+    assert full_envelope.requests[4].approval_required is True
+    assert full_envelope.requests[6].approval_required is True
+    assert full_envelope.requests[7].runtime_stage == "verify"
+    assert full_envelope.requests[7].runtime_role == "verify_result"
+    assert full_envelope.requests[7].task_verification_targets[0]["step_id"] == (
+        "send-communication-message"
+    )
+
+    projected_requests = runtime_execution_requests_from_envelope_payload(
+        full_envelope.model_dump(mode="json"),
+        allowed_tools=allowed_tools,
+    )
+    assert projected_requests[6]["approval_required"] is True
+    assert projected_requests[7]["runtime_stage"] == "verify"
+    assert projected_requests[7]["task_verification_targets"][0]["todo"]["step_id"] == (
+        "send-communication-message"
+    )
 
 
 def test_runtime_execution_envelope_can_project_full_code_task_plan() -> None:

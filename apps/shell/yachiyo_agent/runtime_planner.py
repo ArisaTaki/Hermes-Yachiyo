@@ -9217,6 +9217,21 @@ def _direct_communication_steps(
             reason="Final message sending remains approval-gated.",
         )
     )
+    verify_tool = _first_allowed(("desktop.ui_elements", "desktop.read_ui", "screen.capture"), allowed)
+    if verify_tool:
+        steps.append(
+            _step(
+                intent,
+                "verify-communication-message",
+                "Verify communication message",
+                "desktop.app_discovery",
+                verify_tool,
+                input_preview=_communication_verify_input_preview(verify_tool, app_name),
+                depends_on=["send-communication-message"],
+                action=_desktop_discovery_action(verify_tool),
+                reason="Observe the communication app after the approval-gated send action.",
+            )
+        )
     return steps
 
 
@@ -9274,6 +9289,19 @@ def _communication_send_operation_tool(allowed: set[str] | None) -> str | None:
 
 def _communication_send_input_preview(tool_name: str | None) -> dict[str, Any]:
     return _communication_shortcut_input_preview(tool_name, "send")
+
+
+def _communication_verify_input_preview(
+    tool_name: str | None,
+    app_name: str,
+) -> dict[str, Any]:
+    clean_tool = str(tool_name or "").strip()
+    if clean_tool in {"desktop.ui_elements", "desktop.read_ui"}:
+        preview = {"role_filter": "text", "limit": 80}
+        if app_name:
+            preview["app_name"] = app_name
+        return preview
+    return {"reason": "Verify communication send result"}
 
 
 def _direct_communication_discovered_app_steps(
