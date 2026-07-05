@@ -823,6 +823,7 @@ def test_replan_recovery_contract_links_request_fallback_and_checkpoint() -> Non
         risk_level="medium",
         approval_id="approval-1",
         approval_status="approved",
+        approval_ids=["approval-1"],
         deferred_tool="terminal.run",
         deferred_input={"command": "python analyze.py sales.csv"},
         deferred_context={"step_id": "run-analysis"},
@@ -841,6 +842,9 @@ def test_replan_recovery_contract_links_request_fallback_and_checkpoint() -> Non
             "reason": "target_not_found",
         },
         tool_call_id="tool-call-1",
+        tool_call_ids=["tool-call-1"],
+        artifact_ids=["artifact-1"],
+        artifact_paths=["reports/analysis.md"],
         tool_status="completed",
         todo_status="completed",
         checkpoint_status="completed",
@@ -878,6 +882,7 @@ def test_replan_recovery_contract_links_request_fallback_and_checkpoint() -> Non
         "risk_level",
         "approval_id",
         "approval_status",
+        "approval_ids",
         "deferred_tool",
         "deferred_input",
         "deferred_context",
@@ -886,6 +891,9 @@ def test_replan_recovery_contract_links_request_fallback_and_checkpoint() -> Non
         "observation_evidence",
         "observation_retry",
         "tool_call_id",
+        "tool_call_ids",
+        "artifact_ids",
+        "artifact_paths",
         "tool_status",
         "todo_status",
         "checkpoint_status",
@@ -912,6 +920,7 @@ def test_replan_recovery_contract_links_request_fallback_and_checkpoint() -> Non
     assert payload["risk_level"] == "medium"
     assert payload["approval_id"] == "approval-1"
     assert payload["approval_status"] == "approved"
+    assert payload["approval_ids"] == ["approval-1"]
     assert payload["deferred_tool"] == "terminal.run"
     assert payload["deferred_input"] == {"command": "python analyze.py sales.csv"}
     assert payload["deferred_continuation"] == [{"tool": "desktop.active_window"}]
@@ -934,6 +943,9 @@ def test_replan_recovery_contract_links_request_fallback_and_checkpoint() -> Non
         "from_tool": "desktop.ui_elements",
         "reason": "target_not_found",
     }
+    assert payload["tool_call_ids"] == ["tool-call-1"]
+    assert payload["artifact_ids"] == ["artifact-1"]
+    assert payload["artifact_paths"] == ["reports/analysis.md"]
     assert payload["checkpoint_status"] == "completed"
 
 
@@ -2171,6 +2183,7 @@ def test_run_timeline_snapshot_projects_completed_replan_recovery() -> None:
                     "payload": {
                         "replan_request_id": "replan-1",
                         "replan_trigger": "tool_failure",
+                        "tool_call_id": "tool-call-terminal-recovery",
                         "step_id": "analyze-data-file",
                         "capability_id": "data.analysis",
                         "tool_name": "terminal.run",
@@ -2188,7 +2201,12 @@ def test_run_timeline_snapshot_projects_completed_replan_recovery() -> None:
                             "strategy": "observed_center_fallback",
                             "observed_center": {"x": 512, "y": 220},
                         },
-                        "result": {"ok": True, "stdout": "report.md"},
+                        "result": {
+                            "ok": True,
+                            "stdout": "report.md",
+                            "artifact_path": "reports/report.md",
+                            "artifact_id": "artifact-report",
+                        },
                     },
                 },
                 {
@@ -2288,9 +2306,18 @@ def test_run_timeline_snapshot_projects_completed_replan_recovery() -> None:
         "strategy": "observed_center_fallback",
         "observed_center": {"x": 512, "y": 220},
     }
+    assert recovery.tool_call_id == "tool-call-terminal-recovery"
+    assert recovery.tool_call_ids == ["tool-call-terminal-recovery"]
+    assert recovery.artifact_paths == ["reports/report.md"]
+    assert recovery.artifact_ids == ["artifact-report"]
     assert recovery.tool_status == "completed"
     assert recovery.checkpoint_status == "completed"
-    assert recovery.result_preview == {"ok": True, "stdout": "report.md"}
+    assert recovery.result_preview == {
+        "ok": True,
+        "stdout": "report.md",
+        "artifact_path": "reports/report.md",
+        "artifact_id": "artifact-report",
+    }
     assert recovery.recovery_event_ids == ["event-1", "event-2", "event-3", "event-4", "event-5"]
     assert snapshot.task_progress is not None
     assert snapshot.task_progress.status == "completed"
@@ -2351,10 +2378,13 @@ def test_run_timeline_snapshot_projects_explicit_replan_recovery_update() -> Non
                         "recovery_action_label": "Rediscover app",
                         "permission_target": "app_discovery",
                         "risk_level": "low",
+                        "approval_id": "approval-replan-1",
                         "status": "completed",
                         "tool_status": "completed",
                         "todo_status": "completed",
                         "checkpoint_status": "completed",
+                        "artifact_path": "reports/preview.md",
+                        "artifact_id": "artifact-preview",
                         "action_target": {
                             "action": "open_app",
                             "app_name": "Preview",
@@ -2381,6 +2411,10 @@ def test_run_timeline_snapshot_projects_explicit_replan_recovery_update() -> Non
     assert recovery.recovery_action_label == "Rediscover app"
     assert recovery.permission_target == "app_discovery"
     assert recovery.risk_level == "low"
+    assert recovery.approval_id == "approval-replan-1"
+    assert recovery.approval_ids == ["approval-replan-1"]
+    assert recovery.artifact_paths == ["reports/preview.md"]
+    assert recovery.artifact_ids == ["artifact-preview"]
     assert recovery.action_target == {"action": "open_app", "app_name": "Preview"}
     assert recovery.observation_evidence == {
         "source_tool": "desktop.list_apps",

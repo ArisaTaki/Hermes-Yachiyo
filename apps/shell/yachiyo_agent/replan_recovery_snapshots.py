@@ -48,6 +48,7 @@ class _RecoveryRecord:
     risk_level: str = ""
     approval_id: str | None = None
     approval_status: str | None = None
+    approval_ids: list[str] = field(default_factory=list)
     deferred_tool: str | None = None
     deferred_input: dict[str, Any] = field(default_factory=dict)
     deferred_context: dict[str, Any] = field(default_factory=dict)
@@ -56,6 +57,9 @@ class _RecoveryRecord:
     observation_evidence: dict[str, Any] = field(default_factory=dict)
     observation_retry: dict[str, Any] = field(default_factory=dict)
     tool_call_id: str | None = None
+    tool_call_ids: list[str] = field(default_factory=list)
+    artifact_ids: list[str] = field(default_factory=list)
+    artifact_paths: list[str] = field(default_factory=list)
     tool_status: str | None = None
     todo_status: str | None = None
     checkpoint_status: str | None = None
@@ -157,6 +161,7 @@ def replan_recovery_snapshots_from_events(
             risk_level=record.risk_level,
             approval_id=record.approval_id or None,
             approval_status=record.approval_status or None,
+            approval_ids=list(record.approval_ids),
             deferred_tool=record.deferred_tool or None,
             deferred_input=dict(record.deferred_input),
             deferred_context=dict(record.deferred_context),
@@ -165,6 +170,9 @@ def replan_recovery_snapshots_from_events(
             observation_evidence=dict(record.observation_evidence),
             observation_retry=dict(record.observation_retry),
             tool_call_id=record.tool_call_id or None,
+            tool_call_ids=list(record.tool_call_ids),
+            artifact_ids=list(record.artifact_ids),
+            artifact_paths=list(record.artifact_paths),
             tool_status=record.tool_status or None,
             todo_status=record.todo_status or None,
             checkpoint_status=record.checkpoint_status or None,
@@ -338,6 +346,7 @@ def _apply_request_event(
     _apply_recovery_action_metadata(record, request)
     _apply_deferred_approval_metadata(record, request)
     _apply_observed_action_metadata(record, request)
+    _apply_evidence_links(record, request)
     record.failure_detail = _first_text(
         record.failure_detail,
         request.get("failure_detail"),
@@ -406,6 +415,7 @@ def _apply_planned_event(
     _apply_recovery_action_metadata(record, payload, selected_tool=selected_tool)
     _apply_deferred_approval_metadata(record, payload)
     _apply_observed_action_metadata(record, payload)
+    _apply_evidence_links(record, payload)
     _mark_event(record, event)
 
 
@@ -461,6 +471,7 @@ def _apply_approval_event(
         payload.get("target_capability_id"),
     )
     _apply_deferred_approval_metadata(record, payload)
+    _apply_evidence_links(record, payload)
     _mark_event(record, event)
 
 
@@ -518,6 +529,7 @@ def _apply_tool_event(
         )
         _apply_deferred_approval_metadata(record, payload, call=call)
         _apply_observed_action_metadata(record, payload, call=call)
+        _apply_evidence_links(record, payload, call=call)
         record.result_preview = _mapping(call.output_preview)
         _mark_event(record, event)
 
@@ -626,6 +638,7 @@ def _apply_recovery_update_event(
     _apply_recovery_action_metadata(record, payload, selected_tool=selected_tool)
     _apply_deferred_approval_metadata(record, payload)
     _apply_observed_action_metadata(record, payload)
+    _apply_evidence_links(record, payload)
     _mark_event(record, event)
 
 
@@ -704,6 +717,10 @@ def _merge_recovery_snapshots(
         current.recovery_actions,
         incoming.recovery_actions,
     )
+    approval_ids = _merged_string_lists(current.approval_ids, incoming.approval_ids)
+    tool_call_ids = _merged_string_lists(current.tool_call_ids, incoming.tool_call_ids)
+    artifact_ids = _merged_string_lists(current.artifact_ids, incoming.artifact_ids)
+    artifact_paths = _merged_string_lists(current.artifact_paths, incoming.artifact_paths)
     event_ids = list(current.recovery_event_ids)
     _extend_unique(event_ids, incoming.recovery_event_ids)
     return current.model_copy(
@@ -734,6 +751,7 @@ def _merge_recovery_snapshots(
                 current.approval_status,
                 incoming.approval_status,
             ),
+            "approval_ids": approval_ids,
             "deferred_tool": current.deferred_tool or incoming.deferred_tool,
             "deferred_input": deferred_input,
             "deferred_context": deferred_context,
@@ -742,6 +760,9 @@ def _merge_recovery_snapshots(
             "observation_evidence": observation_evidence,
             "observation_retry": observation_retry,
             "tool_call_id": current.tool_call_id or incoming.tool_call_id,
+            "tool_call_ids": tool_call_ids,
+            "artifact_ids": artifact_ids,
+            "artifact_paths": artifact_paths,
             "tool_status": current.tool_status or incoming.tool_status,
             "todo_status": current.todo_status or incoming.todo_status,
             "checkpoint_status": current.checkpoint_status or incoming.checkpoint_status,
@@ -1233,6 +1254,34 @@ def _apply_deferred_approval_metadata(
         _extend_unique_mappings(record.deferred_continuation, source.get("deferred_continuation"))
 
 
+def _apply_evidence_links(
+    record: _RecoveryRecord,
+    payload: Mapping[str, Any],
+    *,
+    call: ToolCallSnapshot | None = None,
+) -> None:
+    sources = _metadata_sources(payload)
+    if call is not None:
+        sources.extend((call.input_preview, call.output_preview, call.metadata))
+        _extend_unique(record.tool_call_ids, [call.tool_call_id])
+        record.tool_call_id = _first_text(record.tool_call_id, call.tool_call_id) or None
+        if call.approval_id:
+            _extend_unique(record.approval_ids, [call.approval_id])
+            record.approval_id = _first_text(record.approval_id, call.approval_id) or None
+
+    for source in sources:
+        tool_call_id = _text(source.get("tool_call_id"))
+        if tool_call_id:
+            _extend_unique(record.tool_call_ids, [tool_call_id])
+            record.tool_call_id = _first_text(record.tool_call_id, tool_call_id) or None
+        approval_id = _text(source.get("approval_id"))
+        if approval_id:
+            _extend_unique(record.approval_ids, [approval_id])
+            record.approval_id = _first_text(record.approval_id, approval_id) or None
+        _extend_unique(record.artifact_ids, _artifact_ids_from_payload(source))
+        _extend_unique(record.artifact_paths, _artifact_paths_from_payload(source))
+
+
 def _metadata_sources(payload: Mapping[str, Any]) -> list[Mapping[str, Any]]:
     sources: list[Mapping[str, Any]] = [payload]
     metadata = payload.get("metadata")
@@ -1254,6 +1303,67 @@ def _approval_status_value(value: Any) -> str:
     if clean in {"approval_required", "waiting_approval", "requires_approval"}:
         return "pending"
     return ""
+
+
+def _artifact_paths_from_payload(payload: Mapping[str, Any], *, nested_artifact: bool = False) -> list[str]:
+    paths: list[str] = []
+    _extend_unique(paths, [payload.get("artifact_path")])
+    _extend_unique(paths, _string_list(payload.get("artifact_paths")))
+    if nested_artifact:
+        _extend_unique(paths, [payload.get("path")])
+    _extend_nested_artifact_links(paths, payload, link_kind="path")
+    return paths
+
+
+def _artifact_ids_from_payload(payload: Mapping[str, Any], *, nested_artifact: bool = False) -> list[str]:
+    artifact_ids: list[str] = []
+    _extend_unique(artifact_ids, [payload.get("artifact_id")])
+    _extend_unique(artifact_ids, _string_list(payload.get("artifact_ids")))
+    if nested_artifact:
+        _extend_unique(artifact_ids, [payload.get("id")])
+    _extend_nested_artifact_links(artifact_ids, payload, link_kind="id")
+    return artifact_ids
+
+
+def _extend_nested_artifact_links(
+    target: list[str],
+    payload: Mapping[str, Any],
+    *,
+    link_kind: str,
+) -> None:
+    artifact = payload.get("artifact")
+    if isinstance(artifact, Mapping):
+        values = (
+            _artifact_paths_from_payload(artifact, nested_artifact=True)
+            if link_kind == "path"
+            else _artifact_ids_from_payload(artifact, nested_artifact=True)
+        )
+        _extend_unique(target, values)
+
+    for key in ("artifacts", "artifact_manifest"):
+        values = payload.get(key)
+        if not isinstance(values, list):
+            continue
+        for item in values:
+            if not isinstance(item, Mapping):
+                continue
+            nested_values = (
+                _artifact_paths_from_payload(item, nested_artifact=True)
+                if link_kind == "path"
+                else _artifact_ids_from_payload(item, nested_artifact=True)
+            )
+            _extend_unique(target, nested_values)
+
+    for key in ("result", "data", "output", "output_preview"):
+        nested = payload.get(key)
+        if not isinstance(nested, Mapping):
+            continue
+        nested_values = (
+            _artifact_paths_from_payload(nested)
+            if link_kind == "path"
+            else _artifact_ids_from_payload(nested)
+        )
+        _extend_unique(target, nested_values)
 
 
 def _apply_verification_target_metadata(

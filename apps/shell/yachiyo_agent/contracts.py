@@ -462,6 +462,7 @@ class ReplanRecoverySnapshot(_PublicSnapshot):
     risk_level: str = ""
     approval_id: str | None = None
     approval_status: str | None = None
+    approval_ids: list[str] = Field(default_factory=list)
     deferred_tool: str | None = None
     deferred_input: dict[str, Any] = Field(default_factory=dict)
     deferred_context: dict[str, Any] = Field(default_factory=dict)
@@ -470,6 +471,9 @@ class ReplanRecoverySnapshot(_PublicSnapshot):
     observation_evidence: dict[str, Any] = Field(default_factory=dict)
     observation_retry: dict[str, Any] = Field(default_factory=dict)
     tool_call_id: str | None = None
+    tool_call_ids: list[str] = Field(default_factory=list)
+    artifact_ids: list[str] = Field(default_factory=list)
+    artifact_paths: list[str] = Field(default_factory=list)
     tool_status: str | None = None
     todo_status: str | None = None
     checkpoint_status: str | None = None

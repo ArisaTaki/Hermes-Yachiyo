@@ -826,6 +826,20 @@ function ReplanRecoverySnapshotPill({
   const deferredContextPreview = plannerValuePreview(deferredContext);
   const deferredContinuationPreview = replanRecoveryDeferredContinuationPreview(deferredContinuation);
   const verificationTargetsPreview = replanRecoveryVerificationTargetsPreview(verificationTargets);
+  const toolCallIds = uniqueStrings([
+    ...(recovery.tool_call_ids || []),
+    recovery.tool_call_id || '',
+  ]);
+  const approvalIds = uniqueStrings([
+    ...(recovery.approval_ids || []),
+    recovery.approval_id || '',
+  ]);
+  const artifactPaths = uniqueStrings(recovery.artifact_paths || []);
+  const artifactIds = uniqueStrings(recovery.artifact_ids || []);
+  const toolCallIdsPreview = toolCallIds.slice(0, 3).join(', ');
+  const approvalIdsPreview = approvalIds.slice(0, 3).join(', ');
+  const artifactPathsPreview = artifactPaths.slice(0, 3).join(', ');
+  const artifactIdsPreview = artifactIds.slice(0, 3).join(', ');
   const recoveryActions = runtimeToolRecoveryActionsFromRecords([
     recovery as unknown as Record<string, unknown>,
   ]);
@@ -837,6 +851,10 @@ function ReplanRecoverySnapshotPill({
     recovery.risk_level ? `risk: ${recovery.risk_level}` : '',
     recovery.approval_id ? `approval: ${recovery.approval_id}` : '',
     recovery.approval_status ? `approval status: ${recovery.approval_status}` : '',
+    approvalIdsPreview ? `approvals: ${approvalIdsPreview}` : '',
+    toolCallIdsPreview ? `tool calls: ${toolCallIdsPreview}` : '',
+    artifactPathsPreview ? `artifacts: ${artifactPathsPreview}` : '',
+    artifactIdsPreview ? `artifact ids: ${artifactIdsPreview}` : '',
     recovery.deferred_tool ? `deferred: ${recovery.deferred_tool}` : '',
     verificationTargetsPreview ? `verification: ${verificationTargetsPreview}` : '',
     deferredInputPreview ? `deferred input: ${deferredInputPreview}` : '',
@@ -852,8 +870,11 @@ function ReplanRecoverySnapshotPill({
         data-replan-recovery-action={label}
         data-replan-recovery-action-count={recoveryActions.length}
         data-replan-recovery-action-target={actionTargetPreview}
+        data-replan-recovery-approval-ids={approvalIdsPreview}
         data-replan-recovery-approval-id={recovery.approval_id || ''}
         data-replan-recovery-approval-status={recovery.approval_status || ''}
+        data-replan-recovery-artifact-ids={artifactIdsPreview}
+        data-replan-recovery-artifact-paths={artifactPathsPreview}
         data-replan-recovery-deferred-context={deferredContextPreview}
         data-replan-recovery-deferred-continuation={deferredContinuationPreview}
         data-replan-recovery-deferred-input={deferredInputPreview}
@@ -867,6 +888,7 @@ function ReplanRecoverySnapshotPill({
         data-replan-recovery-planning-reason-label={planningReasonLabel}
         data-replan-recovery-risk={recovery.risk_level || ''}
         data-replan-recovery-status={recovery.status || 'requested'}
+        data-replan-recovery-tool-call-ids={toolCallIdsPreview}
         data-replan-recovery-verification-targets={verificationTargetsPreview}
         key={`recovery:${recovery.request_id}`}
         title={title}
@@ -874,6 +896,8 @@ function ReplanRecoverySnapshotPill({
         recovery · {label || recovery.trigger} · {recovery.status || 'requested'}
         {planningReasonLabel ? ` · ${planningReasonLabel}` : ''}
         {recovery.approval_status ? ` · approval: ${recovery.approval_status}` : ''}
+        {toolCallIdsPreview ? ` · tool calls: ${toolCallIdsPreview}` : ''}
+        {artifactPathsPreview ? ` · artifacts: ${artifactPathsPreview}` : ''}
         {recovery.deferred_tool ? ` · deferred: ${recovery.deferred_tool}` : ''}
         {verificationTargetsPreview ? ` · verifies: ${verificationTargetsPreview}` : ''}
         {actionTargetPreview ? ` · target: ${actionTargetPreview}` : ''}

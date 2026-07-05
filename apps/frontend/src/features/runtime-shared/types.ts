@@ -378,6 +378,7 @@ export type ReplanRecoverySnapshot = {
   risk_level?: string;
   approval_id?: string | null;
   approval_status?: string | null;
+  approval_ids?: string[];
   deferred_tool?: string | null;
   deferred_input?: Record<string, unknown>;
   deferred_context?: Record<string, unknown>;
@@ -386,6 +387,9 @@ export type ReplanRecoverySnapshot = {
   observation_evidence?: Record<string, unknown>;
   observation_retry?: Record<string, unknown>;
   tool_call_id?: string | null;
+  tool_call_ids?: string[];
+  artifact_ids?: string[];
+  artifact_paths?: string[];
   tool_status?: string | null;
   todo_status?: string | null;
   checkpoint_status?: string | null;
