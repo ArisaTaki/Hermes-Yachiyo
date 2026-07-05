@@ -10,7 +10,6 @@ from dataclasses import dataclass
 from typing import Any
 
 from apps.shell.agent.runtime.errors import AgentApprovalRequired
-from apps.shell.agent.runtime.desktop_intents import daily_desktop_entrypoint_tool_requests
 from apps.shell.agent.tools.policy import DAILY_DESKTOP_TOOL_NAMES
 from apps.shell.yachiyo_agent.entrypoint_tool_selection import (
     planner_first_direct_decision_and_tool_requests,
@@ -424,7 +423,6 @@ def _with_daily_desktop_policy_overlay(agent: dict[str, Any], payload: dict[str,
         _decision, direct_requests = planner_first_direct_decision_and_tool_requests(
             planning_goal,
             list(DAILY_DESKTOP_TOOL_NAMES),
-            legacy_tool_requests=daily_desktop_entrypoint_tool_requests,
         )
         if not direct_requests:
             return agent

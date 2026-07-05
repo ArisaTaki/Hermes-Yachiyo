@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from typing import Any
 
 from apps.shell.agent.runtime.callbacks import supports_keyword
-from apps.shell.agent.runtime.desktop_intents import daily_desktop_entrypoint_tool_requests
 from apps.shell.agent.runtime.events import tool_input_preview as _tool_input_preview
 from apps.shell.agent.runtime.tool_brokers import write_artifact_with_tool_broker
 from apps.shell.agent.tools.policy import DAILY_DESKTOP_TOOL_NAMES
@@ -90,7 +89,6 @@ def _agent_with_daily_desktop_policy_overlay(
         selection = planner_first_direct_tool_selection(
             clean_context,
             list(DAILY_DESKTOP_TOOL_NAMES),
-            legacy_tool_requests=daily_desktop_entrypoint_tool_requests,
         )
     except Exception:
         direct_requests = []

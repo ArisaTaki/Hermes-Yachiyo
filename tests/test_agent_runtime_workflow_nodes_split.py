@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from apps.shell import agent_runtime
+from apps.shell.agent.runtime import workflow_nodes as workflow_nodes_mod
 from apps.shell.agent.runtime.events import tool_input_preview
 from apps.shell.agent.runtime.workflow_nodes import (
     _agent_with_runtime_planner_entrypoint,
@@ -51,6 +52,7 @@ def test_workflow_agent_node_runtime_planner_entrypoint_overlays_desktop_policy(
     )
 
     assert "_daily_desktop_policy_overlay" not in agent
+    assert not hasattr(workflow_nodes_mod, "daily_desktop_entrypoint_tool_requests")
     assert enriched["_runtime_planner_entrypoint"] is True
     assert enriched["_daily_desktop_policy_overlay"] is True
     assert enriched["tool_policy"]["allowed_tools"][:1] == ["workspace.read"]

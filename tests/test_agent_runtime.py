@@ -4671,6 +4671,8 @@ def test_main_chat_model_loop_executes_generic_apple_music_intent_before_model(t
 
 
 def test_agent_run_daily_desktop_overlay_plans_from_user_goal_before_context(tmp_path, monkeypatch):
+    from apps.shell.agent.runtime import agent_runs as agent_runs_mod
+
     service = make_service(tmp_path)
     open_and_play_calls = 0
     monkeypatch.setattr(
@@ -4726,6 +4728,7 @@ def test_agent_run_daily_desktop_overlay_plans_from_user_goal_before_context(tmp
         planned_event = next(event for event in events if event["event_type"] == "agent.desktop.intent_planned")
         tool_event = next(event for event in events if event["event_type"] == "agent.tool.call")
 
+        assert not hasattr(agent_runs_mod, "daily_desktop_entrypoint_tool_requests")
         assert open_and_play_calls == 1
         assert run["status"] == "completed"
         assert "已打开 Apple Music，并开始播放" in run["result"]
@@ -4974,7 +4977,7 @@ def test_agent_run_runtime_planner_entrypoint_opens_desktop_app_before_model(
         assert run["status"] == "completed"
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
-        assert planned_event["payload"]["planning_reason"] == "planner_desktop_operation"
+        assert planned_event["payload"]["planning_reason"] == "planner_full_plan_desktop_operation"
         assert planned_event["payload"]["tool"] == "desktop.open_app"
         assert tool_event["payload"]["tool"] == "desktop.open_app"
         assert tool_event["payload"]["result"]["action"] == "desktop.open_app"

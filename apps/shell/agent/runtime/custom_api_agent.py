@@ -2429,6 +2429,10 @@ class RuntimeCustomApiAgentLoop:
                 execution_requests = _dedupe_runtime_planner_full_plan_requests(
                     execution_requests
                 )
+                execution_requests = _runtime_planner_execution_requests_with_selection_inputs(
+                    execution_requests,
+                    selection.requests,
+                )
                 has_approval_plan_tool = self._has_approval_plan_tool(execution_requests)
                 if execution_requests and (
                     not has_approval_plan_tool
@@ -8345,14 +8349,35 @@ def _runtime_planner_completed_direct_requests_with_unavailable_replan(
             *_DAILY_DESKTOP_VERIFY_TOOLS,
         }
     }
-    if not trailing_observation_tools:
-        return False
     payloads = [payload for payload in replan_payloads if isinstance(payload, Mapping)]
+    if not trailing_observation_tools:
+        return bool(payloads) and all(
+            _runtime_replan_payload_is_missing_desktop_observation(payload)
+            and not _runtime_replan_payload_requires_continuation(payload)
+            for payload in payloads
+        )
     if not payloads:
         return False
     return all(
         any(tool in trailing_observation_tools for tool in _runtime_replan_payload_tool_candidates(payload))
         for payload in payloads
+    )
+
+
+def _runtime_replan_payload_is_missing_desktop_observation(payload: Mapping[str, Any]) -> bool:
+    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), Mapping) else {}
+    capability_id = str(
+        payload.get("target_capability_id")
+        or payload.get("capability_id")
+        or metadata.get("target_capability_id")
+        or metadata.get("capability_id")
+        or ""
+    ).strip()
+    if capability_id == "desktop.app_discovery":
+        return True
+    return any(
+        tool in _DAILY_DESKTOP_DISCOVERY_TOOLS or tool in _DAILY_DESKTOP_VERIFY_TOOLS
+        for tool in _runtime_replan_payload_tool_candidates(payload)
     )
 
 
@@ -11924,6 +11949,52 @@ def _dedupe_runtime_planner_full_plan_requests(
         seen.add(key)
         deduped.append(item)
     return deduped
+
+
+def _runtime_planner_execution_requests_with_selection_inputs(
+    execution_requests: list[dict[str, Any]],
+    selection_requests: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if not execution_requests or len(execution_requests) != len(selection_requests):
+        return execution_requests
+    execution_tools = [
+        str(request.get("tool") or request.get("tool_name") or "").strip()
+        for request in execution_requests
+    ]
+    selection_tools = [
+        str(request.get("tool") or request.get("tool_name") or "").strip()
+        for request in selection_requests
+    ]
+    if execution_tools != selection_tools:
+        return execution_requests
+    if any(tool in _DAILY_DESKTOP_DISCOVERY_TOOLS or tool in _DAILY_DESKTOP_VERIFY_TOOLS for tool in execution_tools):
+        return execution_requests
+    if any(bool(request.get("continue_to_model")) for request in execution_requests):
+        return execution_requests
+    updated: list[dict[str, Any]] = []
+    changed = False
+    for execution_request, selection_request in zip(execution_requests, selection_requests):
+        selection_input = (
+            selection_request.get("input")
+            if isinstance(selection_request.get("input"), Mapping)
+            else {}
+        )
+        if not selection_input:
+            updated.append(execution_request)
+            continue
+        execution_input = (
+            execution_request.get("input")
+            if isinstance(execution_request.get("input"), Mapping)
+            else {}
+        )
+        if dict(selection_input) == dict(execution_input):
+            updated.append(execution_request)
+            continue
+        merged = dict(execution_request)
+        merged["input"] = dict(selection_input)
+        updated.append(merged)
+        changed = True
+    return updated if changed else execution_requests
 
 
 def _runtime_planner_request_without_resolved_selection_hints(
