@@ -178,6 +178,76 @@ def test_approval_resume_records_runtime_task_progress_events() -> None:
     }
 
 
+def test_approval_resume_skips_terminal_remaining_runtime_requests() -> None:
+    captured_requests: list[list[dict[str, Any]]] = []
+    context = ToolApprovalResumeContext(
+        run_id="run-approval",
+        timeline=[],
+        artifacts=[],
+        broker={"broker": True},
+        allowed_tools=["desktop.open_app", "desktop.active_window", "artifact.write"],
+        budget={"events": 0},
+        messages=[{"role": "assistant", "content": "Need approval"}],
+        tool_request={
+            "tool": "desktop.open_app",
+            "input": {"app_name": "PixelForge"},
+            "step_id": "open-or-focus-app",
+        },
+        tool_name="desktop.open_app",
+        input_preview={"app_name": "PixelForge"},
+        remaining_requests=[
+            {
+                "tool": "desktop.list_apps",
+                "input": {"query": "PixelForge"},
+                "step_id": "discover-desktop-state",
+                "status": "completed",
+            },
+            {
+                "tool": "desktop.active_window",
+                "input": {"app_name": "PixelForge"},
+                "step_id": "verify-desktop-result",
+                "status": "planned",
+            },
+            {
+                "tool": "artifact.write",
+                "input": {"path": "blocked.md"},
+                "step_id": "write-blocked-artifact",
+                "status": "denied",
+            },
+            {
+                "tool": "artifact.write",
+                "input": {"path": "needs-approval.md"},
+                "step_id": "write-approved-artifact",
+                "status": "waiting_approval",
+                "approval_required": True,
+            },
+        ],
+        next_iteration=3,
+    )
+
+    def run_tool_requests(
+        requests: list[dict[str, Any]],
+        *_args: Any,
+        **_kwargs: Any,
+    ) -> None:
+        captured_requests.append(requests)
+
+    coordinator = ApprovalResumeCoordinator(
+        call_agent_tool=_approved_tool_call,
+        fatal_tool_failure_detail=lambda *_args: "",
+        append_tool_result_message=_append_tool_result_message,
+        run_tool_requests=run_tool_requests,
+        timeline_factory=_timeline,
+    )
+
+    coordinator.execute_approved_tool(context)
+
+    assert [[request["step_id"] for request in requests] for requests in captured_requests] == [
+        ["verify-desktop-result", "write-approved-artifact"]
+    ]
+    assert context.remaining_requests == captured_requests[0]
+
+
 def test_approval_resume_records_replan_and_blocked_progress_for_failed_tool() -> None:
     task_core = {
         "core_id": "core-approval",

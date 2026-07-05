@@ -26,6 +26,18 @@ from apps.shell.agent.runtime.tool_approvals import (
 )
 from packages.security import redact_api_error_text
 
+_NON_RESUMABLE_REMAINING_REQUEST_STATUSES = {
+    "blocked",
+    "cancelled",
+    "canceled",
+    "completed",
+    "denied",
+    "expired",
+    "failed",
+    "rejected",
+    "skipped",
+}
+
 
 class ApprovalResumeCoordinator:
     """Executes the approved tool portion of a paused run resume."""
@@ -385,7 +397,7 @@ def _approval_resume_remaining_requests_after_tool(
         if isinstance(request, Mapping)
     ]
     if existing:
-        return existing
+        return _resumable_remaining_requests(existing)
     if not _approved_workspace_patch_step(context, tool_result):
         return []
     verification = _pending_verification_request_after_patch(
@@ -393,6 +405,17 @@ def _approval_resume_remaining_requests_after_tool(
         allowed_tools=context.allowed_tools,
     )
     return [verification] if verification else []
+
+
+def _resumable_remaining_requests(
+    requests: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    return [
+        request
+        for request in requests
+        if str(request.get("status") or "").strip()
+        not in _NON_RESUMABLE_REMAINING_REQUEST_STATUSES
+    ]
 
 
 def _approval_resume_has_pending_replan_request(context: ToolApprovalResumeContext) -> bool:
