@@ -1278,6 +1278,10 @@ function ExecutionRequestRow({
     .filter(Boolean)
     .join(', ');
   const taskVerificationPreview = replanRecoveryVerificationTargetsPreview(taskVerificationTargets);
+  const verificationEventIds = uniqueStrings(request.verification_event_ids || []);
+  const verificationArtifactPaths = uniqueStrings(request.verification_artifact_paths || []);
+  const verificationEventPreview = verificationEventIds.slice(0, 3).join(',');
+  const verificationArtifactPreview = verificationArtifactPaths.slice(0, 3).join(',');
   const workflowScope = request.workflow_node_label || request.workflow_node_id || request.workflow_run_id || request.workflow_id || '';
   const groupScope = request.group_run_id || request.run_group_id || request.group_id || '';
   return (
@@ -1321,6 +1325,10 @@ function ExecutionRequestRow({
       data-task-verification-targets={taskVerificationPreview}
       data-task-workspace-id={request.workspace_id || ''}
       data-task-workspace-item-count={taskWorkspaceItems.length}
+      data-verification-artifact-paths={verificationArtifactPreview}
+      data-verification-event-ids={verificationEventPreview}
+      data-verification-status={request.verification_status || ''}
+      data-verification-step-id={request.verification_step_id || ''}
       data-step-status={request.status || 'planned'}
       data-testid="agent-run-detail-planner-execution-request"
       data-tool-plan-id={request.tool_plan_id || ''}
@@ -1359,6 +1367,18 @@ function ExecutionRequestRow({
         ) : null}
         {taskVerificationTargets.length ? (
           <span title={taskVerificationPreview}>verifies: {taskVerificationPreview || taskVerificationTargets.length}</span>
+        ) : null}
+        {request.verification_status ? (
+          <span>verification: {request.verification_status}</span>
+        ) : null}
+        {request.verification_step_id ? (
+          <span>verified by: {request.verification_step_id}</span>
+        ) : null}
+        {verificationEventPreview ? (
+          <span title={verificationEventPreview}>verification events: {verificationEventPreview}</span>
+        ) : null}
+        {verificationArtifactPreview ? (
+          <span title={verificationArtifactPreview}>verification artifacts: {verificationArtifactPreview}</span>
         ) : null}
         {planningReasonLabel ? <span title={request.planning_reason}>reason: {planningReasonLabel}</span> : null}
         {request.runtime_stage || request.runtime_role ? (
