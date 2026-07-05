@@ -300,6 +300,11 @@ def planned_agent_task_snapshot_for_quick_message(
     if not timeline:
         return None
     task_metadata = {**dict(metadata or {}), **planner_metadata}
+    runtime_execution_envelope = (
+        task_metadata.get("yachiyo_execution_envelope")
+        if isinstance(task_metadata.get("yachiyo_execution_envelope"), dict)
+        else None
+    )
     snapshot = agent_task_snapshot_from_payload(
         {
             "task_id": task_id,
@@ -310,6 +315,7 @@ def planned_agent_task_snapshot_for_quick_message(
             "progress_text": "",
             "timeline": timeline,
             "metadata": task_metadata,
+            "runtime_execution_envelope": runtime_execution_envelope,
         }
     ).model_dump(mode="json")
     snapshot["open_in_studio_url"] = None
@@ -328,10 +334,11 @@ def _planner_trace_for_quick_message(
         for candidate in candidates
     ):
         return [], {}
+    trace_allowed_tools = allowed_tools or daily_desktop_allowed_tools()
     try:
         decision, planned_requests = planner_decision_and_tool_requests(
             text,
-            allowed_tools or daily_desktop_allowed_tools(),
+            trace_allowed_tools,
             metadata=metadata,
         )
     except Exception:
@@ -349,13 +356,13 @@ def _planner_trace_for_quick_message(
         for candidate in planned_requests
         if str(candidate.get("tool") or "").strip()
     ]
-    if candidate_tools != planned_tools:
+    if not _quick_candidate_tools_cover_planner_tools(candidate_tools, planned_tools):
         return [], {}
     selection_payload = planner_selection_payload(
         decision=decision,
         planner_requests=planned_requests,
         legacy_requests=[],
-        selected_requests=planned_requests,
+        selected_requests=candidates,
         selected_source="runtime_planner",
         selected_reason="runtime_planner_direct",
         metadata=metadata,
@@ -363,7 +370,18 @@ def _planner_trace_for_quick_message(
     return [
         *planner_timeline_events(decision),
         planner_selection_timeline_event(selection_payload),
-    ], runtime_planner_metadata(decision)
+    ], runtime_planner_metadata(decision, allowed_tools=trace_allowed_tools)
+
+
+def _quick_candidate_tools_cover_planner_tools(
+    candidate_tools: list[str],
+    planned_tools: list[str],
+) -> bool:
+    if candidate_tools == planned_tools:
+        return True
+    if not planned_tools:
+        return False
+    return candidate_tools[: len(planned_tools)] == planned_tools
 
 
 def _latest_notifiable_assistant_message(messages: list[dict[str, Any]]) -> dict[str, Any]:

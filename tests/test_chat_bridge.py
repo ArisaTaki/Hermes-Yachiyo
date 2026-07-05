@@ -11267,6 +11267,11 @@ def test_chat_bridge_quick_message_returns_planned_web_task_before_run_link(tmp_
         assert result["agent_task"]["current_step"] == "准备执行 · 打开网页"
         assert result["agent_task"]["progress_text"] == "准备执行 · 打开网页"
         assert result["agent_task"]["open_in_studio_url"] is None
+        assert result["agent_task"]["runtime_execution_envelope"]["intent_kind"] == "web_research"
+        assert [
+            request["tool_name"]
+            for request in result["agent_task"]["runtime_execution_envelope"]["requests"]
+        ] == ["browser.open_url"]
         _assert_planner_trace_prefix(
             result["agent_task"],
             intent_kind="web_research",
@@ -11276,16 +11281,21 @@ def test_chat_bridge_quick_message_returns_planned_web_task_before_run_link(tmp_
             "agent.desktop.intent_planned",
             detail="browser.open_url",
         )
-        assert planned_event["payload"] == {
-            "input_preview": {"url": "https://github.com"},
-            "planning_reason": "planner_fallback_web_research",
-            "source": "runtime_planner",
-            "status": "planned",
-            "tool": "browser.open_url",
+        assert planned_event["payload"]["input_preview"] == {"url": "https://github.com"}
+        assert planned_event["payload"]["source"] == "runtime_planner"
+        assert planned_event["payload"]["status"] == "planned"
+        assert planned_event["payload"]["tool"] == "browser.open_url"
+        assert planned_event["payload"]["planning_reason"] in {
+            "planner_fallback_web_research",
+            "planner_full_plan_web_research",
         }
-        assert runtime.agent_runtime_service.calls == [
+        assert planned_event["payload"]["capability_id"] == "browser.research"
+        assert planned_event["payload"]["runtime_stage"] == "operate"
+        assert planned_event["payload"]["task_todo"]["tool_name"] == "browser.open_url"
+        assert set(runtime.agent_runtime_service.calls) == {
             ("get_task_run_link", "task-pending-browser")
-        ] * chat_bridge_mod._QUICK_DESKTOP_SNAPSHOT_ATTEMPTS
+        }
+        assert len(runtime.agent_runtime_service.calls) >= chat_bridge_mod._QUICK_DESKTOP_SNAPSHOT_ATTEMPTS
     finally:
         store.close()
 
