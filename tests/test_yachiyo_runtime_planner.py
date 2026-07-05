@@ -3949,22 +3949,25 @@ def test_planner_adds_generic_discovered_app_followup_action_steps() -> None:
 
 
 def test_planner_sequences_selected_discovered_app_click_then_type() -> None:
-    prompt = "打开一个项目管理应用，点击新建任务按钮，然后输入登录失败"
+    prompt = "打开一个项目管理应用，点击新建任务按钮，然后输入登录失败，然后按回车确认"
     allowed_tools = [
         "desktop.list_apps",
         "app.open",
         "desktop.ui_elements",
         "app.focus_and_click_ui_element",
         "app.focus_and_safe_type_text",
+        "desktop.submit_foreground",
     ]
     decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
 
+    assert decision.selected_intent.inputs["foreground_compose_text_hint"] == "登录失败"
     assert [step.step_id for step in decision.plan.tool_plan.steps] == [
         "discover_apps-desktop-state",
         "open-selected-discovered-app",
         "observe-selected-discovered-app",
         "operate-selected-discovered-app-ui",
         "type-selected-discovered-app-text",
+        "submit-selected-discovered-app-action",
         "verify-selected-discovered-app-action",
     ]
     click = _step_by_id(decision, "operate-selected-discovered-app-ui")
@@ -3988,8 +3991,13 @@ def test_planner_sequences_selected_discovered_app_click_then_type() -> None:
         "query": "project management",
         "text": "登录失败",
     }
+    submit = _step_by_id(decision, "submit-selected-discovered-app-action")
+    assert submit.tool_name == "desktop.submit_foreground"
+    assert submit.depends_on == ["type-selected-discovered-app-text"]
+    assert submit.input_preview == {"action": "confirm"}
+    assert submit.approval_required is True
     assert _step_by_id(decision, "verify-selected-discovered-app-action").depends_on == [
-        "type-selected-discovered-app-text"
+        "submit-selected-discovered-app-action"
     ]
 
 

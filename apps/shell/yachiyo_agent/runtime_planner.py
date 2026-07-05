@@ -21353,10 +21353,32 @@ def _clean_foreground_compose_text(value: str) -> str:
     text = str(value or "").strip()
     text = re.sub(r"^[\"'`“”‘’]+|[\"'`“”‘’]+$", "", text).strip()
     text = re.sub(r"^(?:[:：]\s*)+", "", text).strip()
+    text = re.sub(
+        r"\s*[，,；;]?\s*(?:并|然后|再|后|之后|随后|接着|\band\s+then\b|\bthen\b|\band\b)\s*"
+        r"(?:按下|按一下|按|press|hit)\s*(?:回车|enter|return)"
+        r"(?:确认|确定|提交|发送|send|submit|confirm)?$",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    ).strip()
+    text = re.sub(
+        r"\s*[，,；;]?\s*(?:并|然后|再|后|之后|随后|接着|\band\s+then\b|\bthen\b|\band\b)\s*"
+        r"(?:点击|点一下|点按|单击|按一下|按下|按|click|tap|press)\s+[^。！？!?，,；;]+$",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    ).strip()
     text = re.sub(r"\s*(?:并|然后|再|后)?\s*(?:发送|发出|send)$", "", text, flags=re.IGNORECASE).strip()
     text = re.sub(
-        r"\s*(?:并|然后|再|后|之后|随后|接着)?\s*"
+        r"\s*[，,；;]?\s*(?:并|然后|再|后|之后|随后|接着)?\s*"
         r"(?:确认|确定|提交|保存|回车|send|submit|confirm|save|press\s+enter|hit\s+enter)$",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    ).strip()
+    text = re.sub(
+        r"\s*[，,；;]?\s*(?:并|然后|再|后|之后|随后|接着|\band\s+then\b|\bthen\b|\band\b)\s*"
+        r"(?:点击|点一下|点按|单击|按一下|按下|按|click|tap|press)\s+[^。！？!?，,；;]+$",
         "",
         text,
         flags=re.IGNORECASE,
