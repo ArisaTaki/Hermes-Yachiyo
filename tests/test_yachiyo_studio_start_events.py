@@ -125,6 +125,59 @@ def test_studio_start_group_run_enriches_bare_port_payload_with_group_scoped_eve
     assert event_request["run_group_id"] == "group-run-1"
 
 
+def test_studio_start_group_run_scopes_media_desktop_fallback_requests() -> None:
+    port = _BareStartPort()
+    group_run = AgentStudioService(port).start_group_run(
+        {
+            "group_id": "group-1",
+            "objective": "用 Apple Music 播放超时空辉夜姬",
+            "allowed_tools": [
+                "desktop.list_apps",
+                "app.open",
+                "desktop.safe_shortcut",
+                "desktop.type",
+                "desktop.safe_key",
+                "desktop.click_ui_element",
+                "desktop.ui_elements",
+            ],
+        }
+    )
+
+    start_payload = port.group_run_payloads[0]
+    tools = [request["tool"] for request in start_payload["direct_tool_requests"]]
+    assert tools == [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.safe_shortcut",
+        "desktop.type",
+        "desktop.safe_key",
+        "desktop.click_ui_element",
+        "desktop.ui_elements",
+    ]
+    assert {
+        request.get("group_id")
+        for request in start_payload["direct_tool_requests"]
+    } == {"group-1"}
+    assert {
+        request.get("group_run_id")
+        for request in start_payload["direct_tool_requests"]
+    } == {None}
+    assert group_run.task_core is not None
+    assert [todo.step_id for todo in group_run.task_core.todos] == [
+        "discover-media-app",
+        "open-media-app",
+        "focus-media-app-search",
+        "type-media-search-query",
+        "submit-media-search",
+        "play-media-search-result",
+        "verify-media-search",
+    ]
+    plan_event = next(event for event in group_run.events if event.event_type == "group.run.plan.created")
+    event_request = plan_event.payload["runtime_execution_envelope"]["requests"][0]
+    assert event_request["group_id"] == "group-1"
+    assert event_request["group_run_id"] == "group-run-1"
+
+
 def test_studio_start_workflow_run_enriches_bare_port_payload_with_workflow_scoped_events() -> None:
     port = _BareStartPort()
     workflow_run = AgentStudioService(port).start_workflow_run(
@@ -149,6 +202,61 @@ def test_studio_start_workflow_run_enriches_bare_port_payload_with_workflow_scop
     request_envelope = start_payload["metadata"]["yachiyo_execution_envelope"]
     assert request_envelope["requests"][0]["workflow_id"] == "workflow-1"
     assert start_payload["direct_tool_requests"][0]["workflow_id"] == "workflow-1"
+    plan_event = next(
+        event for event in workflow_run.events if event.event_type == "workflow.run.plan.created"
+    )
+    event_request = plan_event.payload["runtime_execution_envelope"]["requests"][0]
+    assert event_request["workflow_id"] == "workflow-1"
+    assert event_request["workflow_run_id"] == "workflow-run-1"
+
+
+def test_studio_start_workflow_run_scopes_media_desktop_fallback_requests() -> None:
+    port = _BareStartPort()
+    workflow_run = AgentStudioService(port).start_workflow_run(
+        {
+            "workflow_id": "workflow-1",
+            "objective": "用 Apple Music 播放超时空辉夜姬",
+            "allowed_tools": [
+                "desktop.list_apps",
+                "app.open",
+                "desktop.safe_shortcut",
+                "desktop.type",
+                "desktop.safe_key",
+                "desktop.click_ui_element",
+                "desktop.ui_elements",
+            ],
+        }
+    )
+
+    start_payload = port.workflow_run_payloads[0]
+    tools = [request["tool"] for request in start_payload["direct_tool_requests"]]
+    assert tools == [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.safe_shortcut",
+        "desktop.type",
+        "desktop.safe_key",
+        "desktop.click_ui_element",
+        "desktop.ui_elements",
+    ]
+    assert {
+        request.get("workflow_id")
+        for request in start_payload["direct_tool_requests"]
+    } == {"workflow-1"}
+    assert {
+        request.get("workflow_run_id")
+        for request in start_payload["direct_tool_requests"]
+    } == {None}
+    assert workflow_run.task_core is not None
+    assert [todo.step_id for todo in workflow_run.task_core.todos] == [
+        "discover-media-app",
+        "open-media-app",
+        "focus-media-app-search",
+        "type-media-search-query",
+        "submit-media-search",
+        "play-media-search-result",
+        "verify-media-search",
+    ]
     plan_event = next(
         event for event in workflow_run.events if event.event_type == "workflow.run.plan.created"
     )
