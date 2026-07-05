@@ -275,6 +275,7 @@ _RUNTIME_PLANNER_MEDIA_PLAYBACK_TOOLS = frozenset(
         "desktop.shortcut",
         "desktop.hotkey",
         "desktop.safe_type_text",
+        "desktop.type",
         "desktop.type_text",
         "desktop.type_into_ui_element",
         "desktop.click_ui_element",
@@ -549,6 +550,7 @@ _RUNTIME_PLANNER_DESKTOP_OPERATION_TOOLS = frozenset(
         "desktop.open_path_with_app",
         "app.open_path_with_app",
         "desktop.click",
+        "desktop.type",
         "desktop.type_text",
         "desktop.search_submit",
         "desktop.submit_foreground",
@@ -699,7 +701,7 @@ def _runtime_planner_desktop_request_is_complete(request: dict[str, Any]) -> boo
         return _has_text_input(request_input, "target") and _has_text_input(request_input, "text")
     if tool_name == "desktop.click":
         return _has_numeric_input(request_input, "x") and _has_numeric_input(request_input, "y")
-    if tool_name == "desktop.type_text":
+    if tool_name in {"desktop.type", "desktop.type_text"}:
         return _has_text_input(request_input, "text")
     return False
 

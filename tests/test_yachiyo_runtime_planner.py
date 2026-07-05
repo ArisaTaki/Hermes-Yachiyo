@@ -21726,6 +21726,22 @@ def test_runtime_planner_routes_direct_communication_send_sequence() -> None:
     assert generic_send.input_preview == {"key": "return", "modifiers": []}
     assert generic_send.approval_required is True
 
+    generic_selection = planner_first_direct_tool_selection(
+        "打开 Slack 发消息给 yachiyo：hello",
+        ["app.open", "desktop.shortcut", "desktop.type"],
+    )
+    assert generic_selection.selected_source == "runtime_planner"
+    assert [request["tool"] for request in generic_selection.requests] == [
+        "app.open",
+        "desktop.shortcut",
+        "desktop.type",
+        "desktop.shortcut",
+        "desktop.type",
+        "desktop.shortcut",
+    ]
+    assert generic_selection.requests[2]["input"] == {"text": "yachiyo"}
+    assert generic_selection.requests[4]["input"] == {"text": "hello"}
+
 
 def test_runtime_planner_uses_observed_safe_communication_when_shortcut_is_missing() -> None:
     allowed_tools = [
