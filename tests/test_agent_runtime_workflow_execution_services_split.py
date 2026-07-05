@@ -95,6 +95,70 @@ def test_build_runtime_workflow_execution_services_wires_continuation_approval_a
     assert bundle.workflow_cancellation._timeline is timeline_factory
 
 
+def test_runtime_workflow_execution_services_forwards_runtime_context() -> None:
+    class Engine:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, Any]] = []
+
+        def _execute_agent_run(
+            self,
+            run_id: str,
+            agent: dict[str, Any],
+            user_goal: str,
+            **kwargs: Any,
+        ) -> dict[str, Any]:
+            self.calls.append(
+                {
+                    "run_id": run_id,
+                    "agent": agent,
+                    "user_goal": user_goal,
+                    "kwargs": kwargs,
+                }
+            )
+            return {"run_id": run_id, "status": "completed", "result": "done"}
+
+    engine = Engine()
+    envelope = {"requests": [{"request_id": "open-music", "tool_name": "app.open"}]}
+    metadata = {"yachiyo_runtime_planner": True}
+    bundle = build_runtime_workflow_execution_services(
+        engine=engine,
+        iso_epoch=lambda _value: 0.0,
+        claim_pending_approval=lambda *_args, **_kwargs: True,
+        get_current_run=lambda run_id: {"run_id": run_id},
+        pending_approval_private=lambda _run_id: None,
+        get_run=lambda run_id: {"run_id": run_id},
+        merge_workflow_child_run_outcome=lambda *_args, **_kwargs: None,
+        timeline_factory=lambda event, detail="", **extra: {
+            "event": event,
+            "detail": detail,
+            **extra,
+        },
+        append_run_event=lambda _run_id, _event_type, _payload: None,
+        update_run=lambda run_id, **kwargs: {"run_id": run_id, **kwargs},
+        update_run_group=lambda run_group_id, **kwargs: {
+            "run_group_id": run_group_id,
+            **kwargs,
+        },
+        approve_workflow_node=lambda run_id, **kwargs: {"run_id": run_id, **kwargs},
+    )
+
+    result = bundle.workflow_continuation._execute_agent_run_callback(
+        "child_run",
+        {"agent_id": "agent_research"},
+        "Open Music.",
+        upstream="Previous step",
+        workflow_run_id="workflow_run",
+        runtime_execution_envelope=envelope,
+        runtime_execution_metadata=metadata,
+    )
+
+    assert result["status"] == "completed"
+    kwargs = engine.calls[0]["kwargs"]
+    assert kwargs["runtime_execution_envelope"] is envelope
+    assert kwargs["runtime_execution_metadata"] is metadata
+    assert kwargs["workflow_run_id"] == "workflow_run"
+
+
 def test_build_runtime_workflow_execution_services_prefers_explicit_planning_ports() -> None:
     engine = object()
 

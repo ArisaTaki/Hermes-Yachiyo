@@ -1118,6 +1118,43 @@ def test_workflow_continuation_uses_injected_subworkflow_execution_ports() -> No
     assert workflow_event["artifact_count"] == 1
 
 
+def test_workflow_continuation_execute_agent_run_forwards_runtime_context() -> None:
+    received: list[dict[str, Any]] = []
+    envelope = {"requests": [{"request_id": "open-music", "tool_name": "app.open"}]}
+    metadata = {"yachiyo_runtime_planner": True}
+    coordinator = WorkflowContinuationCoordinator(
+        object(),
+        execute_agent_run=lambda run_id, agent, user_goal, **kwargs: received.append(
+            {
+                "run_id": run_id,
+                "agent": agent,
+                "user_goal": user_goal,
+                "kwargs": kwargs,
+            }
+        )
+        or {"run_id": run_id, "status": "completed", "result": "done"},
+    )
+
+    result = coordinator._execute_agent_run(
+        "child_run",
+        {"agent_id": "agent_research"},
+        "Open Music.",
+        upstream="Previous step",
+        run_group_id="workflow_group",
+        workflow_run_id="workflow_run",
+        runtime_execution_envelope=envelope,
+        runtime_execution_metadata=metadata,
+        daily_desktop_planning_context="Open Music.",
+    )
+
+    assert result["status"] == "completed"
+    kwargs = received[0]["kwargs"]
+    assert kwargs["runtime_execution_envelope"] is envelope
+    assert kwargs["runtime_execution_metadata"] is metadata
+    assert kwargs["workflow_run_id"] == "workflow_run"
+    assert kwargs["daily_desktop_planning_context"] == "Open Music."
+
+
 class FakeWorkflowTraversalEngine:
     def __init__(self) -> None:
         self.events: list[tuple[str, str, dict[str, Any]]] = []

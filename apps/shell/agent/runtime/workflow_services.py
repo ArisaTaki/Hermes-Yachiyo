@@ -149,6 +149,8 @@ def build_runtime_workflow_execution_services(
         workflow_run_id: str = "",
         direct_tool_request: dict[str, Any] | None = None,
         direct_tool_requests: list[dict[str, Any]] | None = None,
+        runtime_execution_envelope: dict[str, Any] | None = None,
+        runtime_execution_metadata: dict[str, Any] | None = None,
         daily_desktop_planning_context: str | None = None,
     ) -> dict[str, Any]:
         return engine._execute_agent_run(
@@ -160,6 +162,8 @@ def build_runtime_workflow_execution_services(
             workflow_run_id=workflow_run_id,
             direct_tool_request=direct_tool_request,
             direct_tool_requests=direct_tool_requests,
+            runtime_execution_envelope=runtime_execution_envelope,
+            runtime_execution_metadata=runtime_execution_metadata,
             daily_desktop_planning_context=daily_desktop_planning_context,
         )
 

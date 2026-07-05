@@ -323,6 +323,107 @@ def test_workflow_agent_node_execution_prefers_explicit_direct_requests_over_env
     assert agent["tool_policy"]["approval_required"]["app.open"] is True
 
 
+def test_workflow_agent_node_execution_passes_contextualized_runtime_envelope() -> None:
+    calls: list[dict[str, object]] = []
+    handoff = WorkflowAgentNodeHandoff.from_agent(
+        {"id": "research", "type": "agent"},
+        agent={
+            "agent_id": "agent_research",
+            "tool_policy": {"allowed_tools": ["app.open"], "approval_required": {}},
+        },
+        label="Research",
+        kind="agent",
+        step_task="Open Music.",
+        child_goal="Open Music from workflow.",
+        context="",
+        has_agent_upstream=False,
+    )
+    ports = WorkflowNodePortBundle(
+        insert_run=lambda **_kwargs: {"run_id": "child_run"},
+        execute_agent_run=lambda run_id, _agent, _goal, **kwargs: calls.append(
+            {
+                "run_id": run_id,
+                "direct_tool_requests": kwargs.get("direct_tool_requests"),
+                "runtime_execution_envelope": kwargs.get("runtime_execution_envelope"),
+                "runtime_execution_metadata": kwargs.get("runtime_execution_metadata"),
+            }
+        )
+        or {"run_id": run_id, "status": "completed", "result": "done"},
+        workflow_child_artifact_refs=lambda _run, _label: [],
+    )
+
+    WorkflowAgentNodeExecution.from_handoff(
+        object(),
+        handoff,
+        run_group_id="workflow_group",
+        workflow_run_id="workflow_run",
+        runtime_execution_envelope={
+            "decision_id": "decision-workflow",
+            "requests": [
+                {
+                    "request_id": "current-node",
+                    "tool_name": "app.open",
+                    "input": {"app_name": "Music"},
+                    "workflow_node_id": "research",
+                },
+                {
+                    "request_id": "other-node",
+                    "tool_name": "app.open",
+                    "input": {"app_name": "Notes"},
+                    "workflow_node_id": "notes",
+                },
+            ],
+            "task_core": {"workspace": {"context": {}}},
+        },
+        runtime_execution_metadata={
+            "yachiyo_runtime_planner": True,
+            "yachiyo_execution_envelope": {
+                "decision_id": "decision-metadata",
+                "requests": [
+                    {
+                        "request_id": "metadata-current",
+                        "tool_name": "app.open",
+                        "input": {"app_name": "Music"},
+                        "workflow_node_id": "research",
+                    },
+                    {
+                        "request_id": "metadata-other",
+                        "tool_name": "app.open",
+                        "input": {"app_name": "Notes"},
+                        "workflow_node_id": "notes",
+                    },
+                ],
+                "task_core": {"workspace": {"context": {}}},
+            },
+        },
+        ports=ports,
+    )
+
+    envelope = calls[0]["runtime_execution_envelope"]
+    assert isinstance(envelope, dict)
+    assert [request["request_id"] for request in envelope["requests"]] == ["current-node"]
+    envelope_request = envelope["requests"][0]
+    assert envelope_request["workflow_run_id"] == "workflow_run"
+    assert envelope_request["workflow_node_id"] == "research"
+    assert envelope_request["workflow_node_label"] == "Research"
+    assert envelope_request["workflow_node_kind"] == "agent"
+    assert envelope_request["agent_id"] == "agent_research"
+    assert envelope["task_core"]["workspace"]["context"]["workflow_node_id"] == "research"
+
+    metadata = calls[0]["runtime_execution_metadata"]
+    assert isinstance(metadata, dict)
+    assert metadata["workflow_run_id"] == "workflow_run"
+    metadata_envelope = metadata["yachiyo_execution_envelope"]
+    assert [request["request_id"] for request in metadata_envelope["requests"]] == [
+        "metadata-current"
+    ]
+    assert metadata_envelope["requests"][0]["agent_id"] == "agent_research"
+
+    direct_requests = calls[0]["direct_tool_requests"]
+    assert isinstance(direct_requests, list)
+    assert [request["request_id"] for request in direct_requests] == ["current-node"]
+
+
 def test_workflow_agent_node_execution_prepares_child_before_artifact_refs() -> None:
     calls: list[tuple[str, str]] = []
     handoff = WorkflowAgentNodeHandoff.from_agent(

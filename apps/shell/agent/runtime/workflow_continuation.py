@@ -394,6 +394,8 @@ class WorkflowContinuationCoordinator:
         workflow_run_id: str = "",
         direct_tool_request: dict[str, Any] | None = None,
         direct_tool_requests: list[dict[str, Any]] | None = None,
+        runtime_execution_envelope: dict[str, Any] | None = None,
+        runtime_execution_metadata: dict[str, Any] | None = None,
         daily_desktop_planning_context: str | None = None,
     ) -> dict[str, Any]:
         if self._execute_agent_run_callback is not None:
@@ -415,6 +417,22 @@ class WorkflowContinuationCoordinator:
                 and supports_keyword(self._execute_agent_run_callback, "direct_tool_requests")
             ):
                 kwargs["direct_tool_requests"] = direct_tool_requests
+            if (
+                runtime_execution_envelope is not None
+                and supports_keyword(
+                    self._execute_agent_run_callback,
+                    "runtime_execution_envelope",
+                )
+            ):
+                kwargs["runtime_execution_envelope"] = runtime_execution_envelope
+            if (
+                runtime_execution_metadata is not None
+                and supports_keyword(
+                    self._execute_agent_run_callback,
+                    "runtime_execution_metadata",
+                )
+            ):
+                kwargs["runtime_execution_metadata"] = runtime_execution_metadata
             if (
                 daily_desktop_planning_context is not None
                 and supports_keyword(
@@ -438,6 +456,8 @@ class WorkflowContinuationCoordinator:
             workflow_run_id=workflow_run_id,
             direct_tool_request=direct_tool_request,
             direct_tool_requests=direct_tool_requests,
+            runtime_execution_envelope=runtime_execution_envelope,
+            runtime_execution_metadata=runtime_execution_metadata,
             daily_desktop_planning_context=daily_desktop_planning_context,
         )
 

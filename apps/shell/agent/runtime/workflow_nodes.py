@@ -17,6 +17,7 @@ from apps.shell.yachiyo_agent.entrypoint_tool_selection import (
     planner_first_direct_tool_selection,
 )
 from apps.shell.yachiyo_agent.runtime_execution import (
+    runtime_execution_envelope_payload_with_request_context,
     runtime_execution_requests_from_envelope_payload,
     runtime_execution_requests_from_metadata,
 )
@@ -321,6 +322,146 @@ def _workflow_node_direct_tool_request_with_context(
     return enriched
 
 
+def _workflow_node_runtime_context(
+    handoff: "WorkflowAgentNodeHandoff",
+    *,
+    workflow_run_id: str,
+) -> dict[str, str]:
+    context = {
+        **handoff.node_info(),
+        "workflow_run_id": workflow_run_id,
+        "agent_id": handoff.agent_id,
+    }
+    return {
+        str(key): text
+        for key, value in context.items()
+        if str(key).strip() and (text := str(value or "").strip())
+    }
+
+
+def _workflow_node_runtime_execution_envelope(
+    envelope: Any | None,
+    handoff: "WorkflowAgentNodeHandoff",
+    agent: dict[str, Any],
+    *,
+    workflow_run_id: str,
+    direct_request_fallback_node_id: str,
+) -> dict[str, Any] | None:
+    if not isinstance(envelope, Mapping):
+        return None
+    context = _workflow_node_runtime_context(handoff, workflow_run_id=workflow_run_id)
+    payload = dict(envelope)
+    requests = payload.get("requests")
+    if isinstance(requests, list):
+        payload["requests"] = _workflow_node_runtime_execution_requests(
+            requests,
+            handoff,
+            agent,
+            direct_request_fallback_node_id=direct_request_fallback_node_id,
+        )
+    enriched = runtime_execution_envelope_payload_with_request_context(payload, context)
+    return _runtime_execution_envelope_with_agent_context(enriched, context)
+
+
+def _workflow_node_runtime_execution_requests(
+    requests: list[Any],
+    handoff: "WorkflowAgentNodeHandoff",
+    agent: dict[str, Any],
+    *,
+    direct_request_fallback_node_id: str,
+) -> list[dict[str, Any]]:
+    allowed_tools = _agent_allowed_tools(agent)
+    return [
+        dict(request)
+        for request in requests
+        if isinstance(request, Mapping)
+        and _workflow_node_runtime_execution_request_tool_allowed(
+            request,
+            allowed_tools=allowed_tools,
+        )
+        and _workflow_node_request_matches(
+            dict(request),
+            handoff,
+            direct_request_fallback_node_id=direct_request_fallback_node_id,
+        )
+    ]
+
+
+def _workflow_node_runtime_execution_request_tool_allowed(
+    request: Mapping[str, Any],
+    *,
+    allowed_tools: list[str] | None,
+) -> bool:
+    tool_name = str(request.get("tool_name") or request.get("tool") or "").strip()
+    if not tool_name:
+        return False
+    allowed = {
+        str(tool or "").strip()
+        for tool in allowed_tools or []
+        if str(tool or "").strip()
+    }
+    return not allowed or tool_name in allowed
+
+
+def _runtime_execution_envelope_with_agent_context(
+    envelope: Mapping[str, Any],
+    context: Mapping[str, str],
+) -> dict[str, Any]:
+    agent_id = str(context.get("agent_id") or "").strip()
+    if not agent_id:
+        return dict(envelope)
+    requests = envelope.get("requests")
+    if not isinstance(requests, list):
+        return dict(envelope)
+    return {
+        **dict(envelope),
+        "requests": [
+            _runtime_execution_request_with_agent_context(request, agent_id)
+            if isinstance(request, Mapping)
+            else request
+            for request in requests
+        ],
+    }
+
+
+def _runtime_execution_request_with_agent_context(
+    request: Mapping[str, Any],
+    agent_id: str,
+) -> dict[str, Any]:
+    payload = dict(request)
+    if not str(payload.get("agent_id") or "").strip():
+        payload["agent_id"] = agent_id
+    return payload
+
+
+def _workflow_node_runtime_execution_metadata(
+    metadata: Mapping[str, Any] | None,
+    handoff: "WorkflowAgentNodeHandoff",
+    agent: dict[str, Any],
+    *,
+    workflow_run_id: str,
+    direct_request_fallback_node_id: str,
+) -> dict[str, Any] | None:
+    if not isinstance(metadata, Mapping):
+        return None
+    context = _workflow_node_runtime_context(handoff, workflow_run_id=workflow_run_id)
+    payload = dict(metadata)
+    for key in ("runtime_execution_envelope", "yachiyo_execution_envelope"):
+        envelope = payload.get(key)
+        contextualized = _workflow_node_runtime_execution_envelope(
+            envelope,
+            handoff,
+            agent,
+            workflow_run_id=workflow_run_id,
+            direct_request_fallback_node_id=direct_request_fallback_node_id,
+        )
+        if contextualized is not None:
+            payload[key] = contextualized
+    for key, value in context.items():
+        payload.setdefault(key, value)
+    return payload
+
+
 def _agent_allowed_tools(agent: dict[str, Any]) -> list[str] | None:
     policy = agent.get("tool_policy") if isinstance(agent.get("tool_policy"), dict) else {}
     allowed_tools = policy.get("allowed_tools") if isinstance(policy, dict) else None
@@ -520,6 +661,20 @@ class WorkflowAgentNodeExecution:
             workflow_run_id=workflow_run_id,
             direct_request_fallback_node_id=direct_request_fallback_node_id,
         )
+        node_runtime_execution_envelope = _workflow_node_runtime_execution_envelope(
+            runtime_execution_envelope,
+            handoff,
+            execution_agent,
+            workflow_run_id=workflow_run_id,
+            direct_request_fallback_node_id=direct_request_fallback_node_id,
+        )
+        node_runtime_execution_metadata = _workflow_node_runtime_execution_metadata(
+            runtime_execution_metadata,
+            handoff,
+            execution_agent,
+            workflow_run_id=workflow_run_id,
+            direct_request_fallback_node_id=direct_request_fallback_node_id,
+        )
         execution_agent = agent_with_direct_request_approvals(
             execution_agent,
             node_direct_tool_requests,
@@ -530,6 +685,16 @@ class WorkflowAgentNodeExecution:
             execute_kwargs["workflow_run_id"] = workflow_run_id
         if node_direct_tool_requests and supports_keyword(execute_agent_run, "direct_tool_requests"):
             execute_kwargs["direct_tool_requests"] = node_direct_tool_requests
+        if node_runtime_execution_envelope is not None and supports_keyword(
+            execute_agent_run,
+            "runtime_execution_envelope",
+        ):
+            execute_kwargs["runtime_execution_envelope"] = node_runtime_execution_envelope
+        if node_runtime_execution_metadata is not None and supports_keyword(
+            execute_agent_run,
+            "runtime_execution_metadata",
+        ):
+            execute_kwargs["runtime_execution_metadata"] = node_runtime_execution_metadata
         if (
             planning_context
             and supports_keyword(execute_agent_run, "daily_desktop_planning_context")
