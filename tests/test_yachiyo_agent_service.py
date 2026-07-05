@@ -773,6 +773,40 @@ def test_yachiyo_agent_service_preserves_deferred_replan_recovery_context() -> N
     assert continuation["task_verification_targets"][0]["step_id"] == "open-app"
 
 
+def test_yachiyo_agent_service_blocks_auto_start_for_deferred_approval_replan() -> None:
+    port = _DeferredReplanRecoveryTaskRuntimePort()
+    service = YachiyoAgentService(port)
+
+    continuation = service.plan_replan_recovery_action(
+        "task-1",
+        {
+            "request_id": "replan-1",
+            "action_id": "replan-1:action:1:desktop.list_apps",
+            "conversation_id": "chat-1",
+        },
+    )
+
+    assert continuation.approval_required is True
+    assert continuation.auto_start_eligible is False
+    assert continuation.auto_start_blockers == [
+        "approval_required",
+        "deferred_tool_not_auto_safe",
+    ]
+    assert continuation.metadata["replan_auto_start_eligible"] is False
+    assert continuation.metadata["replan_auto_start_blockers"] == [
+        "approval_required",
+        "deferred_tool_not_auto_safe",
+    ]
+
+    port = _DeferredReplanRecoveryTaskRuntimePort()
+    service = YachiyoAgentService(port)
+    assert service.start_next_replan_continuation(
+        "task-1",
+        {"conversation_id": "chat-1"},
+    ) is None
+    assert [name for name, _payload in port.calls] == ["get_task_timeline"]
+
+
 def test_yachiyo_agent_service_auto_starts_next_safe_replan_continuation() -> None:
     port = _ReplanRecoveryTaskRuntimePort()
     service = YachiyoAgentService(port)

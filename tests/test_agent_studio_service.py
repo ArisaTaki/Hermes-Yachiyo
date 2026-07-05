@@ -1812,6 +1812,35 @@ def test_agent_studio_service_preserves_deferred_replan_recovery_context() -> No
     assert continuation["task_verification_targets"][0]["step_id"] == "open-app"
 
 
+def test_agent_studio_service_blocks_auto_start_for_deferred_approval_replan() -> None:
+    port = _DeferredReplanRecoveryActionPort()
+    service = AgentStudioService(port)
+
+    continuation = service.plan_replan_recovery_action(
+        "run-1",
+        {
+            "request_id": "replan-1",
+            "action_id": "replan-1:action:1:desktop.list_apps",
+            "agent_id": "agent-1",
+        },
+    )
+
+    assert continuation.approval_required is True
+    assert continuation.auto_start_eligible is False
+    assert continuation.auto_start_blockers == [
+        "approval_required",
+        "deferred_tool_not_auto_safe",
+    ]
+
+    port = _DeferredReplanRecoveryActionPort()
+    service = AgentStudioService(port)
+    assert service.start_next_replan_continuation(
+        "run-1",
+        {"agent_id": "agent-1", "client_run_id": "client-auto-1"},
+    ) is None
+    assert [name for name, _payload in port.calls] == ["get_run_timeline"]
+
+
 def test_agent_studio_service_starts_runtime_envelope_retry_action_direct_run() -> None:
     port = _ReplanRecoveryActionPort()
     service = AgentStudioService(port)

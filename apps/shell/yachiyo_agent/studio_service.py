@@ -1598,6 +1598,23 @@ _AUTO_CONTINUATION_SAFE_TOOLS = {
 }
 
 
+_AUTO_CONTINUATION_APPROVAL_TOOLS = {
+    "app.focus_and_click_ui_element",
+    "app.focus_and_type_into_ui_element",
+    "app.open_and_click_ui_element",
+    "app.open_and_type_into_ui_element",
+    "desktop.click",
+    "desktop.click_ui_element",
+    "desktop.safe_click",
+    "desktop.safe_type_text",
+    "desktop.type",
+    "desktop.type_into_ui_element",
+    "desktop.type_text",
+    "python.run",
+    "terminal.run",
+}
+
+
 def _next_replan_recovery_action_continuation(
     source_run: Any,
     payload: Mapping[str, Any],
@@ -1749,6 +1766,7 @@ def _replan_continuation_auto_start_context(
     approval_required = bool(
         action.approval_required
         or direct_request.get("approval_required")
+        or _replan_continuation_deferred_approval_required(direct_request)
         or str(action.approval_status or "").strip().lower() in {
             "pending",
             "required",
@@ -1765,6 +1783,18 @@ def _replan_continuation_auto_start_context(
         blockers.append("high_risk")
     if tool_name and tool_name not in _AUTO_CONTINUATION_SAFE_TOOLS:
         blockers.append("tool_not_auto_safe")
+    for key, deferred_tool_name in _replan_continuation_deferred_tool_names(
+        direct_request
+    ):
+        if deferred_tool_name in _AUTO_CONTINUATION_SAFE_TOOLS:
+            continue
+        blocker = (
+            "deferred_tool_not_auto_safe"
+            if key == "deferred_tool"
+            else "deferred_continuation_tool_not_auto_safe"
+        )
+        if blocker not in blockers:
+            blockers.append(blocker)
     return {
         "approval_required": approval_required,
         "blockers": blockers,
@@ -1774,6 +1804,40 @@ def _replan_continuation_auto_start_context(
             else "manual_replan_continuation_required"
         ),
     }
+
+
+def _replan_continuation_deferred_approval_required(
+    direct_request: Mapping[str, Any],
+) -> bool:
+    for _key, tool_name in _replan_continuation_deferred_tool_names(direct_request):
+        if tool_name in _AUTO_CONTINUATION_APPROVAL_TOOLS:
+            return True
+    for item in _replan_continuation_deferred_items(direct_request):
+        if bool(item.get("approval_required")):
+            return True
+        if _first_text(item.get("risk_level")).lower() in {"high", "critical"}:
+            return True
+    return False
+
+
+def _replan_continuation_deferred_tool_names(
+    direct_request: Mapping[str, Any],
+) -> list[tuple[str, str]]:
+    tools: list[tuple[str, str]] = []
+    deferred_tool = _first_text(direct_request.get("deferred_tool"))
+    if deferred_tool:
+        tools.append(("deferred_tool", deferred_tool))
+    for item in _replan_continuation_deferred_items(direct_request):
+        tool_name = _first_text(item.get("tool"), item.get("tool_name"))
+        if tool_name:
+            tools.append(("deferred_continuation_tool", tool_name))
+    return tools
+
+
+def _replan_continuation_deferred_items(
+    direct_request: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    return _mapping_list(direct_request.get("deferred_continuation"))
 
 
 def _agent_start_payload_from_replan_continuation(
