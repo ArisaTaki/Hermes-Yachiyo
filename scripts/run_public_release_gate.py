@@ -63,6 +63,17 @@ def public_release_gate_checks(
             command=(sys.executable, "scripts/smoke_planner_runtime_tool_parity.py"),
         ),
         GateCheck(
+            id="oha_desktop_agent_release_smoke",
+            label="Oha desktop-agent Core, Executor, Studio product smoke",
+            command=(
+                sys.executable,
+                "scripts/smoke_oha_desktop_agent_release.py",
+                "--report-json",
+                str(tmp_dir / "oha-desktop-agent-release-smoke.json"),
+            ),
+            report_json=tmp_dir / "oha-desktop-agent-release-smoke.json",
+        ),
+        GateCheck(
             id="release_pytest",
             label="Focused release pytest coverage",
             command=(
@@ -546,10 +557,11 @@ def _release_smoke_assessment(
     report_paths = [_resolve_path(Path(path)) for path in extra_reports]
     report_paths.extend(_resolve_path(Path(path)) for path in public_demo_reports)
     for check in checks:
-        if check.id == "public_demo" and check.report_json is not None:
-            resolved = check.report_json.resolve(strict=False)
-            if all(path.resolve(strict=False) != resolved for path in report_paths):
-                report_paths.append(check.report_json)
+        if check.report_json is None:
+            continue
+        resolved = check.report_json.resolve(strict=False)
+        if all(path.resolve(strict=False) != resolved for path in report_paths):
+            report_paths.append(check.report_json)
     command: list[str] = [
         sys.executable,
         "scripts/summarize_release_smoke.py",

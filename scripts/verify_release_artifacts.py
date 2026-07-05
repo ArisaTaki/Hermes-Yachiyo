@@ -191,7 +191,7 @@ USER_FACING_RELEASE_DOC_REQUIRED_TEXT: tuple[tuple[Path, str, str], ...] = (
     ),
     (
         Path("docs/public-release-readiness.md"),
-        "missing 9-item release-smoke evidence",
+        "missing 10-item release-smoke evidence",
         "public release readiness guide must document strict release-smoke evidence enforcement",
     ),
     (
@@ -813,7 +813,7 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release packaging docs must document public release preflight gate",
     ),
     (
-        "release artifact guard、secret redaction、focused release pytest、安全 public-demo smoke 和本轮 gate evidence 的脱敏 diagnostics bundle",
+        "release artifact guard、secret redaction、Agent market-parity、Planner-to-runtime tool parity、Oha desktop-agent product smoke、focused release pytest、安全 public-demo smoke 和本轮 gate evidence 的脱敏 diagnostics bundle",
         "release packaging docs must document public release gate coverage",
     ),
     (
@@ -845,8 +845,8 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release packaging docs must document public demo release assessment fields",
     ),
     (
-        "汇总 9 项用户路径覆盖度",
-        "release packaging docs must document the 9-item release smoke checklist",
+        "汇总 10 项用户路径覆盖度",
+        "release packaging docs must document the 10-item release smoke checklist",
     ),
     (
         "--reuse-current-reports",

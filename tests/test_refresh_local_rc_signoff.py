@@ -930,7 +930,7 @@ def test_refresh_local_rc_signoff_print_status_uses_current_draft(
             {
                 "status": "incomplete",
                 "passed_count": 6,
-                "item_count": 9,
+                "item_count": 10,
                 "missing_item_ids": ["chat_desktop_task", "workflow", "public_demo"],
                 "items": [
                     {
@@ -1003,7 +1003,7 @@ def test_refresh_local_rc_signoff_print_status_uses_current_draft(
     assert "blocker runtime_blocking_condition:desktop_session_locked" in output
     assert "blocker provider_credentials_missing:oha_yachiyo_smoke_credentials" in output
     assert "local RC release smoke:" in output
-    assert "- user paths: 6/9 passed" in output
+    assert "- user paths: 6/10 passed" in output
     assert "chat_desktop_task" in output
     assert "workflow" in output
     assert "public_demo" in output

@@ -80,8 +80,8 @@ def _write_release_smoke_report(command: list[str], *, ok: bool) -> None:
     payload = {
         "ok": ok,
         "status": "passed" if ok else "incomplete",
-        "item_count": 9,
-        "passed_count": 9 if ok else 9 - len(missing_item_ids),
+        "item_count": 10,
+        "passed_count": 10 if ok else 10 - len(missing_item_ids),
         "missing_count": 0 if ok else len(missing_item_ids),
         "missing_item_ids": [] if ok else missing_item_ids,
         "items": [],
@@ -209,7 +209,7 @@ def test_public_release_gate_defaults_to_safe_preflight_with_demo_blockers(
     assert summary["ok"] is True
     assert summary["release_ready"] is False
     assert summary["status"] == "needs_release_evidence"
-    assert summary["check_count"] == 7
+    assert summary["check_count"] == 8
     assert summary["failed_count"] == 0
     assert [command[:2] for command in commands[:2]] == [
         [sys.executable, "scripts/verify_release_artifacts.py"],
@@ -222,6 +222,12 @@ def test_public_release_gate_defaults_to_safe_preflight_with_demo_blockers(
     assert any(
         "scripts/smoke_planner_runtime_tool_parity.py" in command
         for command in commands
+    )
+    oha_product_command = next(
+        command for command in commands if "scripts/smoke_oha_desktop_agent_release.py" in command
+    )
+    assert oha_product_command[oha_product_command.index("--report-json") + 1] == str(
+        tmp_path / "tmp" / "gate" / "oha-desktop-agent-release-smoke.json"
     )
     release_pytest_command = next(command for command in commands if "pytest" in command)
     assert "tests/test_public_release_gate.py" in release_pytest_command
@@ -243,6 +249,9 @@ def test_public_release_gate_defaults_to_safe_preflight_with_demo_blockers(
     release_smoke_command = next(
         command for command in commands if "scripts/summarize_release_smoke.py" in command
     )
+    assert str(
+        tmp_path / "tmp" / "gate" / "oha-desktop-agent-release-smoke.json"
+    ) in release_smoke_command
     assert str(tmp_path / "tmp" / "gate" / "diagnostics.zip") in release_smoke_command
     public_demo = next(item for item in summary["checks"] if item["id"] == "public_demo")
     assert public_demo["release_level"] == "partial_demo_ready"
@@ -484,8 +493,8 @@ def test_public_release_gate_does_not_double_count_public_demo_release_smoke_blo
                     {
                         "ok": False,
                         "status": "incomplete",
-                        "item_count": 9,
-                        "passed_count": 8,
+                        "item_count": 10,
+                        "passed_count": 9,
                         "missing_count": 1,
                         "missing_item_ids": ["public_demo"],
                         "items": [],

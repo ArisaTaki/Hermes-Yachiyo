@@ -83,10 +83,32 @@ def _public_demo_report_with_passed_flows(passed_flow_ids: set[str]) -> dict[str
     }
 
 
+def _oha_desktop_agent_release_smoke_report() -> dict[str, object]:
+    section_ids = release_smoke.OHA_DESKTOP_AGENT_SECTION_EVIDENCE.keys()
+    return {
+        "ok": True,
+        "mode": release_smoke.OHA_DESKTOP_AGENT_RELEASE_SMOKE_MODE,
+        "section_count": len(section_ids),
+        "failed_sections": [],
+        "checks": {"all_sections_passed": True},
+        "sections": [
+            {
+                "id": section_id,
+                "objective": f"cover {section_id}",
+                "ok": True,
+                "mode": section_id,
+                "report": {"ok": True},
+            }
+            for section_id in section_ids
+        ],
+    }
+
+
 def test_release_smoke_summary_passes_with_required_evidence(tmp_path, monkeypatch):
     monkeypatch.setattr(release_smoke, "ROOT", tmp_path)
     report_path = tmp_path / "tmp" / "rc.json"
     public_demo_path = tmp_path / "tmp" / "public-demo.json"
+    oha_report_path = tmp_path / "tmp" / "oha-desktop-agent-release-smoke.json"
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(
         json.dumps(
@@ -121,18 +143,27 @@ def test_release_smoke_summary_passes_with_required_evidence(tmp_path, monkeypat
         ),
         encoding="utf-8",
     )
+    oha_report_path.write_text(
+        json.dumps(_oha_desktop_agent_release_smoke_report()),
+        encoding="utf-8",
+    )
     diagnostics_zip = tmp_path / "tmp" / "diagnostics.zip"
     _diagnostics_zip(diagnostics_zip)
 
     summary = release_smoke.summarize_release_smoke(
-        [report_path, public_demo_path],
+        [report_path, public_demo_path, oha_report_path],
         diagnostics_zips=[diagnostics_zip],
     )
 
     assert summary["ok"] is True
     assert summary["status"] == "passed"
-    assert summary["passed_count"] == summary["item_count"] == 9
+    assert summary["passed_count"] == summary["item_count"] == 10
     assert summary["missing_item_ids"] == []
+    oha_item = next(item for item in summary["items"] if item["id"] == "oha_desktop_agent_product")
+    assert oha_item["present_evidence_ids"] == [
+        release_smoke.OHA_DESKTOP_AGENT_RELEASE_SMOKE_MODE
+    ]
+    assert "oha_deepagent_core" in oha_item["related_evidence_ids"]
 
 
 def test_release_smoke_summary_reports_missing_items_and_next_actions(
@@ -150,6 +181,7 @@ def test_release_smoke_summary_reports_missing_items_and_next_actions(
     summary = release_smoke.summarize_release_smoke([report_path])
 
     assert summary["ok"] is False
+    assert "oha_desktop_agent_product" in summary["missing_item_ids"]
     assert "diagnostics_export" in summary["missing_item_ids"]
     assert "public_demo" in summary["missing_item_ids"]
     artifact = next(item for item in summary["items"] if item["id"] == "artifact_readback")

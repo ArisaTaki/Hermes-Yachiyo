@@ -69,7 +69,31 @@ ELECTRON_UI_PUBLIC_DEMO_FLOW_MAP: dict[str, str] = {
 PROVIDER_WORKFLOW_PUBLIC_DEMO_FLOW_ID = "workflow_provider"
 PROVIDER_WORKFLOW_PROVIDER_CHECK_LABEL = "native_workflow_full_chain"
 PROVIDER_WORKFLOW_SMOKE_MODE = "native_workflow_full_chain_smoke"
+OHA_DESKTOP_AGENT_RELEASE_SMOKE_MODE = "oha_desktop_agent_release_smoke"
+OHA_DESKTOP_AGENT_SECTION_EVIDENCE: dict[str, str] = {
+    "deepagent_core": "oha_deepagent_core",
+    "shared_daily_surfaces": "oha_chat_bubble_live2d_runtime",
+    "desktop_executor_before_model": "oha_desktop_executor_before_model",
+    "legacy_facade_planner_ownership": "oha_legacy_facade_planner_ownership",
+    "capability_planner_tool_parity": "oha_capability_planner_tool_parity",
+    "data_analysis_artifacts": "oha_data_analysis_artifacts",
+    "agent_studio_orchestration": "oha_agent_studio_orchestration",
+    "group_run_timeline": "oha_group_run_timeline",
+    "workflow_run_timeline": "oha_workflow_run_timeline",
+    "approval_policy_gate": "oha_approval_policy_gate",
+    "studio_tool_catalog": "oha_studio_tool_catalog",
+}
 SMOKE_ITEMS: tuple[dict[str, Any], ...] = (
+    {
+        "id": "oha_desktop_agent_product",
+        "label": "Oha desktop-agent product smoke covers the new Core, Executor, and Studio path",
+        "required": (OHA_DESKTOP_AGENT_RELEASE_SMOKE_MODE,),
+        "related": tuple(OHA_DESKTOP_AGENT_SECTION_EVIDENCE.values()),
+        "next_action": (
+            "python scripts/smoke_oha_desktop_agent_release.py "
+            "--report-json tmp/oha-desktop-agent-release-smoke.json"
+        ),
+    },
     {
         "id": "packaged_launch",
         "label": "Packaged app launches and uses its own Bridge",
@@ -288,6 +312,11 @@ def _collect_report_evidence(
     )
     _collect_electron_ui_public_demo_evidence(report, source=source, evidence=evidence)
     _collect_provider_workflow_public_demo_evidence(
+        report,
+        source=source,
+        evidence=evidence,
+    )
+    _collect_oha_desktop_agent_release_evidence(
         report,
         source=source,
         evidence=evidence,
@@ -918,6 +947,35 @@ def _provider_workflow_public_demo_evidence(report: Mapping[str, Any]) -> dict[s
             "summary_ok": True,
         }
     return {}
+
+
+def _collect_oha_desktop_agent_release_evidence(
+    report: Mapping[str, Any],
+    *,
+    source: str,
+    evidence: dict[str, list[dict[str, Any]]],
+) -> None:
+    if (
+        report.get("mode") != OHA_DESKTOP_AGENT_RELEASE_SMOKE_MODE
+        or report.get("ok") is not True
+    ):
+        return
+    for section in _dict_list(report.get("sections")):
+        if section.get("ok") is not True:
+            continue
+        section_id = str(section.get("id") or "").strip()
+        evidence_id = OHA_DESKTOP_AGENT_SECTION_EVIDENCE.get(section_id)
+        if not evidence_id:
+            continue
+        _add_evidence(
+            evidence,
+            evidence_id,
+            source=source,
+            kind="oha_desktop_agent_release_section",
+            section_id=section_id,
+            mode=str(section.get("mode") or ""),
+            objective=str(section.get("objective") or ""),
+        )
 
 
 def _canonical_public_demo_flow_ids() -> list[str]:

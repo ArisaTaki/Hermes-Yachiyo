@@ -741,9 +741,9 @@ too large, unreadable, or still secret-like after redaction.
 
 `scripts/summarize_release_smoke.py` now turns existing RC reports, public-demo
 JSON files, single-smoke JSON files, and diagnostics bundle manifests into a
-9-item release-smoke checklist: packaged launch, Chat desktop task, approval
-card, Agent Studio run timeline, GroupRun, Workflow, public demo, artifact
-readback, and diagnostics export. It does not run heavy native/provider/UI
+10-item release-smoke checklist: Oha desktop-agent product smoke, packaged
+launch, Chat desktop task, approval card, Agent Studio run timeline, GroupRun,
+Workflow, public demo, artifact readback, and diagnostics export. It does not run heavy native/provider/UI
 flows; it reports missing evidence and the next commands to run. For partial
 or blocked public-demo reports it now carries through `release_level`,
 `missing_required_flow_ids`, and demo blocker details so the release checklist
@@ -792,11 +792,12 @@ language.
 
 `scripts/run_public_release_gate.py` now provides a cheap public-release
 preflight before the heavier local RC refresh. It runs release artifact guards,
-secret redaction, focused release pytest, the safe public-demo smoke, and a
-redacted diagnostics bundle for the gate evidence, then projects the demo result
-and diagnostics zip into a non-blocking release-smoke assessment. It writes
+secret redaction, Agent market-parity evidence, Planner-to-runtime parity, the
+Oha desktop-agent product smoke, focused release pytest, the safe public-demo
+smoke, and a redacted diagnostics bundle for the gate evidence, then projects
+the demo result, Oha product smoke, and diagnostics zip into a non-blocking release-smoke assessment. It writes
 JSON/Markdown status with `needs_release_evidence` when the safe demo passes but
-full opt-in public-demo evidence or the 9-item release-smoke evidence is still
+full opt-in public-demo evidence or the 10-item release-smoke evidence is still
 missing. Final release signoff can add `--require-release-ready` so partial
 public-demo or release-smoke evidence fails the gate instead of only reporting
 next actions. It also emits `external_requirement_count`,

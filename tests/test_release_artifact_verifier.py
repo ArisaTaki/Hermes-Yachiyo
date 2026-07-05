@@ -914,7 +914,7 @@ def test_verifier_requires_release_packaging_docs_for_release_gates(tmp_path):
     assert "release packaging docs must document strict public release gate mode" in messages
     assert "release packaging docs must document local RC public demo evidence output" in messages
     assert "release packaging docs must document public demo release assessment fields" in messages
-    assert "release packaging docs must document the 9-item release smoke checklist" in messages
+    assert "release packaging docs must document the 10-item release smoke checklist" in messages
     assert "release packaging docs must document local RC signoff resume/reuse mode" in messages
     assert "release packaging docs must document local RC signoff status shortcut" in messages
     assert "release packaging docs must document print-status public demo blocker output" in messages
