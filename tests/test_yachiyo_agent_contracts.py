@@ -562,6 +562,7 @@ def test_runtime_execution_request_projects_verification_evidence() -> None:
         capability_id="workspace.file_read",
         tool_name="workspace.read",
         status="completed",
+        approval_id="approval-read-source",
         output_preview={
             "ok": True,
             "artifact_path": "reports/read-source.md",
@@ -619,6 +620,14 @@ def test_runtime_execution_request_projects_verification_evidence() -> None:
     assert projected is not None
     request = projected.requests[0]
     assert request.status == "completed"
+    assert request.event_ids == ["event-verify-read-source", "event-artifact-read-source"]
+    assert request.tool_call_ids == ["tool-call-read-source"]
+    assert request.approval_ids == ["approval-read-source"]
+    assert request.artifact_ids == ["artifact-read-source"]
+    assert request.artifact_paths == [
+        "reports/read-source-verified.md",
+        "reports/read-source.md",
+    ]
     assert request.verification_status == "verified"
     assert request.verification_step_id == "verify-read-source"
     assert request.verification_event_ids == ["event-verify-read-source"]

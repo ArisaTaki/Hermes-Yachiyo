@@ -69,6 +69,14 @@ def runtime_execution_envelope_with_status_overlay(
         if status:
             request_update["status"] = status
         request_update.update(
+            _request_replay_evidence_update(
+                request,
+                events=event_items,
+                tool_calls=tool_items,
+                approvals=approval_items,
+            )
+        )
+        request_update.update(
             _request_verification_update(
                 request,
                 events=event_items,
@@ -223,6 +231,62 @@ def _request_verification_update(
     return update
 
 
+def _request_replay_evidence_update(
+    request: RuntimeExecutionRequestSnapshot,
+    *,
+    events: list[PublicRunEvent],
+    tool_calls: list[ToolCallSnapshot],
+    approvals: list[ApprovalCardSnapshot],
+) -> dict[str, Any]:
+    event_ids = _string_list(getattr(request, "event_ids", []))
+    tool_call_ids = _string_list(getattr(request, "tool_call_ids", []))
+    approval_ids = _string_list(getattr(request, "approval_ids", []))
+    artifact_ids = _string_list(getattr(request, "artifact_ids", []))
+    artifact_paths = _string_list(getattr(request, "artifact_paths", []))
+
+    for event in events:
+        payload = _payload(event)
+        if not _event_matches_request(event, payload, request):
+            continue
+        _extend_unique(event_ids, [_event_identity(event)])
+        _extend_unique(tool_call_ids, _tool_call_ids_from_payload(payload))
+        _extend_unique(approval_ids, _approval_ids_from_payload(payload))
+        _extend_unique(artifact_ids, _artifact_ids_from_payload(payload))
+        _extend_unique(artifact_paths, _artifact_paths_from_payload(payload))
+
+    for tool_call in tool_calls:
+        if not _tool_call_matches_request(tool_call, request):
+            continue
+        _extend_unique(tool_call_ids, [tool_call.tool_call_id])
+        _extend_unique(approval_ids, [tool_call.approval_id])
+        for source in (tool_call.input_preview, tool_call.output_preview, tool_call.metadata):
+            _extend_unique(tool_call_ids, _tool_call_ids_from_payload(source))
+            _extend_unique(approval_ids, _approval_ids_from_payload(source))
+            _extend_unique(artifact_ids, _artifact_ids_from_payload(source))
+            _extend_unique(artifact_paths, _artifact_paths_from_payload(source))
+
+    for approval in approvals:
+        if not _approval_matches_request(approval, request, approvals=approvals):
+            continue
+        _extend_unique(approval_ids, [approval.approval_id])
+        _extend_unique(tool_call_ids, _tool_call_ids_from_payload(approval.input_preview))
+        _extend_unique(artifact_ids, _artifact_ids_from_payload(approval.input_preview))
+        _extend_unique(artifact_paths, _artifact_paths_from_payload(approval.input_preview))
+
+    update: dict[str, Any] = {}
+    if event_ids:
+        update["event_ids"] = event_ids
+    if tool_call_ids:
+        update["tool_call_ids"] = tool_call_ids
+    if approval_ids:
+        update["approval_ids"] = approval_ids
+    if artifact_ids:
+        update["artifact_ids"] = artifact_ids
+    if artifact_paths:
+        update["artifact_paths"] = artifact_paths
+    return update
+
+
 def _event_matches_request(
     event: PublicRunEvent,
     payload: dict[str, Any],
@@ -345,6 +409,47 @@ def _artifact_paths_from_payload(payload: dict[str, Any]) -> list[str]:
     return paths
 
 
+def _artifact_ids_from_payload(payload: dict[str, Any]) -> list[str]:
+    artifact_ids: list[str] = []
+    _extend_unique(artifact_ids, [payload.get("artifact_id")])
+    _extend_unique(artifact_ids, _string_list(payload.get("artifact_ids")))
+    artifact = payload.get("artifact")
+    if isinstance(artifact, dict):
+        _extend_unique(artifact_ids, [artifact.get("artifact_id"), artifact.get("id")])
+    for key in ("artifacts", "artifact_manifest"):
+        values = payload.get(key)
+        if not isinstance(values, list):
+            continue
+        for item in values:
+            if isinstance(item, dict):
+                _extend_unique(artifact_ids, [item.get("artifact_id"), item.get("id")])
+    for key in ("result", "data", "output", "output_preview"):
+        nested = payload.get(key)
+        if isinstance(nested, dict):
+            _extend_unique(artifact_ids, _artifact_ids_from_payload(nested))
+    return artifact_ids
+
+
+def _tool_call_ids_from_payload(payload: dict[str, Any]) -> list[str]:
+    values: list[str] = []
+    _extend_unique(values, _string_list(payload.get("tool_call_ids")))
+    _extend_unique(values, [payload.get("tool_call_id")])
+    return values
+
+
+def _approval_ids_from_payload(payload: dict[str, Any]) -> list[str]:
+    values: list[str] = []
+    _extend_unique(values, _string_list(payload.get("approval_ids")))
+    _extend_unique(values, [payload.get("approval_id")])
+    pending = payload.get("pending_approval")
+    if isinstance(pending, dict):
+        _extend_unique(values, [pending.get("approval_id")])
+    approval = payload.get("approval")
+    if isinstance(approval, dict):
+        _extend_unique(values, [approval.get("approval_id")])
+    return values
+
+
 def _matching_approval(
     request: RuntimeExecutionRequestSnapshot,
     approvals: list[ApprovalCardSnapshot],
@@ -365,6 +470,29 @@ def _matching_approval(
         if request_tool and _text(approval.tool_name) == request_tool:
             return approval
     return None
+
+
+def _approval_matches_request(
+    approval: ApprovalCardSnapshot,
+    request: RuntimeExecutionRequestSnapshot,
+    *,
+    approvals: list[ApprovalCardSnapshot] | None = None,
+) -> bool:
+    request_step_id = _text(request.step_id)
+    request_tool = _text(request.tool_name)
+    request_capability = _text(request.capability_id)
+    if request_step_id and request_step_id in {
+        _text(approval.step_id),
+        _text(approval.planner_step_id),
+    }:
+        return True
+    if request_step_id and any(
+        _text(item.step_id) or _text(item.planner_step_id) for item in approvals or []
+    ):
+        return False
+    if request_tool and request_tool == _text(approval.tool_name):
+        return True
+    return bool(request_capability and request_capability == _text(approval.capability_id))
 
 
 def _same_approval(

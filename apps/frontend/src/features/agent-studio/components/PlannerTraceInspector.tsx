@@ -1260,10 +1260,20 @@ function ExecutionRequestRow({
   const actionTargetPreview = replanRecoveryActionTargetPreview(objectRecord(request.action_target));
   const observationEvidencePreview = replanRecoveryObservationEvidencePreview(objectRecord(request.observation_evidence));
   const observationRetryPreview = replanRecoveryObservationRetryPreview(objectRecord(request.observation_retry));
+  const eventIds = uniqueStrings(request.event_ids || []);
+  const toolCallIds = uniqueStrings(request.tool_call_ids || []);
+  const approvalIds = uniqueStrings(request.approval_ids || []);
+  const artifactIds = uniqueStrings(request.artifact_ids || []);
+  const artifactPaths = uniqueStrings(request.artifact_paths || []);
   const taskTodo = request.task_todo || null;
   const taskCheckpoints = request.task_checkpoints || [];
   const taskWorkspaceItems = request.task_workspace_items || [];
   const taskVerificationTargets = request.task_verification_targets || [];
+  const eventPreview = eventIds.slice(0, 3).join(',');
+  const toolCallPreview = toolCallIds.slice(0, 3).join(',');
+  const approvalPreview = approvalIds.slice(0, 3).join(',');
+  const artifactIdPreview = artifactIds.slice(0, 3).join(',');
+  const artifactPathPreview = artifactPaths.slice(0, 3).join(',');
   const taskTodoLabel = taskTodo
     ? taskTodo.title || taskTodo.step_id || taskTodo.todo_id || ''
     : '';
@@ -1309,9 +1319,14 @@ function ExecutionRequestRow({
       data-policy-reason={request.policy_reason || ''}
       data-planning-reason={request.planning_reason || ''}
       data-planning-reason-label={planningReasonLabel}
+      data-request-approval-ids={approvalPreview}
+      data-request-artifact-ids={artifactIdPreview}
+      data-request-artifact-paths={artifactPathPreview}
       data-request-action-target={actionTargetPreview}
+      data-request-event-ids={eventPreview}
       data-request-followup-target={followupTargetPreview}
       data-request-observation-evidence={observationEvidencePreview}
+      data-request-tool-call-ids={toolCallPreview}
       data-replan-triggers={replanTriggers.join(',')}
       data-risk-level={request.risk_level || ''}
       data-run-group-id={request.run_group_id || request.group_run_id || ''}
@@ -1353,6 +1368,11 @@ function ExecutionRequestRow({
         {request.core_id || request.workspace_id ? (
           <span>task: {[request.core_id, request.workspace_id].filter(Boolean).join(' / ')}</span>
         ) : null}
+        {toolCallPreview ? <span>tool calls: {toolCallPreview}</span> : null}
+        {approvalPreview ? <span>approvals: {approvalPreview}</span> : null}
+        {eventPreview ? <span>events: {eventPreview}</span> : null}
+        {artifactPathPreview ? <span>artifacts: {artifactPathPreview}</span> : null}
+        {artifactIdPreview && !artifactPathPreview ? <span>artifact ids: {artifactIdPreview}</span> : null}
         {taskTodo ? (
           <span title={taskTodo.reason || taskTodo.tool_name || taskTodo.capability_id}>
             todo: {taskTodoLabel}

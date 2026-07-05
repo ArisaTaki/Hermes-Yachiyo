@@ -528,6 +528,11 @@ export type RuntimeExecutionRequestSnapshot = {
   action_target?: Record<string, unknown>;
   observation_evidence?: Record<string, unknown>;
   observation_retry?: Record<string, unknown>;
+  event_ids?: string[];
+  tool_call_ids?: string[];
+  approval_ids?: string[];
+  artifact_ids?: string[];
+  artifact_paths?: string[];
   task_todo?: TaskTodoItemSnapshot | null;
   task_checkpoints?: TaskCheckpointSnapshot[];
   task_workspace_items?: TaskWorkspaceItemSnapshot[];
