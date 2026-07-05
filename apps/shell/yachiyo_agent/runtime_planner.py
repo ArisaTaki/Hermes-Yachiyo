@@ -2858,7 +2858,14 @@ class RuntimePlanner:
             }
             if len(artifact_paths) > 1:
                 input_preview["artifact_paths"] = artifact_paths
+            data_source_read_step = _data_source_read_step(
+                intent,
+                allowed,
+                source_hint=source_hint,
+                source_kind=source_kind,
+            )
             prepare_steps = [
+                *([data_source_read_step] if data_source_read_step is not None else []),
                 *([spreadsheet_app_step] if spreadsheet_app_step is not None else []),
                 *([data_file_open_step] if data_file_open_step is not None else []),
             ]
@@ -7774,6 +7781,34 @@ def _data_file_open_step(
             "Open the explicit local data file on the desktop so the requested spreadsheet app "
             "path is observable while data.analyze keeps the reproducible analysis artifact."
         ),
+    )
+
+
+def _data_source_read_step(
+    intent: TaskIntentSnapshot,
+    allowed: set[str] | None,
+    *,
+    source_hint: str,
+    source_kind: str,
+) -> ToolPlanStepSnapshot | None:
+    clean_source_hint = str(source_hint or "").strip()
+    if not clean_source_hint:
+        return None
+    tool_name = _first_allowed(("workspace.read", "fs.read_file", "file.read"), allowed)
+    if not tool_name:
+        return None
+    input_preview = {"path": clean_source_hint}
+    if source_kind:
+        input_preview["source_kind"] = source_kind
+    return _step(
+        intent,
+        "read-data-source",
+        "Read data source",
+        "file.workspace_read",
+        tool_name,
+        input_preview=input_preview,
+        action="read_file",
+        reason="Read the explicit dataset path so analysis has an observable source record.",
     )
 
 

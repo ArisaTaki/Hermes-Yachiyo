@@ -1164,8 +1164,8 @@ def test_yachiyo_agent_service_attaches_planner_outputs_to_chat_task() -> None:
         {"kind": "data_analysis", "title": "Data Analysis", "confidence": 0.56},
         {"kind": "report_generation", "title": "Report Generation", "confidence": 0.42},
     ]
-    assert metadata["yachiyo_plan_tools"] == ["data.analyze"]
-    assert metadata["yachiyo_plan_capabilities"] == ["data.analysis"]
+    assert metadata["yachiyo_plan_tools"] == ["workspace.read", "data.analyze"]
+    assert metadata["yachiyo_plan_capabilities"] == ["file.workspace_read", "data.analysis"]
     assert metadata["yachiyo_plan_approvals_required"] == []
     assert metadata["yachiyo_plan_artifacts_expected"] == ["analysis-report.md"]
     assert metadata["yachiyo_plan_open_questions"] == []
@@ -1188,14 +1188,18 @@ def test_yachiyo_agent_service_attaches_planner_outputs_to_chat_task() -> None:
     assert metadata["yachiyo_task_progress"]["workspace_id"] == (
         metadata["yachiyo_task_core"]["workspace"]["workspace_id"]
     )
-    assert metadata["yachiyo_task_progress"]["total_todos"] == 1
-    assert metadata["yachiyo_task_progress"]["current_step_id"] == "analyze-data-file"
+    assert metadata["yachiyo_task_progress"]["total_todos"] == 2
+    assert metadata["yachiyo_task_progress"]["current_step_id"] == "read-data-source"
     assert [todo["step_id"] for todo in metadata["yachiyo_task_core"]["todos"]] == [
+        "read-data-source",
         "analyze-data-file"
     ]
     assert task.task_core is not None
     assert task.task_core.workspace.workspace_id == metadata["yachiyo_task_core"]["workspace"]["workspace_id"]
-    assert [todo.step_id for todo in task.task_core.todos] == ["analyze-data-file"]
+    assert [todo.step_id for todo in task.task_core.todos] == [
+        "read-data-source",
+        "analyze-data-file",
+    ]
     assert task.task_progress is not None
     assert task.task_progress.workspace_id == metadata["yachiyo_task_progress"]["workspace_id"]
 
@@ -1273,6 +1277,45 @@ def test_yachiyo_agent_service_starts_chat_with_full_runtime_execution_envelope(
     assert "task" in task.runtime_debug.debug_surfaces
 
 
+def test_yachiyo_agent_service_starts_data_analysis_with_observable_read_step() -> None:
+    port = _FakeRuntimePort()
+    service = YachiyoAgentService(port)
+
+    service.start_chat_task(
+        {
+            "prompt": "请分析 data/sales.csv 并输出报告",
+            "conversation_id": "chat-1",
+            "allowed_tools": [
+                "workspace.read",
+                "data.analyze",
+                "terminal.run",
+                "artifact.write",
+            ],
+        }
+    )
+
+    request_payload = port.calls[0][1]
+    direct_requests = request_payload["direct_tool_requests"]
+    assert [request["tool"] for request in direct_requests] == [
+        "workspace.read",
+        "data.analyze",
+    ]
+    assert direct_requests[0]["step_id"] == "read-data-source"
+    assert direct_requests[0]["input"] == {"path": "data/sales.csv", "source_kind": "csv"}
+    assert direct_requests[0]["runtime_stage"] == "discover"
+    assert direct_requests[0]["runtime_role"] == "inspect_workspace"
+    assert direct_requests[1]["step_id"] == "analyze-data-file"
+    assert direct_requests[1]["depends_on"] == ["read-data-source"]
+    assert direct_requests[1]["runtime_stage"] == "operate"
+    assert direct_requests[1]["runtime_role"] == "analyze_data"
+    metadata = request_payload["metadata"]
+    assert metadata["yachiyo_execution_requests"] == ["workspace.read", "data.analyze"]
+    assert [
+        todo["step_id"]
+        for todo in metadata["yachiyo_execution_envelope"]["task_core"]["todos"]
+    ] == ["read-data-source", "analyze-data-file"]
+
+
 def test_yachiyo_agent_service_plans_shared_chat_execution_envelope() -> None:
     service = YachiyoAgentService(_FakeRuntimePort())
 
@@ -1345,25 +1388,37 @@ def test_agent_studio_service_plans_shared_execution_envelope() -> None:
     assert envelope.intent_kind == "data_analysis"
     assert envelope.task_core is not None
     assert envelope.task_progress is not None
-    assert envelope.requests[0].tool_name == "data.analyze"
+    assert [request.tool_name for request in envelope.requests] == [
+        "workspace.read",
+        "data.analyze",
+    ]
     assert envelope.task_progress.core_id == envelope.task_core.core_id
-    assert envelope.requests[0].step_id == "analyze-data-file"
-    assert envelope.requests[0].capability_id == "data.analysis"
-    assert envelope.requests[0].replan_signal_ids
+    assert envelope.requests[0].step_id == "read-data-source"
+    assert envelope.requests[0].capability_id == "file.workspace_read"
     assert envelope.requests[0].core_id == envelope.task_core.core_id
     assert envelope.requests[0].workspace_id == envelope.task_core.workspace.workspace_id
-    assert envelope.requests[0].task_todo["step_id"] == "analyze-data-file"
+    assert envelope.requests[0].task_todo["step_id"] == "read-data-source"
     assert envelope.requests[0].task_checkpoints[0]["after_step_id"] == (
+        "read-data-source"
+    )
+    assert envelope.requests[1].step_id == "analyze-data-file"
+    assert envelope.requests[1].capability_id == "data.analysis"
+    assert envelope.requests[1].depends_on == ["read-data-source"]
+    assert envelope.requests[1].replan_signal_ids
+    assert envelope.requests[1].task_todo["step_id"] == "analyze-data-file"
+    assert envelope.requests[1].task_checkpoints[0]["after_step_id"] == (
         "analyze-data-file"
     )
-    assert envelope.requests[0].checkpoint_policy is not None
-    assert envelope.requests[0].checkpoint_policy.replan_signal_ids == (
-        envelope.requests[0].replan_signal_ids
+    assert envelope.requests[1].checkpoint_policy is not None
+    assert envelope.requests[1].checkpoint_policy.replan_signal_ids == (
+        envelope.requests[1].replan_signal_ids
     )
-    assert envelope.requests[0].checkpoint_policy.fallback_tools == ["terminal.run"]
-    assert envelope.runtime_stage_counts == {"operate": 1}
-    assert envelope.requests[0].runtime_stage == "operate"
-    assert envelope.requests[0].runtime_role == "analyze_data"
+    assert envelope.requests[1].checkpoint_policy.fallback_tools == ["terminal.run"]
+    assert envelope.runtime_stage_counts == {"discover": 1, "operate": 1}
+    assert envelope.requests[0].runtime_stage == "discover"
+    assert envelope.requests[0].runtime_role == "inspect_workspace"
+    assert envelope.requests[1].runtime_stage == "operate"
+    assert envelope.requests[1].runtime_role == "analyze_data"
 
 
 def test_agent_studio_service_plans_discovered_desktop_app_execution() -> None:
