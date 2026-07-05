@@ -47,6 +47,7 @@ from apps.shell.agent_runtime import AgentRuntimeError, get_agent_runtime_servic
 from apps.shell.native_capabilities import get_native_image_input_capability
 from apps.shell.yachiyo_agent.daily_desktop import (
     daily_desktop_allowed_tools,
+    daily_desktop_runtime_execution_envelope,
     entrypoint_plan_user_metadata,
     main_chat_entrypoint_allowed_tools,
     planner_first_daily_desktop_entrypoint_requests,
@@ -769,6 +770,7 @@ class ChatAPI:
         task_id: str,
         prompt: str,
         metadata: dict[str, Any] | None = None,
+        runtime_execution_envelope: dict[str, Any] | None = None,
         direct_tool_requests: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any] | None:
         try:
@@ -784,6 +786,7 @@ class ChatAPI:
                 conversation_id=str(getattr(self._session, "session_id", "") or ""),
                 prompt=prompt,
                 metadata=metadata,
+                runtime_execution_envelope=runtime_execution_envelope,
                 direct_tool_requests=direct_tool_requests,
             )
             if payload is None:
@@ -1275,6 +1278,27 @@ class ChatAPI:
             metadata_allowed_tools=allowed_daily_desktop_tools,
         )
 
+    def _daily_desktop_runtime_execution_envelope(
+        self,
+        text: str,
+        *,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        allowed_daily_desktop_tools = daily_desktop_allowed_tools()
+        try:
+            runtime_service = self._agent_runtime_service()
+        except Exception:
+            runtime_service = None
+        allowed_entrypoint_tools = main_chat_entrypoint_allowed_tools(
+            runtime_service,
+            fallback=allowed_daily_desktop_tools,
+        )
+        return daily_desktop_runtime_execution_envelope(
+            text,
+            metadata=metadata,
+            allowed_tools=allowed_entrypoint_tools,
+        )
+
     def _daily_desktop_followup_goal_text(
         self,
         text: str,
@@ -1723,6 +1747,14 @@ class ChatAPI:
                 task_text,
                 metadata=metadata,
             )
+            daily_desktop_runtime_envelope = (
+                self._daily_desktop_runtime_execution_envelope(
+                    task_text,
+                    metadata=metadata,
+                )
+                if daily_desktop_requests
+                else {}
+            )
             direct_daily_desktop_intent = (
                 not raw_attachments
                 and current_context.get("conversation_kind") != "group"
@@ -1831,7 +1863,7 @@ class ChatAPI:
                     task_id=task_id,
                     prompt=task_text,
                     metadata=user_metadata,
-                    direct_tool_requests=daily_desktop_requests,
+                    runtime_execution_envelope=daily_desktop_runtime_envelope,
                 )
             direct_planner_orchestration_task: dict[str, Any] | None = None
             if direct_planner_orchestration_intent and direct_daily_desktop_task is None:

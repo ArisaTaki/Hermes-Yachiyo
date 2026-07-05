@@ -67,6 +67,71 @@ def _make_agent_runtime_service(tmp_path) -> AgentRuntimeService:
     )
 
 
+def test_chat_api_direct_daily_desktop_task_forwards_runtime_execution_envelope(
+    tmp_path,
+    monkeypatch,
+):
+    api, runtime, store = _make_api(tmp_path)
+    runtime.agent_runtime_service = object()
+    captured: dict[str, Any] = {}
+
+    class FakeStarter:
+        def __init__(self, app_runtime, service):
+            captured["app_runtime"] = app_runtime
+            captured["service"] = service
+
+        def execute_existing_main_chat_task(
+            self,
+            *,
+            task_id,
+            conversation_id,
+            prompt,
+            metadata=None,
+            runtime_execution_envelope=None,
+            direct_tool_requests=None,
+        ):
+            captured["task_id"] = task_id
+            captured["conversation_id"] = conversation_id
+            captured["prompt"] = prompt
+            captured["metadata"] = metadata
+            captured["runtime_execution_envelope"] = runtime_execution_envelope
+            captured["direct_tool_requests"] = direct_tool_requests
+            return {
+                "task_id": task_id,
+                "conversation_id": conversation_id,
+                "status": "completed",
+                "summary": "done",
+                "timeline": [],
+            }
+
+    monkeypatch.setattr(
+        "apps.shell.yachiyo_agent.legacy_ports.LegacyChatTaskStarter",
+        FakeStarter,
+    )
+    envelope = {
+        "envelope_id": "envelope-chat",
+        "requests": [{"tool_name": "app.open", "input": {"app_name": "Music"}}],
+    }
+    direct_requests = [{"tool": "app.open", "input": {"app_name": "Music"}}]
+
+    try:
+        result = api._execute_direct_daily_desktop_task(
+            task_id="task-chat",
+            prompt="打开 Music",
+            metadata={"source": "chat_window"},
+            runtime_execution_envelope=envelope,
+            direct_tool_requests=direct_requests,
+        )
+
+        assert result is not None
+        assert captured["runtime_execution_envelope"] == envelope
+        assert captured["direct_tool_requests"] == direct_requests
+        assert captured["metadata"] == {"source": "chat_window"}
+        assert captured["conversation_id"] == runtime.chat_session.session_id
+    finally:
+        store.close()
+
+
 def _wait_for_agent_run(service: AgentRuntimeService, run_id: str, timeout: float = 5.0) -> dict:
     """等待 Agent Run 异步执行完成"""
     deadline = time.time() + timeout

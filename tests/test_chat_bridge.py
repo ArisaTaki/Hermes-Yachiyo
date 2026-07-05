@@ -44,6 +44,73 @@ def _runtime_with_chat_store(store: ChatStore) -> SimpleNamespace:
     )
 
 
+def test_chat_bridge_quick_task_forwards_runtime_execution_envelope(
+    tmp_path,
+    monkeypatch,
+):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _runtime_with_chat_store(store)
+    runtime.agent_runtime_service = object()
+    bridge = ChatBridge(runtime)
+    captured: dict[str, Any] = {}
+
+    class FakeStarter:
+        def __init__(self, app_runtime, service):
+            captured["app_runtime"] = app_runtime
+            captured["service"] = service
+
+        def execute_existing_main_chat_task(
+            self,
+            *,
+            task_id,
+            conversation_id,
+            prompt,
+            metadata=None,
+            runtime_execution_envelope=None,
+            direct_tool_requests=None,
+        ):
+            captured["task_id"] = task_id
+            captured["conversation_id"] = conversation_id
+            captured["prompt"] = prompt
+            captured["metadata"] = metadata
+            captured["runtime_execution_envelope"] = runtime_execution_envelope
+            captured["direct_tool_requests"] = direct_tool_requests
+            return {
+                "task_id": task_id,
+                "conversation_id": conversation_id,
+                "status": "completed",
+                "summary": "done",
+                "timeline": [],
+            }
+
+    monkeypatch.setattr(
+        "apps.shell.yachiyo_agent.legacy_ports.LegacyChatTaskStarter",
+        FakeStarter,
+    )
+    envelope = {
+        "envelope_id": "envelope-launcher",
+        "requests": [{"tool_name": "desktop.list_apps", "input": {"query": "PixelForge"}}],
+    }
+    direct_requests = [{"tool": "desktop.list_apps", "input": {"query": "PixelForge"}}]
+
+    try:
+        result = bridge._execute_yachiyo_desktop_quick_task(
+            "task-launcher",
+            "打开 PixelForge",
+            metadata={"source": "launcher", "launcher_mode": "live2d"},
+            runtime_execution_envelope=envelope,
+            direct_tool_requests=direct_requests,
+        )
+
+        assert result is not None
+        assert captured["runtime_execution_envelope"] == envelope
+        assert captured["direct_tool_requests"] == direct_requests
+        assert captured["metadata"]["launcher_mode"] == "live2d"
+        assert captured["conversation_id"] == "session-current"
+    finally:
+        store.close()
+
+
 def _agent_task_event(
     agent_task: dict[str, Any],
     event_type: str,

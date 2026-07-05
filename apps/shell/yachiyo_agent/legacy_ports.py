@@ -802,6 +802,11 @@ class LegacyChatTaskStarter:
                 direct_tool_selection_payload,
                 selected_requests,
             )
+            if isinstance(runtime_execution_envelope, Mapping) and direct_tool_selection_payload:
+                direct_tool_selection_payload.setdefault(
+                    "runtime_execution_envelope",
+                    dict(runtime_execution_envelope),
+                )
             envelope_tool_requests = _safe_runtime_execution_envelope_requests(
                 prompt or execution_prompt,
                 metadata,
@@ -2063,6 +2068,8 @@ def _safe_runtime_execution_envelope_requests(
         allowed_tools,
     ):
         return raw_approval_sequence
+    if selected_requests:
+        return []
     for requests in _runtime_execution_envelope_request_candidates(
         runtime_execution_envelope,
         metadata,

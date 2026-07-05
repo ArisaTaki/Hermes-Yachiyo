@@ -3752,7 +3752,7 @@ class RuntimeCustomApiAgentLoop:
         event_index = 0
         completed_steps: list[dict[str, Any]] = []
         stopped_after_recovery = False
-        for planned_tool_request in planned_tool_requests:
+        for request_index, planned_tool_request in enumerate(planned_tool_requests):
             planned_tool = str(planned_tool_request.get("tool") or "")
             if planned_tool not in _DIRECT_DAILY_DESKTOP_TOOLS:
                 return ""
@@ -3776,6 +3776,11 @@ class RuntimeCustomApiAgentLoop:
                     tool_event = candidate
                     break
             if tool_event is None:
+                remaining_requests = planned_tool_requests[request_index:]
+                if completed_steps and _all_noncritical_daily_desktop_observations(
+                    remaining_requests
+                ):
+                    break
                 return ""
             result = tool_event.get("result") if isinstance(tool_event.get("result"), dict) else {}
             if result.get("approval_required"):
@@ -8287,39 +8292,45 @@ def _runtime_planner_completed_direct_requests_with_unavailable_replan(
 ) -> bool:
     if not _runtime_planner_replan_payloads_only_tool_unavailable(replan_payloads):
         return False
-    planned_tools = [
-        str(request.get("tool") or "").strip()
-        for request in planned_tool_requests
-        if isinstance(request, Mapping)
-        and str(request.get("tool") or "").strip() in _DIRECT_DAILY_DESKTOP_TOOLS
-    ]
-    if not planned_tools:
+    requests = [request for request in planned_tool_requests if isinstance(request, Mapping)]
+    primary_requests: list[Mapping[str, Any]] = []
+    last_primary_index = -1
+    for index, request in enumerate(requests):
+        tool_name = str(request.get("tool") or "").strip()
+        if not tool_name or tool_name not in _DIRECT_DAILY_DESKTOP_TOOLS:
+            continue
+        if tool_name in _DAILY_DESKTOP_DISCOVERY_TOOLS or tool_name in _DAILY_DESKTOP_VERIFY_TOOLS:
+            continue
+        primary_requests.append(request)
+        last_primary_index = index
+    if not primary_requests:
         return False
-    tool_events = [
-        event
-        for event in timeline[tool_timeline_start:]
-        if isinstance(event, dict)
-        and str(event.get("event") or "").strip() == "agent.tool.call"
-    ]
-    event_index = 0
-    for planned_tool in planned_tools:
-        matched_event: dict[str, Any] | None = None
-        while event_index < len(tool_events):
-            candidate = tool_events[event_index]
-            event_index += 1
-            if str(candidate.get("detail") or "").strip() == planned_tool:
-                matched_event = candidate
-                break
-        if matched_event is None:
-            return False
-        result = (
-            matched_event.get("result")
-            if isinstance(matched_event.get("result"), Mapping)
-            else {}
+    if not all(
+        _runtime_planner_tool_request_completed(
+            request,
+            timeline,
+            tool_timeline_start=tool_timeline_start,
         )
-        if result.get("ok") is not True or result.get("approval_required"):
-            return False
-    return True
+        for request in primary_requests
+    ):
+        return False
+    trailing_observation_tools = {
+        str(request.get("tool") or "").strip()
+        for request in requests[last_primary_index + 1 :]
+        if str(request.get("tool") or "").strip() in {
+            *_DAILY_DESKTOP_DISCOVERY_TOOLS,
+            *_DAILY_DESKTOP_VERIFY_TOOLS,
+        }
+    }
+    if not trailing_observation_tools:
+        return False
+    payloads = [payload for payload in replan_payloads if isinstance(payload, Mapping)]
+    if not payloads:
+        return False
+    return all(
+        any(tool in trailing_observation_tools for tool in _runtime_replan_payload_tool_candidates(payload))
+        for payload in payloads
+    )
 
 
 def _runtime_planner_completed_direct_requests_with_verification_replan(
@@ -8329,15 +8340,23 @@ def _runtime_planner_completed_direct_requests_with_verification_replan(
     *,
     tool_timeline_start: int,
 ) -> bool:
-    payloads = [payload for payload in replan_payloads if isinstance(payload, Mapping)]
+    payloads: list[Mapping[str, Any]] = []
+    for payload in replan_payloads:
+        if not isinstance(payload, Mapping):
+            continue
+        nested_requests = (
+            payload.get("replan_requests")
+            if isinstance(payload.get("replan_requests"), list)
+            else []
+        )
+        payloads.extend(item for item in nested_requests if isinstance(item, Mapping))
+        if _runtime_replan_payload_tool_candidates(payload):
+            payloads.append(payload)
     if not payloads:
-        return False
-    if any(_runtime_replan_payload_requires_continuation(payload) for payload in payloads):
         return False
     requests = [request for request in planned_tool_requests if isinstance(request, Mapping)]
     if any(bool(request.get("continue_to_model")) for request in requests):
         return False
-
     primary_requests: list[Mapping[str, Any]] = []
     last_primary_index = -1
     for index, request in enumerate(requests):
@@ -8367,13 +8386,17 @@ def _runtime_planner_completed_direct_requests_with_verification_replan(
     }
     if not trailing_verification_tools:
         return False
-    return all(
+    if all(
         _runtime_replan_payload_is_trailing_verification_failure(
             payload,
             trailing_verification_tools,
         )
         for payload in payloads
-    )
+    ):
+        return True
+    if any(_runtime_replan_payload_requires_continuation(payload) for payload in payloads):
+        return False
+    return False
 
 
 def _runtime_replan_payload_requires_continuation(payload: Mapping[str, Any]) -> bool:
@@ -8407,12 +8430,11 @@ def _runtime_replan_payload_is_trailing_verification_failure(
     payload: Mapping[str, Any],
     trailing_verification_tools: set[str],
 ) -> bool:
-    source_tool = str(
-        payload.get("source_tool_name")
-        or payload.get("tool_name")
-        or payload.get("tool")
-        or ""
-    ).strip()
+    source_tool_candidates = _runtime_replan_payload_tool_candidates(payload)
+    source_tool = next(
+        (tool for tool in source_tool_candidates if tool in trailing_verification_tools),
+        source_tool_candidates[0] if source_tool_candidates else "",
+    )
     if source_tool not in trailing_verification_tools:
         return False
     metadata = payload.get("metadata") if isinstance(payload.get("metadata"), Mapping) else {}
@@ -8423,6 +8445,33 @@ def _runtime_replan_payload_is_trailing_verification_failure(
     if source_step and "verify" not in source_step and trigger != "verification_failed":
         return False
     return True
+
+
+def _runtime_replan_payload_tool_candidates(payload: Mapping[str, Any]) -> list[str]:
+    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), Mapping) else {}
+    action_target = (
+        payload.get("action_target") if isinstance(payload.get("action_target"), Mapping) else {}
+    )
+    observation_retry = (
+        payload.get("observation_retry")
+        if isinstance(payload.get("observation_retry"), Mapping)
+        else {}
+    )
+    return [
+        str(value or "").strip()
+        for value in (
+            payload.get("source_tool_name"),
+            payload.get("tool_name"),
+            payload.get("tool"),
+            metadata.get("source_tool_name"),
+            metadata.get("tool_name"),
+            metadata.get("tool"),
+            action_target.get("verification_tool"),
+            action_target.get("tool_name"),
+            observation_retry.get("tool"),
+        )
+        if str(value or "").strip()
+    ]
 
 
 def _runtime_planner_completed_discovered_app_direct_action(
@@ -19096,6 +19145,23 @@ def _is_daily_desktop_discovery_prefix_completed_step(step: dict[str, Any]) -> b
     if tool_name in _DAILY_DESKTOP_DISCOVERY_PREFIX_TOOLS:
         return True
     return tool_name == "desktop.inspect_app" and isinstance(step.get("result"), dict)
+
+
+def _all_noncritical_daily_desktop_observations(
+    requests: list[dict[str, Any]],
+) -> bool:
+    if not requests:
+        return False
+    for request in requests:
+        if not isinstance(request, dict):
+            return False
+        tool_name = str(request.get("tool") or "").strip()
+        if (
+            tool_name not in _DAILY_DESKTOP_DISCOVERY_TOOLS
+            and tool_name not in _DAILY_DESKTOP_VERIFY_TOOLS
+        ):
+            return False
+    return True
 
 
 def _drop_trailing_daily_desktop_verify_requests(

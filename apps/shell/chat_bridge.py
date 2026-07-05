@@ -26,6 +26,7 @@ from apps.shell.chat_api import ChatAPI
 from apps.shell.yachiyo_agent.daily_desktop import (
     daily_desktop_allowed_tools,
     daily_desktop_planned_timeline,
+    daily_desktop_runtime_execution_envelope,
     main_chat_entrypoint_allowed_tools,
     planner_first_daily_desktop_entrypoint_requests,
 )
@@ -514,6 +515,11 @@ class ChatBridge:
                 task_id,
                 text,
                 metadata=execution_metadata,
+                runtime_execution_envelope=daily_desktop_runtime_execution_envelope(
+                    planning_text,
+                    metadata=execution_metadata,
+                    allowed_tools=planner_allowed_tools,
+                ),
             )
             if executed_task is not None:
                 return {**result, "agent_task": executed_task}
@@ -556,6 +562,8 @@ class ChatBridge:
         text: str,
         *,
         metadata: dict[str, Any] | None = None,
+        runtime_execution_envelope: dict[str, Any] | None = None,
+        direct_tool_requests: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any] | None:
         service = _runtime_agent_service(self._runtime)
         if service is None:
@@ -569,6 +577,8 @@ class ChatBridge:
                 conversation_id=str(getattr(self._runtime.chat_session, "session_id", "") or ""),
                 prompt=text,
                 metadata=metadata,
+                runtime_execution_envelope=runtime_execution_envelope,
+                direct_tool_requests=direct_tool_requests,
             )
             if payload is not None:
                 return agent_task_snapshot_from_payload(payload).model_dump(mode="json")

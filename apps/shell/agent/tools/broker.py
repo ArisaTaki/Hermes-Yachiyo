@@ -1702,38 +1702,6 @@ class ToolBroker:
 
         action_name, action, *action_options = action_step
         expected_app_name = _foreground_expected_app_name(clean_app_name, step_results)
-        if action_name in {
-            "safe_shortcut",
-            "safe_key",
-            "safe_scroll",
-            "safe_type_text",
-            "safe_click",
-        }:
-            action_result = action(expected_app_name) if action_options else action()
-            action_data = action_result.get("data") if isinstance(action_result.get("data"), dict) else {}
-            data = dict(action_data)
-            if clean_app_name:
-                data["app_name"] = clean_app_name
-            data["foreground_action"] = action_name
-            fallback_used = fallback_used or bool(action_result.get("fallback_used"))
-            fallback_result = {**step_results, action_name: action_result}
-            if action_result.get("ok"):
-                return {
-                    **action_result,
-                    "action": tool_name,
-                    "summary": "Focused app and completed foreground action",
-                    "data": data,
-                    "fallback_used": fallback_used,
-                    "fallback_result": fallback_result,
-                }
-            return {
-                **action_result,
-                "action": tool_name,
-                "summary": "Focused app but could not complete foreground action",
-                "data": data,
-                "fallback_used": fallback_used,
-                "fallback_result": fallback_result,
-            }
         active_window_result = desktop.active_window()
         step_results["active_window"] = active_window_result
         fallback_used = fallback_used or bool(active_window_result.get("fallback_used"))

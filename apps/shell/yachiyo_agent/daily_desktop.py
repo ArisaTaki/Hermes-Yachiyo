@@ -153,6 +153,34 @@ def planner_first_daily_desktop_entrypoint_requests(
     )
 
 
+def daily_desktop_runtime_execution_envelope(
+    text: str,
+    *,
+    metadata: Mapping[str, Any] | None = None,
+    allowed_tools: Sequence[str] | None = None,
+) -> dict[str, Any]:
+    """Return the full Runtime execution envelope for daily entrypoints."""
+
+    allowed = daily_desktop_allowed_tools(allowed_tools)
+    try:
+        from .runtime_execution import runtime_execution_envelope_payload
+        from .runtime_planner import RuntimePlanner
+
+        decision = RuntimePlanner().decision(
+            str(text or ""),
+            allowed_tools=allowed,
+            metadata=metadata,
+        )
+        return runtime_execution_envelope_payload(
+            decision,
+            allowed_tools=allowed,
+            full_plan=True,
+        )
+    except Exception:
+        logger.debug("Runtime execution envelope unavailable for daily desktop", exc_info=True)
+        return {}
+
+
 def daily_desktop_direct_metadata_request(
     metadata: Mapping[str, Any] | None,
     *,
@@ -333,21 +361,12 @@ def _runtime_execution_context_entrypoint_requests(
     metadata: Mapping[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     try:
-        from .runtime_execution import (
-            runtime_execution_envelope_payload,
-            runtime_execution_requests_from_envelope_payload,
-        )
-        from .runtime_planner import RuntimePlanner
+        from .runtime_execution import runtime_execution_requests_from_envelope_payload
 
-        decision = RuntimePlanner().decision(
+        envelope = daily_desktop_runtime_execution_envelope(
             text,
-            allowed_tools=allowed_tools,
             metadata=metadata,
-        )
-        envelope = runtime_execution_envelope_payload(
-            decision,
             allowed_tools=allowed_tools,
-            full_plan=True,
         )
         return runtime_execution_requests_from_envelope_payload(
             envelope,
