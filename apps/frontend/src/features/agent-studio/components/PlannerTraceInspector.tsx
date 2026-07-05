@@ -6,6 +6,10 @@ import {
   runtimeRecoveryObservationEvidencePreview,
   runtimeRecoveryObservationRetryPreview,
 } from '../../runtime-shared/components/RuntimeRecoveryEvidencePanel';
+import {
+  RuntimeRequestReplayEvidencePanel,
+  runtimeRequestReplayEvidenceFromRequest,
+} from '../../runtime-shared/components/RuntimeRequestReplayEvidencePanel';
 import { publicRunEventIsSecret } from '../../runtime-shared/runEvents';
 import { runtimePlannerReasonLabel } from '../../runtime-shared/plannerReasonLabels';
 import {
@@ -1260,20 +1264,11 @@ function ExecutionRequestRow({
   const actionTargetPreview = replanRecoveryActionTargetPreview(objectRecord(request.action_target));
   const observationEvidencePreview = replanRecoveryObservationEvidencePreview(objectRecord(request.observation_evidence));
   const observationRetryPreview = replanRecoveryObservationRetryPreview(objectRecord(request.observation_retry));
-  const eventIds = uniqueStrings(request.event_ids || []);
-  const toolCallIds = uniqueStrings(request.tool_call_ids || []);
-  const approvalIds = uniqueStrings(request.approval_ids || []);
-  const artifactIds = uniqueStrings(request.artifact_ids || []);
-  const artifactPaths = uniqueStrings(request.artifact_paths || []);
+  const replayEvidence = runtimeRequestReplayEvidenceFromRequest(request);
   const taskTodo = request.task_todo || null;
   const taskCheckpoints = request.task_checkpoints || [];
   const taskWorkspaceItems = request.task_workspace_items || [];
   const taskVerificationTargets = request.task_verification_targets || [];
-  const eventPreview = eventIds.slice(0, 3).join(',');
-  const toolCallPreview = toolCallIds.slice(0, 3).join(',');
-  const approvalPreview = approvalIds.slice(0, 3).join(',');
-  const artifactIdPreview = artifactIds.slice(0, 3).join(',');
-  const artifactPathPreview = artifactPaths.slice(0, 3).join(',');
   const taskTodoLabel = taskTodo
     ? taskTodo.title || taskTodo.step_id || taskTodo.todo_id || ''
     : '';
@@ -1288,10 +1283,6 @@ function ExecutionRequestRow({
     .filter(Boolean)
     .join(', ');
   const taskVerificationPreview = replanRecoveryVerificationTargetsPreview(taskVerificationTargets);
-  const verificationEventIds = uniqueStrings(request.verification_event_ids || []);
-  const verificationArtifactPaths = uniqueStrings(request.verification_artifact_paths || []);
-  const verificationEventPreview = verificationEventIds.slice(0, 3).join(',');
-  const verificationArtifactPreview = verificationArtifactPaths.slice(0, 3).join(',');
   const workflowScope = request.workflow_node_label || request.workflow_node_id || request.workflow_run_id || request.workflow_id || '';
   const groupScope = request.group_run_id || request.run_group_id || request.group_id || '';
   return (
@@ -1319,14 +1310,14 @@ function ExecutionRequestRow({
       data-policy-reason={request.policy_reason || ''}
       data-planning-reason={request.planning_reason || ''}
       data-planning-reason-label={planningReasonLabel}
-      data-request-approval-ids={approvalPreview}
-      data-request-artifact-ids={artifactIdPreview}
-      data-request-artifact-paths={artifactPathPreview}
+      data-request-approval-ids={replayEvidence.approvalPreview}
+      data-request-artifact-ids={replayEvidence.artifactIdPreview}
+      data-request-artifact-paths={replayEvidence.artifactPathPreview}
       data-request-action-target={actionTargetPreview}
-      data-request-event-ids={eventPreview}
+      data-request-event-ids={replayEvidence.eventPreview}
       data-request-followup-target={followupTargetPreview}
       data-request-observation-evidence={observationEvidencePreview}
-      data-request-tool-call-ids={toolCallPreview}
+      data-request-tool-call-ids={replayEvidence.toolCallPreview}
       data-replan-triggers={replanTriggers.join(',')}
       data-risk-level={request.risk_level || ''}
       data-run-group-id={request.run_group_id || request.group_run_id || ''}
@@ -1340,10 +1331,10 @@ function ExecutionRequestRow({
       data-task-verification-targets={taskVerificationPreview}
       data-task-workspace-id={request.workspace_id || ''}
       data-task-workspace-item-count={taskWorkspaceItems.length}
-      data-verification-artifact-paths={verificationArtifactPreview}
-      data-verification-event-ids={verificationEventPreview}
-      data-verification-status={request.verification_status || ''}
-      data-verification-step-id={request.verification_step_id || ''}
+      data-verification-artifact-paths={replayEvidence.verificationArtifactPreview}
+      data-verification-event-ids={replayEvidence.verificationEventPreview}
+      data-verification-status={replayEvidence.verificationStatus}
+      data-verification-step-id={replayEvidence.verificationStepId}
       data-step-status={request.status || 'planned'}
       data-testid="agent-run-detail-planner-execution-request"
       data-tool-plan-id={request.tool_plan_id || ''}
@@ -1368,11 +1359,11 @@ function ExecutionRequestRow({
         {request.core_id || request.workspace_id ? (
           <span>task: {[request.core_id, request.workspace_id].filter(Boolean).join(' / ')}</span>
         ) : null}
-        {toolCallPreview ? <span>tool calls: {toolCallPreview}</span> : null}
-        {approvalPreview ? <span>approvals: {approvalPreview}</span> : null}
-        {eventPreview ? <span>events: {eventPreview}</span> : null}
-        {artifactPathPreview ? <span>artifacts: {artifactPathPreview}</span> : null}
-        {artifactIdPreview && !artifactPathPreview ? <span>artifact ids: {artifactIdPreview}</span> : null}
+        <RuntimeRequestReplayEvidencePanel
+          className="studio-execution-request-replay-evidence"
+          evidence={replayEvidence}
+          testId="agent-run-detail-planner-execution-request-replay-evidence"
+        />
         {taskTodo ? (
           <span title={taskTodo.reason || taskTodo.tool_name || taskTodo.capability_id}>
             todo: {taskTodoLabel}
@@ -1387,18 +1378,6 @@ function ExecutionRequestRow({
         ) : null}
         {taskVerificationTargets.length ? (
           <span title={taskVerificationPreview}>verifies: {taskVerificationPreview || taskVerificationTargets.length}</span>
-        ) : null}
-        {request.verification_status ? (
-          <span>verification: {request.verification_status}</span>
-        ) : null}
-        {request.verification_step_id ? (
-          <span>verified by: {request.verification_step_id}</span>
-        ) : null}
-        {verificationEventPreview ? (
-          <span title={verificationEventPreview}>verification events: {verificationEventPreview}</span>
-        ) : null}
-        {verificationArtifactPreview ? (
-          <span title={verificationArtifactPreview}>verification artifacts: {verificationArtifactPreview}</span>
         ) : null}
         {planningReasonLabel ? <span title={request.planning_reason}>reason: {planningReasonLabel}</span> : null}
         {request.runtime_stage || request.runtime_role ? (

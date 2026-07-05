@@ -8,6 +8,10 @@ import {
   runtimeRecoveryObservationEvidencePreview,
   runtimeRecoveryObservationRetryPreview,
 } from './RuntimeRecoveryEvidencePanel';
+import {
+  RuntimeRequestReplayEvidencePanel,
+  runtimeRequestReplayEvidenceFromRequest,
+} from './RuntimeRequestReplayEvidencePanel';
 
 export type RuntimeExecutionEnvelopeSummaryVariant = 'chat' | 'studio';
 
@@ -286,20 +290,7 @@ function RuntimeExecutionRequestRow({
   const actionTargetPreview = requestActionTargetPreview(objectRecord(request.action_target));
   const observationEvidencePreview = requestObservationEvidencePreview(objectRecord(request.observation_evidence));
   const observationRetryPreview = requestObservationRetryPreview(objectRecord(request.observation_retry));
-  const eventIds = uniqueStrings(request.event_ids || []);
-  const toolCallIds = uniqueStrings(request.tool_call_ids || []);
-  const approvalIds = uniqueStrings(request.approval_ids || []);
-  const artifactIds = uniqueStrings(request.artifact_ids || []);
-  const artifactPaths = uniqueStrings(request.artifact_paths || []);
-  const verificationEventIds = uniqueStrings(request.verification_event_ids || []);
-  const verificationArtifactPaths = uniqueStrings(request.verification_artifact_paths || []);
-  const eventPreview = eventIds.slice(0, 3).join(',');
-  const toolCallPreview = toolCallIds.slice(0, 3).join(',');
-  const approvalPreview = approvalIds.slice(0, 3).join(',');
-  const artifactIdPreview = artifactIds.slice(0, 3).join(',');
-  const artifactPathPreview = artifactPaths.slice(0, 3).join(',');
-  const verificationEventPreview = verificationEventIds.slice(0, 3).join(',');
-  const verificationArtifactPreview = verificationArtifactPaths.slice(0, 3).join(',');
+  const replayEvidence = runtimeRequestReplayEvidenceFromRequest(request);
   return (
     <div
       className="studio-planner-step"
@@ -308,19 +299,19 @@ function RuntimeExecutionRequestRow({
       data-execution-tool={request.tool_name}
       data-observation-retry={observationRetryPreview}
       data-policy-reason={request.policy_reason || ''}
-      data-request-approval-ids={approvalPreview}
-      data-request-artifact-ids={artifactIdPreview}
-      data-request-artifact-paths={artifactPathPreview}
+      data-request-approval-ids={replayEvidence.approvalPreview}
+      data-request-artifact-ids={replayEvidence.artifactIdPreview}
+      data-request-artifact-paths={replayEvidence.artifactPathPreview}
       data-request-action-target={actionTargetPreview}
-      data-request-event-ids={eventPreview}
+      data-request-event-ids={replayEvidence.eventPreview}
       data-request-observation-evidence={observationEvidencePreview}
-      data-request-tool-call-ids={toolCallPreview}
+      data-request-tool-call-ids={replayEvidence.toolCallPreview}
       data-risk-level={request.risk_level || ''}
       data-runtime-stage={request.runtime_stage || ''}
-      data-verification-artifact-paths={verificationArtifactPreview}
-      data-verification-event-ids={verificationEventPreview}
-      data-verification-status={request.verification_status || ''}
-      data-verification-step-id={request.verification_step_id || ''}
+      data-verification-artifact-paths={replayEvidence.verificationArtifactPreview}
+      data-verification-event-ids={replayEvidence.verificationEventPreview}
+      data-verification-status={replayEvidence.verificationStatus}
+      data-verification-step-id={replayEvidence.verificationStepId}
       data-testid={testId}
     >
       <div>
@@ -329,20 +320,14 @@ function RuntimeExecutionRequestRow({
         {request.risk_level ? (
           <span title={request.policy_reason || undefined}>risk: {request.risk_level}</span>
         ) : null}
-        {toolCallPreview ? <span>tool calls: {toolCallPreview}</span> : null}
-        {approvalPreview ? <span>approvals: {approvalPreview}</span> : null}
-        {eventPreview ? <span>events: {eventPreview}</span> : null}
-        {artifactPathPreview ? <span>artifacts: {artifactPathPreview}</span> : null}
-        {artifactIdPreview && !artifactPathPreview ? <span>artifact ids: {artifactIdPreview}</span> : null}
+        <RuntimeRequestReplayEvidencePanel
+          className="runtime-execution-request-replay-evidence"
+          evidence={replayEvidence}
+          testId={`${testId}-replay-evidence`}
+        />
         {actionTargetPreview ? <span>target: {actionTargetPreview}</span> : null}
         {observationEvidencePreview ? <span>evidence: {observationEvidencePreview}</span> : null}
         {observationRetryPreview ? <span>retry: {observationRetryPreview}</span> : null}
-        {request.verification_status ? (
-          <span>verification: {request.verification_status}</span>
-        ) : null}
-        {verificationArtifactPreview ? (
-          <span>artifacts: {verificationArtifactPreview}</span>
-        ) : null}
         <RuntimeRecoveryEvidencePanel
           actionTarget={objectRecord(request.action_target)}
           approvalRequired={request.approval_required === true}
