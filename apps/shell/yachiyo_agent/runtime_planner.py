@@ -21677,6 +21677,18 @@ def _looks_like_recipient_message_request(value: str) -> bool:
             value,
             flags=re.IGNORECASE,
         )
+        or re.search(
+            r"(?:给|向|对)\s*[^：:，,。]+?\s*(?:发送|发出|发消息|发)\s*"
+            r"(?:在|用|通过)?\s*"
+            r"(?:Microsoft Teams|Google Chat|企业微信|Apple Messages|Messages|"
+            r"Telegram|WhatsApp|Discord|Slack|WeChat|微信|飞书|钉钉|QQ|Mail|"
+            r"[A-Za-z][A-Za-z0-9 ._-]{1,40})?\s*(?:里|中|上|内)?\s*"
+            r"(?:一条|条|一则|则)?\s*"
+            r"(?:邮件|电子邮件|消息|短信|微信|email|e-mail|mail|message)?\s*"
+            r"(?:说明|说(?!明)|[:：]|内容是|内容为)",
+            value,
+            flags=re.IGNORECASE,
+        )
         or re.search(r"\b(?:send|message)\s+.+?\s+(?:to|for)\s+", value, flags=re.IGNORECASE)
     )
 
@@ -23361,8 +23373,19 @@ def _direct_communication_hint(text: str) -> dict[str, str]:
         (
             r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
             r"(?:给|向|对)\s*(?P<recipient>[^：:，,。]+?)\s*"
+            r"(?:发送|发出|发消息|发)\s*(?:在|用|通过)?\s*"
+            r"(?P<app>Microsoft Teams|Google Chat|企业微信|Apple Messages|Messages|"
+            r"Telegram|WhatsApp|Discord|Slack|WeChat|微信|飞书|钉钉|QQ|Mail|"
+            r"[A-Za-z][A-Za-z0-9 ._-]{1,40})"
+            r"(?:里|中|上|内)?\s*"
+            r"(?P<channel>邮件|电子邮件|短信|消息|微信|email|e-mail|mail|message)?\s*"
+            r"(?:说明|说(?!明)|内容是|内容为|[:：])\s*(?P<body>.+)$"
+        ),
+        (
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:给|向|对)\s*(?P<recipient>[^：:，,。]+?)\s*"
             r"(?:发送|发消息|发)\s*(?P<app>[\w .·-]{1,40}?)\s*"
-            r"(?:说|内容是|内容为)\s*(?P<body>.+)$"
+            r"(?:说明|说(?!明)|内容是|内容为)\s*(?P<body>.+)$"
         ),
         (
             r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"

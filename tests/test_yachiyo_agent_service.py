@@ -1671,6 +1671,7 @@ def test_agent_studio_service_normalizes_known_app_submit_execution() -> None:
         "app_name": "Slack",
         "selection_source": "desktop.list_apps",
         "query": "Slack",
+        "role_filter": "text",
         "limit": 80,
     }
 

@@ -184,6 +184,13 @@ def _full_plan_tool_requests_from_decision(
             request["planner_step_id"] = step_id
         if capability_id:
             request["capability_id"] = capability_id
+        runtime_stage = _text(
+            _task_core_step_runtime_metadata(decision, step_id).get("runtime_stage")
+        )
+        if runtime_stage == "verify":
+            request["source"] = "runtime_verification"
+            request["runtime_stage"] = "verify"
+            request["continue_to_model"] = True
         if _request_needs_model_materialization(tool_name, request_input):
             request["continue_to_model"] = True
         requests.append(request)

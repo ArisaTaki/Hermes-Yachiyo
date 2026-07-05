@@ -328,6 +328,11 @@ def test_task_intent_router_covers_agent_work_domains() -> None:
         ("整理 Downloads 里的发票文件", "file_organization", ["file.organization"]),
         ("给 Alice 发消息说会议改到三点", "communication", ["communication.compose"]),
         ("给 Alice 写一封邮件说明会议延期", "communication", ["communication.compose"]),
+        (
+            "给小王发 Slack 消息说明会议推迟到下午三点",
+            "communication",
+            ["communication.compose"],
+        ),
         ("打开一个邮件客户端给 Alice 写邮件说明项目延期", "communication", ["communication.compose"]),
         ("明天上午九点提醒我提交报告", "schedule", ["schedule.reminder"]),
         (
@@ -22944,6 +22949,17 @@ def test_runtime_planner_routes_flexible_communication_surface_phrasing() -> Non
                 "body": "hello",
                 "mode": "focus",
                 "send_action": "send",
+            },
+        ),
+        (
+            "给小王发 Slack 消息说明会议推迟到下午三点",
+            {
+                "app_name": "Slack",
+                "recipient": "小王",
+                "body": "会议推迟到下午三点",
+                "mode": "focus",
+                "send_action": "send",
+                "channel": "message",
             },
         ),
     ]
