@@ -1465,22 +1465,26 @@ class TaskIntentRouter:
             and _looks_like_context_artifact_request(text)
         ):
             return _empty_intent("web_research", text)
-        if _running_browser_page_context_hint(text) and (
-            _looks_like_context_artifact_request(text)
-            or _looks_like_standalone_report_artifact_request(text)
-            or _contains_any(
-                text,
-                (
-                    "report",
-                    "summary",
-                    "markdown",
-                    "document",
-                    "报告",
-                    "总结",
-                    "摘要",
-                    "文档",
-                    "文件",
-                ),
+        if (
+            _running_browser_page_context_hint(text)
+            and not _web_search_hint(text, "")
+            and (
+                _looks_like_context_artifact_request(text)
+                or _looks_like_standalone_report_artifact_request(text)
+                or _contains_any(
+                    text,
+                    (
+                        "report",
+                        "summary",
+                        "markdown",
+                        "document",
+                        "报告",
+                        "总结",
+                        "摘要",
+                        "文档",
+                        "文件",
+                    ),
+                )
             )
         ):
             return _empty_intent("web_research", text)
@@ -2137,7 +2141,9 @@ class TaskIntentRouter:
             return _empty_intent("file_organization", text)
         if _looks_like_document_artifact_transform_request(text):
             return _empty_intent("file_organization", text)
-        if _looks_like_file_content_table_extraction_request(text):
+        if _looks_like_file_content_table_extraction_request(
+            text
+        ) and not _file_organization_inventory_list_request(text):
             return _empty_intent("file_organization", text)
         score = _score_terms(
             text,
@@ -2282,6 +2288,13 @@ class TaskIntentRouter:
             inputs["target_name_hint"] = target_hint
         if action_hint:
             inputs["workflow_action_hint"] = action_hint
+        if action_hint != "create":
+            communication_target = _orchestration_communication_target_hint(
+                text,
+                body_source="workflow_result",
+            )
+            if communication_target:
+                inputs["communication_target_hint"] = communication_target
         return TaskIntentSnapshot(
             intent_id=_stable_id("intent", "workflow_orchestration", text),
             kind="workflow_orchestration",
@@ -2320,6 +2333,13 @@ class TaskIntentRouter:
         if score <= 0 and explicit_multi_agent:
             score = 0.24
         target_hint = known_target_hint or _group_target_hint(text)
+        inputs = {"target_name_hint": target_hint} if target_hint else {}
+        communication_target = _orchestration_communication_target_hint(
+            text,
+            body_source="group_run_result",
+        )
+        if communication_target:
+            inputs["communication_target_hint"] = communication_target
         return TaskIntentSnapshot(
             intent_id=_stable_id("intent", "multi_agent", text),
             kind="multi_agent",
@@ -2327,7 +2347,7 @@ class TaskIntentRouter:
             user_goal=text,
             confidence=min(0.9, 0.48 + score),
             description="Coordinate multiple agents or group runs.",
-            inputs={"target_name_hint": target_hint} if target_hint else {},
+            inputs=inputs,
             required_capabilities=["group.multi_agent"],
             preferred_capabilities=["artifact.write"],
             risk_level="medium",
@@ -2484,7 +2504,11 @@ class TaskIntentRouter:
         ).strip()
         if scoped_action in {"new_reminder", "new_event"}:
             return _empty_intent("schedule", text)
-        if _explicit_app_open_request(text) and _app_name_hint(text):
+        if (
+            _explicit_app_open_request(text)
+            and _app_name_hint(text)
+            and not scheduled_runnable
+        ):
             return _empty_intent("schedule", text)
         shortcut_action = str((safe_shortcut_hint(text) or {}).get("action") or "").strip()
         if shortcut_action in {"new_note", "new_document", "new_task"} and not _contains_any(
@@ -2694,7 +2718,7 @@ class RuntimePlanner:
         if intent.kind == "clipboard_operation":
             return self._clipboard_steps(intent, allowed)
         if intent.kind == "workflow_orchestration":
-            return [
+            steps = [
                 _service_step(
                     intent,
                     "workflow.orchestration",
@@ -2702,8 +2726,15 @@ class RuntimePlanner:
                     allowed,
                 )
             ]
+            return _append_orchestration_communication_steps(
+                intent,
+                allowed,
+                steps,
+                orchestration_kind="workflow",
+                depends_on="workflow-orchestration",
+            )
         if intent.kind == "multi_agent":
-            return [
+            steps = [
                 _service_step(
                     intent,
                     "group.multi_agent",
@@ -2711,6 +2742,13 @@ class RuntimePlanner:
                     allowed,
                 )
             ]
+            return _append_orchestration_communication_steps(
+                intent,
+                allowed,
+                steps,
+                orchestration_kind="group_run",
+                depends_on="group-multi_agent",
+            )
         return self._report_steps(intent, allowed)
 
     def _data_analysis_steps(
@@ -8044,6 +8082,13 @@ def _service_input_preview(
         group_task_plan = _group_task_plan_preview(intent.user_goal)
         if group_task_plan:
             payload["group_task_plan"] = group_task_plan
+    delivery_target = intent.inputs.get("communication_target_hint")
+    if isinstance(delivery_target, Mapping):
+        payload["delivery_target"] = {
+            str(key): value
+            for key, value in delivery_target.items()
+            if str(key or "").strip() and value not in (None, "", [], {})
+        }
     return payload
 
 
@@ -13243,6 +13288,271 @@ def _append_analysis_target_app_verification_step(
     ]
 
 
+def _append_orchestration_communication_steps(
+    intent: TaskIntentSnapshot,
+    allowed: set[str] | None,
+    steps: list[ToolPlanStepSnapshot],
+    *,
+    orchestration_kind: str,
+    depends_on: str,
+) -> list[ToolPlanStepSnapshot]:
+    target = intent.inputs.get("communication_target_hint")
+    if not isinstance(target, Mapping):
+        return steps
+    recipient = str(target.get("recipient") or "").strip()
+    if not recipient:
+        return steps
+    label = "workflow" if orchestration_kind == "workflow" else "group-run"
+    title_label = "workflow" if orchestration_kind == "workflow" else "group run"
+    default_artifact = (
+        "workflow-result.md"
+        if orchestration_kind == "workflow"
+        else "group-run-result.md"
+    )
+    artifact_path = _artifact_output_path(intent.user_goal, default_artifact)
+    artifact_tool = _first_allowed(("artifact.write",), allowed)
+    next_steps = list(steps)
+    compose_depends_on = depends_on
+    body_source = "model_generated_content"
+    if artifact_tool:
+        write_step_id = f"write-{label}-result-artifact"
+        next_steps.append(
+            _step(
+                intent,
+                write_step_id,
+                f"Write {title_label} result artifact",
+                "artifact.write",
+                artifact_tool,
+                input_preview={
+                    "path": artifact_path,
+                    "body_source": "model_generated_content",
+                    "source": str(target.get("body_source") or "").strip()
+                    or f"{orchestration_kind}_result",
+                },
+                depends_on=[depends_on],
+                action="write_artifact",
+                reason=(
+                    f"Materialize the {title_label} result as a replayable artifact before "
+                    "using it in a follow-up communication."
+                ),
+            )
+        )
+        compose_depends_on = write_step_id
+        body_source = "artifact"
+
+    app_name = str(target.get("app_name") or "").strip()
+    channel = str(target.get("channel") or "").strip()
+    transform = str(target.get("content_transform_hint") or "").strip()
+    mode = str(target.get("mode") or "focus").strip() or "focus"
+    send_action = str(target.get("send_action") or "send").strip() or "send"
+    selected_app_payload: dict[str, Any] = {}
+    communication_steps: list[ToolPlanStepSnapshot] = []
+    if not app_name:
+        app_name = _default_communication_app_for_channel(
+            channel,
+            mode,
+            allowed,
+            require_send=send_action == "send",
+        )
+    if not app_name:
+        app_query = _generic_communication_app_query_for_channel(channel)
+        discover_tool = _first_allowed(("desktop.list_apps",), allowed)
+        if app_query and discover_tool and _communication_desktop_compose_tools_available(
+            mode,
+            allowed,
+            require_send=send_action == "send",
+        ):
+            app_name = "<selected app from desktop.list_apps>"
+            selected_app_payload = {
+                "selection_source": "desktop.list_apps",
+                "query": app_query,
+            }
+            mode = "open"
+            communication_steps.append(
+                _step(
+                    intent,
+                    f"discover-{label}-communication-app",
+                    "Discover communication app",
+                    "desktop.app_discovery",
+                    discover_tool,
+                    input_preview={"query": app_query, "limit": 20},
+                    depends_on=[compose_depends_on],
+                    action="list_apps",
+                    reason=(
+                        f"Discover an installed communication app before sending the {title_label} result."
+                    ),
+                )
+            )
+    if not app_name:
+        if not artifact_tool:
+            return next_steps
+        draft_input = {
+            "recipient": recipient,
+            "body_source": body_source,
+        }
+        if body_source == "artifact":
+            draft_input["artifact_path"] = artifact_path
+        if transform:
+            draft_input["transform"] = transform
+        return [
+            *next_steps,
+            _step(
+                intent,
+                f"draft-{label}-communication",
+                f"Draft {title_label} communication",
+                "communication.compose",
+                artifact_tool,
+                input_preview=draft_input,
+                approval_required=True,
+                risk_level="medium",
+                depends_on=[compose_depends_on],
+                action="draft_message",
+                reason=(
+                    f"Create a reviewable communication draft from the {title_label} result "
+                    "when the target app cannot be resolved deterministically."
+                ),
+            ),
+        ]
+
+    app_shortcut_tool = _first_allowed(
+        app_foreground_tool_candidates(mode, "safe_shortcut"),
+        allowed,
+    )
+    app_tool, shortcut_tool = _app_scoped_safe_shortcut_split_tools(app_name, mode, allowed)
+    type_tool, recipient_type_input = _safe_type_text_operation_preview(
+        app_name=app_name,
+        mode=mode,
+        allowed=allowed,
+        payload={"text": recipient},
+    )
+    recipient_type_input = _with_selected_app_payload(
+        type_tool,
+        recipient_type_input,
+        selected_app_payload,
+    )
+    search_submit_tool = _app_search_submit_operation_tool(allowed)
+    send_tool = _first_allowed(("desktop.submit_foreground",), allowed)
+    discover_step_id = f"discover-{label}-communication-app"
+    open_step_id = f"open-or-focus-{label}-communication-app"
+    focus_step_id = f"focus-{label}-communication-recipient-search"
+    type_step_id = f"type-{label}-communication-recipient"
+    submit_step_id = f"submit-{label}-communication-recipient-search"
+    draft_step_id = f"draft-{label}-communication-message"
+    focus_depends_on = [discover_step_id] if selected_app_payload else [compose_depends_on]
+    if app_tool and shortcut_tool:
+        communication_steps.append(
+            _step(
+                intent,
+                open_step_id,
+                "Open or focus communication app",
+                "desktop.app_control",
+                app_tool,
+                input_preview={"app_name": app_name, **selected_app_payload},
+                depends_on=focus_depends_on,
+                reason=f"Prepare the requested communication app after the {title_label} result is available.",
+            )
+        )
+        focus_depends_on = [open_step_id]
+        focus_tool = shortcut_tool
+        focus_input = {"action": _communication_recipient_focus_action(channel)}
+        focus_capability = "communication.compose"
+        focus_reason = "Open foreground recipient search with a generic safe shortcut."
+    else:
+        focus_tool = app_shortcut_tool
+        focus_input = {
+            "app_name": app_name,
+            **selected_app_payload,
+            "action": _communication_recipient_focus_action(channel),
+        }
+        focus_capability = "communication.compose"
+        focus_reason = f"Open the app's recipient search after the {title_label} result is available."
+
+    draft_input = {"body_source": body_source}
+    if body_source == "artifact":
+        draft_input["artifact_path"] = artifact_path
+    if transform:
+        draft_input["transform"] = transform
+    draft_tool, draft_input = _safe_type_text_operation_preview(
+        app_name=app_name,
+        mode=mode,
+        allowed=allowed,
+        payload=draft_input,
+    )
+    draft_input = _with_selected_app_payload(draft_tool, draft_input, selected_app_payload)
+    communication_steps.extend(
+        [
+            _step(
+                intent,
+                focus_step_id,
+                "Focus communication recipient search",
+                focus_capability,
+                focus_tool,
+                input_preview=focus_input,
+                action="resolve_recipient",
+                depends_on=focus_depends_on,
+                reason=focus_reason,
+            ),
+            _step(
+                intent,
+                type_step_id,
+                "Type communication recipient",
+                "communication.compose",
+                type_tool,
+                input_preview=recipient_type_input,
+                depends_on=[focus_step_id],
+                action="type",
+                reason="Type only the explicit recipient from the user prompt.",
+            ),
+            _step(
+                intent,
+                submit_step_id,
+                "Submit communication recipient search",
+                "communication.compose",
+                search_submit_tool,
+                input_preview=_app_search_submit_input_preview(search_submit_tool),
+                risk_level=_app_search_submit_risk_level(search_submit_tool),
+                approval_required=_app_search_submit_approval_required(search_submit_tool),
+                depends_on=[type_step_id],
+                action="submit_search",
+                reason=(
+                    "Select or search the recipient with the dedicated safe submit tool when available; "
+                    "otherwise use the foreground submit fallback through the approval gate."
+                ),
+            ),
+            _step(
+                intent,
+                draft_step_id,
+                f"Draft {title_label} communication message",
+                "communication.compose",
+                draft_tool,
+                input_preview=draft_input,
+                depends_on=[submit_step_id],
+                action="draft_message",
+                reason=(
+                    f"Draft the message from the {title_label} result before any approval-gated send step."
+                ),
+            ),
+        ]
+    )
+    if send_action == "send":
+        communication_steps.append(
+            _step(
+                intent,
+                f"send-{label}-communication-message",
+                f"Send {title_label} communication message",
+                "communication.compose",
+                send_tool,
+                input_preview={"action": "send"},
+                risk_level="high",
+                approval_required=True,
+                depends_on=[draft_step_id],
+                action="send_message",
+                reason="Final message sending remains approval-gated.",
+            )
+        )
+    return [*next_steps, *communication_steps]
+
+
 def _append_analysis_communication_steps(
     intent: TaskIntentSnapshot,
     allowed: set[str] | None,
@@ -15502,6 +15812,8 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         score -= 0.3
     if intent.kind == "desktop_operation" and _looks_like_schedule_request(text):
         score -= 0.2
+        if schedule_tool_preview(text, None)[1]:
+            score -= 0.72
     if (
         intent.kind == "desktop_operation"
         and _contains_any(text, _TASK_DELIVERABLE_TERMS)
@@ -15643,6 +15955,16 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         ["note", "notes", "备忘录", "笔记", "记一下", "记录一下", "记下"],
     ):
         score += 0.08
+        if str(intent.inputs.get("body") or "").strip():
+            score += 0.18
+        if (
+            str(intent.inputs.get("action") or "").strip() == "create_note_from_context"
+            and (
+                not _app_capability_discovery_hint(text)
+                or str(intent.inputs.get("source") or "").strip() != "current_page_link"
+            )
+        ):
+            score += 0.38
     if intent.kind == "communication" and _contains_any(text, _COMMUNICATION_ACTION_TERMS):
         score += 0.16
     if intent.kind == "communication" and _looks_like_recipient_message_request(text):
@@ -15651,6 +15973,8 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         score += 0.26
     if intent.kind == "communication" and isinstance(intent.inputs.get("direct_message_hint"), Mapping):
         score += 0.18
+        if str(intent.inputs.get("context_source") or "").strip() and not _looks_like_data_analysis_delivery_request(text):
+            score += 0.34
     if intent.kind == "communication" and _looks_like_data_analysis_delivery_request(text):
         score -= 0.32
     if intent.kind == "communication" and _looks_like_explicit_workflow_orchestration_request(text):
@@ -15673,6 +15997,8 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         score -= 0.18
     if intent.kind == "schedule" and _looks_like_schedule_request(text):
         score += 0.22
+        if isinstance(intent.inputs.get("schedule_payload"), Mapping):
+            score += 0.18
     if intent.kind == "workflow_orchestration" and _contains_any(
         text,
         ["workflow", "flow", "工作流", "流程"],
@@ -15747,6 +16073,8 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         and _data_analysis_action_requested(text)
     ):
         score -= 0.22
+    if intent.kind == "report_generation" and type_into_ui_hint(text):
+        score -= 0.42
     if (
         intent.kind == "web_research"
         and _contains_any(text, _UI_CONTROL_TERMS)
@@ -15918,6 +16246,10 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
             and not str(intent.inputs.get("context_source") or "").strip()
             and _contains_any(text, ["新建", "打开", "任意", "可用", "应用", "app"])
             and not _contains_any(text, ["根据", "总结", "分析", "读取", "从"])
+            and not _contains_any(
+                text,
+                ["report", "summary", "brief", "报告", "总结", "摘要", "周报", "日报", "月报"],
+            )
         ):
             score -= 0.24
         if (
@@ -16764,6 +17096,43 @@ def _app_search_result_source_mode(text: str) -> str:
     return "focus"
 
 
+def _orchestration_communication_target_hint(text: str, *, body_source: str) -> dict[str, str]:
+    value = _clean_prompt(text)
+    if not value or not _contains_any(value, _COMMUNICATION_ACTION_TERMS):
+        return {}
+    target = _data_analysis_delivery_target_text(value) or _web_research_delivery_target_text(value)
+    if not target:
+        return {}
+    app_name, recipient = _split_communication_surface_and_recipient(target)
+    if not recipient:
+        recipient = _clean_communication_recipient_text(target)
+        if recipient and not app_name:
+            app_name = _communication_surface_for_recipient_hint(recipient)
+    if not recipient:
+        return {}
+    hint: dict[str, str] = {
+        "recipient": recipient,
+        "body_source": body_source,
+        "mode": _communication_app_mode(value),
+        "send_action": _communication_send_action(value),
+    }
+    if app_name:
+        hint["app_name"] = app_name
+    channel = (
+        _data_analysis_delivery_channel_hint(value)
+        or _communication_delivery_channel_hint(value)
+        or _generic_communication_target_channel_hint(target)
+    )
+    if channel:
+        hint["channel"] = channel
+    transform = _communication_content_transform_hint(value)
+    if not transform and _contains_any(value, ("结论", "conclusion", "findings")):
+        transform = "summary"
+    if transform:
+        hint["content_transform_hint"] = transform
+    return hint
+
+
 def _web_research_communication_target_hint(text: str) -> dict[str, str]:
     value = _clean_prompt(text)
     if not value or not _contains_any(value, _COMMUNICATION_ACTION_TERMS):
@@ -17176,7 +17545,24 @@ def _data_analysis_delivery_channel_hint(text: str) -> str:
     app_suffix = (
         r"(?:应用(?:程序)?|app|软件|客户端|工具|程序|client|tool|program)?"
     )
+    email_surface = r"(?:邮件|电子邮件|邮箱|mail|email|e-mail)"
+    if re.search(
+        rf"(?:用|使用|通过|经由|借助|在|到|发到|发送到|分享到|转发到)\s*"
+        rf"{generic_prefix}{email_surface}\s*{app_suffix}"
+        r"(?:里|中|上|内|里面)?"
+        r"(?:\s*(?:发|发送|分享|转发|send|email|mail|forward))?",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        return "email"
     message_surface = r"(?:聊天|通讯|通信|消息|即时通讯|短信|chat|messaging|message|messenger)"
+    if re.search(
+        r"(?:发|发送|分享|转发)\s*(?:一条|条|一则|则)?\s*"
+        r"(?:消息|短信|微信|message)\s*(?:给|到|发给|发送给|向|对)",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        return "message"
     if re.search(
         rf"(?:用|使用|通过|经由|借助|在|到|发到|发送到|分享到|转发到)\s*"
         rf"{generic_prefix}{message_surface}\s*{app_suffix}"
@@ -18854,6 +19240,35 @@ def _looks_like_file_content_table_extraction_request(text: str) -> bool:
             "整理",
             "输出",
             "生成",
+        ),
+    )
+
+
+def _file_organization_inventory_list_request(text: str) -> bool:
+    value = _clean_prompt(text)
+    if not value or not _looks_like_file_organization_request(value):
+        return False
+    if _contains_any(
+        value,
+        (
+            "表格",
+            "电子表格",
+            "csv",
+            "spreadsheet",
+            "summary table",
+            "table",
+        ),
+    ):
+        return False
+    return _contains_any(
+        value,
+        (
+            "清单",
+            "列表",
+            "文件清单",
+            "文件列表",
+            "inventory",
+            "file list",
         ),
     )
 
@@ -20582,7 +20997,7 @@ def _generic_create_title_text_hint(text: str) -> str:
     container = (
         r"(?:页面|页|笔记|备忘录|日志|日记|文档|文件(?!夹)|演示|演示文稿|幻灯片|"
         r"项目|任务|卡片|工单|事项|page|note|document|file|presentation|slide|"
-        r"project|task|card|ticket|issue|bug|board|whiteboard|wireframe|mockup)"
+        r"project|task|card|bug\s+ticket|issue\s+ticket|ticket|issue|bug|board|whiteboard|wireframe|mockup)"
     )
     chinese_patterns = (
         rf"(?:新建|创建|新增).{{0,80}}?"
@@ -20683,13 +21098,13 @@ def _app_scoped_create_text_hint(text: str) -> str:
     patterns = (
         r"(?:新建|创建|新增)\s*(?:一个|一条|一篇|一份|一则|一张|一幅|新的|新)?\s*"
         r"(?:页面|页|笔记|备忘录|日志|日记|文档|文件|演示|演示文稿|幻灯片|"
-        r"项目|任务|卡片|工单|事项|ticket|issue|bug)"
+        r"项目|任务|卡片|工单|事项|bug\s+ticket|issue\s+ticket|ticket|issue|bug)"
         r"\s*(?:(?:标题|名称|名字|题目)\s*)?(?:是|为|叫|:|：)\s*"
         r"(?P<text>[^。！？!?，,]+)",
         r"(?:标题|名称|名字|题目)\s*(?:是|为|叫|:|：)\s*"
         r"(?P<text>[^。！？!?，,]+?)"
         r"(?:\s*的\s*(?:页面|页|笔记|备忘录|日志|日记|文档|文件|演示|演示文稿|"
-        r"幻灯片|项目|任务|卡片|工单|事项|ticket|issue|bug))?"
+        r"幻灯片|项目|任务|卡片|工单|事项|bug\s+ticket|issue\s+ticket|ticket|issue|bug))?"
         r"(?:$|[。！？!?，,])",
         r"(?:名为|叫做|叫)\s*(?P<text>[^。！？!?，,]+)",
         r"(?:关于|有关)\s*(?P<text>.+?)\s*的\s*"
@@ -23290,8 +23705,19 @@ def _direct_file_context_communication_hint(
                         or split_recipient
                         or _clean_communication_recipient_text(target)
                     )
+                    if (
+                        app_name
+                        and recipient
+                        and not channel
+                        and app_name == _communication_surface_for_recipient_hint(recipient)
+                    ):
+                        channel = "message"
             if not app_name and recipient:
-                app_name = _communication_surface_for_recipient_hint(recipient)
+                inferred_app_name = _communication_surface_for_recipient_hint(recipient)
+                if inferred_app_name:
+                    app_name = inferred_app_name
+                    if not channel:
+                        channel = "message"
             if not recipient:
                 continue
             hint = {
@@ -23692,8 +24118,19 @@ def _direct_context_communication_hint(text: str, source: str) -> dict[str, str]
                     or split_recipient
                     or _clean_communication_recipient_text(target)
                 )
+                if (
+                    app_name
+                    and recipient
+                    and not channel
+                    and app_name == _communication_surface_for_recipient_hint(recipient)
+                ):
+                    channel = "message"
         if not app_name and recipient:
-            app_name = _communication_surface_for_recipient_hint(recipient)
+            inferred_app_name = _communication_surface_for_recipient_hint(recipient)
+            if inferred_app_name:
+                app_name = inferred_app_name
+                if not channel:
+                    channel = "message"
         if not app_name and recipient and not channel:
             channel = "message"
         if not recipient or (not app_name and channel not in {"email", "message"}):
@@ -23943,6 +24380,12 @@ def _communication_delivery_channel_hint(text: str, explicit: str = "") -> str:
         flags=re.IGNORECASE,
     ):
         return "email"
+    if re.search(
+        r"(?:聊天|通讯|通信|消息|即时通讯|短信|微信|chat|messaging|message|messenger)",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        return "message"
     return ""
 
 

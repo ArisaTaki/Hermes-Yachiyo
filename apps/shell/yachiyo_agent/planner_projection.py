@@ -624,7 +624,12 @@ def _with_generated_artifact_write(
 ) -> dict[str, Any]:
     intent = getattr(decision, "selected_intent", None)
     intent_kind = str(getattr(intent, "kind", "") or "").strip()
-    if intent_kind not in {"report_generation", "web_research"}:
+    if intent_kind not in {
+        "multi_agent",
+        "report_generation",
+        "web_research",
+        "workflow_orchestration",
+    }:
         return payload
     artifact_paths = _tool_plan_values(decision, "artifacts_expected")
     if not artifact_paths:

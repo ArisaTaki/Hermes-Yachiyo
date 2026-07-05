@@ -1223,6 +1223,8 @@ def media_app_query_search_plan(
         return plan
 
     observed_type_tool = _first_allowed(("desktop.type_into_ui_element",), allowed)
+    if not observed_type_tool and _media_observed_type_fallback_available(allowed):
+        observed_type_tool = "desktop.type_into_ui_element"
     if (
         app_tool
         and type_tool

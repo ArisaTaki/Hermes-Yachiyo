@@ -865,8 +865,10 @@ def test_runtime_planner_opens_explicit_spreadsheet_app_before_builtin_analysis(
     assert decision.plan.tool_plan.required_capabilities == [
         "desktop.app_control",
         "data.analysis",
+        "file.workspace_read",
     ]
     assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "read-data-source",
         "open-spreadsheet-app",
         "analyze-data-file",
     ]
@@ -875,7 +877,8 @@ def test_runtime_planner_opens_explicit_spreadsheet_app_before_builtin_analysis(
         "app_name": "Excel",
     }
     assert _step_by_id(decision, "analyze-data-file").depends_on == [
-        "open-spreadsheet-app"
+        "read-data-source",
+        "open-spreadsheet-app",
     ]
 
 
@@ -897,9 +900,11 @@ def test_runtime_planner_opens_requested_data_file_when_desktop_path_tool_is_all
     assert decision.plan.tool_plan.required_capabilities == [
         "desktop.app_control",
         "data.analysis",
+        "file.workspace_read",
         "file.desktop_access",
     ]
     assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "read-data-source",
         "open-spreadsheet-app",
         "open-data-file",
         "analyze-data-file",
@@ -912,6 +917,7 @@ def test_runtime_planner_opens_requested_data_file_when_desktop_path_tool_is_all
         "open-spreadsheet-app"
     ]
     assert _step_by_id(decision, "analyze-data-file").depends_on == [
+        "read-data-source",
         "open-spreadsheet-app",
         "open-data-file",
     ]
@@ -978,9 +984,11 @@ def test_runtime_planner_opens_generated_analysis_result_with_requested_app() ->
     assert decision.selected_intent.expected_outputs == ["chart", "report", "table"]
     assert decision.plan.tool_plan.required_capabilities == [
         "data.analysis",
+        "file.workspace_read",
         "file.desktop_access",
     ]
     assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "read-data-source",
         "analyze-data-file",
         "open-analysis-artifact-with-app",
     ]
@@ -1212,10 +1220,12 @@ def test_runtime_planner_uses_builtin_data_analysis_for_standard_artifacts() -> 
         "analysis-report.html",
     ]
     assert [step.step_id for step in decision.plan.tool_plan.steps] == [
-        "analyze-data-file"
+        "read-data-source",
+        "analyze-data-file",
     ]
     step = _step_by_id(decision, "analyze-data-file")
     assert step.tool_name == "data.analyze"
+    assert step.depends_on == ["read-data-source"]
     assert step.input_preview == _data_analysis_preview(
         "metrics.xlsx",
         "xlsx",
@@ -1240,10 +1250,12 @@ def test_runtime_planner_prefers_builtin_data_analysis_for_markdown_tables() -> 
     assert decision.selected_intent.inputs["data_source_kind"] == "text_table"
     assert decision.plan.tool_plan.approvals_required == []
     assert [step.step_id for step in decision.plan.tool_plan.steps] == [
-        "analyze-data-file"
+        "read-data-source",
+        "analyze-data-file",
     ]
     step = _step_by_id(decision, "analyze-data-file")
     assert step.tool_name == "data.analyze"
+    assert step.depends_on == ["read-data-source"]
     assert step.input_preview == _data_analysis_preview("data/sales.md", "text_table")
 
 
@@ -1258,10 +1270,12 @@ def test_runtime_planner_prefers_builtin_data_analysis_for_jsonl() -> None:
     assert decision.selected_intent.inputs["data_source_kind"] == "jsonl"
     assert decision.plan.tool_plan.approvals_required == []
     assert [step.step_id for step in decision.plan.tool_plan.steps] == [
-        "analyze-data-file"
+        "read-data-source",
+        "analyze-data-file",
     ]
     step = _step_by_id(decision, "analyze-data-file")
     assert step.tool_name == "data.analyze"
+    assert step.depends_on == ["read-data-source"]
     assert step.input_preview == _data_analysis_preview("logs/events.jsonl", "jsonl")
 
 
@@ -1283,10 +1297,12 @@ def test_runtime_planner_prefers_builtin_data_analysis_for_json_and_text_tables(
         assert "desktop.app_control" not in decision.plan.tool_plan.required_capabilities
         assert decision.plan.tool_plan.approvals_required == []
         assert [step.step_id for step in decision.plan.tool_plan.steps] == [
-            "analyze-data-file"
+            "read-data-source",
+            "analyze-data-file",
         ]
         step = _step_by_id(decision, "analyze-data-file")
         assert step.tool_name == "data.analyze"
+        assert step.depends_on == ["read-data-source"]
         assert step.input_preview == _data_analysis_preview(path, source_kind)
 
 
@@ -4662,6 +4678,7 @@ def test_planner_selection_payload_surfaces_direct_message_followup_target() -> 
         "send_action": "send",
         "mode": "focus",
         "app_name": "WeChat",
+        "channel": "message",
         "transform": "report",
     }
 
@@ -6634,7 +6651,14 @@ def test_runtime_planner_preserves_workflow_and_multi_agent_orchestration_routes
     )
     assert workflow_with_delivery.selected_intent.kind == "workflow_orchestration"
     assert workflow_with_delivery.selected_intent.inputs == {
-        "workflow_action_hint": "run"
+        "workflow_action_hint": "run",
+        "communication_target_hint": {
+            "recipient": "我",
+            "body_source": "workflow_result",
+            "mode": "open",
+            "send_action": "send",
+            "channel": "message",
+        },
     }
     assert planner_tool_requests(
         workflow_with_delivery_prompt,
@@ -6666,6 +6690,63 @@ def test_runtime_planner_preserves_workflow_and_multi_agent_orchestration_routes
         create_workflow_with_delivery_prompt,
         ["workflow.create", "workflow.run", "workspace.list"],
     )[0]["tool"] == "workflow.create"
+
+    workflow_result_delivery = RuntimePlanner().decision(
+        "运行日报 Workflow 并把结果用邮件发给 Alice",
+        allowed_tools=[
+            "workflow.run",
+            "artifact.write",
+            "app.focus",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.submit_foreground",
+        ],
+    )
+    assert workflow_result_delivery.selected_intent.inputs == {
+        "target_name_hint": "日报",
+        "workflow_action_hint": "run",
+        "communication_target_hint": {
+            "recipient": "Alice",
+            "body_source": "workflow_result",
+            "mode": "focus",
+            "send_action": "send",
+            "channel": "email",
+        },
+    }
+    assert [step.step_id for step in workflow_result_delivery.plan.tool_plan.steps] == [
+        "workflow-orchestration",
+        "write-workflow-result-artifact",
+        "open-or-focus-workflow-communication-app",
+        "focus-workflow-communication-recipient-search",
+        "type-workflow-communication-recipient",
+        "submit-workflow-communication-recipient-search",
+        "draft-workflow-communication-message",
+        "send-workflow-communication-message",
+    ]
+    assert _step_by_id(
+        workflow_result_delivery,
+        "write-workflow-result-artifact",
+    ).input_preview == {
+        "path": "workflow-result.md",
+        "body_source": "model_generated_content",
+        "source": "workflow_result",
+    }
+    assert _step_by_id(
+        workflow_result_delivery,
+        "open-or-focus-workflow-communication-app",
+    ).input_preview == {"app_name": "Mail"}
+    assert _step_by_id(
+        workflow_result_delivery,
+        "draft-workflow-communication-message",
+    ).input_preview == {
+        "body_source": "artifact",
+        "artifact_path": "workflow-result.md",
+    }
+    assert _step_by_id(
+        workflow_result_delivery,
+        "send-workflow-communication-message",
+    ).approval_required is True
 
     workflow_message_content = RuntimePlanner().decision(
         "给 Alice 发消息说启动 workflow",
@@ -6898,6 +6979,108 @@ def test_runtime_planner_preserves_workflow_and_multi_agent_orchestration_routes
             "planning_reason": "planner_fallback_group_run",
         }
     ]
+
+    group_result_delivery = RuntimePlanner().decision(
+        "让研究群组比较三个方案，然后把结论发给 Slack 的 yachiyo",
+        allowed_tools=[
+            "group.run",
+            "artifact.write",
+            "app.focus",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.submit_foreground",
+        ],
+    )
+    assert group_result_delivery.selected_intent.inputs == {
+        "target_name_hint": "研究",
+        "communication_target_hint": {
+            "recipient": "yachiyo",
+            "body_source": "group_run_result",
+            "mode": "focus",
+            "send_action": "send",
+            "app_name": "Slack",
+            "content_transform_hint": "summary",
+        },
+    }
+    assert [step.step_id for step in group_result_delivery.plan.tool_plan.steps] == [
+        "group-multi_agent",
+        "write-group-run-result-artifact",
+        "open-or-focus-group-run-communication-app",
+        "focus-group-run-communication-recipient-search",
+        "type-group-run-communication-recipient",
+        "submit-group-run-communication-recipient-search",
+        "draft-group-run-communication-message",
+        "send-group-run-communication-message",
+    ]
+    assert _step_by_id(
+        group_result_delivery,
+        "draft-group-run-communication-message",
+    ).input_preview == {
+        "body_source": "artifact",
+        "artifact_path": "group-run-result.md",
+        "transform": "summary",
+    }
+    assert _step_by_id(
+        group_result_delivery,
+        "send-group-run-communication-message",
+    ).approval_required is True
+
+    generic_group_delivery = RuntimePlanner().decision(
+        "启动研究群组调研 Hanako，然后用任意聊天应用发给小王",
+        allowed_tools=[
+            "group.run",
+            "artifact.write",
+            "desktop.list_apps",
+            "app.open",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.submit_foreground",
+        ],
+    )
+    assert generic_group_delivery.selected_intent.inputs["communication_target_hint"] == {
+        "recipient": "小王",
+        "body_source": "group_run_result",
+        "mode": "open",
+        "send_action": "send",
+        "channel": "message",
+    }
+    assert [
+        step.step_id
+        for step in generic_group_delivery.plan.tool_plan.steps[2:6]
+    ] == [
+        "discover-group-run-communication-app",
+        "open-or-focus-group-run-communication-app",
+        "focus-group-run-communication-recipient-search",
+        "type-group-run-communication-recipient",
+    ]
+    assert _step_by_id(
+        generic_group_delivery,
+        "discover-group-run-communication-app",
+    ).input_preview == {"query": "chat", "limit": 20}
+    generic_group_payload = planner_selection_payload(
+        decision=generic_group_delivery,
+        planner_requests=[],
+        legacy_requests=[],
+        selected_requests=[],
+        selected_source="runtime_planner",
+        selected_reason="runtime_planner_full_plan_execution",
+    )
+    assert generic_group_payload["followup_target"]["kind"] == "desktop_discovered_app_action"
+    assert generic_group_payload["followup_target"]["app_query"] == "chat"
+    assert generic_group_payload["followup_target"]["communication_compose"] == {
+        "recipient": "小王",
+        "send_action": "send",
+        "channel": "message",
+    }
+    assert generic_group_payload["followup_target"]["artifact_write"] == {
+        "target_action": "write_artifact",
+        "path": "group-run-result.md",
+        "body_source": "model_generated_content",
+        "tool": "artifact.write",
+        "intent_kind": "multi_agent",
+    }
 
     generic_group = RuntimePlanner().decision(
         "运行一个 Agent 群组：研究 Hermes 和 Hanako 的差异并产出报告",
@@ -11134,22 +11317,23 @@ def test_runtime_planner_prefetches_transformed_context_before_app_write() -> No
         assert _step_by_id(decision, "read-report-context").tool_name == (
             "browser.extract_text"
         )
+        expected_artifact_path = "summary.md" if "摘要" in prompt else "report.md"
         assert _step_by_id(decision, "write-report-artifact").input_preview == {
-            "path": "report.md",
+            "path": expected_artifact_path,
             "body_source": "current_page_content",
         }
         assert _step_by_id(decision, "prepare-report-target-app").input_preview == {
             "app_name": "Obsidian",
             "target_action": "app_paste",
             "body_source": "report_artifact",
-            "artifact_path": "report.md",
+            "artifact_path": expected_artifact_path,
         }
         assert _step_by_id(decision, "insert-report-into-target-app").input_preview == {
             "body_source": "report_artifact",
-            "artifact_path": "report.md",
+            "artifact_path": expected_artifact_path,
             "target_action": "app_paste",
         }
-        assert decision.plan.tool_plan.artifacts_expected == ["report.md"]
+        assert decision.plan.tool_plan.artifacts_expected == [expected_artifact_path]
         assert planner_tool_requests(prompt, allowed) == [page_prefetch]
         assert planner_direct_tool_requests(prompt, allowed) == [page_prefetch]
 
@@ -11171,7 +11355,7 @@ def test_runtime_planner_prefetches_transformed_context_before_app_write() -> No
     }
     assert _step_by_id(new_note, "insert-report-into-target-app").input_preview == {
         "body_source": "report_artifact",
-        "artifact_path": "report.md",
+        "artifact_path": "summary.md",
         "target_action": "app_paste",
         "container_action": "new_note",
     }
@@ -11366,7 +11550,7 @@ def test_runtime_planner_prefetches_transformed_context_before_app_write() -> No
         "query": "document",
         "target_action": "app_paste",
         "body_source": "report_artifact",
-        "artifact_path": "report.md",
+        "artifact_path": "summary.md",
         "action": "new_document",
     }
     assert _step_by_id(
@@ -11374,7 +11558,7 @@ def test_runtime_planner_prefetches_transformed_context_before_app_write() -> No
         "insert-report-into-target-app",
     ).input_preview == {
         "body_source": "report_artifact",
-        "artifact_path": "report.md",
+        "artifact_path": "summary.md",
         "target_action": "app_paste",
         "container_action": "new_document",
     }
@@ -11524,11 +11708,11 @@ def test_runtime_planner_applies_artifact_output_locations() -> None:
 
     assert current_window_report.selected_intent.kind == "report_generation"
     assert _step_by_id(current_window_report, "write-report-artifact").input_preview == {
-        "path": "Downloads/report.md",
+        "path": "Downloads/summary.md",
         "body_source": "visible_text",
     }
     assert current_window_report.plan.tool_plan.artifacts_expected == [
-        "Downloads/report.md"
+        "Downloads/summary.md"
     ]
     assert current_window_release_notes.selected_intent.kind == "report_generation"
     assert _step_by_id(current_window_release_notes, "write-report-artifact").input_preview == {
@@ -11538,13 +11722,12 @@ def test_runtime_planner_applies_artifact_output_locations() -> None:
     assert current_window_release_notes.plan.tool_plan.artifacts_expected == [
         "Downloads/release-notes.md"
     ]
-    assert current_page_markdown.selected_intent.kind == "report_generation"
-    assert _step_by_id(current_page_markdown, "write-report-artifact").input_preview == {
-        "path": "Desktop/report.md",
-        "body_source": "current_page_content",
+    assert current_page_markdown.selected_intent.kind == "web_research"
+    assert _step_by_id(current_page_markdown, "write-research-artifact").input_preview == {
+        "path": "Desktop/research-summary.md",
     }
     assert current_page_markdown.plan.tool_plan.artifacts_expected == [
-        "Desktop/report.md"
+        "Desktop/research-summary.md"
     ]
     assert clipboard_table.selected_intent.kind == "data_analysis"
     assert _step_by_id(clipboard_table, "write-analysis-artifact").input_preview == {
@@ -11746,6 +11929,7 @@ def test_runtime_planner_reveals_generated_artifacts_in_finder() -> None:
 
     assert builtin_data.selected_intent.kind == "data_analysis"
     assert [step.step_id for step in builtin_data.plan.tool_plan.steps] == [
+        "read-data-source",
         "analyze-data-file",
         "reveal-artifact-in-finder",
     ]
@@ -11760,6 +11944,7 @@ def test_runtime_planner_reveals_generated_artifacts_in_finder() -> None:
     ]
     assert builtin_data.plan.tool_plan.required_capabilities == [
         "data.analysis",
+        "file.workspace_read",
         "file.desktop_access",
     ]
     assert builtin_data.plan.tool_plan.artifacts_expected == [
@@ -11773,12 +11958,12 @@ def test_runtime_planner_reveals_generated_artifacts_in_finder() -> None:
         "reveal-artifact-in-finder",
     ]
     assert _step_by_id(current_window, "reveal-artifact-in-finder").input_preview == {
-        "path": "report.md"
+        "path": "summary.md"
     }
     assert _step_by_id(current_window, "reveal-artifact-in-finder").depends_on == [
         "write-report-artifact"
     ]
-    assert current_window.plan.tool_plan.artifacts_expected == ["report.md"]
+    assert current_window.plan.tool_plan.artifacts_expected == ["summary.md"]
 
     assert current_page.selected_intent.kind == "web_research"
     assert [step.step_id for step in current_page.plan.tool_plan.steps] == [
@@ -12835,6 +13020,7 @@ def test_runtime_planner_discovers_apps_by_capability_before_acting() -> None:
     assert [step.step_id for step in local_pdf_en.plan.tool_plan.steps] == [
         "discover_apps-desktop-state",
         "open-selected-discovered-app",
+        "observe-selected-discovered-app",
     ]
 
     mindmap = RuntimePlanner().decision(
@@ -13401,10 +13587,10 @@ def test_runtime_planner_discovers_generic_design_tool_before_searching() -> Non
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
             "input": {
-                "app_name": "<selected app from desktop.list_apps>",
-                "selection_source": "desktop.list_apps",
-                "query": "pdf",
-            },
+                    "app_name": "<selected app from desktop.list_apps>",
+                    "selection_source": "desktop.list_apps",
+                    "query": "image",
+                },
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -16024,6 +16210,7 @@ def test_runtime_planner_clicks_running_browser_window_by_desktop_capability() -
         assert [step.step_id for step in decision.plan.tool_plan.steps] == [
             "discover_apps-desktop-state",
             "open-selected-discovered-app",
+            "observe-selected-discovered-app",
             "operate-selected-discovered-app-ui",
             "verify-selected-discovered-app-action",
         ]
@@ -16049,7 +16236,7 @@ def test_runtime_planner_clicks_running_browser_window_by_desktop_capability() -
             "operate-selected-discovered-app-ui"
         ]
         assert envelope is not None
-        assert envelope.requests[2].action_target == {
+        assert envelope.requests[3].action_target == {
             "kind": "desktop_app",
             "action": "click_ui",
             "selection_source": "desktop.running_apps",
@@ -16057,7 +16244,7 @@ def test_runtime_planner_clicks_running_browser_window_by_desktop_capability() -
             "query": "browser",
             "step_id": "operate-selected-discovered-app-ui",
         }
-        assert envelope.requests[3].action_target["verified_step_ids"] == [
+        assert envelope.requests[4].action_target["verified_step_ids"] == [
             "operate-selected-discovered-app-ui"
         ]
 
@@ -23504,12 +23691,12 @@ def test_runtime_planner_routes_file_context_communication_without_app_alias() -
         "direct_message_hint": {
             "app_name": "Slack",
             "recipient": "Alice",
-            "body_source": "file",
-            "mode": "focus",
-            "send_action": "send",
-            "content_transform_hint": "summary",
-        },
-    }
+                "body_source": "file",
+                "mode": "focus",
+                "send_action": "send",
+                "content_transform_hint": "summary",
+            },
+        }
     assert [step.step_id for step in recent_pdf_decision.plan.tool_plan.steps] == [
         "read-communication-context",
         "open-or-focus-app",
@@ -23597,14 +23784,15 @@ def test_runtime_planner_infers_known_communication_surface_for_context_send() -
     assert decision.selected_intent.kind == "communication"
     assert decision.selected_intent.inputs == {
         "context_source": "clipboard",
-        "direct_message_hint": {
-            "app_name": "WeChat",
-            "recipient": "文件传输助手",
-            "body_source": "clipboard",
-            "mode": "focus",
-            "send_action": "send",
-        },
-    }
+            "direct_message_hint": {
+                "app_name": "WeChat",
+                "recipient": "文件传输助手",
+                "body_source": "clipboard",
+                "mode": "focus",
+                "send_action": "send",
+                "channel": "message",
+            },
+        }
     assert [step.step_id for step in decision.plan.tool_plan.steps] == [
         "open-or-focus-app",
         "focus-communication-recipient-search",
@@ -23688,6 +23876,7 @@ def test_runtime_planner_cleans_app_prefix_for_context_communication() -> None:
             "body_source": "clipboard",
             "mode": "focus",
             "send_action": "send",
+            "channel": "message",
         },
     }
     assert _step_by_id(decision, "focus-communication-recipient-search").input_preview == {
@@ -24204,6 +24393,7 @@ def test_runtime_planner_tracks_context_communication_source_without_body() -> N
             "body_source": "current_page_content",
             "mode": "focus",
             "send_action": "send",
+            "channel": "message",
         },
     }
     assert [step.step_id for step in decision.plan.tool_plan.steps] == [
@@ -24412,6 +24602,7 @@ def test_runtime_planner_uses_browser_current_page_for_link_delivery() -> None:
             "body_source": "current_page_link",
             "mode": "focus",
             "send_action": "send",
+            "channel": "message",
         },
     }
     assert [step.step_id for step in wechat_link.plan.tool_plan.steps] == [
@@ -24680,6 +24871,7 @@ def test_runtime_planner_routes_screen_capture_delivery_to_communication() -> No
             "body_source": "screen_capture",
             "mode": "focus",
             "send_action": "send",
+            "channel": "message",
         },
     }
     assert decision.plan.tool_plan.missing_capabilities == []
@@ -24773,6 +24965,7 @@ def test_runtime_planner_routes_generated_context_to_direct_communication() -> N
             "body_source": "current_page_content",
             "mode": "focus",
             "send_action": "send",
+            "channel": "message",
             "content_transform_hint": "summary",
         },
     }
@@ -25789,16 +25982,15 @@ def test_planner_selection_payload_surfaces_context_artifact_write_target() -> N
         selected_reason="runtime_planner_direct",
     )
 
-    assert payload["intent_kind"] == "report_generation"
-    assert payload["artifacts_expected"] == ["Downloads/report.md"]
+    assert payload["intent_kind"] == "web_research"
+    assert payload["artifacts_expected"] == ["Downloads/research-summary.md"]
     assert payload["followup_target"] == {
         "kind": "artifact_write",
         "target_action": "write_artifact",
-        "path": "Downloads/report.md",
+        "path": "Downloads/research-summary.md",
         "body_source": "model_generated_content",
         "tool": "artifact.write",
-        "context_source": "current_page_content",
-        "intent_kind": "report_generation",
+        "intent_kind": "web_research",
     }
     assert runtime_planner_metadata(decision)["yachiyo_followup_target"] == payload[
         "followup_target"
@@ -25822,11 +26014,11 @@ def test_planner_selection_payload_surfaces_context_artifact_write_target() -> N
     )
 
     assert window_payload["intent_kind"] == "report_generation"
-    assert window_payload["artifacts_expected"] == ["Downloads/report.md"]
+    assert window_payload["artifacts_expected"] == ["Downloads/summary.md"]
     assert window_payload["followup_target"] == {
         "kind": "artifact_write",
         "target_action": "write_artifact",
-        "path": "Downloads/report.md",
+        "path": "Downloads/summary.md",
         "body_source": "model_generated_content",
         "tool": "artifact.write",
         "context_source": "visible_text",
@@ -36231,7 +36423,7 @@ def test_runtime_execution_envelope_can_project_full_report_app_write_plan() -> 
         "verify_result",
     ]
     assert full_envelope.requests[1].input == {
-        "path": "report.md",
+        "path": "summary.md",
         "body_source": "current_page_content",
     }
     assert full_envelope.requests[2].input == {
@@ -36240,7 +36432,7 @@ def test_runtime_execution_envelope_can_project_full_report_app_write_plan() -> 
     }
     assert full_envelope.requests[3].input == {
         "body_source": "report_artifact",
-        "artifact_path": "report.md",
+        "artifact_path": "summary.md",
         "target_action": "app_paste",
         "container_action": "new_note",
     }
@@ -36872,6 +37064,7 @@ def test_runtime_planner_keeps_running_app_selection_for_followup_ui_action() ->
     assert [request.input.get("selection_source") for request in envelope.requests] == [
         None,
         "desktop.running_apps",
+        None,
         "desktop.running_apps",
         "desktop.running_apps",
     ]
@@ -36948,6 +37141,7 @@ def test_runtime_planner_does_not_type_button_tail_after_click_target() -> None:
         assert [step.step_id for step in decision.plan.tool_plan.steps] == [
             "discover_apps-desktop-state",
             "open-selected-discovered-app",
+            "observe-selected-discovered-app",
             "operate-selected-discovered-app-ui",
             "verify-selected-discovered-app-action",
         ]
@@ -36968,8 +37162,8 @@ def test_runtime_planner_does_not_type_button_tail_after_click_target() -> None:
             "type" not in str(request.step_id or "")
             for request in envelope.requests
         )
-        assert envelope.requests[2].action_target["action"] == "click_ui"
-        assert envelope.requests[2].action_target["selection_source"] == (
+        assert envelope.requests[3].action_target["action"] == "click_ui"
+        assert envelope.requests[3].action_target["selection_source"] == (
             "desktop.running_apps"
         )
 
