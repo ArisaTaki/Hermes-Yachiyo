@@ -161,6 +161,119 @@ def test_auto_data_analysis_from_workspace_discovery_skips_ambiguous_files() -> 
     assert request is None
 
 
+def test_auto_data_analysis_from_workspace_discovery_selects_latest_file() -> None:
+    request = RuntimeCustomApiAgentLoop._auto_data_analysis_request_from_discovery(
+        [
+            {
+                "protocol": "json_fallback",
+                "tool": "workspace.list",
+                "input": {
+                    "path": "Downloads",
+                    "pattern": "*.csv",
+                    "file_type": "csv",
+                    "selection": "latest",
+                },
+                "source": "runtime_planner",
+                "planning_reason": "planner_prefetch_data_source",
+                "continue_to_model": True,
+            }
+        ],
+        ["workspace.list", "data.analyze", "artifact.write"],
+        {"artifacts_expected": ["analysis-report.md"]},
+        [
+            _timeline(
+                "agent.tool.call",
+                "workspace.list",
+                input_preview={
+                    "path": "Downloads",
+                    "pattern": "*.csv",
+                    "file_type": "csv",
+                    "selection": "latest",
+                },
+                result={
+                    "ok": True,
+                    "path": "Downloads",
+                    "entries": [
+                        {"name": "sales-old.csv", "type": "file", "mtime_ns": 10},
+                        {"name": "sales-new.csv", "type": "file", "mtime_ns": 20},
+                    ],
+                },
+            )
+        ],
+    )
+
+    assert request is not None
+    assert request["tool"] == "data.analyze"
+    assert request["input"]["path"] == "Downloads/sales-new.csv"
+    assert request["input"]["source_kind"] == "csv"
+
+
+def test_auto_data_analysis_from_workspace_discovery_selects_all_files() -> None:
+    request = RuntimeCustomApiAgentLoop._auto_data_analysis_request_from_discovery(
+        [
+            {
+                "protocol": "json_fallback",
+                "tool": "workspace.list",
+                "input": {
+                    "path": "Downloads",
+                    "pattern": "*.csv",
+                    "file_type": "csv",
+                    "selection": "all",
+                },
+                "source": "runtime_planner",
+                "planning_reason": "planner_prefetch_data_source",
+                "continue_to_model": True,
+            }
+        ],
+        ["workspace.list", "data.analyze", "artifact.write"],
+        {
+            "artifacts_expected": [
+                "analysis-report.md",
+                "analysis-chart.png",
+            ],
+        },
+        [
+            _timeline(
+                "agent.tool.call",
+                "workspace.list",
+                input_preview={
+                    "path": "Downloads",
+                    "pattern": "*.csv",
+                    "file_type": "csv",
+                    "selection": "all",
+                },
+                result={
+                    "ok": True,
+                    "path": "Downloads",
+                    "entries": [
+                        {"name": "sales.csv", "type": "file"},
+                        {"name": "inventory.csv", "type": "file"},
+                    ],
+                },
+            )
+        ],
+    )
+
+    assert request == {
+        "protocol": "json_fallback",
+        "tool": "data.analyze",
+        "input": {
+            "artifact_path": "analysis-report.md",
+            "requested_outputs": ["report", "chart"],
+            "artifact_manifest": [
+                {"path": "analysis-report.md", "kind": "markdown"},
+                {"path": "analysis-chart.png", "kind": "chart"},
+            ],
+            "paths": ["Downloads/sales.csv", "Downloads/inventory.csv"],
+            "display_path": "Downloads",
+            "source_kind": "csv",
+            "artifact_paths": ["analysis-report.md", "analysis-chart.png"],
+        },
+        "source": "runtime_planner",
+        "planning_reason": "planner_builtin_data_analysis",
+    }
+
+
 def _private_runtime_loop(
     *,
     append_run_event=None,

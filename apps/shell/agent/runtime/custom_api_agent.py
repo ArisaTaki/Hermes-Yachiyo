@@ -2121,16 +2121,19 @@ class RuntimeCustomApiAgentLoop:
                 return None
             result = latest_list.get("result") if isinstance(latest_list.get("result"), dict) else {}
             entries = result.get("entries")
-            data_files: list[str] = []
+            data_entries: list[Mapping[str, Any]] = []
             if isinstance(entries, list):
-                data_files = [
-                    str(entry.get("name") or "").strip()
+                data_entries = [
+                    entry
                     for entry in entries
                     if isinstance(entry, dict)
                     and str(entry.get("type") or "").strip() == "file"
-                    and _data_analysis_file_kind(str(entry.get("name") or "")) != ""
+                    and _data_analysis_file_kind(
+                        str(entry.get("name") or entry.get("path") or "")
+                    )
+                    != ""
                 ]
-            if result.get("ok") is not True or len(data_files) != 1:
+            if result.get("ok") is not True or not data_entries:
                 return None
             list_input = (
                 latest_list.get("input_preview")
@@ -2138,17 +2141,18 @@ class RuntimeCustomApiAgentLoop:
                 else {}
             )
             base_path = str(list_input.get("path") or result.get("path") or "").strip()
-            path = _join_workspace_list_path(base_path, data_files[0])
             artifact_paths = _string_list(selection_payload.get("artifacts_expected"))
             if not artifact_paths:
                 artifact_paths = ["analysis-report.md"]
-            input_payload: dict[str, Any] = {
-                "path": path,
-                "artifact_path": artifact_paths[0],
-                "source_kind": _data_analysis_file_kind(path),
-                "requested_outputs": _requested_outputs_from_artifact_paths(artifact_paths),
-                "artifact_manifest": _artifact_manifest_from_paths(artifact_paths),
-            }
+            selection = str(list_input.get("selection") or "").strip().lower()
+            input_payload = _data_analysis_input_from_workspace_entries(
+                base_path,
+                data_entries,
+                selection,
+                artifact_paths,
+            )
+            if not input_payload:
+                return None
             if len(artifact_paths) > 1:
                 input_payload["artifact_paths"] = artifact_paths
             return _first_annotated_auto_followup_request(
@@ -17994,6 +17998,11 @@ def _select_followup_workspace_entry(
     if not candidates:
         return {}
     selection = str(raw_input.get("selection") or "").strip().lower()
+    if any(marker in selection for marker in ("largest", "biggest", "最大")):
+        return max(
+            candidates,
+            key=lambda entry: _workspace_entry_size_score(entry, candidates.index(entry)),
+        )
     if any(marker in selection for marker in ("last", "最后", "末尾")):
         return candidates[-1]
     if any(
@@ -18028,6 +18037,17 @@ def _workspace_entry_recency_score(entry: Mapping[str, Any], index: int) -> tupl
         if marker in name:
             name_score = max(name_score, score)
     return numeric_score, name_score, -index
+
+
+def _workspace_entry_size_score(entry: Mapping[str, Any], index: int) -> tuple[float, int]:
+    numeric_score = 0.0
+    for key in ("size_bytes", "size", "bytes", "file_size"):
+        value = entry.get(key)
+        try:
+            numeric_score = max(numeric_score, float(value))
+        except (TypeError, ValueError):
+            pass
+    return numeric_score, -index
 
 
 def _select_followup_desktop_app(apps: list[Any]) -> Mapping[str, Any]:
@@ -19610,6 +19630,85 @@ def _data_analysis_file_kind(path: str) -> str:
         return "jsonl"
     if lowered.endswith(".xlsx"):
         return "xlsx"
+    return ""
+
+
+def _data_analysis_input_from_workspace_entries(
+    base_path: str,
+    entries: list[Mapping[str, Any]],
+    selection: str,
+    artifact_paths: list[str],
+) -> dict[str, Any]:
+    clean_entries = [entry for entry in entries if isinstance(entry, Mapping)]
+    if not clean_entries:
+        return {}
+    if selection in {"all", "multiple"}:
+        paths = [
+            path
+            for entry in clean_entries
+            for path in [_workspace_data_entry_path(base_path, entry)]
+            if path
+        ]
+        if not paths or len(paths) > 100:
+            return {}
+        payload = _data_analysis_base_input_payload(artifact_paths)
+        payload["paths"] = paths
+        payload["display_path"] = str(base_path or "workspace.list").strip()
+        source_kind = _common_data_analysis_file_kind(paths)
+        if source_kind:
+            payload["source_kind"] = source_kind
+        return payload
+
+    selected_entry: Mapping[str, Any] = {}
+    if len(clean_entries) == 1:
+        selected_entry = clean_entries[0]
+    elif selection:
+        selected_entry = _select_followup_workspace_entry(
+            clean_entries,
+            {"selection": selection},
+        )
+    if not selected_entry:
+        return {}
+    path = _workspace_data_entry_path(base_path, selected_entry)
+    if not path:
+        return {}
+    payload = _data_analysis_base_input_payload(artifact_paths)
+    payload["path"] = path
+    source_kind = _data_analysis_file_kind(path) or _data_analysis_file_kind(
+        str(selected_entry.get("name") or "")
+    )
+    if source_kind:
+        payload["source_kind"] = source_kind
+    return payload
+
+
+def _data_analysis_base_input_payload(artifact_paths: list[str]) -> dict[str, Any]:
+    return {
+        "artifact_path": artifact_paths[0],
+        "requested_outputs": _requested_outputs_from_artifact_paths(artifact_paths),
+        "artifact_manifest": _artifact_manifest_from_paths(artifact_paths),
+    }
+
+
+def _workspace_data_entry_path(base_path: str, entry: Mapping[str, Any]) -> str:
+    path = str(entry.get("path") or "").strip()
+    if path:
+        return path
+    name = str(entry.get("name") or "").strip()
+    if not name:
+        return ""
+    return _join_workspace_list_path(base_path, name)
+
+
+def _common_data_analysis_file_kind(paths: list[str]) -> str:
+    kinds = {
+        kind
+        for path in paths
+        for kind in [_data_analysis_file_kind(path)]
+        if kind
+    }
+    if len(kinds) == 1:
+        return next(iter(kinds))
     return ""
 
 
