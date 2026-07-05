@@ -485,6 +485,9 @@ def refresh_local_rc_signoff(
     diagnostics_bundle = tmp_dir / f"oha-yachiyo-diagnostics-{label}.zip"
     release_smoke_report = tmp_dir / f"rc-verification-{label}-release-smoke.json"
     release_smoke_markdown = tmp_dir / f"rc-verification-{label}-release-smoke.md"
+    oha_desktop_agent_smoke_report = (
+        tmp_dir / f"rc-verification-{label}-oha-desktop-agent-release-smoke.json"
+    )
     public_demo_report = tmp_dir / f"rc-verification-{label}-public-demo.json"
     public_demo_markdown = tmp_dir / f"rc-verification-{label}-public-demo.md"
     signoff_draft = tmp_dir / f"rc-signoff-{label}-current.json"
@@ -643,6 +646,7 @@ def refresh_local_rc_signoff(
     for stale_release_smoke in (
         release_smoke_report,
         release_smoke_markdown,
+        oha_desktop_agent_smoke_report,
         public_demo_report,
         public_demo_markdown,
     ):
@@ -664,6 +668,22 @@ def refresh_local_rc_signoff(
     if public_demo_code and not public_demo_report.exists():
         raise subprocess.CalledProcessError(public_demo_code, public_demo_command)
 
+    oha_desktop_agent_smoke_command = [
+        sys.executable,
+        "scripts/smoke_oha_desktop_agent_release.py",
+        "--report-json",
+        str(oha_desktop_agent_smoke_report.relative_to(ROOT)),
+    ]
+    oha_desktop_agent_smoke_code = _run(
+        oha_desktop_agent_smoke_command,
+        allow_failure=True,
+    )
+    if oha_desktop_agent_smoke_code and not oha_desktop_agent_smoke_report.exists():
+        raise subprocess.CalledProcessError(
+            oha_desktop_agent_smoke_code,
+            oha_desktop_agent_smoke_command,
+        )
+
     diagnostics_command = [
         sys.executable,
         "scripts/collect_release_diagnostics.py",
@@ -683,6 +703,8 @@ def refresh_local_rc_signoff(
     ]
     for source in manual_sources:
         release_smoke_command.append(str(source.relative_to(ROOT)))
+    if oha_desktop_agent_smoke_report.exists():
+        release_smoke_command.append(str(oha_desktop_agent_smoke_report.relative_to(ROOT)))
     for source in public_demo_reports:
         release_smoke_command.append(str(_relative_or_display(source)))
     if public_demo_report.exists():
@@ -712,6 +734,7 @@ def refresh_local_rc_signoff(
         "release_readiness_report": release_readiness_report,
         "release_readiness_markdown": release_readiness_markdown,
         "diagnostics_bundle": diagnostics_bundle,
+        "oha_desktop_agent_smoke_report": oha_desktop_agent_smoke_report,
         "release_smoke_report": release_smoke_report,
         "release_smoke_markdown": release_smoke_markdown,
         "public_demo_report": public_demo_report,

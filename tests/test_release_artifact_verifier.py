@@ -913,6 +913,7 @@ def test_verifier_requires_release_packaging_docs_for_release_gates(tmp_path):
     assert "release packaging docs must document public release gate existing report inputs" in messages
     assert "release packaging docs must document strict public release gate mode" in messages
     assert "release packaging docs must document local RC public demo evidence output" in messages
+    assert "release packaging docs must document local RC Oha product smoke evidence output" in messages
     assert "release packaging docs must document public demo release assessment fields" in messages
     assert "release packaging docs must document the 10-item release smoke checklist" in messages
     assert "release packaging docs must document local RC signoff resume/reuse mode" in messages
@@ -944,7 +945,7 @@ def test_verifier_requires_release_packaging_docs_for_release_gates(tmp_path):
         in messages
     )
     assert "release packaging docs must include public demo JSON in release smoke command" in messages
-    assert "release packaging docs must document release smoke checks 9 user paths" in messages
+    assert "release packaging docs must document release smoke checks 10 user paths" in messages
     assert "release packaging docs must include public demo in release smoke user paths" in messages
     assert (
         "release packaging docs must document partial or blocked public demo release smoke behavior"

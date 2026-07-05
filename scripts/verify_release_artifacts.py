@@ -841,6 +841,10 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release packaging docs must document local RC public demo evidence output",
     ),
     (
+        "tmp/rc-verification-<short-commit>-oha-desktop-agent-release-smoke.json",
+        "release packaging docs must document local RC Oha product smoke evidence output",
+    ),
+    (
         "public-demo summary 会记录 `release_level`、`missing_required_flow_ids` 和 `release_blockers`",
         "release packaging docs must document public demo release assessment fields",
     ),
@@ -965,8 +969,8 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release packaging docs must include public demo JSON in release smoke command",
     ),
     (
-        "检查 9 个发布用户路径是否已有证据",
-        "release packaging docs must document release smoke checks 9 user paths",
+        "检查 10 个发布用户路径是否已有证据",
+        "release packaging docs must document release smoke checks 10 user paths",
     ),
     (
         "public demo、artifact readback、diagnostics export",

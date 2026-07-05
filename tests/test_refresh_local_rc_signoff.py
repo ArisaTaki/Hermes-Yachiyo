@@ -122,6 +122,11 @@ def test_refresh_local_rc_signoff_runs_batch_screen_draft_and_preview(
             elif report_path.endswith("-screen.json"):
                 write_report(report_path, {"ok": False})
                 return 1
+            elif report_path.endswith("-oha-desktop-agent-release-smoke.json"):
+                write_report(
+                    report_path,
+                    {"ok": True, "mode": "oha_desktop_agent_release_smoke"},
+                )
             elif report_path.endswith("-preview.json"):
                 write_report(
                     report_path,
@@ -182,6 +187,7 @@ def test_refresh_local_rc_signoff_runs_batch_screen_draft_and_preview(
     assert reports["release_readiness_report"] == tmp_path / "tmp" / "rc-verification-abc12345-release-readiness.json"
     assert reports["release_readiness_markdown"] == tmp_path / "tmp" / "rc-verification-abc12345-release-readiness.md"
     assert reports["diagnostics_bundle"] == tmp_path / "tmp" / "oha-yachiyo-diagnostics-abc12345.zip"
+    assert reports["oha_desktop_agent_smoke_report"] == tmp_path / "tmp" / "rc-verification-abc12345-oha-desktop-agent-release-smoke.json"
     assert reports["release_smoke_report"] == tmp_path / "tmp" / "rc-verification-abc12345-release-smoke.json"
     assert reports["release_smoke_markdown"] == tmp_path / "tmp" / "rc-verification-abc12345-release-smoke.md"
     assert reports["public_demo_report"] == tmp_path / "tmp" / "rc-verification-abc12345-public-demo.json"
@@ -276,6 +282,15 @@ def test_refresh_local_rc_signoff_runs_batch_screen_draft_and_preview(
     assert commands[9] == (
         [
             sys.executable,
+            "scripts/smoke_oha_desktop_agent_release.py",
+            "--report-json",
+            "tmp/rc-verification-abc12345-oha-desktop-agent-release-smoke.json",
+        ],
+        True,
+    )
+    assert commands[10] == (
+        [
+            sys.executable,
             "scripts/collect_release_diagnostics.py",
             "--label",
             "abc12345",
@@ -285,13 +300,14 @@ def test_refresh_local_rc_signoff_runs_batch_screen_draft_and_preview(
         ],
         True,
     )
-    assert commands[10] == (
+    assert commands[11] == (
         [
             sys.executable,
             "scripts/summarize_release_smoke.py",
             "tmp/rc-verification-abc12345-source-capabilities.json",
             "tmp/rc-verification-abc12345-packaged-batch.json",
             "tmp/rc-verification-abc12345-screen.json",
+            "tmp/rc-verification-abc12345-oha-desktop-agent-release-smoke.json",
             "tmp/rc-verification-abc12345-public-demo.json",
             "--diagnostics-zip",
             "tmp/oha-yachiyo-diagnostics-abc12345.zip",
@@ -436,7 +452,7 @@ def test_refresh_local_rc_signoff_reuses_current_reports(monkeypatch, tmp_path):
     assert reports["batch_report"].exists()
     assert reports["screen_report"].exists()
     assert reports["native_capability_matrix_report"].exists()
-    assert len(commands) == 8
+    assert len(commands) == 9
     assert commands[0] == (
         [
             sys.executable,
@@ -494,6 +510,15 @@ def test_refresh_local_rc_signoff_reuses_current_reports(monkeypatch, tmp_path):
     assert commands[6] == (
         [
             sys.executable,
+            "scripts/smoke_oha_desktop_agent_release.py",
+            "--report-json",
+            "tmp/rc-verification-abc12345-oha-desktop-agent-release-smoke.json",
+        ],
+        True,
+    )
+    assert commands[7] == (
+        [
+            sys.executable,
             "scripts/collect_release_diagnostics.py",
             "--label",
             "abc12345",
@@ -503,12 +528,13 @@ def test_refresh_local_rc_signoff_reuses_current_reports(monkeypatch, tmp_path):
         ],
         True,
     )
-    assert commands[7][0] == [
+    assert commands[8][0] == [
         sys.executable,
         "scripts/summarize_release_smoke.py",
         "tmp/rc-verification-abc12345-source-capabilities.json",
         "tmp/rc-verification-abc12345-packaged-batch.json",
         "tmp/rc-verification-abc12345-screen.json",
+        "tmp/rc-verification-abc12345-oha-desktop-agent-release-smoke.json",
         "tmp/rc-verification-abc12345-public-demo.json",
         "--diagnostics-zip",
         "tmp/oha-yachiyo-diagnostics-abc12345.zip",
@@ -517,7 +543,7 @@ def test_refresh_local_rc_signoff_reuses_current_reports(monkeypatch, tmp_path):
         "--output-markdown",
         "tmp/rc-verification-abc12345-release-smoke.md",
     ]
-    assert commands[7][1] is True
+    assert commands[8][1] is True
 
 
 def test_refresh_local_rc_signoff_merges_existing_public_demo_reports(
