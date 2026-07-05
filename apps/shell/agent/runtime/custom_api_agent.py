@@ -9632,7 +9632,18 @@ def _runtime_planner_tool_event_step_payloads(
             continue
         if match_index >= step_cursor:
             step_cursor = match_index + 1
-        by_event_index[event_index] = _runtime_planner_step_failure_trace_payload(step)
+        result = event.get("result") if isinstance(event.get("result"), Mapping) else {}
+        step_payload = _runtime_planner_step_failure_trace_payload(step)
+        _merge_runtime_planner_failure_context(
+            step_payload,
+            _runtime_planner_step_verification_failure_context(
+                decision,
+                step,
+                event,
+                result,
+            ),
+        )
+        by_event_index[event_index] = step_payload
     return by_event_index
 
 
@@ -9696,6 +9707,276 @@ def _runtime_planner_step_failure_trace_payload(step: Any) -> dict[str, Any]:
     return payload
 
 
+def _merge_runtime_planner_failure_context(
+    payload: dict[str, Any],
+    context: Mapping[str, Any],
+) -> None:
+    if not context:
+        return
+    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), Mapping) else {}
+    merged_metadata = dict(metadata)
+    for key, value in context.items():
+        if value in (None, "", [], {}):
+            continue
+        if key == "task_verification_targets":
+            payload.setdefault(key, [dict(item) for item in _mapping_list(value)])
+            merged_metadata.setdefault(key, [dict(item) for item in _mapping_list(value)])
+            continue
+        if key == "verification_targets":
+            payload.setdefault(key, [dict(item) for item in _mapping_list(value)])
+            merged_metadata.setdefault(key, [dict(item) for item in _mapping_list(value)])
+            continue
+        if isinstance(value, Mapping):
+            payload.setdefault(key, dict(value))
+            merged_metadata.setdefault(key, dict(value))
+        else:
+            payload.setdefault(key, value)
+            merged_metadata.setdefault(key, value)
+    if merged_metadata:
+        payload["metadata"] = merged_metadata
+
+
+def _runtime_planner_step_verification_failure_context(
+    decision: Any,
+    step: Any,
+    event: Mapping[str, Any],
+    result: Mapping[str, Any],
+) -> dict[str, Any]:
+    targets = _runtime_planner_task_verification_targets_for_step(decision, step)
+    if not targets:
+        return {}
+    step_id = str(getattr(step, "step_id", "") or "").strip()
+    tool_name = str(getattr(step, "tool_name", "") or "").strip()
+    input_preview = event.get("input_preview") if isinstance(event.get("input_preview"), Mapping) else {}
+    result_preview = _task_progress_result_preview(result)
+    compact_targets = _runtime_planner_compact_task_verification_targets(targets)
+    action_target = _runtime_planner_verification_action_target(targets, input_preview)
+    observation_evidence = {
+        "source_tool": tool_name,
+        "source_step_id": step_id,
+        "verification_failed": True,
+        "input_preview": dict(input_preview),
+        "result_preview": result_preview,
+    }
+    failure_detail = _runtime_planner_failure_detail(result)
+    if failure_detail:
+        observation_evidence["failure_detail"] = failure_detail
+    observation_retry = {
+        "tool": tool_name,
+        "input": dict(input_preview),
+        "source_step_id": step_id,
+        "reason": "verification_failed",
+    }
+    context = {
+        "verification_targets": compact_targets,
+        "task_verification_targets": targets,
+        "action_target": action_target,
+        "observation_evidence": _runtime_planner_non_empty_mapping(observation_evidence),
+        "observation_retry": _runtime_planner_non_empty_mapping(observation_retry),
+        "recovery_action_label": "Re-observe failed verification target",
+    }
+    target_app_name = _runtime_planner_first_text(
+        ("target_app_name", "app_name", "expected_app_name"),
+        action_target,
+        input_preview,
+        *compact_targets,
+    )
+    target_app_query = _runtime_planner_first_text(
+        ("target_app_query", "app_query", "query"),
+        action_target,
+        input_preview,
+        *compact_targets,
+    )
+    target_search_text = _runtime_planner_first_text(
+        ("target_search_text", "target", "selector", "text", "value"),
+        action_target,
+        input_preview,
+        *compact_targets,
+    )
+    if target_app_name:
+        context["target_app_name"] = target_app_name
+    if target_app_query:
+        context["target_app_query"] = target_app_query
+    if target_search_text:
+        context["target_search_text"] = target_search_text
+    return {key: value for key, value in context.items() if value not in ("", [], {})}
+
+
+def _runtime_planner_task_verification_targets_for_step(
+    decision: Any,
+    step: Any,
+) -> list[dict[str, Any]]:
+    plan = getattr(decision, "plan", None)
+    task_core = getattr(plan, "task_core", None)
+    if task_core is None:
+        return []
+    step_id = str(getattr(step, "step_id", "") or "").strip()
+    todos_by_step = {
+        str(getattr(todo, "step_id", "") or "").strip(): todo
+        for todo in list(getattr(task_core, "todos", []) or [])
+        if str(getattr(todo, "step_id", "") or "").strip()
+    }
+    checkpoints_by_step: dict[str, list[Any]] = {}
+    for checkpoint in list(getattr(task_core, "checkpoints", []) or []):
+        after_step_id = str(getattr(checkpoint, "after_step_id", "") or "").strip()
+        if after_step_id:
+            checkpoints_by_step.setdefault(after_step_id, []).append(checkpoint)
+    workspace = getattr(task_core, "workspace", None)
+    workspace_items_by_step: dict[str, list[Any]] = {}
+    for item in list(getattr(workspace, "items", []) if workspace is not None else []):
+        source_step_id = str(getattr(item, "source_step_id", "") or "").strip()
+        if source_step_id:
+            workspace_items_by_step.setdefault(source_step_id, []).append(item)
+    target_ids = _task_progress_verified_step_ids(
+        step,
+        *checkpoints_by_step.get(step_id, []),
+    )
+    targets: list[dict[str, Any]] = []
+    for target_step_id in target_ids:
+        target: dict[str, Any] = {"step_id": target_step_id}
+        todo = todos_by_step.get(target_step_id)
+        if _task_progress_has_value(todo):
+            target["todo"] = _snapshot_payload(todo)
+        checkpoints = [
+            _snapshot_payload(checkpoint)
+            for checkpoint in checkpoints_by_step.get(target_step_id, [])
+            if _task_progress_has_value(checkpoint)
+        ]
+        if checkpoints:
+            target["checkpoints"] = checkpoints
+        workspace_items = [
+            _snapshot_payload(item)
+            for item in workspace_items_by_step.get(target_step_id, [])
+            if _task_progress_has_value(item)
+        ]
+        if workspace_items:
+            target["workspace_items"] = workspace_items
+        if len(target) > 1:
+            targets.append(target)
+    return targets
+
+
+def _runtime_planner_compact_task_verification_targets(
+    targets: Iterable[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    compact_targets: list[dict[str, Any]] = []
+    for target in targets:
+        if not isinstance(target, Mapping):
+            continue
+        step_id = str(target.get("step_id") or "").strip()
+        if not step_id:
+            continue
+        todo = target.get("todo") if isinstance(target.get("todo"), Mapping) else {}
+        checkpoints = _mapping_list(target.get("checkpoints"))
+        compact: dict[str, Any] = {"step_id": step_id}
+        todo_id = str(todo.get("todo_id") or "").strip()
+        if todo_id:
+            compact["todo_id"] = todo_id
+        todo_title = str(todo.get("title") or "").strip()
+        if todo_title:
+            compact["todo_title"] = todo_title
+        tool_name = str(todo.get("tool_name") or todo.get("tool") or "").strip()
+        if tool_name:
+            compact["tool_name"] = tool_name
+        checkpoint_ids = [
+            str(checkpoint.get("checkpoint_id") or "").strip()
+            for checkpoint in checkpoints
+            if str(checkpoint.get("checkpoint_id") or "").strip()
+        ]
+        if checkpoint_ids:
+            compact["checkpoint_ids"] = checkpoint_ids
+        checkpoint_titles = [
+            str(checkpoint.get("title") or "").strip()
+            for checkpoint in checkpoints
+            if str(checkpoint.get("title") or "").strip()
+        ]
+        if checkpoint_titles:
+            compact["checkpoint_titles"] = checkpoint_titles
+        action_target = _runtime_planner_verification_action_target([target], {})
+        if action_target:
+            compact["action_target"] = action_target
+            for key in (
+                "app_name",
+                "target_app_name",
+                "target_app_query",
+                "target_search_text",
+                "target",
+                "selector",
+            ):
+                value = str(action_target.get(key) or "").strip()
+                if value:
+                    compact[key] = value
+        compact_targets.append(compact)
+    return compact_targets
+
+
+def _runtime_planner_verification_action_target(
+    targets: Iterable[Mapping[str, Any]],
+    input_preview: Mapping[str, Any],
+) -> dict[str, Any]:
+    for target in targets:
+        if not isinstance(target, Mapping):
+            continue
+        for checkpoint in _mapping_list(target.get("checkpoints")):
+            payload = checkpoint.get("payload") if isinstance(checkpoint.get("payload"), Mapping) else {}
+            action_target = (
+                payload.get("action_target")
+                if isinstance(payload.get("action_target"), Mapping)
+                else {}
+            )
+            if action_target:
+                return dict(action_target)
+        todo = target.get("todo") if isinstance(target.get("todo"), Mapping) else {}
+        metadata = todo.get("metadata") if isinstance(todo.get("metadata"), Mapping) else {}
+        action = str(metadata.get("action") or "").strip()
+        if action:
+            target_payload = {
+                "kind": "task_step",
+                "action": action,
+                "step_id": str(target.get("step_id") or "").strip(),
+                "tool_name": str(todo.get("tool_name") or "").strip(),
+                **{
+                    key: input_preview.get(key)
+                    for key in ("app_name", "target", "selector", "target_search_text")
+                    if input_preview.get(key)
+                },
+            }
+            return _runtime_planner_non_empty_mapping(target_payload)
+    return _runtime_planner_non_empty_mapping(
+        {
+            key: input_preview.get(key)
+            for key in ("app_name", "target", "selector", "target_search_text")
+            if input_preview.get(key)
+        }
+    )
+
+
+def _runtime_planner_failure_detail(result: Mapping[str, Any]) -> str:
+    for key in ("error", "hint", "summary", "status"):
+        value = str(result.get(key) or "").strip() if isinstance(result, Mapping) else ""
+        if value:
+            return value[:500]
+    return ""
+
+
+def _runtime_planner_non_empty_mapping(value: Mapping[str, Any]) -> dict[str, Any]:
+    return {key: item for key, item in value.items() if item not in (None, "", [], {})}
+
+
+def _runtime_planner_first_text(
+    keys: Iterable[str],
+    *values: Mapping[str, Any],
+) -> str:
+    for value in values:
+        if not isinstance(value, Mapping):
+            continue
+        for key in keys:
+            clean = str(value.get(key) or "").strip()
+            if clean:
+                return clean
+    return ""
+
+
 def _runtime_planner_verification_failure_payloads(
     decision: Any,
     events: list[dict[str, Any]],
@@ -9740,12 +10021,17 @@ def _runtime_planner_verification_failure_payloads(
             tool_events[: max(0, event_index - 1)],
             tool_event,
         )
-        target_missing = _tool_result_verification_target_missing(
-            tool_name,
-            result,
-            target_text=str(verification_context.get("target_search_text") or ""),
-            role_filter=str(verification_context.get("ui_role_filter") or ""),
-        )
+        target_missing = False
+        if _runtime_planner_verification_requires_exact_target_match(
+            tool_events[: max(0, event_index - 1)],
+            tool_event,
+        ):
+            target_missing = _tool_result_verification_target_missing(
+                tool_name,
+                result,
+                target_text=str(verification_context.get("target_search_text") or ""),
+                role_filter=str(verification_context.get("ui_role_filter") or ""),
+            )
         weak_observation = _tool_result_verification_weak(tool_name, result)
         if not weak_observation and not target_missing:
             continue
@@ -9766,25 +10052,33 @@ def _runtime_planner_verification_failure_payloads(
                 "verification observation did not include target UI element"
                 f": {verification_context.get('target_search_text')}"
             )
-        payloads.append(
-            {
-                "event_type": "agent.tool.call",
-                "trigger": "verification_failed",
-                "status": "verification_failed",
-                "source_step_id": step_id,
-                "planner_step_id": step_id,
-                "tool_name": tool_name,
-                "input_preview": (
-                    tool_event.get("input_preview")
-                    if isinstance(tool_event.get("input_preview"), Mapping)
-                    else {}
-                ),
-                "detail": detail,
-                "result": result,
-                **verification_context,
-                **({"metadata": metadata} if metadata else {}),
-            }
+        payload = {
+            "event_type": "agent.tool.call",
+            "trigger": "verification_failed",
+            "status": "verification_failed",
+            "source_step_id": step_id,
+            "planner_step_id": step_id,
+            "tool_name": tool_name,
+            "input_preview": (
+                tool_event.get("input_preview")
+                if isinstance(tool_event.get("input_preview"), Mapping)
+                else {}
+            ),
+            "detail": detail,
+            "result": result,
+            **verification_context,
+            **({"metadata": metadata} if metadata else {}),
+        }
+        _merge_runtime_planner_failure_context(
+            payload,
+            _runtime_planner_step_verification_failure_context(
+                decision,
+                step,
+                tool_event,
+                result,
+            ),
         )
+        payloads.append(payload)
     return payloads
 
 
@@ -9804,6 +10098,38 @@ def _runtime_planner_verification_context(
         "recovery_observation_goal": "inspect_current_target_after_verification_gap",
     }
     return {key: value for key, value in context.items() if value not in ("", [], {})}
+
+
+def _runtime_planner_verification_requires_exact_target_match(
+    events: list[dict[str, Any]],
+    current_event: Mapping[str, Any],
+) -> bool:
+    current_input = (
+        current_event.get("input_preview")
+        if isinstance(current_event.get("input_preview"), Mapping)
+        else {}
+    )
+    if _first_runtime_planner_event_text(
+        current_input,
+        keys=("target_search_text", "target", "selector"),
+    ):
+        return True
+    if _first_runtime_planner_event_text(current_input, keys=("role_filter", "role")):
+        return True
+    for event in reversed(events):
+        tool_name = str(event.get("detail") or "").strip()
+        if tool_name in {
+            "app.open_and_click_ui_element",
+            "app.focus_and_click_ui_element",
+            "app.open_and_type_into_ui_element",
+            "app.focus_and_type_into_ui_element",
+            "desktop.click_ui_element",
+            "desktop.type_into_ui_element",
+        }:
+            return True
+        if tool_name in {"desktop.safe_type_text", "desktop.search_submit"}:
+            return False
+    return False
 
 
 def _runtime_planner_verification_app_name(
@@ -10661,6 +10987,7 @@ def _task_progress_result_preview(result: Mapping[str, Any]) -> dict[str, Any]:
         "summary",
         "error",
         "hint",
+        "verification_failed",
         "returncode",
         "exit_code",
         "blocked_by_user_goal",
@@ -14436,6 +14763,8 @@ def _runtime_recovery_action_tools_for_payload(payload: Mapping[str, Any]) -> se
     return {
         str(action.get("tool") or "").strip()
         for action in _mapping_list(metadata.get("recovery_actions"))
+        if str(action.get("planning_reason") or "").strip()
+        != "planner_replan_runtime_recovery_action"
         if str(action.get("tool") or "").strip()
     }
 

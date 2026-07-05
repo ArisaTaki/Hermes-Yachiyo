@@ -24639,6 +24639,151 @@ def test_runtime_planner_verify_step_completes_verified_operate_step() -> None:
     )
 
 
+def test_runtime_planner_verify_failure_blocks_verified_operate_step() -> None:
+    decision = RuntimePlanner().decision(
+        "在 Notion 点击 New Page",
+        allowed_tools=[
+            "desktop.inspect_app",
+            "app.focus_and_click_ui_element",
+            "desktop.ui_elements",
+        ],
+    )
+    loop = _private_runtime_loop()
+    timeline = [
+        _timeline(
+            "agent.tool.call",
+            "app.focus_and_click_ui_element",
+            input_preview={"app_name": "Notion", "target": "New Page"},
+            result={"ok": True, "summary": "clicked"},
+            status="completed",
+        )
+    ]
+    loop._record_runtime_planner_task_progress_events(
+        decision,
+        timeline=timeline,
+        tool_timeline_start=0,
+        run_id="run-click-verify-fails-target",
+    )
+    verify_start = len(timeline)
+    timeline.append(
+        _timeline(
+            "agent.tool.call",
+            "desktop.ui_elements",
+            input_preview={"app_name": "Notion"},
+            result={
+                "ok": False,
+                "verification_failed": True,
+                "error": "New Page missing",
+            },
+            status="failed",
+            verification_failed=True,
+        )
+    )
+
+    loop._record_runtime_planner_task_progress_events(
+        decision,
+        timeline=timeline,
+        tool_timeline_start=verify_start,
+        run_id="run-click-verify-fails-target",
+    )
+
+    blocked_todo = [
+        event
+        for event in timeline
+        if event["event"] == "agent.task.todo.updated"
+        and event["step_id"] == "operate-foreground-ui"
+        and event["status"] == "blocked"
+    ][0]
+    blocked_checkpoint = [
+        event
+        for event in timeline
+        if event["event"] == "agent.task.checkpoint.updated"
+        and event["step_id"] == "operate-foreground-ui"
+        and event["status"] == "blocked"
+    ][0]
+    assert blocked_todo["verified_by_step_id"] == "verify-desktop-result"
+    assert blocked_todo["verification_tool"] == "desktop.ui_elements"
+    assert blocked_todo["todo"]["metadata"]["verification_status"] == (
+        "verification_failed"
+    )
+    assert blocked_checkpoint["checkpoint"]["payload"]["verification_status"] == (
+        "verification_failed"
+    )
+
+
+def test_runtime_planner_replan_for_verify_failure_preserves_target_context() -> None:
+    decision = RuntimePlanner().decision(
+        "在 Notion 点击 New Page",
+        allowed_tools=[
+            "desktop.inspect_app",
+            "app.focus_and_click_ui_element",
+            "desktop.ui_elements",
+        ],
+    )
+    loop = _private_runtime_loop()
+    timeline = [
+        _timeline(
+            "agent.tool.call",
+            "app.focus_and_click_ui_element",
+            input_preview={"app_name": "Notion", "target": "New Page"},
+            result={"ok": True, "summary": "clicked"},
+            status="completed",
+        ),
+        _timeline(
+            "agent.tool.call",
+            "desktop.ui_elements",
+            input_preview={"app_name": "Notion"},
+            result={
+                "ok": False,
+                "verification_failed": True,
+                "error": "New Page missing",
+            },
+            status="failed",
+            verification_failed=True,
+        ),
+    ]
+
+    payloads = loop._record_runtime_planner_replan_events(
+        decision,
+        timeline=timeline,
+        tool_timeline_start=0,
+        run_id="run-click-verify-replan-target",
+    )
+
+    assert len(payloads) == 1
+    payload = payloads[0]
+    metadata = payload["metadata"]
+    assert payload["trigger"] == "verification_failed"
+    assert payload["source_step_id"] == "verify-desktop-result"
+    assert metadata["verification_targets"][0]["step_id"] == "operate-foreground-ui"
+    assert metadata["verification_targets"][0]["todo_id"].startswith("todo-")
+    assert metadata["task_verification_targets"][0]["todo"]["step_id"] == (
+        "operate-foreground-ui"
+    )
+    assert metadata["action_target"]["app_name"] == "Notion"
+    assert metadata["action_target"]["target"] == "New Page"
+    assert metadata["observation_evidence"]["verification_failed"] is True
+    assert metadata["observation_retry"]["tool"] == "desktop.ui_elements"
+    assert metadata["task_core_context"]["task_verification_targets"][0]["step_id"] == (
+        "operate-foreground-ui"
+    )
+    assert payload["fallback_tools"] == [
+        "desktop.active_window",
+        "desktop.ui_elements",
+        "screen.capture",
+    ]
+    ui_recovery = [
+        action
+        for action in payload["recovery_actions"]
+        if action["tool"] == "desktop.ui_elements"
+    ][0]
+    assert ui_recovery["action_target"] == metadata["action_target"]
+    assert ui_recovery["observation_evidence"]["verification_failed"] is True
+    assert ui_recovery["verification_targets"][0]["step_id"] == (
+        "operate-foreground-ui"
+    )
+
+
 def test_model_followup_task_progress_keeps_operate_step_pending_verification() -> None:
     loop = _private_runtime_loop()
     followup_context = {

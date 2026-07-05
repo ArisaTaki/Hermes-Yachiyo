@@ -395,6 +395,13 @@ def _task_core_replan_context(
         context["checkpoints"] = checkpoints
     if replan_signals:
         context["replan_signals"] = replan_signals
+    verification_targets = _task_core_replan_verification_targets(
+        decision,
+        task_core,
+        plan_step,
+    )
+    if verification_targets:
+        context["task_verification_targets"] = verification_targets
     return {key: value for key, value in context.items() if value not in ("", [], {})}
 
 
@@ -436,6 +443,118 @@ def _context_item_key(item: Any) -> str:
         if value:
             return f"{attribute}:{value}"
     return str(id(item))
+
+
+def _task_core_replan_verification_targets(
+    decision: PlannerDecisionSnapshot,
+    task_core: Any,
+    step_id: str,
+) -> list[dict[str, Any]]:
+    target_step_ids = _task_core_replan_verified_step_ids(decision, task_core, step_id)
+    if not target_step_ids:
+        return []
+    workspace = getattr(task_core, "workspace", None)
+    targets: list[dict[str, Any]] = []
+    for target_step_id in target_step_ids:
+        target: dict[str, Any] = {"step_id": target_step_id}
+        todo = _task_core_replan_todo(task_core, target_step_id)
+        if todo:
+            target["todo"] = todo
+        checkpoints = _task_core_replan_checkpoints(task_core, target_step_id)
+        if checkpoints:
+            target["checkpoints"] = checkpoints
+        workspace_items = _task_core_replan_workspace_items(workspace, target_step_id)
+        if workspace_items:
+            target["workspace_items"] = workspace_items
+        if len(target) > 1:
+            targets.append(target)
+    return targets
+
+
+def _task_core_replan_verified_step_ids(
+    decision: PlannerDecisionSnapshot,
+    task_core: Any,
+    step_id: str,
+) -> list[str]:
+    ids: list[str] = []
+    for checkpoint in list(getattr(task_core, "checkpoints", []) or []):
+        if _text(getattr(checkpoint, "after_step_id", "")) != step_id:
+            continue
+        payload = getattr(checkpoint, "payload", {})
+        if isinstance(payload, Mapping):
+            ids.extend(_text_list(payload.get("verified_step_ids"), limit=8))
+    if ids:
+        return _ordered_text_list(ids)
+    step = _matching_plan_step(decision, step_id, "", None)
+    if step is None:
+        return []
+    stage = _task_core_replan_step_runtime_stage(task_core, step_id)
+    if stage != "verify" and _text(getattr(step, "action", "")) not in {"read_ui", "verify"}:
+        return []
+    return _ordered_text_list(getattr(step, "depends_on", []) or [])
+
+
+def _task_core_replan_step_runtime_stage(task_core: Any, step_id: str) -> str:
+    for todo in list(getattr(task_core, "todos", []) or []):
+        if _text(getattr(todo, "step_id", "")) != step_id:
+            continue
+        metadata = getattr(todo, "metadata", {})
+        if isinstance(metadata, Mapping):
+            stage = _text(metadata.get("runtime_stage"))
+            if stage:
+                return stage
+    for checkpoint in list(getattr(task_core, "checkpoints", []) or []):
+        if _text(getattr(checkpoint, "after_step_id", "")) != step_id:
+            continue
+        payload = getattr(checkpoint, "payload", {})
+        if isinstance(payload, Mapping):
+            stage = _text(payload.get("runtime_stage"))
+            if stage:
+                return stage
+    return ""
+
+
+def _task_core_replan_todo(task_core: Any, step_id: str) -> dict[str, Any]:
+    for todo in list(getattr(task_core, "todos", []) or []):
+        if _text(getattr(todo, "step_id", "")) == step_id:
+            return _model_payload(todo)
+    return {}
+
+
+def _task_core_replan_checkpoints(task_core: Any, step_id: str) -> list[dict[str, Any]]:
+    return [
+        payload
+        for checkpoint in list(getattr(task_core, "checkpoints", []) or [])
+        if _text(getattr(checkpoint, "after_step_id", "")) == step_id
+        for payload in [_model_payload(checkpoint)]
+        if payload
+    ]
+
+
+def _task_core_replan_workspace_items(workspace: Any, step_id: str) -> list[dict[str, Any]]:
+    return [
+        payload
+        for item in list(getattr(workspace, "items", []) if workspace is not None else [])
+        if _text(getattr(item, "source_step_id", "")) == step_id
+        for payload in [_model_payload(item)]
+        if payload
+    ]
+
+
+def _model_payload(value: Any) -> dict[str, Any]:
+    if hasattr(value, "model_dump"):
+        return value.model_dump(mode="json")
+    if isinstance(value, Mapping):
+        return dict(value)
+    return {}
+
+
+def _ordered_text_list(values: Any) -> list[str]:
+    ordered: list[str] = []
+    for value in _text_list(values, limit=100):
+        if value and value not in ordered:
+            ordered.append(value)
+    return ordered
 
 
 def _task_core_replan_prompt_lines(context: Mapping[str, Any]) -> list[str]:
@@ -536,6 +655,11 @@ def _default_recovery_tools(
     step_input = getattr(step, "input_preview", {}) if step is not None else {}
     input_preview = step_input if isinstance(step_input, Mapping) else {}
     request_input = _failure_tool_input(failure)
+    if _text(failure.get("trigger")) == "verification_failed" and (
+        capability in {"desktop.app_discovery", "desktop.ui_operation"}
+        or step_action in {"read_ui", "inspect_app", "click", "type_text"}
+    ):
+        return ["desktop.active_window", "desktop.ui_elements", "screen.capture"]
     if capability == "desktop.app_control" or step_action in {
         "open_app",
         "focus_app",
@@ -671,6 +795,10 @@ def _fallback_recovery_action(
         "source_step_id": _text(source_step_id),
         "target_capability_id": _text(target_capability_id),
     }
+    for key in ("action_target", "observation_evidence", "observation_retry"):
+        value = _mapping(failure.get(key))
+        if value:
+            action[key] = value
     focus_target_app = _foreground_focus_unverified_target_app(failure)
     if focus_target_app and tool_name in {
         "app.open",
