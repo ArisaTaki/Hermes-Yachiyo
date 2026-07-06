@@ -580,9 +580,32 @@ def _sandbox_provider_for_request(
         or execution_mode_name == "supervised_live"
     ):
         provider_payload = sandbox_desktop_provider_status(request)
-        if sandbox_desktop_provider_can_execute_tool(provider_payload, tool_name):
+        if sandbox_desktop_provider_can_execute_tool(
+            provider_payload,
+            tool_name,
+        ) or _sandbox_provider_requires_controlled_input(
+            provider_payload,
+            tool_name=tool_name,
+            execution_mode=execution_mode,
+        ):
             return SandboxDesktopProviderSnapshot.model_validate(provider_payload)
     return None
+
+
+def _sandbox_provider_requires_controlled_input(
+    provider_payload: Mapping[str, Any],
+    *,
+    tool_name: str,
+    execution_mode: Any,
+) -> bool:
+    if bool(getattr(execution_mode, "keyboard_mouse_capture", False)) and (
+        provider_payload.get("keyboard_mouse_capture_supported") is False
+    ):
+        return True
+    required_tools = set(
+        _string_values(provider_payload.get("requires_real_sandbox_for"))
+    )
+    return str(tool_name or "").strip() in required_tools
 
 
 def _desktop_execution_route_for_request(

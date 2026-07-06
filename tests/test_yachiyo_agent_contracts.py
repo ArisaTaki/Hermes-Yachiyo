@@ -19,6 +19,7 @@ from apps.shell.agent.tools.plugins import (
 from apps.shell.agent.runtime.main_chat_config import MAIN_CHAT_DESKTOP_AGENT_INSTRUCTIONS
 from apps.shell.agent.runtime.approval_snapshots import public_pending_approval
 from apps.shell.agent.runtime.desktop_execution_providers import (
+    LOCAL_DESKTOP_PROVIDER_ID,
     desktop_execution_provider_status_from_env,
     local_desktop_execution_provider_status,
 )
@@ -5212,6 +5213,31 @@ def test_desktop_execution_route_decision_reports_provider_boundaries() -> None:
         DesktopExecutionRouteSnapshot(unknown=True)
 
 
+def test_agent_studio_route_blocks_keyboard_mouse_without_controlled_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("OHA_YACHIYO_DESKTOP_PROVIDER_URL", raising=False)
+    monkeypatch.delenv("OHA_YACHIYO_SANDBOX_DESKTOP_PROVIDER_URL", raising=False)
+    monkeypatch.delenv("OHA_YACHIYO_DESKTOP_PROVIDER_EXECUTE_URL", raising=False)
+    monkeypatch.delenv("OHA_YACHIYO_SANDBOX_DESKTOP_PROVIDER_EXECUTE_URL", raising=False)
+    route = desktop_execution_route_decision(
+        "desktop.safe_type_text",
+        policy={"mode": "supervised_live"},
+        execution_mode=DesktopExecutionModeSnapshot(
+            mode="supervised_live",
+            foreground_control=True,
+            keyboard_mouse_capture=True,
+        ),
+        metadata=with_agent_studio_desktop_execution_policy({"source": "studio"}),
+    )
+
+    assert route["status"] == "sandbox_keyboard_mouse_provider_required"
+    assert route["can_execute"] is False
+    assert route["sandbox_required"] is True
+    assert route["fallback_mode"] == "supervised_live"
+    assert route["blocking_conditions"] == ["sandbox_keyboard_mouse_provider_required"]
+
+
 def test_daily_entrypoint_desktop_execution_policy_defaults_to_input_preview() -> None:
     policy = daily_entrypoint_desktop_execution_policy(surface="bubble")
     metadata = with_daily_entrypoint_desktop_execution_policy(
@@ -6722,6 +6748,46 @@ def test_desktop_execution_envelope_keeps_blocked_verification_non_executable() 
     assert recoveries[0].recovery_actions[0].observation_retry["reason"] == (
         "screen_capture_blank"
     )
+
+
+def test_runtime_execution_envelope_blocks_keyboard_mouse_without_controlled_provider(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("OHA_YACHIYO_DESKTOP_PROVIDER_URL", raising=False)
+    monkeypatch.delenv("OHA_YACHIYO_SANDBOX_DESKTOP_PROVIDER_URL", raising=False)
+    monkeypatch.delenv("OHA_YACHIYO_DESKTOP_PROVIDER_EXECUTE_URL", raising=False)
+    monkeypatch.delenv("OHA_YACHIYO_SANDBOX_DESKTOP_PROVIDER_EXECUTE_URL", raising=False)
+    tools = runtime_execution_tool_names(
+        intent_kind="desktop_operation",
+        prefer_low_level=True,
+    )
+    metadata = with_agent_studio_desktop_execution_policy({"source": "studio"})
+    decision = RuntimePlanner().decision(
+        "在当前应用输入 hello",
+        allowed_tools=tools,
+        metadata=metadata,
+    )
+    envelope = runtime_execution_envelope_from_decision(
+        decision,
+        allowed_tools=tools,
+        metadata=metadata,
+    )
+
+    assert envelope is not None
+    input_request = next(
+        request
+        for request in envelope.requests
+        if request.tool_name == "desktop.safe_type_text"
+    )
+    assert input_request.sandbox_provider is not None
+    assert input_request.sandbox_provider.provider_id == LOCAL_DESKTOP_PROVIDER_ID
+    assert input_request.sandbox_provider.keyboard_mouse_capture_supported is False
+    assert input_request.desktop_execution_route is not None
+    assert (
+        input_request.desktop_execution_route.status
+        == "sandbox_keyboard_mouse_provider_required"
+    )
+    assert input_request.desktop_execution_route.can_execute is False
 
 
 def test_runtime_tool_catalog_surfaces_restricted_plugin_metadata_and_uninstall() -> None:

@@ -343,6 +343,22 @@ def desktop_execution_route_decision(
     if (
         desktop_foreground_provider_route_requested(metadata)
         and (foreground_required or execution_mode_name == "supervised_live")
+        and _sandbox_provider_requires_keyboard_mouse_sandbox(
+            sandbox_provider,
+            clean_tool,
+        )
+    ):
+        sandbox_route = _sandbox_route_decision(route, sandbox_provider, clean_tool)
+        return {
+            **sandbox_route,
+            "reason": (
+                "Keyboard and mouse foreground actions require the controlled "
+                "desktop provider so the agent does not take over the user's session."
+            ),
+        }
+    if (
+        desktop_foreground_provider_route_requested(metadata)
+        and (foreground_required or execution_mode_name == "supervised_live")
         and sandbox_desktop_provider_can_execute_tool(sandbox_provider, clean_tool)
     ):
         sandbox_route = _sandbox_route_decision(route, sandbox_provider, clean_tool)
