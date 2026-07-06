@@ -888,7 +888,7 @@ real desktop, provider Workflow, and UI public-demo evidence.
 evidence entry point. The default run executes safe default demonstrations for
 data-analysis artifacts, browser-research planner artifacts, desktop planner
 discovery/operate decisions, non-mutating real desktop app discovery, isolated
-desktop provider keyboard/mouse routing, approval resume replay, GroupRun
+desktop provider discover/operate/verify routing, approval resume replay, GroupRun
 replay, and WorkflowRun replay, then reports skipped real desktop operation,
 provider Workflow, and UI demo flows as next actions.
 Full public demo evidence requires the explicit

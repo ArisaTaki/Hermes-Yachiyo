@@ -23,11 +23,22 @@ from apps.shell.agent.runtime.isolated_desktop_provider import (
     build_isolated_desktop_provider_server,
 )
 
+SMOKE_TOOLS = (
+    "desktop.open_app",
+    "desktop.read_ui",
+    "desktop.click_ui_element",
+    "desktop.safe_type_text",
+    "desktop.safe_shortcut",
+    "desktop.verify",
+)
+SMOKE_APP_NAME = "Apple Music"
+SMOKE_TEXT = "morning playlist"
+
 
 def run_smoke() -> dict[str, Any]:
     provider = IsolatedDesktopProvider(
         provider_id="smoke-isolated-desktop",
-        supported_tools=["desktop.safe_type_text"],
+        supported_tools=SMOKE_TOOLS,
     )
     server = build_isolated_desktop_provider_server(
         host="127.0.0.1",
@@ -42,32 +53,120 @@ def run_smoke() -> dict[str, Any]:
         env = {
             "OHA_YACHIYO_DESKTOP_PROVIDER_URL": base_url,
             "OHA_YACHIYO_DESKTOP_PROVIDER_ID": provider.provider_id,
-            "OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS": "desktop.safe_type_text",
+            "OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS": ",".join(SMOKE_TOOLS),
             "OHA_YACHIYO_DESKTOP_PROVIDER_TIMEOUT_SECONDS": "10",
         }
         status = desktop_execution_provider_status_from_env(env, probe_health=True)
         registry = desktop_execution_provider_registry_from_env(env)
-        result = registry.execute_if_routed(
-            "desktop.safe_type_text",
-            {"text": "hello isolated"},
-            tool_request=_tool_request(provider.provider_id),
-            broker=object(),
-            approved=True,
+        tool_results = [
+            _execute_tool(
+                registry,
+                provider.provider_id,
+                "desktop.open_app",
+                {"app_name": SMOKE_APP_NAME},
+            ),
+            _execute_tool(
+                registry,
+                provider.provider_id,
+                "desktop.read_ui",
+                {"app_name": SMOKE_APP_NAME},
+            ),
+            _execute_tool(
+                registry,
+                provider.provider_id,
+                "desktop.click_ui_element",
+                {
+                    "target": "Search",
+                    "role_filter": "text_field",
+                    "expected_app_name": SMOKE_APP_NAME,
+                },
+            ),
+            _execute_tool(
+                registry,
+                provider.provider_id,
+                "desktop.safe_type_text",
+                {"text": SMOKE_TEXT},
+            ),
+            _execute_tool(
+                registry,
+                provider.provider_id,
+                "desktop.safe_shortcut",
+                {"action": "submit"},
+            ),
+            _execute_tool(
+                registry,
+                provider.provider_id,
+                "desktop.verify",
+                {
+                    "app_name": SMOKE_APP_NAME,
+                    "target": "Search",
+                    "expected_text": SMOKE_TEXT,
+                },
+            ),
+        ]
+        result = tool_results[-1] if tool_results else {}
+        result_by_tool = {
+            str(item.get("tool") or item.get("action") or ""): item
+            for item in tool_results
+            if isinstance(item, dict)
+        }
+        read_ui_elements = (
+            result_by_tool.get("desktop.read_ui", {})
+            .get("data", {})
+            .get("elements", [])
         )
+        verify_data = result_by_tool.get("desktop.verify", {}).get("data", {})
         checks = {
             "provider_available": bool(status.get("available")),
             "provider_session_isolated": bool(status.get("desktop_session_isolated")),
             "foreground_takeover_not_required": (
                 status.get("foreground_takeover_required") is False
             ),
-            "tool_routed": isinstance(result, dict)
-            and result.get("desktop_execution_provider_routed") is True,
-            "tool_result_ok": isinstance(result, dict) and result.get("ok") is not False,
-            "tool_result_isolated": isinstance(result, dict)
-            and result.get("isolated_desktop_provider", {}).get(
-                "desktop_session_isolated"
-            )
-            is True,
+            "all_tools_routed": all(
+                isinstance(item, dict)
+                and item.get("desktop_execution_provider_routed") is True
+                for item in tool_results
+            ),
+            "all_tool_results_ok": all(
+                isinstance(item, dict) and item.get("ok") is not False
+                for item in tool_results
+            ),
+            "all_tool_results_isolated": all(
+                isinstance(item, dict)
+                and item.get("isolated_desktop_provider", {}).get(
+                    "desktop_session_isolated"
+                )
+                is True
+                for item in tool_results
+            ),
+            "tool_sequence_completed": [
+                item.get("action") for item in tool_results if isinstance(item, dict)
+            ]
+            == list(SMOKE_TOOLS),
+            "open_app_recorded": (
+                result_by_tool.get("desktop.open_app", {})
+                .get("data", {})
+                .get("app_name")
+                == SMOKE_APP_NAME
+            ),
+            "read_ui_returned_elements": isinstance(read_ui_elements, list)
+            and bool(read_ui_elements),
+            "click_target_recorded": (
+                result_by_tool.get("desktop.click_ui_element", {})
+                .get("data", {})
+                .get("isolated_event", {})
+                .get("target")
+                == "Search"
+            ),
+            "type_text_recorded": (
+                result_by_tool.get("desktop.safe_type_text", {})
+                .get("data", {})
+                .get("isolated_event", {})
+                .get("text_buffer")
+                == SMOKE_TEXT
+            ),
+            "verify_expected_text": verify_data.get("expected_text_found") is True,
+            "verify_target_focused": verify_data.get("expected_target_focused") is True,
         }
         ok = all(checks.values())
         return {
@@ -76,6 +175,8 @@ def run_smoke() -> dict[str, Any]:
             "base_url": base_url,
             "status": status,
             "result": result,
+            "tool_results": tool_results,
+            "tool_sequence": list(SMOKE_TOOLS),
             "checks": checks,
             "desktop_session_kind": str(status.get("desktop_session_kind") or ""),
             "desktop_session_isolated": status.get("desktop_session_isolated"),
@@ -84,6 +185,7 @@ def run_smoke() -> dict[str, Any]:
                 "keyboard_mouse_capture_supported"
             ),
             "supported_tools": status.get("supported_tools") or [],
+            "covered_tools": list(SMOKE_TOOLS),
         }
     finally:
         server.shutdown()
@@ -118,13 +220,33 @@ def main(argv: Sequence[str] | None = None) -> int:
     return 0 if evidence.get("ok") is True else 1
 
 
-def _tool_request(provider_id: str) -> dict[str, Any]:
+def _execute_tool(
+    registry: Any,
+    provider_id: str,
+    tool_name: str,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    result = registry.execute_if_routed(
+        tool_name,
+        payload,
+        tool_request=_tool_request(provider_id, tool_name, payload),
+        broker=object(),
+        approved=True,
+    )
+    return dict(result) if isinstance(result, dict) else {"ok": False}
+
+
+def _tool_request(
+    provider_id: str,
+    tool_name: str,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
     return {
-        "tool": "desktop.safe_type_text",
-        "input": {"text": "hello isolated"},
+        "tool": tool_name,
+        "input": dict(payload),
         "desktop_execution_route": {
-            "route_id": "desktop-route:desktop.safe_type_text",
-            "tool_name": "desktop.safe_type_text",
+            "route_id": f"desktop-route:{tool_name}",
+            "tool_name": tool_name,
             "requested_mode": "sandbox_preferred",
             "selected_provider_kind": "sandbox_desktop",
             "selected_provider_id": provider_id,
@@ -140,7 +262,7 @@ def _tool_request(provider_id: str) -> dict[str, Any]:
             "provider_kind": "sandbox_desktop",
             "provider_id": provider_id,
             "status": "available",
-            "supported_tools": ["desktop.safe_type_text"],
+            "supported_tools": list(SMOKE_TOOLS),
             "keyboard_mouse_capture_supported": True,
             "desktop_session_kind": "isolated_desktop",
             "desktop_session_isolated": True,

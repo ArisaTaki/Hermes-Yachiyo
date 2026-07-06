@@ -219,6 +219,58 @@ def test_isolated_desktop_provider_requires_approval_for_keyboard_mouse() -> Non
     assert result["blocking_conditions"] == ["desktop_provider_tool_approval_required"]
 
 
+def test_isolated_desktop_provider_models_discover_operate_verify_loop() -> None:
+    provider = IsolatedDesktopProvider(
+        supported_tools=[
+            "desktop.open_app",
+            "desktop.read_ui",
+            "desktop.click_ui_element",
+            "desktop.safe_type_text",
+            "desktop.verify",
+        ],
+    )
+
+    opened = provider.execute(
+        "desktop.open_app",
+        {"app_name": "Apple Music"},
+        approved=True,
+    )
+    ui = provider.execute(
+        "desktop.read_ui",
+        {"app_name": "Apple Music"},
+        approved=True,
+    )
+    clicked = provider.execute(
+        "desktop.click_ui_element",
+        {"target": "Search", "role_filter": "text_field"},
+        approved=True,
+    )
+    typed = provider.execute(
+        "desktop.safe_type_text",
+        {"text": "morning playlist"},
+        approved=True,
+    )
+    verified = provider.execute(
+        "desktop.verify",
+        {
+            "app_name": "Apple Music",
+            "target": "Search",
+            "expected_text": "morning playlist",
+        },
+        approved=True,
+    )
+
+    assert opened["data"]["app_name"] == "Apple Music"
+    assert opened["data"]["desktop_session_isolated"] is True
+    assert any(element["title"] == "Search" for element in ui["data"]["elements"])
+    assert clicked["data"]["isolated_event"]["target"] == "Search"
+    assert typed["data"]["isolated_event"]["text_buffer"] == "morning playlist"
+    assert verified["data"]["verification_passed"] is True
+    assert verified["data"]["expected_text_found"] is True
+    assert verified["data"]["expected_target_focused"] is True
+    assert verified["data"]["foreground_takeover_required"] is False
+
+
 def test_isolated_desktop_provider_works_through_runtime_adapter() -> None:
     provider = IsolatedDesktopProvider(
         provider_id="provider-isolated",

@@ -457,6 +457,8 @@ def _evidence_summary(evidence: Mapping[str, Any]) -> dict[str, Any]:
         "foreground_takeover_required",
         "keyboard_mouse_capture_supported",
         "supported_tools",
+        "covered_tools",
+        "tool_sequence",
     )
     summary = {
         key: evidence[key]
