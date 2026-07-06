@@ -1568,6 +1568,7 @@ def planner_decision_and_tool_requests(
         decision,
         include_trace=_request_trace_enabled(metadata),
         include_execution_context=_request_execution_context_enabled(metadata),
+        metadata=metadata,
     )
     return decision, requests
 
@@ -1596,6 +1597,7 @@ def planner_direct_decision_and_tool_requests(
         decision,
         include_trace=_request_trace_enabled(metadata),
         include_execution_context=_request_execution_context_enabled(metadata),
+        metadata=metadata,
     )
     return decision, requests
 
@@ -1606,6 +1608,7 @@ def planner_tool_requests_for_decision(
     *,
     direct: bool = False,
     execution_normalized: bool = True,
+    metadata: Mapping[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     allowed = {str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()}
     if not allowed:
@@ -1619,6 +1622,7 @@ def planner_tool_requests_for_decision(
         decision,
         include_trace=True,
         include_execution_context=True,
+        metadata=metadata,
     )
     if not execution_normalized:
         return requests
@@ -1813,20 +1817,25 @@ def _annotated_tool_requests_for_decision(
     *,
     include_trace: bool = False,
     include_execution_context: bool = False,
+    metadata: Mapping[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     if not requests:
         return []
+    request_metadata = _runtime_request_metadata_from_planner_metadata(metadata)
     steps = [
         step
         for step in getattr(getattr(getattr(decision, "plan", None), "tool_plan", None), "steps", [])
         if str(getattr(step, "tool_name", "") or "").strip()
     ]
     if not steps:
-        return [dict(request) for request in requests]
+        return [
+            _request_with_runtime_metadata(request, request_metadata)
+            for request in requests
+        ]
     used_step_indexes: set[int] = set()
     annotated: list[dict[str, Any]] = []
     for request in requests:
-        next_request = dict(request)
+        next_request = _request_with_runtime_metadata(request, request_metadata)
         step_index, step = _matching_trace_step(next_request, steps, used_step_indexes)
         if step_index >= 0 and step is not None:
             used_step_indexes.add(step_index)
@@ -1839,6 +1848,49 @@ def _annotated_tool_requests_for_decision(
             )
         annotated.append(next_request)
     return annotated
+
+
+def _runtime_request_metadata_from_planner_metadata(
+    metadata: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    if not isinstance(metadata, Mapping):
+        return {}
+    if _metadata_truthy(
+        metadata,
+        "desktop_provider_health_probe",
+        "probe_desktop_provider_health",
+        "sandbox_provider_health_probe",
+    ):
+        return {"desktop_provider_health_probe": True}
+    return {}
+
+
+def _request_with_runtime_metadata(
+    request: Mapping[str, Any],
+    metadata: Mapping[str, Any],
+) -> dict[str, Any]:
+    next_request = dict(request)
+    for key, value in metadata.items():
+        next_request.setdefault(key, value)
+    return next_request
+
+
+def _metadata_truthy(
+    metadata: Mapping[str, Any] | None,
+    *keys: str,
+) -> bool:
+    if not isinstance(metadata, Mapping):
+        return False
+    for key in keys:
+        value = metadata.get(key)
+        if value is True:
+            return True
+        if isinstance(value, str) and value.strip().lower() in {"1", "true", "yes", "on"}:
+            return True
+    nested_metadata = metadata.get("metadata")
+    if isinstance(nested_metadata, Mapping) and nested_metadata is not metadata:
+        return _metadata_truthy(nested_metadata, *keys)
+    return False
 
 
 def _matching_trace_step(

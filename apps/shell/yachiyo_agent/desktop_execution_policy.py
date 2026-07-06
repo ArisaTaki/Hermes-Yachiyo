@@ -108,8 +108,14 @@ def sandbox_desktop_provider_status(
 ) -> dict[str, Any]:
     """Return the runtime-visible sandbox desktop provider status."""
 
+    should_probe_health = probe_health or _metadata_truthy(
+        metadata,
+        "desktop_provider_health_probe",
+        "probe_desktop_provider_health",
+        "sandbox_provider_health_probe",
+    )
     provider = _sandbox_provider_payload(metadata) or _sandbox_provider_payload_from_env(
-        probe_health=probe_health,
+        probe_health=should_probe_health,
     )
     if provider:
         payload = {**_SANDBOX_DESKTOP_PROVIDER_DEFAULT, **provider}
@@ -125,7 +131,7 @@ def sandbox_desktop_provider_status(
         payload["supported_tools"] = _string_list(payload.get("supported_tools"))
         payload["recommended_for"] = _string_list(payload.get("recommended_for"))
         payload["health"] = _health_payload(provider.get("health"))
-        return payload
+        return _sandbox_provider_public_payload(payload)
     return dict(_SANDBOX_DESKTOP_PROVIDER_DEFAULT)
 
 
@@ -262,6 +268,7 @@ def with_agent_studio_desktop_execution_policy(
     metadata: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
     payload = dict(metadata) if isinstance(metadata, Mapping) else {}
+    payload.setdefault("desktop_provider_health_probe", True)
     if _has_desktop_execution_policy(payload):
         return payload
     payload["desktop_execution_policy"] = agent_studio_desktop_execution_policy()
@@ -353,6 +360,47 @@ def _sandbox_provider_payload(
     if isinstance(nested_metadata, Mapping) and nested_metadata is not metadata:
         return _sandbox_provider_payload(nested_metadata)
     return {}
+
+
+def _metadata_truthy(
+    metadata: Mapping[str, Any] | None,
+    *keys: str,
+) -> bool:
+    if not isinstance(metadata, Mapping):
+        return False
+    for key in keys:
+        value = metadata.get(key)
+        if value is True:
+            return True
+        if isinstance(value, str) and value.strip().lower() in {"1", "true", "yes", "on"}:
+            return True
+    nested_metadata = metadata.get("metadata")
+    if isinstance(nested_metadata, Mapping) and nested_metadata is not metadata:
+        return _metadata_truthy(nested_metadata, *keys)
+    return False
+
+
+def _sandbox_provider_public_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
+    allowed_keys = {
+        "available",
+        "provider_id",
+        "provider_kind",
+        "status",
+        "adapter_ready",
+        "reason",
+        "blocking_conditions",
+        "supported_tools",
+        "recommended_for",
+        "diagnostic_route",
+        "source",
+        "health",
+        "launch_hint",
+    }
+    return {
+        key: payload[key]
+        for key in allowed_keys
+        if key in payload
+    }
 
 
 def _sandbox_provider_payload_from_env(

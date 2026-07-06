@@ -241,6 +241,7 @@ class AgentStudioService:
             allowed_tools=allowed_tools,
             direct=direct,
             full_plan=True,
+            metadata=planner_metadata,
         )
         if envelope is None:
             raise ValueError("Unable to build Agent Studio execution plan")

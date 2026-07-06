@@ -887,7 +887,9 @@ def test_agent_studio_service_maps_agent_group_workflow_snapshots() -> None:
     assert tool_catalog.legacy_cleanup_coverage.planner_owned_entrypoints[0].owner == "runtime_planner"
     assert tool_catalog.legacy_cleanup_coverage.planner_owned_entrypoints[0].legacy_shape_preserved is True
     assert len(tool_catalog.legacy_cleanup_coverage.remaining_fallback_contracts) >= 4
-    assert tool_catalog.legacy_cleanup_coverage.remaining_fallback_contracts[0].status == "keep_until_planner_parity"
+    assert tool_catalog.legacy_cleanup_coverage.remaining_fallback_contracts[0].status == (
+        "planner_covered_compat_cleanup_pending"
+    )
     assert tool_catalog.legacy_cleanup_coverage.remaining_fallback_contracts[0].required_before_delete
     assert restricted_plugins[0].plugin_id == "notes"
     assert installed_plugin.plugin_id == "desk"
@@ -1174,11 +1176,12 @@ def test_agent_studio_service_prefers_port_planner_when_available() -> None:
             {
                 "prompt": "打开 PixelForge 并点击导出按钮",
                 "allowed_tools": ["desktop.running_apps", "app.open", "desktop.click_ui_element"],
-                "metadata": {
-                    "surface": "studio",
-                    "desktop_execution_policy": {
-                        "mode": "supervised_live",
-                        "allow_live_foreground": True,
+                    "metadata": {
+                        "surface": "studio",
+                        "desktop_provider_health_probe": True,
+                        "desktop_execution_policy": {
+                            "mode": "supervised_live",
+                            "allow_live_foreground": True,
                         "source": "agent_studio",
                         "reason": "Agent Studio is the supervised desktop execution and debugging surface.",
                     },
@@ -2598,7 +2601,7 @@ def test_agent_studio_service_projects_workflow_replan_events_from_port_page() -
     assert replan_event.payload["planner_event_type"] == "agent.replan.requested"
     assert replan_event.payload["planner_scope"] == "workflow_run"
     assert replan_event.payload["run_id"] == "workflow-run-1"
-    assert page.next_after_sequence == int(replan_event.sequence or 0)
+    assert page.next_after_sequence == max(int(event.sequence or 0) for event in page.events)
     assert ("get_run_event_stream", "workflow-run-1") not in port.calls
 
 

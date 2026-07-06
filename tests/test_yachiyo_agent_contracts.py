@@ -110,6 +110,7 @@ from apps.shell.yachiyo_agent import (
     desktop_execution_route_decision,
     desktop_tool_risk_level,
     sandbox_desktop_provider_status,
+    with_agent_studio_desktop_execution_policy,
     with_daily_entrypoint_desktop_execution_policy,
     is_high_risk_desktop_action,
     task_requires_user_action,
@@ -5159,6 +5160,78 @@ def test_daily_entrypoint_desktop_execution_policy_defaults_to_input_preview() -
     assert metadata["desktop_execution_policy"]["mode"] == "preview_input"
     assert metadata["desktop_execution_policy"]["source"] == "daily_bubble"
     assert explicit["desktop_execution_policy"] == {"mode": "supervised_live"}
+
+
+def test_agent_studio_desktop_execution_policy_requests_provider_health_probe() -> None:
+    metadata = with_agent_studio_desktop_execution_policy({"source": "studio"})
+    explicit = with_agent_studio_desktop_execution_policy(
+        {"desktop_execution_policy": {"mode": "supervised_live"}}
+    )
+    daily = with_daily_entrypoint_desktop_execution_policy(
+        {"source": "launcher"},
+        surface="chat",
+    )
+
+    assert metadata["desktop_execution_policy"]["mode"] == "supervised_live"
+    assert metadata["desktop_provider_health_probe"] is True
+    assert explicit["desktop_execution_policy"] == {"mode": "supervised_live"}
+    assert explicit["desktop_provider_health_probe"] is True
+    assert "desktop_provider_health_probe" not in daily
+
+
+def test_sandbox_desktop_provider_status_probes_health_when_metadata_requests_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+
+    class FakeResponse:
+        status = 200
+
+        def __enter__(self) -> "FakeResponse":
+            return self
+
+        def __exit__(self, *_args: Any) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return json.dumps(
+                {
+                    "ok": True,
+                    "status": "ready",
+                    "version": "0.1.0",
+                    "supported_tools": ["desktop.permission_preflight"],
+                    "capabilities": ["desktop_discovery"],
+                }
+            ).encode("utf-8")
+
+        def getcode(self) -> int:
+            return self.status
+
+    def fake_urlopen(request: Any, *, timeout: float) -> FakeResponse:
+        calls.append(request.full_url)
+        return FakeResponse()
+
+    monkeypatch.setattr(
+        "apps.shell.agent.runtime.desktop_execution_providers.urlopen_with_bundled_ca",
+        fake_urlopen,
+    )
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_URL", "http://127.0.0.1:19091")
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_ID", "local-headless-desktop")
+    monkeypatch.setenv(
+        "OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS",
+        "desktop.permission_preflight",
+    )
+
+    unchecked = sandbox_desktop_provider_status({})
+    probed = sandbox_desktop_provider_status({"desktop_provider_health_probe": True})
+
+    assert unchecked["health"]["checked"] is False
+    assert calls == ["http://127.0.0.1:19091/status"]
+    assert probed["available"] is True
+    assert probed["health"]["checked"] is True
+    assert probed["health"]["status"] == "ready"
+    assert probed["health"]["provider_version"] == "0.1.0"
+    assert probed["health"]["supported_tools"] == ["desktop.permission_preflight"]
 
 
 def test_desktop_recovery_action_metadata_snapshot_json_shape_is_stable() -> None:

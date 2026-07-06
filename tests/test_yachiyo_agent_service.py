@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from apps.shell.yachiyo_agent import (
@@ -1705,6 +1706,79 @@ def test_agent_studio_service_plans_discovered_desktop_app_execution() -> None:
     assert envelope.requests[2].requires_post_action_verification is False
 
 
+def test_agent_studio_service_probes_desktop_provider_health_for_execution(
+    monkeypatch,
+) -> None:
+    calls: list[str] = []
+
+    class FakeResponse:
+        status = 200
+
+        def __enter__(self) -> "FakeResponse":
+            return self
+
+        def __exit__(self, *_args: Any) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return json.dumps(
+                {
+                    "ok": True,
+                    "status": "ready",
+                    "version": "0.1.0",
+                    "supported_tools": ["app.focus_and_click_ui_element"],
+                    "capabilities": ["desktop_discovery", "sandbox_foreground"],
+                }
+            ).encode("utf-8")
+
+        def getcode(self) -> int:
+            return self.status
+
+    def fake_urlopen(request: Any, *, timeout: float) -> FakeResponse:
+        calls.append(request.full_url)
+        return FakeResponse()
+
+    monkeypatch.setattr(
+        "apps.shell.agent.runtime.desktop_execution_providers.urlopen_with_bundled_ca",
+        fake_urlopen,
+    )
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_URL", "http://127.0.0.1:19091")
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_ID", "local-headless-desktop")
+    monkeypatch.setenv(
+        "OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS",
+        "app.focus_and_click_ui_element",
+    )
+    service = AgentStudioService(_FakeStudioExecutionPort())
+
+    envelope = service.plan_execution(
+        "在 PixelForge 点击 Export",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.focus_and_click_ui_element",
+            "desktop.ui_elements",
+        ],
+        metadata={"surface": "studio"},
+    )
+
+    operation_request = next(
+        request
+        for request in envelope.requests
+        if request.tool_name == "app.focus_and_click_ui_element"
+    )
+    assert calls
+    assert operation_request.sandbox_provider is not None
+    assert operation_request.sandbox_provider.status == "available"
+    assert operation_request.sandbox_provider.health is not None
+    assert operation_request.sandbox_provider.health.checked is True
+    assert operation_request.sandbox_provider.health.status == "ready"
+    assert operation_request.sandbox_provider.health.provider_version == "0.1.0"
+    assert operation_request.desktop_execution_route is not None
+    assert operation_request.desktop_execution_route.status == "supervised_live"
+    assert envelope.sandbox_provider is not None
+    assert envelope.sandbox_provider.health is not None
+    assert envelope.sandbox_provider.health.checked is True
+
+
 def test_agent_studio_service_normalizes_known_app_submit_execution() -> None:
     service = AgentStudioService(_FakeStudioExecutionPort())
 
@@ -2312,7 +2386,10 @@ def test_yachiyo_agent_service_enriches_bare_chat_start_payload_with_planner_eve
     assert "agent.task.checkpoint.updated" in event_types
     assert task.recent_events[0].payload["intent"]["kind"] == "data_analysis"
     assert task.task_core is not None
-    assert [todo.step_id for todo in task.task_core.todos] == ["analyze-data-file"]
+    assert [todo.step_id for todo in task.task_core.todos] == [
+        "read-data-source",
+        "analyze-data-file",
+    ]
 
 
 def test_yachiyo_agent_service_does_not_duplicate_existing_chat_planner_events() -> None:
@@ -2378,7 +2455,7 @@ def test_yachiyo_agent_service_defaults_main_chat_entrypoint_metadata() -> None:
     assert metadata["planner_entrypoint"] == "chat_window"
     assert metadata["yachiyo_runtime_planner"] is True
     assert metadata["yachiyo_intent_kind"] == "data_analysis"
-    assert metadata["yachiyo_plan_tools"] == ["data.analyze"]
+    assert metadata["yachiyo_plan_tools"] == ["workspace.read", "data.analyze"]
     assert task.metadata["entrypoint_source"] == "chat_window"
     assert task.metadata["planner_entrypoint"] == "chat_window"
 
@@ -2437,7 +2514,7 @@ def test_yachiyo_agent_service_preserves_launcher_entrypoint_for_data_analysis()
         assert metadata["runnable_kind"] == "main"
         assert metadata["yachiyo_runtime_planner"] is True
         assert metadata["yachiyo_intent_kind"] == "data_analysis"
-        assert metadata["yachiyo_plan_tools"] == ["data.analyze"]
+        assert metadata["yachiyo_plan_tools"] == ["workspace.read", "data.analyze"]
         assert metadata["yachiyo_plan_artifacts_expected"] == ["analysis-report.md"]
         assert task.metadata["planner_entrypoint"] == f"{mode}_default"
 

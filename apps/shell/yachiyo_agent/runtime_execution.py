@@ -47,13 +47,18 @@ def runtime_execution_envelope_from_decision(
     allowed_tools: Iterable[str] | None = None,
     direct: bool = False,
     full_plan: bool = False,
+    metadata: Mapping[str, Any] | None = None,
 ) -> RuntimeExecutionEnvelopeSnapshot | None:
     if decision is None:
         return None
     clean_allowed = _allowed_tools(decision, allowed_tools)
     request_payloads = (
         planner_full_plan_execution_tool_requests(
-            _full_plan_tool_requests_from_decision(decision, clean_allowed),
+            _full_plan_tool_requests_from_decision(
+                decision,
+                clean_allowed,
+                metadata=metadata,
+            ),
             clean_allowed,
         )
         if full_plan and _supports_full_plan_projection(decision)
@@ -62,6 +67,7 @@ def runtime_execution_envelope_from_decision(
             clean_allowed,
             direct=direct,
             execution_normalized=True,
+            metadata=metadata,
         )
     )
     steps = _steps_by_id(decision)
@@ -107,12 +113,14 @@ def runtime_execution_envelope_payload(
     allowed_tools: Iterable[str] | None = None,
     direct: bool = False,
     full_plan: bool = False,
+    metadata: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     envelope = runtime_execution_envelope_from_decision(
         decision,
         allowed_tools=allowed_tools,
         direct=direct,
         full_plan=full_plan,
+        metadata=metadata,
     )
     if envelope is None:
         return {}
@@ -169,8 +177,11 @@ def _supports_full_plan_projection(decision: PlannerDecisionSnapshot) -> bool:
 def _full_plan_tool_requests_from_decision(
     decision: PlannerDecisionSnapshot,
     allowed_tools: set[str],
+    *,
+    metadata: Mapping[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     requests: list[dict[str, Any]] = []
+    request_metadata = _runtime_request_metadata_from_metadata(metadata)
     for step in list(decision.plan.tool_plan.steps or []):
         tool_name = _text(getattr(step, "tool_name", None))
         if not tool_name or tool_name not in allowed_tools:
@@ -196,6 +207,7 @@ def _full_plan_tool_requests_from_decision(
             request["planner_step_id"] = step_id
         if capability_id:
             request["capability_id"] = capability_id
+        request.update(request_metadata)
         runtime_stage = _text(
             _task_core_step_runtime_metadata(decision, step_id).get("runtime_stage")
         )
@@ -301,6 +313,39 @@ def _command_looks_like_planner_placeholder(command: str) -> bool:
             "<generated",
         )
     )
+
+
+def _runtime_request_metadata_from_metadata(
+    metadata: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    if not isinstance(metadata, Mapping):
+        return {}
+    if _metadata_truthy(
+        metadata,
+        "desktop_provider_health_probe",
+        "probe_desktop_provider_health",
+        "sandbox_provider_health_probe",
+    ):
+        return {"desktop_provider_health_probe": True}
+    return {}
+
+
+def _metadata_truthy(
+    metadata: Mapping[str, Any] | None,
+    *keys: str,
+) -> bool:
+    if not isinstance(metadata, Mapping):
+        return False
+    for key in keys:
+        value = metadata.get(key)
+        if value is True:
+            return True
+        if isinstance(value, str) and value.strip().lower() in {"1", "true", "yes", "on"}:
+            return True
+    nested_metadata = metadata.get("metadata")
+    if isinstance(nested_metadata, Mapping) and nested_metadata is not metadata:
+        return _metadata_truthy(nested_metadata, *keys)
+    return False
 
 
 _EXECUTION_REQUEST_CONTEXT_KEYS = {
