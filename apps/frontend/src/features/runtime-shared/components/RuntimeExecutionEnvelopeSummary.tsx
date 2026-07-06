@@ -80,6 +80,13 @@ export function RuntimeExecutionEnvelopeSummary({
       data-runtime-blockers={blockers.join(',')}
       data-desktop-execution-policy={executionPolicy.mode}
       data-desktop-execution-policy-label={executionPolicy.label}
+      data-desktop-execution-policy-prefer-isolated={String(executionPolicy.preferIsolatedDesktop === true)}
+      data-desktop-execution-policy-avoid-foreground-takeover={
+        String(executionPolicy.avoidUserForegroundTakeover === true)
+      }
+      data-desktop-execution-policy-require-keyboard-mouse-sandbox={
+        String(executionPolicy.requireSandboxForKeyboardMouse === true)
+      }
       data-sandbox-provider-status={sandboxProvider.status}
       data-sandbox-provider-blockers={sandboxProvider.blockers.join(',')}
       data-sandbox-provider-health-status={sandboxProvider.healthStatus}
@@ -263,6 +270,15 @@ function RuntimeExecutionEnvelopePills({
         <span
           className={pillClassName}
           data-desktop-execution-policy={executionPolicy.mode}
+          data-desktop-execution-policy-prefer-isolated={String(
+            executionPolicy.preferIsolatedDesktop === true,
+          )}
+          data-desktop-execution-policy-avoid-foreground-takeover={String(
+            executionPolicy.avoidUserForegroundTakeover === true,
+          )}
+          data-desktop-execution-policy-require-keyboard-mouse-sandbox={String(
+            executionPolicy.requireSandboxForKeyboardMouse === true,
+          )}
           title={executionPolicy.reason || undefined}
         >
           execution · {executionPolicy.label}
@@ -422,6 +438,13 @@ function RuntimeExecutionRequestRow({
       data-execution-request-id={request.request_id}
       data-execution-tool={request.tool_name}
       data-desktop-execution-policy={executionPolicy.mode}
+      data-desktop-execution-policy-prefer-isolated={String(executionPolicy.preferIsolatedDesktop === true)}
+      data-desktop-execution-policy-avoid-foreground-takeover={
+        String(executionPolicy.avoidUserForegroundTakeover === true)
+      }
+      data-desktop-execution-policy-require-keyboard-mouse-sandbox={
+        String(executionPolicy.requireSandboxForKeyboardMouse === true)
+      }
       data-sandbox-provider-status={sandboxProvider.status}
       data-sandbox-provider-blockers={sandboxProvider.blockers.join(',')}
       data-sandbox-provider-health-status={sandboxProvider.healthStatus}
@@ -527,9 +550,12 @@ type RuntimeExecutionRetrySummary = {
 type RuntimeExecutionPolicySummary = {
   allowLiveForeground: boolean | null;
   allowMediaControl: boolean | null;
+  avoidUserForegroundTakeover: boolean | null;
   label: string;
   mode: string;
+  preferIsolatedDesktop: boolean | null;
   reason: string;
+  requireSandboxForKeyboardMouse: boolean | null;
   source: string;
 };
 
@@ -591,17 +617,26 @@ function runtimeExecutionPolicySummary(
   const reason = stringValue(record.reason);
   const allowLiveForeground = booleanValue(record.allow_live_foreground);
   const allowMediaControl = booleanValue(record.allow_media_control);
+  const preferIsolatedDesktop = booleanValue(record.prefer_isolated_desktop);
+  const avoidUserForegroundTakeover = booleanValue(record.avoid_user_foreground_takeover);
+  const requireSandboxForKeyboardMouse = booleanValue(record.require_sandbox_for_keyboard_mouse);
   return {
     allowLiveForeground,
     allowMediaControl,
+    avoidUserForegroundTakeover,
     label: executionPolicyLabel({
       allowLiveForeground,
       allowMediaControl,
+      avoidUserForegroundTakeover,
       mode,
+      preferIsolatedDesktop,
+      requireSandboxForKeyboardMouse,
       source,
     }),
     mode,
+    preferIsolatedDesktop,
     reason,
+    requireSandboxForKeyboardMouse,
     source,
   };
 }
@@ -810,12 +845,18 @@ function sandboxProviderLaunchLabel(launch: {
 function executionPolicyLabel(policy: {
   allowLiveForeground: boolean | null;
   allowMediaControl: boolean | null;
+  avoidUserForegroundTakeover: boolean | null;
   mode: string;
+  preferIsolatedDesktop: boolean | null;
+  requireSandboxForKeyboardMouse: boolean | null;
   source: string;
 }): string {
   if (!policy.mode) return '';
   const parts = [policy.mode.replace(/_/g, ' ')];
   if (policy.allowLiveForeground === true) parts.push('live foreground');
+  if (policy.preferIsolatedDesktop === true) parts.push('isolated preferred');
+  if (policy.avoidUserForegroundTakeover === true) parts.push('no takeover');
+  if (policy.requireSandboxForKeyboardMouse === true) parts.push('keyboard/mouse sandbox');
   if (policy.allowMediaControl === true) parts.push('media ok');
   if (policy.allowMediaControl === false) parts.push('media blocked');
   if (policy.source) parts.push(policy.source);

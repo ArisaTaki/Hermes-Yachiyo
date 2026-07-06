@@ -5065,12 +5065,18 @@ def test_desktop_execution_policy_snapshot_json_shape_is_stable() -> None:
     assert list(payload) == [
         "mode",
         "allow_live_foreground",
+        "prefer_isolated_desktop",
+        "avoid_user_foreground_takeover",
+        "require_sandbox_for_keyboard_mouse",
         "allow_media_control",
         "source",
         "reason",
     ]
     assert payload["mode"] == "preview"
     assert payload["allow_live_foreground"] is False
+    assert payload["prefer_isolated_desktop"] is False
+    assert payload["avoid_user_foreground_takeover"] is False
+    assert payload["require_sandbox_for_keyboard_mouse"] is False
     assert payload["allow_media_control"] is True
     with pytest.raises(ValidationError):
         DesktopExecutionPolicySnapshot(mode="allow", unknown=True)
@@ -5368,6 +5374,41 @@ def test_agent_studio_route_blocks_keyboard_mouse_without_isolated_session() -> 
     assert route["blocking_conditions"] == ["sandbox_desktop_session_required"]
 
 
+def test_desktop_policy_prefer_isolated_routes_keyboard_mouse_without_extra_metadata() -> None:
+    route = desktop_execution_route_decision(
+        "desktop.safe_type_text",
+        policy={
+            "mode": "supervised_live",
+            "prefer_isolated_desktop": True,
+            "avoid_user_foreground_takeover": True,
+            "require_sandbox_for_keyboard_mouse": True,
+        },
+        execution_mode=DesktopExecutionModeSnapshot(
+            mode="supervised_live",
+            foreground_control=True,
+            keyboard_mouse_capture=True,
+        ),
+        metadata={
+            "sandbox_provider": {
+                "available": True,
+                "adapter_ready": True,
+                "provider_id": "foreground-control",
+                "provider_kind": "sandbox_desktop",
+                "supported_tools": ["desktop.safe_type_text"],
+                "keyboard_mouse_capture_supported": True,
+                "desktop_session_kind": "user_foreground",
+                "desktop_session_isolated": False,
+                "foreground_takeover_required": True,
+            },
+        },
+    )
+
+    assert route["status"] == "sandbox_desktop_session_required"
+    assert route["can_execute"] is False
+    assert route["selected_provider_id"] == "foreground-control"
+    assert route["blocking_conditions"] == ["sandbox_desktop_session_required"]
+
+
 def test_daily_entrypoint_desktop_execution_policy_defaults_to_input_preview() -> None:
     policy = daily_entrypoint_desktop_execution_policy(surface="bubble")
     metadata = with_daily_entrypoint_desktop_execution_policy(
@@ -5380,9 +5421,15 @@ def test_daily_entrypoint_desktop_execution_policy_defaults_to_input_preview() -
     )
 
     assert policy["mode"] == "preview_input"
+    assert policy["prefer_isolated_desktop"] is True
+    assert policy["avoid_user_foreground_takeover"] is True
+    assert policy["require_sandbox_for_keyboard_mouse"] is True
     assert policy["allow_media_control"] is True
     assert metadata["desktop_execution_policy"]["mode"] == "preview_input"
     assert metadata["desktop_execution_policy"]["source"] == "daily_bubble"
+    assert metadata["desktop_execution_policy"]["prefer_isolated_desktop"] is True
+    assert metadata["desktop_execution_policy"]["avoid_user_foreground_takeover"] is True
+    assert metadata["desktop_execution_policy"]["require_sandbox_for_keyboard_mouse"] is True
     assert explicit["desktop_execution_policy"] == {"mode": "supervised_live"}
     assert metadata["desktop_provider_health_probe"] is True
     assert metadata["desktop_provider_route_readonly"] is True
@@ -5400,6 +5447,9 @@ def test_agent_studio_desktop_execution_policy_requests_provider_health_probe() 
     )
 
     assert metadata["desktop_execution_policy"]["mode"] == "supervised_live"
+    assert metadata["desktop_execution_policy"]["prefer_isolated_desktop"] is True
+    assert metadata["desktop_execution_policy"]["avoid_user_foreground_takeover"] is True
+    assert metadata["desktop_execution_policy"]["require_sandbox_for_keyboard_mouse"] is True
     assert metadata["desktop_provider_health_probe"] is True
     assert metadata["desktop_provider_route_readonly"] is True
     assert metadata["desktop_provider_route_foreground"] is True

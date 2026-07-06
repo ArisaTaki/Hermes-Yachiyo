@@ -98,6 +98,9 @@ export type DesktopExecutionModeSnapshot = {
 export type DesktopExecutionPolicySnapshot = {
   mode?: DesktopExecutionPolicyMode | string;
   allow_live_foreground?: boolean | null;
+  prefer_isolated_desktop?: boolean;
+  avoid_user_foreground_takeover?: boolean;
+  require_sandbox_for_keyboard_mouse?: boolean;
   allow_media_control?: boolean;
   source?: string;
   reason?: string;

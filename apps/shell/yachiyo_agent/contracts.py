@@ -154,6 +154,9 @@ class DesktopExecutionModeSnapshot(_PublicSnapshot):
 class DesktopExecutionPolicySnapshot(_PublicSnapshot):
     mode: DesktopExecutionPolicyMode | str = "allow"
     allow_live_foreground: bool | None = None
+    prefer_isolated_desktop: bool = False
+    avoid_user_foreground_takeover: bool = False
+    require_sandbox_for_keyboard_mouse: bool = False
     allow_media_control: bool = True
     source: str = ""
     reason: str = ""

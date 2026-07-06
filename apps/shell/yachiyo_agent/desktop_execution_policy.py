@@ -213,16 +213,19 @@ def daily_entrypoint_desktop_execution_policy(
     *,
     surface: str = "chat",
 ) -> dict[str, Any]:
-    """Default Chat/Bubble/Live2D policy: execute tools, but preview raw foreground input."""
+    """Default Chat/Bubble/Live2D policy: execute tools, but avoid user foreground takeover."""
 
     clean_surface = str(surface or "chat").strip() or "chat"
     return {
         "mode": "preview_input",
+        "prefer_isolated_desktop": True,
+        "avoid_user_foreground_takeover": True,
+        "require_sandbox_for_keyboard_mouse": True,
         "allow_media_control": True,
         "source": f"daily_{clean_surface}",
         "reason": (
-            "Daily entrypoints should avoid taking over keyboard/mouse input; "
-            "Agent Studio can opt into supervised live desktop execution."
+            "Daily entrypoints should execute through structured tools and isolated "
+            "desktop providers instead of taking over the user's keyboard/mouse."
         ),
     }
 
@@ -233,8 +236,14 @@ def agent_studio_desktop_execution_policy() -> dict[str, Any]:
     return {
         "mode": "supervised_live",
         "allow_live_foreground": True,
+        "prefer_isolated_desktop": True,
+        "avoid_user_foreground_takeover": True,
+        "require_sandbox_for_keyboard_mouse": True,
         "source": "agent_studio",
-        "reason": "Agent Studio is the supervised desktop execution and debugging surface.",
+        "reason": (
+            "Agent Studio is the supervised desktop execution and debugging surface; "
+            "keyboard/mouse actions prefer an isolated desktop provider."
+        ),
     }
 
 
@@ -333,7 +342,28 @@ def desktop_execution_route_decision(
     policy_payload = desktop_execution_policy_payload(policy)
     policy_mode = desktop_execution_policy_mode(policy_payload)
     mode_payload = _execution_mode_payload(execution_mode)
+    decision_context = _route_policy_metadata_context(policy_payload, metadata)
     sandbox_provider = sandbox_desktop_provider_status(metadata)
+    readonly_provider_requested = (
+        desktop_readonly_provider_route_requested(metadata)
+        or _metadata_truthy(
+            policy_payload,
+            "prefer_isolated_desktop",
+            "desktop_provider_route_readonly",
+            "provider_route_readonly",
+        )
+    )
+    foreground_provider_requested = (
+        desktop_foreground_provider_route_requested(metadata)
+        or _metadata_truthy(
+            policy_payload,
+            "prefer_isolated_desktop",
+            "avoid_user_foreground_takeover",
+            "require_sandbox_for_keyboard_mouse",
+            "desktop_provider_route_foreground",
+            "provider_route_foreground",
+        )
+    )
     foreground_control = bool(mode_payload.get("foreground_control"))
     keyboard_mouse_capture = bool(mode_payload.get("keyboard_mouse_capture"))
     foreground_required = foreground_control or keyboard_mouse_capture
@@ -368,7 +398,7 @@ def desktop_execution_route_decision(
             "blocking_conditions": ["missing_tool"],
         }
     if (
-        desktop_readonly_provider_route_requested(metadata)
+        readonly_provider_requested
         and is_readonly_desktop_provider_tool(clean_tool)
         and sandbox_desktop_provider_can_execute_tool(sandbox_provider, clean_tool)
     ):
@@ -381,7 +411,7 @@ def desktop_execution_route_decision(
             ),
         }
     if (
-        desktop_foreground_provider_route_requested(metadata)
+        foreground_provider_requested
         and (foreground_required or execution_mode_name == "supervised_live")
         and _sandbox_provider_requires_keyboard_mouse_sandbox(
             sandbox_provider,
@@ -397,12 +427,12 @@ def desktop_execution_route_decision(
             ),
         }
     if (
-        desktop_foreground_provider_route_requested(metadata)
+        foreground_provider_requested
         and (foreground_required or execution_mode_name == "supervised_live")
         and _sandbox_provider_requires_isolated_keyboard_mouse_session(
             sandbox_provider,
             clean_tool,
-            metadata,
+            decision_context,
         )
     ):
         sandbox_route = _sandbox_route_decision(route, sandbox_provider, clean_tool)
@@ -420,7 +450,7 @@ def desktop_execution_route_decision(
             "blocking_conditions": ["sandbox_desktop_session_required"],
         }
     if (
-        desktop_foreground_provider_route_requested(metadata)
+        foreground_provider_requested
         and (foreground_required or execution_mode_name == "supervised_live")
         and sandbox_desktop_provider_can_execute_tool(sandbox_provider, clean_tool)
     ):
@@ -615,6 +645,16 @@ def _metadata_truthy(
     if isinstance(nested_metadata, Mapping) and nested_metadata is not metadata:
         return _metadata_truthy(nested_metadata, *keys)
     return False
+
+
+def _route_policy_metadata_context(
+    policy_payload: Mapping[str, Any],
+    metadata: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    context = dict(policy_payload)
+    if isinstance(metadata, Mapping):
+        context.update(metadata)
+    return context
 
 
 def _sandbox_provider_public_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
