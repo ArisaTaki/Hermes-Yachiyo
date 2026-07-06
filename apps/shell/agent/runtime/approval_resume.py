@@ -111,10 +111,14 @@ class ApprovalResumeCoordinator:
             )
             self._record_replan_request_after_resume_failure(context, tool_result)
             raise AgentRuntimeError(failure.detail)
-        context.remaining_requests = _approval_resume_remaining_requests_after_tool(
-            context,
-            tool_result,
-        )
+        if _approval_resume_tool_result_blocks_plan_continuation(tool_result):
+            context.remaining_requests = []
+            self._record_replan_request_after_resume_result(context, tool_result)
+        else:
+            context.remaining_requests = _approval_resume_remaining_requests_after_tool(
+                context,
+                tool_result,
+            )
         followup = ToolApprovalExecutionFollowup.from_context(
             context,
             tool_result,
@@ -161,6 +165,25 @@ class ApprovalResumeCoordinator:
                 "event": "agent.tool.failed",
                 "detail": context.tool_name,
                 "result": tool_result if isinstance(tool_result, Mapping) else {},
+            },
+            timeline=context.timeline,
+            timeline_factory=self._timeline,
+            append_run_event=self._append_run_event,
+            run_id=context.run_id,
+        )
+
+    def _record_replan_request_after_resume_result(
+        self,
+        context: ToolApprovalResumeContext,
+        tool_result: Any,
+    ) -> None:
+        result = tool_result if isinstance(tool_result, Mapping) else {}
+        append_replan_request_event_for_tool_result(
+            tool_request={**context.tool_request, "tool": context.tool_name},
+            tool_event={
+                "event": _approval_resume_tool_result_event_type(result),
+                "detail": context.tool_name,
+                "result": result,
             },
             timeline=context.timeline,
             timeline_factory=self._timeline,
@@ -406,6 +429,38 @@ def _approval_resume_remaining_requests_after_tool(
         allowed_tools=context.allowed_tools,
     )
     return [verification] if verification else []
+
+
+def _approval_resume_tool_result_blocks_plan_continuation(tool_result: Any) -> bool:
+    if not isinstance(tool_result, Mapping):
+        return True
+    if tool_result.get("approval_required"):
+        return False
+    if tool_result.get("ok") is False or tool_result.get("error"):
+        return True
+    status = str(tool_result.get("status") or "").strip().lower()
+    return status in {
+        "blocked",
+        "cancelled",
+        "canceled",
+        "error",
+        "failed",
+        "failure",
+        "handoff_required",
+        "preview_required",
+        "provider_required",
+        "rejected",
+        "unavailable",
+    }
+
+
+def _approval_resume_tool_result_event_type(result: Mapping[str, Any]) -> str:
+    if result.get("blocked_by_desktop_execution_policy"):
+        return "agent.tool.skipped"
+    status = str(result.get("status") or "").strip().lower()
+    if status in {"handoff_required", "preview_required", "provider_required"}:
+        return "agent.tool.skipped"
+    return "agent.tool.failed"
 
 
 def _resumable_remaining_requests(

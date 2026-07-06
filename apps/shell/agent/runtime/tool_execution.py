@@ -2894,12 +2894,14 @@ def _runtime_replan_request_payload_for_tool_result(
     parent_replan_request_id = str(tool_request.get("replan_request_id") or "").strip()
     request_fallback_tools = _string_list(tool_request.get("fallback_tools"))
     fallback_tools = _runtime_replan_fallback_tools(tool_request, result)
+    user_recovery_requested = _tool_result_requests_user_recovery(result)
     if not (
         replan_signal_ids
         or replan_triggers
         or parent_replan_request_id
         or request_fallback_tools
         or fallback_tools
+        or user_recovery_requested
         or bool(tool_request.get("requires_observation"))
         or bool(tool_request.get("requires_post_action_verification"))
     ):

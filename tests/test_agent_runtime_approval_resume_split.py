@@ -248,6 +248,188 @@ def test_approval_resume_skips_terminal_remaining_runtime_requests() -> None:
     assert context.remaining_requests == captured_requests[0]
 
 
+def test_approval_resume_replans_policy_blocked_desktop_tool_without_running_remaining_requests() -> None:
+    task_core = {
+        "core_id": "core-desktop-approval",
+        "workspace": {"workspace_id": "workspace-1", "title": "Desktop task"},
+        "todos": [
+            {
+                "todo_id": "todo-type",
+                "step_id": "type-into-foreground",
+                "title": "Type into app",
+                "status": "pending",
+            },
+            {
+                "todo_id": "todo-artifact",
+                "step_id": "write-artifact",
+                "title": "Write artifact",
+                "status": "pending",
+            },
+        ],
+        "checkpoints": [
+            {
+                "checkpoint_id": "checkpoint-type",
+                "after_step_id": "type-into-foreground",
+                "title": "Text entered",
+                "status": "planned",
+            }
+        ],
+    }
+    timeline = [
+        _timeline(
+            "agent.plan.created",
+            "plan",
+            decision_id="decision-desktop",
+            plan_id="plan-desktop",
+            plan={
+                "plan_id": "plan-desktop",
+                "tool_plan": {
+                    "steps": [
+                        {
+                            "step_id": "type-into-foreground",
+                            "tool_name": "desktop.safe_type_text",
+                        },
+                        {
+                            "step_id": "write-artifact",
+                            "tool_name": "artifact.write",
+                        },
+                    ]
+                },
+            },
+        ),
+        _timeline(
+            "agent.task_core.created",
+            "task core",
+            decision_id="decision-desktop",
+            plan_id="plan-desktop",
+            core_id="core-desktop-approval",
+            task_id="task-desktop",
+            group_run_id="group-run-desktop",
+            workflow_run_id="workflow-run-desktop",
+            task_core=task_core,
+        ),
+    ]
+    tool_result = {
+        "ok": False,
+        "status": "provider_required",
+        "error": "desktop_execution_policy_blocked",
+        "summary": "Desktop foreground execution was blocked by policy.",
+        "blocked_by_desktop_execution_policy": True,
+        "recovery_actions": [
+            {
+                "label": "Prepare sandbox desktop handoff",
+                "tool": "screen.capture",
+                "input": {"reason": "sandbox_desktop_handoff"},
+                "recovery_action_kind": "sandbox_desktop_handoff",
+            }
+        ],
+    }
+    captured_requests: list[list[dict[str, Any]]] = []
+    run_events: list[tuple[str, str, dict[str, Any]]] = []
+    context = ToolApprovalResumeContext(
+        run_id="run-desktop-approval",
+        timeline=timeline,
+        artifacts=[],
+        broker={"broker": True},
+        allowed_tools=["desktop.safe_type_text", "artifact.write", "screen.capture"],
+        budget={"events": 4},
+        messages=[{"role": "assistant", "content": "Need approval"}],
+        tool_request={
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "hello"},
+            "step_id": "type-into-foreground",
+            "capability_id": "desktop.keyboard_input",
+            "decision_id": "decision-desktop",
+            "plan_id": "plan-desktop",
+            "core_id": "core-desktop-approval",
+            "workspace_id": "workspace-1",
+            "task_id": "task-desktop",
+            "group_run_id": "group-run-desktop",
+            "workflow_run_id": "workflow-run-desktop",
+        },
+        tool_name="desktop.safe_type_text",
+        input_preview={"text": "hello"},
+        remaining_requests=[
+            {"tool": "artifact.write", "input": {"path": "should-not-run.md"}},
+        ],
+        next_iteration=3,
+    )
+
+    def call_agent_tool(
+        tool_request: dict[str, Any],
+        _allowed_tools: list[str],
+        _broker: Any,
+        run_timeline: list[dict[str, Any]],
+        **_kwargs: Any,
+    ) -> dict[str, Any]:
+        run_timeline.append(
+            _timeline(
+                "agent.tool.skipped",
+                str(tool_request.get("tool") or ""),
+                input_preview=tool_request.get("input") or {},
+                result=tool_result,
+                status="skipped",
+            )
+        )
+        return tool_result
+
+    def run_tool_requests(
+        requests: list[dict[str, Any]],
+        *_args: Any,
+        **_kwargs: Any,
+    ) -> None:
+        captured_requests.append(requests)
+
+    coordinator = ApprovalResumeCoordinator(
+        call_agent_tool=call_agent_tool,
+        fatal_tool_failure_detail=lambda *_args: "",
+        append_tool_result_message=_append_tool_result_message,
+        run_tool_requests=run_tool_requests,
+        timeline_factory=_timeline,
+        append_run_event=lambda run_id, event_type, payload: run_events.append(
+            (run_id, event_type, payload)
+        ),
+    )
+
+    coordinator.execute_approved_tool(context)
+
+    replan_event = next(
+        event
+        for event in context.timeline
+        if event["event"] == "workflow.run.replan.requested"
+    )
+    replan_payload = replan_event["payload"]
+    blocked_todo = next(
+        event
+        for event in context.timeline
+        if event["event"] == "workflow.run.task.todo.updated"
+        and event.get("step_id") == "type-into-foreground"
+    )
+    blocked_checkpoint = next(
+        event
+        for event in context.timeline
+        if event["event"] == "workflow.run.task.checkpoint.updated"
+        and event.get("checkpoint_id") == "checkpoint-type"
+    )
+
+    assert captured_requests == [[]]
+    assert context.remaining_requests == []
+    assert replan_payload["failure_event_type"] == "agent.tool.skipped"
+    assert replan_payload["source_tool_name"] == "desktop.safe_type_text"
+    assert replan_payload["source_step_id"] == "type-into-foreground"
+    assert replan_payload["recovery_actions"][0]["tool"] == "screen.capture"
+    assert blocked_todo["status"] == "blocked"
+    assert blocked_checkpoint["status"] == "blocked"
+    assert {
+        (run_id, event_type)
+        for run_id, event_type, _payload in run_events
+    } >= {
+        ("run-desktop-approval", "workflow.run.replan.requested"),
+        ("run-desktop-approval", "workflow.run.task.todo.updated"),
+        ("run-desktop-approval", "workflow.run.task.checkpoint.updated"),
+    }
+
+
 def test_approval_resume_records_replan_and_blocked_progress_for_failed_tool() -> None:
     task_core = {
         "core_id": "core-approval",
