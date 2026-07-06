@@ -60,6 +60,7 @@ class IsolatedDesktopProvider(ControlledDesktopProvider):
         self._events: list[dict[str, Any]] = []
         self._text_buffers: dict[str, str] = {}
         self._focused_targets: dict[str, str] = {}
+        self._media_states: dict[str, str] = {}
 
     def status(self) -> dict[str, Any]:
         return {
@@ -169,6 +170,10 @@ class IsolatedDesktopProvider(ControlledDesktopProvider):
             return self._focus_app(tool_name, payload)
         if tool_name == "app.focus_window":
             return self._focus_app(tool_name, payload)
+        if tool_name == "media.music_app_open_and_play":
+            return self._music_app_open_and_play(tool_name, payload)
+        if tool_name == "media.music_app_control":
+            return self._music_app_control(tool_name, payload)
         compound = self._compound_action(tool_name, payload)
         if compound is not None:
             return compound
@@ -215,6 +220,71 @@ class IsolatedDesktopProvider(ControlledDesktopProvider):
             f"Focused {app_name or 'isolated desktop'} inside isolated session.",
             app_name=app_name,
             focused=True,
+        )
+
+    def _music_app_open_and_play(
+        self,
+        tool_name: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        app_name = self._resolve_app_name(payload) or "Music"
+        self._open_app("app.open", {"app_name": app_name})
+        self._media_states[app_name] = "playing"
+        event = {
+            "tool": tool_name,
+            "app_name": app_name,
+            "control": "play",
+            "isolated_playback_state": "playing",
+            "real_desktop_mutated": False,
+        }
+        self._events.append(event)
+        return self._result(
+            tool_name,
+            f"Recorded isolated playback start for {app_name}.",
+            app_name=app_name,
+            open_ok=True,
+            focus_ok=True,
+            playback_ok=True,
+            control="play",
+            player_state="playing",
+            isolated_playback_state="playing",
+            playback_state_unverified=False,
+            real_desktop_mutated=False,
+            isolated_event=event,
+            event_count=len(self._events),
+        )
+
+    def _music_app_control(
+        self,
+        tool_name: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        app_name = self._resolve_app_name(payload) or self._active_app or "Music"
+        if app_name not in self._opened_apps:
+            self._open_app("app.open", {"app_name": app_name})
+        control = _isolated_music_control_action(payload.get("action"))
+        current = self._media_states.get(app_name, "stopped")
+        next_state = _isolated_music_next_state(current, control)
+        self._media_states[app_name] = next_state
+        event = {
+            "tool": tool_name,
+            "app_name": app_name,
+            "control": control,
+            "isolated_playback_state": next_state,
+            "real_desktop_mutated": False,
+        }
+        self._events.append(event)
+        return self._result(
+            tool_name,
+            f"Recorded isolated {control} media control for {app_name}.",
+            app_name=app_name,
+            control=control,
+            player_state=next_state,
+            isolated_playback_state=next_state,
+            playback_state_unverified=False,
+            real_desktop_mutated=False,
+            isolated_event=event,
+            event_count=len(self._events),
         )
 
     def _window_result(self, tool_name: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -401,6 +471,15 @@ class IsolatedDesktopProvider(ControlledDesktopProvider):
                 "value": text_value,
                 "focused": focused_target == f"{app_name} Content",
             },
+            {
+                "id": f"{app_name}:playback",
+                "app_name": app_name,
+                "role": "status",
+                "title": "Playback",
+                "label": "Playback",
+                "value": self._media_states.get(app_name, "stopped"),
+                "focused": False,
+            },
         ]
 
     def _record_input_action(
@@ -513,6 +592,25 @@ def _compound_action_tool(tool_name: str) -> str:
         "click_ui_element": "desktop.click_ui_element",
         "type_into_ui_element": "desktop.type_into_ui_element",
     }.get(suffix, f"desktop.{suffix}")
+
+
+def _isolated_music_control_action(value: Any) -> str:
+    clean = str(value or "").strip().lower()
+    return clean if clean in {"toggle", "play", "pause", "next", "previous"} else "play"
+
+
+def _isolated_music_next_state(current: str, control: str) -> str:
+    clean_current = str(current or "").strip().lower()
+    clean_control = str(control or "").strip().lower()
+    if clean_control == "play":
+        return "playing"
+    if clean_control == "pause":
+        return "paused"
+    if clean_control == "toggle":
+        return "paused" if clean_current == "playing" else "playing"
+    if clean_control in {"next", "previous"}:
+        return "playing" if clean_current == "playing" else clean_current or "stopped"
+    return clean_current or "stopped"
 
 
 def _isolated_selected_placeholder(value: str) -> bool:

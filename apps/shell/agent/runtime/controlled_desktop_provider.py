@@ -71,6 +71,8 @@ CONTROLLED_DESKTOP_PROVIDER_TOOLS = (
     "desktop.type",
     "desktop.type_text",
     "desktop.click",
+    "media.music_app_open_and_play",
+    "media.music_app_control",
 )
 
 KEYBOARD_MOUSE_CONTROL_TOOLS = frozenset(
@@ -327,6 +329,13 @@ class ControlledDesktopProvider(HeadlessDesktopProvider):
                 role_filter=str(value.get("role_filter") or ""),
                 limit=value.get("limit", 80),
                 expected_app_name=str(value.get("expected_app_name") or ""),
+            ),
+            "media.music_app_open_and_play": lambda value: desktop.music_app_open_and_play(
+                str(value.get("app_name") or "")
+            ),
+            "media.music_app_control": lambda value: desktop.music_app_control(
+                str(value.get("app_name") or ""),
+                str(value.get("action") or ""),
             ),
         }
         app_dispatch = self._app_control_dispatch(tool_name, payload)

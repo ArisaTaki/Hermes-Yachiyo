@@ -153,3 +153,57 @@ def test_ensure_isolated_provider_session_detects_keyboard_mouse_requests(
         annotated["requests"][0]["desktop_provider_session"]["foreground_takeover_required"]
         is False
     )
+
+
+def test_ensure_isolated_provider_session_detects_media_app_requests(
+    monkeypatch,
+) -> None:
+    starts: list[dict[str, Any] | None] = []
+
+    monkeypatch.setattr(
+        session_module,
+        "isolated_desktop_provider_session_status",
+        lambda: {"ok": True, "status": "stopped", "running": False},
+    )
+    monkeypatch.setattr(
+        session_module,
+        "start_isolated_desktop_provider_session",
+        lambda request=None: starts.append(request)
+        or {
+            "ok": True,
+            "status": "running",
+            "running": True,
+            "started": True,
+            "provider_id": "local-isolated-desktop",
+            "url": "http://127.0.0.1:19093",
+            "provider_status": {
+                "desktop_session_kind": "isolated_desktop",
+                "desktop_session_isolated": True,
+                "foreground_takeover_required": False,
+                "keyboard_mouse_capture_supported": True,
+                "supported_tools": ["media.music_app_open_and_play"],
+            },
+        },
+    )
+    envelope = {
+        "requests": [
+            {
+                "request_id": "request-music",
+                "tool_name": "media.music_app_open_and_play",
+                "input": {"app_name": "Music"},
+            }
+        ]
+    }
+
+    session = ensure_isolated_desktop_provider_session_for_envelope(envelope)
+    annotated = annotate_envelope_with_desktop_provider_session(envelope, session)
+
+    assert starts == [{"tools": ["media.music_app_open_and_play"]}]
+    assert session["needed"] is True
+    assert session["running"] is True
+    assert session["started"] is True
+    assert session["request_ids"] == ["request-music"]
+    assert session["tool_names"] == ["media.music_app_open_and_play"]
+    assert annotated["requests"][0]["desktop_provider_session"]["provider_id"] == (
+        "local-isolated-desktop"
+    )

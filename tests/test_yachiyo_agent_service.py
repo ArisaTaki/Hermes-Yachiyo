@@ -215,6 +215,7 @@ def _install_fake_isolated_provider_session(
                         "desktop.list_apps",
                         "app.focus_and_click_ui_element",
                         "desktop.ui_elements",
+                        "media.music_app_open_and_play",
                     ],
                     "capabilities": [
                         "desktop_discovery",
@@ -251,7 +252,8 @@ def _install_fake_isolated_provider_session(
             "OHA_YACHIYO_DESKTOP_PROVIDER_URL": "http://127.0.0.1:19093",
             "OHA_YACHIYO_DESKTOP_PROVIDER_ID": "local-isolated-desktop",
             "OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS": (
-                "desktop.list_apps,app.focus_and_click_ui_element,desktop.ui_elements"
+                "desktop.list_apps,app.focus_and_click_ui_element,desktop.ui_elements,"
+                "media.music_app_open_and_play"
             ),
             "OHA_YACHIYO_DESKTOP_PROVIDER_KEYBOARD_MOUSE_CAPTURE_SUPPORTED": "true",
             "OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_KIND": "isolated_desktop",
@@ -279,6 +281,7 @@ def _install_fake_isolated_provider_session(
                     "desktop.list_apps",
                     "app.focus_and_click_ui_element",
                     "desktop.ui_elements",
+                    "media.music_app_open_and_play",
                 ],
             },
             "source": "isolated_provider_session_manager",
@@ -2306,6 +2309,65 @@ def test_yachiyo_chat_entrypoint_auto_starts_isolated_provider_for_input(
         is True
     )
     assert "desktop_provider" in task.runtime_debug.debug_surfaces
+
+
+def test_yachiyo_chat_entrypoint_auto_starts_isolated_provider_for_music(
+    monkeypatch,
+) -> None:
+    for key in (
+        "OHA_YACHIYO_DESKTOP_PROVIDER_URL",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_ID",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_KEYBOARD_MOUSE_CAPTURE_SUPPORTED",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_KIND",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_ISOLATED",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_FOREGROUND_TAKEOVER_REQUIRED",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    start_calls = _install_fake_isolated_provider_session(monkeypatch)
+    port = _FakeRuntimePort()
+    service = YachiyoAgentService(port)
+
+    task = service.start_chat_task(
+        StartChatTaskRequest(
+            prompt="播放 Apple Music",
+            conversation_id="chat-1",
+            metadata={"launcher_mode": "bubble"},
+            allowed_tools=[
+                "media.music_app_open_and_play",
+                "desktop.ui_elements",
+            ],
+        )
+    )
+
+    request_payload = port.calls[0][1]
+    envelope = request_payload["runtime_execution_envelope"]
+    session = envelope["desktop_provider_session"]
+    playback_request = next(
+        request
+        for request in request_payload["direct_tool_requests"]
+        if request["tool"] == "media.music_app_open_and_play"
+    )
+
+    assert start_calls == [{"tools": ["media.music_app_open_and_play"]}]
+    assert session["needed"] is True
+    assert session["started"] is True
+    assert session["running"] is True
+    assert session["provider_id"] == "local-isolated-desktop"
+    assert session["desktop_session_isolated"] is True
+    assert session["foreground_takeover_required"] is False
+    assert playback_request["input"] == {"app_name": "Music"}
+    assert playback_request["sandbox_provider"]["provider_id"] == (
+        "local-isolated-desktop"
+    )
+    assert playback_request["desktop_execution_route"]["status"] == "sandbox_ready"
+    assert playback_request["desktop_provider_session"]["provider_id"] == (
+        "local-isolated-desktop"
+    )
+    assert task.runtime_debug is not None
+    assert task.runtime_debug.desktop_provider_session_tool_names == [
+        "media.music_app_open_and_play"
+    ]
 
 
 def test_agent_studio_service_normalizes_known_app_submit_execution() -> None:

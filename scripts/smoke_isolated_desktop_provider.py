@@ -26,6 +26,8 @@ from apps.shell.agent.runtime.isolated_desktop_provider import (
 SMOKE_TOOLS = (
     "desktop.list_apps",
     "app.open",
+    "media.music_app_open_and_play",
+    "media.music_app_control",
     "desktop.read_ui",
     "desktop.click_ui_element",
     "desktop.safe_type_text",
@@ -75,6 +77,18 @@ def run_smoke() -> dict[str, Any]:
                     "selection_source": "desktop.list_apps",
                     "query": SMOKE_APP_NAME,
                 },
+            ),
+            _execute_tool(
+                registry,
+                provider.provider_id,
+                "media.music_app_open_and_play",
+                {"app_name": SMOKE_APP_NAME},
+            ),
+            _execute_tool(
+                registry,
+                provider.provider_id,
+                "media.music_app_control",
+                {"app_name": SMOKE_APP_NAME, "action": "pause"},
             ),
             _execute_tool(
                 registry,
@@ -173,6 +187,26 @@ def run_smoke() -> dict[str, Any]:
                 .get("data", {})
                 .get("app_name")
                 == SMOKE_APP_NAME
+            ),
+            "media_open_recorded": (
+                result_by_tool.get("media.music_app_open_and_play", {})
+                .get("data", {})
+                .get("isolated_playback_state")
+                == "playing"
+                and result_by_tool.get("media.music_app_open_and_play", {})
+                .get("data", {})
+                .get("real_desktop_mutated")
+                is False
+            ),
+            "media_control_recorded": (
+                result_by_tool.get("media.music_app_control", {})
+                .get("data", {})
+                .get("isolated_playback_state")
+                == "paused"
+                and result_by_tool.get("media.music_app_control", {})
+                .get("data", {})
+                .get("real_desktop_mutated")
+                is False
             ),
             "read_ui_returned_elements": isinstance(read_ui_elements, list)
             and bool(read_ui_elements),

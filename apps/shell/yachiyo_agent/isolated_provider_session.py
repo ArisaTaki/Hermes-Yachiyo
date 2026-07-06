@@ -47,6 +47,11 @@ _PROVIDER_START_BLOCKERS = {
     "isolated_desktop_provider_required",
 }
 
+_ISOLATED_SESSION_REQUIRED_TOOLS = {
+    "media.music_app_open_and_play",
+    "media.music_app_control",
+}
+
 
 class IsolatedDesktopProviderSessionManager:
     """Starts, stops, and probes a local isolated desktop provider process."""
@@ -359,8 +364,10 @@ def _isolated_session_targets(envelope: dict[str, Any] | None) -> list[dict[str,
 
 
 def _request_needs_isolated_session(tool_name: str, request: dict[str, Any]) -> bool:
-    if tool_name not in KEYBOARD_MOUSE_CONTROL_TOOLS:
+    if tool_name not in KEYBOARD_MOUSE_CONTROL_TOOLS | _ISOLATED_SESSION_REQUIRED_TOOLS:
         return False
+    if tool_name in _ISOLATED_SESSION_REQUIRED_TOOLS:
+        return True
     route = _mapping(request.get("desktop_execution_route"))
     provider = _mapping(request.get("sandbox_provider"))
     mode = _mapping(request.get("execution_mode"))
