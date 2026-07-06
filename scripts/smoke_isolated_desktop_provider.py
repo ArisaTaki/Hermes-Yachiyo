@@ -24,7 +24,8 @@ from apps.shell.agent.runtime.isolated_desktop_provider import (
 )
 
 SMOKE_TOOLS = (
-    "desktop.open_app",
+    "desktop.list_apps",
+    "app.open",
     "desktop.read_ui",
     "desktop.click_ui_element",
     "desktop.safe_type_text",
@@ -62,8 +63,18 @@ def run_smoke() -> dict[str, Any]:
             _execute_tool(
                 registry,
                 provider.provider_id,
-                "desktop.open_app",
-                {"app_name": SMOKE_APP_NAME},
+                "desktop.list_apps",
+                {"query": SMOKE_APP_NAME, "limit": 20},
+            ),
+            _execute_tool(
+                registry,
+                provider.provider_id,
+                "app.open",
+                {
+                    "app_name": "<selected app from desktop.list_apps>",
+                    "selection_source": "desktop.list_apps",
+                    "query": SMOKE_APP_NAME,
+                },
             ),
             _execute_tool(
                 registry,
@@ -116,6 +127,11 @@ def run_smoke() -> dict[str, Any]:
             .get("elements", [])
         )
         verify_data = result_by_tool.get("desktop.verify", {}).get("data", {})
+        discovered_apps = (
+            result_by_tool.get("desktop.list_apps", {})
+            .get("data", {})
+            .get("matches", [])
+        )
         checks = {
             "provider_available": bool(status.get("available")),
             "provider_session_isolated": bool(status.get("desktop_session_isolated")),
@@ -143,8 +159,17 @@ def run_smoke() -> dict[str, Any]:
                 item.get("action") for item in tool_results if isinstance(item, dict)
             ]
             == list(SMOKE_TOOLS),
+            "app_discovery_recorded": (
+                isinstance(discovered_apps, list)
+                and any(
+                    item.get("app_name") == SMOKE_APP_NAME
+                    and item.get("isolated_discovery") is True
+                    for item in discovered_apps
+                    if isinstance(item, dict)
+                )
+            ),
             "open_app_recorded": (
-                result_by_tool.get("desktop.open_app", {})
+                result_by_tool.get("app.open", {})
                 .get("data", {})
                 .get("app_name")
                 == SMOKE_APP_NAME

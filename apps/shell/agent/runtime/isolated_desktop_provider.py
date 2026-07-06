@@ -148,12 +148,7 @@ class IsolatedDesktopProvider(ControlledDesktopProvider):
                 permissions={"isolated_desktop": True, "keyboard_mouse_capture": True},
             )
         if tool_name in {"desktop.running_apps", "desktop.list_apps"}:
-            return self._result(
-                tool_name,
-                "Listed isolated desktop apps.",
-                apps=list(self._opened_apps.values()),
-                matches=list(self._opened_apps.values()),
-            )
+            return self._list_apps(tool_name, payload)
         if tool_name in {"desktop.active_window", "desktop.windows", "desktop.list_windows"}:
             return self._window_result(tool_name, payload)
         if tool_name in {"desktop.ui_elements", "desktop.read_ui"}:
@@ -182,7 +177,7 @@ class IsolatedDesktopProvider(ControlledDesktopProvider):
         return self._unsupported_tool(tool_name, payload)
 
     def _open_app(self, tool_name: str, payload: dict[str, Any]) -> dict[str, Any]:
-        app_name = str(payload.get("app_name") or "").strip() or "Untitled App"
+        app_name = self._resolve_app_name(payload) or "Untitled App"
         app = {
             "name": app_name,
             "app_name": app_name,
@@ -202,7 +197,7 @@ class IsolatedDesktopProvider(ControlledDesktopProvider):
         )
 
     def _focus_app(self, tool_name: str, payload: dict[str, Any]) -> dict[str, Any]:
-        app_name = str(payload.get("app_name") or self._active_app or "").strip()
+        app_name = self._resolve_app_name(payload) or self._active_app
         if app_name and app_name not in self._opened_apps:
             self._opened_apps[app_name] = {
                 "name": app_name,
@@ -223,7 +218,7 @@ class IsolatedDesktopProvider(ControlledDesktopProvider):
         )
 
     def _window_result(self, tool_name: str, payload: dict[str, Any]) -> dict[str, Any]:
-        app_name = str(payload.get("app_name") or self._active_app or "").strip()
+        app_name = self._resolve_app_name(payload) or self._active_app
         windows = []
         if app_name:
             windows.append(
@@ -242,7 +237,7 @@ class IsolatedDesktopProvider(ControlledDesktopProvider):
         )
 
     def _read_ui(self, tool_name: str, payload: dict[str, Any]) -> dict[str, Any]:
-        app_name = str(payload.get("app_name") or self._active_app or "").strip()
+        app_name = self._resolve_app_name(payload) or self._active_app
         if app_name and app_name not in self._opened_apps:
             self._opened_apps[app_name] = {
                 "name": app_name,
@@ -264,7 +259,7 @@ class IsolatedDesktopProvider(ControlledDesktopProvider):
         )
 
     def _verify(self, tool_name: str, payload: dict[str, Any]) -> dict[str, Any]:
-        app_name = str(payload.get("app_name") or self._active_app or "").strip()
+        app_name = self._resolve_app_name(payload) or self._active_app
         expected_text = str(payload.get("expected_text") or "").strip()
         expected_target = str(payload.get("target") or "").strip()
         buffer_app = app_name or self._active_app
@@ -292,6 +287,62 @@ class IsolatedDesktopProvider(ControlledDesktopProvider):
             last_event=self._events[-1] if self._events else {},
         )
 
+    def _list_apps(self, tool_name: str, payload: dict[str, Any]) -> dict[str, Any]:
+        query = str(payload.get("query") or "").strip()
+        running_only = tool_name == "desktop.running_apps"
+        records = list(self._opened_apps.values())
+        if not running_only:
+            for record in self._discovered_app_records(query):
+                app_name = str(record.get("app_name") or record.get("name") or "").strip()
+                if app_name and app_name not in {
+                    str(item.get("app_name") or item.get("name") or "").strip()
+                    for item in records
+                }:
+                    records.append(record)
+        matches = [
+            record
+            for record in records
+            if not query or _isolated_app_record_matches(record, query)
+        ]
+        return self._result(
+            tool_name,
+            "Listed isolated desktop apps.",
+            apps=records,
+            matches=matches,
+            query=query,
+            running_only=running_only,
+        )
+
+    def _discovered_app_records(self, query: str) -> list[dict[str, Any]]:
+        clean_query = str(query or "").strip()
+        if not clean_query:
+            return []
+        running = clean_query in self._opened_apps
+        return [
+            {
+                "name": clean_query,
+                "app_name": clean_query,
+                "display_name": clean_query,
+                "running": running,
+                "source": "isolated_desktop_provider_discovery",
+                "selection_source": "desktop.list_apps",
+                "query": clean_query,
+                "isolated_discovery": True,
+            }
+        ]
+
+    def _resolve_app_name(self, payload: Mapping[str, Any]) -> str:
+        raw_name = str(payload.get("app_name") or payload.get("name") or "").strip()
+        query = str(payload.get("query") or "").strip()
+        selection_source = str(payload.get("selection_source") or "").strip()
+        if raw_name and not _isolated_selected_placeholder(raw_name):
+            return raw_name
+        if selection_source in {"desktop.list_apps", "desktop.running_apps"} and query:
+            return query
+        if query:
+            return query
+        return ""
+
     def _compound_action(
         self,
         tool_name: str,
@@ -302,7 +353,7 @@ class IsolatedDesktopProvider(ControlledDesktopProvider):
         )
         if not is_compound:
             return None
-        app_name = str(payload.get("app_name") or self._active_app or "").strip()
+        app_name = self._resolve_app_name(payload) or self._active_app
         if tool_name.startswith("app.open_and_"):
             self._open_app("app.open", {"app_name": app_name})
         else:
@@ -357,7 +408,7 @@ class IsolatedDesktopProvider(ControlledDesktopProvider):
         tool_name: str,
         payload: dict[str, Any],
     ) -> dict[str, Any]:
-        app_name = str(payload.get("app_name") or self._active_app or "").strip()
+        app_name = self._resolve_app_name(payload) or self._active_app
         target = str(payload.get("target") or payload.get("role_filter") or "").strip()
         if target:
             self._focused_targets[app_name or self._active_app] = target
@@ -462,6 +513,22 @@ def _compound_action_tool(tool_name: str) -> str:
         "click_ui_element": "desktop.click_ui_element",
         "type_into_ui_element": "desktop.type_into_ui_element",
     }.get(suffix, f"desktop.{suffix}")
+
+
+def _isolated_selected_placeholder(value: str) -> bool:
+    clean = str(value or "").strip().lower()
+    return clean.startswith("<selected ") and "desktop." in clean
+
+
+def _isolated_app_record_matches(record: Mapping[str, Any], query: str) -> bool:
+    clean_query = str(query or "").strip().lower()
+    if not clean_query:
+        return True
+    for key in ("app_name", "name", "display_name", "query"):
+        value = str(record.get(key) or "").strip().lower()
+        if value and (clean_query in value or value in clean_query):
+            return True
+    return False
 
 
 def build_isolated_desktop_provider_server(

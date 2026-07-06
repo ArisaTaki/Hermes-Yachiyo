@@ -36078,7 +36078,7 @@ def test_runtime_execution_envelope_preserves_app_search_prepare_chain() -> None
         "focus-opened-app",
         "focus-app-search-field",
     ]
-    assert envelope.requests[3].depends_on == ["open-or-focus-app"]
+    assert envelope.requests[3].depends_on == ["focus-opened-app"]
     projected_requests = runtime_execution_requests_from_envelope_payload(
         envelope.model_dump(mode="json"),
         allowed_tools=allowed_tools,
