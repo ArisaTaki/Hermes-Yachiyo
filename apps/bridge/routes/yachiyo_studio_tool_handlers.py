@@ -8,6 +8,7 @@ from typing import Any
 from fastapi import HTTPException, Request
 
 from apps.bridge.routes.yachiyo_models import (
+    DesktopProviderSessionBody,
     PlanExecutionBody,
     PlanTaskBody,
     RestrictedToolPluginInstallBody,
@@ -22,6 +23,33 @@ from apps.shell.agent_runtime import AgentRuntimeError
 async def list_tool_catalog(http_request: Request | None = None) -> dict[str, Any]:
     catalog = await asyncio.to_thread(studio_service(http_request).list_tool_catalog)
     return snapshot(catalog)
+
+
+async def desktop_provider_session_status(
+    http_request: Request | None = None,
+) -> dict[str, Any]:
+    return await asyncio.to_thread(
+        studio_service(http_request).desktop_provider_session_status
+    )
+
+
+async def start_desktop_provider_session(
+    request: DesktopProviderSessionBody | None = None,
+    http_request: Request | None = None,
+) -> dict[str, Any]:
+    payload = request.model_dump(exclude_none=True) if request is not None else {}
+    return await asyncio.to_thread(
+        studio_service(http_request).start_desktop_provider_session,
+        payload,
+    )
+
+
+async def stop_desktop_provider_session(
+    http_request: Request | None = None,
+) -> dict[str, Any]:
+    return await asyncio.to_thread(
+        studio_service(http_request).stop_desktop_provider_session
+    )
 
 
 async def plan_task(

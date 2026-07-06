@@ -1068,6 +1068,43 @@ def test_agent_studio_service_maps_agent_group_workflow_snapshots() -> None:
     ) in port.calls
 
 
+def test_agent_studio_service_delegates_desktop_provider_session_controls() -> None:
+    class SessionPort(_FakeStudioPort):
+        def desktop_provider_session_status(self) -> dict[str, Any]:
+            self.calls.append(("desktop_provider_session_status", None))
+            return {"ok": True, "status": "stopped", "running": False}
+
+        def start_desktop_provider_session(self, request: dict[str, Any]) -> dict[str, Any]:
+            self.calls.append(("start_desktop_provider_session", request))
+            return {
+                "ok": True,
+                "status": "running",
+                "running": True,
+                "started": True,
+                "url": "http://127.0.0.1:19093",
+            }
+
+        def stop_desktop_provider_session(self) -> dict[str, Any]:
+            self.calls.append(("stop_desktop_provider_session", None))
+            return {"ok": True, "status": "stopped", "running": False, "stopped": True}
+
+    port = SessionPort()
+    service = AgentStudioService(port)
+
+    status = service.desktop_provider_session_status()
+    started = service.start_desktop_provider_session({"tools": ["desktop.safe_type_text"]})
+    stopped = service.stop_desktop_provider_session()
+
+    assert status["status"] == "stopped"
+    assert started["running"] is True
+    assert stopped["stopped"] is True
+    assert port.calls[-3:] == [
+        ("desktop_provider_session_status", None),
+        ("start_desktop_provider_session", {"tools": ["desktop.safe_type_text"]}),
+        ("stop_desktop_provider_session", None),
+    ]
+
+
 def test_legacy_studio_tool_catalog_exposes_local_desktop_provider(monkeypatch) -> None:
     monkeypatch.delenv("OHA_YACHIYO_DESKTOP_PROVIDER_URL", raising=False)
     monkeypatch.delenv("OHA_YACHIYO_SANDBOX_DESKTOP_PROVIDER_URL", raising=False)
@@ -1130,6 +1167,8 @@ def test_legacy_studio_tool_catalog_exposes_local_desktop_provider(monkeypatch) 
         controlled["env"]["OHA_YACHIYO_DESKTOP_PROVIDER_URL"]
         == "http://127.0.0.1:19093"
     )
+    assert controlled["session_manager"]["source"] == "isolated_provider_session_manager"
+    assert "running" in controlled["session_manager"]
 
 
 def test_agent_studio_service_plans_task_from_tool_catalog() -> None:

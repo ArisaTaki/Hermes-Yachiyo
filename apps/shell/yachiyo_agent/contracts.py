@@ -231,6 +231,7 @@ class ControlledDesktopProviderDiagnosticSnapshot(_PublicSnapshot):
     status_endpoint_path: str = ""
     health: DesktopProviderHealthSnapshot | None = None
     manifest: dict[str, Any] = Field(default_factory=dict)
+    session_manager: dict[str, Any] = Field(default_factory=dict)
 
 
 class DesktopExecutionRouteSnapshot(_PublicSnapshot):

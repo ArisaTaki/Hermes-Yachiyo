@@ -10,6 +10,7 @@ from apps.bridge.routes import yachiyo_chat_handlers
 from apps.bridge.routes import yachiyo_studio_handlers
 from apps.bridge.routes.yachiyo_models import (
     AgentSkillBody,
+    DesktopProviderSessionBody,
     FutureTaskCancelBody,
     FutureTaskTriggerBody,
     MemoryBody,
@@ -234,6 +235,31 @@ async def list_studio_agents(http_request: Request = None) -> dict[str, Any]:  #
 @router.get("/studio/tools")
 async def list_studio_tools(http_request: Request = None) -> dict[str, Any]:  # type: ignore[assignment]
     return await yachiyo_studio_handlers.list_tool_catalog(http_request)
+
+
+@router.get("/studio/tools/desktop-provider/session")
+async def get_studio_desktop_provider_session(
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
+    return await yachiyo_studio_handlers.desktop_provider_session_status(http_request)
+
+
+@router.post("/studio/tools/desktop-provider/session/start")
+async def start_studio_desktop_provider_session(
+    request: DesktopProviderSessionBody | None = None,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
+    return await yachiyo_studio_handlers.start_desktop_provider_session(
+        request,
+        http_request,
+    )
+
+
+@router.post("/studio/tools/desktop-provider/session/stop")
+async def stop_studio_desktop_provider_session(
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
+    return await yachiyo_studio_handlers.stop_desktop_provider_session(http_request)
 
 
 @router.post("/studio/planner")

@@ -67,6 +67,15 @@ class RestrictedToolPluginUpdateBody(BaseModel):
     enabled: bool | None = None
 
 
+class DesktopProviderSessionBody(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    host: str | None = Field(default=None, max_length=200)
+    port: int | None = Field(default=None, ge=0, le=65535)
+    provider_id: str | None = Field(default=None, max_length=160)
+    tools: list[str] | None = None
+
+
 class PlanTaskBody(BaseModel):
     model_config = ConfigDict(extra="allow")
 

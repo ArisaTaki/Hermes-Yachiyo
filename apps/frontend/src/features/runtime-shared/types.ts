@@ -218,6 +218,7 @@ export type ControlledDesktopProviderDiagnosticSnapshot = {
   status_endpoint_path?: string;
   health?: DesktopProviderHealthSnapshot | null;
   manifest?: Record<string, unknown>;
+  session_manager?: Record<string, unknown>;
 };
 
 export type DesktopExecutionRouteSnapshot = {

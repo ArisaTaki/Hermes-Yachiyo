@@ -83,6 +83,11 @@ from .runtime_progress import (
 )
 from .controlled_provider_diagnostics import controlled_desktop_provider_diagnostics_payload
 from .groups import group_run_snapshot_from_payload
+from .isolated_provider_session import (
+    isolated_desktop_provider_session_status,
+    start_isolated_desktop_provider_session,
+    stop_isolated_desktop_provider_session,
+)
 from .tool_catalog import runtime_tool_catalog_snapshot
 from .workflow_run_snapshots import workflow_run_snapshot_from_payload
 
@@ -1165,6 +1170,15 @@ class LegacyStudioPort:
                 sandbox_provider=sandbox_provider
             ),
         ).model_dump(mode="json")
+
+    def desktop_provider_session_status(self) -> dict[str, Any]:
+        return isolated_desktop_provider_session_status()
+
+    def start_desktop_provider_session(self, request: dict[str, Any]) -> dict[str, Any]:
+        return start_isolated_desktop_provider_session(request)
+
+    def stop_desktop_provider_session(self) -> dict[str, Any]:
+        return stop_isolated_desktop_provider_session()
 
     def list_restricted_tool_plugins(self) -> dict[str, Any]:
         list_plugins = getattr(self._runtime, "list_restricted_tool_plugins", None)

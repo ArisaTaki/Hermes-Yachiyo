@@ -3,7 +3,10 @@ import { type FormEvent, useEffect, useMemo, useState } from 'react';
 import {
   planYachiyoStudioExecution,
   planYachiyoStudioTask,
+  startYachiyoStudioDesktopProviderSession,
   startYachiyoStudioPlannerOrchestration,
+  stopYachiyoStudioDesktopProviderSession,
+  type YachiyoStudioDesktopProviderSessionSnapshot,
 } from '../../yachiyo-studio/api';
 import type {
   LegacyCleanupCoverageSnapshot,
@@ -54,6 +57,9 @@ export function AgentStudioToolsTab({
   const [plannerExecutionEnvelope, setPlannerExecutionEnvelope] = useState<RuntimeExecutionEnvelopeSnapshot | null>(null);
   const [plannerExecutionError, setPlannerExecutionError] = useState('');
   const [plannerExecutionLoading, setPlannerExecutionLoading] = useState(false);
+  const [providerSessionBusy, setProviderSessionBusy] = useState<'start' | 'stop' | ''>('');
+  const [providerSessionError, setProviderSessionError] = useState('');
+  const [providerSessionResult, setProviderSessionResult] = useState<YachiyoStudioDesktopProviderSessionSnapshot | null>(null);
   const legacyCleanupCoverage = catalog.legacy_cleanup_coverage || null;
 
   useEffect(() => {
@@ -175,6 +181,36 @@ export function AgentStudioToolsTab({
     }
   }
 
+  async function handleProviderSessionStart() {
+    if (providerSessionBusy) return;
+    setProviderSessionBusy('start');
+    setProviderSessionError('');
+    try {
+      const result = await startYachiyoStudioDesktopProviderSession();
+      setProviderSessionResult(result);
+      onReload();
+    } catch (error) {
+      setProviderSessionError(errorMessage(error));
+    } finally {
+      setProviderSessionBusy('');
+    }
+  }
+
+  async function handleProviderSessionStop() {
+    if (providerSessionBusy) return;
+    setProviderSessionBusy('stop');
+    setProviderSessionError('');
+    try {
+      const result = await stopYachiyoStudioDesktopProviderSession();
+      setProviderSessionResult(result);
+      onReload();
+    } catch (error) {
+      setProviderSessionError(errorMessage(error));
+    } finally {
+      setProviderSessionBusy('');
+    }
+  }
+
   return (
     <section className="agent-studio-grid agent-studio-tools-grid" data-testid="agent-studio-tools-tab">
       <aside className="agent-studio-panel studio-tool-list-panel">
@@ -233,6 +269,15 @@ export function AgentStudioToolsTab({
 
         <LegacyCleanupCoveragePanel coverage={legacyCleanupCoverage} />
 
+        <DesktopProviderSessionPanel
+          busy={providerSessionBusy}
+          catalog={catalog}
+          error={providerSessionError}
+          latestResult={providerSessionResult}
+          onStart={() => void handleProviderSessionStart()}
+          onStop={() => void handleProviderSessionStop()}
+        />
+
         {error ? <div className="notice danger">{error}</div> : null}
         <div className="studio-tool-list" data-testid="agent-studio-tool-list">
           {filteredTools.map((tool) => (
@@ -274,6 +319,90 @@ export function AgentStudioToolsTab({
         {selectedTool ? <ToolDetail tool={selectedTool} catalog={catalog} /> : null}
         {!selectedTool && !loading ? <span className="studio-tool-empty">No tool selected</span> : null}
         {loading ? <span className="studio-tool-empty">Loading tools</span> : null}
+      </div>
+    </section>
+  );
+}
+
+function DesktopProviderSessionPanel({
+  busy,
+  catalog,
+  error,
+  latestResult,
+  onStart,
+  onStop,
+}: {
+  busy: 'start' | 'stop' | '';
+  catalog: ToolCatalogSnapshot;
+  error: string;
+  latestResult: YachiyoStudioDesktopProviderSessionSnapshot | null;
+  onStart: () => void;
+  onStop: () => void;
+}) {
+  const diagnostics = objectRecord(catalog.controlled_provider_diagnostics);
+  const managedSession = objectRecord(diagnostics.session_manager);
+  const resultRecord = latestResult ? objectRecord(latestResult) : {};
+  const session = latestResult ? resultRecord : managedSession;
+  const running = latestResult ? latestResult.running === true : session.running === true;
+  const status = stringValue(session.status) || (running ? 'running' : 'stopped');
+  const providerId = stringValue(session.provider_id) || stringValue(diagnostics.provider_id);
+  const url = stringValue(session.url);
+  const pid = stringValue(session.pid);
+  const command = stringArray(session.command);
+  const source = stringValue(session.source);
+  return (
+    <section
+      className="studio-tool-inspector-section"
+      data-provider-session-command={command.join(' ')}
+      data-provider-session-pid={pid}
+      data-provider-session-running={String(running)}
+      data-provider-session-source={source}
+      data-provider-session-status={status}
+      data-provider-session-url={url}
+      data-testid="studio-desktop-provider-session"
+    >
+      <div className="studio-tool-inspector-heading">
+        <h3>Desktop Session</h3>
+        <span>{status}</span>
+      </div>
+      <div className="studio-tool-pill-row">
+        {providerId ? (
+          <span className="studio-tool-permission" data-provider-session-id={providerId}>
+            {providerId}
+          </span>
+        ) : null}
+        {url ? (
+          <span className="studio-tool-permission" data-provider-session-url={url}>
+            {url}
+          </span>
+        ) : null}
+        {pid ? (
+          <span className="studio-tool-permission" data-provider-session-pid={pid}>
+            pid {pid}
+          </span>
+        ) : null}
+        {!providerId && !url && !pid ? (
+          <span className="studio-tool-permission missing">isolated provider stopped</span>
+        ) : null}
+      </div>
+      {error ? <div className="notice danger">{error}</div> : null}
+      <div className="studio-planner-actions">
+        <button
+          type="button"
+          className="hy-btn hy-btn-primary"
+          disabled={Boolean(busy) || running}
+          onClick={onStart}
+        >
+          {busy === 'start' ? '启动中' : '启动'}
+        </button>
+        <button
+          type="button"
+          className="hy-btn hy-btn-ghost"
+          disabled={Boolean(busy) || !running}
+          onClick={onStop}
+        >
+          {busy === 'stop' ? '停止中' : '停止'}
+        </button>
       </div>
     </section>
   );
@@ -766,6 +895,9 @@ function ToolDetail({
         data-controlled-provider-requires-approval={String(providerState.controlledRequiresApproval)}
         data-controlled-provider-session-isolated={String(providerState.controlledSessionIsolated)}
         data-controlled-provider-session-kind={providerState.controlledSessionKind}
+        data-controlled-provider-session-manager-running={String(providerState.controlledSessionManagerRunning)}
+        data-controlled-provider-session-manager-status={providerState.controlledSessionManagerStatus}
+        data-controlled-provider-session-manager-url={providerState.controlledSessionManagerUrl}
         data-controlled-provider-status={providerState.controlledStatus}
         data-controlled-provider-takeover-required={String(providerState.controlledForegroundTakeoverRequired)}
         data-provider-ready={String(providerState.ready)}
@@ -829,6 +961,15 @@ function ToolDetail({
               data-controlled-provider-status={providerState.controlledStatus}
             >
               {providerState.controlledStatus}
+            </span>
+          ) : null}
+          {providerState.controlledSessionManagerStatus ? (
+            <span
+              className={providerState.controlledSessionManagerRunning ? 'studio-tool-permission' : 'studio-tool-permission missing'}
+              data-controlled-provider-session-manager-status={providerState.controlledSessionManagerStatus}
+              data-controlled-provider-session-manager-url={providerState.controlledSessionManagerUrl}
+            >
+              {providerState.controlledSessionManagerStatus}
             </span>
           ) : null}
           {providerState.controlledSessionKind ? (
@@ -944,6 +1085,9 @@ type ToolProviderState = {
   controlledStatus: string;
   controlledReason: string;
   controlledBlockingConditions: string[];
+  controlledSessionManagerRunning: boolean;
+  controlledSessionManagerStatus: string;
+  controlledSessionManagerUrl: string;
   controlledSessionKind: string;
   controlledSessionIsolated: boolean;
   controlledForegroundTakeoverRequired: boolean;
@@ -985,6 +1129,10 @@ function toolProviderState(tool: ToolCatalogItemSnapshot, catalog: ToolCatalogSn
   const controlledStatus = stringValue(controlledDiagnostics.status);
   const controlledReason = stringValue(controlledDiagnostics.reason);
   const controlledBlockingConditions = stringArray(controlledDiagnostics.blocking_conditions);
+  const controlledSessionManager = objectRecord(controlledDiagnostics.session_manager);
+  const controlledSessionManagerRunning = controlledSessionManager.running === true;
+  const controlledSessionManagerStatus = stringValue(controlledSessionManager.status);
+  const controlledSessionManagerUrl = stringValue(controlledSessionManager.url);
   const controlledSessionKind = stringValue(controlledDiagnostics.desktop_session_kind)
     || stringValue(controlledProvider.desktop_session_kind);
   const controlledSessionIsolated = controlledDiagnostics.desktop_session_isolated === true
@@ -1012,6 +1160,9 @@ function toolProviderState(tool: ToolCatalogItemSnapshot, catalog: ToolCatalogSn
     controlledStatus,
     controlledReason,
     controlledBlockingConditions,
+    controlledSessionManagerRunning,
+    controlledSessionManagerStatus,
+    controlledSessionManagerUrl,
     controlledSessionKind,
     controlledSessionIsolated,
     controlledForegroundTakeoverRequired,

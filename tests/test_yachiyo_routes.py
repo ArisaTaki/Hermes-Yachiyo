@@ -8878,6 +8878,9 @@ def test_yachiyo_public_routes_delegate_to_chat_and_studio_handlers() -> None:
     assert "return await yachiyo_studio_handlers.write_agent_desk_file(agent_id, request, http_request)" in source
     assert "trigger_agent_desk_file_event(" in source
     assert "return await yachiyo_studio_handlers.list_tool_catalog(http_request)" in source
+    assert "return await yachiyo_studio_handlers.desktop_provider_session_status(http_request)" in source
+    assert "start_desktop_provider_session(" in source
+    assert "stop_desktop_provider_session(" in source
     assert "return await yachiyo_studio_handlers.plan_task(request, http_request)" in source
     assert "return await yachiyo_studio_handlers.plan_execution(request, http_request)" in source
     assert "return await yachiyo_studio_handlers.start_planner_orchestration(request, http_request)" in source
@@ -8910,6 +8913,9 @@ def test_yachiyo_studio_routes_include_run_action_facade() -> None:
     assert '@router.post("/studio/agents")' in source
     assert '@router.post("/studio/agents/{agent_id}/runs")' in source
     assert '@router.get("/studio/tools")' in source
+    assert '@router.get("/studio/tools/desktop-provider/session")' in source
+    assert '@router.post("/studio/tools/desktop-provider/session/start")' in source
+    assert '@router.post("/studio/tools/desktop-provider/session/stop")' in source
     assert '@router.post("/studio/planner")' in source
     assert '@router.get("/studio/agents/{agent_id}")' in source
     assert '@router.patch("/studio/agents/{agent_id}")' in source

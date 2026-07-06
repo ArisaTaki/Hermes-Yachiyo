@@ -201,6 +201,27 @@ class AgentStudioService:
             return tool_catalog_snapshot_from_payload(list_catalog())
         return runtime_tool_catalog_snapshot()
 
+    def desktop_provider_session_status(self) -> dict[str, Any]:
+        session_status = getattr(self._studio_port, "desktop_provider_session_status", None)
+        if callable(session_status):
+            return dict(session_status())
+        return {"ok": True, "status": "unavailable", "running": False}
+
+    def start_desktop_provider_session(
+        self,
+        request: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        start_session = getattr(self._studio_port, "start_desktop_provider_session", None)
+        if callable(start_session):
+            return dict(start_session(dict(request or {})))
+        return {"ok": False, "status": "unavailable", "running": False}
+
+    def stop_desktop_provider_session(self) -> dict[str, Any]:
+        stop_session = getattr(self._studio_port, "stop_desktop_provider_session", None)
+        if callable(stop_session):
+            return dict(stop_session())
+        return {"ok": True, "status": "unavailable", "running": False}
+
     def plan_task(
         self,
         prompt: str,

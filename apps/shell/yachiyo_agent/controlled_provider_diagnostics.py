@@ -17,6 +17,7 @@ from .contracts import (
     SandboxDesktopProviderSnapshot,
 )
 from .desktop_execution_policy import sandbox_desktop_provider_status
+from .isolated_provider_session import isolated_desktop_provider_session_status
 
 
 def controlled_desktop_provider_diagnostics_snapshot(
@@ -27,6 +28,7 @@ def controlled_desktop_provider_diagnostics_snapshot(
 
     provider_payload = _provider_payload(sandbox_provider)
     provider = SandboxDesktopProviderSnapshot.model_validate(provider_payload)
+    session_manager = isolated_desktop_provider_session_status()
     env_status = desktop_execution_provider_status_from_env(probe_health=False)
     launch_hint = _mapping(provider.launch_hint)
     controlled_launch = _mapping(
@@ -197,6 +199,7 @@ def controlled_desktop_provider_diagnostics_snapshot(
         status_endpoint_path=str(env_status.get("status_endpoint_path") or ""),
         health=provider.health,
         manifest=manifest,
+        session_manager=session_manager,
     )
 
 

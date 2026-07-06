@@ -43,6 +43,28 @@ export type YachiyoStudioPlanExecutionRequest = YachiyoStudioPlanTaskRequest & {
 
 export type YachiyoStudioStartPlannerOrchestrationRequest = StartPlannerOrchestrationRequest;
 
+export type YachiyoStudioDesktopProviderSessionRequest = {
+  host?: string;
+  port?: number;
+  provider_id?: string;
+  tools?: string[];
+};
+
+export type YachiyoStudioDesktopProviderSessionSnapshot = {
+  ok?: boolean;
+  status?: string;
+  running?: boolean;
+  started?: boolean;
+  stopped?: boolean;
+  pid?: number | null;
+  provider_id?: string;
+  url?: string;
+  command?: string[];
+  env?: Record<string, string>;
+  provider_status?: Record<string, unknown>;
+  source?: string;
+};
+
 export type YachiyoStudioRunReplanRecoveryActionRequest = {
   request_id: string;
   action_id?: string;
@@ -112,6 +134,28 @@ export type YachiyoSkillInstallResponse = {
 
 export async function getYachiyoStudioToolCatalog(): Promise<ToolCatalogSnapshot> {
   return apiGet<ToolCatalogSnapshot>('/yachiyo/studio/tools');
+}
+
+export async function getYachiyoStudioDesktopProviderSession(): Promise<YachiyoStudioDesktopProviderSessionSnapshot> {
+  return apiGet<YachiyoStudioDesktopProviderSessionSnapshot>(
+    '/yachiyo/studio/tools/desktop-provider/session',
+  );
+}
+
+export async function startYachiyoStudioDesktopProviderSession(
+  request: YachiyoStudioDesktopProviderSessionRequest = {},
+): Promise<YachiyoStudioDesktopProviderSessionSnapshot> {
+  return apiPost<YachiyoStudioDesktopProviderSessionSnapshot>(
+    '/yachiyo/studio/tools/desktop-provider/session/start',
+    request,
+  );
+}
+
+export async function stopYachiyoStudioDesktopProviderSession(): Promise<YachiyoStudioDesktopProviderSessionSnapshot> {
+  return apiPost<YachiyoStudioDesktopProviderSessionSnapshot>(
+    '/yachiyo/studio/tools/desktop-provider/session/stop',
+    {},
+  );
 }
 
 export async function planYachiyoStudioTask(

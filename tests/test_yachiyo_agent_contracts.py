@@ -6600,6 +6600,11 @@ def test_runtime_tool_catalog_surfaces_controlled_provider_diagnostics() -> None
         env={
             "OHA_YACHIYO_DESKTOP_PROVIDER_URL": "http://127.0.0.1:19093",
         },
+        session_manager={
+            "source": "isolated_provider_session_manager",
+            "status": "stopped",
+            "running": False,
+        },
     )
 
     catalog = runtime_tool_catalog_snapshot(
@@ -6620,6 +6625,11 @@ def test_runtime_tool_catalog_surfaces_controlled_provider_diagnostics() -> None
         "--port",
         "19093",
     ]
+    assert payload["controlled_provider_diagnostics"]["session_manager"] == {
+        "source": "isolated_provider_session_manager",
+        "status": "stopped",
+        "running": False,
+    }
 
 
 def test_controlled_provider_diagnostics_marks_configured_keyboard_provider_ready(
