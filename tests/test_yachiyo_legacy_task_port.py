@@ -48,13 +48,35 @@ def test_desktop_agent_entrypoint_fallback_includes_analysis_tools() -> None:
     assert len(allowed_tools) == len(set(allowed_tools))
 
 
-def test_main_chat_entrypoint_preserves_explicit_runtime_tool_policy() -> None:
+def test_main_chat_entrypoint_extends_explicit_runtime_tool_policy() -> None:
     class Runtime:
         @staticmethod
         def _main_chat_tool_policy() -> dict[str, Any]:
             return {"allowed_tools": ["workspace.read"]}
 
-    assert main_chat_entrypoint_allowed_tools(Runtime()) == ["workspace.read"]
+    allowed_tools = main_chat_entrypoint_allowed_tools(Runtime())
+
+    assert allowed_tools[0] == "workspace.read"
+    assert "desktop.list_apps" in allowed_tools
+    assert "app.open" in allowed_tools
+    assert "media.music_app_open_and_play" in allowed_tools
+    assert "python.run" in allowed_tools
+    assert len(allowed_tools) == len(set(allowed_tools))
+
+
+def test_main_chat_direct_request_tool_policy_includes_selected_tools() -> None:
+    policy = legacy_ports_module._main_chat_direct_request_tool_policy(
+        None,
+        [
+            {"tool": "desktop.list_apps", "input": {"query": "Music"}},
+            {"tool": "media.music_app_open_and_play", "input": {"app_name": "Music"}},
+        ],
+    )
+
+    assert policy["allowed_tools"] == [
+        "desktop.list_apps",
+        "media.music_app_open_and_play",
+    ]
 
 
 def test_desktop_agent_entrypoint_fallback_routes_data_analysis() -> None:
@@ -71,6 +93,34 @@ def test_desktop_agent_entrypoint_fallback_routes_data_analysis() -> None:
         "requested_outputs": ["report"],
         "artifact_manifest": [{"path": "analysis-report.md", "kind": "markdown"}],
     }
+
+
+def test_daily_entrypoint_verify_reads_do_not_run_in_direct_execution() -> None:
+    requests = planner_first_daily_desktop_entrypoint_requests(
+        "Can you play Apple Music?",
+        allowed_tools=desktop_agent_entrypoint_allowed_tools(),
+        execution_normalized=True,
+        include_runtime_context=True,
+    )
+
+    assert [request["tool"] for request in requests] == ["media.music_app_open_and_play"]
+    assert requests[0]["runtime_stage"] == "operate"
+    assert not any(request.get("continue_to_model") for request in requests)
+
+
+def test_daily_entrypoint_does_not_execute_blocking_active_window_verify() -> None:
+    requests = planner_first_daily_desktop_entrypoint_requests(
+        "打开微信",
+        allowed_tools=desktop_agent_entrypoint_allowed_tools(),
+        execution_normalized=True,
+        include_runtime_context=True,
+    )
+
+    assert [request["tool"] for request in requests] == [
+        "desktop.list_apps",
+        "app.open",
+    ]
+    assert not any(request.get("continue_to_model") for request in requests)
 
 
 def test_desktop_agent_entrypoint_prefetches_report_research_context() -> None:

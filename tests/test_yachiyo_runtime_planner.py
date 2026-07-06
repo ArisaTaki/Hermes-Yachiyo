@@ -35122,11 +35122,7 @@ def test_runtime_planner_execution_keeps_open_and_focus_verification_steps() -> 
     assert open_envelope.requests[-1].observation_retry == {
         "from_tool": "desktop.active_window",
         "tool": "desktop.active_window",
-        "input": {
-            "app_name": "PixelForge",
-            "query": "PixelForge",
-            "selection_source": "desktop.list_apps",
-        },
+        "input": {},
         "reason": "verification_failed",
     }
     open_projected_requests = runtime_execution_requests_from_envelope_payload(

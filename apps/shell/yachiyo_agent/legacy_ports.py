@@ -22,6 +22,7 @@ from .daily_desktop import (
     daily_desktop_allowed_tools,
     daily_desktop_direct_metadata_request,
     daily_desktop_entrypoint_requests,
+    daily_desktop_executable_entrypoint_requests,
     daily_desktop_planned_timeline,
     daily_desktop_recovery_execution_prompt,
     direct_browser_entrypoint_requests,
@@ -239,6 +240,7 @@ def _tool_family(tool_name: str) -> str:
 def _visible_daily_desktop_metadata_requests(
     requests: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
+    requests = _metadata_requests_with_split_app_shortcuts(requests)
     for index, request in enumerate(requests):
         if str(request.get("tool") or "").strip() == "data.analyze":
             return requests[index:]
@@ -249,6 +251,38 @@ def _visible_daily_desktop_metadata_requests(
         and str(request.get("tool") or "").strip() not in _DAILY_DESKTOP_METADATA_VERIFY_TOOLS
     ]
     return primary or requests
+
+
+def _metadata_requests_with_split_app_shortcuts(
+    requests: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    expanded: list[dict[str, Any]] = []
+    for request in requests:
+        tool_name = str(request.get("tool") or "").strip()
+        if tool_name not in {"app.open_and_safe_shortcut", "app.focus_and_safe_shortcut"}:
+            expanded.append(request)
+            continue
+        payload = request.get("input") if isinstance(request.get("input"), dict) else {}
+        app_name = str(payload.get("app_name") or "").strip()
+        action = str(payload.get("action") or "").strip()
+        if not app_name or not action:
+            expanded.append(request)
+            continue
+        expanded.append(
+            {
+                **request,
+                "tool": "app.open" if tool_name == "app.open_and_safe_shortcut" else "app.focus",
+                "input": {"app_name": app_name},
+            }
+        )
+        expanded.append(
+            {
+                **request,
+                "tool": "desktop.safe_shortcut",
+                "input": {"action": action},
+            }
+        )
+    return expanded
 
 
 def _drop_nonblocking_trailing_verify_requests(
@@ -707,19 +741,18 @@ class LegacyChatTaskStarter:
             return None
         if direct_tool_request:
             metadata_tool_requests = [direct_tool_request]
+        elif direct_tool_requests:
+            metadata_tool_requests = direct_tool_requests
         elif _prefer_execution_requests_for_metadata(metadata):
-            if direct_tool_requests:
-                metadata_tool_requests = direct_tool_requests
-            else:
-                metadata_tool_requests = (
-                    planner_execution_tool_requests(
-                        selected_requests,
-                        allowed_entrypoint_tools,
-                    )
-                    or selected_requests
+            metadata_tool_requests = (
+                planner_execution_tool_requests(
+                    selected_requests,
+                    allowed_entrypoint_tools,
                 )
+                or selected_requests
+            )
         else:
-            metadata_tool_requests = selected_requests or direct_tool_requests
+            metadata_tool_requests = selected_requests
         self._sync_chat_user_daily_desktop_metadata(
             task_id,
             metadata_tool_requests,
@@ -2151,6 +2184,7 @@ def _safe_runtime_execution_envelope_requests(
         if _has_explicit_hotkey_safe_shortcut(prompt, requests, allowed_tools):
             continue
         requests = _split_redundant_app_safe_shortcut_requests(requests)
+        requests = daily_desktop_executable_entrypoint_requests(requests)
         return requests
     return []
 
@@ -2324,10 +2358,16 @@ def _main_chat_direct_request_tool_policy(
         requests.extend(
             dict(item) for item in direct_tool_requests if isinstance(item, dict)
         )
+    allowed_tools = _tool_names_for_requests(requests)
     approval_required = approval_required_policy_from_direct_requests(requests)
-    if not approval_required:
+    if not allowed_tools and not approval_required:
         return {}
-    return {"approval_required": approval_required}
+    policy: dict[str, Any] = {}
+    if allowed_tools:
+        policy["allowed_tools"] = allowed_tools
+    if approval_required:
+        policy["approval_required"] = approval_required
+    return policy
 
 
 def _explicit_direct_tool_requests(

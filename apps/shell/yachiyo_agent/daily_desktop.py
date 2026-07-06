@@ -22,11 +22,17 @@ _ENTRYPOINT_DISCOVERY_TOOLS = {
     "desktop.running_apps",
     "desktop.permissions",
 }
-_ENTRYPOINT_NON_PRIMARY_TOOLS = {
-    *_ENTRYPOINT_DISCOVERY_TOOLS,
+_ENTRYPOINT_VERIFY_TOOLS = {
     "desktop.active_window",
+    "desktop.list_windows",
+    "desktop.read_ui",
     "desktop.windows",
     "desktop.ui_elements",
+    "screen.capture",
+}
+_ENTRYPOINT_NON_PRIMARY_TOOLS = {
+    *_ENTRYPOINT_DISCOVERY_TOOLS,
+    *_ENTRYPOINT_VERIFY_TOOLS,
 }
 _ENTRYPOINT_TIMELINE_CONTEXT_KEYS = (
     "request_id",
@@ -159,7 +165,9 @@ def main_chat_entrypoint_allowed_tools(
     for policy in _runtime_main_chat_tool_policies(runtime):
         allowed = policy.get("allowed_tools") if isinstance(policy, Mapping) else None
         if allowed:
-            return daily_desktop_allowed_tools(allowed)
+            return desktop_agent_entrypoint_allowed_tools(
+                [*daily_desktop_allowed_tools(allowed), *DAILY_DESKTOP_TOOL_NAMES]
+            )
     return desktop_agent_entrypoint_allowed_tools(fallback)
 
 
@@ -535,7 +543,9 @@ def planner_first_daily_desktop_entrypoint_requests(
                 metadata=metadata,
             )
             if runtime_requests:
-                return runtime_requests
+                return _entrypoint_requests_without_blocking_trailing_verify_followup(
+                    runtime_requests
+                )
 
         planner_requests = planner_tool_requests(
             str(text or ""),
@@ -547,7 +557,13 @@ def planner_first_daily_desktop_entrypoint_requests(
         planner_requests = []
     if planner_requests:
         if execution_normalized:
-            return planner_execution_tool_requests(planner_requests, allowed) or planner_requests
+            normalized = (
+                planner_execution_tool_requests(planner_requests, allowed)
+                or planner_requests
+            )
+            return _entrypoint_requests_without_blocking_trailing_verify_followup(
+                normalized
+            )
         return planner_requests
     if not allow_legacy_fallback:
         return []
@@ -586,6 +602,12 @@ def daily_desktop_runtime_execution_envelope(
     except Exception:
         logger.debug("Runtime execution envelope unavailable for daily desktop", exc_info=True)
         return {}
+
+
+def daily_desktop_executable_entrypoint_requests(
+    requests: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    return _entrypoint_requests_without_blocking_trailing_verify_followup(requests)
 
 
 def daily_desktop_direct_metadata_request(
@@ -782,6 +804,52 @@ def _runtime_execution_context_entrypoint_requests(
     except Exception:
         logger.debug("Runtime execution context entrypoint unavailable", exc_info=True)
         return []
+
+
+def _entrypoint_requests_without_blocking_trailing_verify_followup(
+    requests: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    items = [dict(request) for request in requests if isinstance(request, Mapping)]
+    if len(items) <= 1:
+        return items
+    last_primary_index = -1
+    for index, request in enumerate(items):
+        tool_name = str(request.get("tool") or "").strip()
+        if (
+            tool_name
+            and tool_name not in _ENTRYPOINT_DISCOVERY_TOOLS
+            and tool_name not in _ENTRYPOINT_VERIFY_TOOLS
+        ):
+            last_primary_index = index
+    if last_primary_index < 0:
+        return items
+    normalized: list[dict[str, Any]] = []
+    for index, request in enumerate(items):
+        item = dict(request)
+        if (
+            index > last_primary_index
+            and str(item.get("tool") or "").strip() in _ENTRYPOINT_VERIFY_TOOLS
+            and _is_entrypoint_tail_verify_request(item)
+        ):
+            continue
+        normalized.append(item)
+    return normalized
+
+
+def _is_entrypoint_tail_verify_request(request: Mapping[str, Any]) -> bool:
+    if str(request.get("runtime_stage") or "").strip() != "verify":
+        return False
+    if str(request.get("deferred_tool") or "").strip():
+        return False
+    if isinstance(request.get("deferred_input"), Mapping) and request.get(
+        "deferred_input"
+    ):
+        return False
+    if isinstance(request.get("deferred_continuation"), list) and request.get(
+        "deferred_continuation"
+    ):
+        return False
+    return True
 
 
 def _runtime_main_chat_tool_policies(runtime: Any | None) -> list[Mapping[str, Any]]:

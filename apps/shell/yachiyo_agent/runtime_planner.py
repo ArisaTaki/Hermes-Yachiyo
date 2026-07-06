@@ -19855,7 +19855,7 @@ def _explicit_generic_named_app_hint(text: str) -> str:
 def _app_name_hint(text: str) -> str:
     explicit_generic_named_app = _explicit_generic_named_app_hint(text)
     if explicit_generic_named_app:
-        return explicit_generic_named_app
+        return _canonical_app_name_hint(explicit_generic_named_app)
     if _looks_like_non_desktop_content_task(text):
         return ""
     if _app_capability_discovery_hint(text):
@@ -19947,7 +19947,7 @@ def _app_name_hint(text: str) -> str:
             and not _invalid_app_scoped_followup_app(app)
             and not _is_generic_foreground_app_label(app)
         ):
-            return app
+            return _canonical_app_name_hint(app)
     return ""
 
 

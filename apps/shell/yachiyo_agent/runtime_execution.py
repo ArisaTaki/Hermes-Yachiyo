@@ -1309,7 +1309,7 @@ def _desktop_observation_retry(
             for key in ("app_name", "role_filter", "limit", "reason")
             if key in request_input and request_input[key] not in (None, "")
         }
-        if not retry_input:
+        if tool_name != "desktop.active_window" and not retry_input:
             retry_input = {
                 key: scope[key]
                 for key in ("app_name", "query", "selection_source")

@@ -1504,6 +1504,20 @@ def _input_preview_with_app_name_resolution(
     requested_app_name = str(resolution.get("requested_app_name") or "").strip()
     resolved_app_name = str(resolution.get("resolved_app_name") or "").strip()
     source_tool = str(resolution.get("source_tool") or "").strip()
+    if (
+        requested_app_name
+        and resolved_app_name
+        and _normalized_app_lookup(requested_app_name)
+        == _normalized_app_lookup(resolved_app_name)
+    ):
+        current_app_name = str(preview.get("app_name") or "").strip()
+        if (
+            not current_app_name
+            or _normalized_app_lookup(current_app_name)
+            == _normalized_app_lookup(resolved_app_name)
+        ):
+            preview["app_name"] = resolved_app_name
+            return preview
     if resolved_app_name:
         preview.setdefault("app_name", resolved_app_name)
         preview.setdefault("resolved_app_name", resolved_app_name)
