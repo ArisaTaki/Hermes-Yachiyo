@@ -1327,7 +1327,11 @@ def _planner_orchestration_run_metadata(
 ) -> dict[str, Any]:
     payload = {
         **dict(metadata),
-        **runtime_planner_metadata(decision, allowed_tools=allowed_tools),
+        **runtime_planner_metadata(
+            decision,
+            allowed_tools=allowed_tools,
+            metadata=metadata,
+        ),
     }
     payload = with_agent_studio_desktop_execution_policy(payload)
     envelope = payload.get("yachiyo_execution_envelope")
@@ -1542,11 +1546,18 @@ def _planner_enriched_start_payload(
         )
         return start_payload
     metadata = _planner_start_metadata(start_payload, source=metadata_source)
-    metadata.update(runtime_planner_metadata(decision, allowed_tools=allowed_tools))
+    metadata.update(
+        runtime_planner_metadata(
+            decision,
+            allowed_tools=allowed_tools,
+            metadata=metadata,
+        )
+    )
     full_plan_envelope = runtime_execution_envelope_from_decision(
         decision,
         allowed_tools=allowed_tools,
         full_plan=True,
+        metadata=metadata,
     )
     envelope = (
         full_plan_envelope.model_dump(mode="json")

@@ -521,6 +521,7 @@ def _runtime_planner_direct_requests(
     planner_metadata = runtime_planner_metadata(
         decision,
         allowed_tools=allowed_tools,
+        metadata=metadata,
     )
     return runtime_execution_requests_from_metadata(
         planner_metadata,

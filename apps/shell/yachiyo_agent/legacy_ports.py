@@ -2237,6 +2237,7 @@ def _studio_workflow_run_payload(
         for key, value in runtime_planner_metadata(
             planner_decision,
             allowed_tools=allowed_tools,
+            metadata=metadata,
         ).items():
             if explicit_runtime_envelope and key in {
                 "yachiyo_execution_envelope",

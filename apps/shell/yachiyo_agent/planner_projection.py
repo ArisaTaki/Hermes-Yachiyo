@@ -51,6 +51,7 @@ def runtime_planner_metadata(
     decision: PlannerDecisionSnapshot | None,
     *,
     allowed_tools: Iterable[str] | None = None,
+    metadata: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     if decision is None:
         return {}
@@ -86,6 +87,7 @@ def runtime_planner_metadata(
     execution_envelope = runtime_execution_envelope_payload(
         decision,
         allowed_tools=allowed_tools,
+        metadata=metadata,
     )
     if execution_envelope:
         _apply_execution_envelope_metadata(payload, execution_envelope)
@@ -123,6 +125,7 @@ def planner_enriched_chat_request(
     planner_metadata = runtime_planner_metadata(
         decision,
         allowed_tools=effective_allowed_tools,
+        metadata=metadata,
     )
     execution_allowed_tools = _entrypoint_runtime_execution_allowed_tools(
         decision,
@@ -140,6 +143,7 @@ def planner_enriched_chat_request(
         execution_decision,
         allowed_tools=execution_allowed_tools,
         full_plan=True,
+        metadata=metadata,
     )
     if runtime_execution_envelope:
         _apply_execution_envelope_metadata(

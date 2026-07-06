@@ -99,6 +99,7 @@ def _chat_runtime_execution_kwargs(
         runtime_planner_metadata(
             planner_decision,
             allowed_tools=request_allowed_tools,
+            metadata=metadata,
         )
         if planner_decision is not None
         else {}

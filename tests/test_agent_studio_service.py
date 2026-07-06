@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from apps.shell.yachiyo_agent import (
@@ -1190,6 +1191,93 @@ def test_agent_studio_service_prefers_port_planner_when_available() -> None:
             },
         )
     ]
+
+
+def test_agent_studio_start_agent_run_preserves_readonly_provider_route(
+    monkeypatch,
+) -> None:
+    calls: list[str] = []
+
+    class FakeResponse:
+        status = 200
+
+        def __enter__(self) -> "FakeResponse":
+            return self
+
+        def __exit__(self, *_args: Any) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return json.dumps(
+                {
+                    "ok": True,
+                    "status": "ready",
+                    "version": "0.1.0",
+                    "supported_tools": ["desktop.list_apps"],
+                    "capabilities": [
+                        "desktop_discovery",
+                        "read_only_observation",
+                        "no_foreground_mutation",
+                    ],
+                }
+            ).encode("utf-8")
+
+        def getcode(self) -> int:
+            return self.status
+
+    def fake_urlopen(request: Any, *, timeout: float) -> FakeResponse:
+        calls.append(request.full_url)
+        return FakeResponse()
+
+    monkeypatch.setattr(
+        "apps.shell.agent.runtime.desktop_execution_providers.urlopen_with_bundled_ca",
+        fake_urlopen,
+    )
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_URL", "http://127.0.0.1:19091")
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_ID", "local-headless-desktop")
+    monkeypatch.setenv(
+        "OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS",
+        "desktop.list_apps",
+    )
+    port = _FakeStudioPort()
+    service = AgentStudioService(port)
+
+    service.start_agent_run(
+        {
+            "agent_id": "agent-1",
+            "objective": "在一个我没提过的新应用 PixelForge 点击 Export",
+            "title": "PixelForge export",
+            "allowed_tools": [
+                "desktop.list_apps",
+                "app.focus",
+                "desktop.ui_elements",
+                "app.focus_and_click_ui_element",
+            ],
+            "metadata": {"surface": "agent_studio"},
+        }
+    )
+
+    start_payload = _port_call_payload(port, "start_agent_run")
+    discovery_request = next(
+        request
+        for request in start_payload["direct_tool_requests"]
+        if request["tool"] == "desktop.list_apps"
+    )
+    envelope_request = next(
+        request
+        for request in start_payload["metadata"]["yachiyo_execution_envelope"]["requests"]
+        if request["tool_name"] == "desktop.list_apps"
+    )
+    assert calls
+    assert discovery_request["desktop_execution_route"]["status"] == "sandbox_ready"
+    assert discovery_request["desktop_execution_route"]["selected_provider_id"] == (
+        "local-headless-desktop"
+    )
+    assert discovery_request["sandbox_provider"]["provider_id"] == "local-headless-desktop"
+    assert envelope_request["desktop_execution_route"]["status"] == "sandbox_ready"
+    assert start_payload["runtime_execution_envelope"] == (
+        start_payload["metadata"]["yachiyo_execution_envelope"]
+    )
 
 
 def test_agent_studio_service_starts_workflow_from_planner_orchestration() -> None:

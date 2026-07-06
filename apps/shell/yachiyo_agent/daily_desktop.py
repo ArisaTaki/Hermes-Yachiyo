@@ -598,6 +598,7 @@ def daily_desktop_runtime_execution_envelope(
             decision,
             allowed_tools=allowed,
             full_plan=True,
+            metadata=metadata,
         )
     except Exception:
         logger.debug("Runtime execution envelope unavailable for daily desktop", exc_info=True)
