@@ -10,6 +10,8 @@ from typing import Any
 from apps.shell.yachiyo_agent import isolated_provider_session as session_module
 from apps.shell.yachiyo_agent.isolated_provider_session import (
     IsolatedDesktopProviderSessionManager,
+    annotate_envelope_with_desktop_provider_session,
+    ensure_isolated_desktop_provider_session_for_envelope,
 )
 
 
@@ -83,3 +85,54 @@ def test_isolated_provider_session_manager_starts_applies_env_and_stops(
     assert stopped["stopped"] is True
     assert stopped["running"] is False
     assert "OHA_YACHIYO_DESKTOP_PROVIDER_URL" not in session_module.os.environ
+
+
+def test_ensure_isolated_provider_session_detects_keyboard_mouse_requests(
+    monkeypatch,
+) -> None:
+    starts: list[dict[str, Any] | None] = []
+
+    monkeypatch.setattr(
+        session_module,
+        "isolated_desktop_provider_session_status",
+        lambda: {"ok": True, "status": "stopped", "running": False},
+    )
+    monkeypatch.setattr(
+        session_module,
+        "start_isolated_desktop_provider_session",
+        lambda request=None: starts.append(request)
+        or {
+            "ok": True,
+            "status": "running",
+            "running": True,
+            "started": True,
+            "provider_id": "local-isolated-desktop",
+            "url": "http://127.0.0.1:19093",
+        },
+    )
+    envelope = {
+        "requests": [
+            {
+                "request_id": "request-type",
+                "tool_name": "desktop.safe_type_text",
+                "execution_mode": {"keyboard_mouse_capture": True},
+                "desktop_execution_route": {
+                    "status": "sandbox_keyboard_mouse_provider_required",
+                    "blocking_conditions": ["sandbox_keyboard_mouse_provider_required"],
+                },
+                "sandbox_provider": {"desktop_session_isolated": False},
+            }
+        ]
+    }
+
+    session = ensure_isolated_desktop_provider_session_for_envelope(envelope)
+    annotated = annotate_envelope_with_desktop_provider_session(envelope, session)
+
+    assert starts == [None]
+    assert session["needed"] is True
+    assert session["running"] is True
+    assert session["started"] is True
+    assert session["request_ids"] == ["request-type"]
+    assert session["tool_names"] == ["desktop.safe_type_text"]
+    assert annotated["desktop_provider_session"]["provider_id"] == "local-isolated-desktop"
+    assert annotated["requests"][0]["desktop_provider_session"]["needed"] is True

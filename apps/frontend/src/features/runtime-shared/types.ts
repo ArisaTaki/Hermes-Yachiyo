@@ -775,6 +775,7 @@ export type RuntimeExecutionRequestSnapshot = {
   desktop_execution_policy?: DesktopExecutionPolicySnapshot | null;
   sandbox_provider?: SandboxDesktopProviderSnapshot | null;
   desktop_execution_route?: DesktopExecutionRouteSnapshot | null;
+  desktop_provider_session?: Record<string, unknown>;
   policy_reason?: string;
   continue_to_model?: boolean;
   depends_on?: string[];
@@ -826,6 +827,7 @@ export type RuntimeExecutionEnvelopeSnapshot = {
   desktop_execution_policy?: DesktopExecutionPolicySnapshot | null;
   sandbox_provider?: SandboxDesktopProviderSnapshot | null;
   desktop_execution_route?: DesktopExecutionRouteSnapshot | null;
+  desktop_provider_session?: Record<string, unknown>;
   runtime_doctrine?: string;
   runtime_stage_counts?: Record<string, number>;
   replan_signal_count?: number;

@@ -821,6 +821,7 @@ class RuntimeExecutionRequestSnapshot(_PublicSnapshot):
     desktop_execution_policy: DesktopExecutionPolicySnapshot | None = None
     sandbox_provider: SandboxDesktopProviderSnapshot | None = None
     desktop_execution_route: DesktopExecutionRouteSnapshot | None = None
+    desktop_provider_session: dict[str, Any] = Field(default_factory=dict)
     policy_reason: str = ""
     continue_to_model: bool = False
     deferred_tool: str | None = None
@@ -876,6 +877,7 @@ class RuntimeExecutionEnvelopeSnapshot(_PublicSnapshot):
     desktop_execution_policy: DesktopExecutionPolicySnapshot | None = None
     sandbox_provider: SandboxDesktopProviderSnapshot | None = None
     desktop_execution_route: DesktopExecutionRouteSnapshot | None = None
+    desktop_provider_session: dict[str, Any] = Field(default_factory=dict)
     runtime_doctrine: str = ""
     runtime_stage_counts: dict[str, int] = Field(default_factory=dict)
     replan_signal_count: int = 0

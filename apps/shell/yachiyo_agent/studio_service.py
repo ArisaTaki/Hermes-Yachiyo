@@ -72,6 +72,10 @@ from .future_tasks import (
     future_task_trigger_result_snapshot_from_payload,
 )
 from .groups import agent_group_snapshot_from_payload, group_run_snapshot_from_payload
+from .isolated_provider_session import (
+    annotate_envelope_with_desktop_provider_session,
+    ensure_isolated_desktop_provider_session_for_envelope,
+)
 from .memories import memory_snapshot_from_payload
 from .ports import StudioPort
 from .planner_projection import runtime_planner_metadata
@@ -169,6 +173,53 @@ def _studio_runtime_execution_envelope_with_policy(
         payload,
         _studio_desktop_execution_policy(metadata),
     )
+
+
+def _runtime_execution_envelope_payload_for_start(
+    decision: PlannerDecisionSnapshot,
+    *,
+    allowed_tools: Iterable[str] | None = None,
+    full_plan: bool = True,
+    metadata: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    envelope = runtime_execution_envelope_from_decision(
+        decision,
+        allowed_tools=allowed_tools,
+        full_plan=full_plan,
+        metadata=metadata,
+    )
+    if envelope is None:
+        return {}
+    payload = envelope.model_dump(mode="json")
+    session = ensure_isolated_desktop_provider_session_for_envelope(payload)
+    if session.get("needed") and session.get("running"):
+        refreshed = runtime_execution_envelope_from_decision(
+            decision,
+            allowed_tools=allowed_tools,
+            full_plan=full_plan,
+            metadata=metadata,
+        )
+        if refreshed is not None:
+            payload = refreshed.model_dump(mode="json")
+    return annotate_envelope_with_desktop_provider_session(payload, session)
+
+
+def _studio_runtime_execution_envelope_for_start(
+    envelope: Any,
+    metadata: Mapping[str, Any],
+) -> dict[str, Any]:
+    payload = _studio_runtime_execution_envelope_with_policy(envelope, metadata)
+    existing_session = (
+        dict(payload.get("desktop_provider_session"))
+        if isinstance(payload.get("desktop_provider_session"), Mapping)
+        else {}
+    )
+    if existing_session.get("needed"):
+        return annotate_envelope_with_desktop_provider_session(payload, existing_session)
+    session = ensure_isolated_desktop_provider_session_for_envelope(payload)
+    if session.get("needed") and session.get("running"):
+        payload = _studio_runtime_execution_envelope_with_policy(payload, metadata)
+    return annotate_envelope_with_desktop_provider_session(payload, session)
 
 
 def _studio_desktop_execution_policy(metadata: Mapping[str, Any]) -> dict[str, Any]:
@@ -1432,9 +1483,14 @@ def _planner_orchestration_run_metadata(
         ),
     }
     payload = with_agent_studio_desktop_execution_policy(payload)
-    envelope = payload.get("yachiyo_execution_envelope")
+    envelope = _runtime_execution_envelope_payload_for_start(
+        decision,
+        allowed_tools=allowed_tools,
+        full_plan=True,
+        metadata=payload,
+    ) or payload.get("yachiyo_execution_envelope")
     if isinstance(envelope, Mapping):
-        payload["yachiyo_execution_envelope"] = _studio_runtime_execution_envelope_with_policy(
+        payload["yachiyo_execution_envelope"] = _studio_runtime_execution_envelope_for_start(
             runtime_execution_envelope_payload_with_request_context(
                 envelope,
                 execution_context,
@@ -1660,23 +1716,19 @@ def _planner_enriched_start_payload(
             metadata=metadata,
         )
     )
-    full_plan_envelope = runtime_execution_envelope_from_decision(
+    full_plan_envelope = _runtime_execution_envelope_payload_for_start(
         decision,
         allowed_tools=allowed_tools,
         full_plan=True,
         metadata=metadata,
     )
-    envelope = (
-        full_plan_envelope.model_dump(mode="json")
-        if full_plan_envelope is not None
-        else metadata.get("yachiyo_execution_envelope")
-    )
+    envelope = full_plan_envelope or metadata.get("yachiyo_execution_envelope")
     if isinstance(envelope, Mapping):
         enriched_envelope = runtime_execution_envelope_payload_with_request_context(
             envelope,
             execution_context,
         )
-        enriched_envelope = _studio_runtime_execution_envelope_with_policy(
+        enriched_envelope = _studio_runtime_execution_envelope_for_start(
             enriched_envelope,
             metadata,
         )

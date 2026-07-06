@@ -182,12 +182,73 @@ class DesktopExecutionProviderRegistry:
         tool_request: Mapping[str, Any],
     ) -> DesktopExecutionProviderAdapter | None:
         clean_provider_kind = _clean_provider_kind(provider_kind)
-        for adapter in self._adapters.get(clean_provider_kind, []):
+        adapter = self._matching_adapter(
+            clean_provider_kind,
+            tool_name,
+            route,
+            tool_request,
+        )
+        if adapter is not None:
+            return adapter
+        env_adapter = self._refresh_env_adapter(clean_provider_kind)
+        if env_adapter is not None:
+            return self._matching_adapter(
+                clean_provider_kind,
+                tool_name,
+                route,
+                tool_request,
+            )
+        return None
+
+    def _matching_adapter(
+        self,
+        provider_kind: str,
+        tool_name: str,
+        route: Mapping[str, Any],
+        tool_request: Mapping[str, Any],
+    ) -> DesktopExecutionProviderAdapter | None:
+        for adapter in self._adapters.get(provider_kind, []):
             can_execute = getattr(adapter, "can_execute", None)
             if callable(can_execute) and not can_execute(tool_name, route, tool_request):
                 continue
             return adapter
         return None
+
+    def _refresh_env_adapter(
+        self,
+        provider_kind: str,
+    ) -> DesktopExecutionProviderAdapter | None:
+        if provider_kind != "sandbox_desktop":
+            return None
+        adapter = _http_desktop_execution_provider_adapter_from_env()
+        if adapter is None:
+            return None
+        if self._has_equivalent_adapter(provider_kind, adapter):
+            return adapter
+        self.register(adapter)
+        return adapter
+
+    def _has_equivalent_adapter(
+        self,
+        provider_kind: str,
+        adapter: DesktopExecutionProviderAdapter,
+    ) -> bool:
+        provider_id = str(getattr(adapter, "provider_id", "") or "").strip()
+        execute_url = str(getattr(adapter, "execute_url", "") or "").strip()
+        for existing in self._adapters.get(provider_kind, []):
+            existing_provider_id = str(
+                getattr(existing, "provider_id", "") or ""
+            ).strip()
+            existing_execute_url = str(
+                getattr(existing, "execute_url", "") or ""
+            ).strip()
+            if provider_id and provider_id != existing_provider_id:
+                continue
+            if execute_url and execute_url != existing_execute_url:
+                continue
+            if provider_id or execute_url:
+                return True
+        return False
 
     def execute_if_routed(
         self,

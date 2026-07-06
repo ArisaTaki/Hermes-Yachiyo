@@ -798,6 +798,7 @@ def _execution_request_snapshot(
         desktop_execution_policy=desktop_execution_policy,
         sandbox_provider=sandbox_provider,
         desktop_execution_route=desktop_execution_route,
+        desktop_provider_session=_mapping(request.get("desktop_provider_session")),
         policy_reason=str(
             request.get("policy_reason") or request.get("approval_reason") or ""
         ),
@@ -924,6 +925,7 @@ def _tool_request_from_execution_request(
         "sandbox_provider",
         "sandbox_desktop_provider",
         "desktop_execution_route",
+        "desktop_provider_session",
         "policy_reason",
         "continue_to_model",
         "deferred_tool",

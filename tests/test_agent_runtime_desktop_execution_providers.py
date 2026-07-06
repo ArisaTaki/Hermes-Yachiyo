@@ -6,6 +6,7 @@ import json
 from typing import Any
 
 from apps.shell.agent.runtime.desktop_execution_providers import (
+    DesktopExecutionProviderRegistry,
     LOCAL_DESKTOP_PROVIDER_ID,
     LOCAL_DESKTOP_PROVIDER_KIND,
     desktop_execution_provider_status_from_env,
@@ -279,6 +280,49 @@ def test_desktop_provider_registry_from_env_ignores_remote_url_by_default() -> N
     assert status["available"] is False
     assert status["status"] == "remote_provider_blocked"
     assert status["blocking_conditions"] == ["desktop_execution_provider_remote_blocked"]
+
+
+def test_desktop_provider_registry_refreshes_adapter_from_runtime_env(monkeypatch) -> None:
+    requests: list[dict[str, Any]] = []
+
+    def fake_urlopen(request: Any, *, timeout: float) -> FakeResponse:
+        requests.append(
+            {
+                "url": request.full_url,
+                "timeout": timeout,
+                "payload": json.loads(request.data.decode("utf-8")),
+            }
+        )
+        return FakeResponse({"result": {"ok": True, "typed": True}})
+
+    monkeypatch.setattr(
+        "apps.shell.agent.runtime.desktop_execution_providers.urlopen_with_bundled_ca",
+        fake_urlopen,
+    )
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_URL", "http://127.0.0.1:19093")
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_ID", "local-isolated-desktop")
+    monkeypatch.setenv(
+        "OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS",
+        "desktop.safe_type_text",
+    )
+    registry = DesktopExecutionProviderRegistry()
+    tool_request = _sandbox_tool_request()
+    tool_request["desktop_execution_route"]["selected_provider_id"] = "local-isolated-desktop"
+    tool_request["sandbox_provider"]["provider_id"] = "local-isolated-desktop"
+
+    result = registry.execute_if_routed(
+        "desktop.safe_type_text",
+        {"text": "hello"},
+        tool_request=tool_request,
+        broker=object(),
+        approved=True,
+    )
+
+    assert result is not None
+    assert result["ok"] is True
+    assert result["desktop_execution_provider"]["adapter_registered"] is True
+    assert result["desktop_execution_provider"]["provider_id"] == "local-isolated-desktop"
+    assert requests[0]["url"] == "http://127.0.0.1:19093/tools/execute"
 
 
 def test_desktop_provider_transport_failure_stays_structured() -> None:

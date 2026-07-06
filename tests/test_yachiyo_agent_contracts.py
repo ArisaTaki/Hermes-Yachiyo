@@ -515,6 +515,7 @@ def test_runtime_execution_envelope_snapshot_is_public_contract() -> None:
         "desktop_execution_policy",
         "sandbox_provider",
         "desktop_execution_route",
+        "desktop_provider_session",
         "runtime_doctrine",
         "runtime_stage_counts",
         "replan_signal_count",
@@ -533,6 +534,8 @@ def test_runtime_execution_envelope_snapshot_is_public_contract() -> None:
         "sandbox_desktop_provider_required"
     ]
     assert payload["requests"][0]["desktop_execution_route"]["status"] == "ready"
+    assert payload["requests"][0]["desktop_provider_session"] == {}
+    assert payload["desktop_provider_session"] == {}
     assert payload["requests"][0]["policy_reason"] == "Desktop app discovery is read-only."
     assert payload["requests"][0]["runtime_stage"] == "discover"
     assert payload["requests"][0]["replan_triggers"] == ["verification_failed"]

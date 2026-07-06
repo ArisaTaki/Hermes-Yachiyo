@@ -1496,13 +1496,17 @@ def test_agent_studio_start_agent_run_preserves_provider_routes(
                         "desktop.list_apps",
                         "app.focus_and_click_ui_element",
                     ],
-                    "capabilities": [
-                        "desktop_discovery",
-                        "sandbox_foreground",
-                        "read_only_observation",
-                    ],
-                }
-            ).encode("utf-8")
+                        "capabilities": [
+                            "desktop_discovery",
+                            "sandbox_foreground",
+                            "read_only_observation",
+                        ],
+                        "keyboard_mouse_capture_supported": True,
+                        "desktop_session_kind": "isolated_desktop",
+                        "desktop_session_isolated": True,
+                        "foreground_takeover_required": False,
+                    }
+                ).encode("utf-8")
 
         def getcode(self) -> int:
             return self.status
@@ -1521,6 +1525,10 @@ def test_agent_studio_start_agent_run_preserves_provider_routes(
         "OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS",
         "desktop.list_apps,app.focus_and_click_ui_element",
     )
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_KEYBOARD_MOUSE_CAPTURE_SUPPORTED", "true")
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_KIND", "isolated_desktop")
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_ISOLATED", "true")
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_FOREGROUND_TAKEOVER_REQUIRED", "false")
     port = _FakeStudioPort()
     service = AgentStudioService(port)
 
@@ -1579,6 +1587,149 @@ def test_agent_studio_start_agent_run_preserves_provider_routes(
         if request["tool_name"] == "desktop.list_apps"
     )
     assert event_request["desktop_execution_route"]["status"] == "sandbox_ready"
+
+
+def test_agent_studio_start_agent_run_auto_starts_isolated_provider_for_input(
+    monkeypatch,
+) -> None:
+    session_state = {"running": False}
+    start_calls: list[dict[str, Any] | None] = []
+    status_urls: list[str] = []
+
+    class FakeResponse:
+        status = 200
+
+        def __enter__(self) -> "FakeResponse":
+            return self
+
+        def __exit__(self, *_args: Any) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return json.dumps(
+                {
+                    "ok": True,
+                    "status": "ready",
+                    "provider_id": "local-isolated-desktop",
+                    "provider_kind": "sandbox_desktop",
+                    "supported_tools": [
+                        "desktop.list_apps",
+                        "app.focus_and_click_ui_element",
+                    ],
+                    "capabilities": ["isolated_desktop", "keyboard_mouse_capture"],
+                    "keyboard_mouse_capture_supported": True,
+                    "desktop_session_kind": "isolated_desktop",
+                    "desktop_session_isolated": True,
+                    "foreground_takeover_required": False,
+                }
+            ).encode("utf-8")
+
+        def getcode(self) -> int:
+            return self.status
+
+    def fake_urlopen(request: Any, *, timeout: float) -> FakeResponse:
+        status_urls.append(request.full_url)
+        return FakeResponse()
+
+    def fake_session_status() -> dict[str, Any]:
+        return {
+            "ok": True,
+            "status": "running" if session_state["running"] else "stopped",
+            "running": session_state["running"],
+            "provider_id": "local-isolated-desktop" if session_state["running"] else "",
+            "url": "http://127.0.0.1:19093" if session_state["running"] else "",
+            "source": "isolated_provider_session_manager",
+        }
+
+    def fake_start_session(request: dict[str, Any] | None = None) -> dict[str, Any]:
+        start_calls.append(request)
+        session_state["running"] = True
+        monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_URL", "http://127.0.0.1:19093")
+        monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_ID", "local-isolated-desktop")
+        monkeypatch.setenv(
+            "OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS",
+            "desktop.list_apps,app.focus_and_click_ui_element",
+        )
+        monkeypatch.setenv(
+            "OHA_YACHIYO_DESKTOP_PROVIDER_KEYBOARD_MOUSE_CAPTURE_SUPPORTED",
+            "true",
+        )
+        monkeypatch.setenv(
+            "OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_KIND",
+            "isolated_desktop",
+        )
+        monkeypatch.setenv(
+            "OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_ISOLATED",
+            "true",
+        )
+        monkeypatch.setenv(
+            "OHA_YACHIYO_DESKTOP_PROVIDER_FOREGROUND_TAKEOVER_REQUIRED",
+            "false",
+        )
+        return fake_session_status() | {"started": True}
+
+    monkeypatch.setattr(
+        "apps.shell.agent.runtime.desktop_execution_providers.urlopen_with_bundled_ca",
+        fake_urlopen,
+    )
+    monkeypatch.setattr(
+        "apps.shell.yachiyo_agent.isolated_provider_session.isolated_desktop_provider_session_status",
+        fake_session_status,
+    )
+    monkeypatch.setattr(
+        "apps.shell.yachiyo_agent.isolated_provider_session.start_isolated_desktop_provider_session",
+        fake_start_session,
+    )
+    port = _FakeStudioPort()
+    service = AgentStudioService(port)
+
+    started = service.start_agent_run(
+        {
+            "agent_id": "agent-1",
+            "objective": "在 PixelForge 点击 Export",
+            "title": "PixelForge export",
+            "allowed_tools": [
+                "desktop.list_apps",
+                "app.focus_and_click_ui_element",
+                "desktop.ui_elements",
+            ],
+            "metadata": {"surface": "agent_studio"},
+        }
+    )
+
+    start_payload = _port_call_payload(port, "start_agent_run")
+    operation_request = next(
+        request
+        for request in start_payload["direct_tool_requests"]
+        if request["tool"] == "app.focus_and_click_ui_element"
+    )
+    envelope = start_payload["metadata"]["yachiyo_execution_envelope"]
+    envelope_request = next(
+        request
+        for request in envelope["requests"]
+        if request["tool_name"] == "app.focus_and_click_ui_element"
+    )
+    plan_event = next(
+        event for event in started.events if event.event_type == "agent.plan.created"
+    )
+
+    assert start_calls == [None]
+    assert status_urls
+    assert envelope["desktop_provider_session"]["needed"] is True
+    assert envelope["desktop_provider_session"]["started"] is True
+    assert envelope["desktop_provider_session"]["running"] is True
+    assert operation_request["desktop_execution_route"]["status"] == "sandbox_ready"
+    assert operation_request["sandbox_provider"]["provider_id"] == "local-isolated-desktop"
+    assert operation_request["desktop_provider_session"]["provider_id"] == (
+        "local-isolated-desktop"
+    )
+    assert envelope_request["desktop_provider_session"]["needed"] is True
+    assert (
+        plan_event.payload["runtime_execution_envelope"]["desktop_provider_session"][
+            "running"
+        ]
+        is True
+    )
 
 
 def test_agent_studio_service_starts_workflow_from_planner_orchestration() -> None:
