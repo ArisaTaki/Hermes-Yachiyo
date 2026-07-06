@@ -505,6 +505,7 @@ def _capability_discovered_app_open_path_case(service: AgentRuntimeService) -> d
         "planned_tool_chain": planned_tools == [
             "desktop.list_apps",
             "desktop.open_path_with_app",
+            "desktop.ui_elements",
         ],
         "planned_discovery_is_direct_execution": (
             not bool(_payload(planned_events[0]).get("continue_to_model"))
@@ -525,10 +526,12 @@ def _capability_discovered_app_open_path_case(service: AgentRuntimeService) -> d
         "tool_call_chain": tool_call_tools == [
             "desktop.list_apps",
             "desktop.open_path_with_app",
+            "desktop.ui_elements",
         ],
         "tool_results_match_chain": tool_result_actions == [
             "desktop.list_apps",
             "desktop.open_path_with_app",
+            "desktop.ui_elements",
         ],
         "resolved_app_from_discovery": {
             "app_name": "PixelForge",
@@ -545,7 +548,7 @@ def _capability_discovered_app_open_path_case(service: AgentRuntimeService) -> d
         "resolved_event_recorded": _payload(resolved_event).get("resolved_app_name") == "PixelForge",
         "completed_from_runtime_planner": completed_payload.get("source") == "runtime_planner",
         "completed_tools_match": completed_payload.get("tools")
-        == ["desktop.list_apps", "desktop.open_path_with_app"],
+        == ["desktop.list_apps", "desktop.open_path_with_app", "desktop.ui_elements"],
         "completed_after_open_path": completed_payload.get("tool") == "desktop.open_path_with_app",
     }
     return {

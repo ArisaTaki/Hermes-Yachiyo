@@ -95,7 +95,7 @@ def test_desktop_agent_entrypoint_fallback_routes_data_analysis() -> None:
     }
 
 
-def test_daily_entrypoint_verify_reads_do_not_run_in_direct_execution() -> None:
+def test_daily_entrypoint_keeps_discover_operate_verify_direct_execution() -> None:
     requests = planner_first_daily_desktop_entrypoint_requests(
         "Can you play Apple Music?",
         allowed_tools=desktop_agent_entrypoint_allowed_tools(),
@@ -103,12 +103,15 @@ def test_daily_entrypoint_verify_reads_do_not_run_in_direct_execution() -> None:
         include_runtime_context=True,
     )
 
-    assert [request["tool"] for request in requests] == ["media.music_app_open_and_play"]
+    assert [request["tool"] for request in requests] == [
+        "media.music_app_open_and_play",
+        "desktop.ui_elements",
+    ]
     assert requests[0]["runtime_stage"] == "operate"
-    assert not any(request.get("continue_to_model") for request in requests)
+    assert requests[-1]["runtime_stage"] == "verify"
 
 
-def test_daily_entrypoint_does_not_execute_blocking_active_window_verify() -> None:
+def test_daily_entrypoint_executes_read_only_active_window_verify() -> None:
     requests = planner_first_daily_desktop_entrypoint_requests(
         "打开微信",
         allowed_tools=desktop_agent_entrypoint_allowed_tools(),
@@ -119,8 +122,13 @@ def test_daily_entrypoint_does_not_execute_blocking_active_window_verify() -> No
     assert [request["tool"] for request in requests] == [
         "desktop.list_apps",
         "app.open",
+        "desktop.active_window",
     ]
-    assert not any(request.get("continue_to_model") for request in requests)
+    assert requests[-1]["runtime_stage"] == "verify"
+    assert [
+        bool(request.get("continue_to_model"))
+        for request in requests
+    ] == [False, False, True]
 
 
 def test_desktop_agent_entrypoint_prefetches_report_research_context() -> None:

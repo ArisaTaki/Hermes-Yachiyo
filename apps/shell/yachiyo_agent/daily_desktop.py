@@ -543,9 +543,7 @@ def planner_first_daily_desktop_entrypoint_requests(
                 metadata=metadata,
             )
             if runtime_requests:
-                return _entrypoint_requests_without_blocking_trailing_verify_followup(
-                    runtime_requests
-                )
+                return [dict(request) for request in runtime_requests]
 
         planner_requests = planner_tool_requests(
             str(text or ""),
@@ -561,9 +559,7 @@ def planner_first_daily_desktop_entrypoint_requests(
                 planner_execution_tool_requests(planner_requests, allowed)
                 or planner_requests
             )
-            return _entrypoint_requests_without_blocking_trailing_verify_followup(
-                normalized
-            )
+            return [dict(request) for request in normalized]
         return planner_requests
     if not allow_legacy_fallback:
         return []
@@ -608,7 +604,7 @@ def daily_desktop_runtime_execution_envelope(
 def daily_desktop_executable_entrypoint_requests(
     requests: Sequence[Mapping[str, Any]],
 ) -> list[dict[str, Any]]:
-    return _entrypoint_requests_without_blocking_trailing_verify_followup(requests)
+    return [dict(request) for request in requests if isinstance(request, Mapping)]
 
 
 def daily_desktop_direct_metadata_request(
@@ -805,52 +801,6 @@ def _runtime_execution_context_entrypoint_requests(
     except Exception:
         logger.debug("Runtime execution context entrypoint unavailable", exc_info=True)
         return []
-
-
-def _entrypoint_requests_without_blocking_trailing_verify_followup(
-    requests: Sequence[Mapping[str, Any]],
-) -> list[dict[str, Any]]:
-    items = [dict(request) for request in requests if isinstance(request, Mapping)]
-    if len(items) <= 1:
-        return items
-    last_primary_index = -1
-    for index, request in enumerate(items):
-        tool_name = str(request.get("tool") or "").strip()
-        if (
-            tool_name
-            and tool_name not in _ENTRYPOINT_DISCOVERY_TOOLS
-            and tool_name not in _ENTRYPOINT_VERIFY_TOOLS
-        ):
-            last_primary_index = index
-    if last_primary_index < 0:
-        return items
-    normalized: list[dict[str, Any]] = []
-    for index, request in enumerate(items):
-        item = dict(request)
-        if (
-            index > last_primary_index
-            and str(item.get("tool") or "").strip() in _ENTRYPOINT_VERIFY_TOOLS
-            and _is_entrypoint_tail_verify_request(item)
-        ):
-            continue
-        normalized.append(item)
-    return normalized
-
-
-def _is_entrypoint_tail_verify_request(request: Mapping[str, Any]) -> bool:
-    if str(request.get("runtime_stage") or "").strip() != "verify":
-        return False
-    if str(request.get("deferred_tool") or "").strip():
-        return False
-    if isinstance(request.get("deferred_input"), Mapping) and request.get(
-        "deferred_input"
-    ):
-        return False
-    if isinstance(request.get("deferred_continuation"), list) and request.get(
-        "deferred_continuation"
-    ):
-        return False
-    return True
 
 
 def _runtime_main_chat_tool_policies(runtime: Any | None) -> list[Mapping[str, Any]]:

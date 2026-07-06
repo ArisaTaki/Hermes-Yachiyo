@@ -125,7 +125,9 @@ def _shared_surface_case() -> dict[str, Any]:
         "all_surfaces_present": [case["surface"] for case in cases]
         == ["chat", "bubble", "live2d"],
         "all_use_runtime_planner": all(
-            case["sources"] and set(case["sources"]) == {"runtime_planner"}
+            case["sources"]
+            and set(case["sources"]) <= {"runtime_planner", "runtime_verification"}
+            and "runtime_planner" in set(case["sources"])
             for case in cases
         ),
         "all_share_discover_operate_verify_tools": all(

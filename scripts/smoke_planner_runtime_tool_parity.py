@@ -93,7 +93,7 @@ PLANNER_TOOL_PARITY_CASES: tuple[dict[str, Any], ...] = (
         "category": "orchestrator",
         "prompt": "请分析 data/sales.csv 并输出报告",
         "expected_intent": "data_analysis",
-        "expected_plan_tools": ["data.analyze"],
+        "expected_plan_tools": ["workspace.read", "data.analyze"],
         "expected_request_tools": ["data.analyze"],
         "approval_required": [],
     },
