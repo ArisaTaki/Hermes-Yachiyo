@@ -5557,7 +5557,13 @@ def test_tool_catalog_snapshot_json_shape_is_stable() -> None:
 
     payload = _json(snapshot)
 
-    assert list(payload) == ["tools", "capabilities", "plugins", "source"]
+    assert list(payload) == [
+        "tools",
+        "capabilities",
+        "plugins",
+        "legacy_cleanup_coverage",
+        "source",
+    ]
     assert payload["tools"][0]["tool_name"] == "media.apple_music_play"
     assert payload["tools"][0]["input_schema"] == {"type": "object"}
     assert payload["tools"][0]["blocking_conditions"] == ["desktop_session_locked"]
@@ -5567,6 +5573,7 @@ def test_tool_catalog_snapshot_json_shape_is_stable() -> None:
     assert payload["plugins"][0]["plugin_id"] == "notes"
     assert payload["plugins"][0]["enabled"] is False
     assert payload["plugins"][0]["tools"][0]["risk_level"] == "medium"
+    assert payload["legacy_cleanup_coverage"] is None
     with pytest.raises(ValidationError):
         ToolCatalogItemSnapshot(
             tool_name="terminal.run",

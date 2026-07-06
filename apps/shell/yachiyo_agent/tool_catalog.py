@@ -318,11 +318,19 @@ def _missing_permissions_for_tool(
 ) -> list[str]:
     if not _is_desktop_or_browser_tool(tool_name):
         return []
-    return desktop_tool_missing_permissions(
+    missing = desktop_tool_missing_permissions(
         tool_name,
         capability_id=capability_id or "",
         missing_permissions=missing_permissions,
     )
+    if capability_id == "browser_control":
+        missing = [
+            *missing,
+            *_string_list(
+                capabilities.get("browser_control", {}).get("missing_permissions")
+            ),
+        ]
+    return _unique(missing)
 
 
 def _blocking_conditions_for_tool(
