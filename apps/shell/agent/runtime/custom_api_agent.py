@@ -130,6 +130,15 @@ _DAILY_DESKTOP_VERIFY_TOOLS = {
     "desktop.ui_elements",
 }
 
+_DIRECT_DAILY_DESKTOP_TERMINAL_ACTION_TOOLS = {
+    "media.apple_music_control",
+    "media.apple_music_open_and_play",
+    "media.apple_music_play",
+    "media.music_app_control",
+    "media.music_app_open_and_play",
+    "media.system_control",
+}
+
 _DAILY_DESKTOP_PLAN_SOURCES = {
     "daily_desktop_intent",
     "runtime_planner",
@@ -638,6 +647,29 @@ class RuntimeCustomApiAgentLoop:
                         tool_timeline_start=tool_timeline_start,
                     )
                 ):
+                    explicit_model_followup = False
+                if (
+                    explicit_model_followup
+                    and _runtime_planner_followup_requests_are_only_verification(
+                        planned_tool_requests
+                    )
+                    and _runtime_planner_completed_terminal_direct_requests_with_trailing_verification(
+                        execution_tool_requests,
+                        timeline,
+                        tool_timeline_start=tool_timeline_start,
+                    )
+                ):
+                    explicit_model_followup = False
+                if (
+                    replan_payloads
+                    and _runtime_planner_completed_terminal_direct_requests_with_verification_replan(
+                        execution_tool_requests,
+                        replan_payloads,
+                        timeline,
+                        tool_timeline_start=tool_timeline_start,
+                    )
+                ):
+                    replan_payloads = []
                     explicit_model_followup = False
                 if (
                     replan_payloads
@@ -9299,6 +9331,104 @@ def _runtime_planner_completed_direct_requests_with_verification_replan(
     if any(_runtime_replan_payload_requires_continuation(payload) for payload in payloads):
         return False
     return False
+
+
+def _runtime_planner_completed_terminal_direct_requests_with_trailing_verification(
+    planned_tool_requests: Iterable[Mapping[str, Any]],
+    timeline: list[dict[str, Any]],
+    *,
+    tool_timeline_start: int,
+) -> bool:
+    requests = [request for request in planned_tool_requests if isinstance(request, Mapping)]
+    terminal_primary_index = -1
+    terminal_primary_request: Mapping[str, Any] | None = None
+    for index, request in enumerate(requests):
+        tool_name = str(request.get("tool") or "").strip()
+        if tool_name in _DIRECT_DAILY_DESKTOP_TERMINAL_ACTION_TOOLS:
+            terminal_primary_index = index
+            terminal_primary_request = request
+    if terminal_primary_index < 0 or terminal_primary_request is None:
+        return False
+    if not _runtime_planner_tool_request_completed(
+        terminal_primary_request,
+        timeline,
+        tool_timeline_start=tool_timeline_start,
+    ):
+        return False
+
+    allowed_trailing_tools = {*_DAILY_DESKTOP_DISCOVERY_TOOLS, *_DAILY_DESKTOP_VERIFY_TOOLS}
+    trailing_requests = requests[terminal_primary_index + 1 :]
+    if any(
+        str(request.get("tool") or "").strip() not in allowed_trailing_tools
+        for request in trailing_requests
+    ):
+        return False
+    return any(
+        str(request.get("tool") or "").strip() in _DAILY_DESKTOP_VERIFY_TOOLS
+        for request in trailing_requests
+    )
+
+
+def _runtime_planner_completed_terminal_direct_requests_with_verification_replan(
+    planned_tool_requests: Iterable[Mapping[str, Any]],
+    replan_payloads: Iterable[Mapping[str, Any]],
+    timeline: list[dict[str, Any]],
+    *,
+    tool_timeline_start: int,
+) -> bool:
+    payloads: list[Mapping[str, Any]] = []
+    for payload in replan_payloads:
+        if not isinstance(payload, Mapping):
+            continue
+        nested_requests = (
+            payload.get("replan_requests")
+            if isinstance(payload.get("replan_requests"), list)
+            else []
+        )
+        payloads.extend(item for item in nested_requests if isinstance(item, Mapping))
+        if _runtime_replan_payload_tool_candidates(payload):
+            payloads.append(payload)
+    if not payloads:
+        return False
+
+    requests = [request for request in planned_tool_requests if isinstance(request, Mapping)]
+    terminal_primary_index = -1
+    terminal_primary_request: Mapping[str, Any] | None = None
+    for index, request in enumerate(requests):
+        tool_name = str(request.get("tool") or "").strip()
+        if tool_name in _DIRECT_DAILY_DESKTOP_TERMINAL_ACTION_TOOLS:
+            terminal_primary_index = index
+            terminal_primary_request = request
+    if terminal_primary_index < 0 or terminal_primary_request is None:
+        return False
+    if not _runtime_planner_tool_request_completed(
+        terminal_primary_request,
+        timeline,
+        tool_timeline_start=tool_timeline_start,
+    ):
+        return False
+
+    trailing_requests = requests[terminal_primary_index + 1 :]
+    if any(
+        str(request.get("tool") or "").strip()
+        not in {*_DAILY_DESKTOP_DISCOVERY_TOOLS, *_DAILY_DESKTOP_VERIFY_TOOLS}
+        for request in trailing_requests
+    ):
+        return False
+    trailing_verification_tools = {
+        str(request.get("tool") or "").strip()
+        for request in trailing_requests
+        if str(request.get("tool") or "").strip() in _DAILY_DESKTOP_VERIFY_TOOLS
+    }
+    if not trailing_verification_tools:
+        return False
+    return all(
+        _runtime_replan_payload_is_trailing_verification_failure(
+            payload,
+            trailing_verification_tools,
+        )
+        for payload in payloads
+    )
 
 
 def _runtime_planner_followup_requests_are_only_verification(

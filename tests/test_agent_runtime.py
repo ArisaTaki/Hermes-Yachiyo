@@ -6578,9 +6578,16 @@ def test_main_chat_daily_desktop_approval_resumes_without_chat_model_profile(tmp
         service.close()
 
 
-def test_main_chat_model_loop_executes_specific_apple_music_song_before_model(tmp_path, monkeypatch):
+def test_main_chat_model_loop_executes_specific_music_query_before_model(tmp_path, monkeypatch):
     service = make_service(tmp_path)
+    list_app_calls: list[tuple[str, int]] = []
+    open_calls: list[str] = []
+    focus_calls: list[str] = []
+    shortcut_calls: list[str] = []
+    type_calls: list[str] = []
+    submit_calls: list[dict[str, Any]] = []
     play_calls: list[str] = []
+    ui_calls: list[dict[str, Any]] = []
     monkeypatch.setattr(
         "apps.shell.agent_runtime.get_model_profile_service",
         lambda: FakeDefaultProfileService(),
@@ -6590,20 +6597,94 @@ def test_main_chat_model_loop_executes_specific_apple_music_song_before_model(tm
         lambda *_args, **_kwargs: pytest.fail("specific music intent should execute before model call"),
     )
 
-    def fake_music_play(query: str) -> dict[str, Any]:
-        play_calls.append(query)
+    def fake_list_apps(query: str = "", limit: int = 10) -> dict[str, Any]:
+        list_app_calls.append((query, limit))
         return {
             "ok": True,
-            "action": "media.apple_music_play",
-            "summary": "Apple Music playback started",
+            "action": "desktop.list_apps",
+            "query": query,
+            "matches": [{"name": "Music", "bundle_id": "com.apple.Music", "score": 0.95}],
             "data": {
                 "query": query,
-                "track": query,
-                "artist": "Yachiyo",
+                "matches": [{"name": "Music", "bundle_id": "com.apple.Music", "score": 0.95}],
             },
         }
 
-    monkeypatch.setattr("apps.shell.agent.tools.desktop.apple_music_play", fake_music_play)
+    def fake_app_open(app_name: str) -> dict[str, Any]:
+        open_calls.append(app_name)
+        return {
+            "ok": True,
+            "action": "app.open",
+            "data": {"app_name": app_name, "launch_verified": True},
+        }
+
+    def fake_app_focus(app_name: str) -> dict[str, Any]:
+        focus_calls.append(app_name)
+        return {"ok": True, "action": "app.focus", "data": {"app_name": app_name}}
+
+    def fake_safe_shortcut(action: str) -> dict[str, Any]:
+        shortcut_calls.append(action)
+        return {
+            "ok": True,
+            "action": "desktop.safe_shortcut",
+            "data": {"shortcut_action": action},
+        }
+
+    def fake_safe_type_text(text: str) -> dict[str, Any]:
+        type_calls.append(text)
+        return {
+            "ok": True,
+            "action": "desktop.safe_type_text",
+            "data": {"text_length": len(text)},
+        }
+
+    def fake_search_submit(**kwargs: Any) -> dict[str, Any]:
+        submit_calls.append(dict(kwargs))
+        return {
+            "ok": True,
+            "action": "desktop.search_submit",
+            "data": {"submitted": True},
+        }
+
+    def fake_music_app_open_and_play(app_name: str) -> dict[str, Any]:
+        play_calls.append(app_name)
+        return {
+            "ok": True,
+            "action": "media.music_app_open_and_play",
+            "data": {
+                "app_name": app_name,
+                "playback_state_unverified": True,
+            },
+        }
+
+    def fake_ui_elements(**kwargs: Any) -> dict[str, Any]:
+        ui_calls.append(dict(kwargs))
+        return {
+            "ok": True,
+            "action": "desktop.ui_elements",
+            "data": {"elements": [], "count": 0},
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.list_apps", fake_list_apps)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.desktop_safe_shortcut",
+        fake_safe_shortcut,
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.desktop_safe_type_text",
+        fake_safe_type_text,
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.desktop_search_submit",
+        fake_search_submit,
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.music_app_open_and_play",
+        fake_music_app_open_and_play,
+    )
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.ui_elements", fake_ui_elements)
     try:
         run = service.start_main_chat_run(
             task_id="task-main-apple-music-song",
@@ -6616,17 +6697,44 @@ def test_main_chat_model_loop_executes_specific_apple_music_song_before_model(tm
         )
         events = service.list_run_events(run["run_id"])["events"]
         event_types = [event["event_type"] for event in events]
-        planned_event = next(event for event in events if event["event_type"] == "agent.desktop.intent_planned")
-        tool_event = next(event for event in events if event["event_type"] == "agent.tool.call")
+        planned_tools = [
+            event["payload"]["tool"]
+            for event in events
+            if event["event_type"] == "agent.desktop.intent_planned"
+        ]
+        tool_events = [
+            event["payload"]
+            for event in events
+            if event["event_type"] == "agent.tool.call"
+        ]
+        tool_names = [event["tool"] for event in tool_events]
 
-        assert play_calls == ["超时空辉夜姬"]
-        assert updated["result"] == "已在 Apple Music 播放：超时空辉夜姬 - Yachiyo。"
+        assert list_app_calls == [("music", 20)]
+        assert open_calls == ["Music"]
+        assert focus_calls == ["Music"]
+        assert shortcut_calls == ["find"]
+        assert type_calls == ["超时空辉夜姬"]
+        assert submit_calls == [{}]
+        assert play_calls == ["Music"]
+        assert ui_calls == [{"role_filter": "", "limit": 80, "app_name": "Music"}]
+        assert "已打开 Apple Music" in updated["result"]
+        assert "没能打开查找" not in updated["result"]
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
-        assert planned_event["payload"]["tool"] == "media.apple_music_play"
-        assert planned_event["payload"]["input_preview"] == {"query": "超时空辉夜姬"}
-        assert tool_event["payload"]["tool"] == "media.apple_music_play"
-        assert tool_event["payload"]["result"]["data"]["track"] == "超时空辉夜姬"
+        assert "media.music_app_open_and_play" in planned_tools
+        assert "media.apple_music_play" not in planned_tools
+        assert tool_names == [
+            "desktop.list_apps",
+            "app.open",
+            "app.focus",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "media.music_app_open_and_play",
+            "desktop.ui_elements",
+        ]
+        assert tool_events[4]["input_preview"] == {"text": "超时空辉夜姬"}
+        assert tool_events[6]["input_preview"] == {"app_name": "Music"}
     finally:
         service.close()
 
