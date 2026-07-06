@@ -731,6 +731,34 @@ class _ApprovalReplanRecoveryTaskRuntimePort(_ReplanRecoveryTaskRuntimePort):
         return payload
 
 
+class _ProviderSessionReplanRecoveryTaskRuntimePort(_ReplanRecoveryTaskRuntimePort):
+    def get_task_timeline(self, task_id: str) -> dict[str, Any]:
+        payload = super().get_task_timeline(task_id)
+        replan_payload = payload["events"][1]["payload"]
+        replan_payload["trigger"] = "isolated_provider_required"
+        replan_payload["source_tool_name"] = "app.focus_and_click_ui_element"
+        replan_payload["target_capability_id"] = "desktop.ui_operation"
+        replan_payload["metadata"]["recovery_actions"][0] = {
+            "action_id": "replan-1:action:1:desktop.provider_session.start",
+            "label": "Start isolated desktop provider",
+            "tool": "desktop.provider_session.start",
+            "input": {
+                "provider_id": "local-isolated-desktop",
+                "api_route": "/yachiyo/studio/tools/desktop-provider/session/start",
+                "diagnostic_route": "/yachiyo/studio/tools",
+            },
+            "permission_target": "isolated_desktop_provider",
+            "risk_level": "medium",
+            "approval_required": True,
+            "approval_status": "pending",
+            "metadata": {
+                "runtime_retry_source": "desktop_provider_session",
+                "runtime_stage": "operate",
+            },
+        }
+        return payload
+
+
 class _DeferredReplanRecoveryTaskRuntimePort(_ReplanRecoveryTaskRuntimePort):
     def get_task_timeline(self, task_id: str) -> dict[str, Any]:
         payload = super().get_task_timeline(task_id)
@@ -983,6 +1011,41 @@ def test_yachiyo_agent_service_plans_replan_continuation_without_bypassing_appro
         "replan-1:action:1:desktop.list_apps"
     )
     assert continuation.task_context["task_todo"]["todo_id"] == "todo-open-app"
+
+
+def test_yachiyo_agent_service_marks_provider_session_recovery_as_control_action() -> None:
+    port = _ProviderSessionReplanRecoveryTaskRuntimePort()
+    service = YachiyoAgentService(port)
+
+    continuation = service.plan_replan_recovery_action(
+        "task-1",
+        {
+            "request_id": "replan-1",
+            "action_id": "replan-1:action:1:desktop.provider_session.start",
+            "conversation_id": "chat-1",
+        },
+    )
+
+    direct_request = continuation.direct_tool_requests[0]
+    assert continuation.tool_name == "desktop.provider_session.start"
+    assert continuation.approval_required is True
+    assert continuation.auto_start_eligible is False
+    assert "approval_required" in continuation.auto_start_blockers
+    assert "tool_not_auto_safe" in continuation.auto_start_blockers
+    assert continuation.metadata["control_action"] == "desktop_provider_session.start"
+    assert continuation.metadata["api_route"] == (
+        "/yachiyo/studio/tools/desktop-provider/session/start"
+    )
+    assert continuation.metadata["diagnostic_route"] == "/yachiyo/studio/tools"
+    assert continuation.metadata["recovery_action_approval_required"] is True
+    assert direct_request["tool"] == "desktop.provider_session.start"
+    assert direct_request["control_action"] == "desktop_provider_session.start"
+    assert direct_request["api_route"] == (
+        "/yachiyo/studio/tools/desktop-provider/session/start"
+    )
+    assert direct_request["diagnostic_route"] == "/yachiyo/studio/tools"
+    assert direct_request["approval_required"] is True
+    assert direct_request["target_capability_id"] == "desktop.ui_operation"
 
 
 def test_yachiyo_agent_service_preserves_deferred_replan_recovery_context() -> None:

@@ -1592,6 +1592,16 @@ def test_agent_studio_start_agent_run_preserves_provider_routes(
 def test_agent_studio_start_agent_run_auto_starts_isolated_provider_for_input(
     monkeypatch,
 ) -> None:
+    for key in (
+        "OHA_YACHIYO_DESKTOP_PROVIDER_URL",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_ID",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_KEYBOARD_MOUSE_CAPTURE_SUPPORTED",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_KIND",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_ISOLATED",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_FOREGROUND_TAKEOVER_REQUIRED",
+    ):
+        monkeypatch.delenv(key, raising=False)
     session_state = {"running": False}
     start_calls: list[dict[str, Any] | None] = []
     status_urls: list[str] = []

@@ -2202,6 +2202,12 @@ def _replan_recovery_action_direct_request(
         value = getattr(action, key) or getattr(recovery, key)
         if isinstance(value, Mapping) and value:
             request[key] = dict(value)
+    if _replan_recovery_action_is_provider_session_start(action):
+        request["control_action"] = "desktop_provider_session.start"
+        for key in ("api_route", "diagnostic_route"):
+            value = _first_text(action.input.get(key))
+            if value:
+                request[key] = value
     deferred_tool = _first_text(action.deferred_tool, recovery.deferred_tool)
     if deferred_tool:
         request["deferred_tool"] = deferred_tool
@@ -2704,6 +2710,12 @@ def _replan_recovery_action_metadata(
     if task_context:
         metadata["task_core_context"] = dict(task_context)
     action_metadata = _mapping(action.metadata)
+    if _replan_recovery_action_is_provider_session_start(action):
+        metadata["control_action"] = "desktop_provider_session.start"
+        for key in ("api_route", "diagnostic_route"):
+            value = _first_text(action.input.get(key))
+            if value:
+                metadata[key] = value
     desktop_loop = _mapping(action_metadata.get("desktop_loop"))
     if desktop_loop:
         metadata["desktop_loop"] = desktop_loop
@@ -2714,6 +2726,17 @@ def _replan_recovery_action_metadata(
     if action.approval_required:
         metadata["recovery_action_approval_required"] = True
     return metadata
+
+
+def _replan_recovery_action_is_provider_session_start(
+    action: ReplanRecoveryActionSnapshot,
+) -> bool:
+    if str(action.tool or "").strip() == "desktop.provider_session.start":
+        return True
+    metadata = _mapping(action.metadata)
+    return str(metadata.get("runtime_retry_source") or "").strip() == (
+        "desktop_provider_session"
+    )
 
 
 def _replan_recovery_source_id(source_run: Any) -> str:
