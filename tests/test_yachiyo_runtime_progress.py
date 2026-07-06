@@ -206,6 +206,44 @@ def test_task_progress_payloads_can_infer_group_and_workflow_scope() -> None:
     assert workflow_events[0]["planner_scope"] == "workflow.run"
 
 
+def test_task_progress_payloads_infer_scope_from_nested_request_context() -> None:
+    tool_event = {
+        "event": "agent.tool.call",
+        "detail": "artifact.write",
+        "result": {"ok": True, "action": "artifact.write"},
+    }
+    metadata_group_request = {
+        **_tool_request(),
+        "workflow_run_id": "",
+        "group_run_id": "",
+        "run_group_id": "",
+        "metadata": {"group_run_id": "group-run-from-metadata"},
+    }
+    payload_workflow_request = {
+        **_tool_request(),
+        "workflow_run_id": "",
+        "group_run_id": "",
+        "run_group_id": "",
+        "payload": {"workflow_run_id": "workflow-run-from-payload"},
+    }
+
+    group_events = task_progress_event_payloads_for_tool_result(
+        tool_request=metadata_group_request,
+        tool_event=tool_event,
+        event_scope="auto",
+    )
+    workflow_events = task_progress_event_payloads_for_tool_result(
+        tool_request=payload_workflow_request,
+        tool_event=tool_event,
+        event_scope="auto",
+    )
+
+    assert group_events[0]["event"] == "group.run.task.workspace_item.updated"
+    assert group_events[0]["planner_scope"] == "group.run"
+    assert workflow_events[0]["event"] == "workflow.run.task.workspace_item.updated"
+    assert workflow_events[0]["planner_scope"] == "workflow.run"
+
+
 def test_task_progress_payloads_scope_replan_recovery_from_trigger_list() -> None:
     workflow_request = {
         **_tool_request(),

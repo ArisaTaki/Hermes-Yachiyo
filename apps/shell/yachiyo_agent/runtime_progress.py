@@ -246,11 +246,30 @@ def _effective_progress_event_scope(
 ) -> Literal["agent", "group.run", "workflow.run"]:
     if event_scope != "auto":
         return event_scope
-    if _text(tool_request.get("workflow_run_id")):
+    if _request_context_text(tool_request, "workflow_run_id"):
         return "workflow.run"
-    if _text(tool_request.get("group_run_id") or tool_request.get("run_group_id")):
+    if _request_context_text(tool_request, "group_run_id", "run_group_id"):
         return "group.run"
     return "agent"
+
+
+def _request_context_text(
+    tool_request: Mapping[str, Any],
+    *keys: str,
+) -> str:
+    for key in keys:
+        text = _text(tool_request.get(key))
+        if text:
+            return text
+    for container_key in ("metadata", "context", "payload"):
+        nested = tool_request.get(container_key)
+        if not isinstance(nested, Mapping):
+            continue
+        for key in keys:
+            text = _text(nested.get(key))
+            if text:
+                return text
+    return ""
 
 
 def _tool_event_requests_replan(tool_event: Mapping[str, Any]) -> bool:
