@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping
 from typing import Any
+from urllib.parse import urlparse
 
 
 _SANDBOX_DESKTOP_PROVIDER_DEFAULT: dict[str, Any] = {
@@ -66,7 +68,7 @@ def sandbox_desktop_provider_status(
 ) -> dict[str, Any]:
     """Return the runtime-visible sandbox desktop provider status."""
 
-    provider = _sandbox_provider_payload(metadata)
+    provider = _sandbox_provider_payload(metadata) or _sandbox_provider_payload_from_env()
     if provider:
         payload = {**_SANDBOX_DESKTOP_PROVIDER_DEFAULT, **provider}
         payload["available"] = bool(payload.get("available"))
@@ -310,6 +312,45 @@ def _sandbox_provider_payload(
     return {}
 
 
+def _sandbox_provider_payload_from_env() -> dict[str, Any]:
+    provider_url = _first_env_value(
+        (
+            "OHA_YACHIYO_DESKTOP_PROVIDER_URL",
+            "OHA_YACHIYO_SANDBOX_DESKTOP_PROVIDER_URL",
+            "OHA_YACHIYO_DESKTOP_PROVIDER_EXECUTE_URL",
+            "OHA_YACHIYO_SANDBOX_DESKTOP_PROVIDER_EXECUTE_URL",
+        )
+    )
+    if not provider_url:
+        return {}
+    if not _truthy_env_value(
+        "OHA_YACHIYO_DESKTOP_PROVIDER_ALLOW_REMOTE"
+    ) and not _is_loopback_url(provider_url):
+        return {}
+    provider_kind = (
+        _first_env_value(("OHA_YACHIYO_DESKTOP_PROVIDER_KIND",))
+        or "sandbox_desktop"
+    )
+    if provider_kind.strip().lower().replace("-", "_") != "sandbox_desktop":
+        return {}
+    supported_tools = _string_list(
+        _first_env_value(("OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS",))
+    )
+    return {
+        "available": True,
+        "provider_id": _first_env_value(("OHA_YACHIYO_DESKTOP_PROVIDER_ID",)),
+        "provider_kind": "sandbox_desktop",
+        "status": "available",
+        "adapter_ready": True,
+        "reason": "Sandbox desktop provider is configured through runtime environment.",
+        "blocking_conditions": [],
+        "supported_tools": supported_tools,
+        "recommended_for": ["foreground_control", "keyboard_mouse_capture"],
+        "diagnostic_route": "/yachiyo/studio/tools",
+        "source": "runtime_env",
+    }
+
+
 def _sandbox_route_decision(
     route: Mapping[str, Any],
     sandbox_provider: Mapping[str, Any],
@@ -390,7 +431,36 @@ def _provider_id_for_isolation(isolation: str) -> str:
     return ""
 
 
+def _first_env_value(keys: tuple[str, ...]) -> str:
+    for key in keys:
+        value = str(os.getenv(key, "") or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _truthy_env_value(key: str) -> bool:
+    return str(os.getenv(key, "") or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _is_loopback_url(value: str) -> bool:
+    parsed = urlparse(str(value or "").strip())
+    if parsed.scheme not in {"http", "https"}:
+        return False
+    host = (parsed.hostname or "").strip().lower()
+    return host in {"localhost", "127.0.0.1", "::1"} or host.startswith("127.")
+
+
 def _string_list(value: Any) -> list[str]:
-    if not isinstance(value, list):
+    if isinstance(value, str):
+        raw_items = value.split(",")
+    elif isinstance(value, list):
+        raw_items = value
+    else:
         return []
-    return [str(item).strip() for item in value if str(item or "").strip()]
+    items: list[str] = []
+    for item in raw_items:
+        text = str(item or "").strip()
+        if text and text not in items:
+            items.append(text)
+    return items

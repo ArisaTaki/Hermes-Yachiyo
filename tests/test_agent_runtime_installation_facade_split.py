@@ -8,6 +8,9 @@ from types import SimpleNamespace
 from apps.shell import agent_runtime
 from apps.shell.agent.runtime import installation_facade as installation_facade_mod
 from apps.shell.agent.runtime.credentials import RuntimeCredentialService
+from apps.shell.agent.runtime.desktop_execution_providers import (
+    DesktopExecutionProviderRegistry,
+)
 from apps.shell.agent.runtime.engine_state import build_runtime_engine_state
 from apps.shell.agent.runtime.installation_facade import RuntimeInstallationFacadeMixin
 from apps.shell.agent.runtime.model_calling import (
@@ -382,6 +385,10 @@ def test_installation_facade_installs_tooling_and_custom_agent_loop(monkeypatch)
     assert engine.custom_api_agent_loop.limit_model_output == "model-output-limiter"
     assert engine.custom_api_agent_loop.kwargs["runtime_timeline_factory"] == "timeline-factory"
     assert engine.custom_api_agent_loop.kwargs["call_model"] == "model-call"
+    assert isinstance(
+        engine.custom_api_agent_loop.kwargs["desktop_provider_registry"],
+        DesktopExecutionProviderRegistry,
+    )
 
 
 def test_installation_facade_installs_tooling_bundle_attributes() -> None:

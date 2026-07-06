@@ -209,9 +209,12 @@ Desktop execution now has an explicit provider adapter boundary in front of the
 legacy broker. If a tool request is routed to a sandbox/headless desktop provider
 and the runtime has no matching adapter registered, execution fails closed with
 `desktop_execution_provider_unavailable` instead of falling back to the user's
-real foreground desktop. A `sandbox_ready` route is allowed past preview policy
-only to reach that provider boundary; it is not treated as permission to seize
-the live mouse or keyboard.
+real foreground desktop. The runtime can register a loopback-only HTTP provider
+through `OHA_YACHIYO_DESKTOP_PROVIDER_URL`; routed tool calls are posted to
+`/tools/execute` and provider transport failures stay structured in the Run
+Timeline. A `sandbox_ready` route is allowed past preview policy only to reach
+that provider boundary; it is not treated as permission to seize the live mouse
+or keyboard.
 
 Semantic foreground typing now mirrors semantic clicking when an accessibility
 target cannot be matched: the tool returns candidate UI controls, visibility

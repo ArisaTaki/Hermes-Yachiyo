@@ -2,8 +2,16 @@
 
 from __future__ import annotations
 
+import json
+import os
 from collections.abc import Iterable, Mapping
 from typing import Any, Protocol
+from urllib import error as urlerror
+from urllib.parse import urlparse
+from urllib.request import Request
+
+from apps.core.tls import urlopen_with_bundled_ca
+from packages.security import redact_api_error_text
 
 
 class DesktopExecutionProviderAdapter(Protocol):
@@ -34,6 +42,19 @@ class DesktopExecutionProviderAdapter(Protocol):
 
 _DEFAULT_PROVIDER_KINDS = {"", "none", "tool_native", "native", "process"}
 _PROVIDER_ROUTE_READY_STATUSES = {"ready", "sandbox_ready", "provider_ready"}
+_DEFAULT_EXECUTE_PATH = "/tools/execute"
+_PROVIDER_URL_ENV_KEYS = (
+    "OHA_YACHIYO_DESKTOP_PROVIDER_URL",
+    "OHA_YACHIYO_SANDBOX_DESKTOP_PROVIDER_URL",
+)
+_PROVIDER_EXECUTE_URL_ENV_KEYS = (
+    "OHA_YACHIYO_DESKTOP_PROVIDER_EXECUTE_URL",
+    "OHA_YACHIYO_SANDBOX_DESKTOP_PROVIDER_EXECUTE_URL",
+)
+_PROVIDER_TOKEN_ENV_KEYS = (
+    "OHA_YACHIYO_DESKTOP_PROVIDER_TOKEN",
+    "OHA_YACHIYO_SANDBOX_DESKTOP_PROVIDER_TOKEN",
+)
 
 
 class DesktopExecutionProviderRegistry:
@@ -107,8 +128,221 @@ class DesktopExecutionProviderRegistry:
         )
 
 
+class HttpDesktopExecutionProviderAdapter:
+    """Calls a local sandbox/headless desktop provider over HTTP."""
+
+    def __init__(
+        self,
+        *,
+        provider_kind: str = "sandbox_desktop",
+        provider_id: str = "",
+        base_url: str = "",
+        execute_url: str = "",
+        token: str = "",
+        supported_tools: Iterable[str] | None = None,
+        timeout: float = 20.0,
+        urlopen: Any | None = None,
+    ) -> None:
+        self.provider_kind = _clean_provider_kind(provider_kind) or "sandbox_desktop"
+        self.provider_id = str(provider_id or "").strip()
+        self.base_url = _clean_base_url(base_url)
+        self.execute_url = str(execute_url or "").strip() or _join_url(
+            self.base_url,
+            _DEFAULT_EXECUTE_PATH,
+        )
+        self.token = str(token or "").strip()
+        self.supported_tools = set(_string_list(supported_tools))
+        self.timeout = max(0.1, float(timeout or 20.0))
+        self._urlopen = urlopen or urlopen_with_bundled_ca
+
+    def can_execute(
+        self,
+        tool_name: str,
+        route: Mapping[str, Any],
+        tool_request: Mapping[str, Any],
+    ) -> bool:
+        selected_provider_id = str(route.get("selected_provider_id") or "").strip()
+        if (
+            self.provider_id
+            and selected_provider_id
+            and selected_provider_id != self.provider_id
+        ):
+            return False
+        if self.supported_tools and tool_name not in self.supported_tools:
+            return False
+        provider_supported_tools = _string_list(
+            sandbox_provider_payload(tool_request).get("supported_tools")
+        )
+        return not provider_supported_tools or tool_name in provider_supported_tools
+
+    def execute(
+        self,
+        tool_name: str,
+        payload: Mapping[str, Any],
+        *,
+        tool_request: Mapping[str, Any],
+        route: Mapping[str, Any],
+        broker: Any,
+        approved: bool = False,
+    ) -> dict[str, Any]:
+        request_payload = {
+            "tool": tool_name,
+            "input": dict(payload),
+            "approved": bool(approved),
+            "route": dict(route),
+            "tool_request": dict(tool_request),
+            "provider": {
+                "provider_kind": self.provider_kind,
+                "provider_id": self.provider_id,
+            },
+        }
+        request = Request(
+            self.execute_url,
+            data=json.dumps(request_payload, ensure_ascii=False).encode("utf-8"),
+            headers=self._headers(),
+            method="POST",
+        )
+        try:
+            with self._urlopen(request, timeout=self.timeout) as response:
+                status_code = int(
+                    getattr(response, "status", 0) or response.getcode() or 0
+                )
+                raw_body = response.read()
+        except (OSError, urlerror.URLError, TimeoutError) as exc:
+            return self._transport_failure(tool_name, exc)
+        except Exception as exc:
+            return self._transport_failure(tool_name, exc)
+
+        try:
+            decoded = (
+                raw_body.decode("utf-8")
+                if isinstance(raw_body, bytes)
+                else str(raw_body or "")
+            )
+            response_payload = json.loads(decoded) if decoded.strip() else {}
+        except (TypeError, ValueError) as exc:
+            return self._transport_failure(tool_name, exc, status_code=status_code)
+
+        result = (
+            response_payload.get("result")
+            if isinstance(response_payload, Mapping)
+            and isinstance(response_payload.get("result"), Mapping)
+            else response_payload
+        )
+        if not isinstance(result, Mapping):
+            result = {"ok": True, "content": result}
+        tool_result = dict(result)
+        tool_result.setdefault("ok", 200 <= status_code < 400 if status_code else True)
+        tool_result.setdefault("tool", tool_name)
+        tool_result.setdefault(
+            "desktop_execution_provider_transport",
+            self._transport_metadata(status_code=status_code),
+        )
+        return tool_result
+
+    def _headers(self) -> dict[str, str]:
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": "Oha-Yachiyo-Desktop-Provider/1",
+        }
+        if self.token:
+            headers["Authorization"] = f"Bearer {self.token}"
+        return headers
+
+    def _transport_failure(
+        self,
+        tool_name: str,
+        exc: Exception,
+        *,
+        status_code: int = 0,
+    ) -> dict[str, Any]:
+        return {
+            "ok": False,
+            "tool": tool_name,
+            "action": tool_name,
+            "status": "provider_transport_failed",
+            "error": "desktop_execution_provider_transport_failed",
+            "summary": "Desktop execution provider request failed.",
+            "blocked_by_desktop_execution_provider": True,
+            "blocking_condition": "desktop_execution_provider_transport_failed",
+            "blocking_conditions": ["desktop_execution_provider_transport_failed"],
+            "retryable": True,
+            "desktop_execution_provider_transport": self._transport_metadata(
+                status_code=status_code,
+                error=redact_api_error_text(exc),
+            ),
+            "hint": (
+                "Check that the sandbox/headless desktop provider is running on a "
+                "local endpoint, then retry the routed tool call."
+            ),
+        }
+
+    def _transport_metadata(
+        self,
+        *,
+        status_code: int = 0,
+        error: str = "",
+    ) -> dict[str, Any]:
+        parsed = urlparse(self.execute_url)
+        payload: dict[str, Any] = {
+            "provider_kind": self.provider_kind,
+            "provider_id": self.provider_id,
+            "endpoint_origin": _url_origin(parsed),
+            "endpoint_path": parsed.path or _DEFAULT_EXECUTE_PATH,
+        }
+        if status_code:
+            payload["status_code"] = status_code
+        if error:
+            payload["error"] = error
+        return payload
+
+
 def default_desktop_execution_provider_registry() -> DesktopExecutionProviderRegistry:
-    return DesktopExecutionProviderRegistry()
+    return desktop_execution_provider_registry_from_env()
+
+
+def desktop_execution_provider_registry_from_env(
+    environ: Mapping[str, str] | None = None,
+    *,
+    urlopen: Any | None = None,
+) -> DesktopExecutionProviderRegistry:
+    env = os.environ if environ is None else environ
+    provider_url = _first_env_value(env, _PROVIDER_URL_ENV_KEYS)
+    execute_url = _first_env_value(env, _PROVIDER_EXECUTE_URL_ENV_KEYS)
+    if not provider_url and not execute_url:
+        return DesktopExecutionProviderRegistry()
+    provider_kind = (
+        _first_env_value(env, ("OHA_YACHIYO_DESKTOP_PROVIDER_KIND",))
+        or "sandbox_desktop"
+    )
+    provider_id = _first_env_value(env, ("OHA_YACHIYO_DESKTOP_PROVIDER_ID",))
+    token = _first_env_value(env, _PROVIDER_TOKEN_ENV_KEYS)
+    timeout = _float_env_value(env, "OHA_YACHIYO_DESKTOP_PROVIDER_TIMEOUT_SECONDS", 20.0)
+    supported_tools = _string_list(
+        _first_env_value(env, ("OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS",))
+    )
+    allow_remote = _truthy_env_value(env, "OHA_YACHIYO_DESKTOP_PROVIDER_ALLOW_REMOTE")
+    clean_execute_url = str(execute_url or "").strip() or _join_url(
+        _clean_base_url(provider_url),
+        _DEFAULT_EXECUTE_PATH,
+    )
+    if not allow_remote and not _is_loopback_url(clean_execute_url):
+        return DesktopExecutionProviderRegistry()
+    return DesktopExecutionProviderRegistry(
+        [
+            HttpDesktopExecutionProviderAdapter(
+                provider_kind=provider_kind,
+                provider_id=provider_id,
+                base_url=provider_url,
+                execute_url=clean_execute_url,
+                token=token,
+                supported_tools=supported_tools,
+                timeout=timeout,
+                urlopen=urlopen,
+            )
+        ]
+    )
 
 
 def desktop_execution_route_payload(tool_request: Mapping[str, Any] | Any) -> dict[str, Any]:
@@ -237,3 +471,65 @@ def _route_provider_kind(route: Mapping[str, Any]) -> str:
 
 def _clean_provider_kind(value: Any) -> str:
     return str(value or "").strip().lower().replace("-", "_")
+
+
+def _first_env_value(env: Mapping[str, str], keys: Iterable[str]) -> str:
+    for key in keys:
+        value = str(env.get(key) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _float_env_value(env: Mapping[str, str], key: str, default: float) -> float:
+    try:
+        return float(str(env.get(key) or "").strip() or default)
+    except (TypeError, ValueError):
+        return default
+
+
+def _truthy_env_value(env: Mapping[str, str], key: str) -> bool:
+    return str(env.get(key) or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _string_list(value: Any) -> list[str]:
+    if isinstance(value, str):
+        raw_items = value.split(",")
+    elif isinstance(value, Iterable) and not isinstance(value, (bytes, bytearray, Mapping)):
+        raw_items = value
+    else:
+        raw_items = []
+    items: list[str] = []
+    for item in raw_items:
+        text = str(item or "").strip()
+        if text and text not in items:
+            items.append(text)
+    return items
+
+
+def _clean_base_url(value: str) -> str:
+    return str(value or "").strip().rstrip("/")
+
+
+def _join_url(base_url: str, path: str) -> str:
+    clean_base = _clean_base_url(base_url)
+    if not clean_base:
+        return ""
+    clean_path = "/" + str(path or "").strip().lstrip("/")
+    return f"{clean_base}{clean_path}"
+
+
+def _is_loopback_url(value: str) -> bool:
+    parsed = urlparse(str(value or "").strip())
+    if parsed.scheme not in {"http", "https"}:
+        return False
+    host = (parsed.hostname or "").strip().lower()
+    return host in {"localhost", "127.0.0.1", "::1"} or host.startswith("127.")
+
+
+def _url_origin(parsed: Any) -> str:
+    host = parsed.hostname or ""
+    if not host:
+        return ""
+    port = f":{parsed.port}" if parsed.port else ""
+    return f"{parsed.scheme}://{host}{port}"

@@ -33,6 +33,9 @@ from apps.shell.agent.runtime.config import (
 from apps.shell.agent.runtime.credentials import RuntimeCredentialService
 from apps.shell.agent.runtime.core_services import build_runtime_memory_core_setup
 from apps.shell.agent.runtime.definition_services import build_runtime_definition_services
+from apps.shell.agent.runtime.desktop_execution_providers import (
+    default_desktop_execution_provider_registry,
+)
 from apps.shell.agent.runtime.errors import AgentRuntimeError
 from apps.shell.agent.runtime.events import redact_secrets
 from apps.shell.agent.runtime.foundation import build_runtime_foundation_setup
@@ -325,6 +328,7 @@ class RuntimeInstallationFacadeMixin:
             call_model=self.model_profile_chat_adapter.call,
             tool_requests_from_message=self._tool_requests_from_message,
             run_tool_requests=self._run_tool_requests,
+            desktop_provider_registry=default_desktop_execution_provider_registry(),
         )
         self._install_runtime_tooling(tooling_stack.tooling)
         self.tool_operations = tooling_stack.tool_operations
