@@ -1181,6 +1181,7 @@ def test_agent_studio_service_prefers_port_planner_when_available() -> None:
                         "surface": "studio",
                         "desktop_provider_health_probe": True,
                         "desktop_provider_route_readonly": True,
+                        "desktop_provider_route_foreground": True,
                         "desktop_execution_policy": {
                             "mode": "supervised_live",
                             "allow_live_foreground": True,
@@ -1193,7 +1194,7 @@ def test_agent_studio_service_prefers_port_planner_when_available() -> None:
     ]
 
 
-def test_agent_studio_start_agent_run_preserves_readonly_provider_route(
+def test_agent_studio_start_agent_run_preserves_provider_routes(
     monkeypatch,
 ) -> None:
     calls: list[str] = []
@@ -1213,11 +1214,14 @@ def test_agent_studio_start_agent_run_preserves_readonly_provider_route(
                     "ok": True,
                     "status": "ready",
                     "version": "0.1.0",
-                    "supported_tools": ["desktop.list_apps"],
+                    "supported_tools": [
+                        "desktop.list_apps",
+                        "app.focus_and_click_ui_element",
+                    ],
                     "capabilities": [
                         "desktop_discovery",
+                        "sandbox_foreground",
                         "read_only_observation",
-                        "no_foreground_mutation",
                     ],
                 }
             ).encode("utf-8")
@@ -1237,7 +1241,7 @@ def test_agent_studio_start_agent_run_preserves_readonly_provider_route(
     monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_ID", "local-headless-desktop")
     monkeypatch.setenv(
         "OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS",
-        "desktop.list_apps",
+        "desktop.list_apps,app.focus_and_click_ui_element",
     )
     port = _FakeStudioPort()
     service = AgentStudioService(port)
@@ -1263,6 +1267,11 @@ def test_agent_studio_start_agent_run_preserves_readonly_provider_route(
         for request in start_payload["direct_tool_requests"]
         if request["tool"] == "desktop.list_apps"
     )
+    operation_request = next(
+        request
+        for request in start_payload["direct_tool_requests"]
+        if request["tool"] == "app.focus_and_click_ui_element"
+    )
     envelope_request = next(
         request
         for request in start_payload["metadata"]["yachiyo_execution_envelope"]["requests"]
@@ -1274,6 +1283,11 @@ def test_agent_studio_start_agent_run_preserves_readonly_provider_route(
         "local-headless-desktop"
     )
     assert discovery_request["sandbox_provider"]["provider_id"] == "local-headless-desktop"
+    assert operation_request["desktop_execution_route"]["status"] == "sandbox_ready"
+    assert operation_request["desktop_execution_route"]["selected_provider_id"] == (
+        "local-headless-desktop"
+    )
+    assert operation_request["sandbox_provider"]["provider_id"] == "local-headless-desktop"
     assert envelope_request["desktop_execution_route"]["status"] == "sandbox_ready"
     assert start_payload["runtime_execution_envelope"] == (
         start_payload["metadata"]["yachiyo_execution_envelope"]

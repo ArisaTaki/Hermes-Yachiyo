@@ -1776,7 +1776,10 @@ def test_agent_studio_service_probes_desktop_provider_health_for_execution(
     assert operation_request.sandbox_provider.health.status == "ready"
     assert operation_request.sandbox_provider.health.provider_version == "0.1.0"
     assert operation_request.desktop_execution_route is not None
-    assert operation_request.desktop_execution_route.status == "supervised_live"
+    assert operation_request.desktop_execution_route.status == "sandbox_ready"
+    assert operation_request.desktop_execution_route.selected_provider_id == (
+        "local-headless-desktop"
+    )
     assert envelope.sandbox_provider is not None
     assert envelope.sandbox_provider.health is not None
     assert envelope.sandbox_provider.health.checked is True

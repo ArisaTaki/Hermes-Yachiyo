@@ -69,6 +69,12 @@ _READ_ONLY_DESKTOP_PROVIDER_ROUTE_KEYS = (
     "route_readonly_desktop_provider",
 )
 
+_FOREGROUND_DESKTOP_PROVIDER_ROUTE_KEYS = (
+    "desktop_provider_route_foreground",
+    "desktop_provider_foreground_route",
+    "route_foreground_desktop_provider",
+)
+
 _READ_ONLY_DESKTOP_PROVIDER_TOOLS = frozenset(
     {
         "desktop.permissions",
@@ -265,6 +271,19 @@ def desktop_execution_route_decision(
                 "desktop provider without taking over foreground input."
             ),
         }
+    if (
+        desktop_foreground_provider_route_requested(metadata)
+        and (foreground_required or execution_mode_name == "supervised_live")
+        and sandbox_desktop_provider_can_execute_tool(sandbox_provider, clean_tool)
+    ):
+        sandbox_route = _sandbox_route_decision(route, sandbox_provider, clean_tool)
+        return {
+            **sandbox_route,
+            "reason": (
+                "Foreground desktop action can be routed through the sandbox "
+                "desktop provider instead of the user's foreground session."
+            ),
+        }
     if not foreground_required and execution_mode_name != "supervised_live":
         return route
     if policy_mode == "allow":
@@ -305,6 +324,7 @@ def with_agent_studio_desktop_execution_policy(
     payload = dict(metadata) if isinstance(metadata, Mapping) else {}
     payload.setdefault("desktop_provider_health_probe", True)
     payload.setdefault("desktop_provider_route_readonly", True)
+    payload.setdefault("desktop_provider_route_foreground", True)
     if _has_desktop_execution_policy(payload):
         return payload
     payload["desktop_execution_policy"] = agent_studio_desktop_execution_policy()
@@ -315,6 +335,12 @@ def desktop_readonly_provider_route_requested(
     metadata: Mapping[str, Any] | None,
 ) -> bool:
     return _metadata_truthy(metadata, *_READ_ONLY_DESKTOP_PROVIDER_ROUTE_KEYS)
+
+
+def desktop_foreground_provider_route_requested(
+    metadata: Mapping[str, Any] | None,
+) -> bool:
+    return _metadata_truthy(metadata, *_FOREGROUND_DESKTOP_PROVIDER_ROUTE_KEYS)
 
 
 def is_readonly_desktop_provider_tool(tool_name: str) -> bool:

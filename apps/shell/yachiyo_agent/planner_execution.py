@@ -971,6 +971,7 @@ _REQUEST_CONTEXT_WITHOUT_STEP_KEYS = (
     "runtime_doctrine",
     "desktop_provider_health_probe",
     "desktop_provider_route_readonly",
+    "desktop_provider_route_foreground",
     "requires_observation",
     "requires_post_action_verification",
     "replan_signal_ids",
@@ -1872,6 +1873,13 @@ def _runtime_request_metadata_from_planner_metadata(
         "route_readonly_desktop_provider",
     ):
         payload["desktop_provider_route_readonly"] = True
+    if _metadata_truthy(
+        metadata,
+        "desktop_provider_route_foreground",
+        "desktop_provider_foreground_route",
+        "route_foreground_desktop_provider",
+    ):
+        payload["desktop_provider_route_foreground"] = True
     return payload
 
 

@@ -16,6 +16,7 @@ from .contracts import (
     ToolPlanStepSnapshot,
 )
 from .desktop_execution_policy import (
+    desktop_foreground_provider_route_requested,
     desktop_readonly_provider_route_requested,
     desktop_execution_route_decision,
     is_readonly_desktop_provider_tool,
@@ -338,6 +339,13 @@ def _runtime_request_metadata_from_metadata(
         "route_readonly_desktop_provider",
     ):
         payload["desktop_provider_route_readonly"] = True
+    if _metadata_truthy(
+        metadata,
+        "desktop_provider_route_foreground",
+        "desktop_provider_foreground_route",
+        "route_foreground_desktop_provider",
+    ):
+        payload["desktop_provider_route_foreground"] = True
     return payload
 
 
@@ -554,6 +562,14 @@ def _sandbox_provider_for_request(
         provider_payload = sandbox_desktop_provider_status(request)
         if sandbox_desktop_provider_can_execute_tool(provider_payload, tool_name):
             return SandboxDesktopProviderSnapshot.model_validate(provider_payload)
+    if desktop_foreground_provider_route_requested(request) and (
+        bool(getattr(execution_mode, "foreground_control", False))
+        or bool(getattr(execution_mode, "keyboard_mouse_capture", False))
+        or execution_mode_name == "supervised_live"
+    ):
+        provider_payload = sandbox_desktop_provider_status(request)
+        if sandbox_desktop_provider_can_execute_tool(provider_payload, tool_name):
+            return SandboxDesktopProviderSnapshot.model_validate(provider_payload)
     return None
 
 
@@ -574,6 +590,7 @@ def _desktop_execution_route_for_request(
             desktop_readonly_provider_route_requested(request)
             and is_readonly_desktop_provider_tool(tool_name)
         )
+        or desktop_foreground_provider_route_requested(request)
     ):
         return DesktopExecutionRouteSnapshot.model_validate(
             desktop_execution_route_decision(
