@@ -270,7 +270,10 @@ class LegacyRuntimePort:
         except Exception:
             blocking_conditions = {}
         sandbox_provider = sandbox_desktop_provider_status(
-            {"desktop_provider_health_probe": True}
+            {
+                "desktop_provider_health_probe": True,
+                "desktop_provider_local_native": True,
+            }
         )
         return {
             "ok": True,

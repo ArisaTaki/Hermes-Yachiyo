@@ -1154,7 +1154,10 @@ class LegacyStudioPort:
             blocking_conditions=blocking_conditions,
             plugin_states=plugin_states,
             sandbox_provider=sandbox_desktop_provider_status(
-                {"desktop_provider_health_probe": True}
+                {
+                    "desktop_provider_health_probe": True,
+                    "desktop_provider_local_native": True,
+                }
             ),
         ).model_dump(mode="json")
 

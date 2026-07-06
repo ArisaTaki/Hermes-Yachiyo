@@ -60,6 +60,43 @@ _PROVIDER_STATUS_URL_ENV_KEYS = (
     "OHA_YACHIYO_DESKTOP_PROVIDER_STATUS_URL",
     "OHA_YACHIYO_SANDBOX_DESKTOP_PROVIDER_STATUS_URL",
 )
+LOCAL_DESKTOP_PROVIDER_ID = "local-native-desktop"
+LOCAL_DESKTOP_PROVIDER_KIND = "local_desktop"
+LOCAL_DESKTOP_PROVIDER_TOOLS = (
+    "desktop.permissions",
+    "desktop.permission_preflight",
+    "desktop.active_window",
+    "desktop.running_apps",
+    "desktop.list_apps",
+    "desktop.windows",
+    "desktop.list_windows",
+    "desktop.ui_elements",
+    "desktop.read_ui",
+    "desktop.verify",
+    "app.status",
+    "app.open",
+    "desktop.open_app",
+    "app.focus",
+    "desktop.focus_app",
+    "app.focus_window",
+    "app.show",
+    "app.hide",
+    "app.minimize",
+    "desktop.hide_app",
+    "desktop.show_all_apps",
+    "desktop.minimize_window",
+    "desktop.reveal_path",
+    "desktop.open_path",
+    "desktop.open_path_with_app",
+    "app.open_path_with_app",
+    "system.settings_open",
+    "media.apple_music_play",
+    "media.apple_music_status",
+    "media.apple_music_open_and_play",
+    "media.apple_music_control",
+    "media.music_app_open_and_play",
+    "media.music_app_control",
+)
 
 
 class DesktopExecutionProviderRegistry:
@@ -457,6 +494,115 @@ class HttpDesktopExecutionProviderAdapter:
         return payload
 
 
+class LocalDesktopExecutionProviderAdapter:
+    """Routes low-risk desktop actions through the local structured tool broker."""
+
+    provider_kind = LOCAL_DESKTOP_PROVIDER_KIND
+
+    def __init__(
+        self,
+        *,
+        provider_id: str = LOCAL_DESKTOP_PROVIDER_ID,
+        supported_tools: Iterable[str] | None = None,
+    ) -> None:
+        self.provider_id = str(provider_id or LOCAL_DESKTOP_PROVIDER_ID).strip()
+        self.supported_tools = _string_list(supported_tools) or list(
+            LOCAL_DESKTOP_PROVIDER_TOOLS
+        )
+
+    def can_execute(
+        self,
+        tool_name: str,
+        route: Mapping[str, Any],
+        tool_request: Mapping[str, Any],
+    ) -> bool:
+        selected_provider_id = str(route.get("selected_provider_id") or "").strip()
+        if (
+            self.provider_id
+            and selected_provider_id
+            and selected_provider_id != self.provider_id
+        ):
+            return False
+        if tool_name not in self.supported_tools:
+            return False
+        provider_supported_tools = _string_list(
+            sandbox_provider_payload(tool_request).get("supported_tools")
+        )
+        return not provider_supported_tools or tool_name in provider_supported_tools
+
+    def execute(
+        self,
+        tool_name: str,
+        payload: Mapping[str, Any],
+        *,
+        tool_request: Mapping[str, Any],
+        route: Mapping[str, Any],
+        broker: Any,
+        approved: bool = False,
+    ) -> dict[str, Any]:
+        call = getattr(broker, "call", None)
+        if not callable(call):
+            return self._failure(
+                tool_name,
+                "local_desktop_provider_broker_unavailable",
+                "Local desktop provider could not access the runtime tool broker.",
+                retryable=False,
+            )
+        try:
+            result = call(tool_name, dict(payload), approved=approved)
+        except Exception as exc:
+            return self._failure(
+                tool_name,
+                "local_desktop_provider_tool_failed",
+                "Local desktop provider tool execution failed.",
+                error=redact_api_error_text(exc),
+            )
+        tool_result = (
+            dict(result)
+            if isinstance(result, Mapping)
+            else {"ok": True, "content": result}
+        )
+        tool_result.setdefault("tool", tool_name)
+        tool_result.setdefault("action", tool_name)
+        tool_result.setdefault(
+            "local_desktop_provider",
+            {
+                "provider_id": self.provider_id,
+                "provider_kind": self.provider_kind,
+                "approved": bool(approved),
+                "supported_tools": list(self.supported_tools),
+            },
+        )
+        return tool_result
+
+    def _failure(
+        self,
+        tool_name: str,
+        status: str,
+        summary: str,
+        *,
+        error: str = "",
+        retryable: bool = True,
+    ) -> dict[str, Any]:
+        return {
+            "ok": False,
+            "tool": tool_name,
+            "action": tool_name,
+            "status": status,
+            "error": error or status,
+            "summary": summary,
+            "blocked_by_desktop_execution_provider": True,
+            "blocking_condition": status,
+            "blocking_conditions": [status],
+            "retryable": retryable,
+            "desktop_execution_provider_transport": {
+                "provider_kind": self.provider_kind,
+                "provider_id": self.provider_id,
+                "transport": "local_broker",
+            },
+        }
+
+
 def default_desktop_execution_provider_registry() -> DesktopExecutionProviderRegistry:
     return desktop_execution_provider_registry_from_env()
 
@@ -470,9 +616,49 @@ def desktop_execution_provider_registry_from_env(
         environ,
         urlopen=urlopen,
     )
+    local_adapter = LocalDesktopExecutionProviderAdapter()
     if adapter is None:
-        return DesktopExecutionProviderRegistry()
-    return DesktopExecutionProviderRegistry([adapter])
+        return DesktopExecutionProviderRegistry([local_adapter])
+    return DesktopExecutionProviderRegistry([adapter, local_adapter])
+
+
+def local_desktop_execution_provider_status(
+    *,
+    supported_tools: Iterable[str] | None = None,
+) -> dict[str, Any]:
+    tools = _string_list(supported_tools) or list(LOCAL_DESKTOP_PROVIDER_TOOLS)
+    blockers: list[str] = []
+    return {
+        "configured": True,
+        "available": True,
+        "adapter_ready": True,
+        "provider_kind": LOCAL_DESKTOP_PROVIDER_KIND,
+        "provider_id": LOCAL_DESKTOP_PROVIDER_ID,
+        "status": "available",
+        "reason": (
+            "Local desktop provider is available for low-risk discovery, app launch, "
+            "focus, and media control tools."
+        ),
+        "blocking_conditions": blockers,
+        "supported_tools": tools,
+        "health": {
+            "ok": True,
+            "checked": True,
+            "status": "ready",
+            "blocking_conditions": blockers,
+            "supported_tools": tools,
+            "capabilities": [
+                "desktop_discovery",
+                "app_launch",
+                "foreground_activation",
+                "media_control",
+                "no_keyboard_mouse_capture",
+            ],
+        },
+        "source": "runtime_local",
+        "foreground_mutation_supported": True,
+        "keyboard_mouse_capture_supported": False,
+    }
 
 
 def desktop_execution_provider_status_from_env(

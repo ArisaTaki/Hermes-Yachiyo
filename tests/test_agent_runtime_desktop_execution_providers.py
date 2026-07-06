@@ -6,6 +6,8 @@ import json
 from typing import Any
 
 from apps.shell.agent.runtime.desktop_execution_providers import (
+    LOCAL_DESKTOP_PROVIDER_ID,
+    LOCAL_DESKTOP_PROVIDER_KIND,
     desktop_execution_provider_status_from_env,
     desktop_execution_provider_registry_from_env,
 )
@@ -60,6 +62,33 @@ def _sandbox_tool_request() -> dict[str, Any]:
     }
 
 
+def _local_tool_request(tool_name: str, payload: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "tool": tool_name,
+        "input": payload,
+        "desktop_execution_route": {
+            "route_id": f"desktop-route:{tool_name}",
+            "tool_name": tool_name,
+            "requested_mode": "preview_input",
+            "selected_provider_kind": LOCAL_DESKTOP_PROVIDER_KIND,
+            "selected_provider_id": LOCAL_DESKTOP_PROVIDER_ID,
+            "status": "sandbox_ready",
+            "can_execute": True,
+            "can_auto_start": True,
+            "sandbox_required": True,
+            "blocking_conditions": [],
+        },
+        "sandbox_provider": {
+            "available": True,
+            "adapter_ready": True,
+            "provider_kind": LOCAL_DESKTOP_PROVIDER_KIND,
+            "provider_id": LOCAL_DESKTOP_PROVIDER_ID,
+            "status": "available",
+            "supported_tools": [tool_name],
+        },
+    }
+
+
 def test_desktop_provider_registry_from_env_routes_tool_to_local_http_provider() -> None:
     requests: list[dict[str, Any]] = []
 
@@ -106,6 +135,43 @@ def test_desktop_provider_registry_from_env_routes_tool_to_local_http_provider()
     assert requests[0]["payload"]["tool"] == "desktop.safe_type_text"
     assert requests[0]["payload"]["approved"] is True
     assert requests[0]["payload"]["provider"]["provider_id"] == "sandbox-1"
+
+
+def test_default_desktop_provider_registry_routes_low_risk_tools_to_local_broker() -> None:
+    calls: list[tuple[str, dict[str, Any], bool]] = []
+
+    class FakeBroker:
+        def call(
+            self,
+            name: str,
+            payload: dict[str, Any],
+            *,
+            approved: bool = False,
+        ) -> dict[str, Any]:
+            calls.append((name, payload, approved))
+            return {
+                "ok": True,
+                "action": name,
+                "data": {"app_name": payload.get("app_name")},
+            }
+
+    registry = desktop_execution_provider_registry_from_env({})
+    tool_request = _local_tool_request("app.open", {"app_name": "Music"})
+
+    result = registry.execute_if_routed(
+        "app.open",
+        {"app_name": "Music"},
+        tool_request=tool_request,
+        broker=FakeBroker(),
+    )
+
+    assert result is not None
+    assert result["ok"] is True
+    assert result["desktop_execution_provider_routed"] is True
+    assert result["desktop_execution_provider"]["provider_kind"] == LOCAL_DESKTOP_PROVIDER_KIND
+    assert result["desktop_execution_provider"]["provider_id"] == LOCAL_DESKTOP_PROVIDER_ID
+    assert result["local_desktop_provider"]["provider_id"] == LOCAL_DESKTOP_PROVIDER_ID
+    assert calls == [("app.open", {"app_name": "Music"}, False)]
 
 
 def test_desktop_provider_status_from_env_reports_unchecked_local_provider() -> None:
@@ -258,3 +324,52 @@ def test_sandbox_desktop_provider_status_reads_runtime_env(monkeypatch) -> None:
     assert provider["health"]["status"] == "not_checked"
     assert route["status"] == "sandbox_ready"
     assert route["selected_provider_id"] == "sandbox-1"
+
+
+def test_local_desktop_provider_status_routes_safe_app_activation(monkeypatch) -> None:
+    monkeypatch.delenv("OHA_YACHIYO_DESKTOP_PROVIDER_URL", raising=False)
+    monkeypatch.delenv("OHA_YACHIYO_SANDBOX_DESKTOP_PROVIDER_URL", raising=False)
+    monkeypatch.delenv("OHA_YACHIYO_DESKTOP_PROVIDER_EXECUTE_URL", raising=False)
+    monkeypatch.delenv("OHA_YACHIYO_SANDBOX_DESKTOP_PROVIDER_EXECUTE_URL", raising=False)
+    provider = sandbox_desktop_provider_status({"desktop_provider_local_native": True})
+    route = desktop_execution_route_decision(
+        "app.open",
+        policy={"mode": "preview_input"},
+        execution_mode={
+            "mode": "supervised_live",
+            "foreground_control": True,
+            "keyboard_mouse_capture": False,
+            "sandbox_recommended": True,
+            "isolation": "none",
+        },
+        metadata={
+            "desktop_provider_route_foreground": True,
+            "desktop_provider_local_native": True,
+        },
+    )
+    unsupported_input_route = desktop_execution_route_decision(
+        "desktop.safe_type_text",
+        policy={"mode": "preview_input"},
+        execution_mode={
+            "mode": "supervised_live",
+            "foreground_control": True,
+            "keyboard_mouse_capture": True,
+            "sandbox_recommended": True,
+            "isolation": "none",
+        },
+        metadata={
+            "desktop_provider_route_foreground": True,
+            "desktop_provider_local_native": True,
+        },
+    )
+
+    assert provider["available"] is True
+    assert provider["adapter_ready"] is True
+    assert provider["provider_kind"] == LOCAL_DESKTOP_PROVIDER_KIND
+    assert provider["provider_id"] == LOCAL_DESKTOP_PROVIDER_ID
+    assert "app.open" in provider["supported_tools"]
+    assert "desktop.safe_type_text" not in provider["supported_tools"]
+    assert route["status"] == "sandbox_ready"
+    assert route["selected_provider_kind"] == LOCAL_DESKTOP_PROVIDER_KIND
+    assert route["selected_provider_id"] == LOCAL_DESKTOP_PROVIDER_ID
+    assert unsupported_input_route["status"] == "sandbox_tool_not_supported"

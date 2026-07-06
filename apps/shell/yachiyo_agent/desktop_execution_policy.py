@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 
 from apps.shell.agent.runtime.desktop_execution_providers import (
     desktop_execution_provider_status_from_env,
+    local_desktop_execution_provider_status,
 )
 
 
@@ -73,6 +74,12 @@ _FOREGROUND_DESKTOP_PROVIDER_ROUTE_KEYS = (
     "desktop_provider_route_foreground",
     "desktop_provider_foreground_route",
     "route_foreground_desktop_provider",
+)
+
+_LOCAL_DESKTOP_PROVIDER_KEYS = (
+    "desktop_provider_local_native",
+    "desktop_provider_local",
+    "local_desktop_provider",
 )
 
 _READ_ONLY_DESKTOP_PROVIDER_TOOLS = frozenset(
@@ -144,7 +151,7 @@ def sandbox_desktop_provider_status(
     )
     provider = _sandbox_provider_payload(metadata) or _sandbox_provider_payload_from_env(
         probe_health=should_probe_health,
-    )
+    ) or _local_desktop_provider_payload(metadata)
     if provider:
         payload = {**_SANDBOX_DESKTOP_PROVIDER_DEFAULT, **provider}
         payload["available"] = bool(payload.get("available"))
@@ -325,6 +332,7 @@ def with_agent_studio_desktop_execution_policy(
     payload.setdefault("desktop_provider_health_probe", True)
     payload.setdefault("desktop_provider_route_readonly", True)
     payload.setdefault("desktop_provider_route_foreground", True)
+    payload.setdefault("desktop_provider_local_native", True)
     if _has_desktop_execution_policy(payload):
         return payload
     payload["desktop_execution_policy"] = agent_studio_desktop_execution_policy()
@@ -368,6 +376,7 @@ def with_daily_entrypoint_desktop_execution_policy(
     payload.setdefault("desktop_provider_health_probe", True)
     payload.setdefault("desktop_provider_route_readonly", True)
     payload.setdefault("desktop_provider_route_foreground", True)
+    payload.setdefault("desktop_provider_local_native", True)
     if _has_desktop_execution_policy(payload):
         return payload
     payload["desktop_execution_policy"] = daily_entrypoint_desktop_execution_policy(
@@ -545,6 +554,12 @@ def _sandbox_provider_payload_from_env(
         "diagnostic_route": "/yachiyo/studio/tools",
         "source": "runtime_env",
     }
+
+
+def _local_desktop_provider_payload(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
+    if not _metadata_truthy(metadata, *_LOCAL_DESKTOP_PROVIDER_KEYS):
+        return {}
+    return local_desktop_execution_provider_status()
 
 
 def _sandbox_route_decision(
