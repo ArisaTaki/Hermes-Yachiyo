@@ -50,6 +50,12 @@ from .contracts import (
     WorkflowRunSnapshot,
     WorkflowSnapshot,
 )
+from .desktop_execution_policy import (
+    agent_studio_desktop_execution_policy,
+    desktop_execution_policy_payload,
+    runtime_execution_envelope_with_desktop_execution_policy,
+    with_agent_studio_desktop_execution_policy,
+)
 from apps.shell.agent.runtime.errors import AgentRuntimeError
 from .desk import agent_desk_snapshot_from_payload
 from .events import public_run_event_page_from_payload
@@ -122,6 +128,34 @@ def _planner_metadata_with_catalog_readiness(
     return enriched
 
 
+def _studio_runtime_execution_envelope_with_policy(
+    envelope: Any,
+    metadata: Mapping[str, Any],
+) -> dict[str, Any]:
+    if isinstance(envelope, RuntimeExecutionEnvelopeSnapshot):
+        payload = envelope.model_dump(mode="json")
+    elif isinstance(envelope, Mapping):
+        payload = dict(envelope)
+    else:
+        return {}
+    return runtime_execution_envelope_with_desktop_execution_policy(
+        payload,
+        _studio_desktop_execution_policy(metadata),
+    )
+
+
+def _studio_desktop_execution_policy(metadata: Mapping[str, Any]) -> dict[str, Any]:
+    for key in (
+        "desktop_execution_policy",
+        "yachiyo_desktop_execution_policy",
+        "desktop_interaction_policy",
+    ):
+        policy = desktop_execution_policy_payload(metadata.get(key))
+        if policy:
+            return policy
+    return agent_studio_desktop_execution_policy()
+
+
 class AgentStudioService:
     """Facade for Agent Studio, groups, workflows, and runtime debugging."""
 
@@ -147,12 +181,13 @@ class AgentStudioService:
         allowed_tools: Iterable[str] | None = None,
         metadata: Mapping[str, Any] | None = None,
     ) -> PlannerDecisionSnapshot:
+        planner_metadata = with_agent_studio_desktop_execution_policy(metadata)
         port_planner = getattr(self._studio_port, "plan_task", None)
         if callable(port_planner):
             payload = port_planner(
                 prompt,
                 allowed_tools=allowed_tools,
-                metadata=metadata or {},
+                metadata=planner_metadata,
             )
             if payload is not None:
                 return PlannerDecisionSnapshot.model_validate(payload)
@@ -169,7 +204,7 @@ class AgentStudioService:
         return RuntimePlanner().decision(
             prompt,
             allowed_tools=tools or None,
-            metadata=_planner_metadata_with_catalog_readiness(metadata, catalog),
+            metadata=_planner_metadata_with_catalog_readiness(planner_metadata, catalog),
         )
 
     def plan_execution(
@@ -180,20 +215,26 @@ class AgentStudioService:
         metadata: Mapping[str, Any] | None = None,
         direct: bool = False,
     ) -> RuntimeExecutionEnvelopeSnapshot:
+        planner_metadata = with_agent_studio_desktop_execution_policy(metadata)
         port_planner = getattr(self._studio_port, "plan_execution", None)
         if callable(port_planner):
             payload = port_planner(
                 prompt,
                 allowed_tools=allowed_tools,
-                metadata=metadata or {},
+                metadata=planner_metadata,
                 direct=direct,
             )
             if payload is not None:
-                return RuntimeExecutionEnvelopeSnapshot.model_validate(payload)
+                return RuntimeExecutionEnvelopeSnapshot.model_validate(
+                    _studio_runtime_execution_envelope_with_policy(
+                        payload,
+                        planner_metadata,
+                    )
+                )
         decision = self.plan_task(
             prompt,
             allowed_tools=allowed_tools,
-            metadata=metadata,
+            metadata=planner_metadata,
         )
         envelope = runtime_execution_envelope_from_decision(
             decision,
@@ -203,7 +244,12 @@ class AgentStudioService:
         )
         if envelope is None:
             raise ValueError("Unable to build Agent Studio execution plan")
-        return envelope
+        return RuntimeExecutionEnvelopeSnapshot.model_validate(
+            _studio_runtime_execution_envelope_with_policy(
+                envelope.model_dump(mode="json"),
+                planner_metadata,
+            )
+        )
 
     def project_tool_result_events(
         self,
@@ -242,6 +288,7 @@ class AgentStudioService:
             if isinstance(payload.get("metadata"), Mapping)
             else {}
         )
+        metadata = with_agent_studio_desktop_execution_policy(metadata)
         allowed_tools = _string_list(
             payload.get("allowed_tools"),
             fallback=["workflow.run", "group.run", "agent.group_run"],
@@ -1281,13 +1328,15 @@ def _planner_orchestration_run_metadata(
         **dict(metadata),
         **runtime_planner_metadata(decision, allowed_tools=allowed_tools),
     }
+    payload = with_agent_studio_desktop_execution_policy(payload)
     envelope = payload.get("yachiyo_execution_envelope")
     if isinstance(envelope, Mapping):
-        payload["yachiyo_execution_envelope"] = (
+        payload["yachiyo_execution_envelope"] = _studio_runtime_execution_envelope_with_policy(
             runtime_execution_envelope_payload_with_request_context(
                 envelope,
                 execution_context,
-            )
+            ),
+            payload,
         )
     payload.setdefault("source", "agent_studio_planner_orchestration")
     payload.update(
@@ -1470,6 +1519,7 @@ def _planner_start_metadata(
         if isinstance(payload.get("metadata"), Mapping)
         else {}
     )
+    metadata = with_agent_studio_desktop_execution_policy(metadata)
     metadata.setdefault("source", source)
     metadata["runtime_planner_entrypoint"] = True
     return metadata
@@ -1485,6 +1535,10 @@ def _planner_enriched_start_payload(
 ) -> dict[str, Any]:
     start_payload = dict(payload)
     if decision is None:
+        start_payload["metadata"] = _planner_start_metadata(
+            start_payload,
+            source=metadata_source,
+        )
         return start_payload
     metadata = _planner_start_metadata(start_payload, source=metadata_source)
     metadata.update(runtime_planner_metadata(decision, allowed_tools=allowed_tools))
@@ -1502,6 +1556,10 @@ def _planner_enriched_start_payload(
         enriched_envelope = runtime_execution_envelope_payload_with_request_context(
             envelope,
             execution_context,
+        )
+        enriched_envelope = _studio_runtime_execution_envelope_with_policy(
+            enriched_envelope,
+            metadata,
         )
         _apply_start_execution_envelope_metadata(metadata, enriched_envelope)
         start_payload.setdefault(

@@ -6,6 +6,14 @@ from collections.abc import Mapping
 from typing import Any
 
 
+def desktop_execution_policy_payload(value: Any) -> dict[str, Any]:
+    if isinstance(value, Mapping):
+        return dict(value)
+    if isinstance(value, str) and value.strip():
+        return {"mode": value.strip()}
+    return {}
+
+
 def daily_entrypoint_desktop_execution_policy(
     *,
     surface: str = "chat",
@@ -35,6 +43,16 @@ def agent_studio_desktop_execution_policy() -> dict[str, Any]:
     }
 
 
+def with_agent_studio_desktop_execution_policy(
+    metadata: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    payload = dict(metadata) if isinstance(metadata, Mapping) else {}
+    if _has_desktop_execution_policy(payload):
+        return payload
+    payload["desktop_execution_policy"] = agent_studio_desktop_execution_policy()
+    return payload
+
+
 def with_daily_entrypoint_desktop_execution_policy(
     metadata: Mapping[str, Any] | None,
     *,
@@ -49,13 +67,55 @@ def with_daily_entrypoint_desktop_execution_policy(
     return payload
 
 
+def runtime_execution_envelope_with_desktop_execution_policy(
+    envelope: Mapping[str, Any],
+    policy: Mapping[str, Any] | str,
+) -> dict[str, Any]:
+    payload = dict(envelope)
+    clean_policy = desktop_execution_policy_payload(policy)
+    if not clean_policy:
+        return payload
+    _ensure_canonical_desktop_execution_policy(payload, clean_policy)
+    requests = payload.get("requests")
+    if isinstance(requests, list):
+        payload["requests"] = [
+            _runtime_execution_request_with_desktop_execution_policy(request, clean_policy)
+            if isinstance(request, Mapping)
+            else request
+            for request in requests
+        ]
+    return payload
+
+
 def _has_desktop_execution_policy(payload: Mapping[str, Any]) -> bool:
     return any(
-        isinstance(payload.get(key), (Mapping, str))
-        and payload.get(key) not in (None, "", {})
+        bool(desktop_execution_policy_payload(payload.get(key)))
         for key in (
             "desktop_execution_policy",
             "yachiyo_desktop_execution_policy",
             "desktop_interaction_policy",
         )
     )
+
+
+def _runtime_execution_request_with_desktop_execution_policy(
+    request: Mapping[str, Any],
+    policy: Mapping[str, Any],
+) -> dict[str, Any]:
+    payload = dict(request)
+    _ensure_canonical_desktop_execution_policy(payload, policy)
+    return payload
+
+
+def _ensure_canonical_desktop_execution_policy(
+    payload: dict[str, Any],
+    fallback_policy: Mapping[str, Any],
+) -> None:
+    if desktop_execution_policy_payload(payload.get("desktop_execution_policy")):
+        return
+    for key in ("yachiyo_desktop_execution_policy", "desktop_interaction_policy"):
+        policy = desktop_execution_policy_payload(payload.get(key))
+        if policy:
+            payload["desktop_execution_policy"] = policy
+            return
+    payload["desktop_execution_policy"] = dict(fallback_policy)

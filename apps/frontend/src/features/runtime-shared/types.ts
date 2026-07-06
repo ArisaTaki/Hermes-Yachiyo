@@ -628,6 +628,7 @@ export type RuntimeExecutionRequestSnapshot = {
   approval_required?: boolean;
   risk_level?: string;
   execution_mode?: DesktopExecutionModeSnapshot | null;
+  desktop_execution_policy?: DesktopExecutionPolicySnapshot | null;
   policy_reason?: string;
   continue_to_model?: boolean;
   depends_on?: string[];
@@ -676,6 +677,7 @@ export type RuntimeExecutionEnvelopeSnapshot = {
   artifacts_expected?: string[];
   open_questions?: string[];
   route_to_studio?: boolean;
+  desktop_execution_policy?: DesktopExecutionPolicySnapshot | null;
   runtime_doctrine?: string;
   runtime_stage_counts?: Record<string, number>;
   replan_signal_count?: number;

@@ -578,6 +578,7 @@ def _execution_request_snapshot(
             if step is not None and step.execution_mode is not None
             else desktop_tool_execution_mode(tool_name)
         ),
+        desktop_execution_policy=_mapping(request.get("desktop_execution_policy")) or None,
         policy_reason=str(
             request.get("policy_reason") or request.get("approval_reason") or ""
         ),
@@ -700,6 +701,7 @@ def _tool_request_from_execution_request(
         "workflow_node_kind",
         "approval_required",
         "risk_level",
+        "desktop_execution_policy",
         "policy_reason",
         "continue_to_model",
         "deferred_tool",

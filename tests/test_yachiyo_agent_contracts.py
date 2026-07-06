@@ -387,6 +387,7 @@ def test_runtime_execution_envelope_snapshot_is_public_contract() -> None:
         planning_reason="planner_desktop_app_discovery",
         risk_level="low",
         execution_mode=DesktopExecutionModeSnapshot(mode="read_only_observation"),
+        desktop_execution_policy=DesktopExecutionPolicySnapshot(mode="preview_input"),
         policy_reason="Desktop app discovery is read-only.",
         runtime_doctrine="discover_operate_verify",
         runtime_stage="discover",
@@ -457,6 +458,7 @@ def test_runtime_execution_envelope_snapshot_is_public_contract() -> None:
         requests=[request],
         approvals_required=["operate-foreground-ui"],
         route_to_studio=True,
+        desktop_execution_policy=DesktopExecutionPolicySnapshot(mode="preview_input"),
         runtime_doctrine="discover_operate_verify",
         runtime_stage_counts={"discover": 1},
         replan_signal_count=1,
@@ -477,6 +479,7 @@ def test_runtime_execution_envelope_snapshot_is_public_contract() -> None:
         "artifacts_expected",
         "open_questions",
         "route_to_studio",
+        "desktop_execution_policy",
         "runtime_doctrine",
         "runtime_stage_counts",
         "replan_signal_count",
@@ -489,6 +492,7 @@ def test_runtime_execution_envelope_snapshot_is_public_contract() -> None:
     assert payload["requests"][0]["input"] == {"query": "PixelForge", "limit": 20}
     assert payload["requests"][0]["risk_level"] == "low"
     assert payload["requests"][0]["execution_mode"]["mode"] == "read_only_observation"
+    assert payload["requests"][0]["desktop_execution_policy"]["mode"] == "preview_input"
     assert payload["requests"][0]["policy_reason"] == "Desktop app discovery is read-only."
     assert payload["requests"][0]["runtime_stage"] == "discover"
     assert payload["requests"][0]["replan_triggers"] == ["verification_failed"]
@@ -540,7 +544,13 @@ def test_runtime_execution_envelope_snapshot_is_public_contract() -> None:
         "source": "desktop_execution_loop",
     }
     assert payload["runtime_stage_counts"] == {"discover": 1}
+    assert payload["desktop_execution_policy"]["mode"] == "preview_input"
     assert payload["replan_signal_count"] == 1
+    projected_requests = runtime_execution_requests_from_envelope_payload(
+        payload,
+        allowed_tools=["desktop.list_apps"],
+    )
+    assert projected_requests[0]["desktop_execution_policy"]["mode"] == "preview_input"
 
 
 def test_runtime_execution_request_projects_verification_evidence() -> None:

@@ -100,6 +100,9 @@ from .desktop_permissions import (
 from .desktop_execution_policy import (
     agent_studio_desktop_execution_policy,
     daily_entrypoint_desktop_execution_policy,
+    desktop_execution_policy_payload,
+    runtime_execution_envelope_with_desktop_execution_policy,
+    with_agent_studio_desktop_execution_policy,
     with_daily_entrypoint_desktop_execution_policy,
 )
 from .daily_desktop import (
@@ -170,6 +173,9 @@ __all__ = [
     "AgentTaskLightSnapshot",
     "AgentTaskSnapshot",
     "agent_studio_desktop_execution_policy",
+    "desktop_execution_policy_payload",
+    "runtime_execution_envelope_with_desktop_execution_policy",
+    "with_agent_studio_desktop_execution_policy",
     "approval_is_pending",
     "ApprovalCardSnapshot",
     "ApprovalDecision",

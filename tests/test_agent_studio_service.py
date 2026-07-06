@@ -1159,7 +1159,15 @@ def test_agent_studio_service_prefers_port_planner_when_available() -> None:
             {
                 "prompt": "打开 PixelForge 并点击导出按钮",
                 "allowed_tools": ["desktop.running_apps", "app.open", "desktop.click_ui_element"],
-                "metadata": {"surface": "studio"},
+                "metadata": {
+                    "surface": "studio",
+                    "desktop_execution_policy": {
+                        "mode": "supervised_live",
+                        "allow_live_foreground": True,
+                        "source": "agent_studio",
+                        "reason": "Agent Studio is the supervised desktop execution and debugging surface.",
+                    },
+                },
             },
         )
     ]
@@ -1196,6 +1204,8 @@ def test_agent_studio_service_starts_workflow_from_planner_orchestration() -> No
     metadata = workflow_payload["metadata"]
     assert metadata["surface"] == "agent_studio"
     assert metadata["source"] == "agent_studio_planner_orchestration"
+    assert metadata["desktop_execution_policy"]["mode"] == "supervised_live"
+    assert metadata["desktop_execution_policy"]["allow_live_foreground"] is True
     assert metadata["planner_orchestration"] is True
     assert metadata["planner_orchestration_kind"] == "workflow"
     assert metadata["planner_orchestration_target_id"] == "workflow-1"
@@ -1208,6 +1218,12 @@ def test_agent_studio_service_starts_workflow_from_planner_orchestration() -> No
     assert metadata["yachiyo_intent_kind"] == "workflow_orchestration"
     assert metadata["yachiyo_execution_requests"] == ["workflow.run"]
     assert metadata["yachiyo_execution_envelope"]["intent_kind"] == "workflow_orchestration"
+    assert metadata["yachiyo_execution_envelope"]["desktop_execution_policy"]["mode"] == (
+        "supervised_live"
+    )
+    assert metadata["yachiyo_execution_envelope"]["requests"][0][
+        "desktop_execution_policy"
+    ]["mode"] == "supervised_live"
     assert workflow_payload["runtime_execution_envelope"] == metadata["yachiyo_execution_envelope"]
     assert workflow_payload["direct_tool_requests"][0]["tool"] == "workflow.run"
     assert workflow_payload["direct_tool_requests"][0]["workflow_id"] == "workflow-1"
@@ -1240,6 +1256,9 @@ def test_agent_studio_service_starts_workflow_from_planner_orchestration() -> No
     assert plan_event.payload["workflow_run_id"] == "workflow-run-1"
     assert event_request["workflow_id"] == "workflow-1"
     assert event_request["workflow_run_id"] == "workflow-run-1"
+    assert workflow_payload["direct_tool_requests"][0]["desktop_execution_policy"][
+        "mode"
+    ] == "supervised_live"
 
 
 def test_agent_studio_service_starts_group_run_from_planner_orchestration() -> None:
@@ -1273,6 +1292,8 @@ def test_agent_studio_service_starts_group_run_from_planner_orchestration() -> N
     metadata = group_payload["metadata"]
     assert metadata["surface"] == "agent_studio"
     assert metadata["source"] == "agent_studio_planner_orchestration"
+    assert metadata["desktop_execution_policy"]["mode"] == "supervised_live"
+    assert metadata["desktop_execution_policy"]["allow_live_foreground"] is True
     assert metadata["planner_orchestration"] is True
     assert metadata["planner_orchestration_kind"] == "group_run"
     assert metadata["planner_orchestration_target_id"] == "group-1"
@@ -1285,8 +1306,17 @@ def test_agent_studio_service_starts_group_run_from_planner_orchestration() -> N
     assert metadata["yachiyo_intent_kind"] == "multi_agent"
     assert metadata["yachiyo_execution_requests"] == ["group.run"]
     assert metadata["yachiyo_execution_envelope"]["intent_kind"] == "multi_agent"
+    assert metadata["yachiyo_execution_envelope"]["desktop_execution_policy"]["mode"] == (
+        "supervised_live"
+    )
+    assert metadata["yachiyo_execution_envelope"]["requests"][0][
+        "desktop_execution_policy"
+    ]["mode"] == "supervised_live"
     assert group_payload["runtime_execution_envelope"] == metadata["yachiyo_execution_envelope"]
     assert group_payload["direct_tool_requests"][0]["tool"] == "group.run"
+    assert group_payload["direct_tool_requests"][0]["desktop_execution_policy"]["mode"] == (
+        "supervised_live"
+    )
     assert group_payload["direct_tool_requests"][0]["group_id"] == "group-1"
     assert group_payload["direct_tool_requests"][0]["task_todo"]["tool_name"] == "group.run"
     assert group_payload["direct_tool_requests"][0]["checkpoint_policy"][

@@ -708,6 +708,7 @@ class RuntimeExecutionRequestSnapshot(_PublicSnapshot):
     approval_required: bool = False
     risk_level: str = "low"
     execution_mode: DesktopExecutionModeSnapshot | None = None
+    desktop_execution_policy: DesktopExecutionPolicySnapshot | None = None
     policy_reason: str = ""
     continue_to_model: bool = False
     deferred_tool: str | None = None
@@ -760,6 +761,7 @@ class RuntimeExecutionEnvelopeSnapshot(_PublicSnapshot):
     artifacts_expected: list[str] = Field(default_factory=list)
     open_questions: list[str] = Field(default_factory=list)
     route_to_studio: bool = False
+    desktop_execution_policy: DesktopExecutionPolicySnapshot | None = None
     runtime_doctrine: str = ""
     runtime_stage_counts: dict[str, int] = Field(default_factory=dict)
     replan_signal_count: int = 0
