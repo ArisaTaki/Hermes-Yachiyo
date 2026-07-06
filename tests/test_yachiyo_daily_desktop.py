@@ -1620,17 +1620,15 @@ def test_planner_first_daily_desktop_entrypoint_scopes_named_app_ui_presence_whe
 
     assert [request["tool"] for request in requests] == [
         "desktop.list_apps",
-        "app.focus",
-        "desktop.ui_elements",
+        "desktop.inspect_app",
     ]
     assert requests[0]["input"] == {"query": "Figma", "limit": 20}
     assert requests[1]["input"] == {
+        "open_if_needed": True,
+        "focus": True,
         "app_name": "Figma",
         "selection_source": "desktop.list_apps",
         "query": "Figma",
-    }
-    assert requests[2]["input"] == {
-        "app_name": "Figma",
         "role_filter": "button",
         "limit": 80,
     }

@@ -1434,6 +1434,9 @@ def _expand_inspect_app_execution_requests(
             request = {**request, "input": {**payload, "app_name": canonical_app_name}}
             payload = request["input"]
             app_name = canonical_app_name
+        if "desktop.inspect_app" in allowed:
+            expanded.append(request)
+            continue
         if _has_later_app_ui_approval_request_for_app(requests[index + 1 :], app_name):
             expanded.append(request)
             continue

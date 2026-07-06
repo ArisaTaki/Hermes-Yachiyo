@@ -148,6 +148,110 @@ def _fake_active_window() -> dict[str, Any]:
     }
 
 
+def _fake_inspect_app(
+    app_name: str,
+    *,
+    open_if_needed: Any = True,
+    focus: Any = True,
+    role_filter: str = "",
+    limit: Any = 80,
+) -> dict[str, Any]:
+    clean_name = str(app_name or "").strip()
+    clean_limit = int(limit or 80)
+    ui_elements = [
+        {
+            "role": "text_field",
+            "title": "Search",
+            "label": "Search",
+            "focused": True,
+            "app_name": clean_name,
+        },
+        {
+            "role": "button",
+            "title": "Export",
+            "label": "Export",
+            "focused": False,
+            "app_name": clean_name,
+        },
+    ][:clean_limit]
+    ui_result = {
+        "ok": True,
+        "action": "desktop.ui_elements",
+        "summary": f"{clean_name} UI contains Search and Export",
+        "data": {
+            "app_name": clean_name,
+            "role_filter": str(role_filter or "").strip(),
+            "limit": clean_limit,
+            "elements": ui_elements,
+            "count": len(ui_elements),
+            "control_like_count": len(ui_elements),
+            "inspection_level": "control",
+            "visibility_limited": False,
+            "visibility_status": "visible",
+        },
+        "permission_error": False,
+        "fallback_used": False,
+    }
+    return {
+        "ok": True,
+        "action": "desktop.inspect_app",
+        "summary": f"{clean_name} is open, focused, and ready for foreground action",
+        "data": {
+            "app_name": clean_name,
+            "requested_app_name": clean_name,
+            "discovered_app_name": clean_name,
+            "app_found": True,
+            "open_if_needed": bool(open_if_needed),
+            "focus_requested": bool(focus),
+            "running": True,
+            "focus_verified": True,
+            "window_count": 1,
+            "ui_element_count": len(ui_elements),
+            "inspection_level": "control",
+            "visibility_limited": False,
+            "visibility_status": "visible",
+            "control_like_count": len(ui_elements),
+            "ready_for_foreground_action": True,
+            "recommended_tools": [
+                "app.focus_and_click_ui_element",
+                "app.focus_and_type_into_ui_element",
+                "desktop.verify",
+            ],
+            "recovery_actions": [],
+            "checks": {
+                "discovered_app": True,
+                "open_ok": True,
+                "status_running": True,
+                "focus_verified": True,
+                "windows_query_ok": True,
+                "ui_query_ok": True,
+                "named_ui_elements_nonempty": True,
+                "control_like_ui_visible": True,
+                "ready_for_foreground_action": True,
+            },
+            "open_result": _fake_app_open(clean_name),
+            "focus_result": {
+                "ok": True,
+                "action": "app.focus",
+                "summary": f"Focused {clean_name}",
+                "data": {"app_name": clean_name, "focus_verified": True},
+                "permission_error": False,
+                "fallback_used": False,
+            },
+            "active_window": _fake_active_window(),
+            "ui_elements": ui_result,
+        },
+        "permission_error": False,
+        "fallback_used": False,
+        "recommended_tools": [
+            "app.focus_and_click_ui_element",
+            "app.focus_and_type_into_ui_element",
+            "desktop.verify",
+        ],
+        "recovery_actions": [],
+    }
+
+
 def _event_types(events: Sequence[dict[str, Any]]) -> list[str]:
     return [str(event.get("event_type") or "") for event in events if isinstance(event, dict)]
 
@@ -293,6 +397,135 @@ def _generic_app_open_case(
     }
     return {
         "id": f"{entrypoint}_generic_app_open_before_model",
+        "ok": all(checks.values()),
+        "run_id": run_id,
+        "status": updated.get("status"),
+        "loop_status": loop_status,
+        "result": updated.get("result"),
+        "event_types": _event_types(events),
+        "selection_event": selection_event,
+        "planned_events": planned_events,
+        "tool_events": tool_events,
+        "completed_event": completed_event,
+        "checks": checks,
+    }
+
+
+def _generic_app_inspect_case(
+    service: AgentRuntimeService,
+    *,
+    entrypoint: str,
+) -> dict[str, Any]:
+    prompt = "打开 PixelForge 并读取界面"
+    if entrypoint == "main_chat":
+        run = service.start_main_chat_run(
+            task_id="smoke-main-chat-pixelforge-inspect",
+            session_id="smoke-main-chat-generic-app-inspect-session",
+            user_goal=prompt,
+        )
+        loop_result = service.execute_main_chat_model_loop(
+            str(run["run_id"]),
+            [{"role": "user", "content": prompt}],
+        )
+        updated = service.complete_main_chat_run(
+            str(run["run_id"]),
+            str(loop_result.get("result") or ""),
+        )
+        run_id = str(run.get("run_id") or "")
+        loop_status = loop_result.get("status")
+    else:
+        agent = service.create_agent(
+            {
+                "name": "Generic Desktop Inspector",
+                "model_mode": "custom_api",
+                "model_config": {
+                    "base_url": "https://api.example.test/v1",
+                    "model": "demo-model",
+                    "api_key": "sk-secret",
+                },
+                "tool_policy": {
+                    "allowed_tools": ["workspace.read"],
+                    "approval_required": {},
+                },
+            }
+        )
+        updated = service.create_agent_run(
+            {
+                "agent_id": agent["agent_id"],
+                "user_goal": prompt,
+                "daily_desktop_policy_overlay": True,
+            }
+        )
+        run_id = str(updated.get("run_id") or "")
+        loop_status = ""
+
+    events = service.list_run_events(run_id)["events"]
+    planned_events = _events_of_type(events, "agent.desktop.intent_planned")
+    tool_events = _events_of_type(events, "agent.tool.call")
+    completed_event = _first_event(events, "agent.desktop.intent_completed")
+    selection_event = _first_event(events, "agent.plan.selection")
+    selected_intent_event = _first_event(events, "agent.intent.selected")
+    planned_tools = [_payload(event).get("tool") for event in planned_events]
+    tool_call_tools = [_payload(event).get("tool") for event in tool_events]
+    tool_results = [
+        _payload(event).get("result")
+        for event in tool_events
+        if isinstance(_payload(event).get("result"), dict)
+    ]
+    tool_result_actions = [
+        result.get("action")
+        for result in tool_results
+        if isinstance(result, dict)
+    ]
+    inspect_result = next(
+        (
+            result
+            for result in tool_results
+            if isinstance(result, dict) and result.get("action") == "desktop.inspect_app"
+        ),
+        {},
+    )
+    inspect_data = inspect_result.get("data") if isinstance(inspect_result.get("data"), dict) else {}
+    completed_payload = _payload(completed_event)
+    selection_payload = _payload(selection_event)
+    selected_intent_payload = _payload(selected_intent_event)
+    expected_plan_tools = ["desktop.inspect_app"]
+    expected_execution_tools = ["desktop.list_apps", "desktop.inspect_app"]
+    expected_input = {"app_name": "PixelForge", "open_if_needed": True, "focus": True, "limit": 80}
+    checks = {
+        "run_completed": updated.get("status") == "completed",
+        "summary_names_generic_app": "PixelForge" in str(updated.get("result") or ""),
+        "model_not_called": _model_event_free(events),
+        "intent_is_desktop_operation": (
+            (selected_intent_payload.get("intent") or {}).get("kind") == "desktop_operation"
+            if isinstance(selected_intent_payload.get("intent"), dict)
+            else False
+        ),
+        "selection_uses_runtime_planner_full_plan": selection_payload.get("selection_reason")
+        == "runtime_planner_full_plan_execution",
+        "selection_source_runtime_planner": selection_payload.get("selection_source") == "runtime_planner",
+        "selection_plan_tool_chain": selection_payload.get("plan_tools") == expected_plan_tools,
+        "planned_tool_chain": planned_tools == expected_execution_tools,
+        "planned_discovery_query": _payload(planned_events[0]).get("input_preview")
+        == {"query": "PixelForge", "limit": 20}
+        if planned_events
+        else False,
+        "planned_inspect_input": _mapping_includes(
+            _payload(planned_events[1]).get("input_preview"),
+            expected_input,
+        )
+        if len(planned_events) > 1
+        else False,
+        "tool_call_chain": tool_call_tools == expected_execution_tools,
+        "tool_results_match_chain": tool_result_actions == expected_execution_tools,
+        "inspect_result_ready": inspect_data.get("ready_for_foreground_action") is True,
+        "inspect_result_has_named_ui": inspect_data.get("ui_element_count") == 2,
+        "completed_from_runtime_planner": completed_payload.get("source") == "runtime_planner",
+        "completed_tools_match": completed_payload.get("tools") == expected_execution_tools,
+        "completed_after_inspect": completed_payload.get("tool") == "desktop.inspect_app",
+    }
+    return {
+        "id": f"{entrypoint}_generic_app_inspect_before_model",
         "ok": all(checks.values()),
         "run_id": run_id,
         "status": updated.get("status"),
@@ -710,10 +943,16 @@ def run_smoke(*, workdir: Path | None = None) -> dict[str, Any]:
                 desktop_tools,
                 "active_window",
                 _fake_active_window,
+            ), _patched_attr(
+                desktop_tools,
+                "inspect_app",
+                _fake_inspect_app,
             ):
                 cases = [
                     _generic_app_open_case(service, entrypoint="main_chat"),
                     _generic_app_open_case(service, entrypoint="agent_run"),
+                    _generic_app_inspect_case(service, entrypoint="main_chat"),
+                    _generic_app_inspect_case(service, entrypoint="agent_run"),
                     _capability_discovered_app_open_case(service),
                     _capability_discovered_app_open_path_case(service),
                     _main_chat_loop_case(service),
