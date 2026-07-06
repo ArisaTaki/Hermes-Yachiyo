@@ -48,7 +48,11 @@ def task_progress_event_payloads_for_tool_result(
     existing_timeline: list[Mapping[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Return task workspace/todo/checkpoint progress events for a tool result."""
-    effective_scope = _effective_progress_event_scope(event_scope, tool_request)
+    effective_scope = _effective_progress_event_scope(
+        event_scope,
+        tool_request,
+        tool_event,
+    )
     timeline = [dict(item) for item in existing_timeline or []]
     start_index = len(timeline)
     _append_task_progress_events(
@@ -133,7 +137,11 @@ def task_replan_event_payloads_for_tool_result(
     """Return a replayable replan request event for a failed tool result."""
     if not _tool_event_requests_replan(tool_event):
         return []
-    effective_scope = _effective_progress_event_scope(event_scope, tool_request)
+    effective_scope = _effective_progress_event_scope(
+        event_scope,
+        tool_request,
+        tool_event,
+    )
     failure = _failure_payload_from_tool_result(tool_request, tool_event)
     request = task_replan_request_from_failure(
         decision,
@@ -243,32 +251,37 @@ def _scoped_progress_event(
 def _effective_progress_event_scope(
     event_scope: ProgressEventScope,
     tool_request: Mapping[str, Any],
+    tool_event: Mapping[str, Any] | None = None,
 ) -> Literal["agent", "group.run", "workflow.run"]:
     if event_scope != "auto":
         return event_scope
-    if _request_context_text(tool_request, "workflow_run_id"):
+    if _request_context_text(tool_request, tool_event, "workflow_run_id"):
         return "workflow.run"
-    if _request_context_text(tool_request, "group_run_id", "run_group_id"):
+    if _request_context_text(tool_request, tool_event, "group_run_id", "run_group_id"):
         return "group.run"
     return "agent"
 
 
 def _request_context_text(
     tool_request: Mapping[str, Any],
+    tool_event: Mapping[str, Any] | None,
     *keys: str,
 ) -> str:
-    for key in keys:
-        text = _text(tool_request.get(key))
-        if text:
-            return text
-    for container_key in ("metadata", "context", "payload"):
-        nested = tool_request.get(container_key)
-        if not isinstance(nested, Mapping):
+    for source in (tool_request, tool_event or {}):
+        if not isinstance(source, Mapping):
             continue
         for key in keys:
-            text = _text(nested.get(key))
+            text = _text(source.get(key))
             if text:
                 return text
+        for container_key in ("metadata", "context", "payload", "result"):
+            nested = source.get(container_key)
+            if not isinstance(nested, Mapping):
+                continue
+            for key in keys:
+                text = _text(nested.get(key))
+                if text:
+                    return text
     return ""
 
 
