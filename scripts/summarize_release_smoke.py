@@ -215,6 +215,7 @@ def summarize_release_smoke(
     items = [_item_status(item, evidence) for item in SMOKE_ITEMS]
     passed_count = sum(1 for item in items if item["status"] == "passed")
     missing = [item for item in items if item["status"] != "passed"]
+    public_demo = _public_demo_summary(evidence)
     return {
         "ok": not missing,
         "status": "passed" if not missing else "incomplete",
@@ -223,6 +224,7 @@ def summarize_release_smoke(
         "missing_count": len(missing),
         "missing_item_ids": [item["id"] for item in missing],
         "items": items,
+        "public_demo": public_demo,
         "source_reports": source_reports,
         "diagnostics_sources": diagnostics_sources,
         "next_actions": _next_actions(missing),
@@ -235,10 +237,23 @@ def render_markdown(summary: Mapping[str, Any]) -> str:
         "",
         f"Status: {summary.get('status')}",
         f"Coverage: {summary.get('passed_count')}/{summary.get('item_count')} passed",
-        "",
-        "## Checklist",
-        "",
     ]
+    public_demo = _dict(summary.get("public_demo"))
+    if public_demo:
+        passed_flows = int(public_demo.get("passed_required_flow_count") or 0)
+        required_flows = int(public_demo.get("required_flow_count") or 0)
+        release_level = str(public_demo.get("release_level") or "")
+        lines.append(
+            f"Public demo: {passed_flows}/{required_flows} required flows"
+            + (f" (`{release_level}`)" if release_level else "")
+        )
+        missing_flows = _string_list(public_demo.get("missing_required_flow_ids"))
+        if missing_flows:
+            lines.append(
+                "Missing demo flows: "
+                + ", ".join(f"`{value}`" for value in missing_flows)
+            )
+    lines.extend(["", "## Checklist", ""])
     for item in _dict_list(summary.get("items")):
         marker = "x" if item.get("status") == "passed" else " "
         lines.append(f"- [{marker}] `{item.get('id')}` - {item.get('label')}")
@@ -735,6 +750,50 @@ def _collect_aggregate_public_demo_evidence(
         evidence.setdefault("public_demo_selected", []).append(aggregate)
     if complete:
         evidence.setdefault("public_demo_complete", []).append(aggregate)
+
+
+def _public_demo_summary(evidence: Mapping[str, Any]) -> dict[str, Any]:
+    assessments = _dict_list(evidence.get("public_demo_assessment"))
+    if not assessments:
+        return {}
+    aggregates = [
+        assessment
+        for assessment in assessments
+        if str(assessment.get("kind") or "") == "public_demo_aggregate"
+    ]
+    candidates = aggregates or assessments
+    candidate = max(
+        candidates,
+        key=lambda assessment: (
+            assessment.get("complete") is True,
+            int(assessment.get("passed_required_flow_count") or 0),
+            int(assessment.get("required_flow_count") or 0),
+        ),
+    )
+    missing_flow_ids = _string_list(candidate.get("missing_required_flow_ids"))
+    return {
+        "source": str(candidate.get("source") or ""),
+        "kind": str(candidate.get("kind") or ""),
+        "status": str(candidate.get("status") or ""),
+        "release_level": str(candidate.get("release_level") or ""),
+        "complete": bool(candidate.get("complete") is True),
+        "selected_count": int(candidate.get("selected_count") or 0),
+        "passed_count": int(candidate.get("passed_count") or 0),
+        "required_flow_count": int(candidate.get("required_flow_count") or 0),
+        "passed_required_flow_count": int(
+            candidate.get("passed_required_flow_count") or 0
+        ),
+        "remaining_required_flow_count": len(missing_flow_ids),
+        "required_flow_ids": _string_list(candidate.get("required_flow_ids")),
+        "passed_required_flow_ids": _string_list(
+            candidate.get("passed_required_flow_ids")
+        ),
+        "missing_required_flow_ids": missing_flow_ids,
+        "release_blockers": _dict_list(candidate.get("release_blockers")),
+        "full_demo_command": str(
+            candidate.get("full_demo_command") or FULL_PUBLIC_DEMO_COMMAND
+        ),
+    }
 
 
 def _collect_public_demo_capability_projection(

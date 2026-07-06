@@ -260,6 +260,10 @@ def test_public_release_gate_defaults_to_safe_preflight_with_demo_blockers(
         "workflow_provider",
     ]
     assert public_demo["release_blockers"][0]["reason"] == "desktop_session_locked"
+    assert summary["public_demo"]["release_level"] == "partial_demo_ready"
+    assert summary["public_demo"]["passed_required_flow_count"] == 12
+    assert summary["public_demo"]["required_flow_count"] == 18
+    assert summary["public_demo"]["remaining_required_flow_count"] == 2
     desktop_action = next(
         item for item in summary["next_actions"] if item["id"] == "public_demo_real_desktop"
     )
@@ -321,6 +325,7 @@ def test_public_release_gate_strict_mode_fails_until_release_ready(
     assert payload["status"] == "needs_release_evidence"
     assert payload["release_smoke"]["status"] == "incomplete"
     markdown = output_markdown.read_text(encoding="utf-8")
+    assert "Public demo: 12/18 required flows (`partial_demo_ready`)" in markdown
     assert "Release level: `partial_demo_ready`" in markdown
     assert "## Release Smoke" in markdown
     assert "Demo blocker `real_desktop_interaction`: `desktop_session_locked`" in markdown

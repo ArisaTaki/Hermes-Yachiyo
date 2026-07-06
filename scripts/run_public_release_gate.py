@@ -227,6 +227,10 @@ def run_public_release_gate(
         if include_release_smoke
         else {}
     )
+    public_demo = _best_public_demo_snapshot(
+        _public_demo_snapshot_from_checks(check_results),
+        _dict(release_smoke.get("public_demo")),
+    )
     release_smoke_blockers = _release_smoke_blockers(release_smoke)
     effective_release_smoke_blockers = _effective_release_smoke_blockers(
         release_smoke_blockers,
@@ -260,6 +264,7 @@ def run_public_release_gate(
         "external_requirement_count": len(external_requirements),
         "external_requirements": external_requirements,
         "checks": check_results,
+        "public_demo": public_demo,
         "release_smoke": release_smoke,
         "next_actions": next_actions,
     }
@@ -543,6 +548,80 @@ def _public_demo_release_blockers(check: Mapping[str, Any]) -> list[dict[str, An
     ]
 
 
+def _public_demo_snapshot_from_checks(
+    check_results: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    check = next(
+        (
+            item
+            for item in check_results
+            if item.get("id") == "public_demo"
+            and (
+                item.get("release_level")
+                or item.get("required_flow_count")
+                or item.get("missing_required_flow_ids")
+            )
+        ),
+        {},
+    )
+    return _public_demo_snapshot(check)
+
+
+def _best_public_demo_snapshot(
+    *candidates: Mapping[str, Any],
+) -> dict[str, Any]:
+    snapshots = [_public_demo_snapshot(candidate) for candidate in candidates]
+    snapshots = [snapshot for snapshot in snapshots if snapshot]
+    if not snapshots:
+        return {}
+    return max(
+        snapshots,
+        key=lambda snapshot: (
+            snapshot.get("complete") is True,
+            int(snapshot.get("passed_required_flow_count") or 0),
+            int(snapshot.get("required_flow_count") or 0),
+            len(_string_list(snapshot.get("public_demo_report_sources"))),
+            len(_string_list(snapshot.get("passed_required_flow_ids"))),
+        ),
+    )
+
+
+def _public_demo_snapshot(value: Mapping[str, Any]) -> dict[str, Any]:
+    if not isinstance(value, Mapping) or not value:
+        return {}
+    missing_flow_ids = _string_list(value.get("missing_required_flow_ids"))
+    required_flow_count = int(value.get("required_flow_count") or 0)
+    if (
+        not str(value.get("release_level") or "")
+        and required_flow_count == 0
+        and not missing_flow_ids
+    ):
+        return {}
+    return {
+        "release_level": str(value.get("release_level") or ""),
+        "complete": bool(value.get("complete") is True),
+        "selected_count": int(value.get("selected_count") or 0),
+        "passed_count": int(value.get("passed_count") or 0),
+        "required_flow_count": required_flow_count,
+        "passed_required_flow_count": int(
+            value.get("passed_required_flow_count") or 0
+        ),
+        "remaining_required_flow_count": len(missing_flow_ids),
+        "required_flow_ids": _string_list(value.get("required_flow_ids")),
+        "passed_required_flow_ids": _string_list(
+            value.get("passed_required_flow_ids")
+        ),
+        "missing_required_flow_ids": missing_flow_ids,
+        "release_blockers": _dict_list(value.get("release_blockers")),
+        "full_demo_command": str(
+            value.get("full_demo_command") or _full_demo_command()
+        ),
+        "public_demo_report_sources": _string_list(
+            value.get("public_demo_report_sources") or value.get("source")
+        ),
+    }
+
+
 def _release_smoke_assessment(
     *,
     tmp_dir: Path,
@@ -604,6 +683,7 @@ def _release_smoke_assessment(
         "passed_count": int(report.get("passed_count") or 0),
         "missing_count": int(report.get("missing_count") or 0),
         "missing_item_ids": _string_list(report.get("missing_item_ids")),
+        "public_demo": _dict(report.get("public_demo")),
         "next_actions": _dict_list(report.get("next_actions")),
         "stdout_tail": _tail(result.stdout),
         "stderr_tail": _tail(result.stderr),
@@ -1095,10 +1175,23 @@ def render_markdown(summary: Mapping[str, Any]) -> str:
         f"Release blockers: {int(summary.get('release_blocker_count') or 0)}",
         f"External requirements: {int(summary.get('external_requirement_count') or 0)}",
         f"Checks: {summary.get('passed_count')}/{summary.get('check_count')} passed",
-        "",
-        "## Checks",
-        "",
     ]
+    public_demo = _dict(summary.get("public_demo"))
+    if public_demo:
+        passed_flows = int(public_demo.get("passed_required_flow_count") or 0)
+        required_flows = int(public_demo.get("required_flow_count") or 0)
+        release_level = str(public_demo.get("release_level") or "")
+        lines.append(
+            f"Public demo: {passed_flows}/{required_flows} required flows"
+            + (f" (`{release_level}`)" if release_level else "")
+        )
+        missing_flows = _string_list(public_demo.get("missing_required_flow_ids"))
+        if missing_flows:
+            lines.append(
+                "Missing demo flows: "
+                + ", ".join(f"`{item}`" for item in missing_flows)
+            )
+    lines.extend(["", "## Checks", ""])
     for check in _dict_list(summary.get("checks")):
         marker = "x" if check.get("status") == "passed" else " "
         lines.append(f"- [{marker}] `{check.get('id')}` - {check.get('status')} - {check.get('label')}")
