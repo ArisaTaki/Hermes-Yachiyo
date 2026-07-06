@@ -2988,6 +2988,12 @@ def test_legacy_runtime_port_readiness_includes_desktop_execution_capabilities(m
     assert readiness["ok"] is True
     assert capabilities["tasks"] is True
     assert capabilities["runnables"] == 1
+    assert capabilities["sandbox_provider"]["status"] == "provider_required"
+    assert capabilities["sandbox_provider"]["blocking_conditions"] == [
+        "sandbox_desktop_provider_required"
+    ]
+    assert capabilities["desktop_provider_ready"] is False
+    assert capabilities["desktop_provider_supported_tools"] == []
     assert capabilities["desktop_execution"]["platform"] in {
         "macos",
         "windows",
@@ -3025,6 +3031,57 @@ def test_legacy_runtime_port_readiness_reports_desktop_permission_gaps(monkeypat
     assert capabilities["foreground_input"]["missing_permissions"] == ["accessibility"]
     assert capabilities["foreground_input"]["available"] is False
     assert runtime.calls == [("list_runnables", None)]
+
+
+def test_legacy_runtime_port_readiness_reports_sandbox_provider_health(
+    monkeypatch,
+) -> None:
+    class FakeResponse:
+        status = 200
+
+        def __enter__(self) -> "FakeResponse":
+            return self
+
+        def __exit__(self, *_args: Any) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return (
+                b'{"ok": true, "status": "ready", "supported_tools": '
+                b'["desktop.list_apps"]}'
+            )
+
+        def getcode(self) -> int:
+            return self.status
+
+    def fake_urlopen(request: Any, *, timeout: float) -> FakeResponse:
+        return FakeResponse()
+
+    runtime = _FakeRuntime()
+    monkeypatch.setattr(
+        "apps.shell.agent.runtime.desktop_execution_providers.urlopen_with_bundled_ca",
+        fake_urlopen,
+    )
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_URL", "http://127.0.0.1:19091")
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_ID", "local-headless-desktop")
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS", "desktop.list_apps")
+    monkeypatch.setattr(
+        "apps.shell.yachiyo_agent.legacy_tasks.desktop_permission_missing_by_capability",
+        lambda: {},
+    )
+    monkeypatch.setattr(
+        "apps.shell.yachiyo_agent.legacy_tasks.desktop_runtime_blocking_conditions_by_capability",
+        lambda: {},
+    )
+
+    readiness = LegacyRuntimePort(runtime).readiness()
+    capabilities = readiness["capabilities"]
+
+    assert capabilities["desktop_provider_ready"] is True
+    assert capabilities["desktop_provider_supported_tools"] == ["desktop.list_apps"]
+    assert capabilities["sandbox_provider"]["status"] == "available"
+    assert capabilities["sandbox_provider"]["health"]["checked"] is True
+    assert capabilities["sandbox_provider"]["health"]["status"] == "ready"
 
 
 def test_legacy_runtime_port_readiness_reports_desktop_runtime_blockers(monkeypatch) -> None:

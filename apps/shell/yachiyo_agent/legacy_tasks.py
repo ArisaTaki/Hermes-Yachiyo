@@ -11,7 +11,10 @@ from .desktop_permissions import (
     desktop_permission_missing_by_capability,
     desktop_runtime_blocking_conditions_by_capability,
 )
-from .desktop_execution_policy import with_daily_entrypoint_desktop_execution_policy
+from .desktop_execution_policy import (
+    sandbox_desktop_provider_status,
+    with_daily_entrypoint_desktop_execution_policy,
+)
 from .legacy_groups import (
     chat_group_snapshot,
     chat_group_snapshots,
@@ -266,12 +269,23 @@ class LegacyRuntimePort:
             blocking_conditions = desktop_runtime_blocking_conditions_by_capability()
         except Exception:
             blocking_conditions = {}
+        sandbox_provider = sandbox_desktop_provider_status(
+            {"desktop_provider_health_probe": True}
+        )
         return {
             "ok": True,
             "status": "ready",
             "capabilities": {
                 "tasks": True,
                 "runnables": len(payload.get("runnables") or []),
+                "sandbox_provider": sandbox_provider,
+                "desktop_provider_ready": bool(
+                    sandbox_provider.get("available")
+                    and sandbox_provider.get("adapter_ready")
+                ),
+                "desktop_provider_supported_tools": list(
+                    sandbox_provider.get("supported_tools") or []
+                ),
                 **desktop_execution_capability_snapshots(
                     registered_tools=known_tools,
                     missing_permissions=missing_permissions,
