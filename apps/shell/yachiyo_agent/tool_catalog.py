@@ -17,6 +17,7 @@ from apps.shell.agent.tools.plugins import list_restricted_plugin_tools, restric
 
 from .contracts import (
     DesktopExecutionCapabilitySnapshot,
+    DesktopExecutionModeSnapshot,
     LegacyCleanupCoverageSnapshot,
     RestrictedPluginToolSnapshot,
     RestrictedToolPluginSnapshot,
@@ -30,6 +31,7 @@ from .policy import (
     desktop_tool_blocking_conditions,
     desktop_tool_missing_permissions,
     desktop_execution_capability_snapshots,
+    desktop_tool_execution_mode,
     desktop_tool_risk_level,
 )
 
@@ -138,6 +140,7 @@ def _catalog_item_from_descriptor(
         description=descriptor.description,
         capability_id=capability_id,
         risk_level=_risk_level_for_tool(tool_name),
+        execution_mode=desktop_tool_execution_mode(tool_name),
         approval_required=_approval_required_for_tool(tool_name),
         input_schema=deepcopy(model_tool_schema["function"]["parameters"]),
         model_tool_schema=deepcopy(model_tool_schema),
@@ -167,6 +170,16 @@ def _legacy_cleanup_coverage_snapshot(payload: Any = None) -> LegacyCleanupCover
     return LegacyCleanupCoverageSnapshot.model_validate(legacy_daily_desktop_cleanup_coverage())
 
 
+def _execution_mode_from_payload(
+    payload: Mapping[str, Any],
+    tool_name: str,
+) -> DesktopExecutionModeSnapshot:
+    raw = payload.get("execution_mode")
+    if isinstance(raw, Mapping):
+        return DesktopExecutionModeSnapshot.model_validate(dict(raw))
+    return desktop_tool_execution_mode(tool_name)
+
+
 def _catalog_item_from_payload(payload: Mapping[str, Any]) -> ToolCatalogItemSnapshot:
     tool_name = str(payload.get("tool_name") or payload.get("name") or "").strip()
     descriptor = TOOL_DESCRIPTORS.get(tool_name)
@@ -194,6 +207,7 @@ def _catalog_item_from_payload(payload: Mapping[str, Any]) -> ToolCatalogItemSna
         description=str(payload.get("description") or (descriptor.description if descriptor else "")),
         capability_id=_optional_string(payload.get("capability_id")),
         risk_level=_optional_string(payload.get("risk_level")),
+        execution_mode=_execution_mode_from_payload(payload, tool_name),
         approval_required=bool(payload.get("approval_required", _approval_required_for_tool(tool_name))),
         input_schema=dict(input_schema),
         model_tool_schema=dict(model_tool_schema),

@@ -5150,6 +5150,11 @@ def test_agent_run_runtime_planner_entrypoint_surfaces_deferred_ui_context(
         )
         assert deferred_ui["payload"]["replan_triggers"] == ["verification_failed"]
         assert deferred_ui["payload"]["requires_post_action_verification"] is True
+        assert deferred_ui["payload"]["execution_mode"] == "read_only_observation"
+        assert deferred_ui["payload"]["keyboard_mouse_capture"] is False
+        assert deferred_ui["payload"]["desktop_execution_mode"]["mode"] == (
+            "read_only_observation"
+        )
         assert policy_deferred_ui["payload"]["deferred_tool"] == "desktop.click_ui_element"
         assert policy_deferred_ui["payload"]["deferred_input"] == deferred_ui["payload"][
             "deferred_input"
@@ -5159,6 +5164,12 @@ def test_agent_run_runtime_planner_entrypoint_surfaces_deferred_ui_context(
         assert policy_click["payload"]["step_id"] == "operate-foreground-ui"
         assert policy_click["payload"]["runtime_stage"] == "operate"
         assert policy_click["payload"]["replan_triggers"] == ["verification_failed"]
+        assert policy_click["payload"]["execution_mode"] == "supervised_live"
+        assert policy_click["payload"]["keyboard_mouse_capture"] is True
+        assert policy_click["payload"]["sandbox_recommended"] is True
+        assert policy_click["payload"]["desktop_execution_mode"]["mode"] == (
+            "supervised_live"
+        )
     finally:
         service.close()
 

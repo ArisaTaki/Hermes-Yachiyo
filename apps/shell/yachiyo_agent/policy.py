@@ -11,6 +11,7 @@ from .contracts import (
     ApprovalCardSnapshot,
     DesktopActionRiskSnapshot,
     DesktopExecutionCapabilitySnapshot,
+    DesktopExecutionModeSnapshot,
     DesktopExecutionRisk,
 )
 
@@ -124,6 +125,87 @@ LOW_RISK_BROWSER_TOOLS = frozenset(
     }
 )
 MEDIUM_RISK_BROWSER_TOOLS = frozenset({"browser.click", "browser.type_text"})
+
+READ_ONLY_OBSERVATION_TOOLS = frozenset(
+    {
+        "screen.capture",
+        "desktop.permissions",
+        "desktop.active_window",
+        "desktop.running_apps",
+        "desktop.list_apps",
+        "desktop.list_windows",
+        "desktop.read_ui",
+        "desktop.windows",
+        "desktop.ui_elements",
+        "desktop.inspect_app",
+        "desktop.verify",
+        "app.status",
+        "browser.current_page",
+        "browser.extract_text",
+        "browser.open_url_and_extract_text",
+        "browser.open_url_and_screenshot",
+        "browser.screenshot",
+        "media.apple_music_status",
+    }
+)
+LIVE_DESKTOP_FOCUS_TOOLS = frozenset(
+    {
+        "desktop.open_app",
+        "desktop.focus_app",
+        "app.open",
+        "app.focus",
+        "app.focus_window",
+        "app.show",
+        "app.hide",
+        "app.minimize",
+        "desktop.hide_app",
+        "desktop.show_all_apps",
+        "desktop.minimize_window",
+        "desktop.reveal_path",
+        "desktop.open_path",
+        "desktop.open_path_with_app",
+        "app.open_path_with_app",
+        "system.settings_open",
+    }
+)
+LIVE_DESKTOP_INPUT_TOOLS = frozenset(
+    {
+        "app.open_and_safe_type_text",
+        "app.focus_and_safe_type_text",
+        "app.open_and_safe_shortcut",
+        "app.focus_and_safe_shortcut",
+        "app.open_and_safe_key",
+        "app.focus_and_safe_key",
+        "app.open_and_safe_scroll",
+        "app.focus_and_safe_scroll",
+        "app.open_and_safe_click",
+        "app.focus_and_safe_click",
+        "app.open_and_click_ui_element",
+        "app.focus_and_click_ui_element",
+        "app.open_and_type_into_ui_element",
+        "app.focus_and_type_into_ui_element",
+        "app.open_and_hotkey",
+        "app.focus_and_hotkey",
+        "desktop.safe_shortcut",
+        "desktop.safe_key",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.safe_click",
+        "desktop.safe_scroll",
+        "desktop.click_ui_element",
+        "desktop.type_into_ui_element",
+        "desktop.close_window",
+        "desktop.shortcut",
+        "desktop.type",
+        "desktop.hotkey",
+        "desktop.type_text",
+        "desktop.click",
+        "desktop.submit_foreground",
+        "media.music_app_open_and_play",
+        "media.music_app_control",
+        "media.system_control",
+    }
+)
 LOW_RISK_DESKTOP_ACTIONS = frozenset(
     {
         "read_screen",
@@ -736,6 +818,106 @@ def desktop_action_risk_level(action_name: str) -> DesktopExecutionRisk | None:
     return DESKTOP_ACTION_RISK_LEVELS.get(str(action_name or "").strip())
 
 
+def desktop_tool_execution_mode(tool_name: str) -> DesktopExecutionModeSnapshot:
+    """Classify how a tool touches the user's desktop so Studio can surface control risk."""
+
+    clean = str(tool_name or "").strip()
+    if not clean:
+        return DesktopExecutionModeSnapshot(
+            mode="preview",
+            reason="No executable tool was selected.",
+        )
+    if clean in READ_ONLY_OBSERVATION_TOOLS:
+        return DesktopExecutionModeSnapshot(
+            mode="read_only_observation",
+            isolation="none",
+            foreground_control=False,
+            keyboard_mouse_capture=False,
+            sandbox_recommended=False,
+            reason="Reads desktop or browser state without sending foreground input.",
+            mitigations=["Prefer this before acting when target state is uncertain."],
+        )
+    if clean in LIVE_DESKTOP_INPUT_TOOLS:
+        return DesktopExecutionModeSnapshot(
+            mode="supervised_live",
+            isolation="none",
+            foreground_control=True,
+            keyboard_mouse_capture=True,
+            sandbox_recommended=True,
+            user_handoff_recommended=clean == "desktop.submit_foreground",
+            approval_recommended=clean in MEDIUM_RISK_DESKTOP_TOOLS
+            or clean in HIGH_RISK_DESKTOP_TOOLS,
+            reason="Sends input to the real foreground desktop and can contend with the user.",
+            mitigations=[
+                "Prefer tool-native or sandbox execution when available.",
+                "Use preview/dry-run before live foreground control.",
+                "Require explicit approval for submit, send, destructive, or ambiguous actions.",
+            ],
+        )
+    if clean in LIVE_DESKTOP_FOCUS_TOOLS:
+        return DesktopExecutionModeSnapshot(
+            mode="supervised_live",
+            isolation="none",
+            foreground_control=True,
+            keyboard_mouse_capture=False,
+            sandbox_recommended=True,
+            approval_recommended=clean in MEDIUM_RISK_DESKTOP_TOOLS
+            or clean in HIGH_RISK_DESKTOP_TOOLS,
+            reason="Activates or changes a real desktop app/window and may steal focus.",
+            mitigations=[
+                "Prefer a sandbox desktop/session for longer workflows.",
+                "Verify the target app before any follow-up input.",
+            ],
+        )
+    if clean.startswith("browser."):
+        return DesktopExecutionModeSnapshot(
+            mode="tool_native",
+            isolation="browser_profile",
+            reason="Uses browser automation instead of global desktop mouse/keyboard control.",
+            mitigations=["Keep browser state in an isolated profile when possible."],
+        )
+    if clean.startswith("media.apple_music"):
+        return DesktopExecutionModeSnapshot(
+            mode="tool_native",
+            isolation="process",
+            reason="Uses Apple Music automation instead of global desktop mouse/keyboard control.",
+            mitigations=["Keep Music automation behind the existing macOS automation permission gate."],
+        )
+    if clean.startswith(("workspace.", "file.", "fs.", "data.", "artifact.", "memory.", "future_task.")):
+        return DesktopExecutionModeSnapshot(
+            mode="tool_native",
+            isolation="process",
+            reason="Uses structured local tools instead of foreground desktop control.",
+        )
+    if clean.startswith(("terminal.", "python.")):
+        return DesktopExecutionModeSnapshot(
+            mode="tool_native",
+            isolation="process",
+            approval_recommended=True,
+            reason="Executes code or shell commands in a process, not through desktop input.",
+            mitigations=["Keep shell/code execution behind the existing approval and policy gates."],
+        )
+    return DesktopExecutionModeSnapshot(
+        mode="tool_native",
+        isolation="none",
+        reason="Uses a structured runtime tool without known global mouse/keyboard capture.",
+    )
+
+
+def desktop_action_execution_mode(action_name: str) -> DesktopExecutionModeSnapshot:
+    tools = list(DESKTOP_ACTION_TOOL_HINTS.get(str(action_name or "").strip(), ()))
+    if not tools:
+        return desktop_tool_execution_mode("")
+    snapshots = [desktop_tool_execution_mode(tool) for tool in tools]
+    if any(snapshot.user_handoff_recommended for snapshot in snapshots):
+        return next(snapshot for snapshot in snapshots if snapshot.user_handoff_recommended)
+    if any(snapshot.keyboard_mouse_capture for snapshot in snapshots):
+        return next(snapshot for snapshot in snapshots if snapshot.keyboard_mouse_capture)
+    if any(snapshot.foreground_control for snapshot in snapshots):
+        return next(snapshot for snapshot in snapshots if snapshot.foreground_control)
+    return snapshots[0]
+
+
 def is_high_risk_desktop_action(action_name: str) -> bool:
     return desktop_action_risk_level(action_name) == "high"
 
@@ -751,6 +933,7 @@ def desktop_action_risk_snapshots() -> list[DesktopActionRiskSnapshot]:
             description=DESKTOP_ACTION_DESCRIPTIONS.get(action_id, ""),
             tools=list(DESKTOP_ACTION_TOOL_HINTS.get(action_id, ())),
             requires_approval=DESKTOP_ACTION_RISK_LEVELS[action_id] == "high",
+            execution_mode=desktop_action_execution_mode(action_id),
         )
         for action_id in DESKTOP_ACTION_RISK_ORDER
         if action_id in DESKTOP_ACTION_RISK_LEVELS

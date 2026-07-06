@@ -39,6 +39,7 @@ from apps.shell.yachiyo_agent import (
     DesktopExecutionLoopSnapshot,
     DesktopActionRiskSnapshot,
     DesktopExecutionCapabilitySnapshot,
+    DesktopExecutionModeSnapshot,
     DesktopRecoveryActionMetadataSnapshot,
     FutureTaskSnapshot,
     FutureTaskTriggerResultSnapshot,
@@ -99,6 +100,7 @@ from apps.shell.yachiyo_agent import (
     approval_is_pending,
     desktop_action_risk_level,
     desktop_action_risk_snapshots,
+    desktop_tool_execution_mode,
     desktop_execution_capability_snapshots,
     desktop_tool_risk_level,
     is_high_risk_desktop_action,
@@ -224,6 +226,7 @@ def test_tool_plan_step_snapshot_exposes_runtime_action() -> None:
         "tool_name",
         "input_preview",
         "risk_level",
+        "execution_mode",
         "approval_required",
         "depends_on",
         "reason",
@@ -380,6 +383,7 @@ def test_runtime_execution_envelope_snapshot_is_public_contract() -> None:
         input={"query": "PixelForge", "limit": 20},
         planning_reason="planner_desktop_app_discovery",
         risk_level="low",
+        execution_mode=DesktopExecutionModeSnapshot(mode="read_only_observation"),
         policy_reason="Desktop app discovery is read-only.",
         runtime_doctrine="discover_operate_verify",
         runtime_stage="discover",
@@ -481,6 +485,7 @@ def test_runtime_execution_envelope_snapshot_is_public_contract() -> None:
     assert payload["requests"][0]["capability_selected_tools"] == ["desktop.list_apps"]
     assert payload["requests"][0]["input"] == {"query": "PixelForge", "limit": 20}
     assert payload["requests"][0]["risk_level"] == "low"
+    assert payload["requests"][0]["execution_mode"]["mode"] == "read_only_observation"
     assert payload["requests"][0]["policy_reason"] == "Desktop app discovery is read-only."
     assert payload["requests"][0]["runtime_stage"] == "discover"
     assert payload["requests"][0]["replan_triggers"] == ["verification_failed"]
@@ -4871,6 +4876,52 @@ def test_desktop_execution_capability_snapshot_json_shape_is_stable() -> None:
         )
 
 
+def test_desktop_execution_mode_snapshot_classifies_live_foreground_tools() -> None:
+    snapshot = DesktopExecutionModeSnapshot(
+        mode="supervised_live",
+        isolation="none",
+        foreground_control=True,
+        keyboard_mouse_capture=True,
+        sandbox_recommended=True,
+        approval_recommended=True,
+        reason="Sends input to the real foreground desktop.",
+        mitigations=["Prefer sandbox execution."],
+    )
+
+    payload = _json(snapshot)
+    safe_type = desktop_tool_execution_mode("desktop.safe_type_text").model_dump(mode="json")
+    read_ui = desktop_tool_execution_mode("desktop.ui_elements").model_dump(mode="json")
+
+    assert list(payload) == [
+        "mode",
+        "isolation",
+        "foreground_control",
+        "keyboard_mouse_capture",
+        "sandbox_recommended",
+        "user_handoff_recommended",
+        "approval_recommended",
+        "reason",
+        "mitigations",
+    ]
+    assert payload["mode"] == "supervised_live"
+    assert safe_type["mode"] == "supervised_live"
+    assert safe_type["keyboard_mouse_capture"] is True
+    assert safe_type["sandbox_recommended"] is True
+    assert read_ui["mode"] == "read_only_observation"
+    assert read_ui["keyboard_mouse_capture"] is False
+    music_app = desktop_tool_execution_mode("media.music_app_open_and_play")
+    assert music_app.mode == "supervised_live"
+    assert music_app.keyboard_mouse_capture is True
+    assert music_app.sandbox_recommended is True
+    assert desktop_tool_execution_mode("media.apple_music_play").mode == "tool_native"
+    assert (
+        desktop_tool_execution_mode("media.apple_music_status").mode
+        == "read_only_observation"
+    )
+    with pytest.raises(ValidationError):
+        DesktopExecutionModeSnapshot(mode="tool_native", unknown=True)
+
+
 def test_desktop_recovery_action_metadata_snapshot_json_shape_is_stable() -> None:
     snapshot = DesktopRecoveryActionMetadataSnapshot(
         recovery_tool="system.settings_open",
@@ -4991,8 +5042,10 @@ def test_desktop_action_risk_snapshot_json_shape_is_stable() -> None:
         "description",
         "tools",
         "requires_approval",
+        "execution_mode",
     ]
     assert payload["risk_level"] == "medium"
+    assert payload["execution_mode"] is None
     with pytest.raises(ValidationError):
         DesktopActionRiskSnapshot(
             action_id="read_screen",
@@ -5338,6 +5391,29 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
     assert desktop_tool_risk_level("browser.open_url_and_screenshot") == "low"
     assert desktop_tool_risk_level("browser.click") == "medium"
     assert desktop_tool_risk_level("terminal.run") is None
+    assert desktop_tool_execution_mode("desktop.ui_elements").mode == (
+        "read_only_observation"
+    )
+    assert desktop_tool_execution_mode("app.open").foreground_control is True
+    assert desktop_tool_execution_mode("app.open").keyboard_mouse_capture is False
+    assert desktop_tool_execution_mode("desktop.safe_type_text").mode == (
+        "supervised_live"
+    )
+    assert desktop_tool_execution_mode("desktop.safe_type_text").keyboard_mouse_capture is True
+    assert desktop_tool_execution_mode("desktop.safe_type_text").sandbox_recommended is True
+    assert (
+        desktop_tool_execution_mode("media.music_app_open_and_play").mode
+        == "supervised_live"
+    )
+    assert (
+        desktop_tool_execution_mode("media.music_app_open_and_play").keyboard_mouse_capture
+        is True
+    )
+    assert desktop_tool_execution_mode("media.apple_music_status").mode == (
+        "read_only_observation"
+    )
+    assert desktop_tool_execution_mode("browser.open_url").isolation == "browser_profile"
+    assert desktop_tool_execution_mode("terminal.run").approval_recommended is True
     assert desktop_action_risk_level("read_screen") == "low"
     assert desktop_action_risk_level("diagnose_permissions") == "low"
     assert desktop_action_risk_level("open_path") == "low"
@@ -5422,6 +5498,8 @@ def test_desktop_action_risk_catalog_covers_product_boundaries() -> None:
     assert catalog["read_windows"].tools == ["desktop.list_windows", "desktop.windows"]
     assert catalog["read_ui_elements"].risk_level == "low"
     assert catalog["read_ui_elements"].tools == ["desktop.read_ui", "desktop.ui_elements"]
+    assert catalog["read_ui_elements"].execution_mode is not None
+    assert catalog["read_ui_elements"].execution_mode.mode == "read_only_observation"
     assert catalog["read_app_status"].risk_level == "low"
     assert catalog["read_app_status"].tools == ["app.status"]
     assert catalog["focus_app_window"].risk_level == "low"
@@ -5466,6 +5544,10 @@ def test_desktop_action_risk_catalog_covers_product_boundaries() -> None:
     assert catalog["foreground_safe_key"].tools == ["desktop.safe_key"]
     assert catalog["foreground_safe_type_text"].risk_level == "low"
     assert catalog["foreground_safe_type_text"].tools == ["desktop.safe_type_text"]
+    assert catalog["foreground_safe_type_text"].execution_mode is not None
+    assert catalog["foreground_safe_type_text"].execution_mode.mode == "supervised_live"
+    assert catalog["foreground_safe_type_text"].execution_mode.keyboard_mouse_capture is True
+    assert catalog["foreground_safe_type_text"].execution_mode.sandbox_recommended is True
     assert catalog["foreground_search_submit"].risk_level == "low"
     assert catalog["foreground_search_submit"].tools == ["desktop.search_submit"]
     assert catalog["foreground_search_submit"].requires_approval is False
@@ -5721,6 +5803,8 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
     assert any("alias for desktop.windows" in note for note in list_windows_alias.fallback_notes)
     assert read_ui_alias.capability_id == "active_window"
     assert read_ui_alias.risk_level == "low"
+    assert read_ui_alias.execution_mode is not None
+    assert read_ui_alias.execution_mode.mode == "read_only_observation"
     assert any("alias for desktop.ui_elements" in note for note in read_ui_alias.fallback_notes)
     assert verify_alias.capability_id == "active_window"
     assert verify_alias.risk_level == "low"
@@ -5856,6 +5940,10 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
     assert any("whitelisted foreground navigation keys" in note for note in safe_key.fallback_notes)
     assert safe_type_text.capability_id == "foreground_input"
     assert safe_type_text.risk_level == "low"
+    assert safe_type_text.execution_mode is not None
+    assert safe_type_text.execution_mode.mode == "supervised_live"
+    assert safe_type_text.execution_mode.keyboard_mouse_capture is True
+    assert safe_type_text.execution_mode.sandbox_recommended is True
     assert safe_type_text.input_schema["required"] == ["text"]
     assert safe_type_text.blocking_conditions == ["desktop_session_locked"]
     assert any("explicitly provided by the user" in note for note in safe_type_text.fallback_notes)

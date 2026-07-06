@@ -18,6 +18,22 @@ GroupMode = Literal["moderated", "round_robin", "debate", "pipeline", "parallel"
 MemoryScope = Literal["shared", "per_agent", "hybrid"]
 ApprovalStatus = Literal["pending", "approved", "rejected", "cancelled", "expired"]
 DesktopExecutionRisk = Literal["low", "medium", "high"]
+DesktopExecutionMode = Literal[
+    "preview",
+    "tool_native",
+    "read_only_observation",
+    "supervised_live",
+    "sandbox_preferred",
+    "handoff_required",
+]
+DesktopIsolationKind = Literal[
+    "none",
+    "process",
+    "browser_profile",
+    "sandbox_desktop",
+    "headless",
+    "user_handoff",
+]
 RecoveryActionKind = Literal["permission_recovery", "retry_original"]
 TaskWorkspaceItemKind = Literal[
     "input",
@@ -105,6 +121,18 @@ class DesktopExecutionCapabilitySnapshot(_PublicSnapshot):
     diagnostic_route: str | None = None
 
 
+class DesktopExecutionModeSnapshot(_PublicSnapshot):
+    mode: DesktopExecutionMode | str = "tool_native"
+    isolation: DesktopIsolationKind | str = "none"
+    foreground_control: bool = False
+    keyboard_mouse_capture: bool = False
+    sandbox_recommended: bool = False
+    user_handoff_recommended: bool = False
+    approval_recommended: bool = False
+    reason: str = ""
+    mitigations: list[str] = Field(default_factory=list)
+
+
 class DesktopActionRiskSnapshot(_PublicSnapshot):
     action_id: str
     risk_level: DesktopExecutionRisk
@@ -112,6 +140,7 @@ class DesktopActionRiskSnapshot(_PublicSnapshot):
     description: str = ""
     tools: list[str] = Field(default_factory=list)
     requires_approval: bool = False
+    execution_mode: DesktopExecutionModeSnapshot | None = None
 
 
 class DesktopRecoveryActionMetadataSnapshot(_PublicSnapshot):
@@ -151,6 +180,7 @@ class ToolCatalogItemSnapshot(_PublicSnapshot):
     description: str = ""
     capability_id: str | None = None
     risk_level: DesktopExecutionRisk | str | None = None
+    execution_mode: DesktopExecutionModeSnapshot | None = None
     approval_required: bool = False
     input_schema: dict[str, Any] = Field(default_factory=dict)
     model_tool_schema: dict[str, Any] = Field(default_factory=dict)
@@ -329,6 +359,7 @@ class ToolPlanStepSnapshot(_PublicSnapshot):
     tool_name: str | None = None
     input_preview: dict[str, Any] = Field(default_factory=dict)
     risk_level: DesktopExecutionRisk | str = "low"
+    execution_mode: DesktopExecutionModeSnapshot | None = None
     approval_required: bool = False
     depends_on: list[str] = Field(default_factory=list)
     reason: str = ""
@@ -661,6 +692,7 @@ class RuntimeExecutionRequestSnapshot(_PublicSnapshot):
     planning_reason: str = ""
     approval_required: bool = False
     risk_level: str = "low"
+    execution_mode: DesktopExecutionModeSnapshot | None = None
     policy_reason: str = ""
     continue_to_model: bool = False
     deferred_tool: str | None = None

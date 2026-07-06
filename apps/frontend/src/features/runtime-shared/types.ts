@@ -3,6 +3,20 @@ export type ApprovalStatus = 'pending' | 'approved' | 'rejected' | 'cancelled' |
 export type GroupMode = 'moderated' | 'round_robin' | 'debate' | 'pipeline' | 'parallel' | 'custom';
 export type MemoryScope = 'shared' | 'per_agent' | 'hybrid';
 export type DesktopExecutionRisk = 'low' | 'medium' | 'high';
+export type DesktopExecutionMode =
+  | 'preview'
+  | 'tool_native'
+  | 'read_only_observation'
+  | 'supervised_live'
+  | 'sandbox_preferred'
+  | 'handoff_required';
+export type DesktopIsolationKind =
+  | 'none'
+  | 'process'
+  | 'browser_profile'
+  | 'sandbox_desktop'
+  | 'headless'
+  | 'user_handoff';
 export type TaskIntentKind =
   | 'desktop_operation'
   | 'data_analysis'
@@ -27,9 +41,12 @@ export type CapabilityCategory =
   | 'terminal'
   | 'browser'
   | 'artifact'
+  | 'capture'
+  | 'clipboard'
   | 'communication'
   | 'schedule'
   | 'media'
+  | 'system'
   | 'workflow'
   | 'group'
   | 'memory'
@@ -56,12 +73,35 @@ export type DesktopExecutionCapabilitySnapshot = {
   diagnostic_route?: string | null;
 };
 
+export type DesktopExecutionModeSnapshot = {
+  mode?: DesktopExecutionMode | string;
+  isolation?: DesktopIsolationKind | string;
+  foreground_control?: boolean;
+  keyboard_mouse_capture?: boolean;
+  sandbox_recommended?: boolean;
+  user_handoff_recommended?: boolean;
+  approval_recommended?: boolean;
+  reason?: string;
+  mitigations?: string[];
+};
+
+export type DesktopActionRiskSnapshot = {
+  action_id: string;
+  risk_level: DesktopExecutionRisk;
+  title: string;
+  description?: string;
+  tools?: string[];
+  requires_approval?: boolean;
+  execution_mode?: DesktopExecutionModeSnapshot | null;
+};
+
 export type ToolCatalogItemSnapshot = {
   tool_name: string;
   function_name: string;
   description?: string;
   capability_id?: string | null;
   risk_level?: DesktopExecutionRisk | string | null;
+  execution_mode?: DesktopExecutionModeSnapshot | null;
   approval_required?: boolean;
   input_schema?: Record<string, unknown>;
   model_tool_schema?: Record<string, unknown>;
@@ -240,6 +280,7 @@ export type ToolPlanStepSnapshot = {
   tool_name?: string | null;
   input_preview?: Record<string, unknown>;
   risk_level?: DesktopExecutionRisk | string;
+  execution_mode?: DesktopExecutionModeSnapshot | null;
   approval_required?: boolean;
   depends_on?: string[];
   reason?: string;
@@ -572,6 +613,7 @@ export type RuntimeExecutionRequestSnapshot = {
   planning_reason?: string;
   approval_required?: boolean;
   risk_level?: string;
+  execution_mode?: DesktopExecutionModeSnapshot | null;
   policy_reason?: string;
   continue_to_model?: boolean;
   depends_on?: string[];
