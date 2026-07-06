@@ -1723,7 +1723,7 @@ def test_agent_studio_start_agent_run_auto_starts_isolated_provider_for_input(
         event for event in started.events if event.event_type == "agent.plan.created"
     )
 
-    assert start_calls == [None]
+    assert start_calls == [{"tools": ["app.focus_and_click_ui_element"]}]
     assert status_urls
     assert envelope["desktop_provider_session"]["needed"] is True
     assert envelope["desktop_provider_session"]["started"] is True

@@ -1396,6 +1396,7 @@ class LegacyStudioPort:
             planner_direct_requests = _planner_direct_tool_requests_for_agent_run(
                 planner_decision,
                 allowed_tools=allowed_tools,
+                metadata=planner_metadata,
                 event_context={"agent_id": str(agent_id or "").strip()},
             )
             if planner_direct_requests:
@@ -1852,15 +1853,17 @@ def _planner_direct_tool_requests_for_agent_run(
     planner_decision: Any | None,
     *,
     allowed_tools: list[str] | None,
+    metadata: Mapping[str, Any] | None = None,
     event_context: Mapping[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     if planner_decision is None:
         return []
-    metadata = runtime_planner_metadata(
+    planner_metadata = runtime_planner_metadata(
         planner_decision,
         allowed_tools=allowed_tools,
+        metadata=metadata,
     )
-    envelope = metadata.get("yachiyo_execution_envelope")
+    envelope = planner_metadata.get("yachiyo_execution_envelope")
     if isinstance(envelope, Mapping):
         envelope = runtime_execution_envelope_payload_with_request_context(
             envelope,
