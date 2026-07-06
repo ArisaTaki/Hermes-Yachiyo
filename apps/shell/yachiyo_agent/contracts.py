@@ -954,6 +954,13 @@ class RuntimeDebugSummarySnapshot(_PublicSnapshot):
     latest_request_id: str | None = None
     latest_request_tool_name: str | None = None
     latest_request_status: str | None = None
+    desktop_provider_session_status: str | None = None
+    desktop_provider_session_needed: bool = False
+    desktop_provider_session_running: bool = False
+    desktop_provider_session_started: bool = False
+    desktop_provider_session_provider_id: str | None = None
+    desktop_provider_session_reason: str | None = None
+    desktop_provider_session_tool_names: list[str] = Field(default_factory=list)
     event_count: int = 0
     tool_call_count: int = 0
     completed_tool_call_count: int = 0

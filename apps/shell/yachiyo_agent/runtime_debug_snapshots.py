@@ -96,6 +96,10 @@ def runtime_debug_summary_from_runtime_objects(
         step_id=current_step_id,
         tool_name=current_tool_name,
     ) or _active_runtime_request(request_items)
+    desktop_provider_session = _desktop_provider_session(
+        runtime_execution_envelope,
+        request_items,
+    )
     request_statuses = [_text(_field(item, "status")) for item in request_items]
     runtime_context_items = [
         latest_tool,
@@ -116,6 +120,7 @@ def runtime_debug_summary_from_runtime_objects(
         replan_items=replan_items,
         planner_items=[item for item in (planner_summary, runtime_execution_envelope) if item is not None],
         task_items=[item for item in (effective_task_core, effective_task_progress) if item is not None],
+        provider_session=desktop_provider_session,
     )
     replan_needed = (
         needs_replan
@@ -203,6 +208,27 @@ def runtime_debug_summary_from_runtime_objects(
         latest_request_id=_optional_text(_field(latest_request, "request_id")),
         latest_request_tool_name=_optional_text(_field(latest_request, "tool_name")),
         latest_request_status=_optional_text(_field(latest_request, "status")),
+        desktop_provider_session_status=_optional_text(
+            _field(desktop_provider_session, "status")
+        ),
+        desktop_provider_session_needed=bool(
+            _field(desktop_provider_session, "needed")
+        ),
+        desktop_provider_session_running=bool(
+            _field(desktop_provider_session, "running")
+        ),
+        desktop_provider_session_started=bool(
+            _field(desktop_provider_session, "started")
+        ),
+        desktop_provider_session_provider_id=_optional_text(
+            _field(desktop_provider_session, "provider_id")
+        ),
+        desktop_provider_session_reason=_optional_text(
+            _field(desktop_provider_session, "reason")
+        ),
+        desktop_provider_session_tool_names=_string_list(
+            _field(desktop_provider_session, "tool_names")
+        ),
         event_count=len(event_items),
         tool_call_count=len(tool_items),
         completed_tool_call_count=sum(status == "completed" for status in tool_statuses),
@@ -316,6 +342,7 @@ def _debug_surfaces(
     replan_items: list[Any],
     planner_items: list[Any],
     task_items: list[Any],
+    provider_session: Any | None = None,
 ) -> list[str]:
     surfaces: list[str] = []
     for name, values in (
@@ -329,6 +356,7 @@ def _debug_surfaces(
         ("skills", skill_items),
         ("children", child_items),
         ("replan", replan_items),
+        ("desktop_provider", [provider_session] if provider_session is not None else []),
     ):
         if values:
             surfaces.append(name)
@@ -377,6 +405,20 @@ def _runtime_stage_counts(envelope: Any | None) -> dict[str, int]:
         if stage:
             counts[stage] = counts.get(stage, 0) + 1
     return counts
+
+
+def _desktop_provider_session(
+    envelope: Any | None,
+    requests: list[Any],
+) -> Any | None:
+    session = _field(envelope, "desktop_provider_session")
+    if session is not None:
+        return session
+    for request in requests:
+        session = _field(request, "desktop_provider_session")
+        if session is not None:
+            return session
+    return None
 
 
 def _task_totals(task_core: Any | None, task_progress: Any | None) -> dict[str, int]:

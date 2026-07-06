@@ -2204,6 +2204,17 @@ def test_yachiyo_chat_entrypoint_auto_starts_isolated_provider_for_input(
     ]["started"] is True
     assert task.runtime_execution_envelope is not None
     assert task.runtime_execution_envelope.desktop_provider_session["started"] is True
+    assert task.runtime_debug is not None
+    assert task.runtime_debug.desktop_provider_session_needed is True
+    assert task.runtime_debug.desktop_provider_session_running is True
+    assert task.runtime_debug.desktop_provider_session_started is True
+    assert task.runtime_debug.desktop_provider_session_provider_id == (
+        "local-isolated-desktop"
+    )
+    assert task.runtime_debug.desktop_provider_session_tool_names == [
+        "app.focus_and_click_ui_element"
+    ]
+    assert "desktop_provider" in task.runtime_debug.debug_surfaces
 
 
 def test_agent_studio_service_normalizes_known_app_submit_execution() -> None:
