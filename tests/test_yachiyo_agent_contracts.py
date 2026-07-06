@@ -5089,6 +5089,22 @@ def test_sandbox_desktop_provider_snapshot_json_shape_is_stable() -> None:
     assert default_status["launch_hint"]["foreground_mutation_supported"] is False
     assert default_status["launch_hint"]["desktop_session_kind"] == "headless_read_only"
     assert default_status["launch_hint"]["desktop_session_isolated"] is True
+    assert default_status["launch_hint"]["isolated_provider"]["provider_id"] == (
+        "local-isolated-desktop"
+    )
+    assert default_status["launch_hint"]["isolated_provider"]["smoke_command"] == [
+        "python",
+        "scripts/smoke_isolated_desktop_provider.py",
+    ]
+    assert default_status["launch_hint"]["isolated_provider"][
+        "keyboard_mouse_capture_supported"
+    ] is True
+    assert default_status["launch_hint"]["isolated_provider"][
+        "desktop_session_kind"
+    ] == "isolated_desktop"
+    assert default_status["launch_hint"]["isolated_provider"][
+        "desktop_session_isolated"
+    ] is True
     assert default_status["launch_hint"]["controlled_provider"]["provider_id"] == (
         "local-controlled-desktop"
     )
@@ -6566,24 +6582,23 @@ def test_runtime_tool_catalog_surfaces_controlled_provider_diagnostics() -> None
     diagnostics = ControlledDesktopProviderDiagnosticSnapshot(
         ready=False,
         configured=False,
-        status="controlled_provider_required",
-        provider_id="local-controlled-desktop",
-        blocking_conditions=["controlled_desktop_provider_required"],
+        status="isolated_provider_required",
+        provider_id="local-isolated-desktop",
+        blocking_conditions=["isolated_desktop_provider_required"],
         launch_command=[
             "python",
-            "scripts/run_controlled_desktop_provider.py",
+            "scripts/run_isolated_desktop_provider.py",
             "--host",
             "127.0.0.1",
             "--port",
-            "19092",
+            "19093",
         ],
         smoke_command=[
             "python",
-            "scripts/run_controlled_desktop_provider.py",
-            "--manifest",
+            "scripts/smoke_isolated_desktop_provider.py",
         ],
         env={
-            "OHA_YACHIYO_DESKTOP_PROVIDER_URL": "http://127.0.0.1:19092",
+            "OHA_YACHIYO_DESKTOP_PROVIDER_URL": "http://127.0.0.1:19093",
         },
     )
 
@@ -6595,15 +6610,15 @@ def test_runtime_tool_catalog_surfaces_controlled_provider_diagnostics() -> None
     assert catalog.controlled_provider_diagnostics is not None
     assert (
         payload["controlled_provider_diagnostics"]["status"]
-        == "controlled_provider_required"
+        == "isolated_provider_required"
     )
     assert payload["controlled_provider_diagnostics"]["launch_command"] == [
         "python",
-        "scripts/run_controlled_desktop_provider.py",
+        "scripts/run_isolated_desktop_provider.py",
         "--host",
         "127.0.0.1",
         "--port",
-        "19092",
+        "19093",
     ]
 
 

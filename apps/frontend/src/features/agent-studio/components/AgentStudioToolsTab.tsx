@@ -963,7 +963,9 @@ function toolProviderState(tool: ToolCatalogItemSnapshot, catalog: ToolCatalogSn
   const requiresRealSandboxFor = stringArray(provider?.requires_real_sandbox_for);
   const blockingConditions = stringArray(provider?.blocking_conditions);
   const launchHint = objectRecord(provider?.launch_hint);
-  const controlledProvider = objectRecord(launchHint.controlled_provider);
+  const controlledProvider = Object.keys(objectRecord(launchHint.isolated_provider)).length
+    ? objectRecord(launchHint.isolated_provider)
+    : objectRecord(launchHint.controlled_provider);
   const controlledEnv = objectRecord(controlledDiagnostics.env).OHA_YACHIYO_DESKTOP_PROVIDER_URL
     ? objectRecord(controlledDiagnostics.env)
     : objectRecord(controlledProvider.env);

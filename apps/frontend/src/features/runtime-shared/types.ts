@@ -138,6 +138,20 @@ export type SandboxDesktopProviderLaunchHint = {
   desktop_session_isolated?: boolean;
   foreground_takeover_required?: boolean;
   requires_real_sandbox_for?: string[];
+  isolated_provider?: {
+    provider_id?: string;
+    provider_kind?: DesktopIsolationKind | string;
+    execution_mode?: string;
+    command?: string[];
+    smoke_command?: string[];
+    env?: Record<string, string>;
+    foreground_mutation_supported?: boolean;
+    keyboard_mouse_capture_supported?: boolean;
+    desktop_session_kind?: string;
+    desktop_session_isolated?: boolean;
+    foreground_takeover_required?: boolean;
+    requires_runtime_approval?: boolean;
+  };
   controlled_provider?: {
     provider_id?: string;
     provider_kind?: DesktopIsolationKind | string;

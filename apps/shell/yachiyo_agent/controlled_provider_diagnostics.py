@@ -9,6 +9,7 @@ from apps.shell.agent.runtime.controlled_desktop_provider import ControlledDeskt
 from apps.shell.agent.runtime.desktop_execution_providers import (
     desktop_execution_provider_status_from_env,
 )
+from apps.shell.agent.runtime.isolated_desktop_provider import IsolatedDesktopProvider
 
 from .contracts import (
     ControlledDesktopProviderDiagnosticSnapshot,
@@ -28,51 +29,97 @@ def controlled_desktop_provider_diagnostics_snapshot(
     provider = SandboxDesktopProviderSnapshot.model_validate(provider_payload)
     env_status = desktop_execution_provider_status_from_env(probe_health=False)
     launch_hint = _mapping(provider.launch_hint)
-    controlled_launch = _mapping(launch_hint.get("controlled_provider"))
+    controlled_launch = _mapping(
+        launch_hint.get("isolated_provider") or launch_hint.get("controlled_provider")
+    )
     controlled_env = _string_mapping(controlled_launch.get("env"))
-    manifest = ControlledDesktopProvider().manifest(
+    manifest_provider = (
+        IsolatedDesktopProvider()
+        if controlled_launch.get("desktop_session_isolated") is not False
+        else ControlledDesktopProvider()
+    )
+    manifest = manifest_provider.manifest(
         base_url=controlled_env.get("OHA_YACHIYO_DESKTOP_PROVIDER_URL", "")
     )
     configured = bool(env_status.get("configured"))
-    foreground_mutation_supported = _optional_bool(
-        provider.foreground_mutation_supported,
-        _nested_bool(provider.health, "foreground_mutation_supported"),
-        env_status.get("foreground_mutation_supported"),
-        controlled_launch.get("foreground_mutation_supported"),
-        manifest.get("foreground_mutation_supported"),
-    )
-    keyboard_mouse_capture_supported = _optional_bool(
-        provider.keyboard_mouse_capture_supported,
-        _nested_bool(provider.health, "keyboard_mouse_capture_supported"),
-        env_status.get("keyboard_mouse_capture_supported"),
-        controlled_launch.get("keyboard_mouse_capture_supported"),
-        manifest.get("keyboard_mouse_capture_supported"),
-    )
     manifest_safety = _mapping(manifest.get("safety"))
-    desktop_session_kind = (
-        str(provider.desktop_session_kind or "").strip()
-        or _nested_text(provider.health, "desktop_session_kind")
-        or str(env_status.get("desktop_session_kind") or "").strip()
-        or str(controlled_launch.get("desktop_session_kind") or "").strip()
-        or str(manifest.get("desktop_session_kind") or "").strip()
-        or str(manifest_safety.get("desktop_session_kind") or "").strip()
-    )
-    desktop_session_isolated = _optional_bool(
-        provider.desktop_session_isolated,
-        _nested_bool(provider.health, "desktop_session_isolated"),
-        env_status.get("desktop_session_isolated"),
-        controlled_launch.get("desktop_session_isolated"),
-        manifest.get("desktop_session_isolated"),
-        manifest_safety.get("desktop_session_isolated"),
-    )
-    foreground_takeover_required = _optional_bool(
-        provider.foreground_takeover_required,
-        _nested_bool(provider.health, "foreground_takeover_required"),
-        env_status.get("foreground_takeover_required"),
-        controlled_launch.get("foreground_takeover_required"),
-        manifest.get("foreground_takeover_required"),
-        manifest_safety.get("foreground_takeover_required"),
-    )
+    if configured:
+        foreground_mutation_supported = _optional_bool(
+            provider.foreground_mutation_supported,
+            _nested_bool(provider.health, "foreground_mutation_supported"),
+            env_status.get("foreground_mutation_supported"),
+            controlled_launch.get("foreground_mutation_supported"),
+            manifest.get("foreground_mutation_supported"),
+        )
+        keyboard_mouse_capture_supported = _optional_bool(
+            provider.keyboard_mouse_capture_supported,
+            _nested_bool(provider.health, "keyboard_mouse_capture_supported"),
+            env_status.get("keyboard_mouse_capture_supported"),
+            controlled_launch.get("keyboard_mouse_capture_supported"),
+            manifest.get("keyboard_mouse_capture_supported"),
+        )
+    else:
+        foreground_mutation_supported = _optional_bool(
+            controlled_launch.get("foreground_mutation_supported"),
+            manifest.get("foreground_mutation_supported"),
+            manifest_safety.get("foreground_mutation_supported"),
+            provider.foreground_mutation_supported,
+            _nested_bool(provider.health, "foreground_mutation_supported"),
+        )
+        keyboard_mouse_capture_supported = _optional_bool(
+            controlled_launch.get("keyboard_mouse_capture_supported"),
+            manifest.get("keyboard_mouse_capture_supported"),
+            manifest_safety.get("keyboard_mouse_capture_supported"),
+            provider.keyboard_mouse_capture_supported,
+            _nested_bool(provider.health, "keyboard_mouse_capture_supported"),
+        )
+    if configured:
+        desktop_session_kind = (
+            str(provider.desktop_session_kind or "").strip()
+            or _nested_text(provider.health, "desktop_session_kind")
+            or str(env_status.get("desktop_session_kind") or "").strip()
+            or str(controlled_launch.get("desktop_session_kind") or "").strip()
+            or str(manifest.get("desktop_session_kind") or "").strip()
+            or str(manifest_safety.get("desktop_session_kind") or "").strip()
+        )
+        desktop_session_isolated = _optional_bool(
+            provider.desktop_session_isolated,
+            _nested_bool(provider.health, "desktop_session_isolated"),
+            env_status.get("desktop_session_isolated"),
+            controlled_launch.get("desktop_session_isolated"),
+            manifest.get("desktop_session_isolated"),
+            manifest_safety.get("desktop_session_isolated"),
+        )
+        foreground_takeover_required = _optional_bool(
+            provider.foreground_takeover_required,
+            _nested_bool(provider.health, "foreground_takeover_required"),
+            env_status.get("foreground_takeover_required"),
+            controlled_launch.get("foreground_takeover_required"),
+            manifest.get("foreground_takeover_required"),
+            manifest_safety.get("foreground_takeover_required"),
+        )
+    else:
+        desktop_session_kind = (
+            str(controlled_launch.get("desktop_session_kind") or "").strip()
+            or str(manifest.get("desktop_session_kind") or "").strip()
+            or str(manifest_safety.get("desktop_session_kind") or "").strip()
+            or str(provider.desktop_session_kind or "").strip()
+            or _nested_text(provider.health, "desktop_session_kind")
+        )
+        desktop_session_isolated = _optional_bool(
+            controlled_launch.get("desktop_session_isolated"),
+            manifest.get("desktop_session_isolated"),
+            manifest_safety.get("desktop_session_isolated"),
+            provider.desktop_session_isolated,
+            _nested_bool(provider.health, "desktop_session_isolated"),
+        )
+        foreground_takeover_required = _optional_bool(
+            controlled_launch.get("foreground_takeover_required"),
+            manifest.get("foreground_takeover_required"),
+            manifest_safety.get("foreground_takeover_required"),
+            provider.foreground_takeover_required,
+            _nested_bool(provider.health, "foreground_takeover_required"),
+        )
     ready = (
         configured
         and provider.available
@@ -188,6 +235,8 @@ def _diagnostic_status(
     if ready:
         return "ready"
     if not configured:
+        if desktop_session_isolated is True:
+            return "isolated_provider_required"
         return "controlled_provider_required"
     if keyboard_mouse_capture_supported is not True:
         return "keyboard_mouse_capture_required"
@@ -208,7 +257,11 @@ def _diagnostic_blockers(
         return []
     blockers = _string_list(provider.blocking_conditions)
     if not configured:
-        blockers.append("controlled_desktop_provider_required")
+        blockers.append(
+            "isolated_desktop_provider_required"
+            if desktop_session_isolated is True
+            else "controlled_desktop_provider_required"
+        )
     if configured and not provider.adapter_ready:
         blockers.append("sandbox_desktop_adapter_required")
     if keyboard_mouse_capture_supported is not True:
@@ -229,6 +282,8 @@ def _diagnostic_reason(
     if ready:
         return "Controlled desktop provider is configured inside an isolated desktop session."
     if not configured:
+        if desktop_session_isolated is True:
+            return "Start the isolated desktop provider before autonomous foreground input."
         return "Start the controlled desktop provider before autonomous foreground input."
     if keyboard_mouse_capture_supported is not True:
         return "Configured provider does not advertise keyboard and mouse capture."

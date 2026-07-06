@@ -1107,30 +1107,28 @@ def test_legacy_studio_tool_catalog_exposes_local_desktop_provider(monkeypatch) 
     controlled = catalog["controlled_provider_diagnostics"]
     assert controlled["ready"] is False
     assert controlled["configured"] is False
-    assert controlled["status"] == "controlled_provider_required"
-    assert controlled["provider_id"] == "local-controlled-desktop"
-    assert "controlled_desktop_provider_required" in controlled["blocking_conditions"]
-    assert "sandbox_desktop_session_required" in controlled["blocking_conditions"]
-    assert controlled["keyboard_mouse_capture_supported"] is False
-    assert controlled["desktop_session_kind"] == "user_foreground"
-    assert controlled["desktop_session_isolated"] is False
-    assert controlled["foreground_takeover_required"] is True
+    assert controlled["status"] == "isolated_provider_required"
+    assert controlled["provider_id"] == "local-isolated-desktop"
+    assert "isolated_desktop_provider_required" in controlled["blocking_conditions"]
+    assert controlled["keyboard_mouse_capture_supported"] is True
+    assert controlled["desktop_session_kind"] == "isolated_desktop"
+    assert controlled["desktop_session_isolated"] is True
+    assert controlled["foreground_takeover_required"] is False
     assert controlled["launch_command"] == [
         "python",
-        "scripts/run_controlled_desktop_provider.py",
+        "scripts/run_isolated_desktop_provider.py",
         "--host",
         "127.0.0.1",
         "--port",
-        "19092",
+        "19093",
     ]
     assert controlled["smoke_command"] == [
         "python",
-        "scripts/run_controlled_desktop_provider.py",
-        "--manifest",
+        "scripts/smoke_isolated_desktop_provider.py",
     ]
     assert (
         controlled["env"]["OHA_YACHIYO_DESKTOP_PROVIDER_URL"]
-        == "http://127.0.0.1:19092"
+        == "http://127.0.0.1:19093"
     )
 
 

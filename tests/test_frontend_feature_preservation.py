@@ -1956,6 +1956,7 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
         [
             "export type DesktopProviderHealthSnapshot",
             "export type SandboxDesktopProviderLaunchHint",
+            "isolated_provider?: {",
             "controlled_provider?: {",
             "smoke_command?: string[];",
             "keyboard_mouse_capture_supported?: boolean;",
@@ -3516,6 +3517,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "data-controlled-provider-takeover-required={String(providerState.controlledForegroundTakeoverRequired)}",
             "data-controlled-provider-blocker={condition}",
             "data-controlled-provider-launch-command={providerState.controlledCommand.join(' ')}",
+            "launchHint.isolated_provider",
             "catalog.controlled_provider_diagnostics",
             "catalog.sandbox_provider",
             "tool.provider_ready",
