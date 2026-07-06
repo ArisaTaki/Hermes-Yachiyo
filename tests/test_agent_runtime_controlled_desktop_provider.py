@@ -271,6 +271,33 @@ def test_isolated_desktop_provider_models_discover_operate_verify_loop() -> None
     assert verified["data"]["foreground_takeover_required"] is False
 
 
+def test_isolated_desktop_provider_inspects_app_without_foreground_takeover() -> None:
+    provider = IsolatedDesktopProvider(
+        supported_tools=[
+            "desktop.inspect_app",
+            "app.open",
+            "desktop.read_ui",
+        ],
+    )
+
+    inspected = provider.execute(
+        "desktop.inspect_app",
+        {"app_name": "PixelForge", "open_if_needed": True, "focus": True},
+        approved=True,
+    )
+
+    assert inspected["ok"] is True
+    assert inspected["data"]["app_name"] == "PixelForge"
+    assert inspected["data"]["running"] is True
+    assert inspected["data"]["focus_verified"] is True
+    assert inspected["data"]["ready_for_foreground_action"] is True
+    assert inspected["data"]["desktop_session_isolated"] is True
+    assert inspected["data"]["foreground_takeover_required"] is False
+    assert inspected["isolated_desktop_provider"]["desktop_session_isolated"] is True
+    assert inspected["controlled_desktop_provider"]["foreground_takeover_required"] is False
+    assert inspected["data"]["ui_elements"]["data"]["elements"]
+
+
 def test_isolated_desktop_provider_works_through_runtime_adapter() -> None:
     provider = IsolatedDesktopProvider(
         provider_id="provider-isolated",

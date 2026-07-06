@@ -152,6 +152,8 @@ class IsolatedDesktopProvider(ControlledDesktopProvider):
             return self._list_apps(tool_name, payload)
         if tool_name in {"desktop.active_window", "desktop.windows", "desktop.list_windows"}:
             return self._window_result(tool_name, payload)
+        if tool_name == "desktop.inspect_app":
+            return self._inspect_app(tool_name, payload)
         if tool_name in {"desktop.ui_elements", "desktop.read_ui"}:
             return self._read_ui(tool_name, payload)
         if tool_name == "desktop.verify":
@@ -328,6 +330,145 @@ class IsolatedDesktopProvider(ControlledDesktopProvider):
             event_count=len(self._events),
         )
 
+    def _inspect_app(self, tool_name: str, payload: dict[str, Any]) -> dict[str, Any]:
+        app_name = self._resolve_app_name(payload) or "Untitled App"
+        open_if_needed = _isolated_bool(payload.get("open_if_needed"), default=True)
+        focus = _isolated_bool(payload.get("focus"), default=True)
+        role_filter = str(payload.get("role_filter") or "").strip()
+        limit = _isolated_limit(payload.get("limit"), default=80)
+        before_running = app_name in self._opened_apps
+        discovery = self._list_apps("desktop.list_apps", {"query": app_name, "limit": 10})
+        open_result: dict[str, Any] | None = None
+        if open_if_needed and not before_running:
+            open_result = self._open_app("app.open", {"app_name": app_name})
+        running = app_name in self._opened_apps
+        focus_result: dict[str, Any] | None = None
+        if focus and running:
+            focus_result = self._focus_app("app.focus", {"app_name": app_name})
+        focused = self._active_app == app_name
+        elements = self._filtered_ui_elements(app_name, role_filter=role_filter, limit=limit)
+        windows = [
+            {
+                "app_name": app_name,
+                "title": f"{app_name} - isolated",
+                "focused": focused,
+            }
+        ] if running else []
+        active_window = windows[0] if focused and windows else {}
+        control_like_count = sum(
+            1
+            for element in elements
+            if str(element.get("role") or "").strip() in {"button", "text_field"}
+        )
+        ready_for_foreground_action = bool(focused and control_like_count > 0)
+        checks = {
+            "discovered_app": bool(app_name),
+            "open_ok": open_result is None or open_result.get("ok") is True,
+            "status_running": running,
+            "focus_verified": focused if focus else True,
+            "windows_query_ok": True,
+            "ui_query_ok": True,
+            "named_ui_elements_nonempty": bool(elements),
+            "control_like_ui_visible": control_like_count > 0,
+            "ready_for_foreground_action": ready_for_foreground_action,
+        }
+        ui_result = self._result(
+            "desktop.ui_elements",
+            f"Read isolated desktop UI for {app_name}.",
+            elements=elements,
+            active_app=app_name,
+            focused_target=self._focused_targets.get(app_name, ""),
+            text_buffer=self._text_buffers.get(app_name, ""),
+            count=len(elements),
+            control_like_count=control_like_count,
+            inspection_level="control" if control_like_count else "empty",
+            visibility_limited=False,
+            visibility_status="visible" if elements else "empty",
+        )
+        windows_result = self._result(
+            "desktop.windows",
+            f"Listed isolated windows for {app_name}.",
+            app_name=app_name,
+            windows=windows,
+            active_window=active_window,
+            count=len(windows),
+            window_visibility_status="visible" if windows else "not_running",
+        )
+        active_window_result = (
+            self._result(
+                "desktop.active_window",
+                f"Active isolated window is {app_name}.",
+                app_name=app_name,
+                frontmost_app=app_name,
+                title=active_window.get("title", ""),
+                active_window=active_window,
+            )
+            if active_window
+            else None
+        )
+        data = {
+            "app_name": app_name,
+            "requested_app_name": app_name,
+            "discovered_app_name": app_name,
+            "app_found": bool(app_name),
+            "open_if_needed": open_if_needed,
+            "focus_requested": focus,
+            "running": running,
+            "focus_verified": focused if focus else True,
+            "window_count": len(windows),
+            "ui_element_count": len(elements),
+            "inspection_level": "control" if control_like_count else "empty",
+            "visibility_limited": False,
+            "visibility_status": "visible" if elements else "empty",
+            "control_like_count": control_like_count,
+            "ready_for_foreground_action": ready_for_foreground_action,
+            "recommended_tools": _isolated_inspect_recommended_tools(
+                running=running,
+                ready_for_foreground_action=ready_for_foreground_action,
+            ),
+            "recovery_actions": [],
+            "checks": checks,
+            "discovery": discovery,
+            "before_status": self._result(
+                "app.status",
+                f"Checked isolated app status: {app_name}.",
+                app_name=app_name,
+                running=before_running,
+            ),
+            "open_result": open_result,
+            "after_status": self._result(
+                "app.status",
+                f"Checked isolated app status: {app_name}.",
+                app_name=app_name,
+                running=running,
+            ),
+            "focus_result": focus_result,
+            "active_window": active_window_result,
+            "windows": windows_result,
+            "ui_elements": ui_result,
+        }
+        return {
+            "ok": bool(app_name),
+            "tool": tool_name,
+            "action": tool_name,
+            "summary": (
+                f"Inspected {app_name} inside isolated desktop session."
+                if app_name
+                else "No isolated app name was provided."
+            ),
+            "data": {
+                **data,
+                "desktop_session_kind": "isolated_desktop",
+                "desktop_session_isolated": True,
+                "foreground_takeover_required": False,
+                "isolated_session_id": self.session_id,
+            },
+            "permission_error": False,
+            "fallback_used": False,
+            "recommended_tools": data["recommended_tools"],
+            "recovery_actions": data["recovery_actions"],
+        }
+
     def _verify(self, tool_name: str, payload: dict[str, Any]) -> dict[str, Any]:
         app_name = self._resolve_app_name(payload) or self._active_app
         expected_text = str(payload.get("expected_text") or "").strip()
@@ -482,6 +623,29 @@ class IsolatedDesktopProvider(ControlledDesktopProvider):
             },
         ]
 
+    def _filtered_ui_elements(
+        self,
+        app_name: str,
+        *,
+        role_filter: str = "",
+        limit: int = 80,
+    ) -> list[dict[str, Any]]:
+        elements = self._ui_elements_for_app(app_name)
+        clean_filter = str(role_filter or "").strip().casefold()
+        if clean_filter:
+            elements = [
+                element
+                for element in elements
+                if clean_filter
+                in str(
+                    element.get("role")
+                    or element.get("title")
+                    or element.get("label")
+                    or ""
+                ).casefold()
+            ]
+        return elements[: max(1, int(limit or 80))]
+
     def _record_input_action(
         self,
         tool_name: str,
@@ -611,6 +775,39 @@ def _isolated_music_next_state(current: str, control: str) -> str:
     if clean_control in {"next", "previous"}:
         return "playing" if clean_current == "playing" else clean_current or "stopped"
     return clean_current or "stopped"
+
+
+def _isolated_bool(value: Any, *, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    clean = str(value).strip().lower()
+    if clean in {"1", "true", "yes", "on"}:
+        return True
+    if clean in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
+def _isolated_limit(value: Any, *, default: int) -> int:
+    try:
+        return max(1, min(200, int(value or default)))
+    except (TypeError, ValueError):
+        return default
+
+
+def _isolated_inspect_recommended_tools(
+    *,
+    running: bool,
+    ready_for_foreground_action: bool,
+) -> list[str]:
+    tools = ["desktop.read_ui", "desktop.ui_elements", "desktop.verify"]
+    if not running:
+        tools.insert(0, "app.open")
+    if ready_for_foreground_action:
+        tools.extend(["app.focus_and_click_ui_element", "app.focus_and_type_into_ui_element"])
+    return _sorted_tools(tools)
 
 
 def _isolated_selected_placeholder(value: str) -> bool:

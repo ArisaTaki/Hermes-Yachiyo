@@ -26,6 +26,7 @@ from apps.shell.agent.runtime.isolated_desktop_provider import (
 SMOKE_TOOLS = (
     "desktop.list_apps",
     "app.open",
+    "desktop.inspect_app",
     "media.music_app_open_and_play",
     "media.music_app_control",
     "desktop.read_ui",
@@ -76,6 +77,17 @@ def run_smoke() -> dict[str, Any]:
                     "app_name": "<selected app from desktop.list_apps>",
                     "selection_source": "desktop.list_apps",
                     "query": SMOKE_APP_NAME,
+                },
+            ),
+            _execute_tool(
+                registry,
+                provider.provider_id,
+                "desktop.inspect_app",
+                {
+                    "app_name": SMOKE_APP_NAME,
+                    "open_if_needed": False,
+                    "focus": True,
+                    "limit": 20,
                 },
             ),
             _execute_tool(
@@ -140,6 +152,7 @@ def run_smoke() -> dict[str, Any]:
             .get("data", {})
             .get("elements", [])
         )
+        inspect_data = result_by_tool.get("desktop.inspect_app", {}).get("data", {})
         verify_data = result_by_tool.get("desktop.verify", {}).get("data", {})
         discovered_apps = (
             result_by_tool.get("desktop.list_apps", {})
@@ -187,6 +200,12 @@ def run_smoke() -> dict[str, Any]:
                 .get("data", {})
                 .get("app_name")
                 == SMOKE_APP_NAME
+            ),
+            "inspect_app_ready": (
+                inspect_data.get("app_name") == SMOKE_APP_NAME
+                and inspect_data.get("running") is True
+                and inspect_data.get("ready_for_foreground_action") is True
+                and inspect_data.get("ui_element_count", 0) > 0
             ),
             "media_open_recorded": (
                 result_by_tool.get("media.music_app_open_and_play", {})

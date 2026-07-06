@@ -34,6 +34,7 @@ CONTROLLED_DESKTOP_PROVIDER_TOOLS = (
     "desktop.list_windows",
     "desktop.ui_elements",
     "desktop.read_ui",
+    "desktop.inspect_app",
     "desktop.verify",
     "app.status",
     "app.open",
@@ -329,6 +330,13 @@ class ControlledDesktopProvider(HeadlessDesktopProvider):
                 role_filter=str(value.get("role_filter") or ""),
                 limit=value.get("limit", 80),
                 expected_app_name=str(value.get("expected_app_name") or ""),
+            ),
+            "desktop.inspect_app": lambda value: desktop.inspect_app(
+                str(value.get("app_name") or ""),
+                open_if_needed=value.get("open_if_needed", True),
+                focus=value.get("focus", True),
+                role_filter=str(value.get("role_filter") or ""),
+                limit=value.get("limit", 80),
             ),
             "media.music_app_open_and_play": lambda value: desktop.music_app_open_and_play(
                 str(value.get("app_name") or "")

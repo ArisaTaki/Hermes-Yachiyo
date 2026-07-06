@@ -260,3 +260,56 @@ def test_ensure_isolated_provider_session_detects_app_open_requests(
     assert annotated["requests"][0]["desktop_provider_session"]["provider_id"] == (
         "local-isolated-desktop"
     )
+
+
+def test_ensure_isolated_provider_session_detects_inspect_app_requests(
+    monkeypatch,
+) -> None:
+    starts: list[dict[str, Any] | None] = []
+
+    monkeypatch.setattr(
+        session_module,
+        "isolated_desktop_provider_session_status",
+        lambda: {"ok": True, "status": "stopped", "running": False},
+    )
+    monkeypatch.setattr(
+        session_module,
+        "start_isolated_desktop_provider_session",
+        lambda request=None: starts.append(request)
+        or {
+            "ok": True,
+            "status": "running",
+            "running": True,
+            "started": True,
+            "provider_id": "local-isolated-desktop",
+            "url": "http://127.0.0.1:19093",
+            "provider_status": {
+                "desktop_session_kind": "isolated_desktop",
+                "desktop_session_isolated": True,
+                "foreground_takeover_required": False,
+                "supported_tools": ["desktop.inspect_app"],
+            },
+        },
+    )
+    envelope = {
+        "requests": [
+            {
+                "request_id": "request-inspect",
+                "tool_name": "desktop.inspect_app",
+                "input": {"app_name": "PixelForge", "open_if_needed": True},
+            }
+        ]
+    }
+
+    session = ensure_isolated_desktop_provider_session_for_envelope(envelope)
+    annotated = annotate_envelope_with_desktop_provider_session(envelope, session)
+
+    assert starts == [{"tools": ["desktop.inspect_app"]}]
+    assert session["needed"] is True
+    assert session["running"] is True
+    assert session["started"] is True
+    assert session["request_ids"] == ["request-inspect"]
+    assert session["tool_names"] == ["desktop.inspect_app"]
+    assert annotated["requests"][0]["desktop_provider_session"]["provider_id"] == (
+        "local-isolated-desktop"
+    )
