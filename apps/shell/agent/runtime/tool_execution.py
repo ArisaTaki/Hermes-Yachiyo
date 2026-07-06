@@ -290,6 +290,15 @@ def _desktop_execution_policy_skip_result(
         return None
 
     execution_mode = desktop_tool_execution_mode(tool_name)
+    if (
+        policy_mode == "preview_input"
+        and not _desktop_execution_policy_blocks_input_tool(
+            tool_name,
+            policy,
+            execution_mode.model_dump(mode="json"),
+        )
+    ):
+        return None
     if not (
         bool(execution_mode.foreground_control)
         or bool(execution_mode.keyboard_mouse_capture)
@@ -332,6 +341,19 @@ def _desktop_execution_policy_skip_result(
             "user perform the foreground step manually."
         ),
     }
+
+
+def _desktop_execution_policy_blocks_input_tool(
+    tool_name: str,
+    policy: Mapping[str, Any],
+    execution_mode: Mapping[str, Any],
+) -> bool:
+    if not bool(execution_mode.get("keyboard_mouse_capture")):
+        return False
+    clean_tool = str(tool_name or "").strip()
+    if clean_tool.startswith("media.") and policy.get("allow_media_control") is not False:
+        return False
+    return True
 
 
 def _desktop_execution_policy_from_request(
@@ -382,6 +404,12 @@ def _desktop_execution_policy_mode(policy: Mapping[str, Any]) -> str:
         "user_handoff_required",
     }:
         return "handoff"
+    if raw in {
+        "preview_input",
+        "input_preview",
+        "foreground_input_preview",
+    }:
+        return "preview_input"
     if raw in {
         "preview",
         "dry_run",

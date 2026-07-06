@@ -129,6 +129,44 @@ def test_chat_bridge_quick_candidates_use_execution_context() -> None:
     assert requests[3]["runtime_stage"] == "verify"
 
 
+def test_chat_bridge_quick_message_adds_daily_desktop_execution_policy(
+    tmp_path,
+) -> None:
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _runtime_with_chat_store(store)
+    bridge = ChatBridge(runtime)
+    captured_metadata: dict[str, Any] = {}
+
+    def fake_send_message(text: str, **kwargs: Any) -> dict[str, Any]:
+        captured_metadata["metadata"] = kwargs.get("metadata")
+        return {
+            "ok": True,
+            "message_id": "message-hi",
+            "task_id": "task-hi",
+            "status": "pending",
+            "echo": text,
+        }
+
+    bridge._chat_api = SimpleNamespace(send_message=fake_send_message)
+    try:
+        result = bridge.send_quick_message(
+            "你好",
+            metadata={
+                "source": "launcher",
+                "launcher_mode": "bubble",
+                "launcher_surface": "quick_message",
+            },
+        )
+
+        policy = captured_metadata["metadata"]["desktop_execution_policy"]
+        assert result["ok"] is True
+        assert policy["mode"] == "preview_input"
+        assert policy["allow_media_control"] is True
+        assert policy["source"] == "daily_bubble"
+    finally:
+        store.close()
+
+
 def _agent_task_event(
     agent_task: dict[str, Any],
     event_type: str,
@@ -845,22 +883,19 @@ def test_chat_bridge_quick_message_uses_main_chat_tools_for_runtime_planner(
         assert result["agent_task"]["task_id"] == "task-data-analysis"
         metadata = result["agent_task"]["metadata"]
         assert metadata["launcher_mode"] == "bubble"
-        assert metadata["yachiyo_runtime_planner"] is True
-        assert metadata["yachiyo_intent_kind"] == "data_analysis"
-        assert metadata["yachiyo_plan_tools"] == ["data.analyze"]
-        assert metadata["yachiyo_plan_artifacts_expected"] == ["analysis-report.md"]
-        _assert_planner_trace_prefix(
+        envelope = metadata["yachiyo_execution_envelope"]
+        assert envelope["intent_kind"] == "data_analysis"
+        assert [request["tool_name"] for request in envelope["requests"]] == [
+            "workspace.read",
+            "data.analyze",
+        ]
+        read_event = _agent_task_event(
             result["agent_task"],
-            intent_kind="data_analysis",
+            "agent.desktop.intent_planned",
+            detail="workspace.read",
         )
-        selection_event = _agent_task_event(
-            result["agent_task"],
-            "agent.plan.selection",
-        )
-        assert selection_event["payload"]["selection_source"] == "runtime_planner"
-        assert selection_event["payload"]["plan_tools"] == ["data.analyze"]
-        assert selection_event["payload"]["selected_tools"] == ["data.analyze"]
-        assert selection_event["payload"]["plan_step_count"] == 1
+        assert read_event["payload"]["tool"] == "workspace.read"
+        assert read_event["payload"]["source"] == "runtime_planner"
         event = _agent_task_event(
             result["agent_task"],
             "agent.desktop.intent_planned",
@@ -868,11 +903,11 @@ def test_chat_bridge_quick_message_uses_main_chat_tools_for_runtime_planner(
         )
         assert event["payload"]["tool"] == "data.analyze"
         assert event["payload"]["source"] == "runtime_planner"
-        assert event["payload"]["planning_reason"] == "planner_builtin_data_analysis"
+        assert event["payload"]["planning_reason"] == "planner_full_plan_data_analysis"
         assert event["payload"]["input_preview"] == {
             "path": "data/sales.csv",
-            "artifact_path": "analysis-report.md",
             "source_kind": "csv",
+            "artifact_path": "analysis-report.md",
             "requested_outputs": ["report"],
             "artifact_manifest": [
                 {"path": "analysis-report.md", "kind": "markdown"},

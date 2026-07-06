@@ -20,6 +20,7 @@ export type DesktopIsolationKind =
 export type DesktopExecutionPolicyMode =
   | 'allow'
   | 'preview'
+  | 'preview_input'
   | 'handoff_required'
   | 'supervised_live';
 export type TaskIntentKind =
@@ -93,6 +94,7 @@ export type DesktopExecutionModeSnapshot = {
 export type DesktopExecutionPolicySnapshot = {
   mode?: DesktopExecutionPolicyMode | string;
   allow_live_foreground?: boolean | null;
+  allow_media_control?: boolean;
   source?: string;
   reason?: string;
 };

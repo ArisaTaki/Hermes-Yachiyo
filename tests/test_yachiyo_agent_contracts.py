@@ -99,11 +99,13 @@ from apps.shell.yachiyo_agent import (
     WorkflowRunSnapshot,
     WorkflowSnapshot,
     approval_is_pending,
+    daily_entrypoint_desktop_execution_policy,
     desktop_action_risk_level,
     desktop_action_risk_snapshots,
     desktop_tool_execution_mode,
     desktop_execution_capability_snapshots,
     desktop_tool_risk_level,
+    with_daily_entrypoint_desktop_execution_policy,
     is_high_risk_desktop_action,
     task_requires_user_action,
 )
@@ -4936,13 +4938,33 @@ def test_desktop_execution_policy_snapshot_json_shape_is_stable() -> None:
     assert list(payload) == [
         "mode",
         "allow_live_foreground",
+        "allow_media_control",
         "source",
         "reason",
     ]
     assert payload["mode"] == "preview"
     assert payload["allow_live_foreground"] is False
+    assert payload["allow_media_control"] is True
     with pytest.raises(ValidationError):
         DesktopExecutionPolicySnapshot(mode="allow", unknown=True)
+
+
+def test_daily_entrypoint_desktop_execution_policy_defaults_to_input_preview() -> None:
+    policy = daily_entrypoint_desktop_execution_policy(surface="bubble")
+    metadata = with_daily_entrypoint_desktop_execution_policy(
+        {"source": "launcher"},
+        surface="bubble",
+    )
+    explicit = with_daily_entrypoint_desktop_execution_policy(
+        {"desktop_execution_policy": {"mode": "supervised_live"}},
+        surface="bubble",
+    )
+
+    assert policy["mode"] == "preview_input"
+    assert policy["allow_media_control"] is True
+    assert metadata["desktop_execution_policy"]["mode"] == "preview_input"
+    assert metadata["desktop_execution_policy"]["source"] == "daily_bubble"
+    assert explicit["desktop_execution_policy"] == {"mode": "supervised_live"}
 
 
 def test_desktop_recovery_action_metadata_snapshot_json_shape_is_stable() -> None:

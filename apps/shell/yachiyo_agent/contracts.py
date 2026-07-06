@@ -37,6 +37,7 @@ DesktopIsolationKind = Literal[
 DesktopExecutionPolicyMode = Literal[
     "allow",
     "preview",
+    "preview_input",
     "handoff_required",
     "supervised_live",
 ]
@@ -142,6 +143,7 @@ class DesktopExecutionModeSnapshot(_PublicSnapshot):
 class DesktopExecutionPolicySnapshot(_PublicSnapshot):
     mode: DesktopExecutionPolicyMode | str = "allow"
     allow_live_foreground: bool | None = None
+    allow_media_control: bool = True
     source: str = ""
     reason: str = ""
 

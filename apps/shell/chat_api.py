@@ -58,6 +58,9 @@ from apps.shell.yachiyo_agent.discovered_app_followups import (
 )
 from apps.shell.yachiyo_agent.desktop_plan_hints import hotkey_hint
 from apps.shell.yachiyo_agent.desktop_permissions import desktop_permission_missing_by_capability
+from apps.shell.yachiyo_agent.desktop_execution_policy import (
+    with_daily_entrypoint_desktop_execution_policy,
+)
 from apps.shell.yachiyo_agent.planner_execution import planner_orchestration_requests
 from apps.shell.yachiyo_agent.planner_projection import planner_selection_payload
 from apps.shell.yachiyo_agent.runtime_planner import RuntimePlanner
@@ -1829,6 +1832,10 @@ class ChatAPI:
                     current_context,
                 )
             user_metadata = self._with_client_message_id(user_metadata, idempotency_key) or {}
+            user_metadata = with_daily_entrypoint_desktop_execution_policy(
+                user_metadata,
+                surface="chat",
+            )
             if desktop_snapshot_error:
                 user_metadata["desktop_snapshot_error"] = desktop_snapshot_error
             if saved_attachments and not raw_attachments and self._should_enforce_image_capability():

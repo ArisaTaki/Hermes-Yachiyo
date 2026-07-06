@@ -18,6 +18,9 @@ from apps.shell.yachiyo_agent.runtime_execution import (
     runtime_execution_requests_from_envelope_payload,
     runtime_execution_requests_from_metadata,
 )
+from apps.shell.yachiyo_agent.desktop_execution_policy import (
+    with_daily_entrypoint_desktop_execution_policy,
+)
 
 
 def build_runtime_main_chat_model_loop_runner(
@@ -130,6 +133,10 @@ class MainChatModelLoopRunner:
         run = self._get_run(run_id)
         if str(run.get("kind") or "") != "main_chat_run":
             raise self._error_type("Run 不是主聊天 Native Run")
+        runtime_execution_metadata = with_daily_entrypoint_desktop_execution_policy(
+            runtime_execution_metadata,
+            surface="chat",
+        )
         default_profile_id = str(profile_id or self._default_profile_id() or "").strip()
         agent = self._main_chat_agent_config(
             model_profile_id=default_profile_id,

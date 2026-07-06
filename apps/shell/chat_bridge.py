@@ -30,6 +30,9 @@ from apps.shell.yachiyo_agent.daily_desktop import (
     main_chat_entrypoint_allowed_tools,
     planner_first_daily_desktop_entrypoint_requests,
 )
+from apps.shell.yachiyo_agent.desktop_execution_policy import (
+    with_daily_entrypoint_desktop_execution_policy,
+)
 from apps.shell.yachiyo_agent.web_destination_hints import legacy_known_web_destination_url_hint
 from apps.shell.yachiyo_agent.planner_execution import planner_decision_and_tool_requests
 from apps.shell.yachiyo_agent.planner_projection import (
@@ -507,7 +510,10 @@ class ChatBridge:
     ) -> Dict[str, Any]:
         """快捷发送消息，委托 ChatAPI"""
         planning_text = self._planning_text_for_quick_message(text)
-        execution_metadata = dict(metadata or {})
+        execution_metadata = with_daily_entrypoint_desktop_execution_policy(
+            metadata,
+            surface=str((metadata or {}).get("launcher_mode") or "launcher"),
+        )
         if planning_text != str(text or "").strip():
             execution_metadata["entrypoint_planning_context"] = planning_text
         result = self._chat_api.send_message(text, metadata=execution_metadata)

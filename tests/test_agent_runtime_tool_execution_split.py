@@ -2274,6 +2274,64 @@ def test_runtime_tool_request_runner_previews_live_foreground_tools_by_policy() 
     assert "blocked_by_desktop_execution_policy" in messages[-1]["content"]
 
 
+def test_runtime_tool_request_runner_preview_input_policy_allows_media_but_blocks_typing() -> None:
+    run_events: list[tuple[str, str, dict[str, Any]]] = []
+    budget = FakeBudget()
+    messages = [{"role": "user", "content": "播放音乐，然后在当前应用里输入 hello"}]
+    timeline: list[dict[str, Any]] = []
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    def call_agent_tool(
+        tool_request: dict[str, Any],
+        _allowed_tools: list[str],
+        _broker: Any,
+        timeline_arg: list[dict[str, Any]],
+        **_kwargs: Any,
+    ) -> dict[str, Any]:
+        tool_name = str(tool_request.get("tool") or "")
+        payload = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
+        calls.append((tool_name, payload))
+        result = {"ok": True, "action": tool_name, "summary": "done"}
+        timeline_arg.append(
+            _timeline("agent.tool.call", tool_name, input_preview=payload, result=result)
+        )
+        return result
+
+    runner = _runner(call_agent_tool=call_agent_tool, run_events=run_events)
+    policy = {"mode": "preview_input", "allow_media_control": True}
+
+    runner.run(
+        [
+            {
+                "tool": "media.music_app_open_and_play",
+                "input": {"app_name": "Music"},
+                "desktop_execution_policy": policy,
+            },
+            {
+                "tool": "desktop.safe_type_text",
+                "input": {"text": "hello"},
+                "desktop_execution_policy": policy,
+            },
+        ],
+        ["media.music_app_open_and_play", "desktop.safe_type_text"],
+        FakeBroker({"ok": True}),
+        messages,
+        timeline,
+        [],
+        next_iteration=3,
+        run_id="run-1",
+        budget=budget,
+    )
+
+    skipped = next(event for event in timeline if event["event"] == "agent.tool.skipped")
+    assert calls == [("media.music_app_open_and_play", {"app_name": "Music"})]
+    assert budget.claims == [("desktop.safe_type_text", False)]
+    assert skipped["detail"] == "desktop.safe_type_text"
+    assert skipped["result"]["blocked_by_desktop_execution_policy"] is True
+    assert skipped["result"]["desktop_execution_policy"] == policy
+    assert "blocked_by_desktop_execution_policy" in messages[-1]["content"]
+
+
 def test_runtime_tool_request_runner_uses_discovered_app_name_for_followup_tool() -> None:
     calls: list[tuple[str, dict[str, Any]]] = []
 

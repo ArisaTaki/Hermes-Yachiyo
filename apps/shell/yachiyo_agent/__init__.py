@@ -97,6 +97,11 @@ from .desktop_permissions import (
     desktop_permission_missing_by_capability,
     desktop_runtime_blocking_conditions_by_capability,
 )
+from .desktop_execution_policy import (
+    agent_studio_desktop_execution_policy,
+    daily_entrypoint_desktop_execution_policy,
+    with_daily_entrypoint_desktop_execution_policy,
+)
 from .daily_desktop import (
     daily_desktop_allowed_tools,
     daily_desktop_direct_metadata_request,
@@ -164,6 +169,7 @@ __all__ = [
     "AgentStudioService",
     "AgentTaskLightSnapshot",
     "AgentTaskSnapshot",
+    "agent_studio_desktop_execution_policy",
     "approval_is_pending",
     "ApprovalCardSnapshot",
     "ApprovalDecision",
@@ -188,6 +194,7 @@ __all__ = [
     "daily_desktop_planned_timeline",
     "daily_desktop_recovery_execution_prompt",
     "daily_desktop_user_metadata",
+    "daily_entrypoint_desktop_execution_policy",
     "desktop_agent_entrypoint_allowed_tools",
     "direct_browser_entrypoint_requests",
     "entrypoint_plan_user_metadata",
@@ -292,4 +299,5 @@ __all__ = [
     "YachiyoAgentService",
     "studio_run_url",
     "task_requires_user_action",
+    "with_daily_entrypoint_desktop_execution_policy",
 ]
