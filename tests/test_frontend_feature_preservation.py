@@ -1904,6 +1904,10 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "data-runtime-retry-tools={retryTools.join(',')}",
             "data-runtime-blockers={blockers.join(',')}",
             "data-runtime-stages={stageCounts.map(([stage, count]) => `${stage}:${count}`).join(',')}",
+            "data-sandbox-provider-health-status={sandboxProvider.healthStatus}",
+            "data-sandbox-provider-launch-command={sandboxProvider.launchCommand.join(' ')}",
+            "data-sandbox-provider-launch-provider-id={sandboxProvider.launchProviderId}",
+            "data-sandbox-provider-foreground-mutation-supported",
             "data-runtime-stage={stage}",
             "data-runtime-tool={toolName}",
             "data-runtime-retry-tool={retry.tool}",
@@ -1936,7 +1940,20 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "target: {actionTargetPreview}",
             "evidence: {observationEvidencePreview}",
             "retry: {observationRetryPreview}",
+            "health · {sandboxProvider.healthLabel}",
+            "launch · {sandboxProvider.launchLabel}",
+            "function sandboxProviderHealthLabel",
+            "function sandboxProviderLaunchLabel",
             'data-testid={testId}',
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/runtime-shared/types.ts",
+        [
+            "export type DesktopProviderHealthSnapshot",
+            "export type SandboxDesktopProviderLaunchHint",
+            "health?: DesktopProviderHealthSnapshot | null;",
+            "launch_hint?: SandboxDesktopProviderLaunchHint;",
         ],
     )
     _assert_contains(

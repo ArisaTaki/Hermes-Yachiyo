@@ -100,6 +100,33 @@ export type DesktopExecutionPolicySnapshot = {
   reason?: string;
 };
 
+export type DesktopProviderHealthSnapshot = {
+  ok?: boolean;
+  checked?: boolean;
+  status?: string;
+  status_code?: number | null;
+  provider_kind?: DesktopIsolationKind | string;
+  provider_id?: string;
+  provider_version?: string;
+  endpoint_origin?: string;
+  endpoint_path?: string;
+  blocking_conditions?: string[];
+  supported_tools?: string[];
+  capabilities?: string[];
+  error?: string;
+};
+
+export type SandboxDesktopProviderLaunchHint = {
+  provider_id?: string;
+  provider_kind?: DesktopIsolationKind | string;
+  execution_mode?: string;
+  command?: string[];
+  env?: Record<string, string>;
+  smoke_command?: string[];
+  foreground_mutation_supported?: boolean;
+  requires_real_sandbox_for?: string[];
+};
+
 export type SandboxDesktopProviderSnapshot = {
   available?: boolean;
   provider_id?: string;
@@ -112,6 +139,8 @@ export type SandboxDesktopProviderSnapshot = {
   recommended_for?: string[];
   diagnostic_route?: string | null;
   source?: string;
+  health?: DesktopProviderHealthSnapshot | null;
+  launch_hint?: SandboxDesktopProviderLaunchHint;
 };
 
 export type DesktopExecutionRouteSnapshot = {

@@ -82,6 +82,14 @@ export function RuntimeExecutionEnvelopeSummary({
       data-desktop-execution-policy-label={executionPolicy.label}
       data-sandbox-provider-status={sandboxProvider.status}
       data-sandbox-provider-blockers={sandboxProvider.blockers.join(',')}
+      data-sandbox-provider-health-status={sandboxProvider.healthStatus}
+      data-sandbox-provider-launch-command={sandboxProvider.launchCommand.join(' ')}
+      data-sandbox-provider-launch-provider-id={sandboxProvider.launchProviderId}
+      data-sandbox-provider-foreground-mutation-supported={
+        sandboxProvider.foregroundMutationSupported === null
+          ? ''
+          : String(sandboxProvider.foregroundMutationSupported)
+      }
       data-desktop-execution-route-status={executionRoute.status}
       data-desktop-execution-route-blockers={executionRoute.blockers.join(',')}
       data-request-count={requests.length}
@@ -230,6 +238,8 @@ function RuntimeExecutionEnvelopePills({
     && !blockers.length
     && !executionRoute.status
     && !sandboxProvider.status
+    && !sandboxProvider.healthStatus
+    && !sandboxProvider.launchCommand.length
     && !executionPolicy.mode
   ) {
     return null;
@@ -264,6 +274,32 @@ function RuntimeExecutionEnvelopePills({
           title={sandboxProvider.reason || undefined}
         >
           sandbox · {sandboxProvider.label}
+        </span>
+      ) : null}
+      {sandboxProvider.healthStatus ? (
+        <span
+          className={sandboxProvider.healthOk === false ? missingClassName : pillClassName}
+          data-sandbox-provider-health-status={sandboxProvider.healthStatus}
+          data-sandbox-provider-health-checked={String(sandboxProvider.healthChecked === true)}
+          title={sandboxProvider.healthEndpoint || sandboxProvider.healthBlockers[0] || undefined}
+        >
+          health · {sandboxProvider.healthLabel}
+        </span>
+      ) : null}
+      {sandboxProvider.launchCommand.length ? (
+        <span
+          className={missingClassName}
+          data-sandbox-provider-launch-command={sandboxProvider.launchCommand.join(' ')}
+          data-sandbox-provider-launch-provider-id={sandboxProvider.launchProviderId}
+          data-sandbox-provider-launch-env-url={sandboxProvider.launchEnvUrl}
+          data-sandbox-provider-foreground-mutation-supported={
+            sandboxProvider.foregroundMutationSupported === null
+              ? ''
+              : String(sandboxProvider.foregroundMutationSupported)
+          }
+          title={sandboxProvider.launchCommand.join(' ')}
+        >
+          launch · {sandboxProvider.launchLabel}
         </span>
       ) : null}
       {stageCounts.map(([stage, count]) => (
@@ -366,6 +402,8 @@ function RuntimeExecutionRequestRow({
       data-desktop-execution-policy={executionPolicy.mode}
       data-sandbox-provider-status={sandboxProvider.status}
       data-sandbox-provider-blockers={sandboxProvider.blockers.join(',')}
+      data-sandbox-provider-health-status={sandboxProvider.healthStatus}
+      data-sandbox-provider-launch-command={sandboxProvider.launchCommand.join(' ')}
       data-desktop-execution-route-status={executionRoute.status}
       data-desktop-execution-route-blockers={executionRoute.blockers.join(',')}
       data-observation-retry={observationRetryPreview}
@@ -396,6 +434,12 @@ function RuntimeExecutionRequestRow({
         ) : null}
         {sandboxProvider.status ? (
           <span title={sandboxProvider.reason || undefined}>sandbox: {sandboxProvider.label}</span>
+        ) : null}
+        {sandboxProvider.healthStatus ? (
+          <span title={sandboxProvider.healthEndpoint || undefined}>health: {sandboxProvider.healthLabel}</span>
+        ) : null}
+        {sandboxProvider.launchCommand.length ? (
+          <span title={sandboxProvider.launchCommand.join(' ')}>launch: {sandboxProvider.launchLabel}</span>
         ) : null}
         {executionRoute.status ? (
           <span title={executionRoute.reason || undefined}>route: {executionRoute.label}</span>
@@ -484,10 +528,22 @@ type RuntimeExecutionRouteSummary = {
 type RuntimeSandboxProviderSummary = {
   available: boolean;
   blockers: string[];
+  foregroundMutationSupported: boolean | null;
+  healthBlockers: string[];
+  healthChecked: boolean | null;
+  healthEndpoint: string;
+  healthLabel: string;
+  healthOk: boolean | null;
+  healthStatus: string;
+  launchCommand: string[];
+  launchEnvUrl: string;
+  launchLabel: string;
+  launchProviderId: string;
   label: string;
   providerId: string;
   providerKind: string;
   reason: string;
+  requiresRealSandboxFor: string[];
   status: string;
 };
 
@@ -602,13 +658,51 @@ function runtimeSandboxProviderSummary(
   const providerKind = stringValue(record.provider_kind);
   const reason = stringValue(record.reason);
   const blockers = stringArray(record.blocking_conditions);
+  const health = objectRecord(record.health);
+  const healthStatus = stringValue(health.status);
+  const healthOk = booleanValue(health.ok);
+  const healthChecked = booleanValue(health.checked);
+  const healthBlockers = stringArray(health.blocking_conditions);
+  const healthEndpoint = compactPreview([
+    stringValue(health.endpoint_origin),
+    stringValue(health.endpoint_path),
+  ]);
+  const launchHint = objectRecord(record.launch_hint);
+  const launchCommand = stringArray(launchHint.command);
+  const launchEnv = objectRecord(launchHint.env);
+  const launchProviderId = stringValue(launchHint.provider_id) || providerId;
+  const launchEnvUrl = stringValue(launchEnv.OHA_YACHIYO_DESKTOP_PROVIDER_URL);
+  const foregroundMutationSupported = booleanValue(launchHint.foreground_mutation_supported);
+  const requiresRealSandboxFor = stringArray(launchHint.requires_real_sandbox_for);
   return {
     available,
     blockers,
+    foregroundMutationSupported,
+    healthBlockers,
+    healthChecked,
+    healthEndpoint,
+    healthLabel: sandboxProviderHealthLabel({
+      blockers: healthBlockers,
+      checked: healthChecked,
+      ok: healthOk,
+      status: healthStatus,
+    }),
+    healthOk,
+    healthStatus,
+    launchCommand,
+    launchEnvUrl,
+    launchLabel: sandboxProviderLaunchLabel({
+      command: launchCommand,
+      foregroundMutationSupported,
+      providerId: launchProviderId,
+      requiresRealSandboxFor,
+    }),
+    launchProviderId,
     label: sandboxProviderLabel({ available, blockers, providerId, providerKind, status }),
     providerId,
     providerKind,
     reason,
+    requiresRealSandboxFor,
     status,
   };
 }
@@ -631,6 +725,35 @@ function sandboxProviderLabel(provider: {
     provider.status || 'blocked',
     provider.blockers[0],
     provider.providerKind,
+  ]);
+}
+
+function sandboxProviderHealthLabel(health: {
+  blockers: string[];
+  checked: boolean | null;
+  ok: boolean | null;
+  status: string;
+}): string {
+  if (!health.status && !health.blockers.length) return '';
+  return compactPreview([
+    health.status || (health.ok ? 'healthy' : 'not checked'),
+    health.checked === false ? 'unchecked' : '',
+    health.ok === false ? health.blockers[0] : '',
+  ]);
+}
+
+function sandboxProviderLaunchLabel(launch: {
+  command: string[];
+  foregroundMutationSupported: boolean | null;
+  providerId: string;
+  requiresRealSandboxFor: string[];
+}): string {
+  if (!launch.command.length && !launch.providerId) return '';
+  return compactPreview([
+    launch.providerId,
+    launch.command.slice(0, 2).join(' '),
+    launch.foregroundMutationSupported === false ? 'read-only' : '',
+    launch.requiresRealSandboxFor.length ? `needs sandbox for ${launch.requiresRealSandboxFor.slice(0, 2).join('/')}` : '',
   ]);
 }
 
