@@ -274,7 +274,11 @@ def _without_shadowed_runtime_retry_recoveries(
     filtered: list[ReplanRecoverySnapshot] = []
     for snapshot in snapshots:
         signature = _recovery_source_signature(snapshot)
-        if _is_runtime_replan_projection(snapshot) and signature in runtime_retry_sources:
+        if (
+            _is_runtime_replan_projection(snapshot)
+            and signature in runtime_retry_sources
+            and not _recovery_is_completed(snapshot)
+        ):
             continue
         if _is_runtime_retry_recovery(snapshot) and signature in completed_sources:
             continue

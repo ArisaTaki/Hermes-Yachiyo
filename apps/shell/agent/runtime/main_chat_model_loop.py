@@ -14,6 +14,10 @@ from apps.shell.yachiyo_agent.entrypoint_tool_selection import (
 from apps.shell.yachiyo_agent.discovered_app_followups import (
     planner_discovered_app_followup_can_direct_execute,
 )
+from apps.shell.yachiyo_agent.runtime_execution import (
+    runtime_execution_requests_from_envelope_payload,
+    runtime_execution_requests_from_metadata,
+)
 
 
 def build_runtime_main_chat_model_loop_runner(
@@ -118,6 +122,8 @@ class MainChatModelLoopRunner:
         profile_id: str = "",
         direct_tool_request: dict[str, Any] | None = None,
         direct_tool_requests: list[dict[str, Any]] | None = None,
+        runtime_execution_envelope: dict[str, Any] | None = None,
+        runtime_execution_metadata: dict[str, Any] | None = None,
         tool_policy: dict[str, Any] | None = None,
         workspace_policy: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
@@ -145,6 +151,8 @@ class MainChatModelLoopRunner:
             runtime["tool_policy"].get("allowed_tools") or [],
             direct_tool_request=direct_tool_request,
             direct_tool_requests=direct_tool_requests,
+            runtime_execution_envelope=runtime_execution_envelope,
+            runtime_execution_metadata=runtime_execution_metadata,
         )
         if not default_profile_id and not direct_daily_desktop_intent:
             raise self._error_type("native_agent_not_ready:chat_model_profile_required")
@@ -194,6 +202,8 @@ class MainChatModelLoopRunner:
                 messages=messages,
                 direct_tool_request=direct_tool_request,
                 direct_tool_requests=direct_tool_requests,
+                runtime_execution_envelope=runtime_execution_envelope,
+                runtime_execution_metadata=runtime_execution_metadata,
                 run_id=run_id,
                 budget=budget,
             )
@@ -203,6 +213,8 @@ class MainChatModelLoopRunner:
                 model_profile_id=default_profile_id,
                 tool_policy=runtime["tool_policy"],
                 workspace_policy=runtime["workspace_policy"],
+                runtime_execution_envelope=runtime_execution_envelope,
+                runtime_execution_metadata=runtime_execution_metadata,
             )
             return self._approval_pause.project_tool_required(
                 run_id,
@@ -267,6 +279,8 @@ class MainChatModelLoopRunner:
         *,
         direct_tool_request: dict[str, Any] | None = None,
         direct_tool_requests: list[dict[str, Any]] | None = None,
+        runtime_execution_envelope: dict[str, Any] | None = None,
+        runtime_execution_metadata: dict[str, Any] | None = None,
     ) -> bool:
         if any(
             isinstance(request, dict) and str(request.get("tool") or "").strip()
@@ -275,6 +289,22 @@ class MainChatModelLoopRunner:
             return True
         if isinstance(direct_tool_request, dict) and str(direct_tool_request.get("tool") or "").strip():
             return True
+        for requests in (
+            runtime_execution_requests_from_envelope_payload(
+                runtime_execution_envelope,
+                allowed_tools=allowed_tools,
+            ),
+            runtime_execution_requests_from_metadata(
+                runtime_execution_metadata,
+                allowed_tools=allowed_tools,
+            ),
+        ):
+            if requests and not any(
+                bool(request.get("continue_to_model"))
+                for request in requests
+                if isinstance(request, dict)
+            ):
+                return True
         intent_text = _latest_user_intent_text(messages)
         if not intent_text:
             return False

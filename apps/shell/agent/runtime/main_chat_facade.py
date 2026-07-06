@@ -14,8 +14,20 @@ class RuntimeMainChatFacadeMixin:
         task_id: str,
         session_id: str,
         user_goal: str,
+        metadata: dict[str, Any] | None = None,
+        runtime_execution_envelope: dict[str, Any] | None = None,
+        direct_tool_request: dict[str, Any] | None = None,
+        direct_tool_requests: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
-        return self.main_chat_runs.start(task_id=task_id, session_id=session_id, user_goal=user_goal)
+        return self.main_chat_runs.start(
+            task_id=task_id,
+            session_id=session_id,
+            user_goal=user_goal,
+            metadata=metadata,
+            runtime_execution_envelope=runtime_execution_envelope,
+            direct_tool_request=direct_tool_request,
+            direct_tool_requests=direct_tool_requests,
+        )
 
     def call_main_chat_model(
         self,
@@ -58,14 +70,21 @@ class RuntimeMainChatFacadeMixin:
         model_profile_id: str,
         tool_policy: dict[str, Any],
         workspace_policy: dict[str, Any],
+        runtime_execution_envelope: dict[str, Any] | None = None,
+        runtime_execution_metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        return {
+        payload = {
             **pending_approval,
             "resume_kind": "main_chat",
             "model_profile_id": str(model_profile_id or "").strip(),
             "tool_policy": tool_policy,
             "workspace_policy": workspace_policy,
         }
+        if runtime_execution_envelope is not None:
+            payload["runtime_execution_envelope"] = runtime_execution_envelope
+        if runtime_execution_metadata is not None:
+            payload["runtime_execution_metadata"] = runtime_execution_metadata
+        return payload
 
     def execute_main_chat_model_loop(
         self,
@@ -75,6 +94,8 @@ class RuntimeMainChatFacadeMixin:
         profile_id: str = "",
         direct_tool_request: dict[str, Any] | None = None,
         direct_tool_requests: list[dict[str, Any]] | None = None,
+        runtime_execution_envelope: dict[str, Any] | None = None,
+        runtime_execution_metadata: dict[str, Any] | None = None,
         tool_policy: dict[str, Any] | None = None,
         workspace_policy: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
@@ -84,6 +105,8 @@ class RuntimeMainChatFacadeMixin:
             profile_id=profile_id,
             direct_tool_request=direct_tool_request,
             direct_tool_requests=direct_tool_requests,
+            runtime_execution_envelope=runtime_execution_envelope,
+            runtime_execution_metadata=runtime_execution_metadata,
             tool_policy=tool_policy,
             workspace_policy=workspace_policy,
         )

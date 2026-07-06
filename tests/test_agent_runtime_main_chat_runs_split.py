@@ -94,6 +94,46 @@ def test_main_chat_run_lifecycle_projects_task_events() -> None:
     ]
 
 
+def test_main_chat_run_lifecycle_records_runtime_context_on_start() -> None:
+    runs: dict[str, dict[str, Any]] = {}
+    lifecycle = MainChatRunLifecycle(
+        main_chat_agent_id="builtin:yachiyo-main",
+        insert_run=lambda **payload: runs.setdefault(
+            "run-1",
+            {"run_id": "run-1", "status": "created", "timeline": [], **payload},
+        ),
+        link_task_run=lambda **_payload: None,
+        get_run=lambda run_id: runs[run_id],
+        update_run=lambda run_id, **payload: runs.__setitem__(
+            run_id,
+            {**runs[run_id], **payload},
+        )
+        or runs[run_id],
+        task_run_links=FakeTaskRunLinks(),
+        task_events=FakeTaskEvents(),
+        timeline_factory=_timeline,
+        redact_secrets=str,
+        final_statuses={"completed", "failed", "cancelled"},
+    )
+    envelope = {"envelope_id": "env-main", "requests": [{"tool_name": "app.open"}]}
+    direct_request = {"tool": "app.open", "input": {"app_name": "Music"}}
+
+    run = lifecycle.start(
+        task_id="task-1",
+        session_id="session-1",
+        user_goal="open music",
+        metadata={"yachiyo_runtime_planner": True},
+        runtime_execution_envelope=envelope,
+        direct_tool_requests=[direct_request],
+    )
+
+    started = run["timeline"][0]
+    assert started["event"] == "run.started"
+    assert started["metadata"]["yachiyo_runtime_planner"] is True
+    assert started["runtime_execution_envelope"] == envelope
+    assert started["direct_tool_requests"] == [direct_request]
+
+
 def test_main_chat_run_lifecycle_keeps_terminal_run_idempotent() -> None:
     events = FakeTaskEvents()
     run = {"run_id": "run-1", "status": "cancelled", "timeline": []}

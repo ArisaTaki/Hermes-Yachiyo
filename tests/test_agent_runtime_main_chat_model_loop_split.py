@@ -182,6 +182,37 @@ def test_main_chat_model_loop_runner_projects_successful_loop() -> None:
     assert state["events"][-1][1]["finish_reason"] == "stop"
 
 
+def test_main_chat_model_loop_runner_forwards_runtime_execution_context() -> None:
+    continue_calls: list[dict[str, Any]] = []
+    runner, _state = _runner()
+    envelope = {"envelope_id": "env-main", "requests": [{"tool_name": "app.open"}]}
+    metadata = {"yachiyo_runtime_planner": True}
+
+    def continue_custom_api_agent(
+        _agent: dict[str, Any],
+        _context: str,
+        _broker: dict[str, Any],
+        _timeline: list[dict[str, Any]],
+        _artifacts: list[dict[str, Any]],
+        **kwargs: Any,
+    ) -> str:
+        continue_calls.append(kwargs)
+        return "done"
+
+    runner._continue_custom_api_agent = continue_custom_api_agent
+
+    result = runner.execute(
+        "run-1",
+        [{"role": "user", "content": "打开 Apple Music"}],
+        runtime_execution_envelope=envelope,
+        runtime_execution_metadata=metadata,
+    )
+
+    assert result["status"] == "running"
+    assert continue_calls[0]["runtime_execution_envelope"] is envelope
+    assert continue_calls[0]["runtime_execution_metadata"] is metadata
+
+
 def test_main_chat_model_loop_runner_passes_approval_policy_to_broker() -> None:
     runner, state = _runner()
     runner._compile_agent_runtime = lambda _agent: {
@@ -196,6 +227,52 @@ def test_main_chat_model_loop_runner_passes_approval_policy_to_broker() -> None:
 
     assert result["status"] == "running"
     assert state["tool_brokers"].calls[0]["approvals"] == {"desktop.type_text": True}
+
+
+def test_main_chat_model_loop_runner_treats_runtime_envelope_as_direct_without_profile() -> None:
+    continue_calls: list[dict[str, Any]] = []
+    runner, state = _runner()
+    runner._default_profile_id = lambda: ""
+    runner._compile_agent_runtime = lambda _agent: {
+        "tool_policy": {"allowed_tools": ["app.open"]},
+        "workspace_policy": {"default_workdir": "/tmp/project"},
+    }
+    envelope = {
+        "requests": [
+            {
+                "request_id": "open-music",
+                "tool_name": "app.open",
+                "input": {"app_name": "Music"},
+            }
+        ]
+    }
+
+    def continue_custom_api_agent(
+        agent: dict[str, Any],
+        _context: str,
+        _broker: dict[str, Any],
+        _timeline: list[dict[str, Any]],
+        _artifacts: list[dict[str, Any]],
+        **kwargs: Any,
+    ) -> str:
+        continue_calls.append({"agent": agent, "kwargs": kwargs})
+        return "opened"
+
+    runner._continue_custom_api_agent = continue_custom_api_agent
+
+    result = runner.execute(
+        "run-1",
+        [{"role": "user", "content": "打开 Apple Music"}],
+        runtime_execution_envelope=envelope,
+    )
+
+    assert result["status"] == "running"
+    assert result["result"] == "opened"
+    assert continue_calls[0]["agent"]["model_profile_id"] == ""
+    assert continue_calls[0]["kwargs"]["runtime_execution_envelope"] is envelope
+    assert [event_type for event_type, _payload in state["events"]] == [
+        "model.output.completed"
+    ]
 
 
 def test_main_chat_model_loop_runner_uses_runtime_planner_without_profile_before_legacy(
@@ -327,8 +404,15 @@ def test_main_chat_model_loop_runner_projects_approval_required_without_bypassin
 
     runner, state = _runner()
     runner._continue_custom_api_agent = raise_approval
+    envelope = {"envelope_id": "env-approval", "requests": [{"tool_name": "terminal.run"}]}
+    metadata = {"yachiyo_runtime_planner": True}
 
-    result = runner.execute("run-1", [{"role": "user", "content": "run command"}])
+    result = runner.execute(
+        "run-1",
+        [{"role": "user", "content": "run command"}],
+        runtime_execution_envelope=envelope,
+        runtime_execution_metadata=metadata,
+    )
 
     assert result["status"] == "approval_required"
     assert state["approval_pause"].calls[0]["pending_approval"] == {
@@ -336,6 +420,8 @@ def test_main_chat_model_loop_runner_projects_approval_required_without_bypassin
         "model_profile_id": "profile-chat",
         "tool_policy": {"allowed_tools": ["workspace.read"]},
         "workspace_policy": {"default_workdir": "/tmp/project"},
+        "runtime_execution_envelope": envelope,
+        "runtime_execution_metadata": metadata,
     }
 
 

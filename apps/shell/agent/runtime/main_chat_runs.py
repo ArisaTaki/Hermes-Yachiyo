@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any, Callable
 
 
@@ -33,19 +34,36 @@ class MainChatRunLifecycle:
         self._redact_secrets = redact_secrets
         self._final_statuses = final_statuses
 
-    def start(self, *, task_id: str, session_id: str, user_goal: str) -> dict[str, Any]:
+    def start(
+        self,
+        *,
+        task_id: str,
+        session_id: str,
+        user_goal: str,
+        metadata: dict[str, Any] | None = None,
+        runtime_execution_envelope: Any | None = None,
+        direct_tool_request: dict[str, Any] | None = None,
+        direct_tool_requests: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
         run = self._insert_run(
             kind="main_chat_run",
             runnable_id=self._main_chat_agent_id,
             user_goal=self._redact_secrets(user_goal),
         )
         self._link_task_run(task_id=task_id, run_id=run["run_id"], session_id=session_id)
+        start_payload = _main_chat_start_payload(
+            task_id=task_id,
+            session_id=session_id,
+            metadata=metadata,
+            runtime_execution_envelope=runtime_execution_envelope,
+            direct_tool_request=direct_tool_request,
+            direct_tool_requests=direct_tool_requests,
+        )
         timeline = [
             self._timeline(
                 "run.started",
                 "Native main chat run started",
-                task_id=str(task_id or ""),
-                session_id=str(session_id or ""),
+                **start_payload,
             ),
             self._timeline("task.created", str(task_id or ""), task_id=str(task_id or "")),
             self._timeline("task.started", str(task_id or ""), task_id=str(task_id or "")),
@@ -110,3 +128,54 @@ class MainChatRunLifecycle:
             error=safe_error,
         )
         return failed
+
+
+def _main_chat_start_payload(
+    *,
+    task_id: str,
+    session_id: str,
+    metadata: dict[str, Any] | None,
+    runtime_execution_envelope: Any | None,
+    direct_tool_request: dict[str, Any] | None,
+    direct_tool_requests: list[dict[str, Any]] | None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "task_id": str(task_id or ""),
+        "session_id": str(session_id or ""),
+    }
+    metadata_payload = dict(metadata) if isinstance(metadata, Mapping) else {}
+    envelope = _runtime_execution_envelope_payload(
+        runtime_execution_envelope,
+        metadata_payload,
+    )
+    if metadata_payload:
+        payload["metadata"] = metadata_payload
+    if envelope is not None:
+        payload["runtime_execution_envelope"] = envelope
+    if isinstance(direct_tool_request, Mapping):
+        payload["direct_tool_request"] = dict(direct_tool_request)
+    requests = _direct_tool_requests_payload(direct_tool_requests)
+    if requests:
+        payload["direct_tool_requests"] = requests
+    return payload
+
+
+def _runtime_execution_envelope_payload(
+    runtime_execution_envelope: Any | None,
+    metadata: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    if isinstance(runtime_execution_envelope, Mapping):
+        return dict(runtime_execution_envelope)
+    for key in ("runtime_execution_envelope", "yachiyo_execution_envelope"):
+        envelope = metadata.get(key)
+        if isinstance(envelope, Mapping):
+            return dict(envelope)
+    return None
+
+
+def _direct_tool_requests_payload(
+    direct_tool_requests: list[dict[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    if not isinstance(direct_tool_requests, list):
+        return []
+    return [dict(request) for request in direct_tool_requests if isinstance(request, Mapping)]

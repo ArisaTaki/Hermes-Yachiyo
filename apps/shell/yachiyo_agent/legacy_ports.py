@@ -657,12 +657,18 @@ class LegacyChatTaskStarter:
                     "runtime_execution_envelope",
                     dict(runtime_execution_envelope),
                 )
+            explicit_runtime_execution_envelope = _has_explicit_runtime_execution_envelope(
+                runtime_execution_envelope,
+                metadata,
+            )
             envelope_tool_requests = _safe_runtime_execution_envelope_requests(
                 prompt or execution_prompt,
                 metadata,
                 allowed_entrypoint_tools,
                 runtime_execution_envelope=runtime_execution_envelope,
-                selected_requests=selected_requests,
+                selected_requests=(
+                    [] if explicit_runtime_execution_envelope else selected_requests
+                ),
             )
             if explicit_direct_tool_requests:
                 direct_tool_requests = explicit_direct_tool_requests
@@ -729,11 +735,34 @@ class LegacyChatTaskStarter:
         self._sync_app_task_running(task_id)
         run_id = ""
         try:
-            run = start_main_chat_run(
-                task_id=task_id,
-                session_id=conversation_id,
-                user_goal=prompt or execution_prompt,
+            effective_runtime_execution_envelope = _main_chat_runtime_execution_envelope(
+                runtime_execution_envelope,
+                metadata,
+                direct_tool_selection_payload,
             )
+            start_kwargs: dict[str, Any] = {
+                "task_id": task_id,
+                "session_id": conversation_id,
+                "user_goal": prompt or execution_prompt,
+            }
+            if supports_keyword(start_main_chat_run, "metadata"):
+                start_kwargs["metadata"] = metadata
+            if (
+                effective_runtime_execution_envelope is not None
+                and supports_keyword(start_main_chat_run, "runtime_execution_envelope")
+            ):
+                start_kwargs["runtime_execution_envelope"] = effective_runtime_execution_envelope
+            if (
+                direct_tool_request is not None
+                and supports_keyword(start_main_chat_run, "direct_tool_request")
+            ):
+                start_kwargs["direct_tool_request"] = direct_tool_request
+            if (
+                direct_tool_requests
+                and supports_keyword(start_main_chat_run, "direct_tool_requests")
+            ):
+                start_kwargs["direct_tool_requests"] = direct_tool_requests
+            run = start_main_chat_run(**start_kwargs)
             run_id = str(run.get("run_id") or "").strip()
             if not run_id:
                 return None
@@ -751,6 +780,15 @@ class LegacyChatTaskStarter:
                 "direct_tool_request": direct_tool_request,
                 "direct_tool_requests": direct_tool_requests,
             }
+            if (
+                effective_runtime_execution_envelope is not None
+                and supports_keyword(execute_main_chat_model_loop, "runtime_execution_envelope")
+            ):
+                model_loop_kwargs["runtime_execution_envelope"] = (
+                    effective_runtime_execution_envelope
+                )
+            if supports_keyword(execute_main_chat_model_loop, "runtime_execution_metadata"):
+                model_loop_kwargs["runtime_execution_metadata"] = metadata
             tool_policy = _main_chat_direct_request_tool_policy(
                 direct_tool_request,
                 direct_tool_requests,
@@ -2037,6 +2075,40 @@ def _runtime_planner_model_followup_verification_request(
         "desktop.windows",
         "screen.capture",
     }
+
+
+def _main_chat_runtime_execution_envelope(
+    runtime_execution_envelope: Any | None,
+    metadata: Mapping[str, Any] | None,
+    direct_tool_selection_payload: Mapping[str, Any] | None,
+) -> dict[str, Any] | None:
+    for envelope in (
+        runtime_execution_envelope,
+        (
+            direct_tool_selection_payload.get("runtime_execution_envelope")
+            if isinstance(direct_tool_selection_payload, Mapping)
+            else None
+        ),
+        metadata.get("runtime_execution_envelope") if isinstance(metadata, Mapping) else None,
+        metadata.get("yachiyo_execution_envelope") if isinstance(metadata, Mapping) else None,
+    ):
+        if isinstance(envelope, Mapping):
+            return dict(envelope)
+    return None
+
+
+def _has_explicit_runtime_execution_envelope(
+    runtime_execution_envelope: Any | None,
+    metadata: Mapping[str, Any] | None,
+) -> bool:
+    return any(
+        isinstance(envelope, Mapping)
+        for envelope in (
+            runtime_execution_envelope,
+            metadata.get("runtime_execution_envelope") if isinstance(metadata, Mapping) else None,
+            metadata.get("yachiyo_execution_envelope") if isinstance(metadata, Mapping) else None,
+        )
+    )
 
 
 def _safe_runtime_execution_envelope_requests(

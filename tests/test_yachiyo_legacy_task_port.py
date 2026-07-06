@@ -2066,9 +2066,20 @@ def test_legacy_chat_task_starter_uses_runtime_execution_envelope_requests() -> 
     )
 
     assert task is not None
+    start_call = [call for call in runtime.calls if call[0] == "start_main_chat_run"][0]
+    assert start_call[1]["metadata"]["yachiyo_runtime_planner"] is True
+    assert start_call[1]["metadata"]["source"] == "launcher"
+    assert start_call[1]["runtime_execution_envelope"] == request["metadata"][
+        "yachiyo_execution_envelope"
+    ]
     model_loop_call = [
         call for call in runtime.calls if call[0] == "execute_main_chat_model_loop"
     ][0]
+    assert model_loop_call[1]["runtime_execution_envelope"] == request["metadata"][
+        "yachiyo_execution_envelope"
+    ]
+    assert model_loop_call[1]["runtime_execution_metadata"]["yachiyo_runtime_planner"] is True
+    assert model_loop_call[1]["runtime_execution_metadata"]["source"] == "launcher"
     direct_requests = model_loop_call[1]["direct_tool_requests"]
     assert [request["tool"] for request in direct_requests] == ["desktop.inspect_app"]
     assert direct_requests[0]["input"] == {
@@ -4051,6 +4062,10 @@ class _MainChatPlannerEventRuntime:
         task_id: str,
         session_id: str,
         user_goal: str,
+        metadata: dict[str, Any] | None = None,
+        runtime_execution_envelope: dict[str, Any] | None = None,
+        direct_tool_request: dict[str, Any] | None = None,
+        direct_tool_requests: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         self.calls.append(
             (
@@ -4059,6 +4074,10 @@ class _MainChatPlannerEventRuntime:
                     "task_id": task_id,
                     "session_id": session_id,
                     "user_goal": user_goal,
+                    "metadata": metadata,
+                    "runtime_execution_envelope": runtime_execution_envelope,
+                    "direct_tool_request": direct_tool_request,
+                    "direct_tool_requests": direct_tool_requests,
                 },
             )
         )
@@ -4094,6 +4113,8 @@ class _MainChatPlannerEventRuntime:
         *,
         direct_tool_request: dict[str, Any] | None = None,
         direct_tool_requests: list[dict[str, Any]] | None = None,
+        runtime_execution_envelope: dict[str, Any] | None = None,
+        runtime_execution_metadata: dict[str, Any] | None = None,
         tool_policy: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         self.calls.append(
@@ -4104,6 +4125,8 @@ class _MainChatPlannerEventRuntime:
                     "messages": messages,
                     "direct_tool_request": direct_tool_request,
                     "direct_tool_requests": direct_tool_requests,
+                    "runtime_execution_envelope": runtime_execution_envelope,
+                    "runtime_execution_metadata": runtime_execution_metadata,
                     "tool_policy": tool_policy,
                 },
             )
