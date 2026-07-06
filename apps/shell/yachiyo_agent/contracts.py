@@ -185,6 +185,7 @@ class SandboxDesktopProviderSnapshot(_PublicSnapshot):
     diagnostic_route: str | None = None
     source: str = "runtime"
     health: DesktopProviderHealthSnapshot | None = None
+    launch_hint: dict[str, Any] = Field(default_factory=dict)
 
 
 class DesktopExecutionRouteSnapshot(_PublicSnapshot):

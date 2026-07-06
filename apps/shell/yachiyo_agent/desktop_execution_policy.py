@@ -35,6 +35,32 @@ _SANDBOX_DESKTOP_PROVIDER_DEFAULT: dict[str, Any] = {
         "supported_tools": [],
         "capabilities": [],
     },
+    "launch_hint": {
+        "provider_id": "local-headless-desktop",
+        "provider_kind": "sandbox_desktop",
+        "execution_mode": "headless_read_only",
+        "command": [
+            "python",
+            "scripts/run_headless_desktop_provider.py",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "19091",
+        ],
+        "env": {
+            "OHA_YACHIYO_DESKTOP_PROVIDER_URL": "http://127.0.0.1:19091",
+            "OHA_YACHIYO_DESKTOP_PROVIDER_ID": "local-headless-desktop",
+            "OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS": (
+                "desktop.permissions,desktop.permission_preflight,"
+                "desktop.active_window,desktop.running_apps,desktop.list_apps,"
+                "desktop.windows,desktop.list_windows,desktop.ui_elements,"
+                "desktop.read_ui,desktop.verify,app.status"
+            ),
+        },
+        "smoke_command": ["python", "scripts/smoke_headless_desktop_provider.py"],
+        "foreground_mutation_supported": False,
+        "requires_real_sandbox_for": ["click", "type", "shortcut", "focus"],
+    },
 }
 
 

@@ -230,6 +230,9 @@ Agent Studio, and release smoke scripts can discover entrypoint, endpoint, env,
 tool, and safety metadata without duplicating constants. Foreground mutation
 tools remain unsupported until a real sandbox/VM/browser-profile provider can
 own the input stream without competing with the user's live mouse and keyboard.
+When no provider is configured, `SandboxDesktopProviderSnapshot.launch_hint`
+now carries the local headless provider command, env wiring, smoke command, and
+its explicit no-foreground-mutation safety boundary.
 
 Semantic foreground typing now mirrors semantic clicking when an accessibility
 target cannot be matched: the tool returns candidate UI controls, visibility

@@ -5012,6 +5012,10 @@ def test_sandbox_desktop_provider_snapshot_json_shape_is_stable() -> None:
             status="not_configured",
             blocking_conditions=["sandbox_desktop_provider_required"],
         ),
+        launch_hint={
+            "command": ["python", "scripts/run_headless_desktop_provider.py"],
+            "foreground_mutation_supported": False,
+        },
     )
 
     payload = _json(snapshot)
@@ -5041,6 +5045,7 @@ def test_sandbox_desktop_provider_snapshot_json_shape_is_stable() -> None:
         "diagnostic_route",
         "source",
         "health",
+        "launch_hint",
     ]
     assert payload["available"] is False
     assert payload["adapter_ready"] is False
@@ -5052,11 +5057,17 @@ def test_sandbox_desktop_provider_snapshot_json_shape_is_stable() -> None:
     assert default_status["status"] == "provider_required"
     assert default_status["blocking_conditions"] == ["sandbox_desktop_provider_required"]
     assert default_status["health"]["status"] == "not_configured"
+    assert default_status["launch_hint"]["provider_id"] == "local-headless-desktop"
+    assert default_status["launch_hint"]["env"]["OHA_YACHIYO_DESKTOP_PROVIDER_URL"] == (
+        "http://127.0.0.1:19091"
+    )
+    assert default_status["launch_hint"]["foreground_mutation_supported"] is False
     assert explicit_status["available"] is True
     assert explicit_status["adapter_ready"] is True
     assert explicit_status["status"] == "available"
     assert explicit_status["blocking_conditions"] == []
     assert explicit_status["health"]["status"] == "not_checked"
+    assert explicit_status["launch_hint"]["provider_id"] == "local-headless-desktop"
     with pytest.raises(ValidationError):
         SandboxDesktopProviderSnapshot(unknown=True)
     with pytest.raises(ValidationError):
