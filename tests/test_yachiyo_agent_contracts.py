@@ -5171,6 +5171,12 @@ def test_sandbox_desktop_provider_snapshot_json_shape_is_stable() -> None:
         "python",
         "scripts/smoke_isolated_desktop_provider.py",
     ]
+    assert "desktop.open_app" in default_status["launch_hint"]["isolated_provider"][
+        "supported_tools"
+    ]
+    assert "desktop.click_ui_element" in default_status["launch_hint"][
+        "isolated_provider"
+    ]["env"]["OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS"]
     assert default_status["launch_hint"]["isolated_provider"][
         "keyboard_mouse_capture_supported"
     ] is True

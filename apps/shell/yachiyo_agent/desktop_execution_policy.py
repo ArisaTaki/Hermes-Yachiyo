@@ -7,6 +7,9 @@ from collections.abc import Mapping
 from typing import Any
 from urllib.parse import urlparse
 
+from apps.shell.agent.runtime.controlled_desktop_provider import (
+    CONTROLLED_DESKTOP_PROVIDER_TOOLS,
+)
 from apps.shell.agent.runtime.desktop_execution_providers import (
     desktop_execution_provider_status_from_env,
     local_desktop_execution_provider_status,
@@ -83,11 +86,15 @@ _SANDBOX_DESKTOP_PROVIDER_DEFAULT: dict[str, Any] = {
             "env": {
                 "OHA_YACHIYO_DESKTOP_PROVIDER_URL": "http://127.0.0.1:19093",
                 "OHA_YACHIYO_DESKTOP_PROVIDER_ID": "local-isolated-desktop",
+                "OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS": ",".join(
+                    CONTROLLED_DESKTOP_PROVIDER_TOOLS
+                ),
                 "OHA_YACHIYO_DESKTOP_PROVIDER_KEYBOARD_MOUSE_CAPTURE_SUPPORTED": "true",
                 "OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_KIND": "isolated_desktop",
                 "OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_ISOLATED": "true",
                 "OHA_YACHIYO_DESKTOP_PROVIDER_FOREGROUND_TAKEOVER_REQUIRED": "false",
             },
+            "supported_tools": list(CONTROLLED_DESKTOP_PROVIDER_TOOLS),
             "foreground_mutation_supported": True,
             "keyboard_mouse_capture_supported": True,
             "desktop_session_kind": "isolated_desktop",
