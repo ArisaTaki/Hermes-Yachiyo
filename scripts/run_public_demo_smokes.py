@@ -539,6 +539,11 @@ def _release_assessment(
         "release_level": release_level,
         "required_flow_count": len(flows),
         "passed_required_flow_count": passed_count,
+        "release_progress": _release_progress(
+            flows,
+            passed_count=passed_count,
+            plan_only=plan_only,
+        ),
         "missing_required_flow_ids": [
             str(flow.get("id") or "") for flow in incomplete if flow.get("id")
         ],
@@ -550,6 +555,53 @@ def _release_assessment(
             "--include-real-desktop --include-provider-workflow --include-ui "
             "--output-json tmp/public-demo-smokes-full.json "
             "--output-markdown tmp/public-demo-smokes-full.md"
+        ),
+    }
+
+
+def _release_progress(
+    flows: Sequence[Mapping[str, Any]],
+    *,
+    passed_count: int,
+    plan_only: bool,
+) -> dict[str, Any]:
+    total_count = len(flows)
+    selected = [flow for flow in flows if flow.get("selected") is True]
+    selected_passed = [
+        flow for flow in selected if str(flow.get("status") or "") == "passed"
+    ]
+    incomplete = [
+        flow for flow in flows if str(flow.get("status") or "") != "passed"
+    ]
+    skipped_opt_in = [
+        flow
+        for flow in flows
+        if str(flow.get("status") or "") == "skipped"
+        and str(flow.get("opt_in_flag") or "")
+    ]
+    remaining_count = len(incomplete)
+    percent = round((passed_count / total_count) * 100, 2) if total_count else 0.0
+    return {
+        "baseline_id": "full_public_demo",
+        "baseline_label": "Full public demo release readiness",
+        "denominator": "required_flow_count",
+        "status_basis": "planned" if plan_only else "executed_smoke_results",
+        "passed_count": passed_count,
+        "total_count": total_count,
+        "remaining_count": remaining_count,
+        "percent": percent,
+        "selected_count": len(selected),
+        "selected_passed_count": len(selected_passed),
+        "selected_remaining_count": max(len(selected) - len(selected_passed), 0),
+        "missing_required_flow_ids": [
+            str(flow.get("id") or "") for flow in incomplete if flow.get("id")
+        ],
+        "opt_in_gap_ids": [
+            str(flow.get("id") or "") for flow in skipped_opt_in if flow.get("id")
+        ],
+        "note": (
+            "Use passed_count/total_count for release progress. "
+            "Selected counts describe this smoke invocation only."
         ),
     }
 
@@ -596,6 +648,7 @@ def _string_list(value: Any) -> list[str]:
 
 
 def render_markdown(summary: Mapping[str, Any]) -> str:
+    release_progress = _dict(summary.get("release_progress"))
     lines = [
         "# Oha-Yachiyo Public Demo Smoke Summary",
         "",
@@ -605,6 +658,13 @@ def render_markdown(summary: Mapping[str, Any]) -> str:
         (
             "Required demo flows: "
             f"{summary.get('passed_required_flow_count')}/{summary.get('required_flow_count')} passed"
+        ),
+        (
+            "Release progress baseline: "
+            f"{release_progress.get('baseline_id') or 'full_public_demo'} "
+            f"({release_progress.get('passed_count', summary.get('passed_required_flow_count'))}/"
+            f"{release_progress.get('total_count', summary.get('required_flow_count'))} passed, "
+            f"{release_progress.get('remaining_count', '?')} remaining)"
         ),
         f"Complete demo evidence: {str(bool(summary.get('complete'))).lower()}",
         "",

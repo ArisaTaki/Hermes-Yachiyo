@@ -43,6 +43,39 @@ def test_public_demo_smokes_default_runs_source_flows_only(tmp_path, monkeypatch
     assert summary["release_level"] == "partial_demo_ready"
     assert summary["required_flow_count"] == 18
     assert summary["passed_required_flow_count"] == 12
+    assert summary["release_progress"] == {
+        "baseline_id": "full_public_demo",
+        "baseline_label": "Full public demo release readiness",
+        "denominator": "required_flow_count",
+        "status_basis": "executed_smoke_results",
+        "passed_count": 12,
+        "total_count": 18,
+        "remaining_count": 6,
+        "percent": 66.67,
+        "selected_count": 12,
+        "selected_passed_count": 12,
+        "selected_remaining_count": 0,
+        "missing_required_flow_ids": [
+            "real_desktop_app_open",
+            "real_desktop_ui_inspection",
+            "real_desktop_interaction",
+            "workflow_provider",
+            "studio_replay_ui",
+            "workflow_ui",
+        ],
+        "opt_in_gap_ids": [
+            "real_desktop_app_open",
+            "real_desktop_ui_inspection",
+            "real_desktop_interaction",
+            "workflow_provider",
+            "studio_replay_ui",
+            "workflow_ui",
+        ],
+        "note": (
+            "Use passed_count/total_count for release progress. "
+            "Selected counts describe this smoke invocation only."
+        ),
+    }
     assert summary["missing_required_flow_ids"] == [
         "real_desktop_app_open",
         "real_desktop_ui_inspection",
@@ -140,6 +173,11 @@ def test_public_demo_smokes_opt_in_selects_all_flows(tmp_path, monkeypatch):
     assert summary["status"] == "passed"
     assert summary["release_level"] == "full_public_demo_ready"
     assert summary["passed_required_flow_count"] == summary["required_flow_count"] == 18
+    assert summary["release_progress"]["passed_count"] == 18
+    assert summary["release_progress"]["total_count"] == 18
+    assert summary["release_progress"]["remaining_count"] == 0
+    assert summary["release_progress"]["percent"] == 100.0
+    assert summary["release_progress"]["opt_in_gap_ids"] == []
     assert summary["missing_required_flow_ids"] == []
     assert summary["release_blockers"] == []
     assert summary["selected_count"] == summary["flow_count"] == 18
@@ -656,5 +694,6 @@ def test_public_demo_smokes_cli_writes_reports(tmp_path, monkeypatch, capsys):
     markdown = output_markdown.read_text(encoding="utf-8")
     assert "# Oha-Yachiyo Public Demo Smoke Summary" in markdown
     assert "Release level: partial_demo_ready" in markdown
+    assert "Release progress baseline: full_public_demo (12/18 passed, 6 remaining)" in markdown
     assert "## Release Blockers" in markdown
     assert "`data_analysis_artifact`" in markdown
