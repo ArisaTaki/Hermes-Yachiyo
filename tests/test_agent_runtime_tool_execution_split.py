@@ -2808,6 +2808,74 @@ def test_runtime_tool_request_runner_allows_sandbox_ready_provider_route() -> No
     assert not [event for event in timeline if event["event"] == "agent.tool.skipped"]
 
 
+def test_runtime_tool_request_runner_executes_sandbox_route_through_provider() -> None:
+    budget = FakeBudget()
+    messages = [{"role": "user", "content": "在隔离桌面里输入 hello"}]
+    timeline: list[dict[str, Any]] = []
+    adapter = FakeSandboxDesktopAdapter()
+    broker = FakeBroker({"ok": True, "unexpected": True})
+    executor = _executor(
+        tool_call_events=FakeToolCallEvents(),
+        desktop_provider_registry=DesktopExecutionProviderRegistry([adapter]),
+    )
+    runner = _runner(call_agent_tool=executor.execute)
+
+    runner.run(
+        [
+            {
+                "tool": "desktop.safe_type_text",
+                "input": {"text": "hello"},
+                "desktop_execution_policy": {"mode": "sandbox_preferred"},
+                "sandbox_provider": {
+                    "available": True,
+                    "adapter_ready": True,
+                    "provider_kind": "sandbox_desktop",
+                    "provider_id": "sandbox-1",
+                    "status": "available",
+                    "supported_tools": ["desktop.safe_type_text"],
+                },
+            }
+        ],
+        ["desktop.safe_type_text"],
+        broker,
+        messages,
+        timeline,
+        [],
+        next_iteration=3,
+        run_id="run-1",
+        budget=budget,
+    )
+
+    assert adapter.calls == [
+        {
+            "tool": "desktop.safe_type_text",
+            "payload": {"text": "hello"},
+            "route": {
+                "route_id": "desktop-route:desktop.safe_type_text",
+                "tool_name": "desktop.safe_type_text",
+                "requested_mode": "sandbox_preferred",
+                "selected_provider_kind": "sandbox_desktop",
+                "selected_provider_id": "sandbox-1",
+                "status": "sandbox_ready",
+                "can_execute": True,
+                "can_auto_start": True,
+                "sandbox_required": True,
+                "fallback_mode": "",
+                "reason": "Foreground desktop action can be routed through the sandbox provider.",
+                "blocking_conditions": [],
+                "source": "runtime",
+            },
+            "approved": False,
+        }
+    ]
+    assert broker.calls == []
+    assert budget.claims == [("desktop.safe_type_text", False)]
+    assert not [event for event in timeline if event["event"] == "agent.tool.skipped"]
+    tool_call = next(event for event in timeline if event["event"] == "agent.tool.call")
+    assert tool_call["result"]["desktop_execution_provider_routed"] is True
+    assert tool_call["result"]["desktop_execution_provider"]["provider_id"] == "sandbox-1"
+
+
 def test_runtime_tool_request_runner_routes_running_provider_session() -> None:
     budget = FakeBudget()
     messages = [{"role": "user", "content": "在隔离桌面里输入 hello"}]
