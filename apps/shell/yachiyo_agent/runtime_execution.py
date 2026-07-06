@@ -16,8 +16,11 @@ from .contracts import (
     ToolPlanStepSnapshot,
 )
 from .desktop_execution_policy import (
+    desktop_readonly_provider_route_requested,
     desktop_execution_route_decision,
+    is_readonly_desktop_provider_tool,
     sandbox_desktop_provider_status,
+    sandbox_desktop_provider_can_execute_tool,
 )
 from .planner_execution import (
     planner_full_plan_execution_tool_requests,
@@ -320,14 +323,22 @@ def _runtime_request_metadata_from_metadata(
 ) -> dict[str, Any]:
     if not isinstance(metadata, Mapping):
         return {}
+    payload: dict[str, Any] = {}
     if _metadata_truthy(
         metadata,
         "desktop_provider_health_probe",
         "probe_desktop_provider_health",
         "sandbox_provider_health_probe",
     ):
-        return {"desktop_provider_health_probe": True}
-    return {}
+        payload["desktop_provider_health_probe"] = True
+    if _metadata_truthy(
+        metadata,
+        "desktop_provider_route_readonly",
+        "desktop_provider_readonly_route",
+        "route_readonly_desktop_provider",
+    ):
+        payload["desktop_provider_route_readonly"] = True
+    return payload
 
 
 def _metadata_truthy(
@@ -515,6 +526,7 @@ def _desktop_execution_route_for_envelope(
 def _sandbox_provider_for_request(
     request: Mapping[str, Any],
     *,
+    tool_name: str,
     execution_mode: Any,
     desktop_execution_policy: Mapping[str, Any] | None,
 ) -> SandboxDesktopProviderSnapshot | None:
@@ -535,6 +547,13 @@ def _sandbox_provider_for_request(
         return SandboxDesktopProviderSnapshot.model_validate(
             sandbox_desktop_provider_status(request)
         )
+    if (
+        desktop_readonly_provider_route_requested(request)
+        and is_readonly_desktop_provider_tool(tool_name)
+    ):
+        provider_payload = sandbox_desktop_provider_status(request)
+        if sandbox_desktop_provider_can_execute_tool(provider_payload, tool_name):
+            return SandboxDesktopProviderSnapshot.model_validate(provider_payload)
     return None
 
 
@@ -548,7 +567,14 @@ def _desktop_execution_route_for_request(
     explicit_route = _mapping(request.get("desktop_execution_route"))
     if explicit_route:
         return DesktopExecutionRouteSnapshot.model_validate(explicit_route)
-    if desktop_execution_policy or bool(getattr(execution_mode, "sandbox_recommended", False)):
+    if (
+        desktop_execution_policy
+        or bool(getattr(execution_mode, "sandbox_recommended", False))
+        or (
+            desktop_readonly_provider_route_requested(request)
+            and is_readonly_desktop_provider_tool(tool_name)
+        )
+    ):
         return DesktopExecutionRouteSnapshot.model_validate(
             desktop_execution_route_decision(
                 tool_name,
@@ -653,6 +679,7 @@ def _execution_request_snapshot(
     desktop_execution_policy = _mapping(request.get("desktop_execution_policy")) or None
     sandbox_provider = _sandbox_provider_for_request(
         request,
+        tool_name=tool_name,
         execution_mode=execution_mode,
         desktop_execution_policy=desktop_execution_policy,
     )

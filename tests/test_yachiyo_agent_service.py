@@ -11,7 +11,10 @@ from apps.shell.yachiyo_agent import (
     StartChatTaskRequest,
     YachiyoAgentService,
 )
-from apps.shell.yachiyo_agent.runtime_execution import runtime_execution_envelope_from_decision
+from apps.shell.yachiyo_agent.runtime_execution import (
+    runtime_execution_envelope_from_decision,
+    runtime_execution_requests_from_envelope_payload,
+)
 from apps.shell.yachiyo_agent.task_cards import agent_task_snapshot_from_payload
 
 
@@ -1777,6 +1780,96 @@ def test_agent_studio_service_probes_desktop_provider_health_for_execution(
     assert envelope.sandbox_provider is not None
     assert envelope.sandbox_provider.health is not None
     assert envelope.sandbox_provider.health.checked is True
+
+
+def test_agent_studio_service_routes_readonly_desktop_discovery_through_provider(
+    monkeypatch,
+) -> None:
+    calls: list[str] = []
+
+    class FakeResponse:
+        status = 200
+
+        def __enter__(self) -> "FakeResponse":
+            return self
+
+        def __exit__(self, *_args: Any) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return json.dumps(
+                {
+                    "ok": True,
+                    "status": "ready",
+                    "version": "0.1.0",
+                    "supported_tools": ["desktop.list_apps"],
+                    "capabilities": [
+                        "desktop_discovery",
+                        "read_only_observation",
+                        "no_foreground_mutation",
+                    ],
+                }
+            ).encode("utf-8")
+
+        def getcode(self) -> int:
+            return self.status
+
+    def fake_urlopen(request: Any, *, timeout: float) -> FakeResponse:
+        calls.append(request.full_url)
+        return FakeResponse()
+
+    monkeypatch.setattr(
+        "apps.shell.agent.runtime.desktop_execution_providers.urlopen_with_bundled_ca",
+        fake_urlopen,
+    )
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_URL", "http://127.0.0.1:19091")
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_ID", "local-headless-desktop")
+    monkeypatch.setenv(
+        "OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS",
+        "desktop.list_apps",
+    )
+    service = AgentStudioService(_FakeStudioExecutionPort())
+
+    envelope = service.plan_execution(
+        "在一个我没提过的新应用 PixelForge 点击 Export",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.focus",
+            "desktop.ui_elements",
+            "app.focus_and_click_ui_element",
+        ],
+        metadata={"surface": "studio"},
+    )
+
+    discovery_request = next(
+        request for request in envelope.requests if request.tool_name == "desktop.list_apps"
+    )
+    operation_request = next(
+        request
+        for request in envelope.requests
+        if request.tool_name == "app.focus_and_click_ui_element"
+    )
+    assert calls
+    assert discovery_request.sandbox_provider is not None
+    assert discovery_request.sandbox_provider.provider_id == "local-headless-desktop"
+    assert discovery_request.sandbox_provider.health is not None
+    assert discovery_request.sandbox_provider.health.checked is True
+    assert discovery_request.desktop_execution_route is not None
+    assert discovery_request.desktop_execution_route.status == "sandbox_ready"
+    assert discovery_request.desktop_execution_route.selected_provider_kind == (
+        "sandbox_desktop"
+    )
+    assert operation_request.desktop_execution_route is not None
+    assert operation_request.desktop_execution_route.status == "supervised_live"
+    assert envelope.sandbox_provider is not None
+    assert envelope.sandbox_provider.provider_id == "local-headless-desktop"
+    projected = runtime_execution_requests_from_envelope_payload(
+        envelope.model_dump(mode="json"),
+        allowed_tools=["desktop.list_apps"],
+    )
+    assert projected[0]["tool"] == "desktop.list_apps"
+    assert projected[0]["desktop_execution_route"]["status"] == "sandbox_ready"
+    assert projected[0]["sandbox_provider"]["provider_id"] == "local-headless-desktop"
 
 
 def test_agent_studio_service_normalizes_known_app_submit_execution() -> None:

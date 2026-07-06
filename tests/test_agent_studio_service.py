@@ -1179,6 +1179,7 @@ def test_agent_studio_service_prefers_port_planner_when_available() -> None:
                     "metadata": {
                         "surface": "studio",
                         "desktop_provider_health_probe": True,
+                        "desktop_provider_route_readonly": True,
                         "desktop_execution_policy": {
                             "mode": "supervised_live",
                             "allow_live_foreground": True,

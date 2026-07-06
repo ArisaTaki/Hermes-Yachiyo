@@ -5112,6 +5112,20 @@ def test_desktop_execution_route_decision_reports_provider_boundaries() -> None:
             isolation="browser_profile",
         ),
     )
+    readonly_provider_route = desktop_execution_route_decision(
+        "desktop.list_apps",
+        policy={"mode": "supervised_live"},
+        execution_mode=DesktopExecutionModeSnapshot(mode="tool_native"),
+        metadata={
+            "desktop_provider_route_readonly": True,
+            "sandbox_provider": {
+                "available": True,
+                "adapter_ready": True,
+                "provider_id": "sandbox-1",
+                "supported_tools": ["desktop.list_apps"],
+            },
+        },
+    )
 
     snapshot = DesktopExecutionRouteSnapshot.model_validate(preview_route)
     payload = _json(snapshot)
@@ -5137,6 +5151,10 @@ def test_desktop_execution_route_decision_reports_provider_boundaries() -> None:
     assert sandbox_ready_route["status"] == "sandbox_ready"
     assert sandbox_ready_route["can_execute"] is True
     assert sandbox_ready_route["selected_provider_id"] == "sandbox-1"
+    assert readonly_provider_route["status"] == "sandbox_ready"
+    assert readonly_provider_route["can_execute"] is True
+    assert readonly_provider_route["selected_provider_id"] == "sandbox-1"
+    assert readonly_provider_route["sandbox_required"] is True
     assert browser_route["status"] == "ready"
     assert browser_route["selected_provider_kind"] == "browser_profile"
     assert browser_route["can_execute"] is True
@@ -5174,9 +5192,12 @@ def test_agent_studio_desktop_execution_policy_requests_provider_health_probe() 
 
     assert metadata["desktop_execution_policy"]["mode"] == "supervised_live"
     assert metadata["desktop_provider_health_probe"] is True
+    assert metadata["desktop_provider_route_readonly"] is True
     assert explicit["desktop_execution_policy"] == {"mode": "supervised_live"}
     assert explicit["desktop_provider_health_probe"] is True
+    assert explicit["desktop_provider_route_readonly"] is True
     assert "desktop_provider_health_probe" not in daily
+    assert "desktop_provider_route_readonly" not in daily
 
 
 def test_sandbox_desktop_provider_status_probes_health_when_metadata_requests_it(

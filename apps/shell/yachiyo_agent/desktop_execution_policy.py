@@ -63,6 +63,28 @@ _SANDBOX_DESKTOP_PROVIDER_DEFAULT: dict[str, Any] = {
     },
 }
 
+_READ_ONLY_DESKTOP_PROVIDER_ROUTE_KEYS = (
+    "desktop_provider_route_readonly",
+    "desktop_provider_readonly_route",
+    "route_readonly_desktop_provider",
+)
+
+_READ_ONLY_DESKTOP_PROVIDER_TOOLS = frozenset(
+    {
+        "desktop.permissions",
+        "desktop.permission_preflight",
+        "desktop.active_window",
+        "desktop.running_apps",
+        "desktop.list_apps",
+        "desktop.windows",
+        "desktop.list_windows",
+        "desktop.ui_elements",
+        "desktop.read_ui",
+        "desktop.verify",
+        "app.status",
+    }
+)
+
 
 def desktop_execution_policy_payload(value: Any) -> dict[str, Any]:
     if isinstance(value, Mapping):
@@ -230,6 +252,19 @@ def desktop_execution_route_decision(
             "reason": "No executable tool was selected.",
             "blocking_conditions": ["missing_tool"],
         }
+    if (
+        desktop_readonly_provider_route_requested(metadata)
+        and is_readonly_desktop_provider_tool(clean_tool)
+        and sandbox_desktop_provider_can_execute_tool(sandbox_provider, clean_tool)
+    ):
+        sandbox_route = _sandbox_route_decision(route, sandbox_provider, clean_tool)
+        return {
+            **sandbox_route,
+            "reason": (
+                "Read-only desktop discovery can be routed through the sandbox "
+                "desktop provider without taking over foreground input."
+            ),
+        }
     if not foreground_required and execution_mode_name != "supervised_live":
         return route
     if policy_mode == "allow":
@@ -269,10 +304,33 @@ def with_agent_studio_desktop_execution_policy(
 ) -> dict[str, Any]:
     payload = dict(metadata) if isinstance(metadata, Mapping) else {}
     payload.setdefault("desktop_provider_health_probe", True)
+    payload.setdefault("desktop_provider_route_readonly", True)
     if _has_desktop_execution_policy(payload):
         return payload
     payload["desktop_execution_policy"] = agent_studio_desktop_execution_policy()
     return payload
+
+
+def desktop_readonly_provider_route_requested(
+    metadata: Mapping[str, Any] | None,
+) -> bool:
+    return _metadata_truthy(metadata, *_READ_ONLY_DESKTOP_PROVIDER_ROUTE_KEYS)
+
+
+def is_readonly_desktop_provider_tool(tool_name: str) -> bool:
+    return str(tool_name or "").strip() in _READ_ONLY_DESKTOP_PROVIDER_TOOLS
+
+
+def sandbox_desktop_provider_can_execute_tool(
+    sandbox_provider: Mapping[str, Any],
+    tool_name: str,
+) -> bool:
+    if not bool(sandbox_provider.get("available")):
+        return False
+    if not bool(sandbox_provider.get("adapter_ready")):
+        return False
+    supported_tools = _string_list(sandbox_provider.get("supported_tools"))
+    return not supported_tools or str(tool_name or "").strip() in supported_tools
 
 
 def with_daily_entrypoint_desktop_execution_policy(

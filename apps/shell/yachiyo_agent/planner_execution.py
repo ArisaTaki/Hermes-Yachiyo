@@ -969,6 +969,8 @@ _REQUEST_CONTEXT_WITHOUT_STEP_KEYS = (
     "task_id",
     "run_id",
     "runtime_doctrine",
+    "desktop_provider_health_probe",
+    "desktop_provider_route_readonly",
     "requires_observation",
     "requires_post_action_verification",
     "replan_signal_ids",
@@ -1855,14 +1857,22 @@ def _runtime_request_metadata_from_planner_metadata(
 ) -> dict[str, Any]:
     if not isinstance(metadata, Mapping):
         return {}
+    payload: dict[str, Any] = {}
     if _metadata_truthy(
         metadata,
         "desktop_provider_health_probe",
         "probe_desktop_provider_health",
         "sandbox_provider_health_probe",
     ):
-        return {"desktop_provider_health_probe": True}
-    return {}
+        payload["desktop_provider_health_probe"] = True
+    if _metadata_truthy(
+        metadata,
+        "desktop_provider_route_readonly",
+        "desktop_provider_readonly_route",
+        "route_readonly_desktop_provider",
+    ):
+        payload["desktop_provider_route_readonly"] = True
+    return payload
 
 
 def _request_with_runtime_metadata(
