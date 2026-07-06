@@ -108,6 +108,13 @@ def test_ensure_isolated_provider_session_detects_keyboard_mouse_requests(
             "started": True,
             "provider_id": "local-isolated-desktop",
             "url": "http://127.0.0.1:19093",
+            "provider_status": {
+                "desktop_session_kind": "isolated_desktop",
+                "desktop_session_isolated": True,
+                "foreground_takeover_required": False,
+                "keyboard_mouse_capture_supported": True,
+                "supported_tools": ["desktop.safe_type_text"],
+            },
         },
     )
     envelope = {
@@ -128,11 +135,21 @@ def test_ensure_isolated_provider_session_detects_keyboard_mouse_requests(
     session = ensure_isolated_desktop_provider_session_for_envelope(envelope)
     annotated = annotate_envelope_with_desktop_provider_session(envelope, session)
 
-    assert starts == [None]
+    assert starts == [{"tools": ["desktop.safe_type_text"]}]
     assert session["needed"] is True
     assert session["running"] is True
     assert session["started"] is True
     assert session["request_ids"] == ["request-type"]
     assert session["tool_names"] == ["desktop.safe_type_text"]
+    assert session["desktop_session_kind"] == "isolated_desktop"
+    assert session["desktop_session_isolated"] is True
+    assert session["foreground_takeover_required"] is False
+    assert session["keyboard_mouse_capture_supported"] is True
+    assert session["supported_tools"] == ["desktop.safe_type_text"]
     assert annotated["desktop_provider_session"]["provider_id"] == "local-isolated-desktop"
     assert annotated["requests"][0]["desktop_provider_session"]["needed"] is True
+    assert annotated["requests"][0]["desktop_provider_session"]["desktop_session_isolated"] is True
+    assert (
+        annotated["requests"][0]["desktop_provider_session"]["foreground_takeover_required"]
+        is False
+    )

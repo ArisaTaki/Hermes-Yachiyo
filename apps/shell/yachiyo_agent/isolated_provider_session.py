@@ -213,7 +213,9 @@ def ensure_isolated_desktop_provider_session_for_envelope(
     if not auto_start:
         return {**base, **_public_session_status(status)}
     try:
-        started = start_isolated_desktop_provider_session()
+        started = start_isolated_desktop_provider_session(
+            {"tools": sorted({target["tool_name"] for target in targets})}
+        )
     except Exception as exc:
         return {
             **base,
@@ -395,6 +397,7 @@ def _request_with_desktop_provider_session(
 
 
 def _public_session_status(status: dict[str, Any]) -> dict[str, Any]:
+    provider_status = _mapping(status.get("provider_status"))
     return {
         "ok": bool(status.get("ok", True)),
         "status": str(status.get("status") or ""),
@@ -402,6 +405,26 @@ def _public_session_status(status: dict[str, Any]) -> dict[str, Any]:
         "pid": status.get("pid"),
         "provider_id": str(status.get("provider_id") or ""),
         "url": str(status.get("url") or ""),
+        "desktop_session_kind": str(
+            status.get("desktop_session_kind")
+            or provider_status.get("desktop_session_kind")
+            or ""
+        ),
+        "desktop_session_isolated": _optional_bool(
+            status.get("desktop_session_isolated"),
+            provider_status.get("desktop_session_isolated"),
+        ),
+        "foreground_takeover_required": _optional_bool(
+            status.get("foreground_takeover_required"),
+            provider_status.get("foreground_takeover_required"),
+        ),
+        "keyboard_mouse_capture_supported": _optional_bool(
+            status.get("keyboard_mouse_capture_supported"),
+            provider_status.get("keyboard_mouse_capture_supported"),
+        ),
+        "supported_tools": _string_list(
+            status.get("supported_tools") or provider_status.get("supported_tools")
+        ),
         "command": _string_list(status.get("command")),
         "env": {
             str(key): str(value)
@@ -420,6 +443,19 @@ def _request_tool_name(request: dict[str, Any]) -> str:
 
 def _mapping(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, dict) else {}
+
+
+def _optional_bool(*values: Any) -> bool | None:
+    for value in values:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            raw = value.strip().lower()
+            if raw in {"1", "true", "yes", "on"}:
+                return True
+            if raw in {"0", "false", "no", "off"}:
+                return False
+    return None
 
 
 def _string_list(value: Any) -> list[str]:
