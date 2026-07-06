@@ -1,5 +1,10 @@
 import { ExpandableRuntimeContent } from './ExpandableRuntimeContent';
+import {
+  runtimeDesktopProviderSessionContext,
+  type RuntimeDesktopProviderSessionContext,
+} from '../desktopProviderSessionEvents';
 import { runtimeAnchorId } from '../runtimeAnchors';
+import { runtimeEventIsDesktopProviderSessionEvent } from '../desktopEvents';
 
 export type RuntimeTimelineEventRecord = Record<string, unknown>;
 
@@ -72,6 +77,7 @@ export function RuntimeTimelineEventList({
           const runtimeContext = runtimeEventRuntimeContext(event, payloadRecord);
           const recoveryTarget = runtimeEventRecoveryTarget(event, payloadRecord);
           const observedContext = runtimeEventObservedContext(event, payloadRecord);
+          const desktopProviderSession = runtimeDesktopProviderSessionContext(event, payloadRecord);
           const policyReason = eventIsSecret ? '' : runtimeEventPolicyReason(event, payloadRecord);
           const contentSnapshots = eventIsSecret ? [] : runtimeEventContentSnapshots(payloadRecord);
           const capabilityRecovery = eventIsSecret ? [] : runtimeEventCapabilityRecovery(payloadRecord);
@@ -83,6 +89,7 @@ export function RuntimeTimelineEventList({
             runtimeContext,
             recoveryTarget,
             observedContext,
+            desktopProviderSession,
             eventSequence,
             eventRunId,
           );
@@ -119,6 +126,14 @@ export function RuntimeTimelineEventList({
               data-run-event-observed-action-evidence={observedContext.observationEvidence}
               data-run-event-observed-action-target={observedContext.actionTarget}
               data-run-event-observed-center={observedContext.observedCenter}
+              data-run-event-desktop-provider-session-error={desktopProviderSession.error}
+              data-run-event-desktop-provider-session-needed={desktopProviderSession.needed}
+              data-run-event-desktop-provider-session-provider-id={desktopProviderSession.providerId}
+              data-run-event-desktop-provider-session-running={desktopProviderSession.running}
+              data-run-event-desktop-provider-session-started={desktopProviderSession.started}
+              data-run-event-desktop-provider-session-status={desktopProviderSession.status}
+              data-run-event-desktop-provider-session-tool-names={desktopProviderSession.toolNames.join(',')}
+              data-run-event-desktop-provider-session-url={desktopProviderSession.url}
               data-run-event-recovery-app-match-capability={recoveryTarget.appResolutionMatchedCapability}
               data-run-event-recovery-app-match-name={recoveryTarget.appResolutionMatchedName}
               data-run-event-recovery-app-match-source={recoveryTarget.appResolutionMatchedNameSource}
@@ -412,6 +427,12 @@ function defaultEventTone(event: RuntimeTimelineEventRecord): string {
   if (status === 'failed' || status === 'cancelled' || status === 'blocked' || name.includes('failed') || name.includes('cancelled')) return 'danger';
   if (status === 'completed' || name.includes('completed')) return 'ready';
   if (status === 'approval_required' || status === 'waiting_approval' || name.includes('approval')) return 'approval';
+  if (runtimeEventIsDesktopProviderSessionEvent(name, 'failed')) return 'danger';
+  if (
+    runtimeEventIsDesktopProviderSessionEvent(name, 'started')
+    || runtimeEventIsDesktopProviderSessionEvent(name, 'ready')
+  ) return 'ready';
+  if (runtimeEventIsDesktopProviderSessionEvent(name, 'required')) return 'approval';
   if (status === 'running' || status === 'processing') return 'running';
   return 'neutral';
 }
@@ -436,6 +457,7 @@ function runtimeEventMetadata(
   runtimeContext: RuntimeTimelineRuntimeContext,
   recoveryTarget: RuntimeTimelineRecoveryTarget,
   observedContext: RuntimeTimelineObservedContext,
+  desktopProviderSession: RuntimeDesktopProviderSessionContext,
   eventSequence: string,
   eventRunId: string,
 ): Array<{ label: string; value: string }> {
@@ -476,6 +498,13 @@ function runtimeEventMetadata(
     { label: 'action', value: observedContext.actionTarget },
     { label: 'observed', value: observedContext.observationEvidence },
     { label: 'center', value: observedContext.observedCenter },
+    { label: 'desktop provider', value: desktopProviderSession.providerId },
+    { label: 'provider status', value: desktopProviderSession.status },
+    { label: 'provider running', value: desktopProviderSession.running },
+    { label: 'provider started', value: desktopProviderSession.started },
+    { label: 'provider needed', value: desktopProviderSession.needed },
+    { label: 'provider tools', value: desktopProviderSession.toolNames.join(', ') },
+    { label: 'provider error', value: desktopProviderSession.error },
     { label: 'target app', value: recoveryTarget.targetAppName },
     { label: 'target query', value: recoveryTarget.targetAppQuery },
     { label: 'target text', value: recoveryTarget.targetSearchText },

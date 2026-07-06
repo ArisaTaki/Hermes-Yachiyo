@@ -1,8 +1,14 @@
 import { RuntimeTimelineEventList, type RuntimeTimelineEventRecord } from './RuntimeTimelineEventList';
 import { runtimeToolDisplayLabelOrName } from '../approval';
 import {
+  runtimeDesktopProviderSessionContext,
+  runtimeDesktopProviderSessionDetail,
+  runtimeDesktopProviderSessionTitle,
+} from '../desktopProviderSessionEvents';
+import {
   runtimeEventIsDesktopIntent,
   runtimeEventIsDesktopPermissionRecovery,
+  runtimeEventIsDesktopProviderSessionEvent,
   runtimeEventIsDesktopReadinessRecovered,
 } from '../desktopEvents';
 import { runtimePlannerReasonLabel } from '../plannerReasonLabels';
@@ -85,6 +91,14 @@ export function runtimeTimelineEventLabel(event: RuntimeTimelineEventSnapshot): 
     const toolLabel = runtimeTimelinePlannedDesktopToolLabel(event);
     return toolLabel ? `无法执行 · ${toolLabel}` : '无法执行桌面动作';
   }
+  if (runtimeEventIsDesktopProviderSessionEvent(type)) {
+    const record = event as RuntimeTimelineEventSnapshot & Record<string, unknown>;
+    return runtimeDesktopProviderSessionTitle(
+      type,
+      runtimeDesktopProviderSessionContext(record, runtimeTimelineRecordObject(record, 'payload')),
+      title,
+    );
+  }
   if (runtimeTimelineEventIsReplanRecoveryUpdate(type)) {
     const status = runtimeTimelineRecoveryUpdateStatus(event);
     const toolLabel = runtimeTimelineRecoveryUpdateToolLabel(event);
@@ -153,6 +167,13 @@ function runtimeTimelineEventDetail(event: RuntimeTimelineEventSnapshot): string
   if (runtimeEventIsDesktopReadinessRecovered(type)) {
     const recoveredDetail = runtimeTimelineReadinessRecoveredDetail(event);
     if (recoveredDetail) return recoveredDetail;
+  }
+  if (runtimeEventIsDesktopProviderSessionEvent(type)) {
+    const record = event as RuntimeTimelineEventSnapshot & Record<string, unknown>;
+    const providerSessionDetail = runtimeDesktopProviderSessionDetail(
+      runtimeDesktopProviderSessionContext(record, runtimeTimelineRecordObject(record, 'payload')),
+    );
+    if (providerSessionDetail) return providerSessionDetail;
   }
   if (runtimeTimelineEventIsReplanRecoveryUpdate(type)) {
     const recoveryDetail = runtimeTimelineReplanRecoveryUpdateDetail(event);
@@ -343,6 +364,10 @@ function runtimeTimelineEventTypeLabel(type: string): string {
   if (type === 'tool.completed' || type === 'agent.tool.completed') return '工具完成';
   if (type === 'tool.failed' || type === 'agent.tool.failed') return '工具失败';
   if (type === 'tool.cancelled') return '工具已取消';
+  if (runtimeEventIsDesktopProviderSessionEvent(type, 'failed')) return '桌面执行环境启动失败';
+  if (runtimeEventIsDesktopProviderSessionEvent(type, 'started')) return '桌面执行环境已启动';
+  if (runtimeEventIsDesktopProviderSessionEvent(type, 'ready')) return '桌面执行环境已就绪';
+  if (runtimeEventIsDesktopProviderSessionEvent(type, 'required')) return '需要桌面执行环境';
   if (type === 'skill.selected') return 'Skill 已选择';
   if (type.startsWith('skill.dispatch.')) return 'Skill 调度';
   if (type === 'memory.retrieved') return 'Memory 检索';

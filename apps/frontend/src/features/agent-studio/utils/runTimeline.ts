@@ -1,10 +1,16 @@
 import type { PublicRunEvent } from '../../yachiyo-studio/types';
 import { publicRunEventIsSecret } from '../../runtime-shared/runEvents';
 import { runtimeToolDisplayLabelOrName } from '../../runtime-shared/approval';
+import {
+  runtimeDesktopProviderSessionContext,
+  runtimeDesktopProviderSessionDetail,
+  runtimeDesktopProviderSessionTitle,
+} from '../../runtime-shared/desktopProviderSessionEvents';
 import { runtimePlannerReasonLabel } from '../../runtime-shared/plannerReasonLabels';
 import {
   runtimeEventIsDesktopIntent,
   runtimeEventIsDesktopPermissionRecovery,
+  runtimeEventIsDesktopProviderSessionEvent,
   runtimeEventIsDesktopReadinessRecovered,
 } from '../../runtime-shared/desktopEvents';
 export {
@@ -136,6 +142,13 @@ export function timelineEventTitle(event: Record<string, unknown>): string {
     const toolLabel = plannedDesktopToolLabel(event, detail);
     return toolLabel ? `无法执行 · ${toolLabel}` : '无法执行桌面动作';
   }
+  if (runtimeEventIsDesktopProviderSessionEvent(name)) {
+    return runtimeDesktopProviderSessionTitle(
+      name,
+      runtimeDesktopProviderSessionContext(event, timelineRecord(event.payload)),
+      detail,
+    );
+  }
   if (name === 'agent.tool.policy_decision' || name === 'tool.policy_decision') {
     return policyDecisionTitle(event, detail);
   }
@@ -233,6 +246,12 @@ export function timelineEventTone(event: Record<string, unknown>): string {
   if (runtimeEventIsDesktopReadinessRecovered(name)) return 'ready';
   if (runtimeEventIsDesktopIntent(name, 'completed')) return 'ready';
   if (runtimeEventIsDesktopIntent(name, 'unavailable')) return 'danger';
+  if (runtimeEventIsDesktopProviderSessionEvent(name, 'failed')) return 'danger';
+  if (
+    runtimeEventIsDesktopProviderSessionEvent(name, 'started')
+    || runtimeEventIsDesktopProviderSessionEvent(name, 'ready')
+  ) return 'ready';
+  if (runtimeEventIsDesktopProviderSessionEvent(name, 'required')) return 'approval';
   if (name === 'agent.model.followup_context') return 'model';
   if (name === 'agent.tool.policy_decision' || name === 'tool.policy_decision') {
     const payload = event.payload && typeof event.payload === 'object' && !Array.isArray(event.payload)
@@ -549,6 +568,12 @@ export function publicRunEventPayloadDetail(event: PublicRunEvent): string {
     const recoverySummary = publicRunEventReplanRecoveryUpdateSummary(payload);
     if (recoverySummary) return recoverySummary;
   }
+  if (runtimeEventIsDesktopProviderSessionEvent(event.event_type)) {
+    const providerSummary = runtimeDesktopProviderSessionDetail(
+      runtimeDesktopProviderSessionContext(payload, publicRunEventPayloadRecord(payload, 'result')),
+    );
+    if (providerSummary) return providerSummary;
+  }
   if (event.event_type === 'agent.model.followup_context') {
     const reasonLabel = runtimePlannerReasonLabel(publicRunEventPayloadString(payload, 'planning_reason'));
     const contentSnapshotSummary = publicRunEventContentSnapshotSummary(payload);
@@ -623,6 +648,7 @@ export function runEventReplayToTimelineEvent(event: PublicRunEvent): Record<str
     target_app_name: payload.target_app_name,
     target_app_query: payload.target_app_query,
     target_search_text: payload.target_search_text,
+    desktop_provider_session: payload.desktop_provider_session,
     ...publicRunEventWorkflowStepPayload(payload),
     payload,
   };
