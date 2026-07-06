@@ -65,6 +65,17 @@ class MainChatRunLifecycle:
                 "Native main chat run started",
                 **start_payload,
             ),
+            *[
+                self._timeline(
+                    event["event"],
+                    event["detail"],
+                    **event["payload"],
+                )
+                for event in _desktop_provider_session_timeline_events(
+                    start_payload,
+                    redact=self._redact_secrets,
+                )
+            ],
             self._timeline("task.created", str(task_id or ""), task_id=str(task_id or "")),
             self._timeline("task.started", str(task_id or ""), task_id=str(task_id or "")),
             self._timeline("task.linked", str(task_id or ""), task_id=str(task_id or "")),
@@ -179,3 +190,89 @@ def _direct_tool_requests_payload(
     if not isinstance(direct_tool_requests, list):
         return []
     return [dict(request) for request in direct_tool_requests if isinstance(request, Mapping)]
+
+
+def _desktop_provider_session_timeline_events(
+    start_payload: Mapping[str, Any],
+    *,
+    redact: Callable[[Any], str] = str,
+) -> list[dict[str, Any]]:
+    envelope = start_payload.get("runtime_execution_envelope")
+    if not isinstance(envelope, Mapping):
+        return []
+    session = envelope.get("desktop_provider_session")
+    if not isinstance(session, Mapping):
+        return []
+    if not _provider_session_is_observable(session):
+        return []
+    event_name, detail = _desktop_provider_session_event_name(session)
+    payload = {
+        "task_id": str(start_payload.get("task_id") or ""),
+        "session_id": str(start_payload.get("session_id") or ""),
+        "desktop_provider_session": _desktop_provider_session_event_payload(
+            session,
+            redact=redact,
+        ),
+    }
+    return [{"event": event_name, "detail": detail, "payload": payload}]
+
+
+def _provider_session_is_observable(session: Mapping[str, Any]) -> bool:
+    return any(
+        bool(session.get(key))
+        for key in ("needed", "started", "running", "error", "reason")
+    )
+
+
+def _desktop_provider_session_event_name(
+    session: Mapping[str, Any],
+) -> tuple[str, str]:
+    if session.get("ok") is False or str(session.get("status") or "") == "start_failed":
+        return (
+            "desktop.provider_session.failed",
+            "Isolated desktop provider failed to start",
+        )
+    if bool(session.get("started")):
+        return (
+            "desktop.provider_session.started",
+            "Isolated desktop provider started",
+        )
+    if bool(session.get("running")):
+        return (
+            "desktop.provider_session.ready",
+            "Isolated desktop provider is ready",
+        )
+    return (
+        "desktop.provider_session.required",
+        "Isolated desktop provider is required",
+    )
+
+
+def _desktop_provider_session_event_payload(
+    session: Mapping[str, Any],
+    *,
+    redact: Callable[[Any], str] = str,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {}
+    for key in (
+        "ok",
+        "status",
+        "running",
+        "started",
+        "needed",
+        "auto_start",
+        "provider_id",
+        "url",
+        "pid",
+        "reason",
+        "request_ids",
+        "tool_names",
+        "error",
+        "source",
+    ):
+        value = session.get(key)
+        if value not in (None, "", [], {}):
+            if key == "error":
+                value = redact(value)
+            payload[key] = value
+    return payload

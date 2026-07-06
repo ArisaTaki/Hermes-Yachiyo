@@ -8,6 +8,7 @@ from apps.shell import agent_runtime
 from apps.shell.agent.runtime.main_chat_runs import MainChatRunLifecycle
 from apps.shell.agent_runtime import AgentRuntimeService
 from apps.shell.credential_store import MemoryCredentialStore
+from apps.shell.yachiyo_agent.run_snapshots import run_timeline_snapshot_from_payload
 
 
 class FakeTaskRunLinks:
@@ -132,6 +133,89 @@ def test_main_chat_run_lifecycle_records_runtime_context_on_start() -> None:
     assert started["metadata"]["yachiyo_runtime_planner"] is True
     assert started["runtime_execution_envelope"] == envelope
     assert started["direct_tool_requests"] == [direct_request]
+
+
+def test_main_chat_run_lifecycle_records_desktop_provider_session_event() -> None:
+    runs: dict[str, dict[str, Any]] = {}
+    lifecycle = MainChatRunLifecycle(
+        main_chat_agent_id="builtin:yachiyo-main",
+        insert_run=lambda **payload: runs.setdefault(
+            "run-1",
+            {"run_id": "run-1", "status": "created", "timeline": [], **payload},
+        ),
+        link_task_run=lambda **_payload: None,
+        get_run=lambda run_id: runs[run_id],
+        update_run=lambda run_id, **payload: runs.__setitem__(
+            run_id,
+            {**runs[run_id], **payload},
+        )
+        or runs[run_id],
+        task_run_links=FakeTaskRunLinks(),
+        task_events=FakeTaskEvents(),
+        timeline_factory=_timeline,
+        redact_secrets=str,
+        final_statuses={"completed", "failed", "cancelled"},
+    )
+    envelope = {
+        "envelope_id": "env-main",
+        "requests": [
+            {
+                "request_id": "request-click",
+                "tool_name": "app.focus_and_click_ui_element",
+            }
+        ],
+        "desktop_provider_session": {
+            "ok": True,
+            "status": "running",
+            "running": True,
+            "started": True,
+            "needed": True,
+            "provider_id": "local-isolated-desktop",
+            "url": "http://127.0.0.1:19093",
+            "env": {"SECRET": "not-for-timeline"},
+            "command": ["python", "scripts/run_isolated_desktop_provider.py"],
+            "request_ids": ["request-click"],
+            "tool_names": ["app.focus_and_click_ui_element"],
+        },
+    }
+
+    run = lifecycle.start(
+        task_id="task-1",
+        session_id="session-1",
+        user_goal="click export",
+        runtime_execution_envelope=envelope,
+    )
+
+    assert [item["event"] for item in run["timeline"]] == [
+        "run.started",
+        "desktop.provider_session.started",
+        "task.created",
+        "task.started",
+        "task.linked",
+    ]
+    provider_event = run["timeline"][1]
+    assert provider_event["task_id"] == "task-1"
+    assert provider_event["session_id"] == "session-1"
+    assert provider_event["desktop_provider_session"]["provider_id"] == (
+        "local-isolated-desktop"
+    )
+    assert provider_event["desktop_provider_session"]["started"] is True
+    assert provider_event["desktop_provider_session"]["request_ids"] == [
+        "request-click"
+    ]
+    assert "env" not in provider_event["desktop_provider_session"]
+    assert "command" not in provider_event["desktop_provider_session"]
+    snapshot = run_timeline_snapshot_from_payload(run)
+    projected_event = next(
+        event
+        for event in snapshot.events
+        if event.event_type == "desktop.provider_session.started"
+    )
+    assert projected_event.task_id == "task-1"
+    assert projected_event.payload["desktop_provider_session"]["provider_id"] == (
+        "local-isolated-desktop"
+    )
+    assert "env" not in projected_event.payload["desktop_provider_session"]
 
 
 def test_main_chat_run_lifecycle_keeps_terminal_run_idempotent() -> None:
