@@ -172,6 +172,9 @@ class DesktopProviderHealthSnapshot(_PublicSnapshot):
     blocking_conditions: list[str] = Field(default_factory=list)
     supported_tools: list[str] = Field(default_factory=list)
     capabilities: list[str] = Field(default_factory=list)
+    foreground_mutation_supported: bool | None = None
+    keyboard_mouse_capture_supported: bool | None = None
+    requires_real_sandbox_for: list[str] = Field(default_factory=list)
     error: str = ""
 
 

@@ -190,6 +190,8 @@ def test_desktop_provider_status_from_env_reports_unchecked_local_provider() -> 
     assert status["provider_id"] == "sandbox-1"
     assert status["status"] == "available"
     assert status["supported_tools"] == ["desktop.safe_type_text", "desktop.click"]
+    assert status["foreground_mutation_supported"] is True
+    assert status["keyboard_mouse_capture_supported"] is True
     assert status["health"]["checked"] is False
     assert status["health"]["status"] == "not_checked"
     assert status["health"]["endpoint_path"] == "/status"
@@ -214,6 +216,7 @@ def test_desktop_provider_status_from_env_probes_health_endpoint() -> None:
                 "version": "0.1.0",
                 "supported_tools": ["desktop.safe_type_text"],
                 "capabilities": ["keyboard_mouse_capture"],
+                "keyboard_mouse_capture_supported": True,
             }
         )
 
@@ -237,6 +240,9 @@ def test_desktop_provider_status_from_env_probes_health_endpoint() -> None:
     assert status["health"]["provider_version"] == "0.1.0"
     assert status["health"]["supported_tools"] == ["desktop.safe_type_text"]
     assert status["health"]["capabilities"] == ["keyboard_mouse_capture"]
+    assert status["foreground_mutation_supported"] is True
+    assert status["keyboard_mouse_capture_supported"] is True
+    assert status["health"]["keyboard_mouse_capture_supported"] is True
     assert requests == [
         {
             "method": "GET",
@@ -321,9 +327,72 @@ def test_sandbox_desktop_provider_status_reads_runtime_env(monkeypatch) -> None:
     assert provider["adapter_ready"] is True
     assert provider["provider_id"] == "sandbox-1"
     assert provider["supported_tools"] == ["desktop.safe_type_text"]
+    assert provider["foreground_mutation_supported"] is True
+    assert provider["keyboard_mouse_capture_supported"] is True
     assert provider["health"]["status"] == "not_checked"
     assert route["status"] == "sandbox_ready"
     assert route["selected_provider_id"] == "sandbox-1"
+
+
+def test_env_control_provider_can_advertise_keyboard_mouse_capture(monkeypatch) -> None:
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_URL", "http://127.0.0.1:19091")
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_ID", "sandbox-control")
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS", "desktop.safe_type_text")
+    monkeypatch.setenv(
+        "OHA_YACHIYO_DESKTOP_PROVIDER_KEYBOARD_MOUSE_CAPTURE_SUPPORTED",
+        "true",
+    )
+    provider = sandbox_desktop_provider_status()
+    route = desktop_execution_route_decision(
+        "desktop.safe_type_text",
+        policy={"mode": "sandbox_preferred"},
+        execution_mode={
+            "mode": "supervised_live",
+            "foreground_control": True,
+            "keyboard_mouse_capture": True,
+            "sandbox_recommended": True,
+            "isolation": "sandbox_desktop",
+        },
+        metadata={"desktop_provider_route_foreground": True},
+    )
+
+    assert provider["provider_id"] == "sandbox-control"
+    assert provider["keyboard_mouse_capture_supported"] is True
+    assert route["status"] == "sandbox_ready"
+    assert route["selected_provider_id"] == "sandbox-control"
+
+
+def test_env_control_provider_can_block_keyboard_mouse_until_sandbox_ready(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_URL", "http://127.0.0.1:19091")
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_ID", "sandbox-readonly")
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS", "desktop.safe_type_text")
+    monkeypatch.setenv(
+        "OHA_YACHIYO_DESKTOP_PROVIDER_KEYBOARD_MOUSE_CAPTURE_SUPPORTED",
+        "false",
+    )
+    monkeypatch.setenv(
+        "OHA_YACHIYO_DESKTOP_PROVIDER_REQUIRES_REAL_SANDBOX_FOR",
+        "desktop.safe_type_text",
+    )
+    provider = sandbox_desktop_provider_status()
+    route = desktop_execution_route_decision(
+        "desktop.safe_type_text",
+        policy={"mode": "sandbox_preferred"},
+        execution_mode={
+            "mode": "supervised_live",
+            "foreground_control": True,
+            "keyboard_mouse_capture": True,
+            "sandbox_recommended": True,
+            "isolation": "sandbox_desktop",
+        },
+        metadata={"desktop_provider_route_foreground": True},
+    )
+
+    assert provider["keyboard_mouse_capture_supported"] is False
+    assert provider["requires_real_sandbox_for"] == ["desktop.safe_type_text"]
+    assert route["status"] == "sandbox_keyboard_mouse_provider_required"
 
 
 def test_local_desktop_provider_status_routes_safe_app_activation(monkeypatch) -> None:

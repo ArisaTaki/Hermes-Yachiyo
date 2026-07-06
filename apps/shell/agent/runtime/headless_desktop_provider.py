@@ -68,6 +68,8 @@ class HeadlessDesktopProvider:
             "blocking_conditions": [],
             "execution_mode": "headless_read_only",
             "foreground_mutation_supported": False,
+            "keyboard_mouse_capture_supported": False,
+            "requires_real_sandbox_for": ["click", "type", "shortcut", "focus"],
         }
 
     def manifest(self, *, base_url: str = "") -> dict[str, Any]:
@@ -84,6 +86,8 @@ class HeadlessDesktopProvider:
             "provider_kind": self.provider_kind,
             "execution_mode": "headless_read_only",
             "foreground_mutation_supported": False,
+            "keyboard_mouse_capture_supported": False,
+            "requires_real_sandbox_for": ["click", "type", "shortcut", "focus"],
             "capabilities": [
                 "desktop_discovery",
                 "read_only_observation",

@@ -116,6 +116,9 @@ export type DesktopProviderHealthSnapshot = {
   blocking_conditions?: string[];
   supported_tools?: string[];
   capabilities?: string[];
+  foreground_mutation_supported?: boolean | null;
+  keyboard_mouse_capture_supported?: boolean | null;
+  requires_real_sandbox_for?: string[];
   error?: string;
 };
 

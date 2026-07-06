@@ -754,7 +754,32 @@ def _health_payload(value: Any) -> dict[str, Any]:
     payload["blocking_conditions"] = _string_list(payload.get("blocking_conditions"))
     payload["supported_tools"] = _string_list(payload.get("supported_tools"))
     payload["capabilities"] = _string_list(payload.get("capabilities"))
+    if "foreground_mutation_supported" in payload:
+        payload["foreground_mutation_supported"] = _optional_bool_value(
+            payload.get("foreground_mutation_supported")
+        )
+    if "keyboard_mouse_capture_supported" in payload:
+        payload["keyboard_mouse_capture_supported"] = _optional_bool_value(
+            payload.get("keyboard_mouse_capture_supported")
+        )
+    payload["requires_real_sandbox_for"] = _string_list(
+        payload.get("requires_real_sandbox_for")
+    )
     return payload
+
+
+def _optional_bool_value(value: Any) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int) and value in {0, 1}:
+        return bool(value)
+    if isinstance(value, str):
+        clean = value.strip().lower()
+        if clean in {"1", "true", "yes", "on", "supported", "ready"}:
+            return True
+        if clean in {"0", "false", "no", "off", "unsupported", "blocked"}:
+            return False
+    return None
 
 
 def _string_list(value: Any) -> list[str]:

@@ -31,6 +31,8 @@ def test_headless_desktop_provider_status_and_unsupported_tool() -> None:
     assert status["ok"] is True
     assert status["provider_id"] == "provider-1"
     assert status["foreground_mutation_supported"] is False
+    assert status["keyboard_mouse_capture_supported"] is False
+    assert status["requires_real_sandbox_for"] == ["click", "type", "shortcut", "focus"]
     assert status["supported_tools"] == ["desktop.list_apps"]
     assert unsupported["ok"] is False
     assert unsupported["error"] == "desktop_provider_tool_unsupported"
@@ -55,6 +57,8 @@ def test_headless_desktop_provider_manifest_is_machine_readable(capsys) -> None:
     assert payload["provider_id"] == "provider-manifest"
     assert payload["execution_mode"] == "headless_read_only"
     assert payload["foreground_mutation_supported"] is False
+    assert payload["keyboard_mouse_capture_supported"] is False
+    assert payload["requires_real_sandbox_for"] == ["click", "type", "shortcut", "focus"]
     assert payload["supported_tools"] == ["desktop.permissions"]
     assert payload["endpoints"]["execute"] == "/tools/execute"
     assert payload["environment"]["url"] == "OHA_YACHIYO_DESKTOP_PROVIDER_URL"
@@ -246,6 +250,8 @@ def test_headless_desktop_provider_works_through_runtime_adapter(monkeypatch) ->
     assert status["health"]["checked"] is True
     assert status["health"]["status"] == "ready"
     assert status["health"]["supported_tools"] == ["desktop.list_apps"]
+    assert status["keyboard_mouse_capture_supported"] is False
+    assert status["requires_real_sandbox_for"] == ["click", "type", "shortcut", "focus"]
     assert result is not None
     assert result["ok"] is True
     assert result["summary"] == "query=Music;limit=4"

@@ -60,6 +60,18 @@ _PROVIDER_STATUS_URL_ENV_KEYS = (
     "OHA_YACHIYO_DESKTOP_PROVIDER_STATUS_URL",
     "OHA_YACHIYO_SANDBOX_DESKTOP_PROVIDER_STATUS_URL",
 )
+_PROVIDER_FOREGROUND_MUTATION_ENV_KEYS = (
+    "OHA_YACHIYO_DESKTOP_PROVIDER_FOREGROUND_MUTATION_SUPPORTED",
+    "OHA_YACHIYO_SANDBOX_DESKTOP_PROVIDER_FOREGROUND_MUTATION_SUPPORTED",
+)
+_PROVIDER_KEYBOARD_MOUSE_ENV_KEYS = (
+    "OHA_YACHIYO_DESKTOP_PROVIDER_KEYBOARD_MOUSE_CAPTURE_SUPPORTED",
+    "OHA_YACHIYO_SANDBOX_DESKTOP_PROVIDER_KEYBOARD_MOUSE_CAPTURE_SUPPORTED",
+)
+_PROVIDER_REQUIRES_REAL_SANDBOX_ENV_KEYS = (
+    "OHA_YACHIYO_DESKTOP_PROVIDER_REQUIRES_REAL_SANDBOX_FOR",
+    "OHA_YACHIYO_SANDBOX_DESKTOP_PROVIDER_REQUIRES_REAL_SANDBOX_FOR",
+)
 LOCAL_DESKTOP_PROVIDER_ID = "local-native-desktop"
 LOCAL_DESKTOP_PROVIDER_KIND = "local_desktop"
 LOCAL_DESKTOP_PROVIDER_TOOLS = (
@@ -98,7 +110,7 @@ LOCAL_DESKTOP_PROVIDER_TOOLS = (
     "media.music_app_open_and_play",
     "media.music_app_control",
 )
-LOCAL_DESKTOP_PROVIDER_REQUIRES_SANDBOX_TOOLS = (
+KEYBOARD_MOUSE_CAPTURE_TOOL_NAMES = (
     "app.open_and_safe_type_text",
     "app.focus_and_safe_type_text",
     "app.open_and_safe_shortcut",
@@ -130,6 +142,7 @@ LOCAL_DESKTOP_PROVIDER_REQUIRES_SANDBOX_TOOLS = (
     "desktop.type_text",
     "desktop.click",
 )
+LOCAL_DESKTOP_PROVIDER_REQUIRES_SANDBOX_TOOLS = KEYBOARD_MOUSE_CAPTURE_TOOL_NAMES
 
 
 class DesktopExecutionProviderRegistry:
@@ -218,6 +231,9 @@ class HttpDesktopExecutionProviderAdapter:
         supported_tools: Iterable[str] | None = None,
         timeout: float = 20.0,
         urlopen: Any | None = None,
+        foreground_mutation_supported: bool | None = None,
+        keyboard_mouse_capture_supported: bool | None = None,
+        requires_real_sandbox_for: Iterable[str] | None = None,
     ) -> None:
         self.provider_kind = _clean_provider_kind(provider_kind) or "sandbox_desktop"
         self.provider_id = str(provider_id or "").strip()
@@ -234,6 +250,9 @@ class HttpDesktopExecutionProviderAdapter:
         self.supported_tools = _string_list(supported_tools)
         self.timeout = max(0.1, float(timeout or 20.0))
         self._urlopen = urlopen or urlopen_with_bundled_ca
+        self.foreground_mutation_supported = foreground_mutation_supported
+        self.keyboard_mouse_capture_supported = keyboard_mouse_capture_supported
+        self.requires_real_sandbox_for = _string_list(requires_real_sandbox_for)
 
     def can_execute(
         self,
@@ -376,6 +395,40 @@ class HttpDesktopExecutionProviderAdapter:
             or provider_payload.get("tools")
             or self.supported_tools
         )
+        capabilities = _string_list(provider_payload.get("capabilities"))
+        foreground_mutation_supported = _provider_capability_bool(
+            provider_payload,
+            capabilities=capabilities,
+            true_tokens=(
+                "foreground_mutation",
+                "foreground_control",
+                "sandbox_foreground",
+                "app_launch",
+                "app_control",
+            ),
+            false_tokens=("no_foreground_mutation", "read_only_observation"),
+            keys=(
+                "foreground_mutation_supported",
+                "foreground_mutation_tools_supported",
+            ),
+        )
+        keyboard_mouse_capture_supported = _provider_capability_bool(
+            provider_payload,
+            capabilities=capabilities,
+            true_tokens=(
+                "keyboard_mouse_capture",
+                "foreground_input",
+                "desktop_control",
+                "sandbox_control",
+            ),
+            false_tokens=(
+                "no_keyboard_mouse_capture",
+            ),
+            keys=(
+                "keyboard_mouse_capture_supported",
+                "input_capture_supported",
+            ),
+        )
         return self._health_payload(
             ok=ok,
             checked=True,
@@ -389,7 +442,12 @@ class HttpDesktopExecutionProviderAdapter:
             status_code=status_code,
             provider_version=str(provider_payload.get("version") or ""),
             supported_tools=supported_tools,
-            capabilities=_string_list(provider_payload.get("capabilities")),
+            capabilities=capabilities,
+            foreground_mutation_supported=foreground_mutation_supported,
+            keyboard_mouse_capture_supported=keyboard_mouse_capture_supported,
+            requires_real_sandbox_for=_provider_requires_real_sandbox_for(
+                provider_payload,
+            ),
         )
 
     def _headers(self) -> dict[str, str]:
@@ -409,6 +467,28 @@ class HttpDesktopExecutionProviderAdapter:
             status="not_checked",
             blocking_conditions=[],
             supported_tools=self.supported_tools,
+            foreground_mutation_supported=self.foreground_mutation_supported,
+            keyboard_mouse_capture_supported=self.keyboard_mouse_capture_supported,
+            requires_real_sandbox_for=self.requires_real_sandbox_for,
+        )
+        supported_tools = _string_list(health.get("supported_tools")) or self.supported_tools
+        keyboard_mouse_capture_supported = _coalesce_optional_bool(
+            health.get("keyboard_mouse_capture_supported"),
+            self.keyboard_mouse_capture_supported,
+        )
+        if keyboard_mouse_capture_supported is None and _supports_keyboard_mouse_tool(
+            supported_tools
+        ):
+            keyboard_mouse_capture_supported = True
+        foreground_mutation_supported = _coalesce_optional_bool(
+            health.get("foreground_mutation_supported"),
+            self.foreground_mutation_supported,
+        )
+        if foreground_mutation_supported is None and keyboard_mouse_capture_supported:
+            foreground_mutation_supported = True
+        requires_real_sandbox_for = (
+            _string_list(health.get("requires_real_sandbox_for"))
+            or self.requires_real_sandbox_for
         )
         return {
             "configured": True,
@@ -436,13 +516,17 @@ class HttpDesktopExecutionProviderAdapter:
                 else _string_list(health.get("blocking_conditions"))
                 or ["desktop_execution_provider_unhealthy"]
             ),
-            "supported_tools": _string_list(health.get("supported_tools"))
-            or self.supported_tools,
+            "supported_tools": supported_tools,
             "health": health,
             "endpoint_origin": _url_origin(urlparse(self.execute_url)),
             "endpoint_path": urlparse(self.execute_url).path or _DEFAULT_EXECUTE_PATH,
             "status_endpoint_path": urlparse(self.status_url).path or _DEFAULT_STATUS_PATH,
             "source": "runtime_env",
+            **_provider_capability_status_fields(
+                foreground_mutation_supported=foreground_mutation_supported,
+                keyboard_mouse_capture_supported=keyboard_mouse_capture_supported,
+                requires_real_sandbox_for=requires_real_sandbox_for,
+            ),
         }
 
     def _transport_failure(
@@ -504,6 +588,9 @@ class HttpDesktopExecutionProviderAdapter:
         provider_version: str = "",
         supported_tools: Iterable[str] | None = None,
         capabilities: Iterable[str] | None = None,
+        foreground_mutation_supported: bool | None = None,
+        keyboard_mouse_capture_supported: bool | None = None,
+        requires_real_sandbox_for: Iterable[str] | None = None,
     ) -> dict[str, Any]:
         parsed = urlparse(self.status_url)
         payload: dict[str, Any] = {
@@ -517,6 +604,11 @@ class HttpDesktopExecutionProviderAdapter:
             "blocking_conditions": _string_list(blocking_conditions),
             "supported_tools": _string_list(supported_tools),
             "capabilities": _string_list(capabilities),
+            **_provider_capability_status_fields(
+                foreground_mutation_supported=foreground_mutation_supported,
+                keyboard_mouse_capture_supported=keyboard_mouse_capture_supported,
+                requires_real_sandbox_for=requires_real_sandbox_for,
+            ),
         }
         if status_code:
             payload["status_code"] = status_code
@@ -942,6 +1034,17 @@ def _http_desktop_execution_provider_adapter_from_env(
             20.0,
         ),
         urlopen=urlopen,
+        foreground_mutation_supported=_optional_bool_env_value(
+            env,
+            _PROVIDER_FOREGROUND_MUTATION_ENV_KEYS,
+        ),
+        keyboard_mouse_capture_supported=_optional_bool_env_value(
+            env,
+            _PROVIDER_KEYBOARD_MOUSE_ENV_KEYS,
+        ),
+        requires_real_sandbox_for=_string_list(
+            _first_env_value(env, _PROVIDER_REQUIRES_REAL_SANDBOX_ENV_KEYS)
+        ),
     )
 
 
@@ -959,6 +1062,104 @@ def _provider_kind_from_env(env: Mapping[str, str]) -> str:
         _first_env_value(env, ("OHA_YACHIYO_DESKTOP_PROVIDER_KIND",))
         or "sandbox_desktop"
     )
+
+
+def _provider_capability_status_fields(
+    *,
+    foreground_mutation_supported: bool | None = None,
+    keyboard_mouse_capture_supported: bool | None = None,
+    requires_real_sandbox_for: Iterable[str] | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {}
+    if foreground_mutation_supported is not None:
+        payload["foreground_mutation_supported"] = bool(foreground_mutation_supported)
+    if keyboard_mouse_capture_supported is not None:
+        payload["keyboard_mouse_capture_supported"] = bool(
+            keyboard_mouse_capture_supported
+        )
+    sandbox_required_tools = _string_list(requires_real_sandbox_for)
+    if sandbox_required_tools:
+        payload["requires_real_sandbox_for"] = sandbox_required_tools
+    return payload
+
+
+def _provider_capability_bool(
+    provider_payload: Mapping[str, Any],
+    *,
+    capabilities: Iterable[str],
+    true_tokens: Iterable[str],
+    false_tokens: Iterable[str],
+    keys: Iterable[str],
+) -> bool | None:
+    for key in keys:
+        direct = _optional_bool_value(provider_payload.get(key))
+        if direct is not None:
+            return direct
+    safety = provider_payload.get("safety")
+    if isinstance(safety, Mapping):
+        for key in keys:
+            nested = _optional_bool_value(safety.get(key))
+            if nested is not None:
+                return nested
+    capability_set = {
+        str(capability or "").strip().lower()
+        for capability in capabilities
+        if str(capability or "").strip()
+    }
+    if any(token in capability_set for token in true_tokens):
+        return True
+    if any(token in capability_set for token in false_tokens):
+        return False
+    return None
+
+
+def _provider_requires_real_sandbox_for(
+    provider_payload: Mapping[str, Any],
+) -> list[str]:
+    direct = _string_list(provider_payload.get("requires_real_sandbox_for"))
+    if direct:
+        return direct
+    safety = provider_payload.get("safety")
+    if isinstance(safety, Mapping):
+        return _string_list(safety.get("requires_real_sandbox_for"))
+    return []
+
+
+def _coalesce_optional_bool(*values: Any) -> bool | None:
+    for value in values:
+        parsed = _optional_bool_value(value)
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _optional_bool_env_value(
+    env: Mapping[str, str],
+    keys: Iterable[str],
+) -> bool | None:
+    for key in keys:
+        if key in env and str(env.get(key) or "").strip():
+            return _optional_bool_value(env.get(key))
+    return None
+
+
+def _optional_bool_value(value: Any) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int) and value in {0, 1}:
+        return bool(value)
+    if isinstance(value, str):
+        clean = value.strip().lower()
+        if clean in {"1", "true", "yes", "on", "supported", "ready"}:
+            return True
+        if clean in {"0", "false", "no", "off", "unsupported", "blocked"}:
+            return False
+    return None
+
+
+def _supports_keyboard_mouse_tool(tools: Iterable[str]) -> bool:
+    capture_tools = set(KEYBOARD_MOUSE_CAPTURE_TOOL_NAMES)
+    return any(str(tool or "").strip() in capture_tools for tool in tools)
 
 
 def _first_env_value(env: Mapping[str, str], keys: Iterable[str]) -> str:
