@@ -547,9 +547,10 @@ def _generic_app_inspect_case(
             and inspect_planned_payload.get("sandbox_recommended") is True
         ),
         "inspect_tool_route_uses_local_provider": (
-            inspect_route.get("status") == "sandbox_ready"
+            inspect_route.get("status") == "provider_ready"
             and inspect_route.get("requested_mode") == "preview_input"
             and inspect_route.get("selected_provider_kind") == "local_desktop"
+            and inspect_route.get("foreground_takeover_required") is True
         ),
         "completed_from_runtime_planner": completed_payload.get("source") == "runtime_planner",
         "completed_tools_match": completed_payload.get("tools") == expected_execution_tools,

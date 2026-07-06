@@ -501,11 +501,15 @@ def test_local_desktop_provider_status_routes_safe_app_activation(monkeypatch) -
     assert provider["foreground_mutation_supported"] is True
     assert provider["keyboard_mouse_capture_supported"] is False
     assert "desktop.safe_type_text" in provider["requires_real_sandbox_for"]
-    assert route["status"] == "sandbox_ready"
+    assert route["status"] == "provider_ready"
     assert route["selected_provider_kind"] == LOCAL_DESKTOP_PROVIDER_KIND
     assert route["selected_provider_id"] == LOCAL_DESKTOP_PROVIDER_ID
-    assert inspect_route["status"] == "sandbox_ready"
+    assert route["foreground_takeover_required"] is True
+    assert route["provider_execution_required"] is True
+    assert route["sandbox_required"] is False
+    assert inspect_route["status"] == "provider_ready"
     assert inspect_route["selected_provider_kind"] == LOCAL_DESKTOP_PROVIDER_KIND
+    assert inspect_route["foreground_takeover_required"] is True
     assert unsupported_input_route["status"] == "sandbox_keyboard_mouse_provider_required"
     assert unsupported_input_route["blocking_conditions"] == [
         "sandbox_keyboard_mouse_provider_required"

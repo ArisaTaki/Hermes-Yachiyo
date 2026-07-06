@@ -832,6 +832,7 @@ def _sandbox_route_decision(
     ]
     provider_kind = str(sandbox_provider.get("provider_kind") or "sandbox_desktop")
     provider_id = str(sandbox_provider.get("provider_id") or "")
+    provider_context = _desktop_provider_route_context(sandbox_provider)
     if not bool(sandbox_provider.get("available")):
         return {
             **dict(route),
@@ -844,6 +845,7 @@ def _sandbox_route_decision(
             "fallback_mode": "supervised_live",
             "reason": str(sandbox_provider.get("reason") or ""),
             "blocking_conditions": blockers,
+            **provider_context,
         }
     supported_tools = _string_list(sandbox_provider.get("supported_tools"))
     if _sandbox_provider_requires_keyboard_mouse_sandbox(sandbox_provider, tool_name):
@@ -861,6 +863,7 @@ def _sandbox_route_decision(
                 "mouse capture must run through a real sandbox/control provider."
             ),
             "blocking_conditions": ["sandbox_keyboard_mouse_provider_required"],
+            **provider_context,
         }
     if supported_tools and tool_name not in supported_tools:
         return {
@@ -874,6 +877,7 @@ def _sandbox_route_decision(
             "fallback_mode": "supervised_live",
             "reason": "Sandbox provider is available but does not support this tool.",
             "blocking_conditions": ["sandbox_tool_not_supported"],
+            **provider_context,
         }
     if not bool(sandbox_provider.get("adapter_ready")):
         return {
@@ -887,19 +891,61 @@ def _sandbox_route_decision(
             "fallback_mode": "supervised_live",
             "reason": "Sandbox provider is available but no executable adapter is registered yet.",
             "blocking_conditions": ["sandbox_desktop_adapter_required"],
+            **provider_context,
         }
+    ready_status = _desktop_provider_ready_status(sandbox_provider)
+    sandbox_required = ready_status == "sandbox_ready"
     return {
         **dict(route),
         "selected_provider_kind": provider_kind,
         "selected_provider_id": provider_id,
-        "status": "sandbox_ready",
+        "status": ready_status,
         "can_execute": True,
         "can_auto_start": True,
-        "sandbox_required": True,
+        "provider_execution_required": True,
+        "sandbox_required": sandbox_required,
         "fallback_mode": "",
-        "reason": "Foreground desktop action can be routed through the sandbox provider.",
+        "reason": _desktop_provider_ready_reason(sandbox_provider),
         "blocking_conditions": [],
+        **provider_context,
     }
+
+
+def _desktop_provider_route_context(sandbox_provider: Mapping[str, Any]) -> dict[str, Any]:
+    payload: dict[str, Any] = {}
+    for key in (
+        "foreground_mutation_supported",
+        "keyboard_mouse_capture_supported",
+        "desktop_session_isolated",
+        "foreground_takeover_required",
+    ):
+        if key in sandbox_provider:
+            payload[key] = _optional_bool_value(sandbox_provider.get(key))
+    session_kind = str(sandbox_provider.get("desktop_session_kind") or "").strip()
+    if session_kind:
+        payload["desktop_session_kind"] = session_kind
+    return payload
+
+
+def _desktop_provider_ready_status(sandbox_provider: Mapping[str, Any]) -> str:
+    provider_kind = str(sandbox_provider.get("provider_kind") or "").strip()
+    if provider_kind != "sandbox_desktop":
+        return "provider_ready"
+    if _optional_bool_value(sandbox_provider.get("foreground_takeover_required")) is True:
+        return "provider_ready"
+    return "sandbox_ready"
+
+
+def _desktop_provider_ready_reason(sandbox_provider: Mapping[str, Any]) -> str:
+    if _desktop_provider_ready_status(sandbox_provider) == "sandbox_ready":
+        return "Foreground desktop action can be routed through the sandbox provider."
+    provider_kind = str(sandbox_provider.get("provider_kind") or "desktop provider").strip()
+    if _optional_bool_value(sandbox_provider.get("foreground_takeover_required")) is True:
+        return (
+            f"Desktop action can be routed through the {provider_kind} provider, "
+            "but that provider uses the user's foreground desktop session."
+        )
+    return f"Desktop action can be routed through the {provider_kind} provider."
 
 
 def _sandbox_provider_requires_keyboard_mouse_sandbox(
@@ -937,16 +983,18 @@ def _sandbox_provider_requires_isolated_keyboard_mouse_session(
         "allow_nonisolated_desktop_provider",
     ):
         return False
-    if _optional_bool_value(sandbox_provider.get("desktop_session_isolated")) is True:
-        return False
     if _optional_bool_value(sandbox_provider.get("foreground_takeover_required")) is True:
         return True
+    if _optional_bool_value(sandbox_provider.get("desktop_session_isolated")) is True:
+        return False
     session_kind = str(sandbox_provider.get("desktop_session_kind") or "").strip()
     if session_kind in {"isolated_desktop", "sandbox_desktop", "virtual_desktop"}:
         return False
+    if _optional_bool_value(sandbox_provider.get("desktop_session_isolated")) is False:
+        return True
     return _optional_bool_value(
         sandbox_provider.get("keyboard_mouse_capture_supported")
-    ) is True
+    ) is True and str(sandbox_provider.get("provider_kind") or "") != "sandbox_desktop"
 
 
 def _execution_mode_payload(value: Mapping[str, Any] | Any | None) -> dict[str, Any]:

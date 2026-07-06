@@ -5320,7 +5320,13 @@ def test_desktop_execution_route_decision_reports_provider_boundaries() -> None:
         "status",
         "can_execute",
         "can_auto_start",
+        "provider_execution_required",
         "sandbox_required",
+        "foreground_mutation_supported",
+        "keyboard_mouse_capture_supported",
+        "desktop_session_kind",
+        "desktop_session_isolated",
+        "foreground_takeover_required",
         "fallback_mode",
         "reason",
         "blocking_conditions",
@@ -5328,9 +5334,11 @@ def test_desktop_execution_route_decision_reports_provider_boundaries() -> None:
     ]
     assert payload["status"] == "provider_required"
     assert payload["can_execute"] is False
+    assert payload["provider_execution_required"] is False
     assert payload["blocking_conditions"] == ["sandbox_desktop_provider_required"]
     assert sandbox_ready_route["status"] == "sandbox_ready"
     assert sandbox_ready_route["can_execute"] is True
+    assert sandbox_ready_route["provider_execution_required"] is True
     assert sandbox_ready_route["selected_provider_id"] == "sandbox-1"
     assert readonly_provider_route["status"] == "sandbox_ready"
     assert readonly_provider_route["can_execute"] is True

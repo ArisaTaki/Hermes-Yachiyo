@@ -1056,7 +1056,7 @@ def desktop_execution_route_requires_provider(route: Mapping[str, Any] | Any) ->
         return True
     if bool(route.get("sandbox_required")):
         return True
-    if str(route.get("status") or "").strip() == "sandbox_ready":
+    if str(route.get("status") or "").strip() in {"provider_ready", "sandbox_ready"}:
         return True
     requested_mode = str(route.get("requested_mode") or "").strip().lower().replace("-", "_")
     return requested_mode == "sandbox_preferred"

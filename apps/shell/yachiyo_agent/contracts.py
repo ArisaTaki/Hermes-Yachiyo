@@ -246,7 +246,13 @@ class DesktopExecutionRouteSnapshot(_PublicSnapshot):
     status: str = "ready"
     can_execute: bool = True
     can_auto_start: bool = True
+    provider_execution_required: bool = False
     sandbox_required: bool = False
+    foreground_mutation_supported: bool | None = None
+    keyboard_mouse_capture_supported: bool | None = None
+    desktop_session_kind: str = ""
+    desktop_session_isolated: bool | None = None
+    foreground_takeover_required: bool | None = None
     fallback_mode: DesktopExecutionPolicyMode | str = ""
     reason: str = ""
     blocking_conditions: list[str] = Field(default_factory=list)

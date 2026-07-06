@@ -2889,28 +2889,24 @@ def test_runtime_tool_request_runner_executes_sandbox_route_through_provider() -
         budget=budget,
     )
 
-    assert adapter.calls == [
-        {
-            "tool": "desktop.safe_type_text",
-            "payload": {"text": "hello"},
-            "route": {
-                "route_id": "desktop-route:desktop.safe_type_text",
-                "tool_name": "desktop.safe_type_text",
-                "requested_mode": "sandbox_preferred",
-                "selected_provider_kind": "sandbox_desktop",
-                "selected_provider_id": "sandbox-1",
-                "status": "sandbox_ready",
-                "can_execute": True,
-                "can_auto_start": True,
-                "sandbox_required": True,
-                "fallback_mode": "",
-                "reason": "Foreground desktop action can be routed through the sandbox provider.",
-                "blocking_conditions": [],
-                "source": "runtime",
-            },
-            "approved": False,
-        }
-    ]
+    assert len(adapter.calls) == 1
+    assert adapter.calls[0]["tool"] == "desktop.safe_type_text"
+    assert adapter.calls[0]["payload"] == {"text": "hello"}
+    assert adapter.calls[0]["approved"] is False
+    route = adapter.calls[0]["route"]
+    assert route["route_id"] == "desktop-route:desktop.safe_type_text"
+    assert route["tool_name"] == "desktop.safe_type_text"
+    assert route["requested_mode"] == "sandbox_preferred"
+    assert route["selected_provider_kind"] == "sandbox_desktop"
+    assert route["selected_provider_id"] == "sandbox-1"
+    assert route["status"] == "sandbox_ready"
+    assert route["can_execute"] is True
+    assert route["can_auto_start"] is True
+    assert route["provider_execution_required"] is True
+    assert route["sandbox_required"] is True
+    assert route["fallback_mode"] == ""
+    assert route["blocking_conditions"] == []
+    assert route["source"] == "runtime"
     assert broker.calls == []
     assert budget.claims == [("desktop.safe_type_text", False)]
     assert not [event for event in timeline if event["event"] == "agent.tool.skipped"]
