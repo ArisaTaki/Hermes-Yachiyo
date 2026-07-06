@@ -197,6 +197,33 @@ class SandboxDesktopProviderSnapshot(_PublicSnapshot):
     requires_real_sandbox_for: list[str] = Field(default_factory=list)
 
 
+class ControlledDesktopProviderDiagnosticSnapshot(_PublicSnapshot):
+    ready: bool = False
+    configured: bool = False
+    status: str = "controlled_provider_required"
+    provider_id: str = "local-controlled-desktop"
+    provider_kind: DesktopIsolationKind | str = "sandbox_desktop"
+    execution_mode: str = "controlled_desktop"
+    source: str = "runtime"
+    reason: str = ""
+    blocking_conditions: list[str] = Field(default_factory=list)
+    supported_tools: list[str] = Field(default_factory=list)
+    capabilities: list[str] = Field(default_factory=list)
+    foreground_mutation_supported: bool | None = None
+    keyboard_mouse_capture_supported: bool | None = None
+    requires_real_sandbox_for: list[str] = Field(default_factory=list)
+    requires_runtime_approval: bool = True
+    approval_required_tools: list[str] = Field(default_factory=list)
+    launch_command: list[str] = Field(default_factory=list)
+    smoke_command: list[str] = Field(default_factory=list)
+    env: dict[str, str] = Field(default_factory=dict)
+    endpoint_origin: str = ""
+    endpoint_path: str = ""
+    status_endpoint_path: str = ""
+    health: DesktopProviderHealthSnapshot | None = None
+    manifest: dict[str, Any] = Field(default_factory=dict)
+
+
 class DesktopExecutionRouteSnapshot(_PublicSnapshot):
     route_id: str = "desktop_execution_route"
     tool_name: str = ""
@@ -369,6 +396,7 @@ class ToolCatalogSnapshot(_PublicSnapshot):
     tools: list[ToolCatalogItemSnapshot] = Field(default_factory=list)
     capabilities: dict[str, DesktopExecutionCapabilitySnapshot] = Field(default_factory=dict)
     sandbox_provider: SandboxDesktopProviderSnapshot | None = None
+    controlled_provider_diagnostics: ControlledDesktopProviderDiagnosticSnapshot | None = None
     plugins: list[RestrictedToolPluginSnapshot] = Field(default_factory=list)
     legacy_cleanup_coverage: LegacyCleanupCoverageSnapshot | None = None
     source: str = "runtime"

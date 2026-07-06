@@ -164,6 +164,33 @@ export type SandboxDesktopProviderSnapshot = {
   requires_real_sandbox_for?: string[];
 };
 
+export type ControlledDesktopProviderDiagnosticSnapshot = {
+  ready?: boolean;
+  configured?: boolean;
+  status?: string;
+  provider_id?: string;
+  provider_kind?: DesktopIsolationKind | string;
+  execution_mode?: string;
+  source?: string;
+  reason?: string;
+  blocking_conditions?: string[];
+  supported_tools?: string[];
+  capabilities?: string[];
+  foreground_mutation_supported?: boolean | null;
+  keyboard_mouse_capture_supported?: boolean | null;
+  requires_real_sandbox_for?: string[];
+  requires_runtime_approval?: boolean;
+  approval_required_tools?: string[];
+  launch_command?: string[];
+  smoke_command?: string[];
+  env?: Record<string, string>;
+  endpoint_origin?: string;
+  endpoint_path?: string;
+  status_endpoint_path?: string;
+  health?: DesktopProviderHealthSnapshot | null;
+  manifest?: Record<string, unknown>;
+};
+
 export type DesktopExecutionRouteSnapshot = {
   route_id?: string;
   tool_name?: string;
@@ -303,6 +330,7 @@ export type ToolCatalogSnapshot = {
   tools: ToolCatalogItemSnapshot[];
   capabilities?: Record<string, DesktopExecutionCapabilitySnapshot>;
   sandbox_provider?: SandboxDesktopProviderSnapshot | null;
+  controlled_provider_diagnostics?: ControlledDesktopProviderDiagnosticSnapshot | null;
   plugins?: RestrictedToolPluginSnapshot[];
   legacy_cleanup_coverage?: LegacyCleanupCoverageSnapshot | null;
   source?: string;

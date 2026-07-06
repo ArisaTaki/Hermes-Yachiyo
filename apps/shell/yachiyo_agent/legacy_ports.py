@@ -81,6 +81,7 @@ from .runtime_progress import (
     task_progress_event_payloads_for_tool_result,
     task_replan_event_payloads_for_tool_result,
 )
+from .controlled_provider_diagnostics import controlled_desktop_provider_diagnostics_payload
 from .groups import group_run_snapshot_from_payload
 from .tool_catalog import runtime_tool_catalog_snapshot
 from .workflow_run_snapshots import workflow_run_snapshot_from_payload
@@ -1149,15 +1150,19 @@ class LegacyStudioPort:
                 plugin_states = payload.get("plugins") if isinstance(payload, dict) else payload
             except Exception:
                 plugin_states = None
+        sandbox_provider = sandbox_desktop_provider_status(
+            {
+                "desktop_provider_health_probe": True,
+                "desktop_provider_local_native": True,
+            }
+        )
         return runtime_tool_catalog_snapshot(
             missing_permissions=missing_permissions,
             blocking_conditions=blocking_conditions,
             plugin_states=plugin_states,
-            sandbox_provider=sandbox_desktop_provider_status(
-                {
-                    "desktop_provider_health_probe": True,
-                    "desktop_provider_local_native": True,
-                }
+            sandbox_provider=sandbox_provider,
+            controlled_provider_diagnostics=controlled_desktop_provider_diagnostics_payload(
+                sandbox_provider=sandbox_provider
             ),
         ).model_dump(mode="json")
 

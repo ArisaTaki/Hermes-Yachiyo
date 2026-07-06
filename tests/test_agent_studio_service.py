@@ -1101,6 +1101,30 @@ def test_legacy_studio_tool_catalog_exposes_local_desktop_provider(monkeypatch) 
     assert tools["desktop.inspect_app"]["provider_ready"] is True
     assert tools["desktop.safe_type_text"]["provider_supported"] is False
     assert tools["app.open"]["provider_kind"] == LOCAL_DESKTOP_PROVIDER_KIND
+    controlled = catalog["controlled_provider_diagnostics"]
+    assert controlled["ready"] is False
+    assert controlled["configured"] is False
+    assert controlled["status"] == "controlled_provider_required"
+    assert controlled["provider_id"] == "local-controlled-desktop"
+    assert "controlled_desktop_provider_required" in controlled["blocking_conditions"]
+    assert controlled["keyboard_mouse_capture_supported"] is False
+    assert controlled["launch_command"] == [
+        "python",
+        "scripts/run_controlled_desktop_provider.py",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "19092",
+    ]
+    assert controlled["smoke_command"] == [
+        "python",
+        "scripts/run_controlled_desktop_provider.py",
+        "--manifest",
+    ]
+    assert (
+        controlled["env"]["OHA_YACHIYO_DESKTOP_PROVIDER_URL"]
+        == "http://127.0.0.1:19092"
+    )
 
 
 def test_agent_studio_service_plans_task_from_tool_catalog() -> None:

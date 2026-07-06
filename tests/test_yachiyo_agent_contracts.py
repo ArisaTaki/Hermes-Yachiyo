@@ -19,6 +19,7 @@ from apps.shell.agent.tools.plugins import (
 from apps.shell.agent.runtime.main_chat_config import MAIN_CHAT_DESKTOP_AGENT_INSTRUCTIONS
 from apps.shell.agent.runtime.approval_snapshots import public_pending_approval
 from apps.shell.agent.runtime.desktop_execution_providers import (
+    desktop_execution_provider_status_from_env,
     local_desktop_execution_provider_status,
 )
 from apps.shell.yachiyo_agent import (
@@ -39,6 +40,7 @@ from apps.shell.yachiyo_agent import (
     ChatRunnableCatalogSnapshot,
     ChatRunnableParticipantSnapshot,
     ChatRunnableSnapshot,
+    ControlledDesktopProviderDiagnosticSnapshot,
     DesktopExecutionLoopSnapshot,
     DesktopActionRiskSnapshot,
     DesktopExecutionCapabilitySnapshot,
@@ -117,6 +119,9 @@ from apps.shell.yachiyo_agent import (
     with_daily_entrypoint_desktop_execution_policy,
     is_high_risk_desktop_action,
     task_requires_user_action,
+)
+from apps.shell.yachiyo_agent.controlled_provider_diagnostics import (
+    controlled_desktop_provider_diagnostics_snapshot,
 )
 from apps.shell.yachiyo_agent.approvals import approval_card_from_payload
 from apps.shell.yachiyo_agent.capability_registry import runtime_execution_tool_names
@@ -6484,6 +6489,91 @@ def test_runtime_tool_catalog_surfaces_sandbox_provider_capabilities() -> None:
     assert catalog.capabilities["foreground_activation"].provider_supported_tools == [
         "app.focus_and_click_ui_element"
     ]
+
+
+def test_runtime_tool_catalog_surfaces_controlled_provider_diagnostics() -> None:
+    diagnostics = ControlledDesktopProviderDiagnosticSnapshot(
+        ready=False,
+        configured=False,
+        status="controlled_provider_required",
+        provider_id="local-controlled-desktop",
+        blocking_conditions=["controlled_desktop_provider_required"],
+        launch_command=[
+            "python",
+            "scripts/run_controlled_desktop_provider.py",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "19092",
+        ],
+        smoke_command=[
+            "python",
+            "scripts/run_controlled_desktop_provider.py",
+            "--manifest",
+        ],
+        env={
+            "OHA_YACHIYO_DESKTOP_PROVIDER_URL": "http://127.0.0.1:19092",
+        },
+    )
+
+    catalog = runtime_tool_catalog_snapshot(
+        controlled_provider_diagnostics=diagnostics
+    )
+    payload = catalog.model_dump(mode="json")
+
+    assert catalog.controlled_provider_diagnostics is not None
+    assert (
+        payload["controlled_provider_diagnostics"]["status"]
+        == "controlled_provider_required"
+    )
+    assert payload["controlled_provider_diagnostics"]["launch_command"] == [
+        "python",
+        "scripts/run_controlled_desktop_provider.py",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "19092",
+    ]
+
+
+def test_controlled_provider_diagnostics_marks_configured_keyboard_provider_ready(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv(
+        "OHA_YACHIYO_DESKTOP_PROVIDER_URL",
+        "http://127.0.0.1:19092",
+    )
+    monkeypatch.setenv(
+        "OHA_YACHIYO_DESKTOP_PROVIDER_ID",
+        "local-controlled-desktop",
+    )
+    monkeypatch.setenv(
+        "OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS",
+        "desktop.list_apps,desktop.safe_type_text",
+    )
+    monkeypatch.setenv(
+        "OHA_YACHIYO_DESKTOP_PROVIDER_KEYBOARD_MOUSE_CAPTURE_SUPPORTED",
+        "true",
+    )
+    monkeypatch.setenv(
+        "OHA_YACHIYO_DESKTOP_PROVIDER_FOREGROUND_MUTATION_SUPPORTED",
+        "true",
+    )
+    provider = desktop_execution_provider_status_from_env(probe_health=False)
+
+    diagnostics = controlled_desktop_provider_diagnostics_snapshot(
+        sandbox_provider=provider
+    )
+
+    assert diagnostics.ready is True
+    assert diagnostics.configured is True
+    assert diagnostics.status == "ready"
+    assert diagnostics.provider_id == "local-controlled-desktop"
+    assert diagnostics.keyboard_mouse_capture_supported is True
+    assert diagnostics.foreground_mutation_supported is True
+    assert diagnostics.blocking_conditions == []
+    assert diagnostics.endpoint_origin == "http://127.0.0.1:19092"
+    assert "desktop.safe_type_text" in diagnostics.supported_tools
 
 
 def test_runtime_tool_catalog_marks_local_provider_input_tools_as_sandbox_required() -> None:

@@ -755,9 +755,16 @@ function ToolDetail({
       <div
         className="studio-tool-inspector-section"
         data-controlled-provider-command={providerState.controlledCommand.join(' ')}
+        data-controlled-provider-blockers={providerState.controlledBlockingConditions.join(',')}
+        data-controlled-provider-configured={String(providerState.controlledConfigured)}
         data-controlled-provider-env-url={providerState.controlledEnvUrl}
+        data-controlled-provider-endpoint-origin={providerState.controlledEndpointOrigin}
+        data-controlled-provider-endpoint-path={providerState.controlledEndpointPath}
         data-controlled-provider-id={providerState.controlledProviderId}
+        data-controlled-provider-ready={String(providerState.controlledReady)}
+        data-controlled-provider-reason={providerState.controlledReason}
         data-controlled-provider-requires-approval={String(providerState.controlledRequiresApproval)}
+        data-controlled-provider-status={providerState.controlledStatus}
         data-provider-ready={String(providerState.ready)}
         data-provider-requires-real-sandbox-for={providerState.requiresRealSandboxFor.join(',')}
         data-provider-status={providerState.status}
@@ -813,6 +820,28 @@ function ToolDetail({
               {providerState.controlledEnvUrl}
             </span>
           ) : null}
+          {providerState.controlledStatus ? (
+            <span
+              className={providerState.controlledReady ? 'studio-tool-permission' : 'studio-tool-permission missing'}
+              data-controlled-provider-status={providerState.controlledStatus}
+            >
+              {providerState.controlledStatus}
+            </span>
+          ) : null}
+          {providerState.controlledEndpointOrigin ? (
+            <span className="studio-tool-permission" data-controlled-provider-endpoint-origin={providerState.controlledEndpointOrigin}>
+              {providerState.controlledEndpointOrigin}{providerState.controlledEndpointPath}
+            </span>
+          ) : null}
+          {providerState.controlledBlockingConditions.map((condition) => (
+            <span
+              className="studio-tool-permission missing"
+              data-controlled-provider-blocker={condition}
+              key={condition}
+            >
+              {runtimeBlockingLabel(condition)}
+            </span>
+          ))}
           {providerState.blockingConditions.map((condition) => (
             <span
               className="studio-tool-permission missing"
@@ -898,10 +927,18 @@ type ToolProviderState = {
   controlledSmokeCommand: string[];
   controlledEnvUrl: string;
   controlledRequiresApproval: boolean;
+  controlledReady: boolean;
+  controlledConfigured: boolean;
+  controlledStatus: string;
+  controlledReason: string;
+  controlledBlockingConditions: string[];
+  controlledEndpointOrigin: string;
+  controlledEndpointPath: string;
 };
 
 function toolProviderState(tool: ToolCatalogItemSnapshot, catalog: ToolCatalogSnapshot): ToolProviderState {
   const provider = catalog.sandbox_provider || null;
+  const controlledDiagnostics = objectRecord(catalog.controlled_provider_diagnostics);
   const ready = tool.provider_ready === true;
   const supported = tool.provider_supported === true;
   const providerId = stringValue(tool.provider_id) || stringValue(provider?.provider_id);
@@ -912,12 +949,27 @@ function toolProviderState(tool: ToolCatalogItemSnapshot, catalog: ToolCatalogSn
   const blockingConditions = stringArray(provider?.blocking_conditions);
   const launchHint = objectRecord(provider?.launch_hint);
   const controlledProvider = objectRecord(launchHint.controlled_provider);
-  const controlledEnv = objectRecord(controlledProvider.env);
-  const controlledProviderId = stringValue(controlledProvider.provider_id);
-  const controlledCommand = stringArray(controlledProvider.command);
-  const controlledSmokeCommand = stringArray(controlledProvider.smoke_command);
+  const controlledEnv = objectRecord(controlledDiagnostics.env).OHA_YACHIYO_DESKTOP_PROVIDER_URL
+    ? objectRecord(controlledDiagnostics.env)
+    : objectRecord(controlledProvider.env);
+  const controlledProviderId = stringValue(controlledDiagnostics.provider_id)
+    || stringValue(controlledProvider.provider_id);
+  const controlledCommand = stringArray(controlledDiagnostics.launch_command).length
+    ? stringArray(controlledDiagnostics.launch_command)
+    : stringArray(controlledProvider.command);
+  const controlledSmokeCommand = stringArray(controlledDiagnostics.smoke_command).length
+    ? stringArray(controlledDiagnostics.smoke_command)
+    : stringArray(controlledProvider.smoke_command);
   const controlledEnvUrl = stringValue(controlledEnv.OHA_YACHIYO_DESKTOP_PROVIDER_URL);
-  const controlledRequiresApproval = controlledProvider.requires_runtime_approval === true;
+  const controlledRequiresApproval = controlledDiagnostics.requires_runtime_approval === true
+    || controlledProvider.requires_runtime_approval === true;
+  const controlledReady = controlledDiagnostics.ready === true;
+  const controlledConfigured = controlledDiagnostics.configured === true;
+  const controlledStatus = stringValue(controlledDiagnostics.status);
+  const controlledReason = stringValue(controlledDiagnostics.reason);
+  const controlledBlockingConditions = stringArray(controlledDiagnostics.blocking_conditions);
+  const controlledEndpointOrigin = stringValue(controlledDiagnostics.endpoint_origin);
+  const controlledEndpointPath = stringValue(controlledDiagnostics.endpoint_path);
   const requiresRealSandbox = Boolean(tool.tool_name && requiresRealSandboxFor.includes(tool.tool_name));
   const baseState = {
     providerId,
@@ -931,6 +983,13 @@ function toolProviderState(tool: ToolCatalogItemSnapshot, catalog: ToolCatalogSn
     controlledSmokeCommand,
     controlledEnvUrl,
     controlledRequiresApproval,
+    controlledReady,
+    controlledConfigured,
+    controlledStatus,
+    controlledReason,
+    controlledBlockingConditions,
+    controlledEndpointOrigin,
+    controlledEndpointPath,
   };
   if (ready) {
     return {

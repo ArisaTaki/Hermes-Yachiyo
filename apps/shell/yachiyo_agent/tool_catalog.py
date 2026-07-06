@@ -16,6 +16,7 @@ from apps.shell.agent.tools.policy import (
 from apps.shell.agent.tools.plugins import list_restricted_plugin_tools, restricted_plugin_tool_risk
 
 from .contracts import (
+    ControlledDesktopProviderDiagnosticSnapshot,
     DesktopExecutionCapabilitySnapshot,
     DesktopExecutionModeSnapshot,
     LegacyCleanupCoverageSnapshot,
@@ -46,6 +47,9 @@ def runtime_tool_catalog_snapshot(
     blocking_conditions: Mapping[str, Iterable[str]] | None = None,
     plugin_states: Iterable[Any] | None = None,
     sandbox_provider: Mapping[str, Any] | SandboxDesktopProviderSnapshot | None = None,
+    controlled_provider_diagnostics: (
+        Mapping[str, Any] | ControlledDesktopProviderDiagnosticSnapshot | None
+    ) = None,
 ) -> ToolCatalogSnapshot:
     """Build the public Studio tool catalog from runtime descriptors."""
 
@@ -77,6 +81,9 @@ def runtime_tool_catalog_snapshot(
         tools=tools,
         capabilities=capabilities,
         sandbox_provider=provider,
+        controlled_provider_diagnostics=_controlled_provider_diagnostics_snapshot(
+            controlled_provider_diagnostics
+        ),
         plugins=_restricted_plugin_snapshots(plugin_states),
         legacy_cleanup_coverage=_legacy_cleanup_coverage_snapshot(),
     )
@@ -112,11 +119,17 @@ def tool_catalog_snapshot_from_payload(payload: Any) -> ToolCatalogSnapshot:
     sandbox_provider = _sandbox_provider_snapshot(
         raw_provider if isinstance(raw_provider, Mapping) else None
     )
+    raw_controlled_provider_diagnostics = payload.get("controlled_provider_diagnostics")
 
     return ToolCatalogSnapshot(
         tools=tools,
         capabilities=capabilities,
         sandbox_provider=sandbox_provider,
+        controlled_provider_diagnostics=_controlled_provider_diagnostics_snapshot(
+            raw_controlled_provider_diagnostics
+            if isinstance(raw_controlled_provider_diagnostics, Mapping)
+            else None
+        ),
         plugins=_restricted_plugin_snapshots_from_payload(payload.get("plugins")),
         legacy_cleanup_coverage=_legacy_cleanup_coverage_snapshot(
             payload.get("legacy_cleanup_coverage")
@@ -755,6 +768,16 @@ def _sandbox_provider_snapshot(
     return SandboxDesktopProviderSnapshot.model_validate(
         sandbox_desktop_provider_status({"sandbox_provider": dict(payload)})
     )
+
+
+def _controlled_provider_diagnostics_snapshot(
+    payload: Mapping[str, Any] | ControlledDesktopProviderDiagnosticSnapshot | None,
+) -> ControlledDesktopProviderDiagnosticSnapshot | None:
+    if isinstance(payload, ControlledDesktopProviderDiagnosticSnapshot):
+        return payload
+    if not isinstance(payload, Mapping):
+        return None
+    return ControlledDesktopProviderDiagnosticSnapshot.model_validate(dict(payload))
 
 
 def _provider_supported_tools(
