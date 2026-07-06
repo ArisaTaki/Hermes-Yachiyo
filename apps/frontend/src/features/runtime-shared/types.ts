@@ -76,6 +76,9 @@ export type DesktopExecutionCapabilitySnapshot = {
   available_tools?: string[];
   degraded_tools?: string[];
   unavailable_tools?: string[];
+  provider_supported_tools?: string[];
+  provider_ready_tools?: string[];
+  provider_blocked_tools?: string[];
   risk_default?: DesktopExecutionRisk;
   diagnostic_route?: string | null;
 };
@@ -176,6 +179,10 @@ export type ToolCatalogItemSnapshot = {
   capability_id?: string | null;
   risk_level?: DesktopExecutionRisk | string | null;
   execution_mode?: DesktopExecutionModeSnapshot | null;
+  provider_supported?: boolean;
+  provider_ready?: boolean;
+  provider_kind?: DesktopIsolationKind | string;
+  provider_id?: string;
   approval_required?: boolean;
   input_schema?: Record<string, unknown>;
   model_tool_schema?: Record<string, unknown>;
@@ -277,6 +284,7 @@ export type LegacyCleanupFallbackContractSnapshot = {
 export type ToolCatalogSnapshot = {
   tools: ToolCatalogItemSnapshot[];
   capabilities?: Record<string, DesktopExecutionCapabilitySnapshot>;
+  sandbox_provider?: SandboxDesktopProviderSnapshot | null;
   plugins?: RestrictedToolPluginSnapshot[];
   legacy_cleanup_coverage?: LegacyCleanupCoverageSnapshot | null;
   source?: string;

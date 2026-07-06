@@ -35,6 +35,7 @@ from .desktop_permissions import (
     desktop_permission_missing_by_capability,
     desktop_runtime_blocking_conditions_by_capability,
 )
+from .desktop_execution_policy import sandbox_desktop_provider_status
 from .desktop_plan_hints import hotkey_hint
 from .desk import LocalAgentDeskStore
 from .entrypoint_tool_selection import planner_first_direct_tool_selection
@@ -1152,6 +1153,9 @@ class LegacyStudioPort:
             missing_permissions=missing_permissions,
             blocking_conditions=blocking_conditions,
             plugin_states=plugin_states,
+            sandbox_provider=sandbox_desktop_provider_status(
+                {"desktop_provider_health_probe": True}
+            ),
         ).model_dump(mode="json")
 
     def list_restricted_tool_plugins(self) -> dict[str, Any]:

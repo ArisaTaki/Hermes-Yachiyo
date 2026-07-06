@@ -132,6 +132,9 @@ class DesktopExecutionCapabilitySnapshot(_PublicSnapshot):
     available_tools: list[str] = Field(default_factory=list)
     degraded_tools: list[str] = Field(default_factory=list)
     unavailable_tools: list[str] = Field(default_factory=list)
+    provider_supported_tools: list[str] = Field(default_factory=list)
+    provider_ready_tools: list[str] = Field(default_factory=list)
+    provider_blocked_tools: list[str] = Field(default_factory=list)
     risk_default: DesktopExecutionRisk = "low"
     diagnostic_route: str | None = None
 
@@ -254,6 +257,10 @@ class ToolCatalogItemSnapshot(_PublicSnapshot):
     capability_id: str | None = None
     risk_level: DesktopExecutionRisk | str | None = None
     execution_mode: DesktopExecutionModeSnapshot | None = None
+    provider_supported: bool = False
+    provider_ready: bool = False
+    provider_kind: DesktopIsolationKind | str = ""
+    provider_id: str = ""
     approval_required: bool = False
     input_schema: dict[str, Any] = Field(default_factory=dict)
     model_tool_schema: dict[str, Any] = Field(default_factory=dict)
@@ -355,6 +362,7 @@ class LegacyCleanupCoverageSnapshot(_PublicSnapshot):
 class ToolCatalogSnapshot(_PublicSnapshot):
     tools: list[ToolCatalogItemSnapshot] = Field(default_factory=list)
     capabilities: dict[str, DesktopExecutionCapabilitySnapshot] = Field(default_factory=dict)
+    sandbox_provider: SandboxDesktopProviderSnapshot | None = None
     plugins: list[RestrictedToolPluginSnapshot] = Field(default_factory=list)
     legacy_cleanup_coverage: LegacyCleanupCoverageSnapshot | None = None
     source: str = "runtime"

@@ -4910,11 +4910,15 @@ def test_desktop_execution_capability_snapshot_json_shape_is_stable() -> None:
         "available_tools",
         "degraded_tools",
         "unavailable_tools",
+        "provider_supported_tools",
+        "provider_ready_tools",
+        "provider_blocked_tools",
         "risk_default",
         "diagnostic_route",
     ]
     assert payload["available"] is True
     assert payload["blocking_conditions"] == ["desktop_session_locked"]
+    assert payload["provider_supported_tools"] == []
     assert payload["risk_default"] == "medium"
     with pytest.raises(ValidationError):
         DesktopExecutionCapabilitySnapshot(
@@ -6012,6 +6016,7 @@ def test_tool_catalog_snapshot_json_shape_is_stable() -> None:
     assert list(payload) == [
         "tools",
         "capabilities",
+        "sandbox_provider",
         "plugins",
         "legacy_cleanup_coverage",
         "source",
@@ -6025,6 +6030,7 @@ def test_tool_catalog_snapshot_json_shape_is_stable() -> None:
     assert payload["plugins"][0]["plugin_id"] == "notes"
     assert payload["plugins"][0]["enabled"] is False
     assert payload["plugins"][0]["tools"][0]["risk_level"] == "medium"
+    assert payload["sandbox_provider"] is None
     assert payload["legacy_cleanup_coverage"] is None
     with pytest.raises(ValidationError):
         ToolCatalogItemSnapshot(
@@ -6412,6 +6418,50 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
     assert any("terminal.run" in note for note in python_run.fallback_notes)
     assert terminal.risk_level == "high"
     assert terminal.approval_required is True
+
+
+def test_runtime_tool_catalog_surfaces_sandbox_provider_capabilities() -> None:
+    catalog = runtime_tool_catalog_snapshot(
+        sandbox_provider={
+            "available": True,
+            "provider_id": "sandbox-1",
+            "provider_kind": "sandbox_desktop",
+            "adapter_ready": True,
+            "supported_tools": [
+                "desktop.list_apps",
+                "app.focus_and_click_ui_element",
+            ],
+        }
+    )
+    tools = {tool.tool_name: tool for tool in catalog.tools}
+
+    assert catalog.sandbox_provider is not None
+    assert catalog.sandbox_provider.provider_id == "sandbox-1"
+    assert catalog.sandbox_provider.supported_tools == [
+        "desktop.list_apps",
+        "app.focus_and_click_ui_element",
+    ]
+    assert tools["desktop.list_apps"].provider_supported is True
+    assert tools["desktop.list_apps"].provider_ready is True
+    assert tools["desktop.list_apps"].provider_id == "sandbox-1"
+    assert tools["desktop.list_apps"].provider_kind == "sandbox_desktop"
+    assert any(
+        "Sandbox desktop provider can execute" in note
+        for note in tools["desktop.list_apps"].fallback_notes
+    )
+    assert tools["desktop.submit_foreground"].provider_supported is False
+    assert "desktop.list_apps" in (
+        catalog.capabilities["desktop_execution"].provider_supported_tools
+    )
+    assert "app.focus_and_click_ui_element" in (
+        catalog.capabilities["desktop_execution"].provider_supported_tools
+    )
+    assert catalog.capabilities["desktop_execution"].provider_ready_tools == (
+        catalog.capabilities["desktop_execution"].provider_supported_tools
+    )
+    assert catalog.capabilities["foreground_activation"].provider_supported_tools == [
+        "app.focus_and_click_ui_element"
+    ]
 
 
 def test_runtime_tool_catalog_surfaces_multi_file_data_analysis_schema() -> None:

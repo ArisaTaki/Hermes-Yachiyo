@@ -125,7 +125,34 @@ def _planner_metadata_with_catalog_readiness(
         enriched["desktop_missing_permissions_by_capability"] = missing
     if blocking and not isinstance(enriched.get("desktop_blocking_conditions_by_capability"), dict):
         enriched["desktop_blocking_conditions_by_capability"] = blocking
+    provider = catalog.sandbox_provider
+    if provider is not None:
+        enriched.setdefault("desktop_provider_available", bool(provider.available))
+        enriched.setdefault("desktop_provider_adapter_ready", bool(provider.adapter_ready))
+        enriched.setdefault("desktop_provider_id", str(provider.provider_id or ""))
+        enriched.setdefault("desktop_provider_kind", str(provider.provider_kind or ""))
+        enriched.setdefault(
+            "desktop_provider_supported_tools",
+            list(provider.supported_tools),
+        )
+        enriched.setdefault(
+            "sandbox_provider",
+            provider.model_dump(mode="json"),
+        )
     return enriched
+
+
+def _tool_names_from_catalog(
+    catalog: ToolCatalogSnapshot,
+    allowed_tools: Iterable[str] | None,
+) -> list[str]:
+    if allowed_tools is not None:
+        return list(allowed_tools)
+    return [
+        str(tool.tool_name or "").strip()
+        for tool in catalog.tools
+        if str(tool.tool_name or "").strip()
+    ]
 
 
 def _studio_runtime_execution_envelope_with_policy(
@@ -192,19 +219,15 @@ class AgentStudioService:
             if payload is not None:
                 return PlannerDecisionSnapshot.model_validate(payload)
         catalog = self.list_tool_catalog()
-        tools = (
-            list(allowed_tools)
-            if allowed_tools is not None
-            else [
-                str(tool.tool_name or "").strip()
-                for tool in catalog.tools
-                if str(tool.tool_name or "").strip()
-            ]
+        enriched_metadata = _planner_metadata_with_catalog_readiness(
+            planner_metadata,
+            catalog,
         )
+        tools = _tool_names_from_catalog(catalog, allowed_tools)
         return RuntimePlanner().decision(
             prompt,
             allowed_tools=tools or None,
-            metadata=_planner_metadata_with_catalog_readiness(planner_metadata, catalog),
+            metadata=enriched_metadata,
         )
 
     def plan_execution(
@@ -231,17 +254,42 @@ class AgentStudioService:
                         planner_metadata,
                     )
                 )
-        decision = self.plan_task(
-            prompt,
-            allowed_tools=allowed_tools,
-            metadata=planner_metadata,
+        catalog = self.list_tool_catalog()
+        enriched_metadata = _planner_metadata_with_catalog_readiness(
+            planner_metadata,
+            catalog,
         )
+        port_planner = getattr(self._studio_port, "plan_task", None)
+        if callable(port_planner):
+            payload = port_planner(
+                prompt,
+                allowed_tools=allowed_tools,
+                metadata=enriched_metadata,
+            )
+            if payload is not None:
+                decision = PlannerDecisionSnapshot.model_validate(payload)
+            else:
+                decision = RuntimePlanner().decision(
+                    prompt,
+                    allowed_tools=(
+                        _tool_names_from_catalog(catalog, allowed_tools) or None
+                    ),
+                    metadata=enriched_metadata,
+                )
+        else:
+            decision = RuntimePlanner().decision(
+                prompt,
+                allowed_tools=(
+                    _tool_names_from_catalog(catalog, allowed_tools) or None
+                ),
+                metadata=enriched_metadata,
+            )
         envelope = runtime_execution_envelope_from_decision(
             decision,
             allowed_tools=allowed_tools,
             direct=direct,
             full_plan=True,
-            metadata=planner_metadata,
+            metadata=enriched_metadata,
         )
         if envelope is None:
             raise ValueError("Unable to build Agent Studio execution plan")

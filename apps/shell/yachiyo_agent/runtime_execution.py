@@ -346,6 +346,11 @@ def _runtime_request_metadata_from_metadata(
         "route_foreground_desktop_provider",
     ):
         payload["desktop_provider_route_foreground"] = True
+    provider = metadata.get("sandbox_provider") or metadata.get(
+        "sandbox_desktop_provider"
+    )
+    if isinstance(provider, Mapping):
+        payload["sandbox_provider"] = dict(provider)
     return payload
 
 

@@ -21,9 +21,11 @@ from .contracts import (
     LegacyCleanupCoverageSnapshot,
     RestrictedPluginToolSnapshot,
     RestrictedToolPluginSnapshot,
+    SandboxDesktopProviderSnapshot,
     ToolCatalogItemSnapshot,
     ToolCatalogSnapshot,
 )
+from .desktop_execution_policy import sandbox_desktop_provider_status
 from .legacy_cleanup_coverage import legacy_daily_desktop_cleanup_coverage
 from .policy import (
     DESKTOP_CAPABILITY_DIAGNOSTIC_ROUTES,
@@ -43,15 +45,18 @@ def runtime_tool_catalog_snapshot(
     missing_permissions: Mapping[str, Iterable[str]] | None = None,
     blocking_conditions: Mapping[str, Iterable[str]] | None = None,
     plugin_states: Iterable[Any] | None = None,
+    sandbox_provider: Mapping[str, Any] | SandboxDesktopProviderSnapshot | None = None,
 ) -> ToolCatalogSnapshot:
     """Build the public Studio tool catalog from runtime descriptors."""
 
     clean_registered = _clean_tool_names(registered_tools or TOOL_DESCRIPTORS)
+    provider = _sandbox_provider_snapshot(sandbox_provider)
     capabilities = _capability_snapshots(
         registered_tools=clean_registered,
         platform_name=platform_name,
         missing_permissions=missing_permissions,
         blocking_conditions=blocking_conditions,
+        sandbox_provider=provider,
     )
     capability_payloads = {
         capability_id: snapshot.model_dump(mode="json")
@@ -63,6 +68,7 @@ def runtime_tool_catalog_snapshot(
             capabilities=capability_payloads,
             missing_permissions=missing_permissions or {},
             blocking_conditions=blocking_conditions or {},
+            sandbox_provider=provider,
         )
         for tool_name in sorted(clean_registered)
         if tool_name in TOOL_DESCRIPTORS
@@ -70,6 +76,7 @@ def runtime_tool_catalog_snapshot(
     return ToolCatalogSnapshot(
         tools=tools,
         capabilities=capabilities,
+        sandbox_provider=provider,
         plugins=_restricted_plugin_snapshots(plugin_states),
         legacy_cleanup_coverage=_legacy_cleanup_coverage_snapshot(),
     )
@@ -101,9 +108,15 @@ def tool_catalog_snapshot_from_payload(payload: Any) -> ToolCatalogSnapshot:
                 dict(capability_payload)
             )
 
+    raw_provider = payload.get("sandbox_provider")
+    sandbox_provider = _sandbox_provider_snapshot(
+        raw_provider if isinstance(raw_provider, Mapping) else None
+    )
+
     return ToolCatalogSnapshot(
         tools=tools,
         capabilities=capabilities,
+        sandbox_provider=sandbox_provider,
         plugins=_restricted_plugin_snapshots_from_payload(payload.get("plugins")),
         legacy_cleanup_coverage=_legacy_cleanup_coverage_snapshot(
             payload.get("legacy_cleanup_coverage")
@@ -130,10 +143,13 @@ def _catalog_item_from_descriptor(
     capabilities: Mapping[str, Mapping[str, Any]],
     missing_permissions: Mapping[str, Iterable[str]],
     blocking_conditions: Mapping[str, Iterable[str]],
+    sandbox_provider: SandboxDesktopProviderSnapshot | None,
 ) -> ToolCatalogItemSnapshot:
     descriptor = TOOL_DESCRIPTORS[tool_name]
     model_tool_schema = descriptor.to_model_tool_schema()
     capability_id = _capability_id_for_tool(tool_name)
+    provider_supported = _provider_supports_tool(sandbox_provider, tool_name)
+    provider_ready = _provider_ready(sandbox_provider) and provider_supported
     return ToolCatalogItemSnapshot(
         tool_name=tool_name,
         function_name=descriptor.function_name,
@@ -141,6 +157,18 @@ def _catalog_item_from_descriptor(
         capability_id=capability_id,
         risk_level=_risk_level_for_tool(tool_name),
         execution_mode=desktop_tool_execution_mode(tool_name),
+        provider_supported=provider_supported,
+        provider_ready=provider_ready,
+        provider_kind=(
+            str(sandbox_provider.provider_kind)
+            if provider_supported and sandbox_provider
+            else ""
+        ),
+        provider_id=(
+            str(sandbox_provider.provider_id)
+            if provider_supported and sandbox_provider
+            else ""
+        ),
         approval_required=_approval_required_for_tool(tool_name),
         input_schema=deepcopy(model_tool_schema["function"]["parameters"]),
         model_tool_schema=deepcopy(model_tool_schema),
@@ -156,7 +184,11 @@ def _catalog_item_from_descriptor(
             capabilities=capabilities,
             blocking_conditions=blocking_conditions,
         ),
-        fallback_notes=_fallback_notes_for_tool(tool_name),
+        fallback_notes=_fallback_notes_for_tool(
+            tool_name,
+            provider_supported=provider_supported,
+            provider_ready=provider_ready,
+        ),
         diagnostic_route=_diagnostic_route_for_tool(capability_id),
         source=_source_for_tool(tool_name),
     )
@@ -208,6 +240,10 @@ def _catalog_item_from_payload(payload: Mapping[str, Any]) -> ToolCatalogItemSna
         capability_id=_optional_string(payload.get("capability_id")),
         risk_level=_optional_string(payload.get("risk_level")),
         execution_mode=_execution_mode_from_payload(payload, tool_name),
+        provider_supported=bool(payload.get("provider_supported", False)),
+        provider_ready=bool(payload.get("provider_ready", False)),
+        provider_kind=str(payload.get("provider_kind") or ""),
+        provider_id=str(payload.get("provider_id") or ""),
         approval_required=bool(payload.get("approval_required", _approval_required_for_tool(tool_name))),
         input_schema=dict(input_schema),
         model_tool_schema=dict(model_tool_schema),
@@ -225,6 +261,7 @@ def _capability_snapshots(
     platform_name: str | None,
     missing_permissions: Mapping[str, Iterable[str]] | None,
     blocking_conditions: Mapping[str, Iterable[str]] | None,
+    sandbox_provider: SandboxDesktopProviderSnapshot | None = None,
 ) -> dict[str, DesktopExecutionCapabilitySnapshot]:
     payload = desktop_execution_capability_snapshots(
         registered_tools=registered_tools,
@@ -232,11 +269,30 @@ def _capability_snapshots(
         missing_permissions=missing_permissions,
         blocking_conditions=blocking_conditions,
     )
-    return {
+    capabilities = {
         capability_id: DesktopExecutionCapabilitySnapshot.model_validate(snapshot)
         for capability_id, snapshot in payload.items()
         if isinstance(snapshot, Mapping)
     }
+    if sandbox_provider is None:
+        return capabilities
+    supported_tools = _provider_supported_tools(sandbox_provider)
+    if not supported_tools:
+        return capabilities
+    ready = _provider_ready(sandbox_provider)
+    enriched: dict[str, DesktopExecutionCapabilitySnapshot] = {}
+    for capability_id, snapshot in capabilities.items():
+        provider_supported_tools = [
+            tool for tool in snapshot.tools if tool in supported_tools
+        ]
+        enriched[capability_id] = snapshot.model_copy(
+            update={
+                "provider_supported_tools": provider_supported_tools,
+                "provider_ready_tools": provider_supported_tools if ready else [],
+                "provider_blocked_tools": [] if ready else provider_supported_tools,
+            }
+        )
+    return enriched
 
 
 def _clean_tool_names(values: Iterable[str]) -> set[str]:
@@ -363,7 +419,12 @@ def _blocking_conditions_for_tool(
     )
 
 
-def _fallback_notes_for_tool(tool_name: str) -> list[str]:
+def _fallback_notes_for_tool(
+    tool_name: str,
+    *,
+    provider_supported: bool = False,
+    provider_ready: bool = False,
+) -> list[str]:
     notes_by_tool = {
         "media.apple_music_play": [
             "Direct Apple Music playback falls back to opening Music when playback is unavailable.",
@@ -652,7 +713,52 @@ def _fallback_notes_for_tool(tool_name: str) -> list[str]:
         notes.append(f"Restricted tool-only plugin: {plugin_tool.plugin_id}.")
         if plugin_tool.skill_docs:
             notes.append(f"Plugin skill docs: {_truncate_note(plugin_tool.skill_docs)}")
+    if provider_supported and provider_ready:
+        notes.append(
+            "Sandbox desktop provider can execute this tool without using the user's "
+            "foreground session."
+        )
+    elif provider_supported:
+        notes.append(
+            "Sandbox desktop provider supports this tool but is not ready; check "
+            "provider health in Agent Studio."
+        )
     return notes
+
+
+def _sandbox_provider_snapshot(
+    payload: Mapping[str, Any] | SandboxDesktopProviderSnapshot | None,
+) -> SandboxDesktopProviderSnapshot | None:
+    if isinstance(payload, SandboxDesktopProviderSnapshot):
+        return payload
+    if not isinstance(payload, Mapping):
+        return None
+    return SandboxDesktopProviderSnapshot.model_validate(
+        sandbox_desktop_provider_status({"sandbox_provider": dict(payload)})
+    )
+
+
+def _provider_supported_tools(
+    sandbox_provider: SandboxDesktopProviderSnapshot | None,
+) -> set[str]:
+    if sandbox_provider is None:
+        return set()
+    return set(_clean_tool_names(sandbox_provider.supported_tools))
+
+
+def _provider_supports_tool(
+    sandbox_provider: SandboxDesktopProviderSnapshot | None,
+    tool_name: str,
+) -> bool:
+    return str(tool_name or "").strip() in _provider_supported_tools(sandbox_provider)
+
+
+def _provider_ready(sandbox_provider: SandboxDesktopProviderSnapshot | None) -> bool:
+    return bool(
+        sandbox_provider is not None
+        and sandbox_provider.available
+        and sandbox_provider.adapter_ready
+    )
 
 
 def _diagnostic_route_for_tool(capability_id: str | None) -> str | None:

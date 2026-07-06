@@ -1093,6 +1093,82 @@ def test_agent_studio_service_plans_task_from_tool_catalog() -> None:
     assert port.calls == [("list_tool_catalog", None)]
 
 
+def test_agent_studio_plan_execution_projects_catalog_provider_to_runtime_requests(
+    monkeypatch,
+) -> None:
+    for name in (
+        "OHA_YACHIYO_DESKTOP_PROVIDER_URL",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_ID",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    class ProviderCatalogPort(_FakeStudioPort):
+        def list_tool_catalog(self) -> dict[str, Any]:
+            self.calls.append(("list_tool_catalog", None))
+            return {
+                "source": "planner-catalog",
+                "tools": [
+                    {
+                        "tool_name": "desktop.list_apps",
+                        "function_name": "desktop_list_apps",
+                    },
+                    {
+                        "tool_name": "app.focus_and_click_ui_element",
+                        "function_name": "app_focus_and_click_ui_element",
+                    },
+                    {
+                        "tool_name": "desktop.ui_elements",
+                        "function_name": "desktop_ui_elements",
+                    },
+                ],
+                "capabilities": {},
+                "sandbox_provider": {
+                    "available": True,
+                    "provider_id": "catalog-provider",
+                    "provider_kind": "sandbox_desktop",
+                    "adapter_ready": True,
+                    "supported_tools": [
+                        "desktop.list_apps",
+                        "app.focus_and_click_ui_element",
+                    ],
+                },
+                "plugins": [],
+            }
+
+    port = ProviderCatalogPort()
+    service = AgentStudioService(port)
+
+    envelope = service.plan_execution(
+        "在 PixelForge 点击 Export",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.focus_and_click_ui_element",
+            "desktop.ui_elements",
+        ],
+        metadata={"surface": "studio"},
+    )
+    requests = {request.tool_name: request for request in envelope.requests}
+
+    assert requests["desktop.list_apps"].sandbox_provider is not None
+    assert (
+        requests["desktop.list_apps"].sandbox_provider.provider_id
+        == "catalog-provider"
+    )
+    assert requests["desktop.list_apps"].desktop_execution_route is not None
+    assert requests["desktop.list_apps"].desktop_execution_route.status == "sandbox_ready"
+    assert requests["app.focus_and_click_ui_element"].sandbox_provider is not None
+    assert requests["app.focus_and_click_ui_element"].sandbox_provider.provider_id == (
+        "catalog-provider"
+    )
+    assert requests["app.focus_and_click_ui_element"].desktop_execution_route is not None
+    assert (
+        requests["app.focus_and_click_ui_element"].desktop_execution_route.status
+        == "sandbox_ready"
+    )
+    assert port.calls == [("list_tool_catalog", None)]
+
+
 def test_agent_studio_service_planner_uses_tool_catalog_readiness_blockers() -> None:
     class PlannerCatalogPort(_FakeStudioPort):
         def list_tool_catalog(self) -> dict[str, Any]:
