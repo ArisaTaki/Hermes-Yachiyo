@@ -1360,6 +1360,27 @@ class LegacyStudioPort:
             "daily_desktop_policy_overlay": True,
             "runtime_planner_entrypoint": True,
         }
+        if metadata:
+            run_payload["metadata"] = dict(metadata)
+        runtime_execution_envelope = request.get("runtime_execution_envelope")
+        if runtime_execution_envelope is None and isinstance(
+            metadata.get("yachiyo_execution_envelope"),
+            Mapping,
+        ):
+            runtime_execution_envelope = metadata.get("yachiyo_execution_envelope")
+        if isinstance(runtime_execution_envelope, Mapping):
+            runtime_execution_envelope = runtime_execution_envelope_payload_with_request_context(
+                runtime_execution_envelope,
+                {"agent_id": str(agent_id or "").strip()},
+            )
+            run_payload["runtime_execution_envelope"] = dict(runtime_execution_envelope)
+            run_metadata = (
+                dict(run_payload.get("metadata"))
+                if isinstance(run_payload.get("metadata"), dict)
+                else {}
+            )
+            run_metadata["yachiyo_execution_envelope"] = dict(runtime_execution_envelope)
+            run_payload["metadata"] = run_metadata
         direct_tool_request = request.get("direct_tool_request")
         if isinstance(direct_tool_request, dict):
             run_payload["direct_tool_request"] = dict(direct_tool_request)

@@ -190,11 +190,16 @@ def _full_plan_tool_requests_from_decision(
         tool_name = _text(getattr(step, "tool_name", None))
         if not tool_name or tool_name not in allowed_tools:
             continue
+        if _skip_executable_full_plan_step(decision, step, allowed_tools):
+            continue
         status = _text(getattr(step, "status", None)) or "planned"
         if status in {"unavailable", "skipped"}:
             continue
         input_preview = getattr(step, "input_preview", None)
-        request_input = dict(input_preview) if isinstance(input_preview, Mapping) else {}
+        raw_request_input = (
+            dict(input_preview) if isinstance(input_preview, Mapping) else {}
+        )
+        request_input = _executable_request_input(tool_name, raw_request_input)
         step_id = _text(getattr(step, "step_id", None))
         capability_id = _text(getattr(step, "capability_id", None))
         request: dict[str, Any] = {
@@ -219,10 +224,42 @@ def _full_plan_tool_requests_from_decision(
             request["source"] = "runtime_verification"
             request["runtime_stage"] = "verify"
             request["continue_to_model"] = True
-        if _request_needs_model_materialization(tool_name, request_input):
+        if _request_needs_model_materialization(tool_name, raw_request_input):
             request["continue_to_model"] = True
         requests.append(request)
     return requests
+
+
+def _skip_executable_full_plan_step(
+    decision: PlannerDecisionSnapshot,
+    step: ToolPlanStepSnapshot,
+    allowed_tools: set[str],
+) -> bool:
+    tool_name = _text(getattr(step, "tool_name", None))
+    if tool_name not in {"workspace.read", "fs.read_file", "file.read"}:
+        return False
+    if _text(getattr(decision.selected_intent, "kind", None)) != "data_analysis":
+        return False
+    if "data.analyze" not in allowed_tools:
+        return False
+    return any(
+        _text(getattr(item, "tool_name", None)) == "data.analyze"
+        and (_text(getattr(item, "status", None)) or "planned")
+        not in {"unavailable", "skipped"}
+        for item in list(decision.plan.tool_plan.steps or [])
+    )
+
+
+def _executable_request_input(
+    tool_name: str,
+    request_input: Mapping[str, Any],
+) -> dict[str, Any]:
+    clean_tool = _text(tool_name)
+    payload = dict(request_input)
+    if clean_tool in {"workspace.read", "fs.read_file", "file.read"}:
+        path = _text(payload.get("path"))
+        return {"path": path} if path else {}
+    return payload
 
 
 def _request_needs_model_materialization(

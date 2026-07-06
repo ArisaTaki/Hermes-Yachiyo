@@ -30,6 +30,12 @@ def test_legacy_studio_agent_run_appends_runtime_planner_events() -> None:
     assert runtime.agent_run_payload["run_group_id"] is None
     assert runtime.agent_run_payload["daily_desktop_policy_overlay"] is True
     assert runtime.agent_run_payload["runtime_planner_entrypoint"] is True
+    assert runtime.agent_run_payload["runtime_execution_envelope"]["intent_kind"] == (
+        "data_analysis"
+    )
+    assert runtime.agent_run_payload["metadata"]["yachiyo_execution_envelope"] == (
+        runtime.agent_run_payload["runtime_execution_envelope"]
+    )
     assert runtime.agent_run_payload["daily_desktop_planning_context"] == (
         "请分析 data/sales.csv 并输出报告"
     )
@@ -48,8 +54,8 @@ def test_legacy_studio_agent_run_appends_runtime_planner_events() -> None:
     plan_steps = events[1]["payload"]["plan"]["tool_plan"]["steps"]
     assert [step["tool_name"] for step in plan_steps[:2]] == ["workspace.read", "data.analyze"]
     execution_requests = events[1]["payload"]["runtime_execution_envelope"]["requests"]
-    assert execution_requests[1]["tool_name"] == "data.analyze"
-    assert execution_requests[1]["step_id"] == "analyze-data-file"
+    assert [request["tool_name"] for request in execution_requests] == ["data.analyze"]
+    assert execution_requests[0]["step_id"] == "analyze-data-file"
     assert events[2]["payload"]["task_core"]["workspace"]["title"] == "Data Analysis Workspace"
 
 

@@ -14305,6 +14305,25 @@ def _runtime_execution_context_selection_payload(
         value = metadata.get(key)
         if value not in (None, "", [], {}):
             payload[key] = value
+    if envelope and str(envelope.get("source") or "").strip() == "runtime_planner":
+        payload["source"] = "runtime_planner"
+        payload["selection_source"] = "runtime_planner"
+        payload["selected_source"] = "runtime_planner"
+        payload["selection_reason"] = "runtime_planner_full_plan_execution"
+        payload["selected_reason"] = "runtime_planner_full_plan_execution"
+        payload["yachiyo_execution_projection"] = "full_plan"
+        for source_key, target_key in (
+            ("decision_id", "decision_id"),
+            ("plan_id", "plan_id"),
+            ("intent_kind", "intent_kind"),
+            ("route_to_studio", "route_to_studio"),
+        ):
+            value = envelope.get(source_key)
+            if value not in (None, "", [], {}):
+                payload[target_key] = value
+        if tool_names:
+            payload["planner_tools"] = list(tool_names)
+            payload["planner_request_count"] = len(tool_names)
     return payload
 
 

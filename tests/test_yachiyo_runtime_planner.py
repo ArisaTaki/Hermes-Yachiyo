@@ -30727,6 +30727,37 @@ def test_planner_tool_requests_prefetches_text_data_source_for_analysis() -> Non
     ]
 
 
+def test_runtime_execution_skips_prefetch_read_for_builtin_data_analysis() -> None:
+    decision = RuntimePlanner().decision(
+        "请分析 data/sales.csv 并输出报告",
+        allowed_tools=["workspace.read", "data.analyze", "artifact.write"],
+    )
+    envelope = runtime_execution_envelope_from_decision(
+        decision,
+        allowed_tools=["workspace.read", "data.analyze", "artifact.write"],
+        full_plan=True,
+    )
+
+    plan_read_step = next(
+        step
+        for step in decision.plan.tool_plan.steps
+        if step.tool_name == "workspace.read"
+    )
+    assert plan_read_step.input_preview == {
+        "path": "data/sales.csv",
+        "source_kind": "csv",
+    }
+    assert envelope is not None
+    assert [request.tool_name for request in envelope.requests] == ["data.analyze"]
+
+    projected_requests = runtime_execution_requests_from_envelope_payload(
+        envelope.model_dump(mode="json"),
+        allowed_tools=["workspace.read", "data.analyze", "artifact.write"],
+    )
+    assert [request["tool"] for request in projected_requests] == ["data.analyze"]
+    assert projected_requests[0]["input"]["source_kind"] == "csv"
+
+
 def test_planner_tool_requests_prefetches_context_data_source_for_analysis() -> None:
     selection_requests = planner_tool_requests(
         "分析当前选中的数据并生成报告",
