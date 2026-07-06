@@ -1024,6 +1024,9 @@ def _workspace_item_with_progress(
         progress_by_artifact_path,
     )
     updated = item
+    update = _workspace_item_explicit_update(updated, task_updates)
+    if update:
+        updated = _apply_workspace_item_update(updated, update)
     if progress:
         metadata = {
             **dict(updated.metadata or {}),
@@ -1036,9 +1039,6 @@ def _workspace_item_with_progress(
                 "metadata": metadata,
             }
         )
-    update = _workspace_item_explicit_update(updated, task_updates)
-    if update:
-        updated = _apply_workspace_item_update(updated, update)
     return updated
 
 
@@ -1135,6 +1135,9 @@ def _todo_with_progress(
         str(todo.tool_name or "").strip()
     )
     updated = todo
+    update = _todo_explicit_update(updated, task_updates)
+    if update:
+        updated = _apply_todo_update(updated, update)
     if progress:
         metadata = {
             **dict(updated.metadata or {}),
@@ -1147,9 +1150,6 @@ def _todo_with_progress(
                 "metadata": metadata,
             }
         )
-    update = _todo_explicit_update(updated, task_updates)
-    if update:
-        updated = _apply_todo_update(updated, update)
     return updated
 
 
@@ -1212,6 +1212,9 @@ def _checkpoint_with_progress(
             else ("blocked" if todo_status == "blocked" else "")
         )
     updated = checkpoint
+    update = _checkpoint_explicit_update(updated, task_updates)
+    if update:
+        updated = _apply_checkpoint_update(updated, update)
     if checkpoint_status:
         payload = {
             **dict(updated.payload or {}),
@@ -1224,9 +1227,6 @@ def _checkpoint_with_progress(
                 "payload": payload,
             }
         )
-    update = _checkpoint_explicit_update(updated, task_updates)
-    if update:
-        updated = _apply_checkpoint_update(updated, update)
     return updated
 
 
