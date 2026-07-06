@@ -10,6 +10,10 @@ from apps.shell.agent.runtime.events import redact_run_event_payload, redact_sec
 
 from .capability_registry import LEGACY_APPLE_MUSIC_FALLBACK_TOOLS
 from .contracts import ToolCallSnapshot
+from .runtime_context_payloads import (
+    runtime_execution_envelope_from_payloads,
+    runtime_execution_metadata_from_payloads,
+)
 
 _LEGACY_APPLE_MUSIC_AFFECTED_TOOLS = tuple(
     tool for tool in LEGACY_APPLE_MUSIC_FALLBACK_TOOLS if tool != "media.apple_music_status"
@@ -65,6 +69,15 @@ def tool_call_snapshot_from_payload(
     if not completed_at and tool_call_status_is_terminal(status):
         completed_at = _optional_text(payload.get("created_at") or payload.get("started_at"))
     foreground_lock_busy = tool_foreground_lock_is_busy(payload, output_preview)
+    runtime_execution_metadata = runtime_execution_metadata_from_payloads(
+        payload,
+        input_preview,
+    )
+    runtime_execution_envelope = runtime_execution_envelope_from_payloads(
+        payload,
+        input_preview,
+        runtime_execution_metadata=runtime_execution_metadata,
+    )
     return ToolCallSnapshot(
         tool_call_id=tool_call_id,
         run_id=_optional_text(payload.get("run_id") or run_id),
@@ -132,6 +145,8 @@ def tool_call_snapshot_from_payload(
             payload.get("requires_post_action_verification")
             or input_preview.get("requires_post_action_verification")
         ),
+        runtime_execution_envelope=runtime_execution_envelope,
+        runtime_execution_metadata=runtime_execution_metadata,
         deferred_tool=_optional_text(
             payload.get("deferred_tool") or input_preview.get("deferred_tool")
         ),
@@ -320,6 +335,16 @@ def _redacted_tool_call_snapshot(snapshot: ToolCallSnapshot) -> ToolCallSnapshot
             "requires_observation": bool(snapshot.requires_observation),
             "requires_post_action_verification": bool(
                 snapshot.requires_post_action_verification
+            ),
+            "runtime_execution_envelope": runtime_execution_envelope_from_payloads(
+                {
+                    "runtime_execution_envelope": snapshot.runtime_execution_envelope,
+                }
+            ),
+            "runtime_execution_metadata": runtime_execution_metadata_from_payloads(
+                {
+                    "runtime_execution_metadata": snapshot.runtime_execution_metadata,
+                }
             ),
             "deferred_tool": _optional_text(snapshot.deferred_tool),
             "deferred_input": _mapping(snapshot.deferred_input),

@@ -38,6 +38,20 @@ def test_artifact_snapshots_from_events_preserve_runtime_trace_context() -> None
                     "core_id": "core-1",
                     "workspace_id": "workspace-1",
                     "task_id": "task-1",
+                    "runtime_execution_envelope": {
+                        "envelope_id": "artifact-envelope-1",
+                        "decision_id": "decision-1",
+                        "plan_id": "runtime-plan-1",
+                        "intent_kind": "report_generation",
+                        "requests": [
+                            {
+                                "request_id": "artifact-request-1",
+                                "tool_name": "artifact.write",
+                                "risk_level": "low",
+                            }
+                        ],
+                    },
+                    "runtime_execution_metadata": {"yachiyo_runtime_planner": True},
                 },
                 created_at="2026-06-17T00:00:00Z",
             ),
@@ -74,6 +88,9 @@ def test_artifact_snapshots_from_events_preserve_runtime_trace_context() -> None
     assert artifact.core_id == "core-1"
     assert artifact.workspace_id == "workspace-1"
     assert artifact.task_id == "task-1"
+    assert artifact.runtime_execution_envelope is not None
+    assert artifact.runtime_execution_envelope.envelope_id == "artifact-envelope-1"
+    assert artifact.runtime_execution_metadata == {"yachiyo_runtime_planner": True}
     assert artifact.kind == "markdown"
     assert artifact.path == "reports/final.md"
     assert artifact.size_bytes == 42
@@ -312,6 +329,20 @@ def test_merge_artifact_snapshot_lists_keeps_order_and_fills_missing_fields() ->
             "preview_text": "done",
             "size_bytes": 42,
             "source_tool": "artifact.write",
+            "runtime_execution_envelope": {
+                "envelope_id": "artifact-envelope-1",
+                "decision_id": "decision-1",
+                "plan_id": "runtime-plan-1",
+                "intent_kind": "report_generation",
+                "requests": [
+                    {
+                        "request_id": "artifact-request-1",
+                        "tool_name": "artifact.write",
+                        "risk_level": "low",
+                    }
+                ],
+            },
+            "runtime_execution_metadata": {"yachiyo_runtime_planner": True},
         },
         run_id="run-1",
     )
@@ -324,3 +355,6 @@ def test_merge_artifact_snapshot_lists_keeps_order_and_fills_missing_fields() ->
     assert merged[0].preview_text == "done"
     assert merged[0].size_bytes == 42
     assert merged[0].source_tool == "artifact.write"
+    assert merged[0].runtime_execution_envelope is not None
+    assert merged[0].runtime_execution_envelope.envelope_id == "artifact-envelope-1"
+    assert merged[0].runtime_execution_metadata == {"yachiyo_runtime_planner": True}

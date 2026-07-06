@@ -7,8 +7,12 @@ from typing import Any
 
 from apps.shell.agent.runtime.events import redact_run_event_payload, redact_secrets
 
-from .contracts import ApprovalCardSnapshot, RuntimeExecutionEnvelopeSnapshot
+from .contracts import ApprovalCardSnapshot
 from .links import studio_run_url
+from .runtime_context_payloads import (
+    runtime_execution_envelope_from_payloads,
+    runtime_execution_metadata_from_payloads,
+)
 
 _RUNTIME_TRACE_KEYS = (
     "runtime_doctrine",
@@ -43,11 +47,14 @@ def approval_card_from_payload(
     if not title:
         title = f"Approve {tool_name}" if tool_name else "Approval required"
     input_preview = _mapping(payload.get("input_preview") or payload.get("input"))
-    runtime_execution_metadata = _runtime_execution_metadata(payload, input_preview)
-    runtime_execution_envelope = _runtime_execution_envelope(
+    runtime_execution_metadata = runtime_execution_metadata_from_payloads(
         payload,
         input_preview,
-        runtime_execution_metadata,
+    )
+    runtime_execution_envelope = runtime_execution_envelope_from_payloads(
+        payload,
+        input_preview,
+        runtime_execution_metadata=runtime_execution_metadata,
     )
 
     return ApprovalCardSnapshot(
@@ -209,47 +216,6 @@ def _approval_status(value: Any) -> str:
 def _mapping(value: Any) -> dict[str, Any]:
     redacted = redact_run_event_payload(dict(value)) if isinstance(value, Mapping) else {}
     return dict(redacted) if isinstance(redacted, Mapping) else {}
-
-
-def _runtime_execution_metadata(
-    payload: Mapping[str, Any],
-    input_preview: Mapping[str, Any],
-) -> dict[str, Any]:
-    for candidate in (
-        payload.get("runtime_execution_metadata"),
-        input_preview.get("runtime_execution_metadata"),
-        payload.get("metadata"),
-        input_preview.get("metadata"),
-    ):
-        metadata = _mapping(candidate)
-        if metadata:
-            return metadata
-    return {}
-
-
-def _runtime_execution_envelope(
-    payload: Mapping[str, Any],
-    input_preview: Mapping[str, Any],
-    runtime_execution_metadata: Mapping[str, Any],
-) -> RuntimeExecutionEnvelopeSnapshot | None:
-    for candidate in (
-        payload.get("runtime_execution_envelope"),
-        payload.get("yachiyo_execution_envelope"),
-        input_preview.get("runtime_execution_envelope"),
-        input_preview.get("yachiyo_execution_envelope"),
-        runtime_execution_metadata.get("runtime_execution_envelope"),
-        runtime_execution_metadata.get("yachiyo_execution_envelope"),
-    ):
-        if isinstance(candidate, RuntimeExecutionEnvelopeSnapshot):
-            return candidate
-        envelope_payload = _mapping(candidate)
-        if not envelope_payload:
-            continue
-        try:
-            return RuntimeExecutionEnvelopeSnapshot.model_validate(envelope_payload)
-        except Exception:
-            continue
-    return None
 
 
 def _record_list(value: Any) -> list[dict[str, Any]]:

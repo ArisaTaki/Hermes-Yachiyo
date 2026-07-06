@@ -231,6 +231,14 @@ def merge_artifact_snapshots(
         core_id=current.core_id or next_artifact.core_id,
         workspace_id=current.workspace_id or next_artifact.workspace_id,
         task_id=current.task_id or next_artifact.task_id,
+        runtime_execution_envelope=(
+            current.runtime_execution_envelope
+            or next_artifact.runtime_execution_envelope
+        ),
+        runtime_execution_metadata={
+            **current.runtime_execution_metadata,
+            **next_artifact.runtime_execution_metadata,
+        },
         title=current.title or next_artifact.title,
         kind=current.kind or next_artifact.kind,
         planned_kind=current.planned_kind or next_artifact.planned_kind,
@@ -268,6 +276,9 @@ def _merge_artifact_trace_context(
         "core_id",
         "workspace_id",
         "task_id",
+        "runtime_execution_envelope",
+        "yachiyo_execution_envelope",
+        "runtime_execution_metadata",
     ):
         if payload.get(key):
             artifact_payload.setdefault(key, payload.get(key))

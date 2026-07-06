@@ -6939,6 +6939,20 @@ def test_tool_call_snapshot_keeps_runtime_trace_fields() -> None:
         runtime_role="desktop_ui_action",
         requires_observation=True,
         requires_post_action_verification=True,
+        runtime_execution_envelope=RuntimeExecutionEnvelopeSnapshot(
+            envelope_id="tool-envelope-1",
+            decision_id="decision-1",
+            plan_id="runtime-plan-1",
+            intent_kind="desktop_operation",
+            requests=[
+                RuntimeExecutionRequestSnapshot(
+                    request_id="tool-request-1",
+                    tool_name="desktop.click_ui_element",
+                    risk_level="medium",
+                )
+            ],
+        ),
+        runtime_execution_metadata={"yachiyo_runtime_planner": True},
         deferred_tool="desktop.click_ui_element",
         deferred_input={"target": "Export", "limit": 80},
         deferred_context={"step_id": "operate-foreground-ui"},
@@ -6993,6 +7007,8 @@ def test_tool_call_snapshot_keeps_runtime_trace_fields() -> None:
         "runtime_role",
         "requires_observation",
         "requires_post_action_verification",
+        "runtime_execution_envelope",
+        "runtime_execution_metadata",
         "deferred_tool",
         "deferred_input",
         "deferred_context",
@@ -7024,6 +7040,11 @@ def test_tool_call_snapshot_keeps_runtime_trace_fields() -> None:
     assert payload["runtime_stage"] == "operate"
     assert payload["policy_reason"] == "Read-only workspace inspection."
     assert payload["requires_post_action_verification"] is True
+    assert payload["runtime_execution_envelope"]["envelope_id"] == "tool-envelope-1"
+    assert payload["runtime_execution_envelope"]["requests"][0]["request_id"] == (
+        "tool-request-1"
+    )
+    assert payload["runtime_execution_metadata"] == {"yachiyo_runtime_planner": True}
     assert payload["verification_targets"] == [
         {"step_id": "verify-export", "todo_id": "todo-export"}
     ]
@@ -7059,6 +7080,20 @@ def test_tool_call_snapshot_from_event_keeps_policy_reason() -> None:
                     "input_preview": {"target": "Export"},
                     "risk_level": "medium",
                     "policy_reason": "Clicking a foreground UI element needs approval.",
+                    "runtime_execution_envelope": {
+                        "envelope_id": "tool-envelope-1",
+                        "decision_id": "decision-1",
+                        "plan_id": "runtime-plan-1",
+                        "intent_kind": "desktop_operation",
+                        "requests": [
+                            {
+                                "request_id": "tool-request-1",
+                                "tool_name": "desktop.click_ui_element",
+                                "risk_level": "medium",
+                            }
+                        ],
+                    },
+                    "runtime_execution_metadata": {"yachiyo_runtime_planner": True},
                 },
                 created_at="2026-06-14T00:00:00Z",
             )
@@ -7071,6 +7106,9 @@ def test_tool_call_snapshot_from_event_keeps_policy_reason() -> None:
     assert calls[0].input_preview["policy_reason"] == (
         "Clicking a foreground UI element needs approval."
     )
+    assert calls[0].runtime_execution_envelope is not None
+    assert calls[0].runtime_execution_envelope.envelope_id == "tool-envelope-1"
+    assert calls[0].runtime_execution_metadata == {"yachiyo_runtime_planner": True}
 
 
 def test_memory_trace_snapshot_keeps_runtime_trace_fields() -> None:
@@ -7279,6 +7317,20 @@ def test_artifact_snapshot_keeps_runtime_trace_fields() -> None:
         workflow_node_label="Report",
         group_id="group-1",
         group_run_id="group-run-1",
+        runtime_execution_envelope=RuntimeExecutionEnvelopeSnapshot(
+            envelope_id="artifact-envelope-1",
+            decision_id="decision-1",
+            plan_id="runtime-plan-1",
+            intent_kind="report_generation",
+            requests=[
+                RuntimeExecutionRequestSnapshot(
+                    request_id="artifact-request-1",
+                    tool_name="artifact.write",
+                    risk_level="low",
+                )
+            ],
+        ),
+        runtime_execution_metadata={"yachiyo_runtime_planner": True},
         title="Report",
         kind="workflow_artifact",
         planned_kind="markdown",
@@ -7311,6 +7363,8 @@ def test_artifact_snapshot_keeps_runtime_trace_fields() -> None:
         "core_id",
         "workspace_id",
         "task_id",
+        "runtime_execution_envelope",
+        "runtime_execution_metadata",
         "title",
         "kind",
         "planned_kind",
@@ -7327,6 +7381,11 @@ def test_artifact_snapshot_keeps_runtime_trace_fields() -> None:
     assert payload["source_tool"] == "artifact.write"
     assert payload["workflow_node_id"] == "report"
     assert payload["group_run_id"] == "group-run-1"
+    assert payload["runtime_execution_envelope"]["envelope_id"] == "artifact-envelope-1"
+    assert payload["runtime_execution_envelope"]["requests"][0]["tool_name"] == (
+        "artifact.write"
+    )
+    assert payload["runtime_execution_metadata"] == {"yachiyo_runtime_planner": True}
     assert payload["planned_kind"] == "markdown"
     assert payload["source_kind"] == "csv"
     assert payload["requested_outputs"] == ["report"]

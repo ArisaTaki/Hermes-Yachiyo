@@ -941,6 +941,8 @@ class ArtifactSnapshot(_PublicSnapshot):
     core_id: str | None = None
     workspace_id: str | None = None
     task_id: str | None = None
+    runtime_execution_envelope: RuntimeExecutionEnvelopeSnapshot | None = None
+    runtime_execution_metadata: dict[str, Any] = Field(default_factory=dict)
     title: str
     kind: str
     planned_kind: str | None = None
@@ -998,6 +1000,8 @@ class ToolCallSnapshot(_PublicSnapshot):
     runtime_role: str | None = None
     requires_observation: bool = False
     requires_post_action_verification: bool = False
+    runtime_execution_envelope: RuntimeExecutionEnvelopeSnapshot | None = None
+    runtime_execution_metadata: dict[str, Any] = Field(default_factory=dict)
     deferred_tool: str | None = None
     deferred_input: dict[str, Any] = Field(default_factory=dict)
     deferred_context: dict[str, Any] = Field(default_factory=dict)

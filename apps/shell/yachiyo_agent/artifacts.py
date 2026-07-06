@@ -8,6 +8,10 @@ from typing import Any
 from apps.shell.agent.runtime.events import redact_secrets
 
 from .contracts import ArtifactContentSnapshot, ArtifactSnapshot
+from .runtime_context_payloads import (
+    runtime_execution_envelope_from_payloads,
+    runtime_execution_metadata_from_payloads,
+)
 
 
 def artifact_snapshot_from_payload(
@@ -27,6 +31,11 @@ def artifact_snapshot_from_payload(
         artifact_id = f"{artifact_owner}:{artifact_name}"
 
     title = _text(payload.get("title") or payload.get("label") or path or "Artifact")
+    runtime_execution_metadata = runtime_execution_metadata_from_payloads(payload)
+    runtime_execution_envelope = runtime_execution_envelope_from_payloads(
+        payload,
+        runtime_execution_metadata=runtime_execution_metadata,
+    )
     return ArtifactSnapshot(
         artifact_id=artifact_id,
         run_id=_optional_text(run_id),
@@ -53,6 +62,8 @@ def artifact_snapshot_from_payload(
         core_id=_optional_text(payload.get("core_id")),
         workspace_id=_optional_text(payload.get("workspace_id")),
         task_id=_optional_text(payload.get("task_id")),
+        runtime_execution_envelope=runtime_execution_envelope,
+        runtime_execution_metadata=runtime_execution_metadata,
         title=title,
         kind=_text(payload.get("kind") or "artifact"),
         planned_kind=_optional_text(payload.get("planned_kind")),
@@ -143,6 +154,16 @@ def _redacted_artifact_snapshot(snapshot: ArtifactSnapshot) -> ArtifactSnapshot:
             "core_id": _optional_text(snapshot.core_id),
             "workspace_id": _optional_text(snapshot.workspace_id),
             "task_id": _optional_text(snapshot.task_id),
+            "runtime_execution_envelope": runtime_execution_envelope_from_payloads(
+                {
+                    "runtime_execution_envelope": snapshot.runtime_execution_envelope,
+                }
+            ),
+            "runtime_execution_metadata": runtime_execution_metadata_from_payloads(
+                {
+                    "runtime_execution_metadata": snapshot.runtime_execution_metadata,
+                }
+            ),
             "title": _text(snapshot.title),
             "kind": _text(snapshot.kind),
             "planned_kind": _optional_text(snapshot.planned_kind),

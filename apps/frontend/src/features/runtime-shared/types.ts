@@ -826,6 +826,8 @@ export type ApprovalCardSnapshot = {
   runtime_role?: string | null;
   requires_observation?: boolean | null;
   requires_post_action_verification?: boolean | null;
+  runtime_execution_envelope?: RuntimeExecutionEnvelopeSnapshot | null;
+  runtime_execution_metadata?: Record<string, unknown>;
   deferred_tool?: string | null;
   deferred_input?: Record<string, unknown>;
   deferred_context?: Record<string, unknown>;
@@ -861,6 +863,8 @@ export type ArtifactSnapshot = {
   core_id?: string | null;
   workspace_id?: string | null;
   task_id?: string | null;
+  runtime_execution_envelope?: RuntimeExecutionEnvelopeSnapshot | null;
+  runtime_execution_metadata?: Record<string, unknown>;
   source?: string | null;
   planning_reason?: string | null;
   decision_id?: string | null;
@@ -949,6 +953,8 @@ export type ToolCallSnapshot = {
   runtime_role?: string | null;
   requires_observation?: boolean | null;
   requires_post_action_verification?: boolean | null;
+  runtime_execution_envelope?: RuntimeExecutionEnvelopeSnapshot | null;
+  runtime_execution_metadata?: Record<string, unknown>;
   deferred_tool?: string | null;
   deferred_input?: Record<string, unknown>;
   deferred_context?: Record<string, unknown>;

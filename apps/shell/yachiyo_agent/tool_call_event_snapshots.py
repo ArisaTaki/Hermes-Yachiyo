@@ -54,6 +54,11 @@ _OBSERVATION_TRACE_KEYS = (
     "observation_evidence",
     "observation_retry",
 )
+_RUNTIME_CONTEXT_KEYS = (
+    "runtime_execution_envelope",
+    "yachiyo_execution_envelope",
+    "runtime_execution_metadata",
+)
 
 
 def tool_call_snapshots_from_events(events: list[PublicRunEvent]) -> list[ToolCallSnapshot]:
@@ -164,6 +169,8 @@ def tool_call_payload_from_event(event: PublicRunEvent) -> dict[str, Any]:
         if key == "source" and is_daily_desktop_intent_tool_event(event.event_type):
             continue
         trace_context[key] = explicit_payload.get(key)
+    for key in _RUNTIME_CONTEXT_KEYS:
+        trace_context[key] = payload.get(key)
     merge_tool_trace_into_input_preview(
         normalized,
         trace_context,
@@ -223,6 +230,7 @@ def daily_desktop_intent_step_payloads(event: PublicRunEvent) -> list[dict[str, 
                 "risk",
                 *_PLANNER_TRACE_KEYS,
                 *_RUNTIME_TRACE_KEYS,
+                *_RUNTIME_CONTEXT_KEYS,
                 *_OBSERVATION_TRACE_KEYS,
             }
         }
@@ -267,6 +275,7 @@ def merge_tool_trace_context(source: dict[str, Any], payload: dict[str, Any]) ->
         "verification_targets",
         *_PLANNER_TRACE_KEYS,
         *_RUNTIME_TRACE_KEYS,
+        *_RUNTIME_CONTEXT_KEYS,
         *_OBSERVATION_TRACE_KEYS,
     ):
         if payload.get(key):
@@ -370,6 +379,14 @@ def merge_tool_call_snapshots(
         requires_post_action_verification=(
             current.requires_post_action_verification
             or next_call.requires_post_action_verification
+        ),
+        runtime_execution_envelope=(
+            current.runtime_execution_envelope
+            or next_call.runtime_execution_envelope
+        ),
+        runtime_execution_metadata=_merge_mappings(
+            current.runtime_execution_metadata,
+            next_call.runtime_execution_metadata,
         ),
         deferred_tool=current.deferred_tool or next_call.deferred_tool,
         deferred_input={**next_call.deferred_input, **current.deferred_input},
