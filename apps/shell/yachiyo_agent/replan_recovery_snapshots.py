@@ -207,6 +207,17 @@ def replan_recovery_snapshots_from_runtime_execution_envelope(
     )
     snapshots: list[ReplanRecoverySnapshot] = []
     seen: set[str] = set()
+    provider_session_snapshot = _desktop_provider_session_recovery_snapshot(
+        envelope,
+        run_id=run_id,
+        task_id=task_id,
+        group_run_id=group_run_id,
+        workflow_run_id=workflow_run_id,
+        created_at=created_at,
+        updated_at=updated_at,
+    )
+    if provider_session_snapshot is not None:
+        snapshots.append(provider_session_snapshot)
     for index, request in enumerate(envelope.requests or [], start=1):
         snapshot = _runtime_execution_request_recovery_snapshot(
             request,
@@ -1642,6 +1653,186 @@ def _runtime_execution_request_recovery_snapshot(
     )
 
 
+def _desktop_provider_session_recovery_snapshot(
+    envelope: RuntimeExecutionEnvelopeSnapshot,
+    *,
+    run_id: str,
+    task_id: str,
+    group_run_id: str,
+    workflow_run_id: str,
+    created_at: str,
+    updated_at: str,
+) -> ReplanRecoverySnapshot | None:
+    session = _mapping(_runtime_envelope_value(envelope, "desktop_provider_session"))
+    if not _desktop_provider_session_needs_recovery(session):
+        return None
+
+    request_ids = _string_list(session.get("request_ids"))
+    tool_names = _string_list(session.get("tool_names"))
+    source_request = _desktop_provider_session_source_request(envelope, request_ids)
+    source_request_id = _first_text(
+        _runtime_request_value(source_request, "request_id") if source_request is not None else "",
+        request_ids[0] if request_ids else "",
+        envelope.envelope_id,
+    )
+    provider_id = _first_text(session.get("provider_id"), "local-isolated-desktop")
+    trigger = _desktop_provider_session_recovery_trigger(session)
+    tool = "desktop.provider_session.start"
+    request_id = f"runtime-replan:desktop-provider-session:{source_request_id}"
+    action_input = {
+        "provider_id": provider_id,
+        "request_ids": request_ids,
+        "tool_names": tool_names,
+        "diagnostic_route": "/yachiyo/studio/tools",
+        "api_route": "/yachiyo/studio/tools/desktop-provider/session/start",
+    }
+    action = ReplanRecoveryActionSnapshot(
+        action_id=f"{request_id}:action:1:{tool}",
+        label="Start isolated desktop provider",
+        tool=tool,
+        input=action_input,
+        planning_reason="desktop_provider_session_recovery",
+        permission_target="isolated_desktop_provider",
+        risk_level="medium",
+        approval_required=True,
+        approval_status="pending",
+        selected=True,
+        observation_evidence={
+            "blocking_condition": trigger,
+            "desktop_provider_session": _desktop_provider_session_public_payload(session),
+        },
+        observation_retry={
+            "tool": tool,
+            "reason": trigger,
+            "input": action_input,
+        },
+        metadata={
+            "runtime_execution_envelope_id": envelope.envelope_id,
+            "runtime_execution_request_id": source_request_id,
+            "runtime_retry_source": "desktop_provider_session",
+            "desktop_provider_session": _desktop_provider_session_public_payload(session),
+        },
+    )
+    source_group_run_id = _first_text(
+        _runtime_request_value(source_request, "group_run_id") if source_request is not None else "",
+        _runtime_request_value(source_request, "run_group_id") if source_request is not None else "",
+        group_run_id,
+    )
+    source_workflow_run_id = _first_text(
+        _runtime_request_value(source_request, "workflow_run_id") if source_request is not None else "",
+        workflow_run_id,
+    )
+    return ReplanRecoverySnapshot(
+        request_id=request_id,
+        trigger=trigger,
+        status="requested",
+        run_id=run_id or None,
+        task_id=task_id or None,
+        group_run_id=source_group_run_id or None,
+        workflow_run_id=source_workflow_run_id or None,
+        decision_id=_first_text(
+            _runtime_request_value(source_request, "decision_id") if source_request is not None else "",
+            envelope.decision_id,
+        )
+        or None,
+        plan_id=_first_text(
+            _runtime_request_value(source_request, "plan_id") if source_request is not None else "",
+            envelope.plan_id,
+        )
+        or None,
+        core_id=_first_text(
+            _runtime_request_value(source_request, "core_id") if source_request is not None else "",
+        )
+        or None,
+        source_step_id=_first_text(
+            _runtime_request_value(source_request, "step_id") if source_request is not None else "",
+        )
+        or None,
+        source_tool_name=_first_text(
+            _runtime_request_value(source_request, "tool_name") if source_request is not None else "",
+            tool_names[0] if tool_names else "",
+        )
+        or None,
+        target_capability_id=_first_text(
+            _runtime_request_value(source_request, "capability_id") if source_request is not None else "",
+            "desktop.execution_provider",
+        ),
+        fallback_tools=[tool],
+        selected_tool_name=tool,
+        selected_step_id=_first_text(
+            _runtime_request_value(source_request, "step_id") if source_request is not None else "",
+        )
+        or None,
+        planning_reason="desktop_provider_session_recovery",
+        recovery_action_label="Start isolated desktop provider",
+        recovery_actions=[action],
+        permission_target="isolated_desktop_provider",
+        risk_level="medium",
+        approval_status="pending",
+        observation_evidence=action.observation_evidence,
+        observation_retry=action.observation_retry,
+        failure_detail=_first_text(session.get("error"), session.get("reason"), trigger),
+        created_at=created_at,
+        updated_at=updated_at or created_at,
+    )
+
+
+def _desktop_provider_session_needs_recovery(session: Mapping[str, Any]) -> bool:
+    if not session:
+        return False
+    if session.get("ok") is False:
+        return True
+    status = _text(session.get("status")).lower()
+    if status in {"start_failed", "failed", "stopped", "provider_required"}:
+        return True
+    return bool(session.get("needed")) and not bool(session.get("running"))
+
+
+def _desktop_provider_session_recovery_trigger(session: Mapping[str, Any]) -> str:
+    return _first_text(
+        session.get("reason"),
+        session.get("status"),
+        "isolated_desktop_provider_required",
+    )
+
+
+def _desktop_provider_session_source_request(
+    envelope: RuntimeExecutionEnvelopeSnapshot,
+    request_ids: list[str],
+) -> RuntimeExecutionRequestSnapshot | None:
+    request_id_set = set(request_ids)
+    for request in envelope.requests or []:
+        request_id = _text(_runtime_request_value(request, "request_id"))
+        if request_id and request_id in request_id_set:
+            return request
+    return (envelope.requests or [None])[0]
+
+
+def _desktop_provider_session_public_payload(
+    session: Mapping[str, Any],
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {}
+    for key in (
+        "ok",
+        "status",
+        "running",
+        "started",
+        "needed",
+        "auto_start",
+        "provider_id",
+        "url",
+        "reason",
+        "request_ids",
+        "tool_names",
+        "error",
+        "source",
+    ):
+        value = session.get(key)
+        if value not in (None, "", [], {}):
+            payload[key] = value
+    return payload
+
+
 def _runtime_execution_recovery_action_metadata(
     request: RuntimeExecutionRequestSnapshot | Mapping[str, Any],
     retry: Mapping[str, Any],
@@ -1737,6 +1928,15 @@ def _runtime_request_value(
     if isinstance(request, Mapping):
         return request.get(key)
     return getattr(request, key, None)
+
+
+def _runtime_envelope_value(
+    envelope: RuntimeExecutionEnvelopeSnapshot | Mapping[str, Any],
+    key: str,
+) -> Any:
+    if isinstance(envelope, Mapping):
+        return envelope.get(key)
+    return getattr(envelope, key, None)
 
 
 def _runtime_progress_allows_retry(

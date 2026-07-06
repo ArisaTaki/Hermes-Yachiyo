@@ -124,6 +124,7 @@ def runtime_debug_summary_from_runtime_objects(
     )
     replan_needed = (
         needs_replan
+        or _desktop_provider_session_needs_replan(desktop_provider_session)
         or any(_replan_item_needs_replan(item) for item in replan_items)
         or _events_have_unresolved_replan(event_items)
     )
@@ -419,6 +420,17 @@ def _desktop_provider_session(
         if session is not None:
             return session
     return None
+
+
+def _desktop_provider_session_needs_replan(session: Any | None) -> bool:
+    if session is None:
+        return False
+    if _field(session, "ok") is False:
+        return True
+    status = _text(_field(session, "status")).lower()
+    if status in {"start_failed", "failed", "stopped", "provider_required"}:
+        return True
+    return bool(_field(session, "needed")) and not bool(_field(session, "running"))
 
 
 def _task_totals(task_core: Any | None, task_progress: Any | None) -> dict[str, int]:

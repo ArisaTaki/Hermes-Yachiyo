@@ -3897,6 +3897,72 @@ def test_agent_task_snapshot_projects_failed_runtime_request_into_replan_recover
     )
 
 
+def test_agent_task_snapshot_projects_desktop_provider_session_recovery() -> None:
+    snapshot = agent_task_snapshot_from_payload(
+        {
+            "run_id": "run-provider-replan",
+            "task_id": "task-provider-replan",
+            "status": "running",
+            "metadata": {
+                "yachiyo_execution_envelope": {
+                    "envelope_id": "execution-envelope-provider-replan",
+                    "decision_id": "decision-provider-replan",
+                    "plan_id": "runtime-plan-provider-replan",
+                    "intent_kind": "desktop_operation",
+                    "desktop_provider_session": {
+                        "ok": False,
+                        "status": "start_failed",
+                        "needed": True,
+                        "running": False,
+                        "started": False,
+                        "provider_id": "local-isolated-desktop",
+                        "reason": "isolated_provider_required",
+                        "error": "provider launch failed",
+                        "request_ids": ["request-click-export"],
+                        "tool_names": ["app.focus_and_click_ui_element"],
+                    },
+                    "requests": [
+                        {
+                            "request_id": "request-click-export",
+                            "step_id": "operate-foreground-ui",
+                            "tool_name": "app.focus_and_click_ui_element",
+                            "capability_id": "desktop.ui_operation",
+                            "runtime_stage": "operate",
+                            "runtime_role": "desktop_ui_action",
+                        }
+                    ],
+                    "runtime_stage_counts": {"operate": 1},
+                }
+            },
+            "created_at": "2026-06-16T00:00:00Z",
+            "updated_at": "2026-06-16T00:00:01Z",
+        }
+    )
+
+    assert snapshot.runtime_debug is not None
+    assert snapshot.runtime_debug.needs_replan is True
+    assert snapshot.runtime_debug.desktop_provider_session_status == "start_failed"
+    assert snapshot.runtime_debug.desktop_provider_session_needed is True
+    assert snapshot.runtime_debug.desktop_provider_session_provider_id == (
+        "local-isolated-desktop"
+    )
+    recovery = next(
+        item
+        for item in snapshot.replan_recoveries
+        if item.selected_tool_name == "desktop.provider_session.start"
+    )
+    assert recovery.trigger == "isolated_provider_required"
+    assert recovery.source_tool_name == "app.focus_and_click_ui_element"
+    assert recovery.target_capability_id == "desktop.ui_operation"
+    assert recovery.recovery_actions[0].approval_required is True
+    assert recovery.recovery_actions[0].input["api_route"] == (
+        "/yachiyo/studio/tools/desktop-provider/session/start"
+    )
+    assert recovery.recovery_actions[0].metadata["runtime_retry_source"] == (
+        "desktop_provider_session"
+    )
+
+
 def test_agent_task_snapshot_marks_recovered_runtime_request_after_recovery_success() -> None:
     replan_request_id = (
         "runtime-replan:request-inspect-ui:inspect-ui:desktop.ui_elements:"
