@@ -233,7 +233,13 @@ export type DesktopExecutionRouteSnapshot = {
   status?: string;
   can_execute?: boolean;
   can_auto_start?: boolean;
+  provider_execution_required?: boolean;
   sandbox_required?: boolean;
+  foreground_mutation_supported?: boolean | null;
+  keyboard_mouse_capture_supported?: boolean | null;
+  desktop_session_kind?: string;
+  desktop_session_isolated?: boolean | null;
+  foreground_takeover_required?: boolean | null;
   fallback_mode?: DesktopExecutionPolicyMode | string;
   reason?: string;
   blocking_conditions?: string[];

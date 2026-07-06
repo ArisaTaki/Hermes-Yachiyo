@@ -108,6 +108,24 @@ export function RuntimeExecutionEnvelopeSummary({
       data-sandbox-provider-requires-real-sandbox-for={sandboxProvider.requiresRealSandboxFor.join(',')}
       data-desktop-execution-route-status={executionRoute.status}
       data-desktop-execution-route-blockers={executionRoute.blockers.join(',')}
+      data-desktop-execution-route-provider-execution-required={
+        executionRoute.providerExecutionRequired === null
+          ? ''
+          : String(executionRoute.providerExecutionRequired)
+      }
+      data-desktop-execution-route-sandbox-required={
+        executionRoute.sandboxRequired === null ? '' : String(executionRoute.sandboxRequired)
+      }
+      data-desktop-execution-route-foreground-takeover-required={
+        executionRoute.foregroundTakeoverRequired === null
+          ? ''
+          : String(executionRoute.foregroundTakeoverRequired)
+      }
+      data-desktop-execution-route-session-isolated={
+        executionRoute.desktopSessionIsolated === null
+          ? ''
+          : String(executionRoute.desktopSessionIsolated)
+      }
       data-request-count={requests.length}
       data-risk-levels={riskCounts.map(([risk, count]) => `${risk}:${count}`).join(',')}
       data-route-to-studio={envelope.route_to_studio === undefined ? '' : String(envelope.route_to_studio)}
@@ -288,6 +306,24 @@ function RuntimeExecutionEnvelopePills({
         <span
           className={executionRoute.canExecute ? pillClassName : missingClassName}
           data-desktop-execution-route-status={executionRoute.status}
+          data-desktop-execution-route-provider-execution-required={
+            executionRoute.providerExecutionRequired === null
+              ? ''
+              : String(executionRoute.providerExecutionRequired)
+          }
+          data-desktop-execution-route-sandbox-required={
+            executionRoute.sandboxRequired === null ? '' : String(executionRoute.sandboxRequired)
+          }
+          data-desktop-execution-route-foreground-takeover-required={
+            executionRoute.foregroundTakeoverRequired === null
+              ? ''
+              : String(executionRoute.foregroundTakeoverRequired)
+          }
+          data-desktop-execution-route-session-isolated={
+            executionRoute.desktopSessionIsolated === null
+              ? ''
+              : String(executionRoute.desktopSessionIsolated)
+          }
           title={executionRoute.reason || undefined}
         >
           route · {executionRoute.label}
@@ -451,6 +487,24 @@ function RuntimeExecutionRequestRow({
       data-sandbox-provider-launch-command={sandboxProvider.launchCommand.join(' ')}
       data-desktop-execution-route-status={executionRoute.status}
       data-desktop-execution-route-blockers={executionRoute.blockers.join(',')}
+      data-desktop-execution-route-provider-execution-required={
+        executionRoute.providerExecutionRequired === null
+          ? ''
+          : String(executionRoute.providerExecutionRequired)
+      }
+      data-desktop-execution-route-sandbox-required={
+        executionRoute.sandboxRequired === null ? '' : String(executionRoute.sandboxRequired)
+      }
+      data-desktop-execution-route-foreground-takeover-required={
+        executionRoute.foregroundTakeoverRequired === null
+          ? ''
+          : String(executionRoute.foregroundTakeoverRequired)
+      }
+      data-desktop-execution-route-session-isolated={
+        executionRoute.desktopSessionIsolated === null
+          ? ''
+          : String(executionRoute.desktopSessionIsolated)
+      }
       data-observation-retry={observationRetryPreview}
       data-policy-reason={request.policy_reason || ''}
       data-request-approval-ids={replayEvidence.approvalPreview}
@@ -563,8 +617,13 @@ type RuntimeExecutionRouteSummary = {
   blockers: string[];
   canAutoStart: boolean | null;
   canExecute: boolean | null;
+  desktopSessionIsolated: boolean | null;
   fallbackMode: string;
+  foregroundMutationSupported: boolean | null;
+  foregroundTakeoverRequired: boolean | null;
+  keyboardMouseCaptureSupported: boolean | null;
   label: string;
+  providerExecutionRequired: boolean | null;
   providerId: string;
   providerKind: string;
   reason: string;
@@ -659,23 +718,35 @@ function runtimeExecutionRouteSummary(
   const fallbackMode = stringValue(record.fallback_mode);
   const canExecute = booleanValue(record.can_execute);
   const canAutoStart = booleanValue(record.can_auto_start);
+  const providerExecutionRequired = booleanValue(record.provider_execution_required);
   const sandboxRequired = booleanValue(record.sandbox_required);
+  const foregroundMutationSupported = booleanValue(record.foreground_mutation_supported);
+  const keyboardMouseCaptureSupported = booleanValue(record.keyboard_mouse_capture_supported);
+  const desktopSessionIsolated = booleanValue(record.desktop_session_isolated);
+  const foregroundTakeoverRequired = booleanValue(record.foreground_takeover_required);
   const reason = stringValue(record.reason);
   const blockers = stringArray(record.blocking_conditions);
   return {
     blockers,
     canAutoStart,
     canExecute,
+    desktopSessionIsolated,
     fallbackMode,
+    foregroundMutationSupported,
+    foregroundTakeoverRequired,
+    keyboardMouseCaptureSupported,
     label: executionRouteLabel({
       blockers,
       canExecute,
+      desktopSessionIsolated,
       fallbackMode,
+      foregroundTakeoverRequired,
       providerId,
       providerKind,
       requestedMode,
       status,
     }),
+    providerExecutionRequired,
     providerId,
     providerKind,
     reason,
@@ -688,7 +759,9 @@ function runtimeExecutionRouteSummary(
 function executionRouteLabel(route: {
   blockers: string[];
   canExecute: boolean | null;
+  desktopSessionIsolated: boolean | null;
   fallbackMode: string;
+  foregroundTakeoverRequired: boolean | null;
   providerId: string;
   providerKind: string;
   requestedMode: string;
@@ -699,6 +772,8 @@ function executionRouteLabel(route: {
     route.status,
     route.canExecute === false ? route.blockers[0] : '',
     route.providerId || route.providerKind,
+    route.foregroundTakeoverRequired === true ? 'user foreground' : '',
+    route.desktopSessionIsolated === true ? 'isolated session' : '',
     route.fallbackMode ? `fallback ${route.fallbackMode}` : '',
     route.requestedMode,
   ]);
