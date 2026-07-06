@@ -1954,6 +1954,8 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
         [
             "export type DesktopProviderHealthSnapshot",
             "export type SandboxDesktopProviderLaunchHint",
+            "controlled_provider?: {",
+            "keyboard_mouse_capture_supported?: boolean;",
             "health?: DesktopProviderHealthSnapshot | null;",
             "launch_hint?: SandboxDesktopProviderLaunchHint;",
         ],

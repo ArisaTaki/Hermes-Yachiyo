@@ -130,7 +130,18 @@ export type SandboxDesktopProviderLaunchHint = {
   env?: Record<string, string>;
   smoke_command?: string[];
   foreground_mutation_supported?: boolean;
+  keyboard_mouse_capture_supported?: boolean;
   requires_real_sandbox_for?: string[];
+  controlled_provider?: {
+    provider_id?: string;
+    provider_kind?: DesktopIsolationKind | string;
+    execution_mode?: string;
+    command?: string[];
+    env?: Record<string, string>;
+    foreground_mutation_supported?: boolean;
+    keyboard_mouse_capture_supported?: boolean;
+    requires_runtime_approval?: boolean;
+  };
 };
 
 export type SandboxDesktopProviderSnapshot = {

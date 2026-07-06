@@ -5075,6 +5075,12 @@ def test_sandbox_desktop_provider_snapshot_json_shape_is_stable() -> None:
         "http://127.0.0.1:19091"
     )
     assert default_status["launch_hint"]["foreground_mutation_supported"] is False
+    assert default_status["launch_hint"]["controlled_provider"]["provider_id"] == (
+        "local-controlled-desktop"
+    )
+    assert default_status["launch_hint"]["controlled_provider"][
+        "keyboard_mouse_capture_supported"
+    ] is True
     assert explicit_status["available"] is True
     assert explicit_status["adapter_ready"] is True
     assert explicit_status["status"] == "available"

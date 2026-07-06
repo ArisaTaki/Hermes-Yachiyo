@@ -61,6 +61,27 @@ _SANDBOX_DESKTOP_PROVIDER_DEFAULT: dict[str, Any] = {
         "smoke_command": ["python", "scripts/smoke_headless_desktop_provider.py"],
         "foreground_mutation_supported": False,
         "requires_real_sandbox_for": ["click", "type", "shortcut", "focus"],
+        "controlled_provider": {
+            "provider_id": "local-controlled-desktop",
+            "provider_kind": "sandbox_desktop",
+            "execution_mode": "controlled_desktop",
+            "command": [
+                "python",
+                "scripts/run_controlled_desktop_provider.py",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                "19092",
+            ],
+            "env": {
+                "OHA_YACHIYO_DESKTOP_PROVIDER_URL": "http://127.0.0.1:19092",
+                "OHA_YACHIYO_DESKTOP_PROVIDER_ID": "local-controlled-desktop",
+                "OHA_YACHIYO_DESKTOP_PROVIDER_KEYBOARD_MOUSE_CAPTURE_SUPPORTED": "true",
+            },
+            "foreground_mutation_supported": True,
+            "keyboard_mouse_capture_supported": True,
+            "requires_runtime_approval": True,
+        },
     },
 }
 
