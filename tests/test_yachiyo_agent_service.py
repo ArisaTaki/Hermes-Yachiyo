@@ -5,6 +5,10 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from apps.shell.agent.runtime.desktop_execution_providers import (
+    LOCAL_DESKTOP_PROVIDER_ID,
+    LOCAL_DESKTOP_PROVIDER_KIND,
+)
 from apps.shell.yachiyo_agent import (
     AgentStudioService,
     ApprovalDecision,
@@ -1595,6 +1599,35 @@ def test_yachiyo_agent_service_plans_shared_chat_execution_envelope() -> None:
     assert analyze_request.runtime_stage == "operate"
     assert analyze_request.runtime_role == "analyze_data"
     assert envelope.replan_signal_count == len(envelope.task_core.replan_signals)
+
+
+def test_yachiyo_chat_execution_routes_app_open_through_local_desktop_provider(
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv("OHA_YACHIYO_DESKTOP_PROVIDER_URL", raising=False)
+    monkeypatch.delenv("OHA_YACHIYO_SANDBOX_DESKTOP_PROVIDER_URL", raising=False)
+    monkeypatch.delenv("OHA_YACHIYO_DESKTOP_PROVIDER_EXECUTE_URL", raising=False)
+    monkeypatch.delenv("OHA_YACHIYO_SANDBOX_DESKTOP_PROVIDER_EXECUTE_URL", raising=False)
+    service = YachiyoAgentService(_FakeRuntimePort())
+
+    envelope = service.plan_chat_execution(
+        "打开 PixelForge",
+        allowed_tools=["desktop.list_apps", "app.open", "desktop.active_window"],
+    )
+    requests = {request.tool_name: request for request in envelope.requests}
+
+    assert requests["app.open"].sandbox_provider is not None
+    assert requests["app.open"].sandbox_provider.provider_kind == LOCAL_DESKTOP_PROVIDER_KIND
+    assert requests["app.open"].sandbox_provider.provider_id == LOCAL_DESKTOP_PROVIDER_ID
+    assert requests["app.open"].desktop_execution_route is not None
+    assert requests["app.open"].desktop_execution_route.status == "sandbox_ready"
+    assert requests["app.open"].desktop_execution_route.selected_provider_kind == (
+        LOCAL_DESKTOP_PROVIDER_KIND
+    )
+    assert requests["desktop.list_apps"].desktop_execution_route is not None
+    assert requests["desktop.list_apps"].desktop_execution_route.status == "sandbox_ready"
+    assert requests["desktop.active_window"].desktop_execution_route is not None
+    assert requests["desktop.active_window"].desktop_execution_route.status == "sandbox_ready"
 
 
 def test_yachiyo_agent_service_can_project_full_chat_execution_plan() -> None:

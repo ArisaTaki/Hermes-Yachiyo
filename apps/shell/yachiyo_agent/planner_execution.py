@@ -1880,6 +1880,13 @@ def _runtime_request_metadata_from_planner_metadata(
         "route_foreground_desktop_provider",
     ):
         payload["desktop_provider_route_foreground"] = True
+    if _metadata_truthy(
+        metadata,
+        "desktop_provider_local_native",
+        "desktop_provider_local",
+        "local_desktop_provider",
+    ):
+        payload["desktop_provider_local_native"] = True
     provider = metadata.get("sandbox_provider") or metadata.get(
         "sandbox_desktop_provider"
     )
