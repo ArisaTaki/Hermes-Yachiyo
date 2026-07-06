@@ -9,6 +9,7 @@ import sys
 from collections.abc import Callable, Iterable, Mapping
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
+from urllib.parse import urlparse
 
 from apps.shell.agent.tools import desktop
 from packages.security import redact_api_error_text
@@ -67,6 +68,54 @@ class HeadlessDesktopProvider:
             "blocking_conditions": [],
             "execution_mode": "headless_read_only",
             "foreground_mutation_supported": False,
+        }
+
+    def manifest(self, *, base_url: str = "") -> dict[str, Any]:
+        endpoints = {
+            "status": "/status",
+            "health": "/health",
+            "manifest": "/manifest",
+            "execute": "/tools/execute",
+        }
+        return {
+            "ok": True,
+            "version": HEADLESS_DESKTOP_PROVIDER_VERSION,
+            "provider_id": self.provider_id,
+            "provider_kind": self.provider_kind,
+            "execution_mode": "headless_read_only",
+            "foreground_mutation_supported": False,
+            "capabilities": [
+                "desktop_discovery",
+                "read_only_observation",
+                "permission_diagnostics",
+                "no_foreground_mutation",
+            ],
+            "supported_tools": list(self.supported_tools),
+            "default_bind": {"host": DEFAULT_HOST, "port": DEFAULT_PORT},
+            "endpoints": endpoints,
+            "endpoint_urls": {
+                key: _join_url(base_url, path) for key, path in endpoints.items()
+            }
+            if base_url
+            else {},
+            "environment": {
+                "url": "OHA_YACHIYO_DESKTOP_PROVIDER_URL",
+                "token": "OHA_YACHIYO_DESKTOP_PROVIDER_TOKEN",
+                "provider_id": "OHA_YACHIYO_DESKTOP_PROVIDER_ID",
+                "provider_kind": "OHA_YACHIYO_DESKTOP_PROVIDER_KIND",
+                "tools": "OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS",
+            },
+            "entrypoint": {
+                "script": "scripts/run_headless_desktop_provider.py",
+                "module": "apps.shell.agent.runtime.headless_desktop_provider",
+                "args": ["--host", DEFAULT_HOST, "--port", str(DEFAULT_PORT)],
+            },
+            "safety": {
+                "loopback_default": True,
+                "remote_default_allowed": False,
+                "foreground_mutation_tools_supported": False,
+                "requires_real_sandbox_for": ["click", "type", "shortcut", "focus"],
+            },
         }
 
     def execute(
@@ -209,7 +258,13 @@ class HeadlessDesktopProviderRequestHandler(BaseHTTPRequestHandler):
     server_version = "OhaHeadlessDesktopProvider/0.1"
 
     def do_GET(self) -> None:
-        if self.path not in {"/status", "/health"}:
+        path = _request_path(self.path)
+        if path == "/manifest":
+            if not self._authorized():
+                return
+            self._send_json(self._provider().manifest(base_url=_request_base_url(self)))
+            return
+        if path not in {"/status", "/health"}:
             self._send_json({"ok": False, "error": "not_found"}, status=404)
             return
         if not self._authorized():
@@ -349,6 +404,14 @@ def serve_headless_desktop_provider(
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    provider = HeadlessDesktopProvider(
+        provider_id=args.provider_id,
+        provider_kind=args.provider_kind,
+        supported_tools=args.tool,
+    )
+    if args.manifest:
+        print(json.dumps(provider.manifest(), ensure_ascii=False, sort_keys=True))
+        return 0
     serve_headless_desktop_provider(
         host=args.host,
         port=args.port,
@@ -369,8 +432,26 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--provider-id", default=DEFAULT_PROVIDER_ID)
     parser.add_argument("--provider-kind", default=DEFAULT_PROVIDER_KIND)
     parser.add_argument("--tool", action="append", default=[])
+    parser.add_argument("--manifest", action="store_true")
     parser.add_argument("--quiet", action="store_true")
     return parser
+
+
+def _request_path(raw_path: str) -> str:
+    return urlparse(str(raw_path or "")).path or "/"
+
+
+def _request_base_url(handler: BaseHTTPRequestHandler) -> str:
+    host, port = handler.server.server_address[:2]
+    return f"http://{host}:{port}"
+
+
+def _join_url(base_url: str, path: str) -> str:
+    clean_base = str(base_url or "").rstrip("/")
+    if not clean_base:
+        return ""
+    clean_path = "/" + str(path or "").lstrip("/")
+    return f"{clean_base}{clean_path}"
 
 
 def _string_list(value: Any) -> list[str]:

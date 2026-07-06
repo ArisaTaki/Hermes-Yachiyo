@@ -15,6 +15,7 @@ from apps.shell.agent.runtime.desktop_execution_providers import (
 from apps.shell.agent.runtime.headless_desktop_provider import (
     HeadlessDesktopProvider,
     build_headless_desktop_provider_server,
+    main,
 )
 
 
@@ -35,6 +36,29 @@ def test_headless_desktop_provider_status_and_unsupported_tool() -> None:
     assert unsupported["error"] == "desktop_provider_tool_unsupported"
     assert unsupported["blocking_conditions"] == ["desktop_provider_tool_unsupported"]
     assert unsupported["supported_tools"] == ["desktop.list_apps"]
+
+
+def test_headless_desktop_provider_manifest_is_machine_readable(capsys) -> None:
+    status_code = main(
+        [
+            "--manifest",
+            "--provider-id",
+            "provider-manifest",
+            "--tool",
+            "desktop.permissions",
+        ]
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert status_code == 0
+    assert payload["ok"] is True
+    assert payload["provider_id"] == "provider-manifest"
+    assert payload["execution_mode"] == "headless_read_only"
+    assert payload["foreground_mutation_supported"] is False
+    assert payload["supported_tools"] == ["desktop.permissions"]
+    assert payload["endpoints"]["execute"] == "/tools/execute"
+    assert payload["environment"]["url"] == "OHA_YACHIYO_DESKTOP_PROVIDER_URL"
+    assert payload["entrypoint"]["script"] == "scripts/run_headless_desktop_provider.py"
 
 
 def test_headless_desktop_provider_executes_safe_tool(monkeypatch) -> None:
@@ -103,6 +127,14 @@ def test_headless_desktop_provider_http_status_and_execute(monkeypatch) -> None:
         with urllib.request.urlopen(status_request, timeout=5) as response:
             status_payload = json.loads(response.read().decode("utf-8"))
 
+        manifest_request = urllib.request.Request(
+            f"{base_url}/manifest",
+            headers={"Authorization": "Bearer secret"},
+            method="GET",
+        )
+        with urllib.request.urlopen(manifest_request, timeout=5) as response:
+            manifest_payload = json.loads(response.read().decode("utf-8"))
+
         execute_request = urllib.request.Request(
             f"{base_url}/tools/execute",
             data=json.dumps(
@@ -128,6 +160,8 @@ def test_headless_desktop_provider_http_status_and_execute(monkeypatch) -> None:
     assert status_payload["ok"] is True
     assert status_payload["provider_id"] == "provider-http"
     assert status_payload["supported_tools"] == ["desktop.list_apps"]
+    assert manifest_payload["ok"] is True
+    assert manifest_payload["endpoint_urls"]["execute"] == f"{base_url}/tools/execute"
     assert execute_payload["ok"] is True
     assert execute_payload["result"]["ok"] is True
     assert execute_payload["result"]["summary"] == "query=Music;limit=3"

@@ -224,7 +224,10 @@ The first concrete provider implementation is a loopback-only headless desktop
 discovery harness started by `scripts/run_headless_desktop_provider.py`. It
 implements the same `/status` and `/tools/execute` provider contract but only
 exposes read-only discovery and diagnostics tools such as `desktop.list_apps`,
-`desktop.list_windows`, `desktop.read_ui`, and `app.status`. Foreground mutation
+`desktop.list_windows`, `desktop.read_ui`, and `app.status`. It also exposes an
+authenticated `/manifest` endpoint and `--manifest` CLI mode so the shell,
+Agent Studio, and release smoke scripts can discover entrypoint, endpoint, env,
+tool, and safety metadata without duplicating constants. Foreground mutation
 tools remain unsupported until a real sandbox/VM/browser-profile provider can
 own the input stream without competing with the user's live mouse and keyboard.
 
@@ -565,8 +568,11 @@ adapter is registered.
 Current provider harness: a local `local-headless-desktop` provider can be run
 on `127.0.0.1` and connected with `OHA_YACHIYO_DESKTOP_PROVIDER_URL`. This is
 only a discovery/verification step toward the release target: it proves the
-runtime can call an external provider process and replay its events, but it does
-not yet satisfy the full Hanako/Hermes-style isolated foreground executor bar.
+runtime can call an external provider process and replay its events. The
+`scripts/smoke_headless_desktop_provider.py` smoke starts the provider, probes
+health, and calls cached `desktop.permission_preflight` through the runtime
+adapter. It does not yet satisfy the full Hanako/Hermes-style isolated
+foreground executor bar.
 
 ## Phase 6 - Data Analysis Capability
 
