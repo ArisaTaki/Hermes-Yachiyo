@@ -25,6 +25,9 @@ from apps.shell.yachiyo_agent.desktop_execution_policy import (
     desktop_execution_route_decision,
     sandbox_desktop_provider_status,
 )
+from apps.shell.yachiyo_agent.isolated_provider_session import (
+    start_isolated_desktop_provider_session,
+)
 from apps.shell.yachiyo_agent.policy import desktop_tool_execution_mode
 from packages.security import redact_api_error_text
 
@@ -62,6 +65,9 @@ _TOOL_REQUEST_TRACE_TEXT_KEYS = (
     "runtime_doctrine",
     "runtime_stage",
     "runtime_role",
+    "control_action",
+    "api_route",
+    "diagnostic_route",
 )
 
 _TOOL_REQUEST_TRACE_BOOL_KEYS = (
@@ -109,6 +115,12 @@ _ARTIFACT_BODY_SOURCES = {
 }
 
 _ARTIFACT_BODY_TEXT_LIMIT = 20000
+
+_DESKTOP_PROVIDER_SESSION_CONTROL_SOURCES = {
+    "agent_studio_group_replan_recovery",
+    "agent_studio_replan_recovery",
+    "yachiyo_chat_replan_recovery",
+}
 
 _INPUT_PREVIEW_TRACE_KEYS = (
     "decision_id",
@@ -208,6 +220,149 @@ def _tool_request_trace_payload(tool_request: dict[str, Any]) -> dict[str, Any]:
         if isinstance(value, Mapping) and value:
             payload[key] = dict(value)
     return payload
+
+
+def _is_desktop_provider_session_start_control(
+    tool_name: str,
+    tool_request: Mapping[str, Any],
+) -> bool:
+    control_action = str(tool_request.get("control_action") or "").strip()
+    return (
+        str(tool_name or "").strip() == "desktop.provider_session.start"
+        and control_action == "desktop_provider_session.start"
+    )
+
+
+def _control_action_allows_tool(tool_name: str, tool_request: Mapping[str, Any]) -> bool:
+    if not _is_desktop_provider_session_start_control(tool_name, tool_request):
+        return False
+    source = str(tool_request.get("source") or "").strip()
+    if source not in _DESKTOP_PROVIDER_SESSION_CONTROL_SOURCES:
+        return False
+    return any(
+        str(tool_request.get(key) or "").strip()
+        for key in ("replan_recovery_action_id", "action_id", "replan_request_id")
+    )
+
+
+def _desktop_provider_session_start_request(
+    payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    request: dict[str, Any] = {}
+    for key in ("host", "provider_id"):
+        value = str(payload.get(key) or "").strip()
+        if value:
+            request[key] = value
+    port = payload.get("port")
+    if isinstance(port, int):
+        request["port"] = port
+    elif isinstance(port, str) and port.strip():
+        try:
+            request["port"] = int(port.strip())
+        except ValueError:
+            pass
+    tools = _string_list(payload.get("tools")) or _string_list(payload.get("tool_names"))
+    if tools:
+        request["tools"] = tools
+    return request
+
+
+def _public_desktop_provider_session(session: Mapping[str, Any]) -> dict[str, Any]:
+    payload: dict[str, Any] = {}
+    for key in (
+        "ok",
+        "status",
+        "running",
+        "started",
+        "stopped",
+        "pid",
+        "provider_id",
+        "url",
+        "source",
+        "needed",
+        "reason",
+    ):
+        value = session.get(key)
+        if value not in (None, "", [], {}):
+            payload[key] = value
+    for key in ("request_ids", "tool_names"):
+        values = _string_list(session.get(key))
+        if values:
+            payload[key] = values
+    return payload
+
+
+def _desktop_provider_session_start_control_result(
+    tool_request: Mapping[str, Any],
+    payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    request = _desktop_provider_session_start_request(payload)
+    try:
+        session = start_isolated_desktop_provider_session(request)
+    except Exception as exc:
+        session = {
+            "ok": False,
+            "status": "start_failed",
+            "running": False,
+            "error": redact_api_error_text(exc),
+            "source": "isolated_provider_session_manager",
+        }
+    public_session = _public_desktop_provider_session(session)
+    if "error" in session:
+        public_session["error"] = redact_api_error_text(session.get("error"))
+    provider_id = str(public_session.get("provider_id") or "local-isolated-desktop")
+    ok = bool(public_session.get("ok", True)) and str(
+        public_session.get("status") or ""
+    ) != "start_failed"
+    status = str(public_session.get("status") or ("running" if ok else "start_failed"))
+    return {
+        "ok": ok,
+        "tool": "desktop.provider_session.start",
+        "status": status,
+        "control_action": "desktop_provider_session.start",
+        "desktop_provider_session": public_session,
+        "provider_id": provider_id,
+        "running": bool(public_session.get("running")),
+        "started": bool(public_session.get("started")),
+        "summary": (
+            f"Isolated desktop provider is {status}: {provider_id}"
+            if ok
+            else f"Failed to start isolated desktop provider: {provider_id}"
+        ),
+        "source": str(tool_request.get("source") or "runtime_tool_request_runner"),
+    }
+
+
+def _desktop_provider_session_control_event(
+    tool_result: Mapping[str, Any],
+) -> tuple[str, str, dict[str, Any]] | None:
+    session = tool_result.get("desktop_provider_session")
+    if not isinstance(session, Mapping) or not session:
+        return None
+    payload = {
+        "desktop_provider_session": dict(session),
+        "control_action": "desktop_provider_session.start",
+        "tool": "desktop.provider_session.start",
+    }
+    if bool(tool_result.get("ok")) is False or str(session.get("status") or "") == "start_failed":
+        return (
+            "desktop.provider_session.failed",
+            "Isolated desktop provider start failed",
+            payload,
+        )
+    if bool(session.get("started")):
+        return (
+            "desktop.provider_session.started",
+            "Isolated desktop provider started",
+            payload,
+        )
+    if bool(session.get("running")):
+        return (
+            "desktop.provider_session.ready",
+            "Isolated desktop provider already running",
+            payload,
+        )
+    return None
 
 
 def _input_preview_with_trace_payload(
@@ -2029,7 +2184,8 @@ class RuntimeToolCallExecutor:
         input_preview = _input_preview_with_trace_payload(input_preview, trace_payload)
         input_preview = _tool_event_input_preview(tool_name, input_preview)
         budget = budget or self._run_budget(run_id, timeline)
-        if not self._allows_tool(tool_name, allowed_tools):
+        trusted_control_action = _control_action_allows_tool(tool_name, tool_request)
+        if not self._allows_tool(tool_name, allowed_tools) and not trusted_control_action:
             budget.claim_tool_call(tool_name)
             timeline.append(
                 self._timeline(
@@ -2053,19 +2209,20 @@ class RuntimeToolCallExecutor:
             approved=approved,
             trace=trace_payload,
         )
-        try:
-            self._validate_tool_payload(tool_name, payload)
-        except AgentRuntimeError as exc:
-            self._tool_call_events.failed(
-                run_id,
-                tool_name,
-                input_preview,
-                approved=approved,
-                pre_validation=True,
-                error=exc,
-                trace=trace_payload,
-            )
-            raise
+        if not trusted_control_action:
+            try:
+                self._validate_tool_payload(tool_name, payload)
+            except AgentRuntimeError as exc:
+                self._tool_call_events.failed(
+                    run_id,
+                    tool_name,
+                    input_preview,
+                    approved=approved,
+                    pre_validation=True,
+                    error=exc,
+                    trace=trace_payload,
+                )
+                raise
         budget.claim_tool_call(
             tool_name,
             terminal_execution=tool_name in {"terminal.run", "python.run"} and approved,
@@ -2094,13 +2251,19 @@ class RuntimeToolCallExecutor:
                 approved=approved,
             )
             if tool_result is None:
-                tool_result = self._desktop_provider_registry.execute_if_routed(
-                    tool_name,
-                    payload,
-                    tool_request=tool_request,
-                    broker=broker,
-                    approved=approved,
-                )
+                if trusted_control_action:
+                    tool_result = _desktop_provider_session_start_control_result(
+                        tool_request,
+                        payload,
+                    )
+                else:
+                    tool_result = self._desktop_provider_registry.execute_if_routed(
+                        tool_name,
+                        payload,
+                        tool_request=tool_request,
+                        broker=broker,
+                        approved=approved,
+                    )
                 if tool_result is None:
                     tool_result = broker.call(tool_name, payload, approved=approved)
         except AgentRuntimeError as exc:
@@ -2185,6 +2348,12 @@ class RuntimeToolCallExecutor:
                         _artifact_context_from_trace_payload(trace_payload),
                     ),
                 )
+            provider_session_event = _desktop_provider_session_control_event(tool_result)
+            if provider_session_event is not None:
+                event_type, detail, event_payload = provider_session_event
+                event_payload = _event_payload_with_trace_context(event_payload, trace_payload)
+                timeline.append(self._timeline(event_type, detail, **event_payload))
+                self._append_run_event(run_id, event_type, event_payload)
         artifact = _tool_result_artifact(tool_name, tool_result)
         extra_artifacts = _tool_result_extra_artifacts(tool_name, tool_result, artifact)
         artifact_context = _artifact_context_from_trace_payload(trace_payload)

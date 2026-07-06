@@ -230,6 +230,158 @@ def _runner(
     )
 
 
+def test_runtime_tool_call_executor_approval_gates_provider_session_control_action(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    start_calls: list[dict[str, Any]] = []
+
+    def fake_start(request: dict[str, Any] | None = None) -> dict[str, Any]:
+        start_calls.append(dict(request or {}))
+        return {"ok": True, "status": "running", "running": True}
+
+    monkeypatch.setattr(
+        "apps.shell.agent.runtime.tool_execution.start_isolated_desktop_provider_session",
+        fake_start,
+    )
+    broker = FakeBroker({"ok": True})
+    timeline: list[dict[str, Any]] = []
+    executor = _executor(tool_call_events=FakeToolCallEvents())
+
+    result = executor.execute(
+        {
+            "tool": "desktop.provider_session.start",
+            "control_action": "desktop_provider_session.start",
+            "approval_required": True,
+            "input": {
+                "provider_id": "local-isolated-desktop",
+                "tool_names": ["desktop.safe_type_text"],
+            },
+            "source": "agent_studio_replan_recovery",
+            "replan_request_id": "replan-approval",
+        },
+        [],
+        broker,
+        timeline,
+        approved=False,
+        run_id="run-provider-approval",
+    )
+
+    assert result["approval_required"] is True
+    assert result["status"] == "approval_required"
+    assert start_calls == []
+    assert broker.calls == []
+
+
+def test_runtime_tool_call_executor_rejects_untrusted_provider_session_control_action(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    start_calls: list[dict[str, Any]] = []
+
+    def fake_start(request: dict[str, Any] | None = None) -> dict[str, Any]:
+        start_calls.append(dict(request or {}))
+        return {"ok": True, "status": "running", "running": True}
+
+    monkeypatch.setattr(
+        "apps.shell.agent.runtime.tool_execution.start_isolated_desktop_provider_session",
+        fake_start,
+    )
+    broker = FakeBroker({"ok": True})
+    timeline: list[dict[str, Any]] = []
+    executor = _executor(tool_call_events=FakeToolCallEvents())
+
+    with pytest.raises(AgentRuntimeError):
+        executor.execute(
+            {
+                "tool": "desktop.provider_session.start",
+                "control_action": "desktop_provider_session.start",
+                "input": {"provider_id": "local-isolated-desktop"},
+                "source": "model_tool_call",
+                "replan_request_id": "replan-forged",
+            },
+            [],
+            broker,
+            timeline,
+            approved=True,
+            run_id="run-provider-denied",
+        )
+
+    assert start_calls == []
+    assert broker.calls == []
+    assert any(event["event"] == "agent.tool.denied" for event in timeline)
+
+
+def test_runtime_tool_call_executor_starts_provider_session_control_action(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    start_calls: list[dict[str, Any]] = []
+    run_events: list[tuple[str, str, dict[str, Any]]] = []
+
+    def fake_start(request: dict[str, Any] | None = None) -> dict[str, Any]:
+        start_calls.append(dict(request or {}))
+        return {
+            "ok": True,
+            "status": "running",
+            "running": True,
+            "started": True,
+            "provider_id": "local-isolated-desktop",
+            "url": "http://127.0.0.1:19093",
+            "command": ["python", "scripts/run_isolated_desktop_provider.py"],
+            "env": {"OHA_YACHIYO_DESKTOP_PROVIDER_URL": "http://127.0.0.1:19093"},
+            "source": "isolated_provider_session_manager",
+        }
+
+    monkeypatch.setattr(
+        "apps.shell.agent.runtime.tool_execution.start_isolated_desktop_provider_session",
+        fake_start,
+    )
+    broker = FakeBroker({"ok": True})
+    timeline: list[dict[str, Any]] = []
+    executor = _executor(
+        tool_call_events=FakeToolCallEvents(),
+        run_events=run_events,
+    )
+
+    result = executor.execute(
+        {
+            "tool": "desktop.provider_session.start",
+            "control_action": "desktop_provider_session.start",
+            "input": {
+                "provider_id": "local-isolated-desktop",
+                "tool_names": ["desktop.safe_type_text"],
+            },
+            "source": "agent_studio_replan_recovery",
+            "replan_request_id": "replan-1",
+        },
+        [],
+        broker,
+        timeline,
+        approved=True,
+        run_id="run-provider-start",
+    )
+
+    assert start_calls == [
+        {
+            "provider_id": "local-isolated-desktop",
+            "tools": ["desktop.safe_type_text"],
+        }
+    ]
+    assert broker.calls == []
+    assert result["ok"] is True
+    assert result["control_action"] == "desktop_provider_session.start"
+    assert result["desktop_provider_session"]["provider_id"] == "local-isolated-desktop"
+    assert result["desktop_provider_session"]["running"] is True
+    assert result["desktop_provider_session"]["started"] is True
+    assert "command" not in result["desktop_provider_session"]
+    assert "env" not in result["desktop_provider_session"]
+    assert any(event["event"] == "desktop.provider_session.started" for event in timeline)
+    provider_events = [
+        event for event in run_events if event[1] == "desktop.provider_session.started"
+    ]
+    assert len(provider_events) == 1
+    assert provider_events[0][2]["control_action"] == "desktop_provider_session.start"
+    assert provider_events[0][2]["replan_request_id"] == "replan-1"
+
+
 def test_runtime_tool_request_runner_resolves_analysis_artifact_body(tmp_path) -> None:
     artifact_text = "Data analysis result for sales.csv.\nEast revenue: 10."
     artifact_path = tmp_path / "analysis-report.md"
