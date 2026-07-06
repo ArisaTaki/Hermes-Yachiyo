@@ -18,6 +18,9 @@ if str(ROOT) not in sys.path:
 
 from packages.security import redact_log_text  # noqa: E402
 
+PUBLISH_CANDIDATE_TRACK_ID = "publish_candidate"
+FULL_PUBLIC_DEMO_TRACK_ID = "full_public_demo"
+
 
 @dataclass(frozen=True)
 class DemoFlow:
@@ -524,31 +527,81 @@ def _release_assessment(
         flow for flow in flows if str(flow.get("status") or "") != "passed"
     ]
     failed = [flow for flow in flows if str(flow.get("status") or "") == "failed"]
+    publish_candidate_flows = [
+        flow for flow in flows if not str(flow.get("opt_in_flag") or "")
+    ]
+    publish_candidate_incomplete = [
+        flow
+        for flow in publish_candidate_flows
+        if str(flow.get("status") or "") != "passed"
+    ]
+    publish_candidate_passed_count = len(publish_candidate_flows) - len(
+        publish_candidate_incomplete
+    )
     passed_count = len(flows) - len(incomplete)
     if not flows:
         release_level = "blocked"
-    elif not incomplete:
-        release_level = "full_public_demo_ready"
     elif plan_only:
         release_level = "planned"
+    elif not incomplete:
+        release_level = "full_public_demo_ready"
     elif failed:
         release_level = "blocked"
+    elif not publish_candidate_incomplete:
+        release_level = "publish_candidate_ready"
     else:
         release_level = "partial_demo_ready"
+    publish_candidate_progress = _release_progress(
+        publish_candidate_flows,
+        passed_count=publish_candidate_passed_count,
+        plan_only=plan_only,
+        baseline_id=PUBLISH_CANDIDATE_TRACK_ID,
+        baseline_label="Publish candidate readiness without foreground takeover",
+        denominator="publish_candidate_flow_count",
+        note=(
+            "This track excludes opt-in flows that open real foreground apps, "
+            "require live provider credentials, or start UI harnesses."
+        ),
+    )
+    full_public_demo_progress = _release_progress(
+        flows,
+        passed_count=passed_count,
+        plan_only=plan_only,
+        baseline_id=FULL_PUBLIC_DEMO_TRACK_ID,
+        baseline_label="Full public demo release readiness",
+        denominator="required_flow_count",
+        note=(
+            "Use full_public_demo for complete release evidence. "
+            "Use publish_candidate to track the default non-invasive smoke path."
+        ),
+    )
     return {
         "release_level": release_level,
         "required_flow_count": len(flows),
         "passed_required_flow_count": passed_count,
-        "release_progress": _release_progress(
-            flows,
-            passed_count=passed_count,
-            plan_only=plan_only,
-        ),
+        "publish_candidate_flow_count": len(publish_candidate_flows),
+        "passed_publish_candidate_flow_count": publish_candidate_passed_count,
+        "release_progress": full_public_demo_progress,
+        "publish_candidate_progress": publish_candidate_progress,
+        "release_tracks": {
+            PUBLISH_CANDIDATE_TRACK_ID: publish_candidate_progress,
+            FULL_PUBLIC_DEMO_TRACK_ID: full_public_demo_progress,
+        },
         "missing_required_flow_ids": [
             str(flow.get("id") or "") for flow in incomplete if flow.get("id")
         ],
+        "missing_publish_candidate_flow_ids": [
+            str(flow.get("id") or "")
+            for flow in publish_candidate_incomplete
+            if flow.get("id")
+        ],
         "release_blockers": [
             _release_blocker(flow) for flow in incomplete if isinstance(flow, Mapping)
+        ],
+        "publish_candidate_blockers": [
+            _release_blocker(flow)
+            for flow in publish_candidate_incomplete
+            if isinstance(flow, Mapping)
         ],
         "full_demo_command": (
             "python scripts/run_public_demo_smokes.py "
@@ -564,6 +617,10 @@ def _release_progress(
     *,
     passed_count: int,
     plan_only: bool,
+    baseline_id: str = FULL_PUBLIC_DEMO_TRACK_ID,
+    baseline_label: str = "Full public demo release readiness",
+    denominator: str = "required_flow_count",
+    note: str | None = None,
 ) -> dict[str, Any]:
     total_count = len(flows)
     selected = [flow for flow in flows if flow.get("selected") is True]
@@ -582,9 +639,9 @@ def _release_progress(
     remaining_count = len(incomplete)
     percent = round((passed_count / total_count) * 100, 2) if total_count else 0.0
     return {
-        "baseline_id": "full_public_demo",
-        "baseline_label": "Full public demo release readiness",
-        "denominator": "required_flow_count",
+        "baseline_id": baseline_id,
+        "baseline_label": baseline_label,
+        "denominator": denominator,
         "status_basis": "planned" if plan_only else "executed_smoke_results",
         "passed_count": passed_count,
         "total_count": total_count,
@@ -599,7 +656,8 @@ def _release_progress(
         "opt_in_gap_ids": [
             str(flow.get("id") or "") for flow in skipped_opt_in if flow.get("id")
         ],
-        "note": (
+        "note": note
+        or (
             "Use passed_count/total_count for release progress. "
             "Selected counts describe this smoke invocation only."
         ),
@@ -649,6 +707,7 @@ def _string_list(value: Any) -> list[str]:
 
 def render_markdown(summary: Mapping[str, Any]) -> str:
     release_progress = _dict(summary.get("release_progress"))
+    publish_candidate_progress = _dict(summary.get("publish_candidate_progress"))
     lines = [
         "# Oha-Yachiyo Public Demo Smoke Summary",
         "",
@@ -656,12 +715,24 @@ def render_markdown(summary: Mapping[str, Any]) -> str:
         f"Release level: {summary.get('release_level')}",
         f"Selected: {summary.get('passed_count')}/{summary.get('selected_count')} passed",
         (
+            "Publish candidate flows: "
+            f"{summary.get('passed_publish_candidate_flow_count')}/"
+            f"{summary.get('publish_candidate_flow_count')} passed"
+        ),
+        (
             "Required demo flows: "
             f"{summary.get('passed_required_flow_count')}/{summary.get('required_flow_count')} passed"
         ),
         (
-            "Release progress baseline: "
-            f"{release_progress.get('baseline_id') or 'full_public_demo'} "
+            "Publish candidate baseline: "
+            f"{publish_candidate_progress.get('baseline_id') or PUBLISH_CANDIDATE_TRACK_ID} "
+            f"({publish_candidate_progress.get('passed_count', summary.get('passed_publish_candidate_flow_count'))}/"
+            f"{publish_candidate_progress.get('total_count', summary.get('publish_candidate_flow_count'))} passed, "
+            f"{publish_candidate_progress.get('remaining_count', '?')} remaining)"
+        ),
+        (
+            "Full demo baseline: "
+            f"{release_progress.get('baseline_id') or FULL_PUBLIC_DEMO_TRACK_ID} "
             f"({release_progress.get('passed_count', summary.get('passed_required_flow_count'))}/"
             f"{release_progress.get('total_count', summary.get('required_flow_count'))} passed, "
             f"{release_progress.get('remaining_count', '?')} remaining)"
