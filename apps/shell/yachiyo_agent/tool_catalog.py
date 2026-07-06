@@ -280,16 +280,26 @@ def _capability_snapshots(
     if not supported_tools:
         return capabilities
     ready = _provider_ready(sandbox_provider)
+    requires_real_sandbox_tools = set(
+        _clean_tool_names(sandbox_provider.requires_real_sandbox_for)
+    )
     enriched: dict[str, DesktopExecutionCapabilitySnapshot] = {}
     for capability_id, snapshot in capabilities.items():
         provider_supported_tools = [
             tool for tool in snapshot.tools if tool in supported_tools
         ]
+        provider_blocked_tools = [
+            tool for tool in snapshot.tools if tool in requires_real_sandbox_tools
+        ]
+        if not ready:
+            provider_blocked_tools = _unique_tool_list(
+                [*provider_blocked_tools, *provider_supported_tools]
+            )
         enriched[capability_id] = snapshot.model_copy(
             update={
                 "provider_supported_tools": provider_supported_tools,
                 "provider_ready_tools": provider_supported_tools if ready else [],
-                "provider_blocked_tools": [] if ready else provider_supported_tools,
+                "provider_blocked_tools": provider_blocked_tools,
             }
         )
     return enriched
@@ -297,6 +307,15 @@ def _capability_snapshots(
 
 def _clean_tool_names(values: Iterable[str]) -> set[str]:
     return {str(value or "").strip() for value in values if str(value or "").strip()}
+
+
+def _unique_tool_list(values: Iterable[str]) -> list[str]:
+    tools: list[str] = []
+    for value in values:
+        clean = str(value or "").strip()
+        if clean and clean not in tools:
+            tools.append(clean)
+    return tools
 
 
 def _capability_id_for_tool(tool_name: str) -> str | None:

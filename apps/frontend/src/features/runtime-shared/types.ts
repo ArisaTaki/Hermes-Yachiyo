@@ -144,6 +144,9 @@ export type SandboxDesktopProviderSnapshot = {
   source?: string;
   health?: DesktopProviderHealthSnapshot | null;
   launch_hint?: SandboxDesktopProviderLaunchHint;
+  foreground_mutation_supported?: boolean;
+  keyboard_mouse_capture_supported?: boolean;
+  requires_real_sandbox_for?: string[];
 };
 
 export type DesktopExecutionRouteSnapshot = {

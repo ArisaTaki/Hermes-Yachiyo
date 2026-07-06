@@ -98,6 +98,38 @@ LOCAL_DESKTOP_PROVIDER_TOOLS = (
     "media.music_app_open_and_play",
     "media.music_app_control",
 )
+LOCAL_DESKTOP_PROVIDER_REQUIRES_SANDBOX_TOOLS = (
+    "app.open_and_safe_type_text",
+    "app.focus_and_safe_type_text",
+    "app.open_and_safe_shortcut",
+    "app.focus_and_safe_shortcut",
+    "app.open_and_safe_key",
+    "app.focus_and_safe_key",
+    "app.open_and_hotkey",
+    "app.focus_and_hotkey",
+    "app.open_and_safe_scroll",
+    "app.focus_and_safe_scroll",
+    "app.open_and_safe_click",
+    "app.focus_and_safe_click",
+    "app.open_and_click_ui_element",
+    "app.focus_and_click_ui_element",
+    "app.open_and_type_into_ui_element",
+    "app.focus_and_type_into_ui_element",
+    "desktop.safe_shortcut",
+    "desktop.safe_key",
+    "desktop.safe_type_text",
+    "desktop.safe_click",
+    "desktop.safe_scroll",
+    "desktop.search_submit",
+    "desktop.click_ui_element",
+    "desktop.type_into_ui_element",
+    "desktop.shortcut",
+    "desktop.hotkey",
+    "desktop.submit_foreground",
+    "desktop.type",
+    "desktop.type_text",
+    "desktop.click",
+)
 
 
 class DesktopExecutionProviderRegistry:
@@ -659,6 +691,7 @@ def local_desktop_execution_provider_status(
         "source": "runtime_local",
         "foreground_mutation_supported": True,
         "keyboard_mouse_capture_supported": False,
+        "requires_real_sandbox_for": list(LOCAL_DESKTOP_PROVIDER_REQUIRES_SANDBOX_TOOLS),
     }
 
 

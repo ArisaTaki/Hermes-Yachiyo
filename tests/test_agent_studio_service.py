@@ -1093,10 +1093,13 @@ def test_legacy_studio_tool_catalog_exposes_local_desktop_provider(monkeypatch) 
     assert provider["provider_kind"] == LOCAL_DESKTOP_PROVIDER_KIND
     assert provider["provider_id"] == LOCAL_DESKTOP_PROVIDER_ID
     assert provider["status"] == "available"
+    assert provider["keyboard_mouse_capture_supported"] is False
+    assert "desktop.safe_type_text" in provider["requires_real_sandbox_for"]
     assert "app.open" in provider["supported_tools"]
     assert "desktop.inspect_app" in provider["supported_tools"]
     assert tools["app.open"]["provider_ready"] is True
     assert tools["desktop.inspect_app"]["provider_ready"] is True
+    assert tools["desktop.safe_type_text"]["provider_supported"] is False
     assert tools["app.open"]["provider_kind"] == LOCAL_DESKTOP_PROVIDER_KIND
 
 
@@ -1295,6 +1298,7 @@ def test_agent_studio_service_prefers_port_planner_when_available() -> None:
                         "desktop_provider_health_probe": True,
                         "desktop_provider_route_readonly": True,
                         "desktop_provider_route_foreground": True,
+                        "desktop_provider_local_native": True,
                         "desktop_execution_policy": {
                             "mode": "supervised_live",
                             "allow_live_foreground": True,

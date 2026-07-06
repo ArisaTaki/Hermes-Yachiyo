@@ -99,6 +99,41 @@ _READ_ONLY_DESKTOP_PROVIDER_TOOLS = frozenset(
     }
 )
 
+_KEYBOARD_MOUSE_CAPTURE_TOOLS = frozenset(
+    {
+        "app.open_and_safe_type_text",
+        "app.focus_and_safe_type_text",
+        "app.open_and_safe_shortcut",
+        "app.focus_and_safe_shortcut",
+        "app.open_and_safe_key",
+        "app.focus_and_safe_key",
+        "app.open_and_hotkey",
+        "app.focus_and_hotkey",
+        "app.open_and_safe_scroll",
+        "app.focus_and_safe_scroll",
+        "app.open_and_safe_click",
+        "app.focus_and_safe_click",
+        "app.open_and_click_ui_element",
+        "app.focus_and_click_ui_element",
+        "app.open_and_type_into_ui_element",
+        "app.focus_and_type_into_ui_element",
+        "desktop.safe_shortcut",
+        "desktop.safe_key",
+        "desktop.safe_type_text",
+        "desktop.safe_click",
+        "desktop.safe_scroll",
+        "desktop.search_submit",
+        "desktop.click_ui_element",
+        "desktop.type_into_ui_element",
+        "desktop.shortcut",
+        "desktop.hotkey",
+        "desktop.submit_foreground",
+        "desktop.type",
+        "desktop.type_text",
+        "desktop.click",
+    }
+)
+
 
 def desktop_execution_policy_payload(value: Any) -> dict[str, Any]:
     if isinstance(value, Mapping):
@@ -492,6 +527,9 @@ def _sandbox_provider_public_payload(payload: Mapping[str, Any]) -> dict[str, An
         "source",
         "health",
         "launch_hint",
+        "foreground_mutation_supported",
+        "keyboard_mouse_capture_supported",
+        "requires_real_sandbox_for",
     }
     return {
         key: payload[key]
@@ -587,6 +625,22 @@ def _sandbox_route_decision(
             "blocking_conditions": blockers,
         }
     supported_tools = _string_list(sandbox_provider.get("supported_tools"))
+    if _sandbox_provider_requires_keyboard_mouse_sandbox(sandbox_provider, tool_name):
+        return {
+            **dict(route),
+            "selected_provider_kind": provider_kind,
+            "selected_provider_id": provider_id,
+            "status": "sandbox_keyboard_mouse_provider_required",
+            "can_execute": False,
+            "can_auto_start": False,
+            "sandbox_required": True,
+            "fallback_mode": "supervised_live",
+            "reason": (
+                "Current desktop provider can open or focus apps, but keyboard and "
+                "mouse capture must run through a real sandbox/control provider."
+            ),
+            "blocking_conditions": ["sandbox_keyboard_mouse_provider_required"],
+        }
     if supported_tools and tool_name not in supported_tools:
         return {
             **dict(route),
@@ -625,6 +679,26 @@ def _sandbox_route_decision(
         "reason": "Foreground desktop action can be routed through the sandbox provider.",
         "blocking_conditions": [],
     }
+
+
+def _sandbox_provider_requires_keyboard_mouse_sandbox(
+    sandbox_provider: Mapping[str, Any],
+    tool_name: str,
+) -> bool:
+    clean_tool = str(tool_name or "").strip()
+    if clean_tool not in _KEYBOARD_MOUSE_CAPTURE_TOOLS:
+        return False
+    if "keyboard_mouse_capture_supported" not in sandbox_provider:
+        return False
+    raw_capture_supported = sandbox_provider.get("keyboard_mouse_capture_supported")
+    if (
+        raw_capture_supported is not False
+        and str(raw_capture_supported).strip().lower()
+        not in {"0", "false", "no", "off"}
+    ):
+        return False
+    required = _string_list(sandbox_provider.get("requires_real_sandbox_for"))
+    return not required or clean_tool in required or "keyboard_mouse_capture" in required
 
 
 def _execution_mode_payload(value: Mapping[str, Any] | Any | None) -> dict[str, Any]:

@@ -755,6 +755,7 @@ function ToolDetail({
       <div
         className="studio-tool-inspector-section"
         data-provider-ready={String(providerState.ready)}
+        data-provider-requires-real-sandbox-for={providerState.requiresRealSandboxFor.join(',')}
         data-provider-status={providerState.status}
         data-provider-supported={String(providerState.supported)}
         data-testid="studio-tool-provider-readiness"
@@ -782,6 +783,17 @@ function ToolDetail({
               {toolName}
             </span>
           ))}
+          {providerState.requiresRealSandboxFor
+            .filter((toolName) => toolName === tool.tool_name)
+            .map((toolName) => (
+              <span
+                className="studio-tool-permission missing"
+                data-provider-real-sandbox-tool={toolName}
+                key={toolName}
+              >
+                {toolName}
+              </span>
+            ))}
           {providerState.blockingConditions.map((condition) => (
             <span
               className="studio-tool-permission missing"
@@ -861,6 +873,7 @@ type ToolProviderState = {
   status: string;
   blockingConditions: string[];
   supportedTools: string[];
+  requiresRealSandboxFor: string[];
 };
 
 function toolProviderState(tool: ToolCatalogItemSnapshot, catalog: ToolCatalogSnapshot): ToolProviderState {
@@ -871,7 +884,9 @@ function toolProviderState(tool: ToolCatalogItemSnapshot, catalog: ToolCatalogSn
   const providerKind = stringValue(tool.provider_kind) || stringValue(provider?.provider_kind);
   const status = stringValue(provider?.status) || (ready ? 'ready' : supported ? 'supported' : 'runtime_only');
   const supportedTools = stringArray(provider?.supported_tools);
+  const requiresRealSandboxFor = stringArray(provider?.requires_real_sandbox_for);
   const blockingConditions = stringArray(provider?.blocking_conditions);
+  const requiresRealSandbox = Boolean(tool.tool_name && requiresRealSandboxFor.includes(tool.tool_name));
   if (ready) {
     return {
       label: 'Provider ready',
@@ -883,6 +898,7 @@ function toolProviderState(tool: ToolCatalogItemSnapshot, catalog: ToolCatalogSn
       status,
       blockingConditions,
       supportedTools,
+      requiresRealSandboxFor,
     };
   }
   if (supported) {
@@ -896,6 +912,21 @@ function toolProviderState(tool: ToolCatalogItemSnapshot, catalog: ToolCatalogSn
       status,
       blockingConditions,
       supportedTools,
+      requiresRealSandboxFor,
+    };
+  }
+  if (requiresRealSandbox) {
+    return {
+      label: 'Sandbox required',
+      detail: `${providerId || providerKind || 'desktop provider'} needs a real sandbox/control provider for this keyboard or mouse action`,
+      ready,
+      supported,
+      providerId,
+      providerKind,
+      status,
+      blockingConditions,
+      supportedTools,
+      requiresRealSandboxFor,
     };
   }
   return {
@@ -908,6 +939,7 @@ function toolProviderState(tool: ToolCatalogItemSnapshot, catalog: ToolCatalogSn
     status,
     blockingConditions,
     supportedTools,
+    requiresRealSandboxFor,
   };
 }
 
@@ -932,6 +964,7 @@ function runtimeBlockingLabel(value: string): string {
   if (value === 'desktop_session_locked') return 'desktop session locked';
   if (value === 'foreground_focus_unavailable') return 'foreground focus unavailable';
   if (value === 'screen_capture_blank') return 'screen capture blank';
+  if (value === 'sandbox_keyboard_mouse_provider_required') return 'sandbox keyboard/mouse provider required';
   return value.replace(/_/g, ' ');
 }
 

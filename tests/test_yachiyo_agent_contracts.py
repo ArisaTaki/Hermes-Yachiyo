@@ -18,6 +18,9 @@ from apps.shell.agent.tools.plugins import (
 )
 from apps.shell.agent.runtime.main_chat_config import MAIN_CHAT_DESKTOP_AGENT_INSTRUCTIONS
 from apps.shell.agent.runtime.approval_snapshots import public_pending_approval
+from apps.shell.agent.runtime.desktop_execution_providers import (
+    local_desktop_execution_provider_status,
+)
 from apps.shell.yachiyo_agent import (
     AgentDefinitionSnapshot,
     AgentDeskFileEventRequest,
@@ -5051,9 +5054,14 @@ def test_sandbox_desktop_provider_snapshot_json_shape_is_stable() -> None:
         "source",
         "health",
         "launch_hint",
+        "foreground_mutation_supported",
+        "keyboard_mouse_capture_supported",
+        "requires_real_sandbox_for",
     ]
     assert payload["available"] is False
     assert payload["adapter_ready"] is False
+    assert payload["keyboard_mouse_capture_supported"] is None
+    assert payload["requires_real_sandbox_for"] == []
     assert payload["blocking_conditions"] == ["sandbox_desktop_provider_required"]
     assert payload["health"]["status"] == "not_configured"
     assert payload["health"]["blocking_conditions"] == [
@@ -6465,6 +6473,25 @@ def test_runtime_tool_catalog_surfaces_sandbox_provider_capabilities() -> None:
     assert catalog.capabilities["foreground_activation"].provider_supported_tools == [
         "app.focus_and_click_ui_element"
     ]
+
+
+def test_runtime_tool_catalog_marks_local_provider_input_tools_as_sandbox_required() -> None:
+    catalog = runtime_tool_catalog_snapshot(
+        sandbox_provider=local_desktop_execution_provider_status()
+    )
+    tools = {tool.tool_name: tool for tool in catalog.tools}
+
+    assert catalog.sandbox_provider is not None
+    assert catalog.sandbox_provider.keyboard_mouse_capture_supported is False
+    assert "desktop.safe_type_text" in catalog.sandbox_provider.requires_real_sandbox_for
+    assert tools["app.open"].provider_ready is True
+    assert tools["desktop.safe_type_text"].provider_supported is False
+    assert "desktop.safe_type_text" in (
+        catalog.capabilities["foreground_input"].provider_blocked_tools
+    )
+    assert "app.focus" in (
+        catalog.capabilities["foreground_activation"].provider_ready_tools
+    )
 
 
 def test_runtime_tool_catalog_surfaces_multi_file_data_analysis_schema() -> None:

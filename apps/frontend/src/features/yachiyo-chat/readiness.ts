@@ -125,6 +125,9 @@ export function desktopProviderReadinessSummary(
   provider_kind: string;
   supported_tools: string[];
   blocking_conditions: string[];
+  foreground_mutation_supported: boolean;
+  keyboard_mouse_capture_supported: boolean;
+  requires_real_sandbox_for: string[];
   detail: string;
 } {
   const capabilities = readiness?.capabilities;
@@ -140,14 +143,30 @@ export function desktopProviderReadinessSummary(
     ...stringList(capabilities.desktop_provider_supported_tools),
   ]);
   const blockingConditions = stringList(provider?.blocking_conditions);
+  const foregroundMutationSupported = booleanValue(provider?.foreground_mutation_supported);
+  const keyboardMouseCaptureKnown = Boolean(
+    provider && Object.prototype.hasOwnProperty.call(provider, 'keyboard_mouse_capture_supported'),
+  );
+  const keyboardMouseCaptureSupported = booleanValue(provider?.keyboard_mouse_capture_supported);
+  const requiresRealSandboxFor = uniqueStrings([
+    ...stringList(provider?.requires_real_sandbox_for),
+    ...stringList(capabilities.desktop_provider_requires_real_sandbox_for),
+  ]);
   const available = booleanValue(provider?.available);
   const adapterReady = booleanValue(provider?.adapter_ready);
   const ready = booleanValue(capabilities.desktop_provider_ready)
     || (available && adapterReady);
+  const providerLabel = providerKind === 'local_desktop' ? '本地桌面 provider' : '隔离桌面 provider';
+  const inputSandboxLimited = ready
+    && keyboardMouseCaptureKnown
+    && !keyboardMouseCaptureSupported
+    && requiresRealSandboxFor.length > 0;
   const detail = ready
-    ? `隔离桌面 provider 已就绪${supportedTools.length ? `，支持 ${formatDesktopToolList(toolDisplayLabels(supportedTools))}` : ''}。`
+    ? inputSandboxLimited
+      ? `${providerLabel} 已就绪${supportedTools.length ? `，支持 ${formatDesktopToolList(toolDisplayLabels(supportedTools))}` : ''}；点击、输入和快捷键仍需要真实沙盒或受监管控制通道。`
+      : `${providerLabel} 已就绪${supportedTools.length ? `，支持 ${formatDesktopToolList(toolDisplayLabels(supportedTools))}` : ''}。`
     : providerId || status
-      ? '隔离桌面 provider 未就绪；前台点击、输入或快捷键会保持预览、审批或转入 Agent Studio。'
+      ? `${providerLabel} 未就绪；前台点击、输入或快捷键会保持预览、审批或转入 Agent Studio。`
       : '';
   return {
     ready,
@@ -157,6 +176,9 @@ export function desktopProviderReadinessSummary(
     provider_kind: providerKind,
     supported_tools: supportedTools,
     blocking_conditions: blockingConditions,
+    foreground_mutation_supported: foregroundMutationSupported,
+    keyboard_mouse_capture_supported: keyboardMouseCaptureSupported,
+    requires_real_sandbox_for: requiresRealSandboxFor,
     detail,
   };
 }
@@ -240,6 +262,9 @@ function emptyProviderReadiness() {
     provider_kind: '',
     supported_tools: [],
     blocking_conditions: [],
+    foreground_mutation_supported: false,
+    keyboard_mouse_capture_supported: false,
+    requires_real_sandbox_for: [],
     detail: '',
   };
 }

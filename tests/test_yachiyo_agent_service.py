@@ -770,8 +770,17 @@ def test_legacy_runtime_readiness_exposes_local_desktop_provider(monkeypatch) ->
     assert provider["provider_kind"] == LOCAL_DESKTOP_PROVIDER_KIND
     assert provider["provider_id"] == LOCAL_DESKTOP_PROVIDER_ID
     assert provider["status"] == "available"
+    assert provider["keyboard_mouse_capture_supported"] is False
+    assert "desktop.safe_type_text" in provider["requires_real_sandbox_for"]
     assert "app.open" in readiness["capabilities"]["desktop_provider_supported_tools"]
     assert "desktop.inspect_app" in readiness["capabilities"]["desktop_provider_supported_tools"]
+    assert (
+        readiness["capabilities"]["desktop_provider_keyboard_mouse_capture_supported"]
+        is False
+    )
+    assert "desktop.safe_type_text" in (
+        readiness["capabilities"]["desktop_provider_requires_real_sandbox_for"]
+    )
 
 
 def test_yachiyo_agent_service_starts_replan_recovery_action_from_chat_task() -> None:

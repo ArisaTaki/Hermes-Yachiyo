@@ -189,6 +189,9 @@ class SandboxDesktopProviderSnapshot(_PublicSnapshot):
     source: str = "runtime"
     health: DesktopProviderHealthSnapshot | None = None
     launch_hint: dict[str, Any] = Field(default_factory=dict)
+    foreground_mutation_supported: bool | None = None
+    keyboard_mouse_capture_supported: bool | None = None
+    requires_real_sandbox_for: list[str] = Field(default_factory=list)
 
 
 class DesktopExecutionRouteSnapshot(_PublicSnapshot):

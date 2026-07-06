@@ -90,6 +90,12 @@ export function RuntimeExecutionEnvelopeSummary({
           ? ''
           : String(sandboxProvider.foregroundMutationSupported)
       }
+      data-sandbox-provider-keyboard-mouse-capture-supported={
+        sandboxProvider.keyboardMouseCaptureSupported === null
+          ? ''
+          : String(sandboxProvider.keyboardMouseCaptureSupported)
+      }
+      data-sandbox-provider-requires-real-sandbox-for={sandboxProvider.requiresRealSandboxFor.join(',')}
       data-desktop-execution-route-status={executionRoute.status}
       data-desktop-execution-route-blockers={executionRoute.blockers.join(',')}
       data-request-count={requests.length}
@@ -529,6 +535,7 @@ type RuntimeSandboxProviderSummary = {
   available: boolean;
   blockers: string[];
   foregroundMutationSupported: boolean | null;
+  keyboardMouseCaptureSupported: boolean | null;
   healthBlockers: string[];
   healthChecked: boolean | null;
   healthEndpoint: string;
@@ -672,12 +679,18 @@ function runtimeSandboxProviderSummary(
   const launchEnv = objectRecord(launchHint.env);
   const launchProviderId = stringValue(launchHint.provider_id) || providerId;
   const launchEnvUrl = stringValue(launchEnv.OHA_YACHIYO_DESKTOP_PROVIDER_URL);
-  const foregroundMutationSupported = booleanValue(launchHint.foreground_mutation_supported);
-  const requiresRealSandboxFor = stringArray(launchHint.requires_real_sandbox_for);
+  const foregroundMutationSupported = booleanValue(record.foreground_mutation_supported)
+    ?? booleanValue(launchHint.foreground_mutation_supported);
+  const keyboardMouseCaptureSupported = booleanValue(record.keyboard_mouse_capture_supported);
+  const requiresRealSandboxFor = uniqueStrings([
+    ...stringArray(record.requires_real_sandbox_for),
+    ...stringArray(launchHint.requires_real_sandbox_for),
+  ]);
   return {
     available,
     blockers,
     foregroundMutationSupported,
+    keyboardMouseCaptureSupported,
     healthBlockers,
     healthChecked,
     healthEndpoint,

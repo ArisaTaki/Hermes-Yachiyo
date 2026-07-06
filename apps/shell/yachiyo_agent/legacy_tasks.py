@@ -289,6 +289,12 @@ class LegacyRuntimePort:
                 "desktop_provider_supported_tools": list(
                     sandbox_provider.get("supported_tools") or []
                 ),
+                "desktop_provider_keyboard_mouse_capture_supported": bool(
+                    sandbox_provider.get("keyboard_mouse_capture_supported")
+                ),
+                "desktop_provider_requires_real_sandbox_for": list(
+                    sandbox_provider.get("requires_real_sandbox_for") or []
+                ),
                 **desktop_execution_capability_snapshots(
                     registered_tools=known_tools,
                     missing_permissions=missing_permissions,
