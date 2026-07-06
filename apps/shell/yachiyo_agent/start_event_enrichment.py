@@ -212,7 +212,12 @@ def _planner_public_events_for_start_payload(
 ) -> list[dict[str, Any]]:
     events: list[dict[str, Any]] = []
     sequence = after_sequence + 1
-    for event_type, payload in planner_run_event_payloads(decision):
+    for event_type, payload in planner_run_event_payloads(
+        decision,
+        runtime_execution_envelope=_runtime_execution_envelope_from_payload(
+            source_payload
+        ),
+    ):
         event = {
             "event_type": event_type,
             "sequence": sequence,
@@ -228,6 +233,22 @@ def _planner_public_events_for_start_payload(
         run_id=run_id,
     )
     return _renumber_planner_events(events, after_sequence)
+
+
+def _runtime_execution_envelope_from_payload(
+    source_payload: Mapping[str, Any] | None,
+) -> dict[str, Any] | None:
+    if not isinstance(source_payload, Mapping):
+        return None
+    envelope = source_payload.get("runtime_execution_envelope")
+    if isinstance(envelope, Mapping):
+        return dict(envelope)
+    metadata = source_payload.get("metadata")
+    if isinstance(metadata, Mapping):
+        envelope = metadata.get("yachiyo_execution_envelope")
+        if isinstance(envelope, Mapping):
+            return dict(envelope)
+    return None
 
 
 def _planner_events_with_execution_task_core(

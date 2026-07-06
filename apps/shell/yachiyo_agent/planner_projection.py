@@ -1396,12 +1396,20 @@ def _planner_timeline_detail(event_type: str, payload: Mapping[str, Any]) -> str
 
 def planner_run_event_payloads(
     decision: PlannerDecisionSnapshot | None,
+    *,
+    runtime_execution_envelope: Mapping[str, Any] | None = None,
+    metadata: Mapping[str, Any] | None = None,
 ) -> list[tuple[str, dict[str, Any]]]:
     if decision is None:
         return []
-    execution_envelope = runtime_execution_envelope_payload(
-        decision,
-        full_plan=True,
+    execution_envelope = (
+        dict(runtime_execution_envelope)
+        if isinstance(runtime_execution_envelope, Mapping)
+        else runtime_execution_envelope_payload(
+            decision,
+            full_plan=True,
+            metadata=metadata,
+        )
     )
     payloads: list[tuple[str, dict[str, Any]]] = [
         (

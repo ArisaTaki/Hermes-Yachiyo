@@ -1242,7 +1242,7 @@ def test_agent_studio_start_agent_run_preserves_readonly_provider_route(
     port = _FakeStudioPort()
     service = AgentStudioService(port)
 
-    service.start_agent_run(
+    started = service.start_agent_run(
         {
             "agent_id": "agent-1",
             "objective": "在一个我没提过的新应用 PixelForge 点击 Export",
@@ -1278,6 +1278,15 @@ def test_agent_studio_start_agent_run_preserves_readonly_provider_route(
     assert start_payload["runtime_execution_envelope"] == (
         start_payload["metadata"]["yachiyo_execution_envelope"]
     )
+    plan_event = next(
+        event for event in started.events if event.event_type == "agent.plan.created"
+    )
+    event_request = next(
+        request
+        for request in plan_event.payload["runtime_execution_envelope"]["requests"]
+        if request["tool_name"] == "desktop.list_apps"
+    )
+    assert event_request["desktop_execution_route"]["status"] == "sandbox_ready"
 
 
 def test_agent_studio_service_starts_workflow_from_planner_orchestration() -> None:
