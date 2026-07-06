@@ -2253,6 +2253,46 @@ class RuntimeToolCallExecutor:
                     trace=trace_payload,
                 )
                 raise
+        runtime_skip = (
+            None
+            if trusted_control_action
+            else _desktop_execution_policy_skip_result(
+                tool_name,
+                tool_request,
+                input_preview,
+            )
+        )
+        if runtime_skip is not None:
+            budget.claim_tool_call(tool_name)
+            self._tool_call_events.result(
+                run_id,
+                tool_name,
+                input_preview,
+                runtime_skip,
+                approved=approved,
+                trace=trace_payload,
+            )
+            timeline.append(
+                self._timeline(
+                    "agent.tool.skipped",
+                    tool_name,
+                    input_preview=input_preview,
+                    result=runtime_skip,
+                    **trace_payload,
+                )
+            )
+            if run_id:
+                self._append_run_event(
+                    run_id,
+                    "agent.tool.skipped",
+                    {
+                        "tool": tool_name,
+                        "input_preview": input_preview,
+                        "result": runtime_skip,
+                        **trace_payload,
+                    },
+                )
+            return runtime_skip
         budget.claim_tool_call(
             tool_name,
             terminal_execution=tool_name in {"terminal.run", "python.run"} and approved,

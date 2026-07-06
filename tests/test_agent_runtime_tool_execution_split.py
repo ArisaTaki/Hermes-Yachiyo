@@ -2100,6 +2100,49 @@ def test_runtime_tool_call_executor_fails_closed_when_provider_adapter_is_missin
     assert timeline[-1]["result"]["blocked_by_desktop_execution_provider"] is True
 
 
+def test_runtime_tool_call_executor_blocks_policy_required_sandbox_before_broker() -> None:
+    events = FakeToolCallEvents()
+    run_events: list[tuple[str, str, dict[str, Any]]] = []
+    executor = _executor(
+        tool_call_events=events,
+        run_events=run_events,
+        desktop_provider_registry=DesktopExecutionProviderRegistry(),
+    )
+    timeline: list[dict[str, Any]] = []
+    broker = FakeBroker({"ok": True, "unexpected": True})
+    budget = FakeBudget()
+
+    result = executor.execute(
+        {
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "hello"},
+            "desktop_execution_policy": {
+                "mode": "supervised_live",
+                "allow_live_foreground": True,
+                "avoid_user_foreground_takeover": True,
+                "require_sandbox_for_keyboard_mouse": True,
+            },
+        },
+        ["desktop.safe_type_text"],
+        broker,
+        timeline,
+        approved=True,
+        run_id="run-1",
+        budget=budget,
+    )
+
+    assert result["ok"] is False
+    assert result["blocked_by_desktop_execution_policy"] is True
+    assert result["desktop_execution_route"]["can_execute"] is False
+    assert result["desktop_execution_route"]["sandbox_required"] is True
+    assert result["desktop_execution_policy"]["allow_live_foreground"] is True
+    assert broker.calls == []
+    assert budget.claims == [("desktop.safe_type_text", False)]
+    assert [event["event"] for event in timeline] == ["agent.tool.skipped"]
+    assert run_events[0][1] == "agent.tool.skipped"
+    assert [call[0] for call in events.calls] == ["requested", "result"]
+
+
 def test_runtime_tool_call_executor_preserves_planner_trace_on_tool_call_events() -> None:
     events = FakeToolCallEvents()
     executor = _executor(tool_call_events=events)
