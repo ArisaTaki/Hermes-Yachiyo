@@ -146,6 +146,18 @@ def demo_flows(
             report_json=tmp_dir / "isolated-desktop-provider.json",
         ),
         DemoFlow(
+            id="native_provider_contract",
+            label="Local provider contract for Agent and Workflow full chain",
+            category="source",
+            command=(
+                sys.executable,
+                "scripts/smoke_native_provider_contract.py",
+                "--report-json",
+                str(tmp_dir / "native-provider-contract.json"),
+            ),
+            report_json=tmp_dir / "native-provider-contract.json",
+        ),
+        DemoFlow(
             id="approval_resume",
             label="Approval card and replayable resume",
             category="source",

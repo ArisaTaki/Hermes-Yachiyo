@@ -22,18 +22,23 @@ def _write_public_demo_report(command: list[str], *, release_level: str) -> None
     if "scripts/run_public_demo_smokes.py" not in command:
         return
     output_json = command[command.index("--output-json") + 1]
+    missing_flow_ids = (
+        []
+        if release_level == "full_public_demo_ready"
+        else ["real_desktop_interaction", "workflow_provider"]
+    )
+    required_flow_count = len(gate._public_demo_required_flow_ids([]))
+    passed_flow_count = required_flow_count - len(missing_flow_ids)
     payload = {
         "ok": True,
         "status": "passed" if release_level == "full_public_demo_ready" else "partial",
         "release_level": release_level,
         "complete": release_level == "full_public_demo_ready",
-        "selected_count": 18 if release_level == "full_public_demo_ready" else 12,
-        "passed_count": 18 if release_level == "full_public_demo_ready" else 12,
-        "required_flow_count": 18,
-        "passed_required_flow_count": 18 if release_level == "full_public_demo_ready" else 12,
-        "missing_required_flow_ids": []
-        if release_level == "full_public_demo_ready"
-        else ["real_desktop_interaction", "workflow_provider"],
+        "selected_count": passed_flow_count,
+        "passed_count": passed_flow_count,
+        "required_flow_count": required_flow_count,
+        "passed_required_flow_count": passed_flow_count,
+        "missing_required_flow_ids": missing_flow_ids,
         "release_blockers": []
         if release_level == "full_public_demo_ready"
         else [
@@ -261,8 +266,8 @@ def test_public_release_gate_defaults_to_safe_preflight_with_demo_blockers(
     ]
     assert public_demo["release_blockers"][0]["reason"] == "desktop_session_locked"
     assert summary["public_demo"]["release_level"] == "partial_demo_ready"
-    assert summary["public_demo"]["passed_required_flow_count"] == 12
-    assert summary["public_demo"]["required_flow_count"] == 18
+    assert summary["public_demo"]["passed_required_flow_count"] == 17
+    assert summary["public_demo"]["required_flow_count"] == 19
     assert summary["public_demo"]["remaining_required_flow_count"] == 2
     desktop_action = next(
         item for item in summary["next_actions"] if item["id"] == "public_demo_real_desktop"
@@ -325,7 +330,7 @@ def test_public_release_gate_strict_mode_fails_until_release_ready(
     assert payload["status"] == "needs_release_evidence"
     assert payload["release_smoke"]["status"] == "incomplete"
     markdown = output_markdown.read_text(encoding="utf-8")
-    assert "Public demo: 12/18 required flows (`partial_demo_ready`)" in markdown
+    assert "Public demo: 17/19 required flows (`partial_demo_ready`)" in markdown
     assert "Release level: `partial_demo_ready`" in markdown
     assert "## Release Smoke" in markdown
     assert "Demo blocker `real_desktop_interaction`: `desktop_session_locked`" in markdown

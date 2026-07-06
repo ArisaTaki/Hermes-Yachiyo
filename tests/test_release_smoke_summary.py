@@ -132,10 +132,10 @@ def test_release_smoke_summary_passes_with_required_evidence(tmp_path, monkeypat
                 "status": "passed",
                 "release_level": "full_public_demo_ready",
                 "complete": True,
-                "selected_count": 18,
-                "passed_count": 18,
-                "required_flow_count": 18,
-                "passed_required_flow_count": 18,
+                "selected_count": 19,
+                "passed_count": 19,
+                "required_flow_count": 19,
+                "passed_required_flow_count": 19,
                 "missing_required_flow_ids": [],
                 "release_blockers": [],
                 "flows": [{"id": "real_desktop_app_open", "status": "passed"}],
@@ -204,10 +204,10 @@ def test_release_smoke_summary_requires_complete_public_demo(tmp_path, monkeypat
                 "status": "partial",
                 "release_level": "partial_demo_ready",
                 "complete": False,
-                "selected_count": 12,
-                "passed_count": 12,
-                "required_flow_count": 18,
-                "passed_required_flow_count": 12,
+                "selected_count": 13,
+                "passed_count": 13,
+                "required_flow_count": 19,
+                "passed_required_flow_count": 13,
                 "missing_required_flow_ids": ["real_desktop_app_open"],
                 "release_blockers": [
                     {
@@ -241,8 +241,8 @@ def test_release_smoke_summary_requires_complete_public_demo(tmp_path, monkeypat
         "public_demo_selected",
     ]
     assert summary["public_demo"]["release_level"] == "partial_demo_ready"
-    assert summary["public_demo"]["passed_required_flow_count"] == 12
-    assert summary["public_demo"]["required_flow_count"] == 18
+    assert summary["public_demo"]["passed_required_flow_count"] == 13
+    assert summary["public_demo"]["required_flow_count"] == 19
     assert summary["public_demo"]["remaining_required_flow_count"] == 1
     assessment = public_demo["related_evidence"]["public_demo_assessment"][0]
     assert assessment["release_level"] == "partial_demo_ready"
@@ -260,7 +260,7 @@ def test_release_smoke_summary_requires_complete_public_demo(tmp_path, monkeypat
     assert action["missing_required_flow_ids"] == ["real_desktop_app_open"]
     assert action["release_blockers"][0]["reason"] == "desktop_session_locked"
     markdown = release_smoke.render_markdown(summary)
-    assert "Public demo: 12/18 required flows (`partial_demo_ready`)" in markdown
+    assert "Public demo: 13/19 required flows (`partial_demo_ready`)" in markdown
     assert "Demo blocker `real_desktop_app_open`: `desktop_session_locked`" in markdown
 
 
@@ -621,10 +621,10 @@ def test_release_smoke_summary_rejects_inconsistent_public_demo_level(
                 "status": "passed",
                 "release_level": "partial_demo_ready",
                 "complete": True,
-                "selected_count": 18,
-                "passed_count": 18,
-                "required_flow_count": 18,
-                "passed_required_flow_count": 18,
+                "selected_count": 19,
+                "passed_count": 19,
+                "required_flow_count": 19,
+                "passed_required_flow_count": 19,
                 "missing_required_flow_ids": [],
                 "release_blockers": [],
                 "flows": [{"id": "workflow_ui", "status": "passed"}],
@@ -684,7 +684,7 @@ def test_release_smoke_summary_collects_passed_public_demo_flow_reports(
                 "complete": False,
                 "selected_count": 1,
                 "passed_count": 1,
-                "required_flow_count": 18,
+                "required_flow_count": 19,
                 "passed_required_flow_count": 1,
                 "missing_required_flow_ids": ["workflow_provider"],
                 "flows": [
@@ -836,10 +836,10 @@ def test_release_smoke_markdown_shows_public_demo_blockers(tmp_path, monkeypatch
                 "status": "partial",
                 "release_level": "partial_demo_ready",
                 "complete": False,
-                "selected_count": 12,
-                "passed_count": 12,
-                "required_flow_count": 18,
-                "passed_required_flow_count": 12,
+                "selected_count": 13,
+                "passed_count": 13,
+                "required_flow_count": 19,
+                "passed_required_flow_count": 13,
                 "missing_required_flow_ids": ["workflow_provider"],
                 "release_blockers": [
                     {"id": "workflow_provider", "status": "skipped"}
@@ -853,6 +853,6 @@ def test_release_smoke_markdown_shows_public_demo_blockers(tmp_path, monkeypatch
     summary = release_smoke.summarize_release_smoke([public_demo_path])
     markdown = release_smoke.render_markdown(summary)
 
-    assert "Public demo: 12/18 required flows (`partial_demo_ready`)" in markdown
+    assert "Public demo: 13/19 required flows (`partial_demo_ready`)" in markdown
     assert "Public demo level: `partial_demo_ready`" in markdown
     assert "Missing demo flows: `workflow_provider`" in markdown

@@ -41,21 +41,21 @@ def test_public_demo_smokes_default_runs_source_flows_only(tmp_path, monkeypatch
     assert summary["complete"] is False
     assert summary["status"] == "partial"
     assert summary["release_level"] == "publish_candidate_ready"
-    assert summary["required_flow_count"] == 18
-    assert summary["passed_required_flow_count"] == 12
-    assert summary["publish_candidate_flow_count"] == 12
-    assert summary["passed_publish_candidate_flow_count"] == 12
+    assert summary["required_flow_count"] == 19
+    assert summary["passed_required_flow_count"] == 13
+    assert summary["publish_candidate_flow_count"] == 13
+    assert summary["passed_publish_candidate_flow_count"] == 13
     assert summary["publish_candidate_progress"] == {
         "baseline_id": "publish_candidate",
         "baseline_label": "Publish candidate readiness without foreground takeover",
         "denominator": "publish_candidate_flow_count",
         "status_basis": "executed_smoke_results",
-        "passed_count": 12,
-        "total_count": 12,
+        "passed_count": 13,
+        "total_count": 13,
         "remaining_count": 0,
         "percent": 100.0,
-        "selected_count": 12,
-        "selected_passed_count": 12,
+        "selected_count": 13,
+        "selected_passed_count": 13,
         "selected_remaining_count": 0,
         "missing_required_flow_ids": [],
         "opt_in_gap_ids": [],
@@ -69,12 +69,12 @@ def test_public_demo_smokes_default_runs_source_flows_only(tmp_path, monkeypatch
         "baseline_label": "Full public demo release readiness",
         "denominator": "required_flow_count",
         "status_basis": "executed_smoke_results",
-        "passed_count": 12,
-        "total_count": 18,
+        "passed_count": 13,
+        "total_count": 19,
         "remaining_count": 6,
-        "percent": 66.67,
-        "selected_count": 12,
-        "selected_passed_count": 12,
+        "percent": 68.42,
+        "selected_count": 13,
+        "selected_passed_count": 13,
         "selected_remaining_count": 0,
         "missing_required_flow_ids": [
             "real_desktop_app_open",
@@ -111,8 +111,8 @@ def test_public_demo_smokes_default_runs_source_flows_only(tmp_path, monkeypatch
         "studio_replay_ui",
         "workflow_ui",
     ]
-    assert summary["selected_count"] == 12
-    assert summary["passed_count"] == 12
+    assert summary["selected_count"] == 13
+    assert summary["passed_count"] == 13
     assert summary["skipped_count"] == 6
     assert [flow["id"] for flow in summary["flows"] if flow["selected"]] == [
         "data_analysis_artifact",
@@ -123,12 +123,13 @@ def test_public_demo_smokes_default_runs_source_flows_only(tmp_path, monkeypatch
         "agent_studio_planner_orchestration",
         "real_desktop_discovery",
         "isolated_desktop_provider",
+        "native_provider_contract",
         "approval_resume",
         "yachiyo_route_approval",
         "group_run",
         "workflow_run",
     ]
-    assert len(commands) == 12
+    assert len(commands) == 13
     entrypoint_commands = [
         command
         for command in commands
@@ -202,20 +203,20 @@ def test_public_demo_smokes_opt_in_selects_all_flows(tmp_path, monkeypatch):
     assert summary["complete"] is True
     assert summary["status"] == "passed"
     assert summary["release_level"] == "full_public_demo_ready"
-    assert summary["passed_required_flow_count"] == summary["required_flow_count"] == 18
-    assert summary["release_progress"]["passed_count"] == 18
-    assert summary["release_progress"]["total_count"] == 18
+    assert summary["passed_required_flow_count"] == summary["required_flow_count"] == 19
+    assert summary["release_progress"]["passed_count"] == 19
+    assert summary["release_progress"]["total_count"] == 19
     assert summary["release_progress"]["remaining_count"] == 0
     assert summary["release_progress"]["percent"] == 100.0
     assert summary["release_progress"]["opt_in_gap_ids"] == []
-    assert summary["publish_candidate_progress"]["passed_count"] == 12
-    assert summary["publish_candidate_progress"]["total_count"] == 12
+    assert summary["publish_candidate_progress"]["passed_count"] == 13
+    assert summary["publish_candidate_progress"]["total_count"] == 13
     assert summary["publish_candidate_progress"]["remaining_count"] == 0
     assert summary["missing_required_flow_ids"] == []
     assert summary["release_blockers"] == []
-    assert summary["selected_count"] == summary["flow_count"] == 18
+    assert summary["selected_count"] == summary["flow_count"] == 19
     assert summary["skipped_count"] == 0
-    assert len(commands) == 18
+    assert len(commands) == 19
     assert any(
         command[:2] == ["node", "scripts/smoke_agent_run_detail_ui.mjs"]
         and "--report-json" in command
@@ -280,8 +281,8 @@ def test_public_demo_smokes_real_desktop_open_can_be_opted_in_separately(
     assert "real_desktop_app_open" in selected_ids
     assert "real_desktop_ui_inspection" not in selected_ids
     assert "real_desktop_interaction" not in selected_ids
-    assert summary["selected_count"] == 13
-    assert summary["passed_count"] == 13
+    assert summary["selected_count"] == 14
+    assert summary["passed_count"] == 14
     assert any("smoke_real_desktop_app_open.py" in part for command in commands for part in command)
     real_open = next(
         flow for flow in summary["flows"] if flow["id"] == "real_desktop_app_open"
@@ -456,7 +457,7 @@ def test_public_demo_smokes_records_selected_skipped_evidence(tmp_path, monkeypa
     assert real_desktop["evidence_skipped"] is True
     assert summary["ok"] is True
     assert summary["complete"] is False
-    assert summary["passed_count"] == 11
+    assert summary["passed_count"] == 12
     assert summary["skipped_count"] == 7
     assert summary["release_level"] == "partial_demo_ready"
     assert "real_desktop_discovery" in summary["missing_required_flow_ids"]
@@ -728,7 +729,7 @@ def test_public_demo_smokes_cli_writes_reports(tmp_path, monkeypatch, capsys):
     markdown = output_markdown.read_text(encoding="utf-8")
     assert "# Oha-Yachiyo Public Demo Smoke Summary" in markdown
     assert "Release level: publish_candidate_ready" in markdown
-    assert "Publish candidate baseline: publish_candidate (12/12 passed, 0 remaining)" in markdown
-    assert "Full demo baseline: full_public_demo (12/18 passed, 6 remaining)" in markdown
+    assert "Publish candidate baseline: publish_candidate (13/13 passed, 0 remaining)" in markdown
+    assert "Full demo baseline: full_public_demo (13/19 passed, 6 remaining)" in markdown
     assert "## Release Blockers" in markdown
     assert "`data_analysis_artifact`" in markdown
