@@ -546,7 +546,11 @@ def _generic_app_inspect_case(
             and inspect_planned_payload.get("foreground_control") is True
             and inspect_planned_payload.get("sandbox_recommended") is True
         ),
-        "inspect_tool_route_is_supervised_live": inspect_route.get("status") == "supervised_live",
+        "inspect_tool_route_uses_local_provider": (
+            inspect_route.get("status") == "sandbox_ready"
+            and inspect_route.get("requested_mode") == "preview_input"
+            and inspect_route.get("selected_provider_kind") == "local_desktop"
+        ),
         "completed_from_runtime_planner": completed_payload.get("source") == "runtime_planner",
         "completed_tools_match": completed_payload.get("tools") == expected_execution_tools,
         "completed_after_inspect": completed_payload.get("tool") == "desktop.inspect_app",

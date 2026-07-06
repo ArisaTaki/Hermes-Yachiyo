@@ -419,6 +419,7 @@ class RuntimeCustomApiAgentLoop:
                     ) = self._runtime_planner_tool_requests(
                         planning_context,
                         allowed_tools,
+                        runtime_execution_metadata=runtime_execution_metadata,
                     )
                     if planner_execution_requests:
                         planned_tool_requests = planner_execution_requests
@@ -434,6 +435,7 @@ class RuntimeCustomApiAgentLoop:
                 ) = self._runtime_planner_tool_requests(
                     planning_context,
                     allowed_tools,
+                    runtime_execution_metadata=runtime_execution_metadata,
                 )
                 if not planned_tool_requests:
                     daily_unavailable_candidates = daily_desktop_intent_candidates(
@@ -2870,20 +2872,30 @@ class RuntimeCustomApiAgentLoop:
         self,
         planning_context: str,
         allowed_tools: list[str],
+        *,
+        runtime_execution_metadata: Mapping[str, Any] | None = None,
     ) -> tuple[Any | None, list[dict[str, Any]], dict[str, Any]]:
         try:
+            planner_metadata = _runtime_planner_execution_metadata(
+                runtime_execution_metadata,
+            )
             selection: DirectToolSelection = planner_first_direct_tool_selection(
                 planning_context,
                 allowed_tools,
-                metadata={"runtime_planner_execution_context": True},
+                metadata=planner_metadata,
             )
             if selection.selected_source == "runtime_planner" and selection.decision is not None:
-                runtime_trace_metadata = _runtime_planner_request_trace_metadata(
-                    selection.decision
+                runtime_request_trace_metadata = _runtime_planner_request_trace_metadata(
+                    selection.decision,
+                )
+                runtime_trace_metadata = _runtime_planner_execution_metadata(
+                    runtime_execution_metadata,
+                    runtime_request_trace_metadata,
                 )
                 full_plan_requests = _runtime_planner_full_plan_tool_requests(
                     selection.decision,
                     allowed_tools,
+                    metadata=runtime_trace_metadata,
                 ) or planner_tool_requests(
                     planning_context,
                     allowed_tools,
@@ -2914,7 +2926,7 @@ class RuntimeCustomApiAgentLoop:
                 if execution_requests and (
                     not has_approval_plan_tool
                     or _direct_action_with_active_window_verification(execution_requests)
-                    or runtime_trace_metadata is not None
+                    or runtime_request_trace_metadata is not None
                 ):
                     selection_payload = planner_selection_payload(
                         decision=selection.decision,
@@ -2931,6 +2943,7 @@ class RuntimeCustomApiAgentLoop:
                         allowed_tools,
                         full_plan=True,
                         execution_requests=execution_requests,
+                        metadata=runtime_trace_metadata,
                     )
                     return (
                         selection.decision,
@@ -2955,6 +2968,7 @@ class RuntimeCustomApiAgentLoop:
                 unavailable_decision = runtime_planner_decision(
                     planning_context,
                     allowed_tools=allowed_tools,
+                    metadata=planner_metadata,
                 )
                 if (
                     unavailable_decision is not None
@@ -2970,6 +2984,7 @@ class RuntimeCustomApiAgentLoop:
                             selected_requests=[],
                             selected_source="runtime_planner",
                             selected_reason="runtime_planner_unavailable_plan",
+                            metadata=planner_metadata,
                         ),
                     )
             event_payload = selection.event_payload
@@ -2996,6 +3011,8 @@ class RuntimeCustomApiAgentLoop:
                     selection.decision,
                     allowed_tools,
                     full_plan=True,
+                    execution_requests=execution_requests,
+                    metadata=planner_metadata,
                 )
             return selection.decision, execution_requests, event_payload
         except Exception:
@@ -13927,9 +13944,26 @@ def _runtime_planner_request_trace_metadata(
     return {"runtime_planner_request_trace": True}
 
 
+def _runtime_planner_execution_metadata(
+    runtime_execution_metadata: Mapping[str, Any] | None,
+    extra: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    payload = (
+        dict(runtime_execution_metadata)
+        if isinstance(runtime_execution_metadata, Mapping)
+        else {}
+    )
+    payload["runtime_planner_execution_context"] = True
+    if isinstance(extra, Mapping):
+        payload.update(extra)
+    return payload
+
+
 def _runtime_planner_full_plan_tool_requests(
     decision: Any | None,
     allowed_tools: Iterable[str],
+    *,
+    metadata: Mapping[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     if _runtime_planner_full_plan_should_defer_to_context_prefetch(decision):
         return []
@@ -13942,6 +13976,7 @@ def _runtime_planner_full_plan_tool_requests(
         decision,
         allowed_tools=allowed_tools,
         full_plan=True,
+        metadata=metadata,
     )
     if not envelope:
         return []
@@ -14352,12 +14387,14 @@ def _selection_payload_with_runtime_execution_envelope(
     *,
     full_plan: bool = False,
     execution_requests: Iterable[Mapping[str, Any]] | None = None,
+    metadata: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     enriched = dict(payload)
     envelope = runtime_execution_envelope_payload(
         decision,
         allowed_tools=allowed_tools,
         full_plan=full_plan,
+        metadata=metadata,
     )
     if not envelope:
         return enriched

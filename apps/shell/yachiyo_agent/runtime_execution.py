@@ -390,6 +390,18 @@ def _runtime_request_metadata_from_metadata(
         "local_desktop_provider",
     ):
         payload["desktop_provider_local_native"] = True
+    for policy_key in (
+        "desktop_execution_policy",
+        "yachiyo_desktop_execution_policy",
+        "desktop_interaction_policy",
+    ):
+        policy = metadata.get(policy_key)
+        if isinstance(policy, Mapping):
+            payload["desktop_execution_policy"] = dict(policy)
+            break
+        if isinstance(policy, str) and policy.strip():
+            payload["desktop_execution_policy"] = {"mode": policy.strip()}
+            break
     provider = metadata.get("sandbox_provider") or metadata.get(
         "sandbox_desktop_provider"
     )

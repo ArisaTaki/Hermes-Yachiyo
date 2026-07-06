@@ -17,6 +17,9 @@ from apps.shell.agent.tools.policy import DAILY_DESKTOP_TOOL_NAMES, RuntimePolic
 from apps.shell.yachiyo_agent.entrypoint_tool_selection import (
     planner_first_direct_decision_and_tool_requests,
 )
+from apps.shell.yachiyo_agent.desktop_execution_policy import (
+    with_daily_entrypoint_desktop_execution_policy,
+)
 
 @dataclass(frozen=True)
 class AgentRunStart:
@@ -137,6 +140,10 @@ class RuntimeAgentRunExecutor:
         artifacts = preparation.artifacts
         try:
             self._preparer.write_context_artifact(run_id, preparation)
+            runtime_execution_metadata = _agent_run_runtime_execution_metadata(
+                agent,
+                runtime_execution_metadata,
+            )
             result = self._continue_custom_api_agent(
                 agent,
                 preparation.context,
@@ -376,6 +383,18 @@ def _runtime_planner_entrypoint_context(agent: dict[str, Any], user_goal: str) -
         allowed = _string_list(policy.get("allowed_tools"))
         return candidate if _runtime_planner_entrypoint_should_execute(candidate, allowed) else ""
     return clean_goal
+
+
+def _agent_run_runtime_execution_metadata(
+    agent: dict[str, Any],
+    runtime_execution_metadata: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if agent.get("_daily_desktop_policy_overlay") is not True:
+        return runtime_execution_metadata
+    return with_daily_entrypoint_desktop_execution_policy(
+        runtime_execution_metadata,
+        surface="agent_run",
+    )
 
 
 def _runtime_planner_entrypoint_should_execute(context: str, allowed_tools: list[str]) -> bool:
