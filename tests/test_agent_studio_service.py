@@ -5,6 +5,10 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from apps.shell.agent.runtime.desktop_execution_providers import (
+    LOCAL_DESKTOP_PROVIDER_ID,
+    LOCAL_DESKTOP_PROVIDER_KIND,
+)
 from apps.shell.yachiyo_agent import (
     AgentDeskFileEventRequest,
     AgentStudioService,
@@ -21,6 +25,7 @@ from apps.shell.yachiyo_agent import (
     StartPlannerOrchestrationRequest,
     StartWorkflowRunRequest,
 )
+from apps.shell.yachiyo_agent.legacy_ports import LegacyStudioPort
 from apps.shell.yachiyo_agent.planner_projection import planner_run_event_payloads
 from apps.shell.yachiyo_agent.runtime_planner import RuntimePlanner
 
@@ -1061,6 +1066,38 @@ def test_agent_studio_service_maps_agent_group_workflow_snapshots() -> None:
             "default_input_schema": {"type": "object"},
         },
     ) in port.calls
+
+
+def test_legacy_studio_tool_catalog_exposes_local_desktop_provider(monkeypatch) -> None:
+    monkeypatch.delenv("OHA_YACHIYO_DESKTOP_PROVIDER_URL", raising=False)
+    monkeypatch.delenv("OHA_YACHIYO_SANDBOX_DESKTOP_PROVIDER_URL", raising=False)
+    monkeypatch.delenv("OHA_YACHIYO_DESKTOP_PROVIDER_EXECUTE_URL", raising=False)
+    monkeypatch.delenv("OHA_YACHIYO_SANDBOX_DESKTOP_PROVIDER_EXECUTE_URL", raising=False)
+    monkeypatch.setattr(
+        "apps.shell.yachiyo_agent.legacy_ports.desktop_permission_missing_by_capability",
+        lambda: {},
+    )
+    monkeypatch.setattr(
+        "apps.shell.yachiyo_agent.legacy_ports.desktop_runtime_blocking_conditions_by_capability",
+        lambda: {},
+    )
+
+    class Runtime:
+        def list_restricted_tool_plugins(self) -> dict[str, Any]:
+            return {"plugins": []}
+
+    catalog = LegacyStudioPort(Runtime()).list_tool_catalog()
+    provider = catalog["sandbox_provider"]
+    tools = {tool["tool_name"]: tool for tool in catalog["tools"]}
+
+    assert provider["provider_kind"] == LOCAL_DESKTOP_PROVIDER_KIND
+    assert provider["provider_id"] == LOCAL_DESKTOP_PROVIDER_ID
+    assert provider["status"] == "available"
+    assert "app.open" in provider["supported_tools"]
+    assert "desktop.inspect_app" in provider["supported_tools"]
+    assert tools["app.open"]["provider_ready"] is True
+    assert tools["desktop.inspect_app"]["provider_ready"] is True
+    assert tools["app.open"]["provider_kind"] == LOCAL_DESKTOP_PROVIDER_KIND
 
 
 def test_agent_studio_service_plans_task_from_tool_catalog() -> None:

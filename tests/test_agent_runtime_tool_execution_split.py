@@ -9,6 +9,9 @@ import pytest
 from apps.shell import agent_runtime
 from apps.shell.agent.runtime.desktop_execution_providers import (
     DesktopExecutionProviderRegistry,
+    LOCAL_DESKTOP_PROVIDER_ID,
+    LOCAL_DESKTOP_PROVIDER_KIND,
+    LocalDesktopExecutionProviderAdapter,
 )
 from apps.shell.agent.runtime.errors import AgentApprovalRequired, AgentRuntimeError
 from apps.shell.agent.runtime.tool_execution import (
@@ -1767,6 +1770,71 @@ def test_runtime_tool_call_executor_routes_sandbox_ready_tool_to_provider() -> N
     assert broker.calls == []
     assert timeline[-1]["event"] == "agent.tool.call"
     assert timeline[-1]["result"]["desktop_execution_provider_routed"] is True
+
+
+def test_runtime_tool_call_executor_routes_local_desktop_app_open_to_provider() -> None:
+    events = FakeToolCallEvents()
+    registry = DesktopExecutionProviderRegistry([LocalDesktopExecutionProviderAdapter()])
+    executor = _executor(
+        tool_call_events=events,
+        desktop_provider_registry=registry,
+    )
+    timeline: list[dict[str, Any]] = []
+    broker = FakeBroker(
+        {
+            "ok": True,
+            "action": "app.open",
+            "summary": "Opened PixelForge",
+            "data": {"app_name": "PixelForge"},
+        }
+    )
+
+    result = executor.execute(
+        {
+            "tool": "app.open",
+            "input": {"app_name": "PixelForge"},
+            "desktop_execution_policy": {"mode": "preview_input"},
+            "desktop_execution_route": {
+                "route_id": "desktop-route:app.open",
+                "tool_name": "app.open",
+                "requested_mode": "preview_input",
+                "selected_provider_kind": LOCAL_DESKTOP_PROVIDER_KIND,
+                "selected_provider_id": LOCAL_DESKTOP_PROVIDER_ID,
+                "status": "sandbox_ready",
+                "can_execute": True,
+                "can_auto_start": True,
+                "sandbox_required": True,
+                "blocking_conditions": [],
+            },
+            "sandbox_provider": {
+                "available": True,
+                "adapter_ready": True,
+                "provider_kind": LOCAL_DESKTOP_PROVIDER_KIND,
+                "provider_id": LOCAL_DESKTOP_PROVIDER_ID,
+                "status": "available",
+                "supported_tools": ["app.open"],
+            },
+        },
+        ["app.open"],
+        broker,
+        timeline,
+        run_id="run-1",
+        budget=FakeBudget(),
+    )
+
+    assert result["ok"] is True
+    assert result["desktop_execution_provider_routed"] is True
+    assert result["desktop_execution_provider"]["adapter_registered"] is True
+    assert result["desktop_execution_provider"]["provider_kind"] == LOCAL_DESKTOP_PROVIDER_KIND
+    assert result["desktop_execution_provider"]["provider_id"] == LOCAL_DESKTOP_PROVIDER_ID
+    assert result["local_desktop_provider"]["provider_id"] == LOCAL_DESKTOP_PROVIDER_ID
+    assert result["desktop_execution_route"]["status"] == "sandbox_ready"
+    assert result["sandbox_provider"]["provider_kind"] == LOCAL_DESKTOP_PROVIDER_KIND
+    assert broker.calls == [("app.open", {"app_name": "PixelForge"}, False)]
+    assert timeline[-1]["event"] == "agent.tool.call"
+    assert timeline[-1]["result"]["local_desktop_provider"]["provider_id"] == (
+        LOCAL_DESKTOP_PROVIDER_ID
+    )
 
 
 def test_runtime_tool_call_executor_blocks_provider_route_until_approved() -> None:

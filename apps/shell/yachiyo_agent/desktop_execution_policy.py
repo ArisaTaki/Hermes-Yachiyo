@@ -93,6 +93,7 @@ _READ_ONLY_DESKTOP_PROVIDER_TOOLS = frozenset(
         "desktop.list_windows",
         "desktop.ui_elements",
         "desktop.read_ui",
+        "desktop.inspect_app",
         "desktop.verify",
         "app.status",
     }

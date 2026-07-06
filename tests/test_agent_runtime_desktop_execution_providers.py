@@ -362,14 +362,32 @@ def test_local_desktop_provider_status_routes_safe_app_activation(monkeypatch) -
             "desktop_provider_local_native": True,
         },
     )
+    inspect_route = desktop_execution_route_decision(
+        "desktop.inspect_app",
+        policy={"mode": "preview_input"},
+        execution_mode={
+            "mode": "read_only_observation",
+            "foreground_control": False,
+            "keyboard_mouse_capture": False,
+            "sandbox_recommended": False,
+            "isolation": "none",
+        },
+        metadata={
+            "desktop_provider_route_readonly": True,
+            "desktop_provider_local_native": True,
+        },
+    )
 
     assert provider["available"] is True
     assert provider["adapter_ready"] is True
     assert provider["provider_kind"] == LOCAL_DESKTOP_PROVIDER_KIND
     assert provider["provider_id"] == LOCAL_DESKTOP_PROVIDER_ID
     assert "app.open" in provider["supported_tools"]
+    assert "desktop.inspect_app" in provider["supported_tools"]
     assert "desktop.safe_type_text" not in provider["supported_tools"]
     assert route["status"] == "sandbox_ready"
     assert route["selected_provider_kind"] == LOCAL_DESKTOP_PROVIDER_KIND
     assert route["selected_provider_id"] == LOCAL_DESKTOP_PROVIDER_ID
+    assert inspect_route["status"] == "sandbox_ready"
+    assert inspect_route["selected_provider_kind"] == LOCAL_DESKTOP_PROVIDER_KIND
     assert unsupported_input_route["status"] == "sandbox_tool_not_supported"

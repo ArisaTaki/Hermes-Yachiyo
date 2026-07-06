@@ -15,6 +15,7 @@ from apps.shell.yachiyo_agent import (
     StartChatTaskRequest,
     YachiyoAgentService,
 )
+from apps.shell.yachiyo_agent.legacy_tasks import LegacyRuntimePort
 from apps.shell.yachiyo_agent.runtime_execution import (
     runtime_execution_envelope_from_decision,
     runtime_execution_requests_from_envelope_payload,
@@ -741,6 +742,36 @@ def test_yachiyo_agent_service_maps_fake_runtime_to_task_snapshots() -> None:
     assert fetched.status == "completed"
     assert recent[0].task_id == "task-recent"
     assert port.calls[1][1]["prompt"] == "Patch README"
+
+
+def test_legacy_runtime_readiness_exposes_local_desktop_provider(monkeypatch) -> None:
+    monkeypatch.delenv("OHA_YACHIYO_DESKTOP_PROVIDER_URL", raising=False)
+    monkeypatch.delenv("OHA_YACHIYO_SANDBOX_DESKTOP_PROVIDER_URL", raising=False)
+    monkeypatch.delenv("OHA_YACHIYO_DESKTOP_PROVIDER_EXECUTE_URL", raising=False)
+    monkeypatch.delenv("OHA_YACHIYO_SANDBOX_DESKTOP_PROVIDER_EXECUTE_URL", raising=False)
+    monkeypatch.setattr(
+        "apps.shell.yachiyo_agent.legacy_tasks.desktop_permission_missing_by_capability",
+        lambda: {},
+    )
+    monkeypatch.setattr(
+        "apps.shell.yachiyo_agent.legacy_tasks.desktop_runtime_blocking_conditions_by_capability",
+        lambda: {},
+    )
+
+    class Runtime:
+        def list_runnables(self) -> dict[str, Any]:
+            return {"runnables": [{"runnable_id": "main-chat"}]}
+
+    readiness = LegacyRuntimePort(Runtime()).readiness()
+    provider = readiness["capabilities"]["sandbox_provider"]
+
+    assert readiness["ok"] is True
+    assert readiness["capabilities"]["desktop_provider_ready"] is True
+    assert provider["provider_kind"] == LOCAL_DESKTOP_PROVIDER_KIND
+    assert provider["provider_id"] == LOCAL_DESKTOP_PROVIDER_ID
+    assert provider["status"] == "available"
+    assert "app.open" in readiness["capabilities"]["desktop_provider_supported_tools"]
+    assert "desktop.inspect_app" in readiness["capabilities"]["desktop_provider_supported_tools"]
 
 
 def test_yachiyo_agent_service_starts_replan_recovery_action_from_chat_task() -> None:
@@ -1626,6 +1657,40 @@ def test_yachiyo_chat_execution_routes_app_open_through_local_desktop_provider(
     )
     assert requests["desktop.list_apps"].desktop_execution_route is not None
     assert requests["desktop.list_apps"].desktop_execution_route.status == "sandbox_ready"
+    assert requests["desktop.active_window"].desktop_execution_route is not None
+    assert requests["desktop.active_window"].desktop_execution_route.status == "sandbox_ready"
+
+
+def test_yachiyo_chat_execution_routes_music_playback_through_local_provider(
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv("OHA_YACHIYO_DESKTOP_PROVIDER_URL", raising=False)
+    monkeypatch.delenv("OHA_YACHIYO_SANDBOX_DESKTOP_PROVIDER_URL", raising=False)
+    monkeypatch.delenv("OHA_YACHIYO_DESKTOP_PROVIDER_EXECUTE_URL", raising=False)
+    monkeypatch.delenv("OHA_YACHIYO_SANDBOX_DESKTOP_PROVIDER_EXECUTE_URL", raising=False)
+    service = YachiyoAgentService(_FakeRuntimePort())
+
+    envelope = service.plan_chat_execution(
+        "播放 Apple Music",
+        allowed_tools=[
+            "media.music_app_open_and_play",
+            "media.apple_music_open_and_play",
+            "media.apple_music_play",
+            "desktop.active_window",
+        ],
+    )
+    requests = {request.tool_name: request for request in envelope.requests}
+    playback_request = requests["media.music_app_open_and_play"]
+
+    assert envelope.intent_kind == "media_playback"
+    assert playback_request.input == {"app_name": "Music"}
+    assert playback_request.sandbox_provider is not None
+    assert playback_request.sandbox_provider.provider_kind == LOCAL_DESKTOP_PROVIDER_KIND
+    assert playback_request.desktop_execution_route is not None
+    assert playback_request.desktop_execution_route.status == "sandbox_ready"
+    assert playback_request.desktop_execution_route.selected_provider_kind == (
+        LOCAL_DESKTOP_PROVIDER_KIND
+    )
     assert requests["desktop.active_window"].desktop_execution_route is not None
     assert requests["desktop.active_window"].desktop_execution_route.status == "sandbox_ready"
 
