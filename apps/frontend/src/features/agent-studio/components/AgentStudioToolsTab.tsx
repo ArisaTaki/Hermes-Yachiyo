@@ -754,6 +754,10 @@ function ToolDetail({
 
       <div
         className="studio-tool-inspector-section"
+        data-controlled-provider-command={providerState.controlledCommand.join(' ')}
+        data-controlled-provider-env-url={providerState.controlledEnvUrl}
+        data-controlled-provider-id={providerState.controlledProviderId}
+        data-controlled-provider-requires-approval={String(providerState.controlledRequiresApproval)}
         data-provider-ready={String(providerState.ready)}
         data-provider-requires-real-sandbox-for={providerState.requiresRealSandboxFor.join(',')}
         data-provider-status={providerState.status}
@@ -794,6 +798,21 @@ function ToolDetail({
                 {toolName}
               </span>
             ))}
+          {providerState.controlledCommand.length ? (
+            <span
+              className="studio-tool-permission missing"
+              data-controlled-provider-launch-command={providerState.controlledCommand.join(' ')}
+              data-controlled-provider-smoke-command={providerState.controlledSmokeCommand.join(' ')}
+              title={providerState.controlledCommand.join(' ')}
+            >
+              controlled · {providerState.controlledProviderId || 'launch provider'}
+            </span>
+          ) : null}
+          {providerState.controlledEnvUrl ? (
+            <span className="studio-tool-permission" data-controlled-provider-env-url={providerState.controlledEnvUrl}>
+              {providerState.controlledEnvUrl}
+            </span>
+          ) : null}
           {providerState.blockingConditions.map((condition) => (
             <span
               className="studio-tool-permission missing"
@@ -874,6 +893,11 @@ type ToolProviderState = {
   blockingConditions: string[];
   supportedTools: string[];
   requiresRealSandboxFor: string[];
+  controlledProviderId: string;
+  controlledCommand: string[];
+  controlledSmokeCommand: string[];
+  controlledEnvUrl: string;
+  controlledRequiresApproval: boolean;
 };
 
 function toolProviderState(tool: ToolCatalogItemSnapshot, catalog: ToolCatalogSnapshot): ToolProviderState {
@@ -886,19 +910,35 @@ function toolProviderState(tool: ToolCatalogItemSnapshot, catalog: ToolCatalogSn
   const supportedTools = stringArray(provider?.supported_tools);
   const requiresRealSandboxFor = stringArray(provider?.requires_real_sandbox_for);
   const blockingConditions = stringArray(provider?.blocking_conditions);
+  const launchHint = objectRecord(provider?.launch_hint);
+  const controlledProvider = objectRecord(launchHint.controlled_provider);
+  const controlledEnv = objectRecord(controlledProvider.env);
+  const controlledProviderId = stringValue(controlledProvider.provider_id);
+  const controlledCommand = stringArray(controlledProvider.command);
+  const controlledSmokeCommand = stringArray(controlledProvider.smoke_command);
+  const controlledEnvUrl = stringValue(controlledEnv.OHA_YACHIYO_DESKTOP_PROVIDER_URL);
+  const controlledRequiresApproval = controlledProvider.requires_runtime_approval === true;
   const requiresRealSandbox = Boolean(tool.tool_name && requiresRealSandboxFor.includes(tool.tool_name));
+  const baseState = {
+    providerId,
+    providerKind,
+    status,
+    blockingConditions,
+    supportedTools,
+    requiresRealSandboxFor,
+    controlledProviderId,
+    controlledCommand,
+    controlledSmokeCommand,
+    controlledEnvUrl,
+    controlledRequiresApproval,
+  };
   if (ready) {
     return {
       label: 'Provider ready',
       detail: `${providerId || providerKind || 'sandbox provider'} can run this tool`,
       ready,
       supported,
-      providerId,
-      providerKind,
-      status,
-      blockingConditions,
-      supportedTools,
-      requiresRealSandboxFor,
+      ...baseState,
     };
   }
   if (supported) {
@@ -907,26 +947,18 @@ function toolProviderState(tool: ToolCatalogItemSnapshot, catalog: ToolCatalogSn
       detail: `${providerId || providerKind || 'sandbox provider'} supports this tool but is not ready`,
       ready,
       supported,
-      providerId,
-      providerKind,
-      status,
-      blockingConditions,
-      supportedTools,
-      requiresRealSandboxFor,
+      ...baseState,
     };
   }
   if (requiresRealSandbox) {
     return {
       label: 'Sandbox required',
-      detail: `${providerId || providerKind || 'desktop provider'} needs a real sandbox/control provider for this keyboard or mouse action`,
+      detail: controlledCommand.length
+        ? `${controlledProviderId || 'controlled provider'} can be started for this keyboard or mouse action`
+        : `${providerId || providerKind || 'desktop provider'} needs a real sandbox/control provider for this keyboard or mouse action`,
       ready,
       supported,
-      providerId,
-      providerKind,
-      status,
-      blockingConditions,
-      supportedTools,
-      requiresRealSandboxFor,
+      ...baseState,
     };
   }
   return {
@@ -934,12 +966,7 @@ function toolProviderState(tool: ToolCatalogItemSnapshot, catalog: ToolCatalogSn
     detail: provider ? 'No provider route for this tool' : 'No desktop provider advertised',
     ready,
     supported,
-    providerId,
-    providerKind,
-    status,
-    blockingConditions,
-    supportedTools,
-    requiresRealSandboxFor,
+    ...baseState,
   };
 }
 

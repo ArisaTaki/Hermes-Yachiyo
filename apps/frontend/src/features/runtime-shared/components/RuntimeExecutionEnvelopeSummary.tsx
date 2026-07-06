@@ -85,6 +85,9 @@ export function RuntimeExecutionEnvelopeSummary({
       data-sandbox-provider-health-status={sandboxProvider.healthStatus}
       data-sandbox-provider-launch-command={sandboxProvider.launchCommand.join(' ')}
       data-sandbox-provider-launch-provider-id={sandboxProvider.launchProviderId}
+      data-sandbox-provider-controlled-command={sandboxProvider.controlledCommand.join(' ')}
+      data-sandbox-provider-controlled-env-url={sandboxProvider.controlledEnvUrl}
+      data-sandbox-provider-controlled-provider-id={sandboxProvider.controlledProviderId}
       data-sandbox-provider-foreground-mutation-supported={
         sandboxProvider.foregroundMutationSupported === null
           ? ''
@@ -246,6 +249,7 @@ function RuntimeExecutionEnvelopePills({
     && !sandboxProvider.status
     && !sandboxProvider.healthStatus
     && !sandboxProvider.launchCommand.length
+    && !sandboxProvider.controlledCommand.length
     && !executionPolicy.mode
   ) {
     return null;
@@ -306,6 +310,18 @@ function RuntimeExecutionEnvelopePills({
           title={sandboxProvider.launchCommand.join(' ')}
         >
           launch · {sandboxProvider.launchLabel}
+        </span>
+      ) : null}
+      {sandboxProvider.controlledCommand.length ? (
+        <span
+          className={missingClassName}
+          data-sandbox-provider-controlled-command={sandboxProvider.controlledCommand.join(' ')}
+          data-sandbox-provider-controlled-env-url={sandboxProvider.controlledEnvUrl}
+          data-sandbox-provider-controlled-provider-id={sandboxProvider.controlledProviderId}
+          data-sandbox-provider-controlled-smoke-command={sandboxProvider.controlledSmokeCommand.join(' ')}
+          title={sandboxProvider.controlledCommand.join(' ')}
+        >
+          control · {sandboxProvider.controlledLabel}
         </span>
       ) : null}
       {stageCounts.map(([stage, count]) => (
@@ -534,6 +550,11 @@ type RuntimeExecutionRouteSummary = {
 type RuntimeSandboxProviderSummary = {
   available: boolean;
   blockers: string[];
+  controlledCommand: string[];
+  controlledEnvUrl: string;
+  controlledLabel: string;
+  controlledProviderId: string;
+  controlledSmokeCommand: string[];
   foregroundMutationSupported: boolean | null;
   keyboardMouseCaptureSupported: boolean | null;
   healthBlockers: string[];
@@ -677,6 +698,12 @@ function runtimeSandboxProviderSummary(
   const launchHint = objectRecord(record.launch_hint);
   const launchCommand = stringArray(launchHint.command);
   const launchEnv = objectRecord(launchHint.env);
+  const controlledProvider = objectRecord(launchHint.controlled_provider);
+  const controlledCommand = stringArray(controlledProvider.command);
+  const controlledSmokeCommand = stringArray(controlledProvider.smoke_command);
+  const controlledEnv = objectRecord(controlledProvider.env);
+  const controlledProviderId = stringValue(controlledProvider.provider_id);
+  const controlledEnvUrl = stringValue(controlledEnv.OHA_YACHIYO_DESKTOP_PROVIDER_URL);
   const launchProviderId = stringValue(launchHint.provider_id) || providerId;
   const launchEnvUrl = stringValue(launchEnv.OHA_YACHIYO_DESKTOP_PROVIDER_URL);
   const foregroundMutationSupported = booleanValue(record.foreground_mutation_supported)
@@ -689,6 +716,16 @@ function runtimeSandboxProviderSummary(
   return {
     available,
     blockers,
+    controlledCommand,
+    controlledEnvUrl,
+    controlledLabel: sandboxProviderLaunchLabel({
+      command: controlledCommand,
+      foregroundMutationSupported: booleanValue(controlledProvider.foreground_mutation_supported),
+      providerId: controlledProviderId,
+      requiresRealSandboxFor: [],
+    }),
+    controlledProviderId,
+    controlledSmokeCommand,
     foregroundMutationSupported,
     keyboardMouseCaptureSupported,
     healthBlockers,

@@ -5078,6 +5078,11 @@ def test_sandbox_desktop_provider_snapshot_json_shape_is_stable() -> None:
     assert default_status["launch_hint"]["controlled_provider"]["provider_id"] == (
         "local-controlled-desktop"
     )
+    assert default_status["launch_hint"]["controlled_provider"]["smoke_command"] == [
+        "python",
+        "scripts/run_controlled_desktop_provider.py",
+        "--manifest",
+    ]
     assert default_status["launch_hint"]["controlled_provider"][
         "keyboard_mouse_capture_supported"
     ] is True

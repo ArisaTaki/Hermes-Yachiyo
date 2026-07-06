@@ -137,6 +137,7 @@ export type SandboxDesktopProviderLaunchHint = {
     provider_kind?: DesktopIsolationKind | string;
     execution_mode?: string;
     command?: string[];
+    smoke_command?: string[];
     env?: Record<string, string>;
     foreground_mutation_supported?: boolean;
     keyboard_mouse_capture_supported?: boolean;

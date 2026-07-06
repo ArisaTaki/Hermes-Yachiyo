@@ -73,6 +73,11 @@ _SANDBOX_DESKTOP_PROVIDER_DEFAULT: dict[str, Any] = {
                 "--port",
                 "19092",
             ],
+            "smoke_command": [
+                "python",
+                "scripts/run_controlled_desktop_provider.py",
+                "--manifest",
+            ],
             "env": {
                 "OHA_YACHIYO_DESKTOP_PROVIDER_URL": "http://127.0.0.1:19092",
                 "OHA_YACHIYO_DESKTOP_PROVIDER_ID": "local-controlled-desktop",

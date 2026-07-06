@@ -101,6 +101,12 @@ export function chatDesktopPermissionNotice(
   if (providerReadiness.supported_tools.length) {
     actionParams.desktop_provider_tools = providerReadiness.supported_tools.join(',');
   }
+  if (providerReadiness.controlled_provider_id) {
+    actionParams.controlled_desktop_provider_id = providerReadiness.controlled_provider_id;
+  }
+  if (providerReadiness.controlled_env_url) {
+    actionParams.controlled_desktop_provider_url = providerReadiness.controlled_env_url;
+  }
   return {
     kind: 'warn',
     title: missing.length
@@ -128,6 +134,9 @@ export function desktopProviderReadinessSummary(
   foreground_mutation_supported: boolean;
   keyboard_mouse_capture_supported: boolean;
   requires_real_sandbox_for: string[];
+  controlled_provider_id: string;
+  controlled_env_url: string;
+  controlled_command: string[];
   detail: string;
 } {
   const capabilities = readiness?.capabilities;
@@ -143,6 +152,12 @@ export function desktopProviderReadinessSummary(
     ...stringList(capabilities.desktop_provider_supported_tools),
   ]);
   const blockingConditions = stringList(provider?.blocking_conditions);
+  const launchHint = recordValue(provider?.launch_hint);
+  const controlledProvider = recordValue(launchHint?.controlled_provider);
+  const controlledEnv = recordValue(controlledProvider?.env);
+  const controlledProviderId = stringValue(controlledProvider?.provider_id);
+  const controlledEnvUrl = stringValue(controlledEnv?.OHA_YACHIYO_DESKTOP_PROVIDER_URL);
+  const controlledCommand = stringList(controlledProvider?.command);
   const foregroundMutationSupported = booleanValue(provider?.foreground_mutation_supported);
   const keyboardMouseCaptureKnown = Boolean(
     provider && Object.prototype.hasOwnProperty.call(provider, 'keyboard_mouse_capture_supported'),
@@ -163,7 +178,7 @@ export function desktopProviderReadinessSummary(
     && requiresRealSandboxFor.length > 0;
   const detail = ready
     ? inputSandboxLimited
-      ? `${providerLabel} 已就绪${supportedTools.length ? `，支持 ${formatDesktopToolList(toolDisplayLabels(supportedTools))}` : ''}；点击、输入和快捷键仍需要真实沙盒或受监管控制通道。`
+      ? `${providerLabel} 已就绪${supportedTools.length ? `，支持 ${formatDesktopToolList(toolDisplayLabels(supportedTools))}` : ''}；点击、输入和快捷键仍需要真实沙盒或受监管控制通道${controlledCommand.length ? `，可在 Agent Studio 启动 ${controlledProviderId || 'controlled provider'}。` : '。'}`
       : `${providerLabel} 已就绪${supportedTools.length ? `，支持 ${formatDesktopToolList(toolDisplayLabels(supportedTools))}` : ''}。`
     : providerId || status
       ? `${providerLabel} 未就绪；前台点击、输入或快捷键会保持预览、审批或转入 Agent Studio。`
@@ -179,6 +194,9 @@ export function desktopProviderReadinessSummary(
     foreground_mutation_supported: foregroundMutationSupported,
     keyboard_mouse_capture_supported: keyboardMouseCaptureSupported,
     requires_real_sandbox_for: requiresRealSandboxFor,
+    controlled_provider_id: controlledProviderId,
+    controlled_env_url: controlledEnvUrl,
+    controlled_command: controlledCommand,
     detail,
   };
 }
@@ -265,6 +283,9 @@ function emptyProviderReadiness() {
     foreground_mutation_supported: false,
     keyboard_mouse_capture_supported: false,
     requires_real_sandbox_for: [],
+    controlled_provider_id: '',
+    controlled_env_url: '',
+    controlled_command: [],
     detail: '',
   };
 }
