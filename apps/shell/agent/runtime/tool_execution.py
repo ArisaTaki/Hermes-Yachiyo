@@ -369,6 +369,11 @@ def _desktop_execution_policy_recovery_actions(
         "source": "desktop_execution_policy_recovery",
         "reason": "User selected an Agent Studio supervised live retry.",
     }
+    sandbox_policy = {
+        "mode": "sandbox_preferred",
+        "source": "desktop_execution_policy_recovery",
+        "reason": "Prefer a sandbox desktop/session before touching the real foreground desktop.",
+    }
     manual_metadata = {
         "runtime_replan_auto_start_eligible": False,
         "runtime_replan_auto_start_reason": "desktop_execution_policy_requires_supervision",
@@ -419,6 +424,42 @@ def _desktop_execution_policy_recovery_actions(
                 "blocked_tool": tool_name,
             },
         },
+    ]
+    if bool(execution_mode.get("sandbox_recommended")):
+        actions.append(
+            {
+                "label": "Prepare sandbox desktop handoff",
+                "tool": "screen.capture",
+                "input": {"reason": "sandbox_desktop_handoff"},
+                "permission_target": "sandbox_desktop",
+                "risk_level": "low",
+                "planning_reason": "desktop_execution_policy_sandbox_handoff",
+                "recovery_action_kind": "sandbox_desktop_handoff",
+                "desktop_execution_policy": sandbox_policy,
+                "deferred_continuation": [
+                    {
+                        "tool": tool_name,
+                        "input": tool_input,
+                        "desktop_execution_policy": sandbox_policy,
+                        "planning_reason": "desktop_execution_policy_sandbox_deferred_tool",
+                        "source": "desktop_execution_policy_recovery",
+                    }
+                ],
+                "metadata": {
+                    "runtime_replan_auto_start_eligible": False,
+                    "runtime_replan_auto_start_reason": "sandbox_desktop_handoff_required",
+                    "runtime_replan_auto_start_blockers": ["sandbox_desktop_provider_required"],
+                    "desktop_execution_policy": sandbox_policy,
+                    "blocked_desktop_execution_policy": dict(policy),
+                    "blocked_desktop_execution_policy_mode": policy_mode,
+                    "desktop_execution_mode": dict(execution_mode),
+                    "sandbox_desktop_handoff": True,
+                    "sandbox_original_tool": tool_name,
+                    "sandbox_original_input": tool_input,
+                },
+            }
+        )
+    actions.append(
         {
             "label": "Continue in Agent Studio supervised live",
             "tool": tool_name,
@@ -430,8 +471,8 @@ def _desktop_execution_policy_recovery_actions(
             "recovery_action_kind": "supervised_live_retry",
             "desktop_execution_policy": supervised_policy,
             "metadata": manual_metadata,
-        },
-    ]
+        }
+    )
     if isinstance(action_target, Mapping) and action_target:
         actions[-1]["action_target"] = dict(action_target)
     if isinstance(observation_evidence, Mapping) and observation_evidence:

@@ -2272,9 +2272,29 @@ def test_runtime_tool_request_runner_previews_live_foreground_tools_by_policy() 
     assert [action["tool"] for action in result["recovery_actions"]] == [
         "desktop.active_window",
         "desktop.ui_elements",
+        "screen.capture",
         "desktop.safe_type_text",
     ]
-    supervised_action = result["recovery_actions"][2]
+    assert [action["recovery_action_kind"] for action in result["recovery_actions"]] == [
+        "observe_desktop_state",
+        "observe_desktop_controls",
+        "sandbox_desktop_handoff",
+        "supervised_live_retry",
+    ]
+    sandbox_action = result["recovery_actions"][2]
+    assert sandbox_action["desktop_execution_policy"]["mode"] == "sandbox_preferred"
+    assert sandbox_action["metadata"]["sandbox_desktop_handoff"] is True
+    assert sandbox_action["metadata"]["runtime_replan_auto_start_eligible"] is False
+    assert sandbox_action["metadata"]["runtime_replan_auto_start_blockers"] == [
+        "sandbox_desktop_provider_required"
+    ]
+    assert sandbox_action["deferred_continuation"][0]["tool"] == "desktop.safe_type_text"
+    assert sandbox_action["deferred_continuation"][0]["input"] == {"text": "hello"}
+    assert (
+        sandbox_action["deferred_continuation"][0]["desktop_execution_policy"]["mode"]
+        == "sandbox_preferred"
+    )
+    supervised_action = result["recovery_actions"][3]
     assert supervised_action["desktop_execution_policy"]["mode"] == "supervised_live"
     assert supervised_action["metadata"]["runtime_replan_auto_start_eligible"] is False
     assert supervised_action["metadata"]["runtime_replan_auto_start_blockers"] == [
@@ -2342,7 +2362,7 @@ def test_runtime_tool_request_runner_preview_input_policy_allows_media_but_block
     assert skipped["detail"] == "desktop.safe_type_text"
     assert skipped["result"]["blocked_by_desktop_execution_policy"] is True
     assert skipped["result"]["desktop_execution_policy"] == policy
-    supervised_action = skipped["result"]["recovery_actions"][2]
+    supervised_action = skipped["result"]["recovery_actions"][3]
     assert supervised_action["tool"] == "desktop.safe_type_text"
     assert supervised_action["input"] == {"text": "hello"}
     assert supervised_action["desktop_execution_policy"]["mode"] == "supervised_live"

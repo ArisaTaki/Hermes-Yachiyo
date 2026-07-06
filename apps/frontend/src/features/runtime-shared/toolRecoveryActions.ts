@@ -1,6 +1,12 @@
 export type RuntimeToolRecoveryAction = {
   action_id?: string;
-  action_kind?: 'permission_recovery' | 'retry_original';
+  action_kind?:
+    | 'permission_recovery'
+    | 'retry_original'
+    | 'observe_desktop_state'
+    | 'observe_desktop_controls'
+    | 'supervised_live_retry'
+    | 'sandbox_desktop_handoff';
   approval_required?: boolean;
   approval_id?: string;
   approval_status?: string;
@@ -12,6 +18,7 @@ export type RuntimeToolRecoveryAction = {
   deferred_input?: Record<string, unknown>;
   deferred_context?: Record<string, unknown>;
   deferred_continuation?: Array<Record<string, unknown>>;
+  desktop_execution_policy?: Record<string, unknown>;
   input: Record<string, unknown>;
   label: string;
   permission_target: string;
@@ -142,6 +149,7 @@ export const RUNTIME_TOOL_RECOVERY_TASK_METADATA_KEYS = [
   'deferred_input',
   'deferred_context',
   'deferred_continuation',
+  'desktop_execution_policy',
   'replan_recovery_action_id',
   'replan_request_id',
   'recovery_retry_tool',
@@ -204,6 +212,9 @@ export function runtimeToolRecoveryActionTaskMetadata(
     ...(Object.keys(action.deferred_input || {}).length ? { deferred_input: action.deferred_input } : {}),
     ...(Object.keys(action.deferred_context || {}).length ? { deferred_context: action.deferred_context } : {}),
     ...(action.deferred_continuation?.length ? { deferred_continuation: action.deferred_continuation } : {}),
+    ...(Object.keys(action.desktop_execution_policy || {}).length
+      ? { desktop_execution_policy: action.desktop_execution_policy }
+      : {}),
     ...(action.replan_request_id ? { replan_request_id: action.replan_request_id } : {}),
     ...(action.retry_tool ? { recovery_retry_tool: action.retry_tool } : {}),
     ...(action.retry_tool || action.retry_input ? { recovery_retry_input: action.retry_input || {} } : {}),
@@ -302,6 +313,9 @@ function runtimeToolRecoveryApprovalDeferredMetadata(
     ...(Object.keys(action.deferred_input || {}).length ? { deferred_input: action.deferred_input } : {}),
     ...(Object.keys(action.deferred_context || {}).length ? { deferred_context: action.deferred_context } : {}),
     ...(action.deferred_continuation?.length ? { deferred_continuation: action.deferred_continuation } : {}),
+    ...(Object.keys(action.desktop_execution_policy || {}).length
+      ? { desktop_execution_policy: action.desktop_execution_policy }
+      : {}),
   };
 }
 
@@ -341,6 +355,7 @@ export function runtimeToolRecoveryRetryAction(
     deferred_input: action.deferred_input,
     deferred_context: action.deferred_context,
     deferred_continuation: action.deferred_continuation,
+    desktop_execution_policy: action.desktop_execution_policy,
     input: retryInput,
     label: '恢复后重试原操作',
     permission_target: action.permission_target,

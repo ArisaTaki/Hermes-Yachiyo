@@ -38,10 +38,18 @@ DesktopExecutionPolicyMode = Literal[
     "allow",
     "preview",
     "preview_input",
+    "sandbox_preferred",
     "handoff_required",
     "supervised_live",
 ]
-RecoveryActionKind = Literal["permission_recovery", "retry_original"]
+RecoveryActionKind = Literal[
+    "permission_recovery",
+    "retry_original",
+    "observe_desktop_state",
+    "observe_desktop_controls",
+    "supervised_live_retry",
+    "sandbox_desktop_handoff",
+]
 TaskWorkspaceItemKind = Literal[
     "input",
     "scratch",

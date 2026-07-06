@@ -29,6 +29,28 @@ of these phases, and cleanup of old app-specific hardcoding belongs in Phase
 application optimizations must not replace the capability discovery,
 intent-routing, planning, execution, and verification chain.
 
+## Current Goal Addendum
+
+The active goal is to finish Oha-Yachiyo as a releasable desktop execution
+agent, not to keep tuning small isolated tests. The runtime direction is:
+
+- DeepAgent-style core: explicit task workspace, todo/checkpoint state,
+  planner/replan loop, artifacts, and durable run events that Studio can replay.
+- Hanako/Hermes-style desktop executor: discover first, operate second, verify
+  third; generic app categories and unknown app names must go through local
+  discovery instead of new app-specific branches.
+- Sandboxed-first desktop interaction: when foreground input could compete with
+  the user's mouse or keyboard, prefer tool-native, headless, browser-profile,
+  or sandbox desktop execution. Real foreground control remains supervised and
+  approval/policy gated.
+- Progress reporting should be against release parity, not only the currently
+  selected phase. The remaining percentage can increase if the definition of
+  parity expands, but each completed batch should report the new remaining
+  estimate and the next blocker honestly.
+- Testing cadence is code-first during active migration: run focused syntax and
+  smoke checks per batch, then run the full source/UI/native/provider release
+  gates at phase boundaries and before release claims.
+
 ## Release-Level Definition Of Done
 
 Oha-Yachiyo is not considered Hanako/Hermes-level until all of the following

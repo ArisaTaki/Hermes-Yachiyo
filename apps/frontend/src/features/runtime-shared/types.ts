@@ -21,6 +21,7 @@ export type DesktopExecutionPolicyMode =
   | 'allow'
   | 'preview'
   | 'preview_input'
+  | 'sandbox_preferred'
   | 'handoff_required'
   | 'supervised_live';
 export type TaskIntentKind =
