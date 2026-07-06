@@ -2314,6 +2314,10 @@ def _runtime_replan_request_payload_for_tool_result(
         result_preview=result_preview,
         failure_detail=failure_detail,
     )
+    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), Mapping) else {}
+    recovery_actions = metadata.get("recovery_actions")
+    if isinstance(recovery_actions, list) and recovery_actions:
+        payload["recovery_actions"] = list(recovery_actions)
     for key in (
         "run_group_id",
         "group_run_id",
@@ -2499,22 +2503,27 @@ def _runtime_default_replan_recovery_actions(
         )
         if action_input is None:
             continue
-        actions.append(
-            {
-                "label": _runtime_default_recovery_label(fallback_tool),
+        risk_level = _runtime_default_recovery_risk_level(fallback_tool)
+        approval_required = _runtime_default_recovery_approval_required(fallback_tool)
+        action: dict[str, Any] = {
+            "label": _runtime_default_recovery_label(fallback_tool),
+            "tool": fallback_tool,
+            "input": action_input,
+            "permission_target": _runtime_default_recovery_permission_target(
+                fallback_tool
+            ),
+            "risk_level": risk_level,
+            "observation_retry": {
                 "tool": fallback_tool,
                 "input": action_input,
-                "permission_target": _runtime_default_recovery_permission_target(
-                    fallback_tool
-                ),
-                "risk_level": "low",
-                "observation_retry": {
-                    "tool": fallback_tool,
-                    "input": action_input,
-                    "reason": "tool_failure",
-                    "source_tool": tool_name,
-                },
-            }
+                "reason": "tool_failure",
+                "source_tool": tool_name,
+            },
+        }
+        if approval_required:
+            action["approval_required"] = True
+        actions.append(
+            action
         )
     return actions
 
@@ -2557,7 +2566,75 @@ def _runtime_default_recovery_input(
         return {"reason": "recover failed desktop tool"}
     if fallback_tool == "desktop.permissions":
         return {}
+    if fallback_tool == "python.run":
+        code = _runtime_default_python_recovery_code(raw_input)
+        return {"code": code} if code else None
+    if fallback_tool == "terminal.run":
+        command = _runtime_default_terminal_recovery_command(raw_input)
+        return {"command": command} if command else None
     return None
+
+
+def _runtime_default_python_recovery_code(raw_input: Mapping[str, Any]) -> str:
+    explicit_code = _runtime_default_recovery_text_value(
+        raw_input,
+        "code",
+        "python_code",
+        "script",
+    )
+    if explicit_code:
+        return explicit_code
+    path = _runtime_default_recovery_text_value(
+        raw_input,
+        "path",
+        "file_path",
+        "source_path",
+        "data_source_hint",
+    )
+    if not path:
+        return ""
+    return "\n".join(
+        [
+            "from pathlib import Path",
+            "import pandas as pd",
+            "",
+            f"path = Path({path!r})",
+            "suffix = path.suffix.lower()",
+            "if suffix == '.csv':",
+            "    df = pd.read_csv(path)",
+            "elif suffix in {'.xlsx', '.xls'}:",
+            "    df = pd.read_excel(path)",
+            "elif suffix == '.json':",
+            "    df = pd.read_json(path)",
+            "else:",
+            "    df = pd.read_csv(path)",
+            "print('rows:', len(df), 'columns:', len(df.columns))",
+            "print(df.head(20).to_string(index=False))",
+            "print(df.describe(include='all').to_string())",
+        ]
+    )
+
+
+def _runtime_default_terminal_recovery_command(raw_input: Mapping[str, Any]) -> str:
+    return _runtime_default_recovery_text_value(
+        raw_input,
+        "command",
+        "cmd",
+        "shell_command",
+    )
+
+
+def _runtime_default_recovery_text_value(
+    payload: Mapping[str, Any],
+    *keys: str,
+) -> str:
+    for key in keys:
+        value = payload.get(key)
+        if isinstance(value, str):
+            text = value.strip()
+            if text:
+                return text
+    return ""
 
 
 def _runtime_default_recovery_label(tool_name: str) -> str:
@@ -2571,6 +2648,8 @@ def _runtime_default_recovery_label(tool_name: str) -> str:
         "desktop.read_ui": "Inspect foreground UI",
         "screen.capture": "Capture screen",
         "desktop.permissions": "Check desktop permissions",
+        "python.run": "Run Python analysis fallback",
+        "terminal.run": "Run terminal fallback",
     }.get(tool_name, "Run recovery tool")
 
 
@@ -2581,7 +2660,19 @@ def _runtime_default_recovery_permission_target(tool_name: str) -> str:
         return "desktop_permissions"
     if tool_name == "app.open":
         return "app_launch"
+    if tool_name in {"python.run", "terminal.run"}:
+        return "terminal_execution"
     return "runtime_observation"
+
+
+def _runtime_default_recovery_risk_level(tool_name: str) -> str:
+    if tool_name in {"python.run", "terminal.run"}:
+        return "high"
+    return "low"
+
+
+def _runtime_default_recovery_approval_required(tool_name: str) -> bool:
+    return tool_name in {"python.run", "terminal.run"}
 
 
 def _runtime_replan_result_preview(result: Mapping[str, Any]) -> dict[str, Any]:
@@ -2656,6 +2747,15 @@ def _runtime_replan_enrich_recovery_context(
                 payload.setdefault(key, value)
                 metadata.setdefault(key, value)
         recovery_actions.extend(_mapping_list(verification_context.get("recovery_actions")))
+
+    if not recovery_actions:
+        recovery_actions.extend(
+            _runtime_default_replan_recovery_actions(
+                source_tool_name,
+                input_preview,
+                _string_list(payload.get("fallback_tools")),
+            )
+        )
 
     recovery_actions = _dedupe_runtime_replan_recovery_actions(recovery_actions)
     if recovery_actions:

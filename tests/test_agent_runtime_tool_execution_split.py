@@ -757,7 +757,9 @@ def test_runtime_tool_request_runner_records_verification_failure_recovery_conte
     assert todo_statuses == ["in_progress", "blocked"]
     assert checkpoint_statuses == ["ready", "blocked"]
 
-    replan_event = next(event for event in timeline if event["event"] == "agent.replan.requested")
+    replan_event = next(
+        event for event in timeline if event["event"] == "agent.replan.requested"
+    )
     payload = replan_event["payload"]
     assert payload["trigger"] == "verification_failed"
     assert payload["source_step_id"] == "verify-desktop-result"
@@ -988,6 +990,69 @@ def test_runtime_tool_request_runner_uses_capability_recovery_for_generic_media_
     assert run_replan_event["fallback_tools"] == payload["fallback_tools"]
 
 
+def test_runtime_tool_request_runner_projects_data_analysis_python_recovery_action() -> None:
+    run_events: list[tuple[str, str, dict[str, Any]]] = []
+    timeline: list[dict[str, Any]] = []
+
+    runner = _runner(
+        call_agent_tool=lambda *_args, **_kwargs: {
+            "ok": False,
+            "error": "built-in parser could not parse file",
+        },
+        run_events=run_events,
+    )
+
+    runner.run(
+        [
+            {
+                "tool": "data.analyze",
+                "input": {"path": "data/sales.csv"},
+                "source": "runtime_planner",
+                "step_id": "analyze-data-file",
+                "capability_id": "data.analysis",
+                "replan_triggers": ["tool_failure"],
+            }
+        ],
+        ["data.analyze", "python.run", "terminal.run"],
+        FakeBroker({"ok": True}),
+        [{"role": "user", "content": "analyze data/sales.csv"}],
+        timeline,
+        [],
+        next_iteration=1,
+        run_id="run-data-recovery",
+        budget=FakeBudget(),
+    )
+
+    replan_event = next(event for event in timeline if event["event"] == "agent.replan.requested")
+    payload = replan_event["payload"]
+    assert payload["fallback_tools"] == ["python.run", "terminal.run"]
+    assert payload["recovery_actions"] == payload["metadata"]["recovery_actions"]
+    recovery_actions = payload["metadata"]["recovery_actions"]
+    assert len(recovery_actions) == 1
+    python_action = recovery_actions[0]
+    assert python_action["tool"] == "python.run"
+    assert python_action["permission_target"] == "terminal_execution"
+    assert python_action["risk_level"] == "high"
+    assert python_action["approval_required"] is True
+    assert "data/sales.csv" in python_action["input"]["code"]
+    assert "pd.read_csv" in python_action["input"]["code"]
+    assert python_action["metadata"] == {
+        "runtime_replan_auto_start_eligible": False,
+        "runtime_replan_auto_start_reason": "manual_runtime_replan_recovery_required",
+        "runtime_replan_auto_start_blockers": [
+            "approval_required",
+            "high_risk",
+            "tool_not_auto_safe",
+        ],
+    }
+    run_replan_event = next(
+        payload
+        for _run_id, event_type, payload in run_events
+        if event_type == "agent.replan.requested"
+    )
+    assert run_replan_event["recovery_actions"] == payload["recovery_actions"]
+
+
 def test_runtime_tool_request_runner_records_group_scoped_replan_request() -> None:
     run_events: list[tuple[str, str, dict[str, Any]]] = []
     timeline: list[dict[str, Any]] = []
@@ -1199,6 +1264,7 @@ def test_runtime_tool_request_runner_synthesizes_observation_retry_recovery_acti
     assert payload["action_target"] == action_target
     assert payload["observation_evidence"] == observation_evidence
     assert payload["observation_retry"] == observation_retry
+    assert payload["recovery_actions"] == payload["metadata"]["recovery_actions"]
     assert payload["metadata"]["recovery_actions"] == [
         {
             "label": "Re-run runtime observation",
@@ -1227,7 +1293,10 @@ def test_runtime_tool_request_runner_synthesizes_observation_retry_recovery_acti
         for _run_id, event_type, payload in run_events
         if event_type == "agent.replan.requested"
     )
-    assert run_replan_event["metadata"]["recovery_actions"] == payload["metadata"]["recovery_actions"]
+    assert run_replan_event["metadata"]["recovery_actions"] == payload["metadata"][
+        "recovery_actions"
+    ]
+    assert run_replan_event["recovery_actions"] == payload["recovery_actions"]
 
 
 def test_runtime_tool_request_runner_marks_unsafe_recovery_actions_manual() -> None:
