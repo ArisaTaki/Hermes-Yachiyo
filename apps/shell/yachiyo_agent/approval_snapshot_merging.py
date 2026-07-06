@@ -57,6 +57,14 @@ def merge_approval_snapshots(
             current.requires_post_action_verification
             or next_approval.requires_post_action_verification
         ),
+        runtime_execution_envelope=(
+            current.runtime_execution_envelope
+            or next_approval.runtime_execution_envelope
+        ),
+        runtime_execution_metadata=_merge_mappings(
+            current.runtime_execution_metadata,
+            next_approval.runtime_execution_metadata,
+        ),
         deferred_tool=current.deferred_tool or next_approval.deferred_tool,
         deferred_input={**next_approval.deferred_input, **current.deferred_input},
         deferred_context={**next_approval.deferred_context, **current.deferred_context},

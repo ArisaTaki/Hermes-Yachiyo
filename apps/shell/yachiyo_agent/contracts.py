@@ -901,6 +901,8 @@ class ApprovalCardSnapshot(_PublicSnapshot):
     runtime_role: str | None = None
     requires_observation: bool = False
     requires_post_action_verification: bool = False
+    runtime_execution_envelope: RuntimeExecutionEnvelopeSnapshot | None = None
+    runtime_execution_metadata: dict[str, Any] = Field(default_factory=dict)
     deferred_tool: str | None = None
     deferred_input: dict[str, Any] = Field(default_factory=dict)
     deferred_context: dict[str, Any] = Field(default_factory=dict)

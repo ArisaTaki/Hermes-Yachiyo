@@ -238,6 +238,20 @@ def test_merge_approval_snapshot_lists_preserves_order_and_fills_resolution() ->
             "approval_id": "approval-1",
             "tool": "terminal.run",
             "input_preview": {"command": "npm test"},
+            "runtime_execution_envelope": {
+                "envelope_id": "approval-envelope-1",
+                "decision_id": "decision-1",
+                "plan_id": "plan-1",
+                "intent_kind": "code_task",
+                "requests": [
+                    {
+                        "request_id": "request-1",
+                        "tool_name": "terminal.run",
+                        "risk_level": "high",
+                    }
+                ],
+            },
+            "runtime_execution_metadata": {"yachiyo_runtime_planner": True},
             "created_at": "2026-06-15T00:00:00Z",
         },
         run_id="run-1",
@@ -263,6 +277,9 @@ def test_merge_approval_snapshot_lists_preserves_order_and_fills_resolution() ->
     assert merged[0].requested_at == "2026-06-15T00:00:00Z"
     assert merged[0].resolved_at == "2026-06-15T00:00:01Z"
     assert merged[0].input_preview == {"command": "npm test"}
+    assert merged[0].runtime_execution_envelope is not None
+    assert merged[0].runtime_execution_envelope.envelope_id == "approval-envelope-1"
+    assert merged[0].runtime_execution_metadata == {"yachiyo_runtime_planner": True}
 
 
 def test_merge_approval_snapshot_lists_skips_empty_identity_snapshots() -> None:

@@ -57,6 +57,11 @@ _PENDING_APPROVAL_CONTEXT_LIST_KEYS = (
     "replan_triggers",
     "replan_signal_ids",
 )
+_PENDING_APPROVAL_CONTEXT_MAPPING_KEYS = (
+    "runtime_execution_envelope",
+    "yachiyo_execution_envelope",
+    "runtime_execution_metadata",
+)
 
 
 class ToolPendingApprovalBuilder:
@@ -76,7 +81,10 @@ class ToolPendingApprovalBuilder:
     ) -> dict[str, Any]:
         raw_input = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
         context = _pending_approval_context(tool_request)
-        input_preview = _tool_input_preview(raw_input)
+        input_preview = _pending_approval_input_preview(
+            _tool_input_preview(raw_input),
+            context,
+        )
         return {
             "approval_id": str(self._approval_id_factory()),
             "tool": normalize_tool_name(tool_request.get("tool")),
@@ -192,6 +200,10 @@ def _pending_approval_context(tool_request: dict[str, Any]) -> dict[str, Any]:
             items = [str(item).strip() for item in value if str(item).strip()]
             if items:
                 context[key] = items
+    for key in _PENDING_APPROVAL_CONTEXT_MAPPING_KEYS:
+        value = tool_request.get(key)
+        if isinstance(value, dict):
+            context[key] = deepcopy(value)
     return context
 
 
@@ -203,7 +215,8 @@ def _pending_approval_input_preview(
         return input_preview
     preview = dict(input_preview)
     for key, value in context.items():
-        preview.setdefault(key, deepcopy(value))
+        preview_value = _tool_input_preview(value) if isinstance(value, dict) else value
+        preview.setdefault(key, deepcopy(preview_value))
     return preview
 
 

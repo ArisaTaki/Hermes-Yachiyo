@@ -122,6 +122,27 @@ def public_pending_approval(value: Any) -> dict[str, Any]:
             items = _first_mapping_items(raw, tool_request, preview_record, aliases)
             if items:
                 snapshot[key] = items
+    runtime_metadata = _first_mapping(
+        raw,
+        tool_request,
+        preview_record,
+        ("runtime_execution_metadata", "metadata"),
+    )
+    if runtime_metadata:
+        snapshot["runtime_execution_metadata"] = runtime_metadata
+    runtime_envelope = _first_mapping(
+        raw,
+        tool_request,
+        preview_record,
+        ("runtime_execution_envelope", "yachiyo_execution_envelope"),
+    )
+    if not runtime_envelope and runtime_metadata:
+        runtime_envelope = (
+            _mapping_item(runtime_metadata.get("runtime_execution_envelope"))
+            or _mapping_item(runtime_metadata.get("yachiyo_execution_envelope"))
+        )
+    if runtime_envelope:
+        snapshot["runtime_execution_envelope"] = runtime_envelope
     if risk_level:
         snapshot["risk_level"] = risk_level
     if policy_reason:

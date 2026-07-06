@@ -109,6 +109,20 @@ def test_tool_pending_approval_builder_preserves_runtime_context() -> None:
         "runtime_role": "click_ui",
         "requires_post_action_verification": True,
         "replan_triggers": ["ui_not_found"],
+        "runtime_execution_envelope": {
+            "envelope_id": "approval-envelope-1",
+            "decision_id": "decision-1",
+            "plan_id": "runtime-plan-1",
+            "intent_kind": "desktop_operation",
+            "requests": [
+                {
+                    "request_id": "approval-request-1",
+                    "tool_name": "desktop.click_ui_element",
+                    "risk_level": "medium",
+                }
+            ],
+        },
+        "runtime_execution_metadata": {"yachiyo_runtime_planner": True},
     }
 
     pending = builder.build(
@@ -145,6 +159,14 @@ def test_tool_pending_approval_builder_preserves_runtime_context() -> None:
     assert pending["input_preview"]["requires_post_action_verification"] is True
     assert pending["replan_triggers"] == ["ui_not_found"]
     assert pending["input_preview"]["replan_triggers"] == ["ui_not_found"]
+    assert pending["runtime_execution_envelope"]["envelope_id"] == "approval-envelope-1"
+    assert pending["input_preview"]["runtime_execution_envelope"]["envelope_id"] == (
+        "approval-envelope-1"
+    )
+    assert pending["runtime_execution_metadata"] == {"yachiyo_runtime_planner": True}
+    assert pending["input_preview"]["runtime_execution_metadata"] == {
+        "yachiyo_runtime_planner": True
+    }
 
 
 def test_tool_approval_resume_context_preserves_pending_input_preview_context() -> None:

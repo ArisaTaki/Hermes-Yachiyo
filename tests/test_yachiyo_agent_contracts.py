@@ -4441,6 +4441,20 @@ def test_approval_card_snapshot_keeps_runtime_trace_fields() -> None:
         runtime_role="manual_checkpoint",
         requires_observation=True,
         requires_post_action_verification=True,
+        runtime_execution_envelope=RuntimeExecutionEnvelopeSnapshot(
+            envelope_id="approval-envelope-1",
+            decision_id="decision-1",
+            plan_id="runtime-plan-1",
+            intent_kind="workflow_orchestration",
+            requests=[
+                RuntimeExecutionRequestSnapshot(
+                    request_id="approval-request-1",
+                    tool_name="desktop.click_ui_element",
+                    risk_level="medium",
+                )
+            ],
+        ),
+        runtime_execution_metadata={"yachiyo_runtime_planner": True},
         deferred_tool="desktop.click_ui_element",
         deferred_input={"target": "Review"},
         deferred_context={"step_id": "review-step"},
@@ -4496,6 +4510,8 @@ def test_approval_card_snapshot_keeps_runtime_trace_fields() -> None:
         "runtime_role",
         "requires_observation",
         "requires_post_action_verification",
+        "runtime_execution_envelope",
+        "runtime_execution_metadata",
         "deferred_tool",
         "deferred_input",
         "deferred_context",
@@ -4529,6 +4545,11 @@ def test_approval_card_snapshot_keeps_runtime_trace_fields() -> None:
     assert payload["replan_triggers"] == ["approval_retry"]
     assert payload["runtime_stage"] == "approve"
     assert payload["requires_post_action_verification"] is True
+    assert payload["runtime_execution_envelope"]["envelope_id"] == "approval-envelope-1"
+    assert payload["runtime_execution_envelope"]["requests"][0]["tool_name"] == (
+        "desktop.click_ui_element"
+    )
+    assert payload["runtime_execution_metadata"] == {"yachiyo_runtime_planner": True}
     assert payload["verification_targets"] == [
         {"step_id": "verify-review", "todo_id": "todo-review"}
     ]
@@ -4570,6 +4591,20 @@ def test_public_pending_approval_projects_runtime_planner_trace_fields() -> None
                 "runtime_stage": "operate",
                 "runtime_role": "click_ui",
                 "requires_post_action_verification": True,
+                "runtime_execution_envelope": {
+                    "envelope_id": "approval-envelope-1",
+                    "decision_id": "decision-1",
+                    "plan_id": "runtime-plan-1",
+                    "intent_kind": "desktop_operation",
+                    "requests": [
+                        {
+                            "request_id": "approval-request-1",
+                            "tool_name": "desktop.click_ui_element",
+                            "risk_level": "medium",
+                        }
+                    ],
+                },
+                "runtime_execution_metadata": {"yachiyo_runtime_planner": True},
                 "replan_triggers": ["ui_not_found"],
                 "replan_request_id": "replan-1",
                 "replan_trigger": "ui_not_found",
@@ -4619,6 +4654,11 @@ def test_public_pending_approval_projects_runtime_planner_trace_fields() -> None
     assert snapshot["runtime_stage"] == "operate"
     assert snapshot["runtime_role"] == "click_ui"
     assert snapshot["requires_post_action_verification"] is True
+    assert snapshot["runtime_execution_envelope"]["envelope_id"] == "approval-envelope-1"
+    assert snapshot["runtime_execution_envelope"]["requests"][0]["request_id"] == (
+        "approval-request-1"
+    )
+    assert snapshot["runtime_execution_metadata"] == {"yachiyo_runtime_planner": True}
     assert snapshot["replan_triggers"] == ["ui_not_found"]
     assert snapshot["replan_request_id"] == "replan-1"
     assert snapshot["replan_trigger"] == "ui_not_found"
@@ -4698,6 +4738,20 @@ def test_approval_card_from_payload_maps_runtime_planner_trace_fields() -> None:
             "decision_id": "decision-1",
             "tool_plan_id": "tool-plan-1",
             "intent_kind": "desktop_operation",
+            "runtime_execution_envelope": {
+                "envelope_id": "approval-envelope-1",
+                "decision_id": "decision-1",
+                "plan_id": "runtime-plan-1",
+                "intent_kind": "desktop_operation",
+                "requests": [
+                    {
+                        "request_id": "approval-request-1",
+                        "tool_name": "desktop.click_ui_element",
+                        "risk_level": "medium",
+                    }
+                ],
+            },
+            "runtime_execution_metadata": {"yachiyo_runtime_planner": True},
             "replan_signal_ids": ["signal-1"],
             "deferred_tool": "desktop.click_ui_element",
         }
@@ -4716,6 +4770,10 @@ def test_approval_card_from_payload_maps_runtime_planner_trace_fields() -> None:
     assert snapshot.runtime_role == "click_ui"
     assert snapshot.requires_observation is True
     assert snapshot.requires_post_action_verification is True
+    assert snapshot.runtime_execution_envelope is not None
+    assert snapshot.runtime_execution_envelope.envelope_id == "approval-envelope-1"
+    assert snapshot.runtime_execution_envelope.requests[0].request_id == "approval-request-1"
+    assert snapshot.runtime_execution_metadata == {"yachiyo_runtime_planner": True}
     assert snapshot.deferred_tool == "desktop.click_ui_element"
     assert snapshot.deferred_input == {"label": "Save"}
     assert snapshot.deferred_context == {"step_id": "save-discovered-app-creative-result"}
