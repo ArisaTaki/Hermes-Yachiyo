@@ -100,6 +100,11 @@ def test_frontend_runtime_debug_summary_exposes_runtime_trace_facts() -> None:
             "data-intent-kind={summary?.intent_kind || ''}",
             "data-plan-capabilities={(summary?.plan_capabilities || []).join(',')}",
             "data-plan-tools={(summary?.plan_tools || []).join(',')}",
+            "data-desktop-provider-session-isolated="
+            "{String(summary?.desktop_provider_session_isolated ?? '')}",
+            "data-desktop-provider-session-foreground-takeover="
+            "{String(summary?.desktop_provider_session_foreground_takeover_required ?? '')}",
+            "data-desktop-provider-session-kind={summary?.desktop_provider_session_kind || ''}",
             "data-latest-replan-request-id={summary?.latest_replan_request_id || ''}",
             "data-latest-deferred-tool={summary?.latest_deferred_tool || ''}",
             "summary.runtime_doctrine ? `doctrine ${summary.runtime_doctrine}` : ''",
@@ -108,6 +113,10 @@ def test_frontend_runtime_debug_summary_exposes_runtime_trace_facts() -> None:
             "summary.latest_request_tool_name ? "
             "`latest request tool ${summary.latest_request_tool_name}` : ''",
             "summary.current_capability_id ? `capability ${summary.current_capability_id}` : ''",
+            "summary.desktop_provider_session_isolated === true ? "
+            "'isolated desktop session' : ''",
+            "summary.desktop_provider_session_foreground_takeover_required === false ? "
+            "'no foreground takeover' : ''",
             "summary.latest_approval_tool_name ? "
             "`approval tool ${summary.latest_approval_tool_name}` : ''",
         ],

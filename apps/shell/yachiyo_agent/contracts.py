@@ -964,6 +964,11 @@ class RuntimeDebugSummarySnapshot(_PublicSnapshot):
     desktop_provider_session_provider_id: str | None = None
     desktop_provider_session_reason: str | None = None
     desktop_provider_session_tool_names: list[str] = Field(default_factory=list)
+    desktop_provider_session_kind: str | None = None
+    desktop_provider_session_isolated: bool | None = None
+    desktop_provider_session_foreground_takeover_required: bool | None = None
+    desktop_provider_session_keyboard_mouse_capture_supported: bool | None = None
+    desktop_provider_session_supported_tools: list[str] = Field(default_factory=list)
     event_count: int = 0
     tool_call_count: int = 0
     completed_tool_call_count: int = 0

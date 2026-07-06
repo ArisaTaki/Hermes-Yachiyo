@@ -230,6 +230,21 @@ def runtime_debug_summary_from_runtime_objects(
         desktop_provider_session_tool_names=_string_list(
             _field(desktop_provider_session, "tool_names")
         ),
+        desktop_provider_session_kind=_optional_text(
+            _field(desktop_provider_session, "desktop_session_kind")
+        ),
+        desktop_provider_session_isolated=_optional_bool(
+            _field(desktop_provider_session, "desktop_session_isolated")
+        ),
+        desktop_provider_session_foreground_takeover_required=_optional_bool(
+            _field(desktop_provider_session, "foreground_takeover_required")
+        ),
+        desktop_provider_session_keyboard_mouse_capture_supported=_optional_bool(
+            _field(desktop_provider_session, "keyboard_mouse_capture_supported")
+        ),
+        desktop_provider_session_supported_tools=_string_list(
+            _field(desktop_provider_session, "supported_tools")
+        ),
         event_count=len(event_items),
         tool_call_count=len(tool_items),
         completed_tool_call_count=sum(status == "completed" for status in tool_statuses),
@@ -504,11 +519,19 @@ def _optional_bool(*values: Any) -> bool | None:
     for value in values:
         if isinstance(value, bool):
             return value
+        if isinstance(value, str):
+            clean = value.strip().lower()
+            if clean in {"1", "true", "yes", "on"}:
+                return True
+            if clean in {"0", "false", "no", "off"}:
+                return False
     return None
 
 
 def _string_list(values: Any) -> list[str]:
-    if not isinstance(values, Iterable) or isinstance(values, (str, bytes, dict)):
+    if isinstance(values, str):
+        return _unique_strings(values.split(","))
+    if not isinstance(values, Iterable) or isinstance(values, (bytes, dict)):
         return []
     return _unique_strings(_text(item) for item in values)
 

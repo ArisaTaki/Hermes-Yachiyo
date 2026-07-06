@@ -907,6 +907,18 @@ export type RuntimeDebugSummarySnapshot = {
   latest_request_id?: string | null;
   latest_request_tool_name?: string | null;
   latest_request_status?: string | null;
+  desktop_provider_session_status?: string | null;
+  desktop_provider_session_needed?: boolean;
+  desktop_provider_session_running?: boolean;
+  desktop_provider_session_started?: boolean;
+  desktop_provider_session_provider_id?: string | null;
+  desktop_provider_session_reason?: string | null;
+  desktop_provider_session_tool_names?: string[];
+  desktop_provider_session_kind?: string | null;
+  desktop_provider_session_isolated?: boolean | null;
+  desktop_provider_session_foreground_takeover_required?: boolean | null;
+  desktop_provider_session_keyboard_mouse_capture_supported?: boolean | null;
+  desktop_provider_session_supported_tools?: string[];
   event_count?: number;
   tool_call_count?: number;
   completed_tool_call_count?: number;

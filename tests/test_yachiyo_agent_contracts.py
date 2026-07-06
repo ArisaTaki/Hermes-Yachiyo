@@ -3920,6 +3920,14 @@ def test_agent_task_snapshot_projects_desktop_provider_session_recovery() -> Non
                         "error": "provider launch failed",
                         "request_ids": ["request-click-export"],
                         "tool_names": ["app.focus_and_click_ui_element"],
+                        "desktop_session_kind": "isolated_desktop",
+                        "desktop_session_isolated": True,
+                        "foreground_takeover_required": False,
+                        "keyboard_mouse_capture_supported": True,
+                        "supported_tools": [
+                            "app.focus_and_click_ui_element",
+                            "desktop.ui_elements",
+                        ],
                     },
                     "requests": [
                         {
@@ -3946,6 +3954,20 @@ def test_agent_task_snapshot_projects_desktop_provider_session_recovery() -> Non
     assert snapshot.runtime_debug.desktop_provider_session_provider_id == (
         "local-isolated-desktop"
     )
+    assert snapshot.runtime_debug.desktop_provider_session_kind == "isolated_desktop"
+    assert snapshot.runtime_debug.desktop_provider_session_isolated is True
+    assert (
+        snapshot.runtime_debug.desktop_provider_session_foreground_takeover_required
+        is False
+    )
+    assert (
+        snapshot.runtime_debug.desktop_provider_session_keyboard_mouse_capture_supported
+        is True
+    )
+    assert snapshot.runtime_debug.desktop_provider_session_supported_tools == [
+        "app.focus_and_click_ui_element",
+        "desktop.ui_elements",
+    ]
     recovery = next(
         item
         for item in snapshot.replan_recoveries

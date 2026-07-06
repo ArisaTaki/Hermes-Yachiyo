@@ -270,6 +270,17 @@ def _install_fake_isolated_provider_session(
             "url": "http://127.0.0.1:19093",
             "command": ["python", "scripts/run_isolated_desktop_provider.py"],
             "env": env,
+            "provider_status": {
+                "desktop_session_kind": "isolated_desktop",
+                "desktop_session_isolated": True,
+                "foreground_takeover_required": False,
+                "keyboard_mouse_capture_supported": True,
+                "supported_tools": [
+                    "desktop.list_apps",
+                    "app.focus_and_click_ui_element",
+                    "desktop.ui_elements",
+                ],
+            },
             "source": "isolated_provider_session_manager",
         }
 
@@ -2000,11 +2011,15 @@ def test_agent_studio_service_probes_desktop_provider_health_for_execution(
                 {
                     "ok": True,
                     "status": "ready",
-                    "version": "0.1.0",
-                    "supported_tools": ["app.focus_and_click_ui_element"],
-                    "capabilities": ["desktop_discovery", "sandbox_foreground"],
-                }
-            ).encode("utf-8")
+                        "version": "0.1.0",
+                        "supported_tools": ["app.focus_and_click_ui_element"],
+                        "capabilities": ["desktop_discovery", "sandbox_foreground"],
+                        "keyboard_mouse_capture_supported": True,
+                        "desktop_session_kind": "isolated_desktop",
+                        "desktop_session_isolated": True,
+                        "foreground_takeover_required": False,
+                    }
+                ).encode("utf-8")
 
         def getcode(self) -> int:
             return self.status
@@ -2250,11 +2265,14 @@ def test_yachiyo_chat_entrypoint_auto_starts_isolated_provider_for_input(
         if request["tool"] == "app.focus_and_click_ui_element"
     )
 
-    assert start_calls == [{}]
+    assert start_calls == [{"tools": ["app.focus_and_click_ui_element"]}]
     assert session["needed"] is True
     assert session["started"] is True
     assert session["running"] is True
     assert session["provider_id"] == "local-isolated-desktop"
+    assert session["desktop_session_kind"] == "isolated_desktop"
+    assert session["desktop_session_isolated"] is True
+    assert session["foreground_takeover_required"] is False
     assert operation_request["sandbox_provider"]["provider_id"] == (
         "local-isolated-desktop"
     )
@@ -2277,6 +2295,16 @@ def test_yachiyo_chat_entrypoint_auto_starts_isolated_provider_for_input(
     assert task.runtime_debug.desktop_provider_session_tool_names == [
         "app.focus_and_click_ui_element"
     ]
+    assert task.runtime_debug.desktop_provider_session_kind == "isolated_desktop"
+    assert task.runtime_debug.desktop_provider_session_isolated is True
+    assert (
+        task.runtime_debug.desktop_provider_session_foreground_takeover_required
+        is False
+    )
+    assert (
+        task.runtime_debug.desktop_provider_session_keyboard_mouse_capture_supported
+        is True
+    )
     assert "desktop_provider" in task.runtime_debug.debug_surfaces
 
 

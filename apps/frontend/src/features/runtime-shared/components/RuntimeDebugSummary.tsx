@@ -51,6 +51,11 @@ export function RuntimeDebugSummary({
       data-needs-replan={String(Boolean(summary?.needs_replan))}
       data-plan-capabilities={(summary?.plan_capabilities || []).join(',')}
       data-plan-tools={(summary?.plan_tools || []).join(',')}
+      data-desktop-provider-session-id={summary?.desktop_provider_session_provider_id || ''}
+      data-desktop-provider-session-isolated={String(summary?.desktop_provider_session_isolated ?? '')}
+      data-desktop-provider-session-foreground-takeover={String(summary?.desktop_provider_session_foreground_takeover_required ?? '')}
+      data-desktop-provider-session-kind={summary?.desktop_provider_session_kind || ''}
+      data-desktop-provider-session-status={summary?.desktop_provider_session_status || ''}
       data-current-request-id={summary?.current_request_id || ''}
       data-current-request-tool-name={summary?.current_request_tool_name || ''}
       data-runtime-doctrine={summary?.runtime_doctrine || ''}
@@ -131,6 +136,10 @@ export function runtimeDebugSummaryHasContent(summary?: RuntimeDebugSummarySnaps
     || summary.latest_request_id
     || summary.latest_request_tool_name
     || summary.latest_request_status
+    || summary.desktop_provider_session_status
+    || summary.desktop_provider_session_provider_id
+    || summary.desktop_provider_session_reason
+    || summary.desktop_provider_session_kind
     || summary.runtime_doctrine
     || summary.runtime_stage
     || summary.runtime_role
@@ -245,6 +254,16 @@ function runtimeDebugLatestFacts(summary?: RuntimeDebugSummarySnapshot | null): 
     summary.latest_request_id ? `latest request ${summary.latest_request_id}` : '',
     summary.latest_request_tool_name ? `latest request tool ${summary.latest_request_tool_name}` : '',
     summary.latest_request_status ? `latest request status ${summary.latest_request_status}` : '',
+    summary.desktop_provider_session_provider_id ? `desktop provider ${summary.desktop_provider_session_provider_id}` : '',
+    summary.desktop_provider_session_status ? `desktop provider status ${summary.desktop_provider_session_status}` : '',
+    summary.desktop_provider_session_kind ? `desktop session ${summary.desktop_provider_session_kind}` : '',
+    summary.desktop_provider_session_isolated === true ? 'isolated desktop session' : '',
+    summary.desktop_provider_session_foreground_takeover_required === true ? 'foreground takeover required' : '',
+    summary.desktop_provider_session_foreground_takeover_required === false ? 'no foreground takeover' : '',
+    summary.desktop_provider_session_keyboard_mouse_capture_supported === true ? 'keyboard mouse capture ready' : '',
+    (summary.desktop_provider_session_tool_names || []).length
+      ? `provider tools ${(summary.desktop_provider_session_tool_names || []).slice(0, 3).join(', ')}`
+      : '',
     summary.latest_replan_request_id ? `replan ${summary.latest_replan_request_id}` : '',
     summary.latest_replan_trigger ? `trigger ${summary.latest_replan_trigger}` : '',
     summary.latest_replan_status ? `replan status ${summary.latest_replan_status}` : '',
