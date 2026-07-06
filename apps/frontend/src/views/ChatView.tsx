@@ -101,6 +101,7 @@ import {
   getYachiyoReadiness,
   retryLegacyChatMessage,
   sendLegacyChatMessage,
+  startYachiyoTaskNextReplanContinuation,
   updateChatGroupSessionWithRecovery,
 } from '../features/yachiyo-chat/api';
 import {
@@ -118,7 +119,10 @@ import {
   responsiveChatSidebarMaxWidth,
 } from '../features/yachiyo-chat/layoutState';
 import { publicTaskSnapshotForMessage } from '../features/yachiyo-chat/taskSnapshots';
-import { startYachiyoTaskRecoveryAction } from '../features/yachiyo-chat/taskRecoveryActions';
+import {
+  startYachiyoTaskRecoveryAction,
+  yachiyoTaskNextAutoReplanContinuation,
+} from '../features/yachiyo-chat/taskRecoveryActions';
 import type {
   AgentTaskSnapshot,
   ApprovalCardSnapshot,
@@ -230,6 +234,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const highlightClearTimerRef = useRef<number | null>(null);
   const approvalSessionIdRef = useRef('');
   const desktopReadinessNoticeShownRef = useRef(false);
+  const autoReplanContinuationKeysRef = useRef<Set<string>>(new Set());
   const loadSessionsRef = useRef<() => Promise<void>>(async () => undefined);
   const transientEmptySessionIdRef = useRef('');
   const latestChatSnapshotRef = useRef({
@@ -475,6 +480,40 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     setApprovalActionMessageId,
     setStatus,
     startPublicYachiyoTask,
+  ]);
+
+  useEffect(() => {
+    if (approvalActionMessageId) return;
+    const currentSessionId = sessions?.current_session_id || latestChatSnapshotRef.current.currentSessionId || '';
+    const candidate = uniqueCurrentTaskSnapshots(agentTaskSnapshotsById, currentSessionId)
+      .map((task) => yachiyoTaskNextAutoReplanContinuation(task, currentSessionId || null))
+      .find((item) => Boolean(item));
+    if (!candidate) return;
+    if (autoReplanContinuationKeysRef.current.has(candidate.key)) return;
+    autoReplanContinuationKeysRef.current.add(candidate.key);
+    const taskId = String(candidate.recovery.task_id || candidate.request.metadata?.source_task_id || '').trim()
+      || candidate.key.split(':')[0];
+    setStatus(`正在自动恢复：${candidate.action.label || candidate.action.tool}...`);
+    void startYachiyoTaskNextReplanContinuation(taskId, candidate.request)
+      .then((result) => {
+        if (result.started && result.task) {
+          rememberYachiyoTasks([result.task]);
+          setStatus(`已自动启动恢复动作：${candidate.action.label || candidate.action.tool}`);
+          void refreshMessages({ allowDuringTransition: true });
+          return;
+        }
+        setStatus('未找到可自动执行的恢复动作');
+      })
+      .catch(() => {
+        setStatus('自动恢复动作提交失败');
+      });
+  }, [
+    agentTaskSnapshotsById,
+    approvalActionMessageId,
+    refreshMessages,
+    rememberYachiyoTasks,
+    sessions?.current_session_id,
+    setStatus,
   ]);
 
   useEffect(() => {
@@ -1843,4 +1882,21 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       {confirmDialog}
     </section>
   );
+}
+
+function uniqueCurrentTaskSnapshots(
+  snapshotsById: Record<string, AgentTaskSnapshot>,
+  currentSessionId: string,
+): AgentTaskSnapshot[] {
+  const seen = new Set<string>();
+  const tasks: AgentTaskSnapshot[] = [];
+  Object.values(snapshotsById).forEach((task) => {
+    const taskId = String(task.task_id || '').trim();
+    if (!taskId || seen.has(taskId)) return;
+    const conversationId = String(task.conversation_id || '').trim();
+    if (currentSessionId && conversationId && conversationId !== currentSessionId) return;
+    seen.add(taskId);
+    tasks.push(task);
+  });
+  return tasks;
 }

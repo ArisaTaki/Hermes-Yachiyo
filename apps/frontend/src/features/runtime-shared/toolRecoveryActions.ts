@@ -4,6 +4,9 @@ export type RuntimeToolRecoveryAction = {
   approval_required?: boolean;
   approval_id?: string;
   approval_status?: string;
+  auto_start_eligible?: boolean;
+  auto_start_reason?: string;
+  auto_start_blockers?: string[];
   action_target?: Record<string, unknown>;
   deferred_tool?: string;
   deferred_input?: Record<string, unknown>;
@@ -330,6 +333,9 @@ export function runtimeToolRecoveryRetryAction(
     approval_required: action.approval_required,
     approval_id: action.approval_id,
     approval_status: action.approval_status,
+    auto_start_eligible: action.auto_start_eligible,
+    auto_start_reason: action.auto_start_reason,
+    auto_start_blockers: action.auto_start_blockers,
     action_target: action.action_target,
     deferred_tool: action.deferred_tool,
     deferred_input: action.deferred_input,
@@ -422,11 +428,13 @@ export function runtimeToolRecoveryActionsFromRecord(
     if (!fallbackLabel) return [];
     const label = String(action.label || fallbackLabel || tool).trim();
     const actionRetryContext = runtimeToolRecoveryRetryContext(action, retryContext);
+    const autoStart = runtimeToolRecoveryAutoStartContext(action, source);
     return [{
       action_id: String(action.action_id || action.id || '').trim() || undefined,
       approval_required: Boolean(action.approval_required || action.requires_approval),
       approval_id: String(action.approval_id || source.approval_id || '').trim() || undefined,
       approval_status: String(action.approval_status || source.approval_status || '').trim() || undefined,
+      ...autoStart,
       action_target: objectValue(action.action_target || source.action_target),
       deferred_tool: String(action.deferred_tool || source.deferred_tool || '').trim() || undefined,
       deferred_input: objectValue(action.deferred_input || source.deferred_input),
@@ -461,6 +469,51 @@ export function runtimeToolRecoveryActionsFromRecord(
       tool,
     }];
   });
+}
+
+function runtimeToolRecoveryAutoStartContext(
+  action: Record<string, unknown>,
+  source: Record<string, unknown>,
+): Pick<RuntimeToolRecoveryAction, 'auto_start_eligible' | 'auto_start_reason' | 'auto_start_blockers'> {
+  const metadata = objectValue(action.metadata || source.metadata);
+  const eligible = optionalBoolean(
+    action.auto_start_eligible
+    ?? action.runtime_replan_auto_start_eligible
+    ?? action.replan_auto_start_eligible
+    ?? metadata.auto_start_eligible
+    ?? metadata.runtime_replan_auto_start_eligible
+    ?? metadata.replan_auto_start_eligible,
+  );
+  const reason = String(
+    action.auto_start_reason
+    || action.runtime_replan_auto_start_reason
+    || action.replan_auto_start_reason
+    || metadata.auto_start_reason
+    || metadata.runtime_replan_auto_start_reason
+    || metadata.replan_auto_start_reason
+    || '',
+  ).trim();
+  const blockers = recoveryStringList(
+    action.auto_start_blockers
+    || action.runtime_replan_auto_start_blockers
+    || action.replan_auto_start_blockers
+    || metadata.auto_start_blockers
+    || metadata.runtime_replan_auto_start_blockers
+    || metadata.replan_auto_start_blockers,
+  ) || [];
+  return {
+    ...(eligible !== null ? { auto_start_eligible: eligible } : {}),
+    ...(reason ? { auto_start_reason: reason } : {}),
+    ...(blockers.length ? { auto_start_blockers: blockers } : {}),
+  };
+}
+
+function optionalBoolean(value: unknown): boolean | null {
+  if (value === true || value === false) return value;
+  const text = String(value ?? '').trim().toLowerCase();
+  if (text === 'true') return true;
+  if (text === 'false') return false;
+  return null;
 }
 
 function recoveryRecordList(value: unknown): Array<Record<string, unknown>> {

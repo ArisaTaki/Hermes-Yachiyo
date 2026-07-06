@@ -53,6 +53,22 @@ export type YachiyoStudioRunReplanRecoveryActionRequest = {
   metadata?: Record<string, unknown>;
 };
 
+export type YachiyoStudioNextReplanContinuationRequest = {
+  request_id?: string;
+  action_id?: string;
+  agent_id?: string;
+  title?: string;
+  client_run_id?: string;
+  continue_to_model?: boolean;
+  metadata?: Record<string, unknown>;
+};
+
+export type YachiyoStudioNextReplanContinuationResult = {
+  started: boolean;
+  run?: YachiyoRunTimelineSnapshot | null;
+  reason?: string;
+};
+
 export type YachiyoStudioRunToolRecoveryActionRequest = {
   tool_call_id: string;
   action_id: string;
@@ -485,6 +501,16 @@ export async function startYachiyoGroupRunReplanRecoveryAction(
   );
 }
 
+export async function startYachiyoGroupRunNextReplanContinuation(
+  groupRunId: string,
+  request: YachiyoStudioNextReplanContinuationRequest = {},
+): Promise<YachiyoStudioNextReplanContinuationResult> {
+  return apiPost<YachiyoStudioNextReplanContinuationResult>(
+    `/yachiyo/studio/group-runs/${encodeURIComponent(groupRunId)}/replan-recovery-actions/start-next`,
+    request,
+  );
+}
+
 export async function startYachiyoGroupRunToolRecoveryAction(
   groupRunId: string,
   request: YachiyoStudioRunToolRecoveryActionRequest,
@@ -521,6 +547,16 @@ export async function startYachiyoRunReplanRecoveryAction(
 ): Promise<YachiyoRunTimelineSnapshot> {
   return apiPost<YachiyoRunTimelineSnapshot>(
     `/yachiyo/studio/runs/${encodeURIComponent(runId)}/replan-recovery-actions/start`,
+    request,
+  );
+}
+
+export async function startYachiyoRunNextReplanContinuation(
+  runId: string,
+  request: YachiyoStudioNextReplanContinuationRequest = {},
+): Promise<YachiyoStudioNextReplanContinuationResult> {
+  return apiPost<YachiyoStudioNextReplanContinuationResult>(
+    `/yachiyo/studio/runs/${encodeURIComponent(runId)}/replan-recovery-actions/start-next`,
     request,
   );
 }

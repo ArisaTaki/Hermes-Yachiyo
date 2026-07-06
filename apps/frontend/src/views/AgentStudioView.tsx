@@ -1,5 +1,7 @@
 import '@xyflow/react/dist/style.css';
 
+import { useEffect, useRef } from 'react';
+
 import { AgentDefinitionsTab } from '../features/agent-studio/components/AgentDefinitionsTab';
 import { AgentStudioGroupsTab } from '../features/agent-studio/components/AgentStudioGroupsTab';
 import { AgentStudioMemoryTab } from '../features/agent-studio/components/AgentStudioMemoryTab';
@@ -60,17 +62,22 @@ import {
   runtimeToolRecoveryActionRunStartRequest,
   runtimeToolRecoveryActionTaskStart,
   runtimeToolRecoveryActionToolRunStartRequest,
+  runtimeToolRecoveryActionsFromRecords,
+  runtimeToolRecoveryMissingRequiredFields,
   type RuntimeToolRecoveryAction,
 } from '../features/runtime-shared/toolRecoveryActions';
 import { startYachiyoTask } from '../features/yachiyo-chat/api';
 import {
+  startYachiyoGroupRunNextReplanContinuation,
   startYachiyoGroupRunReplanRecoveryAction,
   startYachiyoGroupRunToolRecoveryAction,
+  startYachiyoRunNextReplanContinuation,
   startYachiyoRunReplanRecoveryAction,
   startYachiyoRunToolRecoveryAction,
 } from '../features/yachiyo-studio/api';
 import type {
   PlannerOrchestrationStartSnapshot,
+  ReplanRecoverySnapshot,
   ToolCallSnapshot,
 } from '../features/yachiyo-studio/types';
 import { groupRunTimelineRunId } from '../features/agent-studio/utils/groups';
@@ -90,6 +97,82 @@ function plannerOrchestrationStatusMessage(result: PlannerOrchestrationStartSnap
     return `已从 Runtime Planner 启动 ${target}。`;
   }
   return result.message || 'Runtime Planner 已返回 Studio 编排 handoff。';
+}
+
+type StudioAutoReplanContinuation = {
+  action: RuntimeToolRecoveryAction;
+  groupRun: boolean;
+  key: string;
+  request: {
+    request_id?: string;
+    action_id?: string;
+    agent_id?: string;
+    title?: string;
+    continue_to_model?: boolean;
+    metadata?: Record<string, unknown>;
+  };
+  targetId: string;
+};
+
+function studioNextAutoReplanContinuation(
+  targetId: string,
+  recoveries: ReplanRecoverySnapshot[] | undefined,
+  options: {
+    agentId?: string | null;
+    groupRun?: boolean;
+  } = {},
+): StudioAutoReplanContinuation | null {
+  const cleanTargetId = String(targetId || '').trim();
+  if (!cleanTargetId) return null;
+  const orderedRecoveries = [...(recoveries || [])].reverse();
+  for (const recovery of orderedRecoveries) {
+    const requestId = String(recovery.request_id || '').trim();
+    if (!requestId || studioReplanRecoveryIsResolved(recovery)) continue;
+    const actions = runtimeToolRecoveryActionsFromRecords([
+      recovery as unknown as Record<string, unknown>,
+    ]);
+    for (const action of actions) {
+      const actionId = String(action.action_id || '').trim();
+      if (!actionId || !action.auto_start_eligible) continue;
+      if (action.approval_required === true) continue;
+      if (action.auto_start_blockers?.length) continue;
+      if (runtimeToolRecoveryMissingRequiredFields(action).length) continue;
+      const updatedAt = String(recovery.updated_at || recovery.created_at || '').trim();
+      return {
+        action,
+        groupRun: options.groupRun === true,
+        key: [
+          options.groupRun ? 'group' : 'run',
+          cleanTargetId,
+          requestId,
+          actionId,
+          action.tool || '',
+          updatedAt,
+        ].join(':'),
+        request: {
+          request_id: requestId,
+          action_id: actionId,
+          ...(options.agentId ? { agent_id: options.agentId } : {}),
+          title: action.label || action.prompt || action.tool,
+          continue_to_model: true,
+          metadata: {
+            source: options.groupRun
+              ? 'agent_studio_group_replan_auto_continuation_frontend'
+              : 'agent_studio_replan_auto_continuation_frontend',
+            replan_auto_start_reason: action.auto_start_reason || '',
+            replan_auto_trigger: 'studio_snapshot',
+          },
+        },
+        targetId: cleanTargetId,
+      };
+    }
+  }
+  return null;
+}
+
+function studioReplanRecoveryIsResolved(recovery: ReplanRecoverySnapshot): boolean {
+  const status = String(recovery.status || '').trim();
+  return status === 'completed' || status === 'resolved' || status === 'cancelled';
 }
 
 export function AgentStudioView() {
@@ -126,6 +209,7 @@ export function AgentStudioView() {
     workflowEnabled, workflowName, workflowRunGoal,
   } = useAgentStudioLocalState();
   const busy = loading || Boolean(busyAction);
+  const autoReplanContinuationKeysRef = useRef<Set<string>>(new Set());
   const installingSkill = busyAction === '安装 Skill';
   const {
     closeConfirmDialog,
@@ -480,6 +564,51 @@ export function AgentStudioView() {
     selectedRunReplayEvents,
     workflows,
   });
+  useEffect(() => {
+    if (busyAction) return;
+    const groupCandidate = studioNextAutoReplanContinuation(
+      selectedGroupRunSnapshot?.group_run_id
+      || selectedGroupRunSnapshot?.run_group_id
+      || selectedRouteGroupRunId,
+      selectedGroupRunSnapshot?.replan_recoveries,
+      { groupRun: true },
+    );
+    const runCandidate = studioNextAutoReplanContinuation(
+      selectedPublicRunTimeline?.run_id || selectedRun?.run_id || selectedRunId,
+      selectedPublicRunTimeline?.replan_recoveries,
+      {
+        agentId: selectedPublicRunTimeline?.agent_id || '',
+      },
+    );
+    const candidate = groupCandidate || runCandidate;
+    if (!candidate) return;
+    if (autoReplanContinuationKeysRef.current.has(candidate.key)) return;
+    autoReplanContinuationKeysRef.current.add(candidate.key);
+    const label = `自动恢复 Run：${candidate.action.label || candidate.action.tool}`;
+    void runAction(async () => {
+      const result = candidate.groupRun
+        ? await startYachiyoGroupRunNextReplanContinuation(candidate.targetId, candidate.request)
+        : await startYachiyoRunNextReplanContinuation(candidate.targetId, candidate.request);
+      if (result.started && result.run) {
+        return {
+          selectedRunId: result.run.run_id,
+          statusMessage: `已自动启动恢复 Run：${result.run.title || candidate.action.label || candidate.action.tool}`,
+        };
+      }
+      return {
+        skipRefresh: true,
+        statusMessage: '未找到可自动执行的恢复动作',
+      };
+    }, label);
+  }, [
+    busyAction,
+    runAction,
+    selectedGroupRunSnapshot,
+    selectedPublicRunTimeline,
+    selectedRouteGroupRunId,
+    selectedRun,
+    selectedRunId,
+  ]);
   const {
     runTargetDisabledReason,
     selectedRunTarget,

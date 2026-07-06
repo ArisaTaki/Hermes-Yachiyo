@@ -2,10 +2,14 @@ import {
   runtimeToolRecoveryActionsFromRecords,
   runtimeToolRecoveryActionRunStartRequest,
   runtimeToolRecoveryActionTaskStart,
+  runtimeToolRecoveryMissingRequiredFields,
   type RuntimeToolRecoveryAction,
   type RuntimeToolRecoveryActionTaskStart,
 } from '../runtime-shared/toolRecoveryActions';
-import { startYachiyoTaskReplanRecoveryAction } from './api';
+import {
+  startYachiyoTaskReplanRecoveryAction,
+  type YachiyoTaskNextReplanContinuationRequest,
+} from './api';
 import type { AgentTaskSnapshot } from './types';
 
 export type YachiyoTaskReplanRecoverySnapshot = NonNullable<AgentTaskSnapshot['replan_recoveries']>[number];
@@ -34,6 +38,13 @@ export type StartYachiyoTaskRecoveryActionOptions = {
   task: AgentTaskSnapshot;
 };
 
+export type YachiyoTaskNextAutoReplanContinuation = {
+  action: RuntimeToolRecoveryAction;
+  key: string;
+  recovery: YachiyoTaskReplanRecoverySnapshot;
+  request: YachiyoTaskNextReplanContinuationRequest;
+};
+
 export function yachiyoTaskReplanRecoveryActions(
   recovery: YachiyoTaskReplanRecoverySnapshot,
 ): RuntimeToolRecoveryAction[] {
@@ -57,6 +68,53 @@ export function yachiyoTaskPrimaryReplanRecoveryAction(
   task: AgentTaskSnapshot,
 ): YachiyoTaskReplanRecoveryActionItem | null {
   return yachiyoTaskReplanRecoveryActionItems(task, 1)[0] || null;
+}
+
+export function yachiyoTaskNextAutoReplanContinuation(
+  task: AgentTaskSnapshot,
+  conversationId?: string | null,
+): YachiyoTaskNextAutoReplanContinuation | null {
+  const taskId = String(task.task_id || '').trim();
+  if (!taskId) return null;
+  const recoveries = [...(task.replan_recoveries || [])].reverse();
+  for (const recovery of recoveries) {
+    const requestId = String(recovery.request_id || '').trim();
+    if (!requestId || replanRecoveryIsResolved(recovery)) continue;
+    const actions = yachiyoTaskReplanRecoveryActions(recovery);
+    for (const action of actions) {
+      const actionId = String(action.action_id || '').trim();
+      if (!actionId || !action.auto_start_eligible) continue;
+      if (action.approval_required === true) continue;
+      if (action.auto_start_blockers?.length) continue;
+      if (runtimeToolRecoveryMissingRequiredFields(action).length) continue;
+      const updatedAt = String(recovery.updated_at || recovery.created_at || '').trim();
+      return {
+        action,
+        key: [
+          taskId,
+          requestId,
+          actionId,
+          action.tool || '',
+          updatedAt,
+        ].join(':'),
+        recovery,
+        request: {
+          request_id: requestId,
+          action_id: actionId,
+          title: action.label || action.prompt || action.tool,
+          continue_to_model: true,
+          conversation_id: conversationId || task.conversation_id || null,
+          metadata: {
+            source: 'yachiyo_chat_replan_auto_continuation_frontend',
+            source_task_id: taskId,
+            replan_auto_start_reason: action.auto_start_reason || '',
+            replan_auto_trigger: 'task_snapshot',
+          },
+        },
+      };
+    }
+  }
+  return null;
 }
 
 export function yachiyoTaskRuntimeExecutionRetryActions(
@@ -139,6 +197,11 @@ export async function startYachiyoTaskRecoveryAction({
     task: fallbackTask,
     title: fallbackStart.title,
   };
+}
+
+function replanRecoveryIsResolved(recovery: YachiyoTaskReplanRecoverySnapshot): boolean {
+  const status = String(recovery.status || '').trim();
+  return status === 'completed' || status === 'resolved' || status === 'cancelled';
 }
 
 type RuntimeExecutionRequestForRecovery = NonNullable<

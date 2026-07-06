@@ -155,12 +155,37 @@ export type YachiyoTaskReplanRecoveryActionRequest = {
   metadata?: Record<string, unknown>;
 };
 
+export type YachiyoTaskNextReplanContinuationRequest = {
+  request_id?: string;
+  action_id?: string;
+  title?: string;
+  continue_to_model?: boolean;
+  conversation_id?: string | null;
+  metadata?: Record<string, unknown>;
+};
+
+export type YachiyoTaskNextReplanContinuationResult = {
+  started: boolean;
+  task?: AgentTaskSnapshot | null;
+  reason?: string;
+};
+
 export async function startYachiyoTaskReplanRecoveryAction(
   taskId: string,
   request: YachiyoTaskReplanRecoveryActionRequest,
 ): Promise<AgentTaskSnapshot> {
   return apiPost(
     `/yachiyo/tasks/${encodeURIComponent(taskId)}/replan-recovery-actions/start`,
+    request,
+  );
+}
+
+export async function startYachiyoTaskNextReplanContinuation(
+  taskId: string,
+  request: YachiyoTaskNextReplanContinuationRequest = {},
+): Promise<YachiyoTaskNextReplanContinuationResult> {
+  return apiPost(
+    `/yachiyo/tasks/${encodeURIComponent(taskId)}/replan-recovery-actions/start-next`,
     request,
   );
 }
