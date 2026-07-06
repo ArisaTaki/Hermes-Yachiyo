@@ -3851,6 +3851,46 @@ def test_runtime_planner_discovers_generic_browser_before_specific_search() -> N
     assert web_decision.selected_intent.inputs["query"] == "OpenAI 最新新闻"
 
 
+def test_runtime_planner_cleans_app_search_action_suffixes() -> None:
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open",
+        "app.focus",
+        "app.open_and_safe_shortcut",
+        "app.focus_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.ui_elements",
+    ]
+    decision = RuntimePlanner().decision(
+        "打开 PixelForge 搜索 Export preset 并确认",
+        allowed_tools=allowed_tools,
+    )
+
+    assert decision.selected_intent.kind == "desktop_operation"
+    assert decision.selected_intent.inputs["app_search_hint"] == {
+        "query": "Export preset",
+        "target": "搜索",
+    }
+    assert _step_by_id(decision, "type-app-search-query").input_preview == {
+        "text": "Export preset"
+    }
+    assert _step_by_id(decision, "submit-app-search").tool_name == "desktop.search_submit"
+
+    english = RuntimePlanner().decision(
+        "open Obsidian search project plan then confirm",
+        allowed_tools=allowed_tools,
+    )
+
+    assert english.selected_intent.inputs["app_search_hint"] == {
+        "query": "project plan",
+        "target": "Search",
+    }
+    assert _step_by_id(english, "type-app-search-query").input_preview == {
+        "text": "project plan"
+    }
+
+
 def test_runtime_planner_clicks_selected_discovered_app_search_results() -> None:
     allowed_tools = [
         "desktop.list_apps",

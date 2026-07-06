@@ -25896,6 +25896,19 @@ def _clean_app_search_query(query: str) -> str:
         maxsplit=1,
         flags=re.IGNORECASE,
     )[0].strip()
+    value = re.sub(
+        r"\s*(?:[，,]\s*|并|然后|再|接着|之后|后|and\s+then|then|and)\s*"
+        r"(?:确认|确定|提交|回车|按回车|搜索|查找|检索|播放|"
+        r"打开(?:第?[一1]个)?(?:搜索)?(?:结果|条目)?|"
+        r"点击(?:第?[一1]个)?(?:搜索)?(?:结果|条目)?|"
+        r"confirm|submit|press\s+enter|hit\s+enter|search|play|"
+        r"open\s+(?:the\s+)?first\s+(?:result|item)|"
+        r"click\s+(?:the\s+)?first\s+(?:result|item))"
+        r"(?:一下|下|它|it)?\s*$",
+        "",
+        value,
+        flags=re.IGNORECASE,
+    ).strip()
     value = re.split(
         r"\s*(?:[，,]\s*|并|然后|再|接着|之后|后|and\s+then|then)\s*"
         r"(?:选择|选中|点击|点按|打开|按|"
