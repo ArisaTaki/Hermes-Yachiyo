@@ -887,9 +887,10 @@ real desktop, provider Workflow, and UI public-demo evidence.
 `scripts/run_public_demo_smokes.py` now provides the maintained public-demo
 evidence entry point. The default run executes safe default demonstrations for
 data-analysis artifacts, browser-research planner artifacts, desktop planner
-discovery/operate decisions, non-mutating real desktop app discovery, approval
-resume replay, GroupRun replay, and WorkflowRun replay, then reports skipped
-real desktop operation, provider Workflow, and UI demo flows as next actions.
+discovery/operate decisions, non-mutating real desktop app discovery, isolated
+desktop provider keyboard/mouse routing, approval resume replay, GroupRun
+replay, and WorkflowRun replay, then reports skipped real desktop operation,
+provider Workflow, and UI demo flows as next actions.
 Full public demo evidence requires the explicit
 `--include-real-desktop`, `--include-provider-workflow`, and `--include-ui`
 flags because those flows open/operate apps, require live credentials, or start

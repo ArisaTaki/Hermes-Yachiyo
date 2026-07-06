@@ -126,6 +126,7 @@ python scripts/run_public_release_gate.py \
 ```
 
 该入口会运行 release artifact guard、secret redaction、Agent market-parity、Planner-to-runtime tool parity、Oha desktop-agent product smoke、focused release pytest、安全 public-demo smoke 和本轮 gate evidence 的脱敏 diagnostics bundle，并把 public-demo JSON、Oha 产品级 smoke JSON 与 diagnostics zip 投影成非阻断的 `tmp/public-release-gate/release-smoke.json` / `.md` 评估。默认模式用于快速发现文档、secret、Oha 主链路、release-smoke/public-demo/diagnostics 回归；当 public demo 仍是 `partial_demo_ready` 或 10 项 release-smoke 用户路径证据不完整时，报告会显示 `status=needs_release_evidence`、缺失 demo flow、缺失 user path 和下一步命令，但不会因为缺少 opt-in/RC 证据返回失败。已有 RC report、Oha smoke report 和 diagnostics bundle 可通过重复 `--release-smoke-report` 与 `--diagnostics-zip` 合入同一份 assessment。最终发布前加 `--require-release-ready`，让缺少完整 public-demo release evidence 或完整 10 项 release-smoke evidence 的候选版本直接失败。
+安全 public-demo smoke 包含隔离桌面 provider 键鼠路由证据，用来证明默认发布门禁可以验证桌面执行工具链而不抢占用户当前鼠标键盘；真实 macOS app 打开、UI 读取和交互仍然必须显式 opt-in 补证。
 
 当剩余项依赖本机授权或 provider 凭证时，gate JSON 会额外写入 `external_requirement_count` 和 `external_requirements`，Markdown 会写入 `External Requirements` 小节。这里会把缺口归并成 `real_desktop_smoke_opt_in`、`provider_smoke_credentials` 等可执行类别，并列出缺失的 demo flow、缺失的 `OHA_YACHIYO_SMOKE_*` 环境变量、blocking condition 和补证命令。
 

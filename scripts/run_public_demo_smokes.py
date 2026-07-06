@@ -131,6 +131,18 @@ def demo_flows(
             report_json=tmp_dir / "real-desktop-discovery.json",
         ),
         DemoFlow(
+            id="isolated_desktop_provider",
+            label="Isolated desktop provider keyboard/mouse routing",
+            category="sandbox",
+            command=(
+                sys.executable,
+                "scripts/smoke_isolated_desktop_provider.py",
+                "--report-json",
+                str(tmp_dir / "isolated-desktop-provider.json"),
+            ),
+            report_json=tmp_dir / "isolated-desktop-provider.json",
+        ),
+        DemoFlow(
             id="approval_resume",
             label="Approval card and replayable resume",
             category="source",
@@ -440,6 +452,11 @@ def _evidence_summary(evidence: Mapping[str, Any]) -> dict[str, Any]:
         "screen_visibility_status",
         "screen_blocking_condition",
         "release_level",
+        "desktop_session_kind",
+        "desktop_session_isolated",
+        "foreground_takeover_required",
+        "keyboard_mouse_capture_supported",
+        "supported_tools",
     )
     summary = {
         key: evidence[key]

@@ -50,6 +50,7 @@ evidence for these flows:
 | Flow | Evidence |
 | --- | --- |
 | Arbitrary app operation | `desktop_planner_discovery_smoke` for source-level discover/operate/verify planning, `real_desktop_discovery_smoke` for non-mutating installed-app discovery, plus `real_desktop_*` smokes or RC capability matrix entries for app open, UI inspection, and interaction. |
+| Isolated desktop execution | `isolated_desktop_provider` public-demo evidence proving keyboard/mouse-capable tool routing can run with `foreground_takeover_required=false`. |
 | Data analysis artifact | `data_analysis_artifact_smoke` and artifact readback evidence. |
 | Browser research | `browser_planner_artifact_smoke` evidence. |
 | Approval resume | `approval_resume_timeline_smoke`, `runtime_approval_resume_smoke`, and route approval evidence. |
@@ -69,8 +70,9 @@ python scripts/run_public_demo_smokes.py \
 By default it runs only safe demos: data analysis artifact, browser research
 artifact planning, desktop planner discovery, Chat/Agent desktop execution
 entrypoints, Agent data analysis entrypoint, non-mutating real desktop app
-discovery, approval resume, Yachiyo approval route evidence, GroupRun replay,
-and WorkflowRun replay. Full Hanako/Hermes-level demo evidence requires explicit
+discovery, isolated desktop provider keyboard/mouse routing, approval resume,
+Yachiyo approval route evidence, GroupRun replay, and WorkflowRun replay. Full
+Hanako/Hermes-level demo evidence requires explicit
 opt-in:
 
 ```bash

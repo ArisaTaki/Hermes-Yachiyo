@@ -3,11 +3,12 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 import threading
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -23,7 +24,7 @@ from apps.shell.agent.runtime.isolated_desktop_provider import (
 )
 
 
-def main() -> int:
+def run_smoke() -> dict[str, Any]:
     provider = IsolatedDesktopProvider(
         provider_id="smoke-isolated-desktop",
         supported_tools=["desktop.safe_type_text"],
@@ -53,34 +54,68 @@ def main() -> int:
             broker=object(),
             approved=True,
         )
-        ok = (
-            bool(status.get("available"))
-            and bool(status.get("desktop_session_isolated"))
-            and isinstance(result, dict)
-            and result.get("ok") is not False
+        checks = {
+            "provider_available": bool(status.get("available")),
+            "provider_session_isolated": bool(status.get("desktop_session_isolated")),
+            "foreground_takeover_not_required": (
+                status.get("foreground_takeover_required") is False
+            ),
+            "tool_routed": isinstance(result, dict)
+            and result.get("desktop_execution_provider_routed") is True,
+            "tool_result_ok": isinstance(result, dict) and result.get("ok") is not False,
+            "tool_result_isolated": isinstance(result, dict)
             and result.get("isolated_desktop_provider", {}).get(
                 "desktop_session_isolated"
             )
-            is True
-        )
-        print(
-            json.dumps(
-                {
-                    "ok": ok,
-                    "base_url": base_url,
-                    "status": status,
-                    "result": result,
-                },
-                ensure_ascii=False,
-                indent=2,
-                sort_keys=True,
-            )
-        )
-        return 0 if ok else 1
+            is True,
+        }
+        ok = all(checks.values())
+        return {
+            "ok": ok,
+            "mode": "isolated_desktop_provider_smoke",
+            "base_url": base_url,
+            "status": status,
+            "result": result,
+            "checks": checks,
+            "desktop_session_kind": str(status.get("desktop_session_kind") or ""),
+            "desktop_session_isolated": status.get("desktop_session_isolated"),
+            "foreground_takeover_required": status.get("foreground_takeover_required"),
+            "keyboard_mouse_capture_supported": status.get(
+                "keyboard_mouse_capture_supported"
+            ),
+            "supported_tools": status.get("supported_tools") or [],
+        }
     finally:
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
+
+
+def _parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--report-json",
+        type=Path,
+        help="Optional JSON evidence report path.",
+    )
+    return parser
+
+
+def _write_report(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = _parser().parse_args(argv)
+    evidence = run_smoke()
+    if args.report_json is not None:
+        _write_report(args.report_json, evidence)
+    print(json.dumps(evidence, ensure_ascii=False, indent=2, sort_keys=True))
+    return 0 if evidence.get("ok") is True else 1
 
 
 def _tool_request(provider_id: str) -> dict[str, Any]:
