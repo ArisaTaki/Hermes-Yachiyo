@@ -2,7 +2,11 @@ import { runtimeToolDisplayLabelOrName } from './approval';
 import { runtimeEventIsDesktopProviderSessionEvent } from './desktopEvents';
 
 export type RuntimeDesktopProviderSessionContext = {
+  desktopSessionIsolated: string;
+  desktopSessionKind: string;
   error: string;
+  foregroundTakeoverRequired: string;
+  keyboardMouseCaptureSupported: string;
   needed: string;
   providerId: string;
   reason: string;
@@ -10,6 +14,7 @@ export type RuntimeDesktopProviderSessionContext = {
   source: string;
   started: string;
   status: string;
+  supportedTools: string[];
   toolNames: string[];
   url: string;
 };
@@ -24,7 +29,11 @@ export function runtimeDesktopProviderSessionContext(
   const session = runtimeFirstNestedRecord([...baseRecords, ...resultRecords], 'desktop_provider_session');
   const contextRecords = [session, ...baseRecords, ...resultRecords];
   return {
+    desktopSessionIsolated: runtimeFirstBoolLabel(contextRecords, 'desktop_session_isolated'),
+    desktopSessionKind: runtimeFirstString(contextRecords, 'desktop_session_kind'),
     error: runtimeFirstString(contextRecords, 'error'),
+    foregroundTakeoverRequired: runtimeFirstBoolLabel(contextRecords, 'foreground_takeover_required'),
+    keyboardMouseCaptureSupported: runtimeFirstBoolLabel(contextRecords, 'keyboard_mouse_capture_supported'),
     needed: runtimeFirstBoolLabel(contextRecords, 'needed'),
     providerId: runtimeFirstString(contextRecords, 'provider_id'),
     reason: runtimeFirstString(contextRecords, 'reason'),
@@ -32,6 +41,7 @@ export function runtimeDesktopProviderSessionContext(
     source: runtimeFirstString(contextRecords, 'source'),
     started: runtimeFirstBoolLabel(contextRecords, 'started'),
     status: runtimeFirstString(contextRecords, 'status'),
+    supportedTools: runtimeUniqueStrings(contextRecords.flatMap((record) => runtimeStringList(record.supported_tools))),
     toolNames: runtimeUniqueStrings(contextRecords.flatMap((record) => runtimeStringList(record.tool_names))),
     url: runtimeFirstString(contextRecords, 'url'),
   };
@@ -70,11 +80,17 @@ export function runtimeDesktopProviderSessionDetail(
   return [
     context.providerId ? `provider ${context.providerId}` : '',
     context.status ? `状态 ${context.status}` : '',
+    context.desktopSessionKind ? `session ${context.desktopSessionKind}` : '',
+    context.desktopSessionIsolated === 'true' ? 'isolated' : '',
+    context.foregroundTakeoverRequired === 'false' ? 'no foreground takeover' : '',
+    context.foregroundTakeoverRequired === 'true' ? 'foreground takeover required' : '',
+    context.keyboardMouseCaptureSupported === 'true' ? 'keyboard/mouse ready' : '',
     context.running === 'true' ? 'running' : '',
     context.started === 'true' ? 'started' : '',
     context.reason ? `原因 ${context.reason}` : '',
     context.error ? `错误 ${context.error}` : '',
     context.toolNames.length ? `工具 ${context.toolNames.map(runtimeToolDisplayLabelOrName).join(' -> ')}` : '',
+    context.supportedTools.length ? `支持 ${context.supportedTools.map(runtimeToolDisplayLabelOrName).join(' -> ')}` : '',
     context.url,
   ].filter(Boolean).join(' · ');
 }

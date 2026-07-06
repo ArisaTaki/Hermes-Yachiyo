@@ -132,7 +132,12 @@ export function RuntimeTimelineEventList({
               data-run-event-desktop-provider-session-running={desktopProviderSession.running}
               data-run-event-desktop-provider-session-started={desktopProviderSession.started}
               data-run-event-desktop-provider-session-status={desktopProviderSession.status}
+              data-run-event-desktop-provider-session-isolated={desktopProviderSession.desktopSessionIsolated}
+              data-run-event-desktop-provider-session-kind={desktopProviderSession.desktopSessionKind}
+              data-run-event-desktop-provider-session-foreground-takeover={desktopProviderSession.foregroundTakeoverRequired}
+              data-run-event-desktop-provider-session-keyboard-mouse={desktopProviderSession.keyboardMouseCaptureSupported}
               data-run-event-desktop-provider-session-tool-names={desktopProviderSession.toolNames.join(',')}
+              data-run-event-desktop-provider-session-supported-tools={desktopProviderSession.supportedTools.join(',')}
               data-run-event-desktop-provider-session-url={desktopProviderSession.url}
               data-run-event-recovery-app-match-capability={recoveryTarget.appResolutionMatchedCapability}
               data-run-event-recovery-app-match-name={recoveryTarget.appResolutionMatchedName}
@@ -503,7 +508,12 @@ function runtimeEventMetadata(
     { label: 'provider running', value: desktopProviderSession.running },
     { label: 'provider started', value: desktopProviderSession.started },
     { label: 'provider needed', value: desktopProviderSession.needed },
+    { label: 'provider session', value: desktopProviderSession.desktopSessionKind },
+    { label: 'provider isolated', value: desktopProviderSession.desktopSessionIsolated },
+    { label: 'provider foreground takeover', value: desktopProviderSession.foregroundTakeoverRequired },
+    { label: 'provider keyboard/mouse', value: desktopProviderSession.keyboardMouseCaptureSupported },
     { label: 'provider tools', value: desktopProviderSession.toolNames.join(', ') },
+    { label: 'provider supported tools', value: desktopProviderSession.supportedTools.join(', ') },
     { label: 'provider error', value: desktopProviderSession.error },
     { label: 'target app', value: recoveryTarget.targetAppName },
     { label: 'target query', value: recoveryTarget.targetAppQuery },
