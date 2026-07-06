@@ -2921,6 +2921,66 @@ def test_runtime_tool_request_runner_preview_input_policy_allows_media_but_block
     assert "blocked_by_desktop_execution_policy" in messages[-1]["content"]
 
 
+def test_runtime_tool_request_runner_allow_policy_still_requires_sandbox_for_keyboard_mouse() -> None:
+    budget = FakeBudget()
+    messages = [{"role": "user", "content": "在当前应用里输入 hello"}]
+    timeline: list[dict[str, Any]] = []
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    def call_agent_tool(
+        tool_request: dict[str, Any],
+        _allowed_tools: list[str],
+        _broker: Any,
+        _timeline_arg: list[dict[str, Any]],
+        **_kwargs: Any,
+    ) -> dict[str, Any]:
+        calls.append((tool_request.get("tool", ""), dict(tool_request.get("input") or {})))
+        return {"ok": True, "tool": tool_request.get("tool")}
+
+    runner = _runner(call_agent_tool=call_agent_tool, run_events=[])
+
+    runner.run(
+        [
+            {
+                "tool": "desktop.safe_type_text",
+                "input": {"text": "hello"},
+                "desktop_execution_policy": {
+                    "mode": "supervised_live",
+                    "allow_live_foreground": True,
+                    "avoid_user_foreground_takeover": True,
+                    "require_sandbox_for_keyboard_mouse": True,
+                },
+            }
+        ],
+        ["desktop.safe_type_text"],
+        FakeBroker({"ok": True}),
+        messages,
+        timeline,
+        [],
+        next_iteration=3,
+        run_id="run-1",
+        budget=budget,
+    )
+
+    skipped = next(event for event in timeline if event["event"] == "agent.tool.skipped")
+    result = skipped["result"]
+    assert calls == []
+    assert budget.claims == [("desktop.safe_type_text", False)]
+    assert result["blocked_by_desktop_execution_policy"] is True
+    assert result["status"] in {
+        "sandbox_keyboard_mouse_provider_required",
+        "sandbox_desktop_session_required",
+        "provider_required",
+    }
+    assert result["desktop_execution_policy"]["allow_live_foreground"] is True
+    assert result["desktop_execution_policy"]["require_sandbox_for_keyboard_mouse"] is True
+    assert result["desktop_execution_route"]["can_execute"] is False
+    assert result["desktop_execution_route"]["sandbox_required"] is True
+    assert result["blocking_condition"] in result["desktop_execution_route"]["blocking_conditions"]
+    assert result["recovery_actions"][0]["tool"] == "desktop.active_window"
+    assert "blocked_by_desktop_execution_policy" in messages[-1]["content"]
+
+
 def test_runtime_tool_request_runner_uses_discovered_app_name_for_followup_tool() -> None:
     calls: list[tuple[str, dict[str, Any]]] = []
 

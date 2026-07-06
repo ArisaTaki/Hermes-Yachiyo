@@ -398,6 +398,12 @@ def desktop_execution_route_decision(
             "blocking_conditions": ["missing_tool"],
         }
     if (
+        foreground_provider_requested
+        and foreground_required
+        and not bool(sandbox_provider.get("available"))
+    ):
+        return _sandbox_route_decision(route, sandbox_provider, clean_tool)
+    if (
         readonly_provider_requested
         and is_readonly_desktop_provider_tool(clean_tool)
         and sandbox_desktop_provider_can_execute_tool(sandbox_provider, clean_tool)

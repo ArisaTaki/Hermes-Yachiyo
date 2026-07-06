@@ -455,16 +455,20 @@ def _desktop_execution_policy_skip_result(
 ) -> dict[str, Any] | None:
     policy = _desktop_execution_policy_from_request(tool_request)
     policy_mode = _desktop_execution_policy_mode(policy)
-    if policy_mode == "allow":
-        return None
-
     execution_mode = desktop_tool_execution_mode(tool_name)
+    execution_payload = execution_mode.model_dump(mode="json")
+    sandbox_required_by_policy = _desktop_execution_policy_requires_sandbox(
+        policy,
+        execution_payload,
+    )
+    if policy_mode == "allow" and not sandbox_required_by_policy:
+        return None
     if (
         policy_mode == "preview_input"
         and not _desktop_execution_policy_blocks_input_tool(
             tool_name,
             policy,
-            execution_mode.model_dump(mode="json"),
+            execution_payload,
         )
     ):
         return None
@@ -474,7 +478,6 @@ def _desktop_execution_policy_skip_result(
     ):
         return None
 
-    execution_payload = execution_mode.model_dump(mode="json")
     sandbox_provider = sandbox_desktop_provider_status(tool_request)
     route_decision = desktop_execution_route_payload(tool_request) or desktop_execution_route_decision(
         tool_name,
@@ -484,12 +487,21 @@ def _desktop_execution_policy_skip_result(
     )
     if desktop_execution_route_allows_provider_execution(route_decision):
         return None
-    blocking_condition = (
-        "desktop_execution_handoff_required"
-        if policy_mode == "handoff"
-        else "desktop_execution_preview_required"
-    )
-    status = "handoff_required" if policy_mode == "handoff" else "preview_required"
+    route_blockers = [
+        str(item).strip()
+        for item in route_decision.get("blocking_conditions", [])
+        if str(item or "").strip()
+    ]
+    if policy_mode == "allow" and sandbox_required_by_policy:
+        blocking_condition = route_blockers[0] if route_blockers else "desktop_execution_sandbox_required"
+        status = str(route_decision.get("status") or "provider_required")
+    else:
+        blocking_condition = (
+            "desktop_execution_handoff_required"
+            if policy_mode == "handoff"
+            else "desktop_execution_preview_required"
+        )
+        status = "handoff_required" if policy_mode == "handoff" else "preview_required"
     return {
         "ok": False,
         "tool": tool_name,
@@ -530,6 +542,24 @@ def _desktop_execution_policy_skip_result(
             "user perform the foreground step manually."
         ),
     }
+
+
+def _desktop_execution_policy_requires_sandbox(
+    policy: Mapping[str, Any],
+    execution_payload: Mapping[str, Any],
+) -> bool:
+    if not isinstance(policy, Mapping):
+        return False
+    requires_keyboard_mouse_sandbox = bool(
+        policy.get("require_sandbox_for_keyboard_mouse")
+    ) and bool(execution_payload.get("keyboard_mouse_capture"))
+    avoids_foreground_takeover = bool(
+        policy.get("avoid_user_foreground_takeover")
+    ) and (
+        bool(execution_payload.get("foreground_control"))
+        or bool(execution_payload.get("keyboard_mouse_capture"))
+    )
+    return requires_keyboard_mouse_sandbox or avoids_foreground_takeover
 
 
 def _tool_request_with_desktop_execution_route(
