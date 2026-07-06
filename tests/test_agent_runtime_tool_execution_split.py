@@ -2808,6 +2808,57 @@ def test_runtime_tool_request_runner_allows_sandbox_ready_provider_route() -> No
     assert not [event for event in timeline if event["event"] == "agent.tool.skipped"]
 
 
+def test_runtime_tool_request_runner_routes_running_provider_session() -> None:
+    budget = FakeBudget()
+    messages = [{"role": "user", "content": "在隔离桌面里输入 hello"}]
+    timeline: list[dict[str, Any]] = []
+    captured_requests: list[dict[str, Any]] = []
+    runner = _runner(
+        call_agent_tool=lambda tool_request, *_args, **_kwargs: captured_requests.append(
+            tool_request
+        )
+        or {"ok": True, "tool": tool_request.get("tool")},
+    )
+
+    runner.run(
+        [
+            {
+                "tool": "desktop.safe_type_text",
+                "input": {"text": "hello"},
+                "desktop_execution_policy": {"mode": "sandbox_preferred"},
+                "desktop_provider_session": {
+                    "running": True,
+                    "status": "running",
+                    "provider_id": "local-isolated-desktop",
+                    "url": "http://127.0.0.1:19093",
+                    "tool_names": ["desktop.safe_type_text"],
+                },
+            }
+        ],
+        ["desktop.safe_type_text"],
+        FakeBroker({"ok": True}),
+        messages,
+        timeline,
+        [],
+        next_iteration=3,
+        run_id="run-1",
+        budget=budget,
+    )
+
+    assert budget.claims == []
+    assert len(captured_requests) == 1
+    routed_request = captured_requests[0]
+    assert routed_request["desktop_execution_route"]["status"] == "sandbox_ready"
+    assert routed_request["desktop_execution_route"]["selected_provider_kind"] == (
+        "sandbox_desktop"
+    )
+    assert routed_request["sandbox_provider"]["source"] == "desktop_provider_session"
+    assert routed_request["sandbox_provider"]["provider_id"] == "local-isolated-desktop"
+    assert routed_request["sandbox_provider"]["desktop_session_isolated"] is True
+    assert routed_request["sandbox_provider"]["foreground_takeover_required"] is False
+    assert not [event for event in timeline if event["event"] == "agent.tool.skipped"]
+
+
 def test_runtime_tool_request_runner_preview_input_policy_allows_media_but_blocks_typing() -> None:
     run_events: list[tuple[str, str, dict[str, Any]]] = []
     budget = FakeBudget()

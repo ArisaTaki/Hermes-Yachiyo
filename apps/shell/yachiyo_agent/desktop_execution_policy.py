@@ -623,10 +623,61 @@ def _sandbox_provider_payload(
         value = metadata.get(key)
         if isinstance(value, Mapping):
             return dict(value)
+    provider_session = _sandbox_provider_payload_from_desktop_provider_session(metadata)
+    if provider_session:
+        return provider_session
     nested_metadata = metadata.get("metadata")
     if isinstance(nested_metadata, Mapping) and nested_metadata is not metadata:
         return _sandbox_provider_payload(nested_metadata)
     return {}
+
+
+def _sandbox_provider_payload_from_desktop_provider_session(
+    metadata: Mapping[str, Any],
+) -> dict[str, Any]:
+    session = metadata.get("desktop_provider_session")
+    if not isinstance(session, Mapping):
+        return {}
+    running = bool(session.get("running"))
+    provider_id = str(session.get("provider_id") or "").strip()
+    url = str(session.get("url") or "").strip()
+    tool_names = _string_list(session.get("tool_names")) or _string_list(
+        session.get("supported_tools")
+    )
+    blockers = [] if running else ["sandbox_desktop_provider_required"]
+    return {
+        "available": running,
+        "provider_id": provider_id,
+        "provider_kind": "sandbox_desktop",
+        "status": "available" if running else "provider_required",
+        "adapter_ready": running and bool(url),
+        "reason": str(
+            session.get("reason")
+            or (
+                "Isolated desktop provider session is running."
+                if running
+                else "Isolated desktop provider session is required."
+            )
+        ),
+        "blocking_conditions": blockers,
+        "supported_tools": tool_names,
+        "recommended_for": ["foreground_control", "keyboard_mouse_capture"],
+        "source": "desktop_provider_session",
+        "desktop_session_kind": str(
+            session.get("desktop_session_kind") or "isolated_desktop"
+        ),
+        "desktop_session_isolated": _optional_bool_value(
+            session.get("desktop_session_isolated")
+        )
+        if "desktop_session_isolated" in session
+        else True,
+        "foreground_takeover_required": _optional_bool_value(
+            session.get("foreground_takeover_required")
+        )
+        if "foreground_takeover_required" in session
+        else False,
+        "keyboard_mouse_capture_supported": True,
+    }
 
 
 def _metadata_truthy(
