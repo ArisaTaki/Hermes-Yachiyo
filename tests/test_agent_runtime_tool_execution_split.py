@@ -1769,6 +1769,66 @@ def test_runtime_tool_call_executor_routes_sandbox_ready_tool_to_provider() -> N
     assert timeline[-1]["result"]["desktop_execution_provider_routed"] is True
 
 
+def test_runtime_tool_call_executor_blocks_provider_route_until_approved() -> None:
+    events = FakeToolCallEvents()
+    adapter = FakeSandboxDesktopAdapter()
+    registry = DesktopExecutionProviderRegistry([adapter])
+    executor = _executor(
+        tool_call_events=events,
+        desktop_provider_registry=registry,
+    )
+    timeline: list[dict[str, Any]] = []
+    broker = FakeBroker({"ok": True, "unexpected": True})
+    broker.approvals = {"desktop.safe_type_text": True}
+
+    result = executor.execute(
+        {
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "hello"},
+            "approval_required": True,
+            "risk_level": "high",
+            "policy_reason": "Provider-routed foreground input requires approval.",
+            "desktop_execution_policy": {"mode": "sandbox_preferred"},
+            "desktop_execution_route": {
+                "route_id": "desktop-route:desktop.safe_type_text",
+                "tool_name": "desktop.safe_type_text",
+                "requested_mode": "sandbox_preferred",
+                "selected_provider_kind": "sandbox_desktop",
+                "selected_provider_id": "sandbox-1",
+                "status": "sandbox_ready",
+                "can_execute": True,
+                "can_auto_start": True,
+                "sandbox_required": True,
+                "blocking_conditions": [],
+            },
+            "sandbox_provider": {
+                "available": True,
+                "adapter_ready": True,
+                "provider_kind": "sandbox_desktop",
+                "provider_id": "sandbox-1",
+                "status": "available",
+                "supported_tools": ["desktop.safe_type_text"],
+            },
+        },
+        ["desktop.safe_type_text"],
+        broker,
+        timeline,
+        run_id="run-1",
+        budget=FakeBudget(),
+    )
+
+    assert result["ok"] is False
+    assert result["approval_required"] is True
+    assert result["risk_level"] == "high"
+    assert result["policy_reason"] == (
+        "Provider-routed foreground input requires approval."
+    )
+    assert adapter.calls == []
+    assert broker.calls == []
+    assert timeline[-1]["event"] == "agent.tool.call"
+    assert timeline[-1]["result"]["approval_required"] is True
+
+
 def test_runtime_tool_call_executor_fails_closed_when_provider_adapter_is_missing() -> None:
     events = FakeToolCallEvents()
     executor = _executor(

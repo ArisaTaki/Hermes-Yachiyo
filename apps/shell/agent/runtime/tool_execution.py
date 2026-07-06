@@ -1923,6 +1923,54 @@ def _tool_result_extra_artifacts(
     return artifacts
 
 
+_BROKER_APPROVAL_POLICY_EXCEPTIONS = {
+    "file.organize",
+    "terminal.run",
+    "workspace.write_patch",
+}
+
+
+def _pre_execution_approval_required_result(
+    tool_name: str,
+    tool_request: Mapping[str, Any],
+    broker: Any,
+    *,
+    approved: bool,
+) -> dict[str, Any] | None:
+    if approved:
+        return None
+    request_requires_approval = bool(tool_request.get("approval_required"))
+    broker_approvals = getattr(broker, "approvals", None)
+    broker_requires_approval = (
+        isinstance(broker_approvals, Mapping)
+        and bool(broker_approvals.get(tool_name))
+        and tool_name not in _BROKER_APPROVAL_POLICY_EXCEPTIONS
+    )
+    if not request_requires_approval and not broker_requires_approval:
+        return None
+    policy_reason = str(
+        tool_request.get("policy_reason")
+        or tool_request.get("approval_reason")
+        or (
+            "当前工具策略要求人工确认后再执行。"
+            if broker_requires_approval
+            else "This planned tool request requires approval before execution."
+        )
+    ).strip()
+    result: dict[str, Any] = {
+        "ok": False,
+        "approval_required": True,
+        "tool": tool_name,
+        "status": "approval_required",
+        "policy_reason": policy_reason,
+    }
+    for key in ("risk_level", "plugin_id", "approval_id", "step_id", "planner_step_id"):
+        value = tool_request.get(key)
+        if value not in (None, "", [], {}):
+            result[key] = value
+    return result
+
+
 class RuntimeToolCallExecutor:
     """Executes one tool call while preserving policy, budget, and event gates."""
 
@@ -2039,15 +2087,22 @@ class RuntimeToolCallExecutor:
             )
         )
         try:
-            tool_result = self._desktop_provider_registry.execute_if_routed(
+            tool_result = _pre_execution_approval_required_result(
                 tool_name,
-                payload,
-                tool_request=tool_request,
-                broker=broker,
+                tool_request,
+                broker,
                 approved=approved,
             )
             if tool_result is None:
-                tool_result = broker.call(tool_name, payload, approved=approved)
+                tool_result = self._desktop_provider_registry.execute_if_routed(
+                    tool_name,
+                    payload,
+                    tool_request=tool_request,
+                    broker=broker,
+                    approved=approved,
+                )
+                if tool_result is None:
+                    tool_result = broker.call(tool_name, payload, approved=approved)
         except AgentRuntimeError as exc:
             if not tool_name.startswith("workspace."):
                 self._tool_call_events.failed(
