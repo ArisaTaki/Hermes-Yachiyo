@@ -48,6 +48,11 @@ _PROVIDER_START_BLOCKERS = {
 }
 
 _ISOLATED_SESSION_REQUIRED_TOOLS = {
+    "app.open",
+    "desktop.open_app",
+    "app.focus",
+    "desktop.focus_app",
+    "app.focus_window",
     "media.music_app_open_and_play",
     "media.music_app_control",
 }

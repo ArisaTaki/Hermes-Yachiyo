@@ -213,6 +213,7 @@ def _install_fake_isolated_provider_session(
                     "provider_kind": "sandbox_desktop",
                     "supported_tools": [
                         "desktop.list_apps",
+                        "app.open",
                         "app.focus_and_click_ui_element",
                         "desktop.ui_elements",
                         "media.music_app_open_and_play",
@@ -252,8 +253,8 @@ def _install_fake_isolated_provider_session(
             "OHA_YACHIYO_DESKTOP_PROVIDER_URL": "http://127.0.0.1:19093",
             "OHA_YACHIYO_DESKTOP_PROVIDER_ID": "local-isolated-desktop",
             "OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS": (
-                "desktop.list_apps,app.focus_and_click_ui_element,desktop.ui_elements,"
-                "media.music_app_open_and_play"
+                "desktop.list_apps,app.open,app.focus_and_click_ui_element,"
+                "desktop.ui_elements,media.music_app_open_and_play"
             ),
             "OHA_YACHIYO_DESKTOP_PROVIDER_KEYBOARD_MOUSE_CAPTURE_SUPPORTED": "true",
             "OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_KIND": "isolated_desktop",
@@ -279,6 +280,7 @@ def _install_fake_isolated_provider_session(
                 "keyboard_mouse_capture_supported": True,
                 "supported_tools": [
                     "desktop.list_apps",
+                    "app.open",
                     "app.focus_and_click_ui_element",
                     "desktop.ui_elements",
                     "media.music_app_open_and_play",
@@ -2309,6 +2311,66 @@ def test_yachiyo_chat_entrypoint_auto_starts_isolated_provider_for_input(
         is True
     )
     assert "desktop_provider" in task.runtime_debug.debug_surfaces
+
+
+def test_yachiyo_chat_entrypoint_auto_starts_isolated_provider_for_app_open(
+    monkeypatch,
+) -> None:
+    for key in (
+        "OHA_YACHIYO_DESKTOP_PROVIDER_URL",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_ID",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_KEYBOARD_MOUSE_CAPTURE_SUPPORTED",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_KIND",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_ISOLATED",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_FOREGROUND_TAKEOVER_REQUIRED",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    start_calls = _install_fake_isolated_provider_session(monkeypatch)
+    port = _FakeRuntimePort()
+    service = YachiyoAgentService(port)
+
+    task = service.start_chat_task(
+        StartChatTaskRequest(
+            prompt="打开 PixelForge",
+            conversation_id="chat-1",
+            metadata={"launcher_mode": "bubble"},
+            allowed_tools=[
+                "desktop.list_apps",
+                "app.open",
+                "desktop.active_window",
+            ],
+        )
+    )
+
+    request_payload = port.calls[0][1]
+    envelope = request_payload["runtime_execution_envelope"]
+    session = envelope["desktop_provider_session"]
+    open_request = next(
+        request
+        for request in request_payload["direct_tool_requests"]
+        if request["tool"] == "app.open"
+    )
+
+    assert start_calls == [{"tools": ["app.open"]}]
+    assert session["needed"] is True
+    assert session["started"] is True
+    assert session["running"] is True
+    assert session["provider_id"] == "local-isolated-desktop"
+    assert session["desktop_session_isolated"] is True
+    assert session["foreground_takeover_required"] is False
+    assert open_request["input"] == {
+        "app_name": "PixelForge",
+        "query": "PixelForge",
+        "selection_source": "desktop.list_apps",
+    }
+    assert open_request["sandbox_provider"]["provider_id"] == "local-isolated-desktop"
+    assert open_request["desktop_execution_route"]["status"] == "sandbox_ready"
+    assert open_request["desktop_provider_session"]["provider_id"] == (
+        "local-isolated-desktop"
+    )
+    assert task.runtime_debug is not None
+    assert task.runtime_debug.desktop_provider_session_tool_names == ["app.open"]
 
 
 def test_yachiyo_chat_entrypoint_auto_starts_isolated_provider_for_music(
