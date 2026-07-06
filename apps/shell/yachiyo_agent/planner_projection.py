@@ -12,6 +12,10 @@ from .desktop_plan_hints import (
     discovered_app_open_needs_model_followup,
     discovered_app_pending_user_action,
 )
+from .isolated_provider_session import (
+    annotate_envelope_with_desktop_provider_session,
+    ensure_isolated_desktop_provider_session_for_envelope,
+)
 from .planner_execution import planner_orchestration_requests
 from .replans import (
     task_replan_request_from_failure,
@@ -140,7 +144,7 @@ def planner_enriched_chat_request(
         )
         or decision
     )
-    runtime_execution_envelope = runtime_execution_envelope_payload(
+    runtime_execution_envelope = _runtime_execution_envelope_payload_for_chat_start(
         execution_decision,
         allowed_tools=execution_allowed_tools,
         full_plan=True,
@@ -169,6 +173,34 @@ def planner_enriched_chat_request(
             if direct_tool_requests:
                 payload["direct_tool_requests"] = direct_tool_requests
     return payload
+
+
+def _runtime_execution_envelope_payload_for_chat_start(
+    decision: PlannerDecisionSnapshot,
+    *,
+    allowed_tools: Iterable[str] | None = None,
+    full_plan: bool = True,
+    metadata: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    envelope = runtime_execution_envelope_payload(
+        decision,
+        allowed_tools=allowed_tools,
+        full_plan=full_plan,
+        metadata=metadata,
+    )
+    if not envelope:
+        return {}
+    session = ensure_isolated_desktop_provider_session_for_envelope(envelope)
+    if session.get("needed") and session.get("running"):
+        refreshed = runtime_execution_envelope_payload(
+            decision,
+            allowed_tools=allowed_tools,
+            full_plan=full_plan,
+            metadata=metadata,
+        )
+        if refreshed:
+            envelope = refreshed
+    return annotate_envelope_with_desktop_provider_session(envelope, session)
 
 
 def _entrypoint_runtime_execution_allowed_tools(

@@ -188,6 +188,108 @@ class _BareStartTaskRuntimePort(_FakeRuntimePort):
         )
 
 
+def _install_fake_isolated_provider_session(
+    monkeypatch: Any,
+    probe_calls: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    start_calls: list[dict[str, Any]] = []
+
+    class FakeResponse:
+        status = 200
+
+        def __enter__(self) -> "FakeResponse":
+            return self
+
+        def __exit__(self, *_args: Any) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return json.dumps(
+                {
+                    "ok": True,
+                    "status": "ready",
+                    "version": "0.1.0",
+                    "provider_id": "local-isolated-desktop",
+                    "provider_kind": "sandbox_desktop",
+                    "supported_tools": [
+                        "desktop.list_apps",
+                        "app.focus_and_click_ui_element",
+                        "desktop.ui_elements",
+                    ],
+                    "capabilities": [
+                        "desktop_discovery",
+                        "keyboard_mouse_capture",
+                        "isolated_desktop",
+                    ],
+                    "keyboard_mouse_capture_supported": True,
+                    "desktop_session_isolated": True,
+                    "foreground_takeover_required": False,
+                }
+            ).encode("utf-8")
+
+        def getcode(self) -> int:
+            return self.status
+
+    def fake_urlopen(request: Any, *, timeout: float) -> FakeResponse:
+        if probe_calls is not None:
+            probe_calls.append(request.full_url)
+        return FakeResponse()
+
+    def fake_status() -> dict[str, Any]:
+        return {
+            "ok": True,
+            "status": "stopped",
+            "running": False,
+            "provider_id": "",
+            "url": "",
+            "source": "test",
+        }
+
+    def fake_start(request: dict[str, Any] | None = None) -> dict[str, Any]:
+        start_calls.append(dict(request or {}))
+        env = {
+            "OHA_YACHIYO_DESKTOP_PROVIDER_URL": "http://127.0.0.1:19093",
+            "OHA_YACHIYO_DESKTOP_PROVIDER_ID": "local-isolated-desktop",
+            "OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS": (
+                "desktop.list_apps,app.focus_and_click_ui_element,desktop.ui_elements"
+            ),
+            "OHA_YACHIYO_DESKTOP_PROVIDER_KEYBOARD_MOUSE_CAPTURE_SUPPORTED": "true",
+            "OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_KIND": "isolated_desktop",
+            "OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_ISOLATED": "true",
+            "OHA_YACHIYO_DESKTOP_PROVIDER_FOREGROUND_TAKEOVER_REQUIRED": "false",
+        }
+        for key, value in env.items():
+            monkeypatch.setenv(key, value)
+        return {
+            "ok": True,
+            "status": "running",
+            "running": True,
+            "started": True,
+            "pid": 4242,
+            "provider_id": "local-isolated-desktop",
+            "url": "http://127.0.0.1:19093",
+            "command": ["python", "scripts/run_isolated_desktop_provider.py"],
+            "env": env,
+            "source": "isolated_provider_session_manager",
+        }
+
+    monkeypatch.setattr(
+        "apps.shell.agent.runtime.desktop_execution_providers.urlopen_with_bundled_ca",
+        fake_urlopen,
+    )
+    monkeypatch.setattr(
+        "apps.shell.yachiyo_agent.isolated_provider_session."
+        "isolated_desktop_provider_session_status",
+        fake_status,
+    )
+    monkeypatch.setattr(
+        "apps.shell.yachiyo_agent.isolated_provider_session."
+        "start_isolated_desktop_provider_session",
+        fake_start,
+    )
+    return start_calls
+
+
 class _FakeStudioExecutionPort:
     def list_tool_catalog(self) -> dict[str, Any]:
         return {
@@ -1986,51 +2088,13 @@ def test_yachiyo_chat_entrypoint_routes_provider_supported_desktop_actions(
     monkeypatch,
 ) -> None:
     calls: list[str] = []
-
-    class FakeResponse:
-        status = 200
-
-        def __enter__(self) -> "FakeResponse":
-            return self
-
-        def __exit__(self, *_args: Any) -> None:
-            return None
-
-        def read(self) -> bytes:
-            return json.dumps(
-                {
-                    "ok": True,
-                    "status": "ready",
-                    "version": "0.1.0",
-                    "supported_tools": [
-                        "desktop.list_apps",
-                        "app.focus_and_click_ui_element",
-                    ],
-                    "capabilities": [
-                        "desktop_discovery",
-                        "sandbox_foreground",
-                        "read_only_observation",
-                    ],
-                }
-            ).encode("utf-8")
-
-        def getcode(self) -> int:
-            return self.status
-
-    def fake_urlopen(request: Any, *, timeout: float) -> FakeResponse:
-        calls.append(request.full_url)
-        return FakeResponse()
-
-    monkeypatch.setattr(
-        "apps.shell.agent.runtime.desktop_execution_providers.urlopen_with_bundled_ca",
-        fake_urlopen,
-    )
     monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_URL", "http://127.0.0.1:19091")
     monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_ID", "local-headless-desktop")
     monkeypatch.setenv(
         "OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS",
         "desktop.list_apps,app.focus_and_click_ui_element",
     )
+    start_calls = _install_fake_isolated_provider_session(monkeypatch, calls)
     port = _FakeRuntimePort()
     service = YachiyoAgentService(port)
 
@@ -2068,6 +2132,7 @@ def test_yachiyo_chat_entrypoint_routes_provider_supported_desktop_actions(
     assert request_payload["metadata"]["desktop_execution_policy"]["mode"] == (
         "preview_input"
     )
+    assert start_calls == []
     assert operation_request["desktop_execution_route"]["status"] == "sandbox_ready"
     assert operation_request["sandbox_provider"]["provider_id"] == (
         "local-headless-desktop"
@@ -2081,6 +2146,64 @@ def test_yachiyo_chat_entrypoint_routes_provider_supported_desktop_actions(
     )
     assert routed_request.desktop_execution_route is not None
     assert routed_request.desktop_execution_route.status == "sandbox_ready"
+
+
+def test_yachiyo_chat_entrypoint_auto_starts_isolated_provider_for_input(
+    monkeypatch,
+) -> None:
+    for key in (
+        "OHA_YACHIYO_DESKTOP_PROVIDER_URL",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_ID",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_KEYBOARD_MOUSE_CAPTURE_SUPPORTED",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_KIND",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_ISOLATED",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_FOREGROUND_TAKEOVER_REQUIRED",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    start_calls = _install_fake_isolated_provider_session(monkeypatch)
+    port = _FakeRuntimePort()
+    service = YachiyoAgentService(port)
+
+    task = service.start_chat_task(
+        StartChatTaskRequest(
+            prompt="在 PixelForge 点击 Export",
+            conversation_id="chat-1",
+            metadata={"launcher_mode": "bubble"},
+            allowed_tools=[
+                "desktop.list_apps",
+                "app.focus_and_click_ui_element",
+                "desktop.ui_elements",
+            ],
+        )
+    )
+
+    request_payload = port.calls[0][1]
+    envelope = request_payload["runtime_execution_envelope"]
+    session = envelope["desktop_provider_session"]
+    operation_request = next(
+        request
+        for request in request_payload["direct_tool_requests"]
+        if request["tool"] == "app.focus_and_click_ui_element"
+    )
+
+    assert start_calls == [{}]
+    assert session["needed"] is True
+    assert session["started"] is True
+    assert session["running"] is True
+    assert session["provider_id"] == "local-isolated-desktop"
+    assert operation_request["sandbox_provider"]["provider_id"] == (
+        "local-isolated-desktop"
+    )
+    assert operation_request["desktop_execution_route"]["status"] == "sandbox_ready"
+    assert operation_request["desktop_provider_session"]["provider_id"] == (
+        "local-isolated-desktop"
+    )
+    assert request_payload["metadata"]["yachiyo_execution_envelope"][
+        "desktop_provider_session"
+    ]["started"] is True
+    assert task.runtime_execution_envelope is not None
+    assert task.runtime_execution_envelope.desktop_provider_session["started"] is True
 
 
 def test_agent_studio_service_normalizes_known_app_submit_execution() -> None:
