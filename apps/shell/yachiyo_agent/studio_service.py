@@ -811,12 +811,13 @@ class AgentStudioService:
         request: StartAgentRunRequest | Mapping[str, Any],
     ) -> RunTimelineSnapshot:
         payload = _request_payload(request)
-        decision = self._start_planner_decision(payload)
+        decision, planner_metadata = self._start_planner_decision_with_metadata(payload)
         start_payload = _planner_enriched_start_payload(
             payload,
             decision,
             allowed_tools=_planner_start_allowed_tools(payload),
             metadata_source="agent_studio_service_start",
+            planner_metadata=planner_metadata,
         )
         return run_timeline_snapshot_from_payload(
             start_payload_with_planner_decision_events(
@@ -982,7 +983,7 @@ class AgentStudioService:
         request: StartGroupRunRequest | Mapping[str, Any],
     ) -> GroupRunSnapshot:
         payload = _request_payload(request)
-        decision = self._start_planner_decision(payload)
+        decision, planner_metadata = self._start_planner_decision_with_metadata(payload)
         start_payload = _planner_enriched_start_payload(
             payload,
             decision,
@@ -992,6 +993,7 @@ class AgentStudioService:
                 kind="group_run",
                 target_id=str(payload.get("group_id") or "").strip(),
             ),
+            planner_metadata=planner_metadata,
         )
         raw_group_run = self._studio_port.start_group_run(start_payload)
         event_context = _planner_orchestration_execution_context(
@@ -1157,7 +1159,7 @@ class AgentStudioService:
         request: StartWorkflowRunRequest | Mapping[str, Any],
     ) -> WorkflowRunSnapshot:
         payload = _request_payload(request)
-        decision = self._start_planner_decision(payload)
+        decision, planner_metadata = self._start_planner_decision_with_metadata(payload)
         start_payload = _planner_enriched_start_payload(
             payload,
             decision,
@@ -1167,6 +1169,7 @@ class AgentStudioService:
                 kind="workflow",
                 target_id=str(payload.get("workflow_id") or "").strip(),
             ),
+            planner_metadata=planner_metadata,
         )
         raw_workflow_run = self._studio_port.start_workflow_run(start_payload)
         event_context = _planner_orchestration_execution_context(
@@ -1202,20 +1205,46 @@ class AgentStudioService:
         self,
         payload: Mapping[str, Any],
     ) -> PlannerDecisionSnapshot | None:
+        decision, _metadata = self._start_planner_decision_with_metadata(payload)
+        return decision
+
+    def _start_planner_decision_with_metadata(
+        self,
+        payload: Mapping[str, Any],
+    ) -> tuple[PlannerDecisionSnapshot | None, dict[str, Any]]:
+        metadata = _planner_start_metadata(
+            payload,
+            source="agent_studio_service_start",
+        )
         prompt = _planner_start_prompt(payload)
         if not prompt:
-            return None
+            return None, metadata
+        allowed_tools = _planner_start_allowed_tools(payload)
         try:
-            return self.plan_task(
-                prompt,
-                allowed_tools=_planner_start_allowed_tools(payload),
-                metadata=_planner_start_metadata(
-                    payload,
-                    source="agent_studio_service_start",
-                ),
+            port_planner = getattr(self._studio_port, "plan_task", None)
+            if callable(port_planner):
+                planner_payload = port_planner(
+                    prompt,
+                    allowed_tools=allowed_tools,
+                    metadata=metadata,
+                )
+                if planner_payload is not None:
+                    return PlannerDecisionSnapshot.model_validate(
+                        planner_payload
+                    ), metadata
+            catalog = self.list_tool_catalog()
+            enriched_metadata = _planner_metadata_with_catalog_readiness(
+                metadata,
+                catalog,
             )
+            tools = _tool_names_from_catalog(catalog, allowed_tools)
+            return RuntimePlanner().decision(
+                prompt,
+                allowed_tools=tools or None,
+                metadata=enriched_metadata,
+            ), enriched_metadata
         except Exception:
-            return None
+            return None, metadata
 
     def list_run_timelines(self, limit: int = 50) -> list[RunTimelineSnapshot]:
         return [
@@ -1585,15 +1614,24 @@ def _planner_enriched_start_payload(
     allowed_tools: Iterable[str] | None,
     metadata_source: str,
     execution_context: Mapping[str, Any] | None = None,
+    planner_metadata: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     start_payload = dict(payload)
     if decision is None:
-        start_payload["metadata"] = _planner_start_metadata(
-            start_payload,
-            source=metadata_source,
+        start_payload["metadata"] = (
+            dict(planner_metadata)
+            if isinstance(planner_metadata, Mapping)
+            else _planner_start_metadata(
+                start_payload,
+                source=metadata_source,
+            )
         )
         return start_payload
-    metadata = _planner_start_metadata(start_payload, source=metadata_source)
+    metadata = (
+        dict(planner_metadata)
+        if isinstance(planner_metadata, Mapping)
+        else _planner_start_metadata(start_payload, source=metadata_source)
+    )
     metadata.update(
         runtime_planner_metadata(
             decision,

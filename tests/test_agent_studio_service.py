@@ -1270,6 +1270,99 @@ def test_agent_studio_service_prefers_port_planner_when_available() -> None:
     ]
 
 
+def test_agent_studio_start_agent_run_uses_catalog_provider_without_env(
+    monkeypatch,
+) -> None:
+    for name in (
+        "OHA_YACHIYO_DESKTOP_PROVIDER_URL",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_ID",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+    class ProviderCatalogPort(_FakeStudioPort):
+        def list_tool_catalog(self) -> dict[str, Any]:
+            self.calls.append(("list_tool_catalog", None))
+            return {
+                "source": "planner-catalog",
+                "tools": [
+                    {
+                        "tool_name": "desktop.list_apps",
+                        "function_name": "desktop_list_apps",
+                    },
+                    {
+                        "tool_name": "app.focus_and_click_ui_element",
+                        "function_name": "app_focus_and_click_ui_element",
+                    },
+                    {
+                        "tool_name": "desktop.ui_elements",
+                        "function_name": "desktop_ui_elements",
+                    },
+                ],
+                "capabilities": {},
+                "sandbox_provider": {
+                    "available": True,
+                    "provider_id": "catalog-provider",
+                    "provider_kind": "sandbox_desktop",
+                    "adapter_ready": True,
+                    "supported_tools": [
+                        "desktop.list_apps",
+                        "app.focus_and_click_ui_element",
+                    ],
+                },
+                "plugins": [],
+            }
+
+    port = ProviderCatalogPort()
+    service = AgentStudioService(port)
+
+    started = service.start_agent_run(
+        {
+            "agent_id": "agent-1",
+            "objective": "在 PixelForge 点击 Export",
+            "title": "PixelForge export",
+            "allowed_tools": [
+                "desktop.list_apps",
+                "app.focus_and_click_ui_element",
+                "desktop.ui_elements",
+            ],
+            "metadata": {"surface": "agent_studio"},
+        }
+    )
+
+    start_payload = _port_call_payload(port, "start_agent_run")
+    operation_request = next(
+        request
+        for request in start_payload["direct_tool_requests"]
+        if request["tool"] == "app.focus_and_click_ui_element"
+    )
+    envelope_request = next(
+        request
+        for request in start_payload["metadata"]["yachiyo_execution_envelope"][
+            "requests"
+        ]
+        if request["tool_name"] == "app.focus_and_click_ui_element"
+    )
+    plan_event = next(
+        event for event in started.events if event.event_type == "agent.plan.created"
+    )
+    event_request = next(
+        request
+        for request in plan_event.payload["runtime_execution_envelope"]["requests"]
+        if request["tool_name"] == "app.focus_and_click_ui_element"
+    )
+
+    assert [name for name, _payload in port.calls] == [
+        "list_tool_catalog",
+        "start_agent_run",
+    ]
+    assert operation_request["desktop_execution_route"]["status"] == "sandbox_ready"
+    assert operation_request["sandbox_provider"]["provider_id"] == "catalog-provider"
+    assert envelope_request["desktop_execution_route"]["status"] == "sandbox_ready"
+    assert event_request["desktop_execution_route"]["status"] == "sandbox_ready"
+    assert event_request["sandbox_provider"]["provider_id"] == "catalog-provider"
+
+
 def test_agent_studio_start_agent_run_preserves_provider_routes(
     monkeypatch,
 ) -> None:
