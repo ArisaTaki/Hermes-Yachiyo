@@ -105,11 +105,28 @@ export type SandboxDesktopProviderSnapshot = {
   provider_id?: string;
   provider_kind?: DesktopIsolationKind | string;
   status?: string;
+  adapter_ready?: boolean;
   reason?: string;
   blocking_conditions?: string[];
   supported_tools?: string[];
   recommended_for?: string[];
   diagnostic_route?: string | null;
+  source?: string;
+};
+
+export type DesktopExecutionRouteSnapshot = {
+  route_id?: string;
+  tool_name?: string;
+  requested_mode?: DesktopExecutionPolicyMode | string;
+  selected_provider_kind?: DesktopIsolationKind | string;
+  selected_provider_id?: string;
+  status?: string;
+  can_execute?: boolean;
+  can_auto_start?: boolean;
+  sandbox_required?: boolean;
+  fallback_mode?: DesktopExecutionPolicyMode | string;
+  reason?: string;
+  blocking_conditions?: string[];
   source?: string;
 };
 
@@ -644,6 +661,7 @@ export type RuntimeExecutionRequestSnapshot = {
   execution_mode?: DesktopExecutionModeSnapshot | null;
   desktop_execution_policy?: DesktopExecutionPolicySnapshot | null;
   sandbox_provider?: SandboxDesktopProviderSnapshot | null;
+  desktop_execution_route?: DesktopExecutionRouteSnapshot | null;
   policy_reason?: string;
   continue_to_model?: boolean;
   depends_on?: string[];
@@ -694,6 +712,7 @@ export type RuntimeExecutionEnvelopeSnapshot = {
   route_to_studio?: boolean;
   desktop_execution_policy?: DesktopExecutionPolicySnapshot | null;
   sandbox_provider?: SandboxDesktopProviderSnapshot | null;
+  desktop_execution_route?: DesktopExecutionRouteSnapshot | null;
   runtime_doctrine?: string;
   runtime_stage_counts?: Record<string, number>;
   replan_signal_count?: number;

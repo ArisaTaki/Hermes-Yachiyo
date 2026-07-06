@@ -61,6 +61,7 @@ export function RuntimeExecutionEnvelopeSummary({
   const riskCounts = runtimeExecutionRiskCounts(requests);
   const executionPolicy = runtimeExecutionPolicySummary(envelope.desktop_execution_policy, requests);
   const sandboxProvider = runtimeSandboxProviderSummary(envelope.sandbox_provider, requests);
+  const executionRoute = runtimeExecutionRouteSummary(envelope.desktop_execution_route, requests);
   const isChat = variant === 'chat';
   const classes = [
     isChat
@@ -81,6 +82,8 @@ export function RuntimeExecutionEnvelopeSummary({
       data-desktop-execution-policy-label={executionPolicy.label}
       data-sandbox-provider-status={sandboxProvider.status}
       data-sandbox-provider-blockers={sandboxProvider.blockers.join(',')}
+      data-desktop-execution-route-status={executionRoute.status}
+      data-desktop-execution-route-blockers={executionRoute.blockers.join(',')}
       data-request-count={requests.length}
       data-risk-levels={riskCounts.map(([risk, count]) => `${risk}:${count}`).join(',')}
       data-route-to-studio={envelope.route_to_studio === undefined ? '' : String(envelope.route_to_studio)}
@@ -102,6 +105,7 @@ export function RuntimeExecutionEnvelopeSummary({
             artifacts={artifacts}
             blockers={blockers}
             debugPillsTestId={debugPillsTestId}
+            executionRoute={executionRoute}
             executionPolicy={executionPolicy}
             openQuestions={openQuestions}
             retrySummaries={retrySummaries}
@@ -143,12 +147,17 @@ export function RuntimeExecutionEnvelopeSummary({
               <small>Sandbox</small>
               <strong>{sandboxProvider.label || 'Not needed'}</strong>
             </span>
+            <span>
+              <small>Provider</small>
+              <strong>{executionRoute.label || 'Default'}</strong>
+            </span>
           </div>
           <RuntimeExecutionEnvelopePills
             approvals={approvals}
             artifacts={artifacts}
             blockers={blockers}
             debugPillsTestId={debugPillsTestId}
+            executionRoute={executionRoute}
             executionPolicy={executionPolicy}
             openQuestions={openQuestions}
             retrySummaries={retrySummaries}
@@ -185,6 +194,7 @@ function RuntimeExecutionEnvelopePills({
   artifacts,
   blockers,
   debugPillsTestId,
+  executionRoute,
   executionPolicy,
   openQuestions,
   retrySummaries,
@@ -198,6 +208,7 @@ function RuntimeExecutionEnvelopePills({
   artifacts: string[];
   blockers: string[];
   debugPillsTestId?: string;
+  executionRoute: RuntimeExecutionRouteSummary;
   executionPolicy: RuntimeExecutionPolicySummary;
   openQuestions: string[];
   retrySummaries: RuntimeExecutionRetrySummary[];
@@ -217,6 +228,7 @@ function RuntimeExecutionEnvelopePills({
     && !retrySummaries.length
     && !riskCounts.length
     && !blockers.length
+    && !executionRoute.status
     && !sandboxProvider.status
     && !executionPolicy.mode
   ) {
@@ -234,6 +246,15 @@ function RuntimeExecutionEnvelopePills({
           title={executionPolicy.reason || undefined}
         >
           execution · {executionPolicy.label}
+        </span>
+      ) : null}
+      {executionRoute.status ? (
+        <span
+          className={executionRoute.canExecute ? pillClassName : missingClassName}
+          data-desktop-execution-route-status={executionRoute.status}
+          title={executionRoute.reason || undefined}
+        >
+          route · {executionRoute.label}
         </span>
       ) : null}
       {sandboxProvider.status ? (
@@ -335,6 +356,7 @@ function RuntimeExecutionRequestRow({
   const replayEvidence = runtimeRequestReplayEvidenceFromRequest(request);
   const executionPolicy = runtimeExecutionPolicySummary(request.desktop_execution_policy);
   const sandboxProvider = runtimeSandboxProviderSummary(request.sandbox_provider);
+  const executionRoute = runtimeExecutionRouteSummary(request.desktop_execution_route);
   return (
     <div
       className="studio-planner-step"
@@ -344,6 +366,8 @@ function RuntimeExecutionRequestRow({
       data-desktop-execution-policy={executionPolicy.mode}
       data-sandbox-provider-status={sandboxProvider.status}
       data-sandbox-provider-blockers={sandboxProvider.blockers.join(',')}
+      data-desktop-execution-route-status={executionRoute.status}
+      data-desktop-execution-route-blockers={executionRoute.blockers.join(',')}
       data-observation-retry={observationRetryPreview}
       data-policy-reason={request.policy_reason || ''}
       data-request-approval-ids={replayEvidence.approvalPreview}
@@ -372,6 +396,9 @@ function RuntimeExecutionRequestRow({
         ) : null}
         {sandboxProvider.status ? (
           <span title={sandboxProvider.reason || undefined}>sandbox: {sandboxProvider.label}</span>
+        ) : null}
+        {executionRoute.status ? (
+          <span title={executionRoute.reason || undefined}>route: {executionRoute.label}</span>
         ) : null}
         <RuntimeRequestReplayEvidencePanel
           className="runtime-execution-request-replay-evidence"
@@ -440,6 +467,20 @@ type RuntimeExecutionPolicySummary = {
   source: string;
 };
 
+type RuntimeExecutionRouteSummary = {
+  blockers: string[];
+  canAutoStart: boolean | null;
+  canExecute: boolean | null;
+  fallbackMode: string;
+  label: string;
+  providerId: string;
+  providerKind: string;
+  reason: string;
+  requestedMode: string;
+  sandboxRequired: boolean | null;
+  status: string;
+};
+
 type RuntimeSandboxProviderSummary = {
   available: boolean;
   blockers: string[];
@@ -479,6 +520,69 @@ function runtimeExecutionPolicySummary(
     reason,
     source,
   };
+}
+
+function runtimeExecutionRouteSummary(
+  route: unknown,
+  requests: RuntimeExecutionRequestSnapshot[] = [],
+): RuntimeExecutionRouteSummary {
+  let record = objectRecord(route);
+  if (!Object.keys(record).length) {
+    const requestRoute = requests
+      .map((request) => objectRecord(request.desktop_execution_route))
+      .find((candidate) => Object.keys(candidate).length > 0);
+    record = requestRoute || {};
+  }
+  const status = stringValue(record.status);
+  const providerKind = stringValue(record.selected_provider_kind);
+  const providerId = stringValue(record.selected_provider_id);
+  const requestedMode = stringValue(record.requested_mode);
+  const fallbackMode = stringValue(record.fallback_mode);
+  const canExecute = booleanValue(record.can_execute);
+  const canAutoStart = booleanValue(record.can_auto_start);
+  const sandboxRequired = booleanValue(record.sandbox_required);
+  const reason = stringValue(record.reason);
+  const blockers = stringArray(record.blocking_conditions);
+  return {
+    blockers,
+    canAutoStart,
+    canExecute,
+    fallbackMode,
+    label: executionRouteLabel({
+      blockers,
+      canExecute,
+      fallbackMode,
+      providerId,
+      providerKind,
+      requestedMode,
+      status,
+    }),
+    providerId,
+    providerKind,
+    reason,
+    requestedMode,
+    sandboxRequired,
+    status,
+  };
+}
+
+function executionRouteLabel(route: {
+  blockers: string[];
+  canExecute: boolean | null;
+  fallbackMode: string;
+  providerId: string;
+  providerKind: string;
+  requestedMode: string;
+  status: string;
+}): string {
+  if (!route.status && !route.providerKind && !route.blockers.length) return '';
+  return compactPreview([
+    route.status,
+    route.canExecute === false ? route.blockers[0] : '',
+    route.providerId || route.providerKind,
+    route.fallbackMode ? `fallback ${route.fallbackMode}` : '',
+    route.requestedMode,
+  ]);
 }
 
 function runtimeSandboxProviderSummary(

@@ -532,6 +532,13 @@ and shared frontend summaries. The default status is intentionally
 why a sandbox handoff cannot auto-run yet while preserving the supervised-live
 fallback and approval/policy gate.
 
+Current provider routing boundary: `DesktopExecutionRouteSnapshot` records the
+selected provider kind/id, requested policy mode, route status, auto-run
+eligibility, fallback mode, and route blockers. Tool-native, browser-profile,
+process, supervised-live, and sandbox-required cases now share one observable
+route vocabulary without claiming sandbox execution is ready before a provider
+adapter is registered.
+
 ## Phase 6 - Data Analysis Capability
 
 Add a stable data-analysis path for CSV, XLSX, JSON, and text-table inputs.

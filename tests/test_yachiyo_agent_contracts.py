@@ -39,6 +39,7 @@ from apps.shell.yachiyo_agent import (
     DesktopExecutionLoopSnapshot,
     DesktopActionRiskSnapshot,
     DesktopExecutionCapabilitySnapshot,
+    DesktopExecutionRouteSnapshot,
     DesktopExecutionModeSnapshot,
     DesktopExecutionPolicySnapshot,
     DesktopRecoveryActionMetadataSnapshot,
@@ -105,6 +106,7 @@ from apps.shell.yachiyo_agent import (
     desktop_action_risk_snapshots,
     desktop_tool_execution_mode,
     desktop_execution_capability_snapshots,
+    desktop_execution_route_decision,
     desktop_tool_risk_level,
     sandbox_desktop_provider_status,
     with_daily_entrypoint_desktop_execution_policy,
@@ -394,6 +396,11 @@ def test_runtime_execution_envelope_snapshot_is_public_contract() -> None:
             status="provider_required",
             blocking_conditions=["sandbox_desktop_provider_required"],
         ),
+        desktop_execution_route=DesktopExecutionRouteSnapshot(
+            tool_name="desktop.list_apps",
+            requested_mode="preview_input",
+            selected_provider_kind="none",
+        ),
         policy_reason="Desktop app discovery is read-only.",
         runtime_doctrine="discover_operate_verify",
         runtime_stage="discover",
@@ -469,6 +476,11 @@ def test_runtime_execution_envelope_snapshot_is_public_contract() -> None:
             status="provider_required",
             blocking_conditions=["sandbox_desktop_provider_required"],
         ),
+        desktop_execution_route=DesktopExecutionRouteSnapshot(
+            tool_name="desktop.list_apps",
+            requested_mode="preview_input",
+            selected_provider_kind="none",
+        ),
         runtime_doctrine="discover_operate_verify",
         runtime_stage_counts={"discover": 1},
         replan_signal_count=1,
@@ -491,6 +503,7 @@ def test_runtime_execution_envelope_snapshot_is_public_contract() -> None:
         "route_to_studio",
         "desktop_execution_policy",
         "sandbox_provider",
+        "desktop_execution_route",
         "runtime_doctrine",
         "runtime_stage_counts",
         "replan_signal_count",
@@ -508,6 +521,7 @@ def test_runtime_execution_envelope_snapshot_is_public_contract() -> None:
     assert payload["requests"][0]["sandbox_provider"]["blocking_conditions"] == [
         "sandbox_desktop_provider_required"
     ]
+    assert payload["requests"][0]["desktop_execution_route"]["status"] == "ready"
     assert payload["requests"][0]["policy_reason"] == "Desktop app discovery is read-only."
     assert payload["requests"][0]["runtime_stage"] == "discover"
     assert payload["requests"][0]["replan_triggers"] == ["verification_failed"]
@@ -561,6 +575,7 @@ def test_runtime_execution_envelope_snapshot_is_public_contract() -> None:
     assert payload["runtime_stage_counts"] == {"discover": 1}
     assert payload["desktop_execution_policy"]["mode"] == "preview_input"
     assert payload["sandbox_provider"]["status"] == "provider_required"
+    assert payload["desktop_execution_route"]["status"] == "ready"
     assert payload["replan_signal_count"] == 1
     projected_requests = runtime_execution_requests_from_envelope_payload(
         payload,
@@ -568,6 +583,7 @@ def test_runtime_execution_envelope_snapshot_is_public_contract() -> None:
     )
     assert projected_requests[0]["desktop_execution_policy"]["mode"] == "preview_input"
     assert projected_requests[0]["sandbox_provider"]["status"] == "provider_required"
+    assert projected_requests[0]["desktop_execution_route"]["status"] == "ready"
 
 
 def test_runtime_execution_request_projects_verification_evidence() -> None:
@@ -4982,6 +4998,7 @@ def test_sandbox_desktop_provider_snapshot_json_shape_is_stable() -> None:
         provider_id="",
         provider_kind="sandbox_desktop",
         status="provider_required",
+        adapter_ready=False,
         reason="No sandbox provider is configured.",
         blocking_conditions=["sandbox_desktop_provider_required"],
         supported_tools=["desktop.safe_type_text"],
@@ -4998,6 +5015,7 @@ def test_sandbox_desktop_provider_snapshot_json_shape_is_stable() -> None:
                 "available": True,
                 "provider_id": "sandbox-1",
                 "provider_kind": "sandbox_desktop",
+                "adapter_ready": True,
                 "supported_tools": ["desktop.safe_type_text"],
             }
         }
@@ -5008,6 +5026,7 @@ def test_sandbox_desktop_provider_snapshot_json_shape_is_stable() -> None:
         "provider_id",
         "provider_kind",
         "status",
+        "adapter_ready",
         "reason",
         "blocking_conditions",
         "supported_tools",
@@ -5016,14 +5035,85 @@ def test_sandbox_desktop_provider_snapshot_json_shape_is_stable() -> None:
         "source",
     ]
     assert payload["available"] is False
+    assert payload["adapter_ready"] is False
     assert payload["blocking_conditions"] == ["sandbox_desktop_provider_required"]
     assert default_status["status"] == "provider_required"
     assert default_status["blocking_conditions"] == ["sandbox_desktop_provider_required"]
     assert explicit_status["available"] is True
+    assert explicit_status["adapter_ready"] is True
     assert explicit_status["status"] == "available"
     assert explicit_status["blocking_conditions"] == []
     with pytest.raises(ValidationError):
         SandboxDesktopProviderSnapshot(unknown=True)
+
+
+def test_desktop_execution_route_decision_reports_provider_boundaries() -> None:
+    preview_route = desktop_execution_route_decision(
+        "desktop.safe_type_text",
+        policy={"mode": "preview_input"},
+        execution_mode=DesktopExecutionModeSnapshot(
+            mode="supervised_live",
+            foreground_control=True,
+            keyboard_mouse_capture=True,
+            sandbox_recommended=True,
+        ),
+    )
+    sandbox_ready_route = desktop_execution_route_decision(
+        "desktop.safe_type_text",
+        policy={"mode": "sandbox_preferred"},
+        execution_mode=DesktopExecutionModeSnapshot(
+            mode="supervised_live",
+            foreground_control=True,
+            keyboard_mouse_capture=True,
+            sandbox_recommended=True,
+        ),
+        metadata={
+            "sandbox_provider": {
+                "available": True,
+                "adapter_ready": True,
+                "provider_id": "sandbox-1",
+                "supported_tools": ["desktop.safe_type_text"],
+            }
+        },
+    )
+    browser_route = desktop_execution_route_decision(
+        "browser.open_url",
+        policy={"mode": "preview_input"},
+        execution_mode=DesktopExecutionModeSnapshot(
+            mode="tool_native",
+            isolation="browser_profile",
+        ),
+    )
+
+    snapshot = DesktopExecutionRouteSnapshot.model_validate(preview_route)
+    payload = _json(snapshot)
+
+    assert list(payload) == [
+        "route_id",
+        "tool_name",
+        "requested_mode",
+        "selected_provider_kind",
+        "selected_provider_id",
+        "status",
+        "can_execute",
+        "can_auto_start",
+        "sandbox_required",
+        "fallback_mode",
+        "reason",
+        "blocking_conditions",
+        "source",
+    ]
+    assert payload["status"] == "provider_required"
+    assert payload["can_execute"] is False
+    assert payload["blocking_conditions"] == ["sandbox_desktop_provider_required"]
+    assert sandbox_ready_route["status"] == "sandbox_ready"
+    assert sandbox_ready_route["can_execute"] is True
+    assert sandbox_ready_route["selected_provider_id"] == "sandbox-1"
+    assert browser_route["status"] == "ready"
+    assert browser_route["selected_provider_kind"] == "browser_profile"
+    assert browser_route["can_execute"] is True
+    with pytest.raises(ValidationError):
+        DesktopExecutionRouteSnapshot(unknown=True)
 
 
 def test_daily_entrypoint_desktop_execution_policy_defaults_to_input_preview() -> None:
@@ -5078,6 +5168,10 @@ def test_desktop_recovery_action_metadata_snapshot_json_shape_is_stable() -> Non
             status="provider_required",
             blocking_conditions=["sandbox_desktop_provider_required"],
         ),
+        desktop_execution_route=DesktopExecutionRouteSnapshot(
+            tool_name="screen.capture",
+            status="ready",
+        ),
         verification_targets=[{"step_id": "verify-screen", "todo_id": "todo-screen"}],
         task_verification_targets=[
             {"step_id": "verify-screen", "todo_title": "Verify screenshot"}
@@ -5114,6 +5208,7 @@ def test_desktop_recovery_action_metadata_snapshot_json_shape_is_stable() -> Non
         "observation_evidence",
         "observation_retry",
         "sandbox_provider",
+        "desktop_execution_route",
         "verification_targets",
         "task_verification_targets",
         "recovery_retry_source_event_type",
@@ -5137,6 +5232,7 @@ def test_desktop_recovery_action_metadata_snapshot_json_shape_is_stable() -> Non
         "reason": "permission_recovered",
     }
     assert payload["sandbox_provider"]["status"] == "provider_required"
+    assert payload["desktop_execution_route"]["status"] == "ready"
     assert payload["verification_targets"] == [
         {"step_id": "verify-screen", "todo_id": "todo-screen"}
     ]

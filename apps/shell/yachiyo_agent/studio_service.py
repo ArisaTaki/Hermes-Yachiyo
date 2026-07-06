@@ -2658,6 +2658,9 @@ def _tool_recovery_action_direct_request(
     desktop_execution_policy = action.get("desktop_execution_policy")
     if isinstance(desktop_execution_policy, Mapping) and desktop_execution_policy:
         request["desktop_execution_policy"] = dict(desktop_execution_policy)
+    desktop_execution_route = action.get("desktop_execution_route")
+    if isinstance(desktop_execution_route, Mapping) and desktop_execution_route:
+        request["desktop_execution_route"] = dict(desktop_execution_route)
     sandbox_provider = action.get("sandbox_provider")
     if isinstance(sandbox_provider, Mapping) and sandbox_provider:
         request["sandbox_provider"] = dict(sandbox_provider)
@@ -2807,6 +2810,9 @@ def _tool_recovery_action_metadata(
     desktop_execution_policy = action.get("desktop_execution_policy")
     if isinstance(desktop_execution_policy, Mapping) and desktop_execution_policy:
         metadata["desktop_execution_policy"] = dict(desktop_execution_policy)
+    desktop_execution_route = action.get("desktop_execution_route")
+    if isinstance(desktop_execution_route, Mapping) and desktop_execution_route:
+        metadata["desktop_execution_route"] = dict(desktop_execution_route)
     sandbox_provider = action.get("sandbox_provider")
     if isinstance(sandbox_provider, Mapping) and sandbox_provider:
         metadata["sandbox_provider"] = dict(sandbox_provider)

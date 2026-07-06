@@ -7,6 +7,7 @@ from typing import Any
 
 from .contracts import (
     DesktopExecutionLoopSnapshot,
+    DesktopExecutionRouteSnapshot,
     PlannerDecisionSnapshot,
     RuntimeCheckpointPolicySnapshot,
     RuntimeExecutionEnvelopeSnapshot,
@@ -14,7 +15,10 @@ from .contracts import (
     SandboxDesktopProviderSnapshot,
     ToolPlanStepSnapshot,
 )
-from .desktop_execution_policy import sandbox_desktop_provider_status
+from .desktop_execution_policy import (
+    desktop_execution_route_decision,
+    sandbox_desktop_provider_status,
+)
 from .planner_execution import (
     planner_full_plan_execution_tool_requests,
     planner_tool_requests_for_decision,
@@ -75,6 +79,7 @@ def runtime_execution_envelope_from_decision(
     tool_plan = decision.plan.tool_plan
     runtime_metadata = _execution_envelope_runtime_metadata(requests, decision)
     sandbox_provider = _sandbox_provider_for_envelope(requests)
+    desktop_execution_route = _desktop_execution_route_for_envelope(requests)
     return RuntimeExecutionEnvelopeSnapshot(
         envelope_id=f"execution-envelope-{decision.plan.plan_id}",
         decision_id=decision.decision_id,
@@ -89,6 +94,7 @@ def runtime_execution_envelope_from_decision(
         open_questions=list(tool_plan.open_questions),
         route_to_studio=bool(decision.plan.route_to_studio),
         sandbox_provider=sandbox_provider,
+        desktop_execution_route=desktop_execution_route,
         runtime_doctrine=runtime_metadata["runtime_doctrine"],
         runtime_stage_counts=runtime_metadata["runtime_stage_counts"],
         replan_signal_count=runtime_metadata["replan_signal_count"],
@@ -452,6 +458,15 @@ def _sandbox_provider_for_envelope(
     return None
 
 
+def _desktop_execution_route_for_envelope(
+    requests: Iterable[RuntimeExecutionRequestSnapshot],
+) -> DesktopExecutionRouteSnapshot | None:
+    for request in requests:
+        if request.desktop_execution_route is not None:
+            return request.desktop_execution_route
+    return None
+
+
 def _sandbox_provider_for_request(
     request: Mapping[str, Any],
     *,
@@ -474,6 +489,28 @@ def _sandbox_provider_for_request(
     ):
         return SandboxDesktopProviderSnapshot.model_validate(
             sandbox_desktop_provider_status(request)
+        )
+    return None
+
+
+def _desktop_execution_route_for_request(
+    tool_name: str,
+    request: Mapping[str, Any],
+    *,
+    execution_mode: Any,
+    desktop_execution_policy: Mapping[str, Any] | None,
+) -> DesktopExecutionRouteSnapshot | None:
+    explicit_route = _mapping(request.get("desktop_execution_route"))
+    if explicit_route:
+        return DesktopExecutionRouteSnapshot.model_validate(explicit_route)
+    if desktop_execution_policy or bool(getattr(execution_mode, "sandbox_recommended", False)):
+        return DesktopExecutionRouteSnapshot.model_validate(
+            desktop_execution_route_decision(
+                tool_name,
+                policy=desktop_execution_policy,
+                execution_mode=execution_mode,
+                metadata=request,
+            )
         )
     return None
 
@@ -574,6 +611,12 @@ def _execution_request_snapshot(
         execution_mode=execution_mode,
         desktop_execution_policy=desktop_execution_policy,
     )
+    desktop_execution_route = _desktop_execution_route_for_request(
+        tool_name,
+        request,
+        execution_mode=execution_mode,
+        desktop_execution_policy=desktop_execution_policy,
+    )
     tool_plan_id = str(getattr(decision.plan.tool_plan, "plan_id", "") or "").strip()
     return RuntimeExecutionRequestSnapshot(
         request_id=str(
@@ -626,6 +669,7 @@ def _execution_request_snapshot(
         execution_mode=execution_mode,
         desktop_execution_policy=desktop_execution_policy,
         sandbox_provider=sandbox_provider,
+        desktop_execution_route=desktop_execution_route,
         policy_reason=str(
             request.get("policy_reason") or request.get("approval_reason") or ""
         ),
@@ -751,6 +795,7 @@ def _tool_request_from_execution_request(
         "desktop_execution_policy",
         "sandbox_provider",
         "sandbox_desktop_provider",
+        "desktop_execution_route",
         "policy_reason",
         "continue_to_model",
         "deferred_tool",

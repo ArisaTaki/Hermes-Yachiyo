@@ -19,6 +19,7 @@ export type RuntimeToolRecoveryAction = {
   deferred_context?: Record<string, unknown>;
   deferred_continuation?: Array<Record<string, unknown>>;
   desktop_execution_policy?: Record<string, unknown>;
+  desktop_execution_route?: Record<string, unknown>;
   sandbox_provider?: Record<string, unknown>;
   input: Record<string, unknown>;
   label: string;
@@ -81,6 +82,7 @@ export type RuntimeToolRecoveryActionTaskMetadata = {
   deferred_context?: Record<string, unknown>;
   deferred_continuation?: Array<Record<string, unknown>>;
   desktop_execution_policy?: Record<string, unknown>;
+  desktop_execution_route?: Record<string, unknown>;
   sandbox_provider?: Record<string, unknown>;
   replan_recovery_action_id?: string;
   replan_request_id?: string;
@@ -153,6 +155,7 @@ export const RUNTIME_TOOL_RECOVERY_TASK_METADATA_KEYS = [
   'deferred_context',
   'deferred_continuation',
   'desktop_execution_policy',
+  'desktop_execution_route',
   'sandbox_provider',
   'replan_recovery_action_id',
   'replan_request_id',
@@ -218,6 +221,9 @@ export function runtimeToolRecoveryActionTaskMetadata(
     ...(action.deferred_continuation?.length ? { deferred_continuation: action.deferred_continuation } : {}),
     ...(Object.keys(action.desktop_execution_policy || {}).length
       ? { desktop_execution_policy: action.desktop_execution_policy }
+      : {}),
+    ...(Object.keys(action.desktop_execution_route || {}).length
+      ? { desktop_execution_route: action.desktop_execution_route }
       : {}),
     ...(Object.keys(action.sandbox_provider || {}).length
       ? { sandbox_provider: action.sandbox_provider }
@@ -323,6 +329,9 @@ function runtimeToolRecoveryApprovalDeferredMetadata(
     ...(Object.keys(action.desktop_execution_policy || {}).length
       ? { desktop_execution_policy: action.desktop_execution_policy }
       : {}),
+    ...(Object.keys(action.desktop_execution_route || {}).length
+      ? { desktop_execution_route: action.desktop_execution_route }
+      : {}),
     ...(Object.keys(action.sandbox_provider || {}).length
       ? { sandbox_provider: action.sandbox_provider }
       : {}),
@@ -366,6 +375,7 @@ export function runtimeToolRecoveryRetryAction(
     deferred_context: action.deferred_context,
     deferred_continuation: action.deferred_continuation,
     desktop_execution_policy: action.desktop_execution_policy,
+    desktop_execution_route: action.desktop_execution_route,
     sandbox_provider: action.sandbox_provider,
     input: retryInput,
     label: '恢复后重试原操作',
@@ -471,6 +481,9 @@ export function runtimeToolRecoveryActionsFromRecord(
       ),
       desktop_execution_policy: objectValue(
         action.desktop_execution_policy || source.desktop_execution_policy || metadata.desktop_execution_policy,
+      ),
+      desktop_execution_route: objectValue(
+        action.desktop_execution_route || source.desktop_execution_route || metadata.desktop_execution_route,
       ),
       sandbox_provider: objectValue(
         action.sandbox_provider || source.sandbox_provider || metadata.sandbox_provider,

@@ -709,6 +709,11 @@ class _ReplanRecoveryActionPort(_FakeStudioPort):
                             "status": "provider_required",
                             "blocking_conditions": ["sandbox_desktop_provider_required"],
                         },
+                        "desktop_execution_route": {
+                            "status": "provider_required",
+                            "can_execute": False,
+                            "blocking_conditions": ["sandbox_desktop_provider_required"],
+                        },
                     }
                 ],
             },
@@ -1964,6 +1969,7 @@ def test_agent_studio_service_starts_tool_recovery_action_direct_run() -> None:
     assert request["metadata"]["tool_recovery_action_id"] == "tool-action-1"
     assert request["metadata"]["desktop_execution_policy"]["mode"] == "supervised_live"
     assert request["metadata"]["sandbox_provider"]["status"] == "provider_required"
+    assert request["metadata"]["desktop_execution_route"]["status"] == "provider_required"
     assert request["metadata"]["source_run_id"] == "run-1"
     assert request["metadata"]["source_tool_call_id"] == "tool-call-1"
     direct_request = request["direct_tool_requests"][0]
@@ -1973,6 +1979,7 @@ def test_agent_studio_service_starts_tool_recovery_action_direct_run() -> None:
     assert direct_request["tool_call_id"] == "tool-call-1"
     assert direct_request["desktop_execution_policy"]["mode"] == "supervised_live"
     assert direct_request["sandbox_provider"]["status"] == "provider_required"
+    assert direct_request["desktop_execution_route"]["status"] == "provider_required"
     assert direct_request["continue_to_model"] is True
 
 

@@ -11,6 +11,7 @@ _SANDBOX_DESKTOP_PROVIDER_DEFAULT: dict[str, Any] = {
     "provider_id": "",
     "provider_kind": "sandbox_desktop",
     "status": "provider_required",
+    "adapter_ready": False,
     "reason": (
         "No sandbox desktop provider is configured for this runtime yet; "
         "foreground input must stay supervised or use user handoff."
@@ -69,6 +70,7 @@ def sandbox_desktop_provider_status(
     if provider:
         payload = {**_SANDBOX_DESKTOP_PROVIDER_DEFAULT, **provider}
         payload["available"] = bool(payload.get("available"))
+        payload["adapter_ready"] = bool(payload.get("adapter_ready"))
         if payload["available"]:
             if str(payload.get("status") or "").strip() == "provider_required":
                 payload["status"] = "available"
@@ -80,6 +82,135 @@ def sandbox_desktop_provider_status(
         payload["recommended_for"] = _string_list(payload.get("recommended_for"))
         return payload
     return dict(_SANDBOX_DESKTOP_PROVIDER_DEFAULT)
+
+
+def desktop_execution_policy_mode(policy: Mapping[str, Any] | str | None) -> str:
+    payload = desktop_execution_policy_payload(policy)
+    if not payload:
+        return "allow"
+    if payload.get("allow_live_foreground") is True:
+        return "allow"
+    if payload.get("allow_live_foreground") is False:
+        return "preview"
+    raw = str(
+        payload.get("mode")
+        or payload.get("live_foreground")
+        or payload.get("foreground_input")
+        or ""
+    ).strip().lower().replace("-", "_")
+    if raw in {
+        "allow",
+        "allowed",
+        "live",
+        "supervised_live",
+        "foreground",
+        "live_foreground",
+    }:
+        return "allow"
+    if raw in {
+        "handoff",
+        "handoff_required",
+        "user_handoff",
+        "user_handoff_required",
+    }:
+        return "handoff"
+    if raw in {
+        "preview_input",
+        "input_preview",
+        "foreground_input_preview",
+    }:
+        return "preview_input"
+    if raw in {
+        "preview",
+        "dry_run",
+        "dryrun",
+        "observe_only",
+        "observation_only",
+        "read_only",
+        "no_live_foreground",
+        "sandbox_preferred",
+    }:
+        return "preview"
+    return "allow"
+
+
+def desktop_execution_route_decision(
+    tool_name: str,
+    *,
+    policy: Mapping[str, Any] | str | None = None,
+    execution_mode: Mapping[str, Any] | Any | None = None,
+    metadata: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    clean_tool = str(tool_name or "").strip()
+    policy_payload = desktop_execution_policy_payload(policy)
+    policy_mode = desktop_execution_policy_mode(policy_payload)
+    mode_payload = _execution_mode_payload(execution_mode)
+    sandbox_provider = sandbox_desktop_provider_status(metadata)
+    foreground_control = bool(mode_payload.get("foreground_control"))
+    keyboard_mouse_capture = bool(mode_payload.get("keyboard_mouse_capture"))
+    foreground_required = foreground_control or keyboard_mouse_capture
+    sandbox_required = bool(mode_payload.get("sandbox_recommended")) or (
+        str(policy_payload.get("mode") or "").strip().lower().replace("-", "_")
+        == "sandbox_preferred"
+    )
+    isolation = str(mode_payload.get("isolation") or "none").strip() or "none"
+    execution_mode_name = str(mode_payload.get("mode") or "tool_native").strip()
+    route = {
+        "route_id": f"desktop-route:{clean_tool or 'tool'}",
+        "tool_name": clean_tool,
+        "requested_mode": str(policy_payload.get("mode") or policy_mode or "allow"),
+        "selected_provider_kind": isolation,
+        "selected_provider_id": _provider_id_for_isolation(isolation),
+        "status": "ready",
+        "can_execute": True,
+        "can_auto_start": True,
+        "sandbox_required": False,
+        "fallback_mode": "",
+        "reason": "Tool can run through its structured runtime provider.",
+        "blocking_conditions": [],
+        "source": "runtime",
+    }
+    if not clean_tool:
+        return {
+            **route,
+            "status": "missing_tool",
+            "can_execute": False,
+            "can_auto_start": False,
+            "reason": "No executable tool was selected.",
+            "blocking_conditions": ["missing_tool"],
+        }
+    if not foreground_required and execution_mode_name != "supervised_live":
+        return route
+    if policy_mode == "allow":
+        return {
+            **route,
+            "selected_provider_kind": "none",
+            "selected_provider_id": "",
+            "status": "supervised_live",
+            "reason": "Foreground desktop execution is allowed by the current policy.",
+            "fallback_mode": "supervised_live",
+        }
+    if policy_mode == "handoff":
+        return {
+            **route,
+            "status": "handoff_required",
+            "can_execute": False,
+            "can_auto_start": False,
+            "fallback_mode": "user_handoff",
+            "reason": "The current policy requires the user to perform foreground desktop input.",
+            "blocking_conditions": ["desktop_execution_handoff_required"],
+        }
+    if sandbox_required:
+        return _sandbox_route_decision(route, sandbox_provider, clean_tool)
+    return {
+        **route,
+        "status": "preview_required",
+        "can_execute": False,
+        "can_auto_start": False,
+        "fallback_mode": "supervised_live",
+        "reason": "Foreground desktop execution is blocked by preview policy.",
+        "blocking_conditions": ["desktop_execution_preview_required"],
+    }
 
 
 def with_agent_studio_desktop_execution_policy(
@@ -177,6 +308,86 @@ def _sandbox_provider_payload(
     if isinstance(nested_metadata, Mapping) and nested_metadata is not metadata:
         return _sandbox_provider_payload(nested_metadata)
     return {}
+
+
+def _sandbox_route_decision(
+    route: Mapping[str, Any],
+    sandbox_provider: Mapping[str, Any],
+    tool_name: str,
+) -> dict[str, Any]:
+    blockers = _string_list(sandbox_provider.get("blocking_conditions")) or [
+        "sandbox_desktop_provider_required"
+    ]
+    provider_kind = str(sandbox_provider.get("provider_kind") or "sandbox_desktop")
+    provider_id = str(sandbox_provider.get("provider_id") or "")
+    if not bool(sandbox_provider.get("available")):
+        return {
+            **dict(route),
+            "selected_provider_kind": provider_kind,
+            "selected_provider_id": provider_id,
+            "status": "provider_required",
+            "can_execute": False,
+            "can_auto_start": False,
+            "sandbox_required": True,
+            "fallback_mode": "supervised_live",
+            "reason": str(sandbox_provider.get("reason") or ""),
+            "blocking_conditions": blockers,
+        }
+    supported_tools = _string_list(sandbox_provider.get("supported_tools"))
+    if supported_tools and tool_name not in supported_tools:
+        return {
+            **dict(route),
+            "selected_provider_kind": provider_kind,
+            "selected_provider_id": provider_id,
+            "status": "sandbox_tool_not_supported",
+            "can_execute": False,
+            "can_auto_start": False,
+            "sandbox_required": True,
+            "fallback_mode": "supervised_live",
+            "reason": "Sandbox provider is available but does not support this tool.",
+            "blocking_conditions": ["sandbox_tool_not_supported"],
+        }
+    if not bool(sandbox_provider.get("adapter_ready")):
+        return {
+            **dict(route),
+            "selected_provider_kind": provider_kind,
+            "selected_provider_id": provider_id,
+            "status": "sandbox_adapter_required",
+            "can_execute": False,
+            "can_auto_start": False,
+            "sandbox_required": True,
+            "fallback_mode": "supervised_live",
+            "reason": "Sandbox provider is available but no executable adapter is registered yet.",
+            "blocking_conditions": ["sandbox_desktop_adapter_required"],
+        }
+    return {
+        **dict(route),
+        "selected_provider_kind": provider_kind,
+        "selected_provider_id": provider_id,
+        "status": "sandbox_ready",
+        "can_execute": True,
+        "can_auto_start": True,
+        "sandbox_required": True,
+        "fallback_mode": "",
+        "reason": "Foreground desktop action can be routed through the sandbox provider.",
+        "blocking_conditions": [],
+    }
+
+
+def _execution_mode_payload(value: Mapping[str, Any] | Any | None) -> dict[str, Any]:
+    if isinstance(value, Mapping):
+        return dict(value)
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        dumped = model_dump(mode="json")
+        return dict(dumped) if isinstance(dumped, Mapping) else {}
+    return {}
+
+
+def _provider_id_for_isolation(isolation: str) -> str:
+    if isolation in {"process", "browser_profile", "headless"}:
+        return isolation
+    return ""
 
 
 def _string_list(value: Any) -> list[str]:

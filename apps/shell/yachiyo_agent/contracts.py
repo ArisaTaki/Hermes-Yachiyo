@@ -161,11 +161,28 @@ class SandboxDesktopProviderSnapshot(_PublicSnapshot):
     provider_id: str = ""
     provider_kind: DesktopIsolationKind | str = "sandbox_desktop"
     status: str = "provider_required"
+    adapter_ready: bool = False
     reason: str = ""
     blocking_conditions: list[str] = Field(default_factory=list)
     supported_tools: list[str] = Field(default_factory=list)
     recommended_for: list[str] = Field(default_factory=list)
     diagnostic_route: str | None = None
+    source: str = "runtime"
+
+
+class DesktopExecutionRouteSnapshot(_PublicSnapshot):
+    route_id: str = "desktop_execution_route"
+    tool_name: str = ""
+    requested_mode: DesktopExecutionPolicyMode | str = "allow"
+    selected_provider_kind: DesktopIsolationKind | str = "none"
+    selected_provider_id: str = ""
+    status: str = "ready"
+    can_execute: bool = True
+    can_auto_start: bool = True
+    sandbox_required: bool = False
+    fallback_mode: DesktopExecutionPolicyMode | str = ""
+    reason: str = ""
+    blocking_conditions: list[str] = Field(default_factory=list)
     source: str = "runtime"
 
 
@@ -203,6 +220,7 @@ class DesktopRecoveryActionMetadataSnapshot(_PublicSnapshot):
     observation_evidence: dict[str, Any] = Field(default_factory=dict)
     observation_retry: dict[str, Any] = Field(default_factory=dict)
     sandbox_provider: SandboxDesktopProviderSnapshot | None = None
+    desktop_execution_route: DesktopExecutionRouteSnapshot | None = None
     verification_targets: list[dict[str, Any]] = Field(default_factory=list)
     task_verification_targets: list[dict[str, Any]] = Field(default_factory=list)
     recovery_retry_source_event_type: str | None = None
@@ -732,6 +750,7 @@ class RuntimeExecutionRequestSnapshot(_PublicSnapshot):
     execution_mode: DesktopExecutionModeSnapshot | None = None
     desktop_execution_policy: DesktopExecutionPolicySnapshot | None = None
     sandbox_provider: SandboxDesktopProviderSnapshot | None = None
+    desktop_execution_route: DesktopExecutionRouteSnapshot | None = None
     policy_reason: str = ""
     continue_to_model: bool = False
     deferred_tool: str | None = None
@@ -786,6 +805,7 @@ class RuntimeExecutionEnvelopeSnapshot(_PublicSnapshot):
     route_to_studio: bool = False
     desktop_execution_policy: DesktopExecutionPolicySnapshot | None = None
     sandbox_provider: SandboxDesktopProviderSnapshot | None = None
+    desktop_execution_route: DesktopExecutionRouteSnapshot | None = None
     runtime_doctrine: str = ""
     runtime_stage_counts: dict[str, int] = Field(default_factory=dict)
     replan_signal_count: int = 0

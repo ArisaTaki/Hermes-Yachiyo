@@ -14,7 +14,11 @@ from apps.shell.agent.runtime.event_scopes import (
 )
 from apps.shell.agent.runtime.task_progress import append_task_progress_events_for_tool_result
 from apps.shell.yachiyo_agent.capability_registry import capability_recovery_tools
-from apps.shell.yachiyo_agent.desktop_execution_policy import sandbox_desktop_provider_status
+from apps.shell.yachiyo_agent.desktop_execution_policy import (
+    desktop_execution_policy_mode as _public_desktop_execution_policy_mode,
+    desktop_execution_route_decision,
+    sandbox_desktop_provider_status,
+)
 from apps.shell.yachiyo_agent.policy import desktop_tool_execution_mode
 from packages.security import redact_api_error_text
 
@@ -72,6 +76,7 @@ _TOOL_REQUEST_TRACE_MAPPING_KEYS = (
     "observation_evidence",
     "observation_retry",
     "desktop_execution_policy",
+    "desktop_execution_route",
     "sandbox_provider",
     "sandbox_desktop_provider",
 )
@@ -310,6 +315,12 @@ def _desktop_execution_policy_skip_result(
 
     execution_payload = execution_mode.model_dump(mode="json")
     sandbox_provider = sandbox_desktop_provider_status(tool_request)
+    route_decision = desktop_execution_route_decision(
+        tool_name,
+        policy=policy,
+        execution_mode=execution_payload,
+        metadata=tool_request,
+    )
     blocking_condition = (
         "desktop_execution_handoff_required"
         if policy_mode == "handoff"
@@ -327,6 +338,7 @@ def _desktop_execution_policy_skip_result(
         "blocking_conditions": [blocking_condition],
         "desktop_execution_policy": policy,
         "desktop_execution_mode": execution_payload,
+        "desktop_execution_route": route_decision,
         "execution_mode": str(execution_payload.get("mode") or ""),
         "foreground_control": bool(execution_payload.get("foreground_control")),
         "keyboard_mouse_capture": bool(
@@ -348,6 +360,7 @@ def _desktop_execution_policy_skip_result(
             policy_mode=policy_mode,
             execution_mode=execution_payload,
             sandbox_provider=sandbox_provider,
+            route_decision=route_decision,
         ),
         "hint": (
             "Switch the run to supervised_live, continue in Agent Studio, or let the "
@@ -364,6 +377,7 @@ def _desktop_execution_policy_recovery_actions(
     policy_mode: str,
     execution_mode: Mapping[str, Any],
     sandbox_provider: Mapping[str, Any],
+    route_decision: Mapping[str, Any],
 ) -> list[dict[str, Any]]:
     raw_input = tool_request.get("input")
     tool_input = dict(raw_input) if isinstance(raw_input, Mapping) else {}
@@ -382,6 +396,10 @@ def _desktop_execution_policy_recovery_actions(
         "reason": "Prefer a sandbox desktop/session before touching the real foreground desktop.",
     }
     sandbox_blockers = [
+        str(item).strip()
+        for item in route_decision.get("blocking_conditions", [])
+        if str(item or "").strip()
+    ] or [
         str(item).strip()
         for item in sandbox_provider.get("blocking_conditions", [])
         if str(item or "").strip()
@@ -403,6 +421,7 @@ def _desktop_execution_policy_recovery_actions(
             ),
         ],
         "desktop_execution_policy": supervised_policy,
+        "desktop_execution_route": dict(route_decision),
         "blocked_desktop_execution_policy": dict(policy),
         "blocked_desktop_execution_policy_mode": policy_mode,
         "desktop_execution_mode": dict(execution_mode),
@@ -448,12 +467,14 @@ def _desktop_execution_policy_recovery_actions(
                 "planning_reason": "desktop_execution_policy_sandbox_handoff",
                 "recovery_action_kind": "sandbox_desktop_handoff",
                 "desktop_execution_policy": sandbox_policy,
+                "desktop_execution_route": dict(route_decision),
                 "sandbox_provider": dict(sandbox_provider),
                 "deferred_continuation": [
                     {
                         "tool": tool_name,
                         "input": tool_input,
                         "desktop_execution_policy": sandbox_policy,
+                        "desktop_execution_route": dict(route_decision),
                         "sandbox_provider": dict(sandbox_provider),
                         "planning_reason": "desktop_execution_policy_sandbox_deferred_tool",
                         "source": "desktop_execution_policy_recovery",
@@ -464,6 +485,7 @@ def _desktop_execution_policy_recovery_actions(
                     "runtime_replan_auto_start_reason": "sandbox_desktop_handoff_required",
                     "runtime_replan_auto_start_blockers": sandbox_blockers,
                     "desktop_execution_policy": sandbox_policy,
+                    "desktop_execution_route": dict(route_decision),
                     "sandbox_provider": dict(sandbox_provider),
                     "blocked_desktop_execution_policy": dict(policy),
                     "blocked_desktop_execution_policy_mode": policy_mode,
@@ -540,52 +562,7 @@ def _desktop_execution_policy_from_request(
 
 
 def _desktop_execution_policy_mode(policy: Mapping[str, Any]) -> str:
-    if not policy:
-        return "allow"
-    if policy.get("allow_live_foreground") is True:
-        return "allow"
-    if policy.get("allow_live_foreground") is False:
-        return "preview"
-    raw = str(
-        policy.get("mode")
-        or policy.get("live_foreground")
-        or policy.get("foreground_input")
-        or ""
-    ).strip().lower().replace("-", "_")
-    if raw in {
-        "allow",
-        "allowed",
-        "live",
-        "supervised_live",
-        "foreground",
-        "live_foreground",
-    }:
-        return "allow"
-    if raw in {
-        "handoff",
-        "handoff_required",
-        "user_handoff",
-        "user_handoff_required",
-    }:
-        return "handoff"
-    if raw in {
-        "preview_input",
-        "input_preview",
-        "foreground_input_preview",
-    }:
-        return "preview_input"
-    if raw in {
-        "preview",
-        "dry_run",
-        "dryrun",
-        "observe_only",
-        "observation_only",
-        "read_only",
-        "no_live_foreground",
-        "sandbox_preferred",
-    }:
-        return "preview"
-    return "allow"
+    return _public_desktop_execution_policy_mode(policy)
 
 
 def _tool_result_with_runtime_recovery_defaults(

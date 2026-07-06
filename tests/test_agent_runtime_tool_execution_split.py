@@ -2272,6 +2272,9 @@ def test_runtime_tool_request_runner_previews_live_foreground_tools_by_policy() 
     assert result["sandbox_provider"]["blocking_conditions"] == [
         "sandbox_desktop_provider_required"
     ]
+    assert result["desktop_execution_route"]["status"] == "provider_required"
+    assert result["desktop_execution_route"]["can_execute"] is False
+    assert result["desktop_execution_route"]["fallback_mode"] == "supervised_live"
     assert result["blocking_conditions"] == ["desktop_execution_preview_required"]
     assert [action["tool"] for action in result["recovery_actions"]] == [
         "desktop.active_window",
@@ -2287,8 +2290,12 @@ def test_runtime_tool_request_runner_previews_live_foreground_tools_by_policy() 
     ]
     sandbox_action = result["recovery_actions"][2]
     assert sandbox_action["desktop_execution_policy"]["mode"] == "sandbox_preferred"
+    assert sandbox_action["desktop_execution_route"]["status"] == "provider_required"
     assert sandbox_action["sandbox_provider"]["status"] == "provider_required"
     assert sandbox_action["metadata"]["sandbox_desktop_handoff"] is True
+    assert sandbox_action["metadata"]["desktop_execution_route"]["status"] == (
+        "provider_required"
+    )
     assert sandbox_action["metadata"]["sandbox_provider"]["status"] == "provider_required"
     assert sandbox_action["metadata"]["runtime_replan_auto_start_eligible"] is False
     assert sandbox_action["metadata"]["runtime_replan_auto_start_blockers"] == [
