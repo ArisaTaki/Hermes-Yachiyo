@@ -84,6 +84,10 @@ export function AgentStudioToolsTab({
         tool.function_name,
         tool.description,
         tool.capability_id || '',
+        tool.provider_id || '',
+        tool.provider_kind || '',
+        tool.provider_ready ? 'provider ready sandbox ready' : '',
+        tool.provider_supported ? 'provider supported sandbox provider' : '',
       ].some((value) => String(value || '').toLowerCase().includes(query));
     });
   }, [capabilityFilter, catalog.tools, riskFilter, search]);
@@ -668,6 +672,7 @@ function ToolDetail({
   const fallbackNotes = tool.fallback_notes || [];
   const diagnosticRoute = tool.diagnostic_route || capability?.diagnostic_route || '';
   const modelFunctionName = modelToolFunctionName(tool) || tool.function_name;
+  const providerState = toolProviderState(tool, catalog);
   return (
     <>
       <div className="section-heading-row">
@@ -702,6 +707,10 @@ function ToolDetail({
         <span>
           <small>Function</small>
           <strong>{tool.function_name}</strong>
+        </span>
+        <span data-testid="studio-tool-provider-state">
+          <small>Provider</small>
+          <strong>{providerState.label}</strong>
         </span>
       </div>
 
@@ -740,6 +749,48 @@ function ToolDetail({
           {!blockingConditions.length ? (
             <span className="studio-tool-permission">runtime conditions ready</span>
           ) : null}
+        </div>
+      </div>
+
+      <div
+        className="studio-tool-inspector-section"
+        data-provider-ready={String(providerState.ready)}
+        data-provider-status={providerState.status}
+        data-provider-supported={String(providerState.supported)}
+        data-testid="studio-tool-provider-readiness"
+      >
+        <div className="studio-tool-inspector-heading">
+          <h3>Desktop Provider</h3>
+          <span>{providerState.label}</span>
+        </div>
+        <div className="studio-tool-pill-row">
+          <span className={providerState.ready ? 'studio-tool-permission' : 'studio-tool-permission missing'}>
+            {providerState.detail}
+          </span>
+          {providerState.providerId ? (
+            <span className="studio-tool-permission" data-provider-id={providerState.providerId}>
+              {providerState.providerId}
+            </span>
+          ) : null}
+          {providerState.providerKind ? (
+            <span className="studio-tool-permission" data-provider-kind={providerState.providerKind}>
+              {providerState.providerKind}
+            </span>
+          ) : null}
+          {providerState.supportedTools.map((toolName) => (
+            <span className="studio-tool-permission" data-provider-tool={toolName} key={toolName}>
+              {toolName}
+            </span>
+          ))}
+          {providerState.blockingConditions.map((condition) => (
+            <span
+              className="studio-tool-permission missing"
+              data-provider-blocker={condition}
+              key={condition}
+            >
+              {runtimeBlockingLabel(condition)}
+            </span>
+          ))}
         </div>
       </div>
 
@@ -798,6 +849,66 @@ function ToolDetail({
       </details>
     </>
   );
+}
+
+type ToolProviderState = {
+  label: string;
+  detail: string;
+  ready: boolean;
+  supported: boolean;
+  providerId: string;
+  providerKind: string;
+  status: string;
+  blockingConditions: string[];
+  supportedTools: string[];
+};
+
+function toolProviderState(tool: ToolCatalogItemSnapshot, catalog: ToolCatalogSnapshot): ToolProviderState {
+  const provider = catalog.sandbox_provider || null;
+  const ready = tool.provider_ready === true;
+  const supported = tool.provider_supported === true;
+  const providerId = stringValue(tool.provider_id) || stringValue(provider?.provider_id);
+  const providerKind = stringValue(tool.provider_kind) || stringValue(provider?.provider_kind);
+  const status = stringValue(provider?.status) || (ready ? 'ready' : supported ? 'supported' : 'runtime_only');
+  const supportedTools = stringArray(provider?.supported_tools);
+  const blockingConditions = stringArray(provider?.blocking_conditions);
+  if (ready) {
+    return {
+      label: 'Provider ready',
+      detail: `${providerId || providerKind || 'sandbox provider'} can run this tool`,
+      ready,
+      supported,
+      providerId,
+      providerKind,
+      status,
+      blockingConditions,
+      supportedTools,
+    };
+  }
+  if (supported) {
+    return {
+      label: 'Provider supported',
+      detail: `${providerId || providerKind || 'sandbox provider'} supports this tool but is not ready`,
+      ready,
+      supported,
+      providerId,
+      providerKind,
+      status,
+      blockingConditions,
+      supportedTools,
+    };
+  }
+  return {
+    label: 'Runtime path',
+    detail: provider ? 'No provider route for this tool' : 'No desktop provider advertised',
+    ready,
+    supported,
+    providerId,
+    providerKind,
+    status,
+    blockingConditions,
+    supportedTools,
+  };
 }
 
 function normalizedRisk(tool: ToolCatalogItemSnapshot): RiskFilter {
@@ -889,6 +1000,10 @@ function objectRecord(value: unknown): Record<string, unknown> {
 function stringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.map((item) => String(item || '').trim()).filter(Boolean);
+}
+
+function stringValue(value: unknown): string {
+  return String(value || '').trim();
 }
 
 function uniqueStrings(values: string[]): string[] {
