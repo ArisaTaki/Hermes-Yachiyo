@@ -68,6 +68,7 @@ export function chatDesktopPermissionNotice(
   const missing = missingDesktopPermissionIssues(readiness);
   const blocking = desktopRuntimeBlockingIssues(readiness);
   const toolReadiness = desktopToolReadinessSummary(readiness);
+  const providerReadiness = desktopProviderReadinessSummary(readiness);
   if (
     !missing.length
     && !blocking.length
@@ -85,6 +86,7 @@ export function chatDesktopPermissionNotice(
     blockerLabels.length ? `${blockerLabels.join('、')} 正在阻塞桌面执行。` : '',
     toolReadiness.degraded.length ? `降级可用：${formatDesktopToolList(toolReadiness.degraded)}。` : '',
     toolReadiness.unavailable.length ? `暂不可用：${formatDesktopToolList(toolReadiness.unavailable)}。` : '',
+    providerReadiness.detail,
     hints.join(' ') || '打开「诊断」中的桌面能力检查，按提示处理后再试。',
   ].filter(Boolean);
   const actionParams: Record<string, string> = {
@@ -94,6 +96,11 @@ export function chatDesktopPermissionNotice(
   if (missing.length) actionParams.permission_targets = missing.map((issue) => issue.token).join(',');
   if (blocking.length) actionParams.blocking_conditions = blocking.map((issue) => issue.token).join(',');
   if (toolReadiness.tools.length) actionParams.desktop_tools = toolReadiness.tools.join(',');
+  if (providerReadiness.provider_id) actionParams.desktop_provider_id = providerReadiness.provider_id;
+  if (providerReadiness.status) actionParams.desktop_provider_status = providerReadiness.status;
+  if (providerReadiness.supported_tools.length) {
+    actionParams.desktop_provider_tools = providerReadiness.supported_tools.join(',');
+  }
   return {
     kind: 'warn',
     title: missing.length
@@ -105,6 +112,52 @@ export function chatDesktopPermissionNotice(
     action_label: '打开诊断',
     action_view: 'diagnostics',
     action_params: actionParams,
+  };
+}
+
+export function desktopProviderReadinessSummary(
+  readiness: YachiyoReadinessSnapshot | null | undefined,
+): {
+  ready: boolean;
+  available: boolean;
+  status: string;
+  provider_id: string;
+  provider_kind: string;
+  supported_tools: string[];
+  blocking_conditions: string[];
+  detail: string;
+} {
+  const capabilities = readiness?.capabilities;
+  if (!capabilities || typeof capabilities !== 'object') {
+    return emptyProviderReadiness();
+  }
+  const provider = recordValue(capabilities.sandbox_provider);
+  const status = stringValue(provider?.status);
+  const providerId = stringValue(provider?.provider_id);
+  const providerKind = stringValue(provider?.provider_kind);
+  const supportedTools = uniqueStrings([
+    ...stringList(provider?.supported_tools),
+    ...stringList(capabilities.desktop_provider_supported_tools),
+  ]);
+  const blockingConditions = stringList(provider?.blocking_conditions);
+  const available = booleanValue(provider?.available);
+  const adapterReady = booleanValue(provider?.adapter_ready);
+  const ready = booleanValue(capabilities.desktop_provider_ready)
+    || (available && adapterReady);
+  const detail = ready
+    ? `隔离桌面 provider 已就绪${supportedTools.length ? `，支持 ${formatDesktopToolList(toolDisplayLabels(supportedTools))}` : ''}。`
+    : providerId || status
+      ? '隔离桌面 provider 未就绪；前台点击、输入或快捷键会保持预览、审批或转入 Agent Studio。'
+      : '';
+  return {
+    ready,
+    available,
+    status,
+    provider_id: providerId,
+    provider_kind: providerKind,
+    supported_tools: supportedTools,
+    blocking_conditions: blockingConditions,
+    detail,
   };
 }
 
@@ -176,6 +229,37 @@ export function desktopToolReadinessSummary(
 function capabilitySnapshot(value: unknown): DesktopExecutionCapabilitySnapshot | null {
   if (!value || typeof value !== 'object') return null;
   return value as DesktopExecutionCapabilitySnapshot;
+}
+
+function emptyProviderReadiness() {
+  return {
+    ready: false,
+    available: false,
+    status: '',
+    provider_id: '',
+    provider_kind: '',
+    supported_tools: [],
+    blocking_conditions: [],
+    detail: '',
+  };
+}
+
+function recordValue(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function stringValue(value: unknown): string {
+  return String(value || '').trim();
+}
+
+function booleanValue(value: unknown): boolean {
+  return value === true || value === 'true' || value === '1';
+}
+
+function stringList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => String(item || '').trim()).filter(Boolean);
 }
 
 function toolDisplayLabels(values: string[]) {
