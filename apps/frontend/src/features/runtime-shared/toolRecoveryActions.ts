@@ -23,6 +23,7 @@ export type RuntimeToolRecoveryAction = {
   sandbox_provider?: Record<string, unknown>;
   input: Record<string, unknown>;
   label: string;
+  metadata?: Record<string, unknown>;
   permission_target: string;
   prompt: string;
   recommended_tools?: string[];
@@ -490,6 +491,7 @@ export function runtimeToolRecoveryActionsFromRecord(
       ),
       input,
       label,
+      metadata,
       permission_target: String(action.permission_target || '').trim(),
       prompt: String(action.prompt || label || fallbackLabel || tool).trim(),
       recommended_tools: recoveryStringList(action.recommended_tools),
