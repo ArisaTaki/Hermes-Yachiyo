@@ -7,6 +7,9 @@ from typing import Any
 import pytest
 
 from apps.shell import agent_runtime
+from apps.shell.agent.runtime.desktop_execution_providers import (
+    DesktopExecutionProviderRegistry,
+)
 from apps.shell.agent.runtime.errors import AgentApprovalRequired, AgentRuntimeError
 from apps.shell.agent.runtime.tool_execution import (
     RuntimeToolCallExecutor,
@@ -100,6 +103,46 @@ class FakeBroker:
         return dict(self.result)
 
 
+class FakeSandboxDesktopAdapter:
+    provider_kind = "sandbox_desktop"
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    def can_execute(
+        self,
+        tool_name: str,
+        route: dict[str, Any],
+        tool_request: dict[str, Any],
+    ) -> bool:
+        return tool_name == "desktop.safe_type_text"
+
+    def execute(
+        self,
+        tool_name: str,
+        payload: dict[str, Any],
+        *,
+        tool_request: dict[str, Any],
+        route: dict[str, Any],
+        broker: Any,
+        approved: bool = False,
+    ) -> dict[str, Any]:
+        self.calls.append(
+            {
+                "tool": tool_name,
+                "payload": dict(payload),
+                "route": dict(route),
+                "approved": approved,
+            }
+        )
+        return {
+            "ok": True,
+            "tool": tool_name,
+            "summary": "Executed in sandbox desktop provider",
+            "data": {"text": str(payload.get("text") or "")},
+        }
+
+
 class FakePendingApprovalBuilder:
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
@@ -133,6 +176,7 @@ def _executor(
     trace_events: FakeTraceEvents | None = None,
     run_events: list[tuple[str, str, dict[str, Any]]] | None = None,
     allows_tool=None,
+    desktop_provider_registry: Any | None = None,
 ) -> RuntimeToolCallExecutor:
     run_events = run_events if run_events is not None else []
 
@@ -150,6 +194,7 @@ def _executor(
         trace_events=trace_events or FakeTraceEvents(),
         append_run_event=append_run_event,
         allows_tool=allows_tool,
+        desktop_provider_registry=desktop_provider_registry,
     )
 
 
@@ -1661,6 +1706,120 @@ def test_runtime_tool_call_executor_projects_workspace_failure_as_tool_result() 
     ]
 
 
+def test_runtime_tool_call_executor_routes_sandbox_ready_tool_to_provider() -> None:
+    events = FakeToolCallEvents()
+    adapter = FakeSandboxDesktopAdapter()
+    registry = DesktopExecutionProviderRegistry([adapter])
+    executor = _executor(
+        tool_call_events=events,
+        desktop_provider_registry=registry,
+    )
+    timeline: list[dict[str, Any]] = []
+    broker = FakeBroker({"ok": True, "unexpected": True})
+
+    result = executor.execute(
+        {
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "hello"},
+            "desktop_execution_policy": {"mode": "sandbox_preferred"},
+            "desktop_execution_route": {
+                "route_id": "desktop-route:desktop.safe_type_text",
+                "tool_name": "desktop.safe_type_text",
+                "requested_mode": "sandbox_preferred",
+                "selected_provider_kind": "sandbox_desktop",
+                "selected_provider_id": "sandbox-1",
+                "status": "sandbox_ready",
+                "can_execute": True,
+                "can_auto_start": True,
+                "sandbox_required": True,
+                "blocking_conditions": [],
+            },
+            "sandbox_provider": {
+                "available": True,
+                "adapter_ready": True,
+                "provider_kind": "sandbox_desktop",
+                "provider_id": "sandbox-1",
+                "status": "available",
+                "supported_tools": ["desktop.safe_type_text"],
+            },
+        },
+        ["desktop.safe_type_text"],
+        broker,
+        timeline,
+        run_id="run-1",
+        budget=FakeBudget(),
+    )
+
+    assert result["ok"] is True
+    assert result["desktop_execution_provider_routed"] is True
+    assert result["desktop_execution_provider"]["adapter_registered"] is True
+    assert result["desktop_execution_provider"]["provider_kind"] == "sandbox_desktop"
+    assert result["desktop_execution_route"]["status"] == "sandbox_ready"
+    assert result["sandbox_provider"]["provider_id"] == "sandbox-1"
+    assert adapter.calls == [
+        {
+            "tool": "desktop.safe_type_text",
+            "payload": {"text": "hello"},
+            "route": result["desktop_execution_route"],
+            "approved": False,
+        }
+    ]
+    assert broker.calls == []
+    assert timeline[-1]["event"] == "agent.tool.call"
+    assert timeline[-1]["result"]["desktop_execution_provider_routed"] is True
+
+
+def test_runtime_tool_call_executor_fails_closed_when_provider_adapter_is_missing() -> None:
+    events = FakeToolCallEvents()
+    executor = _executor(
+        tool_call_events=events,
+        desktop_provider_registry=DesktopExecutionProviderRegistry(),
+    )
+    timeline: list[dict[str, Any]] = []
+    broker = FakeBroker({"ok": True, "unexpected": True})
+
+    result = executor.execute(
+        {
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "hello"},
+            "desktop_execution_policy": {"mode": "sandbox_preferred"},
+            "desktop_execution_route": {
+                "route_id": "desktop-route:desktop.safe_type_text",
+                "tool_name": "desktop.safe_type_text",
+                "requested_mode": "sandbox_preferred",
+                "selected_provider_kind": "sandbox_desktop",
+                "selected_provider_id": "sandbox-1",
+                "status": "sandbox_ready",
+                "can_execute": True,
+                "can_auto_start": True,
+                "sandbox_required": True,
+                "blocking_conditions": [],
+            },
+            "sandbox_provider": {
+                "available": True,
+                "adapter_ready": True,
+                "provider_kind": "sandbox_desktop",
+                "provider_id": "sandbox-1",
+                "status": "available",
+            },
+        },
+        ["desktop.safe_type_text"],
+        broker,
+        timeline,
+        run_id="run-1",
+        budget=FakeBudget(),
+    )
+
+    assert result["ok"] is False
+    assert result["blocked_by_desktop_execution_provider"] is True
+    assert result["error"] == "desktop_execution_provider_unavailable"
+    assert result["blocking_conditions"] == ["desktop_execution_provider_unavailable"]
+    assert result["desktop_execution_provider"]["adapter_registered"] is False
+    assert result["desktop_execution_route"]["status"] == "sandbox_ready"
+    assert broker.calls == []
+    assert timeline[-1]["result"]["blocked_by_desktop_execution_provider"] is True
+
+
 def test_runtime_tool_call_executor_preserves_planner_trace_on_tool_call_events() -> None:
     events = FakeToolCallEvents()
     executor = _executor(tool_call_events=events)
@@ -2318,6 +2477,55 @@ def test_runtime_tool_request_runner_previews_live_foreground_tools_by_policy() 
     assert run_events[0][1] == "agent.tool.skipped"
     assert run_events[0][2]["result"]["blocked_by_desktop_execution_policy"] is True
     assert "blocked_by_desktop_execution_policy" in messages[-1]["content"]
+
+
+def test_runtime_tool_request_runner_allows_sandbox_ready_provider_route() -> None:
+    budget = FakeBudget()
+    messages = [{"role": "user", "content": "在隔离桌面里输入 hello"}]
+    timeline: list[dict[str, Any]] = []
+    captured_requests: list[dict[str, Any]] = []
+    runner = _runner(
+        call_agent_tool=lambda tool_request, *_args, **_kwargs: captured_requests.append(
+            tool_request
+        )
+        or {"ok": True, "tool": tool_request.get("tool")},
+    )
+
+    runner.run(
+        [
+            {
+                "tool": "desktop.safe_type_text",
+                "input": {"text": "hello"},
+                "desktop_execution_policy": {"mode": "sandbox_preferred"},
+                "sandbox_provider": {
+                    "available": True,
+                    "adapter_ready": True,
+                    "provider_kind": "sandbox_desktop",
+                    "provider_id": "sandbox-1",
+                    "status": "available",
+                    "supported_tools": ["desktop.safe_type_text"],
+                },
+            }
+        ],
+        ["desktop.safe_type_text"],
+        FakeBroker({"ok": True}),
+        messages,
+        timeline,
+        [],
+        next_iteration=3,
+        run_id="run-1",
+        budget=budget,
+    )
+
+    assert budget.claims == []
+    assert len(captured_requests) == 1
+    routed_request = captured_requests[0]
+    assert routed_request["desktop_execution_route"]["status"] == "sandbox_ready"
+    assert routed_request["desktop_execution_route"]["selected_provider_kind"] == (
+        "sandbox_desktop"
+    )
+    assert routed_request["sandbox_provider"]["provider_id"] == "sandbox-1"
+    assert not [event for event in timeline if event["event"] == "agent.tool.skipped"]
 
 
 def test_runtime_tool_request_runner_preview_input_policy_allows_media_but_blocks_typing() -> None:

@@ -65,6 +65,7 @@ def build_runtime_tooling(
     pending_approval_builder: Any,
     call_agent_tool: Callable[..., dict[str, Any]],
     allows_tool: Callable[[str, list[str]], bool] | None = None,
+    desktop_provider_registry: Any | None = None,
 ) -> RuntimeToolingBundle:
     tool_loop_projection = RuntimeToolLoopProjectionBuilder()
     return RuntimeToolingBundle(
@@ -80,6 +81,7 @@ def build_runtime_tooling(
             trace_events=trace_events,
             append_run_event=append_run_event,
             allows_tool=allows_tool,
+            desktop_provider_registry=desktop_provider_registry,
         ),
         tool_request_runner=RuntimeToolRequestRunner(
             normalize_tool_name=normalize_tool_name,
@@ -113,6 +115,7 @@ def build_runtime_tooling_stack(
     call_model: Callable[..., Any],
     tool_requests_from_message: Callable[[dict[str, Any], str], list[dict[str, Any]]],
     run_tool_requests: Callable[..., None],
+    desktop_provider_registry: Any | None = None,
 ) -> RuntimeToolingStack:
     tooling = build_runtime_tooling(
         normalize_tool_name=normalize_tool_name,
@@ -132,6 +135,7 @@ def build_runtime_tooling_stack(
         goal_disallows_tool=agent_goal_disallows_tool,
         pending_approval_builder=pending_approval_builder,
         call_agent_tool=call_agent_tool,
+        desktop_provider_registry=desktop_provider_registry,
     )
     tool_operations = RuntimeToolOperations(
         tool_request_runner=tooling.tool_request_runner,

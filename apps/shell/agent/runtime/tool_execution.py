@@ -6,6 +6,12 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
+from apps.shell.agent.runtime.desktop_execution_providers import (
+    default_desktop_execution_provider_registry,
+    desktop_execution_route_allows_provider_execution,
+    desktop_execution_route_payload,
+    desktop_execution_route_requires_provider,
+)
 from apps.shell.agent.runtime.errors import AgentApprovalRequired, AgentRuntimeError
 from apps.shell.agent.runtime.event_scopes import (
     runtime_replan_base_event_type as _runtime_replan_base_event_type,
@@ -315,12 +321,14 @@ def _desktop_execution_policy_skip_result(
 
     execution_payload = execution_mode.model_dump(mode="json")
     sandbox_provider = sandbox_desktop_provider_status(tool_request)
-    route_decision = desktop_execution_route_decision(
+    route_decision = desktop_execution_route_payload(tool_request) or desktop_execution_route_decision(
         tool_name,
         policy=policy,
         execution_mode=execution_payload,
         metadata=tool_request,
     )
+    if desktop_execution_route_allows_provider_execution(route_decision):
+        return None
     blocking_condition = (
         "desktop_execution_handoff_required"
         if policy_mode == "handoff"
@@ -367,6 +375,29 @@ def _desktop_execution_policy_skip_result(
             "user perform the foreground step manually."
         ),
     }
+
+
+def _tool_request_with_desktop_execution_route(
+    tool_name: str,
+    tool_request: Mapping[str, Any],
+) -> dict[str, Any]:
+    payload = dict(tool_request)
+    if desktop_execution_route_payload(payload):
+        return payload
+    policy = _desktop_execution_policy_from_request(payload)
+    if not policy:
+        return payload
+    execution_mode = desktop_tool_execution_mode(tool_name).model_dump(mode="json")
+    route_decision = desktop_execution_route_decision(
+        tool_name,
+        policy=policy,
+        execution_mode=execution_mode,
+        metadata=payload,
+    )
+    if route_decision:
+        payload["desktop_execution_route"] = dict(route_decision)
+        payload.setdefault("sandbox_provider", sandbox_desktop_provider_status(payload))
+    return payload
 
 
 def _desktop_execution_policy_recovery_actions(
@@ -1908,6 +1939,7 @@ class RuntimeToolCallExecutor:
         trace_events: Any,
         append_run_event: Callable[[str, str, dict[str, Any]], Any],
         allows_tool: Callable[[str, list[str]], bool] | None = None,
+        desktop_provider_registry: Any | None = None,
     ) -> None:
         self._normalize_tool_name = normalize_tool_name
         self._input_preview = input_preview
@@ -1919,6 +1951,9 @@ class RuntimeToolCallExecutor:
         self._trace_events = trace_events
         self._append_run_event = append_run_event
         self._allows_tool = allows_tool or _default_allows_tool
+        self._desktop_provider_registry = (
+            desktop_provider_registry or default_desktop_execution_provider_registry()
+        )
 
     def execute(
         self,
@@ -1933,6 +1968,7 @@ class RuntimeToolCallExecutor:
         budget: Any = None,
     ) -> dict[str, Any]:
         tool_name = self._normalize_tool_name(tool_request.get("tool"))
+        tool_request = _tool_request_with_desktop_execution_route(tool_name, tool_request)
         payload = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
         input_preview = self._input_preview(payload)
         input_resolution = (
@@ -2003,7 +2039,15 @@ class RuntimeToolCallExecutor:
             )
         )
         try:
-            tool_result = broker.call(tool_name, payload, approved=approved)
+            tool_result = self._desktop_provider_registry.execute_if_routed(
+                tool_name,
+                payload,
+                tool_request=tool_request,
+                broker=broker,
+                approved=approved,
+            )
+            if tool_result is None:
+                tool_result = broker.call(tool_name, payload, approved=approved)
         except AgentRuntimeError as exc:
             if not tool_name.startswith("workspace."):
                 self._tool_call_events.failed(
@@ -2211,6 +2255,7 @@ class RuntimeToolRequestRunner:
                 active_window_verification_target,
             )
             tool_request = _tool_request_with_open_path_app_input(tool_request, tool_name)
+            tool_request = _tool_request_with_desktop_execution_route(tool_name, tool_request)
             raw_input = (
                 tool_request.get("input")
                 if isinstance(tool_request.get("input"), dict)
@@ -2255,7 +2300,10 @@ class RuntimeToolRequestRunner:
                 raw_input,
                 file_resolution,
             )
-            if not _broker_requires_approval(broker, tool_name):
+            provider_route_required = desktop_execution_route_requires_provider(
+                desktop_execution_route_payload(tool_request)
+            )
+            if not provider_route_required and not _broker_requires_approval(broker, tool_name):
                 runtime_skip = runtime_skip or _runtime_readiness_skip_result(
                     tool_name,
                     raw_input,
@@ -2719,8 +2767,6 @@ def _runtime_replan_fallback_tools(
         *_string_list(result.get("suggested_tool")),
         *_string_list(result.get("recommended_tools")),
     ]
-    if _runtime_focus_unverified_target_app(tool_request, result):
-        tools.extend(["app.open", "desktop.active_window"])
     observation_retry_tool = _runtime_observation_retry_tool(
         _first_mapping(
             tool_request.get("observation_retry"),
@@ -2735,6 +2781,9 @@ def _runtime_replan_fallback_tools(
         for action in recovery_actions:
             if isinstance(action, Mapping):
                 tools.extend(_string_list(action.get("tool")))
+    if not _string_list(tools):
+        if _runtime_focus_unverified_target_app(tool_request, result):
+            tools.extend(["app.open", "desktop.active_window"])
     if not _string_list(tools):
         tools.extend(_runtime_default_replan_fallback_tools(tool_name))
     if not _string_list(tools):
