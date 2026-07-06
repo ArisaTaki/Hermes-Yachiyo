@@ -212,9 +212,13 @@ and the runtime has no matching adapter registered, execution fails closed with
 real foreground desktop. The runtime can register a loopback-only HTTP provider
 through `OHA_YACHIYO_DESKTOP_PROVIDER_URL`; routed tool calls are posted to
 `/tools/execute` and provider transport failures stay structured in the Run
-Timeline. A `sandbox_ready` route is allowed past preview policy only to reach
-that provider boundary; it is not treated as permission to seize the live mouse
-or keyboard.
+Timeline. The same provider contract now includes `/status` health diagnostics:
+public `SandboxDesktopProviderSnapshot` exposes a `health` block with checked
+state, endpoint, provider version, supported tools, capabilities, and blocking
+conditions, so Chat and Agent Studio can distinguish "not configured",
+"configured but not checked", and "configured but unreachable". A `sandbox_ready`
+route is allowed past preview policy only to reach that provider boundary; it is
+not treated as permission to seize the live mouse or keyboard.
 
 Semantic foreground typing now mirrors semantic clicking when an accessibility
 target cannot be matched: the tool returns candidate UI controls, visibility

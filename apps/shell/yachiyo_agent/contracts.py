@@ -156,6 +156,22 @@ class DesktopExecutionPolicySnapshot(_PublicSnapshot):
     reason: str = ""
 
 
+class DesktopProviderHealthSnapshot(_PublicSnapshot):
+    ok: bool = False
+    checked: bool = False
+    status: str = "not_checked"
+    status_code: int | None = None
+    provider_kind: DesktopIsolationKind | str = "sandbox_desktop"
+    provider_id: str = ""
+    provider_version: str = ""
+    endpoint_origin: str = ""
+    endpoint_path: str = ""
+    blocking_conditions: list[str] = Field(default_factory=list)
+    supported_tools: list[str] = Field(default_factory=list)
+    capabilities: list[str] = Field(default_factory=list)
+    error: str = ""
+
+
 class SandboxDesktopProviderSnapshot(_PublicSnapshot):
     available: bool = False
     provider_id: str = ""
@@ -168,6 +184,7 @@ class SandboxDesktopProviderSnapshot(_PublicSnapshot):
     recommended_for: list[str] = Field(default_factory=list)
     diagnostic_route: str | None = None
     source: str = "runtime"
+    health: DesktopProviderHealthSnapshot | None = None
 
 
 class DesktopExecutionRouteSnapshot(_PublicSnapshot):

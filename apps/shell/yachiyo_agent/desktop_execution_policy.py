@@ -7,6 +7,10 @@ from collections.abc import Mapping
 from typing import Any
 from urllib.parse import urlparse
 
+from apps.shell.agent.runtime.desktop_execution_providers import (
+    desktop_execution_provider_status_from_env,
+)
+
 
 _SANDBOX_DESKTOP_PROVIDER_DEFAULT: dict[str, Any] = {
     "available": False,
@@ -23,6 +27,14 @@ _SANDBOX_DESKTOP_PROVIDER_DEFAULT: dict[str, Any] = {
     "recommended_for": ["foreground_control", "keyboard_mouse_capture"],
     "diagnostic_route": "/yachiyo/studio/tools",
     "source": "runtime",
+    "health": {
+        "ok": False,
+        "checked": False,
+        "status": "not_configured",
+        "blocking_conditions": ["sandbox_desktop_provider_required"],
+        "supported_tools": [],
+        "capabilities": [],
+    },
 }
 
 
@@ -65,10 +77,14 @@ def agent_studio_desktop_execution_policy() -> dict[str, Any]:
 
 def sandbox_desktop_provider_status(
     metadata: Mapping[str, Any] | None = None,
+    *,
+    probe_health: bool = False,
 ) -> dict[str, Any]:
     """Return the runtime-visible sandbox desktop provider status."""
 
-    provider = _sandbox_provider_payload(metadata) or _sandbox_provider_payload_from_env()
+    provider = _sandbox_provider_payload(metadata) or _sandbox_provider_payload_from_env(
+        probe_health=probe_health,
+    )
     if provider:
         payload = {**_SANDBOX_DESKTOP_PROVIDER_DEFAULT, **provider}
         payload["available"] = bool(payload.get("available"))
@@ -82,6 +98,7 @@ def sandbox_desktop_provider_status(
             payload["blocking_conditions"] = blockers or ["sandbox_desktop_provider_required"]
         payload["supported_tools"] = _string_list(payload.get("supported_tools"))
         payload["recommended_for"] = _string_list(payload.get("recommended_for"))
+        payload["health"] = _health_payload(provider.get("health"))
         return payload
     return dict(_SANDBOX_DESKTOP_PROVIDER_DEFAULT)
 
@@ -312,7 +329,10 @@ def _sandbox_provider_payload(
     return {}
 
 
-def _sandbox_provider_payload_from_env() -> dict[str, Any]:
+def _sandbox_provider_payload_from_env(
+    *,
+    probe_health: bool = False,
+) -> dict[str, Any]:
     provider_url = _first_env_value(
         (
             "OHA_YACHIYO_DESKTOP_PROVIDER_URL",
@@ -323,10 +343,20 @@ def _sandbox_provider_payload_from_env() -> dict[str, Any]:
     )
     if not provider_url:
         return {}
+    provider_status = desktop_execution_provider_status_from_env(
+        probe_health=probe_health,
+    )
+    if str(provider_status.get("provider_kind") or "") != "sandbox_desktop":
+        return {}
     if not _truthy_env_value(
         "OHA_YACHIYO_DESKTOP_PROVIDER_ALLOW_REMOTE"
     ) and not _is_loopback_url(provider_url):
-        return {}
+        return {
+            **provider_status,
+            "provider_kind": "sandbox_desktop",
+            "recommended_for": ["foreground_control", "keyboard_mouse_capture"],
+            "diagnostic_route": "/yachiyo/studio/tools",
+        }
     provider_kind = (
         _first_env_value(("OHA_YACHIYO_DESKTOP_PROVIDER_KIND",))
         or "sandbox_desktop"
@@ -337,14 +367,19 @@ def _sandbox_provider_payload_from_env() -> dict[str, Any]:
         _first_env_value(("OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS",))
     )
     return {
-        "available": True,
-        "provider_id": _first_env_value(("OHA_YACHIYO_DESKTOP_PROVIDER_ID",)),
+        **provider_status,
+        "available": bool(provider_status.get("available")),
+        "provider_id": str(provider_status.get("provider_id") or ""),
         "provider_kind": "sandbox_desktop",
-        "status": "available",
-        "adapter_ready": True,
-        "reason": "Sandbox desktop provider is configured through runtime environment.",
-        "blocking_conditions": [],
-        "supported_tools": supported_tools,
+        "status": str(provider_status.get("status") or "available"),
+        "adapter_ready": bool(provider_status.get("adapter_ready")),
+        "reason": str(
+            provider_status.get("reason")
+            or "Sandbox desktop provider is configured through runtime environment."
+        ),
+        "blocking_conditions": _string_list(provider_status.get("blocking_conditions")),
+        "supported_tools": _string_list(provider_status.get("supported_tools"))
+        or supported_tools,
         "recommended_for": ["foreground_control", "keyboard_mouse_capture"],
         "diagnostic_route": "/yachiyo/studio/tools",
         "source": "runtime_env",
@@ -449,6 +484,26 @@ def _is_loopback_url(value: str) -> bool:
         return False
     host = (parsed.hostname or "").strip().lower()
     return host in {"localhost", "127.0.0.1", "::1"} or host.startswith("127.")
+
+
+def _health_payload(value: Any) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        return {
+            "ok": False,
+            "checked": False,
+            "status": "not_checked",
+            "blocking_conditions": [],
+            "supported_tools": [],
+            "capabilities": [],
+        }
+    payload = dict(value)
+    payload["ok"] = bool(payload.get("ok"))
+    payload["checked"] = bool(payload.get("checked"))
+    payload["status"] = str(payload.get("status") or "")
+    payload["blocking_conditions"] = _string_list(payload.get("blocking_conditions"))
+    payload["supported_tools"] = _string_list(payload.get("supported_tools"))
+    payload["capabilities"] = _string_list(payload.get("capabilities"))
+    return payload
 
 
 def _string_list(value: Any) -> list[str]:

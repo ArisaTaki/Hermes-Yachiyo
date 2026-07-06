@@ -6,6 +6,7 @@ import json
 from typing import Any
 
 from apps.shell.agent.runtime.desktop_execution_providers import (
+    desktop_execution_provider_status_from_env,
     desktop_execution_provider_registry_from_env,
 )
 from apps.shell.yachiyo_agent.desktop_execution_policy import (
@@ -107,6 +108,84 @@ def test_desktop_provider_registry_from_env_routes_tool_to_local_http_provider()
     assert requests[0]["payload"]["provider"]["provider_id"] == "sandbox-1"
 
 
+def test_desktop_provider_status_from_env_reports_unchecked_local_provider() -> None:
+    status = desktop_execution_provider_status_from_env(
+        {
+            "OHA_YACHIYO_DESKTOP_PROVIDER_URL": "http://127.0.0.1:19091",
+            "OHA_YACHIYO_DESKTOP_PROVIDER_ID": "sandbox-1",
+            "OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS": "desktop.safe_type_text,desktop.click",
+        }
+    )
+
+    assert status["configured"] is True
+    assert status["available"] is True
+    assert status["adapter_ready"] is True
+    assert status["provider_kind"] == "sandbox_desktop"
+    assert status["provider_id"] == "sandbox-1"
+    assert status["status"] == "available"
+    assert status["supported_tools"] == ["desktop.safe_type_text", "desktop.click"]
+    assert status["health"]["checked"] is False
+    assert status["health"]["status"] == "not_checked"
+    assert status["health"]["endpoint_path"] == "/status"
+
+
+def test_desktop_provider_status_from_env_probes_health_endpoint() -> None:
+    requests: list[dict[str, Any]] = []
+
+    def fake_urlopen(request: Any, *, timeout: float) -> FakeResponse:
+        requests.append(
+            {
+                "method": request.get_method(),
+                "url": request.full_url,
+                "headers": dict(request.header_items()),
+                "timeout": timeout,
+            }
+        )
+        return FakeResponse(
+            {
+                "ok": True,
+                "status": "ready",
+                "version": "0.1.0",
+                "supported_tools": ["desktop.safe_type_text"],
+                "capabilities": ["keyboard_mouse_capture"],
+            }
+        )
+
+    status = desktop_execution_provider_status_from_env(
+        {
+            "OHA_YACHIYO_DESKTOP_PROVIDER_URL": "http://localhost:19091",
+            "OHA_YACHIYO_DESKTOP_PROVIDER_ID": "sandbox-1",
+            "OHA_YACHIYO_DESKTOP_PROVIDER_TOKEN": "secret-token",
+            "OHA_YACHIYO_DESKTOP_PROVIDER_TIMEOUT_SECONDS": "2",
+        },
+        probe_health=True,
+        urlopen=fake_urlopen,
+    )
+
+    assert status["available"] is True
+    assert status["adapter_ready"] is True
+    assert status["status"] == "available"
+    assert status["health"]["ok"] is True
+    assert status["health"]["checked"] is True
+    assert status["health"]["status"] == "ready"
+    assert status["health"]["provider_version"] == "0.1.0"
+    assert status["health"]["supported_tools"] == ["desktop.safe_type_text"]
+    assert status["health"]["capabilities"] == ["keyboard_mouse_capture"]
+    assert requests == [
+        {
+            "method": "GET",
+            "url": "http://localhost:19091/status",
+            "headers": {
+                "Accept": "application/json",
+                "Authorization": "Bearer secret-token",
+                "Content-type": "application/json",
+                "User-agent": "Oha-Yachiyo-Desktop-Provider/1",
+            },
+            "timeout": 2.0,
+        }
+    ]
+
+
 def test_desktop_provider_registry_from_env_ignores_remote_url_by_default() -> None:
     registry = desktop_execution_provider_registry_from_env(
         {"OHA_YACHIYO_DESKTOP_PROVIDER_URL": "https://example.com/provider"}
@@ -121,6 +200,13 @@ def test_desktop_provider_registry_from_env_ignores_remote_url_by_default() -> N
     assert result is not None
     assert result["ok"] is False
     assert result["error"] == "desktop_execution_provider_unavailable"
+
+    status = desktop_execution_provider_status_from_env(
+        {"OHA_YACHIYO_DESKTOP_PROVIDER_URL": "https://example.com/provider"}
+    )
+    assert status["available"] is False
+    assert status["status"] == "remote_provider_blocked"
+    assert status["blocking_conditions"] == ["desktop_execution_provider_remote_blocked"]
 
 
 def test_desktop_provider_transport_failure_stays_structured() -> None:
@@ -169,5 +255,6 @@ def test_sandbox_desktop_provider_status_reads_runtime_env(monkeypatch) -> None:
     assert provider["adapter_ready"] is True
     assert provider["provider_id"] == "sandbox-1"
     assert provider["supported_tools"] == ["desktop.safe_type_text"]
+    assert provider["health"]["status"] == "not_checked"
     assert route["status"] == "sandbox_ready"
     assert route["selected_provider_id"] == "sandbox-1"

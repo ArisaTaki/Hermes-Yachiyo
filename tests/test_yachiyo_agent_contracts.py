@@ -42,6 +42,7 @@ from apps.shell.yachiyo_agent import (
     DesktopExecutionRouteSnapshot,
     DesktopExecutionModeSnapshot,
     DesktopExecutionPolicySnapshot,
+    DesktopProviderHealthSnapshot,
     DesktopRecoveryActionMetadataSnapshot,
     FutureTaskSnapshot,
     FutureTaskTriggerResultSnapshot,
@@ -5005,6 +5006,12 @@ def test_sandbox_desktop_provider_snapshot_json_shape_is_stable() -> None:
         recommended_for=["keyboard_mouse_capture"],
         diagnostic_route="/yachiyo/studio/tools",
         source="runtime",
+        health=DesktopProviderHealthSnapshot(
+            ok=False,
+            checked=False,
+            status="not_configured",
+            blocking_conditions=["sandbox_desktop_provider_required"],
+        ),
     )
 
     payload = _json(snapshot)
@@ -5033,18 +5040,27 @@ def test_sandbox_desktop_provider_snapshot_json_shape_is_stable() -> None:
         "recommended_for",
         "diagnostic_route",
         "source",
+        "health",
     ]
     assert payload["available"] is False
     assert payload["adapter_ready"] is False
     assert payload["blocking_conditions"] == ["sandbox_desktop_provider_required"]
+    assert payload["health"]["status"] == "not_configured"
+    assert payload["health"]["blocking_conditions"] == [
+        "sandbox_desktop_provider_required"
+    ]
     assert default_status["status"] == "provider_required"
     assert default_status["blocking_conditions"] == ["sandbox_desktop_provider_required"]
+    assert default_status["health"]["status"] == "not_configured"
     assert explicit_status["available"] is True
     assert explicit_status["adapter_ready"] is True
     assert explicit_status["status"] == "available"
     assert explicit_status["blocking_conditions"] == []
+    assert explicit_status["health"]["status"] == "not_checked"
     with pytest.raises(ValidationError):
         SandboxDesktopProviderSnapshot(unknown=True)
+    with pytest.raises(ValidationError):
+        DesktopProviderHealthSnapshot(unknown=True)
 
 
 def test_desktop_execution_route_decision_reports_provider_boundaries() -> None:

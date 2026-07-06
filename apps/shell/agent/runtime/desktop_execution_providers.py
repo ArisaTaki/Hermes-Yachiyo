@@ -43,6 +43,7 @@ class DesktopExecutionProviderAdapter(Protocol):
 _DEFAULT_PROVIDER_KINDS = {"", "none", "tool_native", "native", "process"}
 _PROVIDER_ROUTE_READY_STATUSES = {"ready", "sandbox_ready", "provider_ready"}
 _DEFAULT_EXECUTE_PATH = "/tools/execute"
+_DEFAULT_STATUS_PATH = "/status"
 _PROVIDER_URL_ENV_KEYS = (
     "OHA_YACHIYO_DESKTOP_PROVIDER_URL",
     "OHA_YACHIYO_SANDBOX_DESKTOP_PROVIDER_URL",
@@ -54,6 +55,10 @@ _PROVIDER_EXECUTE_URL_ENV_KEYS = (
 _PROVIDER_TOKEN_ENV_KEYS = (
     "OHA_YACHIYO_DESKTOP_PROVIDER_TOKEN",
     "OHA_YACHIYO_SANDBOX_DESKTOP_PROVIDER_TOKEN",
+)
+_PROVIDER_STATUS_URL_ENV_KEYS = (
+    "OHA_YACHIYO_DESKTOP_PROVIDER_STATUS_URL",
+    "OHA_YACHIYO_SANDBOX_DESKTOP_PROVIDER_STATUS_URL",
 )
 
 
@@ -138,6 +143,7 @@ class HttpDesktopExecutionProviderAdapter:
         provider_id: str = "",
         base_url: str = "",
         execute_url: str = "",
+        status_url: str = "",
         token: str = "",
         supported_tools: Iterable[str] | None = None,
         timeout: float = 20.0,
@@ -150,8 +156,12 @@ class HttpDesktopExecutionProviderAdapter:
             self.base_url,
             _DEFAULT_EXECUTE_PATH,
         )
+        self.status_url = str(status_url or "").strip() or _join_url(
+            self.base_url,
+            _DEFAULT_STATUS_PATH,
+        )
         self.token = str(token or "").strip()
-        self.supported_tools = set(_string_list(supported_tools))
+        self.supported_tools = _string_list(supported_tools)
         self.timeout = max(0.1, float(timeout or 20.0))
         self._urlopen = urlopen or urlopen_with_bundled_ca
 
@@ -240,6 +250,78 @@ class HttpDesktopExecutionProviderAdapter:
         )
         return tool_result
 
+    def health(self) -> dict[str, Any]:
+        if not self.status_url:
+            return self._health_payload(
+                ok=False,
+                checked=False,
+                status="status_endpoint_missing",
+                blocking_conditions=["desktop_execution_provider_status_endpoint_missing"],
+            )
+        request = Request(
+            self.status_url,
+            headers=self._headers(),
+            method="GET",
+        )
+        try:
+            with self._urlopen(request, timeout=self.timeout) as response:
+                status_code = int(
+                    getattr(response, "status", 0) or response.getcode() or 0
+                )
+                raw_body = response.read()
+        except (OSError, urlerror.URLError, TimeoutError) as exc:
+            return self._health_payload(
+                ok=False,
+                checked=True,
+                status="unreachable",
+                blocking_conditions=["desktop_execution_provider_unreachable"],
+                error=redact_api_error_text(exc),
+            )
+        except Exception as exc:
+            return self._health_payload(
+                ok=False,
+                checked=True,
+                status="unreachable",
+                blocking_conditions=["desktop_execution_provider_unreachable"],
+                error=redact_api_error_text(exc),
+            )
+
+        response_payload, parse_error = _json_payload_from_bytes(raw_body)
+        if parse_error:
+            return self._health_payload(
+                ok=False,
+                checked=True,
+                status="invalid_response",
+                blocking_conditions=["desktop_execution_provider_invalid_status_response"],
+                status_code=status_code,
+                error=parse_error,
+            )
+        remote_ok = not (
+            isinstance(response_payload, Mapping) and response_payload.get("ok") is False
+        )
+        ok = 200 <= status_code < 400 and remote_ok
+        provider_payload = dict(response_payload) if isinstance(response_payload, Mapping) else {}
+        supported_tools = _string_list(
+            provider_payload.get("supported_tools")
+            or provider_payload.get("tools")
+            or self.supported_tools
+        )
+        return self._health_payload(
+            ok=ok,
+            checked=True,
+            status=str(provider_payload.get("status") or ("healthy" if ok else "unhealthy")),
+            blocking_conditions=(
+                []
+                if ok
+                else _string_list(provider_payload.get("blocking_conditions"))
+                or ["desktop_execution_provider_unhealthy"]
+            ),
+            status_code=status_code,
+            provider_version=str(provider_payload.get("version") or ""),
+            supported_tools=supported_tools,
+            capabilities=_string_list(provider_payload.get("capabilities")),
+        )
+
     def _headers(self) -> dict[str, str]:
         headers = {
             "Content-Type": "application/json",
@@ -249,6 +331,49 @@ class HttpDesktopExecutionProviderAdapter:
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
         return headers
+
+    def configured_status(self, *, probe_health: bool = False) -> dict[str, Any]:
+        health = self.health() if probe_health else self._health_payload(
+            ok=False,
+            checked=False,
+            status="not_checked",
+            blocking_conditions=[],
+            supported_tools=self.supported_tools,
+        )
+        return {
+            "configured": True,
+            "available": bool(health.get("ok")) if probe_health else True,
+            "adapter_ready": bool(health.get("ok")) if probe_health else True,
+            "provider_kind": self.provider_kind,
+            "provider_id": self.provider_id,
+            "status": (
+                "available"
+                if (not probe_health or bool(health.get("ok")))
+                else "provider_unhealthy"
+            ),
+            "reason": (
+                "Desktop execution provider is configured and healthy."
+                if bool(health.get("ok"))
+                else (
+                    "Desktop execution provider is configured; health has not been checked."
+                    if not probe_health
+                    else "Desktop execution provider is configured but health check failed."
+                )
+            ),
+            "blocking_conditions": (
+                []
+                if (not probe_health or bool(health.get("ok")))
+                else _string_list(health.get("blocking_conditions"))
+                or ["desktop_execution_provider_unhealthy"]
+            ),
+            "supported_tools": _string_list(health.get("supported_tools"))
+            or self.supported_tools,
+            "health": health,
+            "endpoint_origin": _url_origin(urlparse(self.execute_url)),
+            "endpoint_path": urlparse(self.execute_url).path or _DEFAULT_EXECUTE_PATH,
+            "status_endpoint_path": urlparse(self.status_url).path or _DEFAULT_STATUS_PATH,
+            "source": "runtime_env",
+        }
 
     def _transport_failure(
         self,
@@ -297,6 +422,40 @@ class HttpDesktopExecutionProviderAdapter:
             payload["error"] = error
         return payload
 
+    def _health_payload(
+        self,
+        *,
+        ok: bool,
+        checked: bool,
+        status: str,
+        blocking_conditions: Iterable[str],
+        status_code: int = 0,
+        error: str = "",
+        provider_version: str = "",
+        supported_tools: Iterable[str] | None = None,
+        capabilities: Iterable[str] | None = None,
+    ) -> dict[str, Any]:
+        parsed = urlparse(self.status_url)
+        payload: dict[str, Any] = {
+            "ok": bool(ok),
+            "checked": bool(checked),
+            "status": str(status or ""),
+            "provider_kind": self.provider_kind,
+            "provider_id": self.provider_id,
+            "endpoint_origin": _url_origin(parsed),
+            "endpoint_path": parsed.path or _DEFAULT_STATUS_PATH,
+            "blocking_conditions": _string_list(blocking_conditions),
+            "supported_tools": _string_list(supported_tools),
+            "capabilities": _string_list(capabilities),
+        }
+        if status_code:
+            payload["status_code"] = status_code
+        if error:
+            payload["error"] = error
+        if provider_version:
+            payload["provider_version"] = provider_version
+        return payload
+
 
 def default_desktop_execution_provider_registry() -> DesktopExecutionProviderRegistry:
     return desktop_execution_provider_registry_from_env()
@@ -307,42 +466,96 @@ def desktop_execution_provider_registry_from_env(
     *,
     urlopen: Any | None = None,
 ) -> DesktopExecutionProviderRegistry:
+    adapter = _http_desktop_execution_provider_adapter_from_env(
+        environ,
+        urlopen=urlopen,
+    )
+    if adapter is None:
+        return DesktopExecutionProviderRegistry()
+    return DesktopExecutionProviderRegistry([adapter])
+
+
+def desktop_execution_provider_status_from_env(
+    environ: Mapping[str, str] | None = None,
+    *,
+    probe_health: bool = False,
+    urlopen: Any | None = None,
+) -> dict[str, Any]:
     env = os.environ if environ is None else environ
     provider_url = _first_env_value(env, _PROVIDER_URL_ENV_KEYS)
     execute_url = _first_env_value(env, _PROVIDER_EXECUTE_URL_ENV_KEYS)
     if not provider_url and not execute_url:
-        return DesktopExecutionProviderRegistry()
-    provider_kind = (
-        _first_env_value(env, ("OHA_YACHIYO_DESKTOP_PROVIDER_KIND",))
-        or "sandbox_desktop"
+        return {
+            "configured": False,
+            "available": False,
+            "adapter_ready": False,
+            "provider_kind": "sandbox_desktop",
+            "provider_id": "",
+            "status": "provider_required",
+            "reason": "No desktop execution provider endpoint is configured.",
+            "blocking_conditions": ["sandbox_desktop_provider_required"],
+            "supported_tools": [],
+            "health": {
+                "ok": False,
+                "checked": False,
+                "status": "not_configured",
+                "blocking_conditions": ["sandbox_desktop_provider_required"],
+                "supported_tools": [],
+                "capabilities": [],
+            },
+            "source": "runtime_env",
+        }
+    clean_execute_url = _provider_execute_url(env)
+    if (
+        not _truthy_env_value(env, "OHA_YACHIYO_DESKTOP_PROVIDER_ALLOW_REMOTE")
+        and not _is_loopback_url(clean_execute_url)
+    ):
+        return {
+            "configured": True,
+            "available": False,
+            "adapter_ready": False,
+            "provider_kind": _provider_kind_from_env(env),
+            "provider_id": _first_env_value(env, ("OHA_YACHIYO_DESKTOP_PROVIDER_ID",)),
+            "status": "remote_provider_blocked",
+            "reason": "Desktop execution provider endpoint is not loopback-local.",
+            "blocking_conditions": ["desktop_execution_provider_remote_blocked"],
+            "supported_tools": [],
+            "health": {
+                "ok": False,
+                "checked": False,
+                "status": "remote_provider_blocked",
+                "blocking_conditions": ["desktop_execution_provider_remote_blocked"],
+                "supported_tools": [],
+                "capabilities": [],
+            },
+            "source": "runtime_env",
+        }
+    adapter = _http_desktop_execution_provider_adapter_from_env(
+        env,
+        urlopen=urlopen,
     )
-    provider_id = _first_env_value(env, ("OHA_YACHIYO_DESKTOP_PROVIDER_ID",))
-    token = _first_env_value(env, _PROVIDER_TOKEN_ENV_KEYS)
-    timeout = _float_env_value(env, "OHA_YACHIYO_DESKTOP_PROVIDER_TIMEOUT_SECONDS", 20.0)
-    supported_tools = _string_list(
-        _first_env_value(env, ("OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS",))
-    )
-    allow_remote = _truthy_env_value(env, "OHA_YACHIYO_DESKTOP_PROVIDER_ALLOW_REMOTE")
-    clean_execute_url = str(execute_url or "").strip() or _join_url(
-        _clean_base_url(provider_url),
-        _DEFAULT_EXECUTE_PATH,
-    )
-    if not allow_remote and not _is_loopback_url(clean_execute_url):
-        return DesktopExecutionProviderRegistry()
-    return DesktopExecutionProviderRegistry(
-        [
-            HttpDesktopExecutionProviderAdapter(
-                provider_kind=provider_kind,
-                provider_id=provider_id,
-                base_url=provider_url,
-                execute_url=clean_execute_url,
-                token=token,
-                supported_tools=supported_tools,
-                timeout=timeout,
-                urlopen=urlopen,
-            )
-        ]
-    )
+    if adapter is None:
+        return {
+            "configured": True,
+            "available": False,
+            "adapter_ready": False,
+            "provider_kind": _provider_kind_from_env(env),
+            "provider_id": _first_env_value(env, ("OHA_YACHIYO_DESKTOP_PROVIDER_ID",)),
+            "status": "provider_adapter_unavailable",
+            "reason": "Desktop execution provider adapter could not be configured.",
+            "blocking_conditions": ["desktop_execution_provider_adapter_unavailable"],
+            "supported_tools": [],
+            "health": {
+                "ok": False,
+                "checked": False,
+                "status": "provider_adapter_unavailable",
+                "blocking_conditions": ["desktop_execution_provider_adapter_unavailable"],
+                "supported_tools": [],
+                "capabilities": [],
+            },
+            "source": "runtime_env",
+        }
+    return adapter.configured_status(probe_health=probe_health)
 
 
 def desktop_execution_route_payload(tool_request: Mapping[str, Any] | Any) -> dict[str, Any]:
@@ -473,6 +686,61 @@ def _clean_provider_kind(value: Any) -> str:
     return str(value or "").strip().lower().replace("-", "_")
 
 
+def _http_desktop_execution_provider_adapter_from_env(
+    environ: Mapping[str, str] | None = None,
+    *,
+    urlopen: Any | None = None,
+) -> HttpDesktopExecutionProviderAdapter | None:
+    env = os.environ if environ is None else environ
+    provider_url = _first_env_value(env, _PROVIDER_URL_ENV_KEYS)
+    execute_url = _first_env_value(env, _PROVIDER_EXECUTE_URL_ENV_KEYS)
+    if not provider_url and not execute_url:
+        return None
+    clean_execute_url = _provider_execute_url(env)
+    allow_remote = _truthy_env_value(env, "OHA_YACHIYO_DESKTOP_PROVIDER_ALLOW_REMOTE")
+    if not allow_remote and not _is_loopback_url(clean_execute_url):
+        return None
+    status_url = _first_env_value(env, _PROVIDER_STATUS_URL_ENV_KEYS) or _join_url(
+        _clean_base_url(provider_url),
+        _DEFAULT_STATUS_PATH,
+    )
+    if status_url and not allow_remote and not _is_loopback_url(status_url):
+        return None
+    return HttpDesktopExecutionProviderAdapter(
+        provider_kind=_provider_kind_from_env(env),
+        provider_id=_first_env_value(env, ("OHA_YACHIYO_DESKTOP_PROVIDER_ID",)),
+        base_url=provider_url,
+        execute_url=clean_execute_url,
+        status_url=status_url,
+        token=_first_env_value(env, _PROVIDER_TOKEN_ENV_KEYS),
+        supported_tools=_string_list(
+            _first_env_value(env, ("OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS",))
+        ),
+        timeout=_float_env_value(
+            env,
+            "OHA_YACHIYO_DESKTOP_PROVIDER_TIMEOUT_SECONDS",
+            20.0,
+        ),
+        urlopen=urlopen,
+    )
+
+
+def _provider_execute_url(env: Mapping[str, str]) -> str:
+    provider_url = _first_env_value(env, _PROVIDER_URL_ENV_KEYS)
+    execute_url = _first_env_value(env, _PROVIDER_EXECUTE_URL_ENV_KEYS)
+    return str(execute_url or "").strip() or _join_url(
+        _clean_base_url(provider_url),
+        _DEFAULT_EXECUTE_PATH,
+    )
+
+
+def _provider_kind_from_env(env: Mapping[str, str]) -> str:
+    return _clean_provider_kind(
+        _first_env_value(env, ("OHA_YACHIYO_DESKTOP_PROVIDER_KIND",))
+        or "sandbox_desktop"
+    )
+
+
 def _first_env_value(env: Mapping[str, str], keys: Iterable[str]) -> str:
     for key in keys:
         value = str(env.get(key) or "").strip()
@@ -533,3 +801,15 @@ def _url_origin(parsed: Any) -> str:
         return ""
     port = f":{parsed.port}" if parsed.port else ""
     return f"{parsed.scheme}://{host}{port}"
+
+
+def _json_payload_from_bytes(raw_body: Any) -> tuple[Any, str]:
+    try:
+        decoded = (
+            raw_body.decode("utf-8")
+            if isinstance(raw_body, bytes)
+            else str(raw_body or "")
+        )
+        return (json.loads(decoded) if decoded.strip() else {}, "")
+    except (TypeError, ValueError) as exc:
+        return {}, redact_api_error_text(exc)
