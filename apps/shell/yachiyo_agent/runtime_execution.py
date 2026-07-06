@@ -602,6 +602,10 @@ def _sandbox_provider_requires_controlled_input(
         provider_payload.get("keyboard_mouse_capture_supported") is False
     ):
         return True
+    if bool(getattr(execution_mode, "keyboard_mouse_capture", False)) and (
+        provider_payload.get("keyboard_mouse_capture_supported") is True
+    ) and provider_payload.get("desktop_session_isolated") is not True:
+        return True
     required_tools = set(
         _string_values(provider_payload.get("requires_real_sandbox_for"))
     )

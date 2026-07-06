@@ -35,6 +35,9 @@ def test_controlled_desktop_provider_status_and_manifest(capsys) -> None:
     assert payload["execution_mode"] == "controlled_desktop"
     assert payload["foreground_mutation_supported"] is True
     assert payload["keyboard_mouse_capture_supported"] is True
+    assert payload["desktop_session_kind"] == "user_foreground"
+    assert payload["desktop_session_isolated"] is False
+    assert payload["foreground_takeover_required"] is True
     assert payload["supported_tools"] == ["desktop.safe_type_text"]
     assert payload["environment"]["keyboard_mouse_capture"] == (
         "OHA_YACHIYO_DESKTOP_PROVIDER_KEYBOARD_MOUSE_CAPTURE_SUPPORTED"
@@ -165,6 +168,9 @@ def test_controlled_desktop_provider_works_through_runtime_adapter(monkeypatch) 
     assert status["available"] is True
     assert status["keyboard_mouse_capture_supported"] is True
     assert status["health"]["keyboard_mouse_capture_supported"] is True
+    assert status["desktop_session_kind"] == "user_foreground"
+    assert status["desktop_session_isolated"] is False
+    assert status["foreground_takeover_required"] is True
     assert result is not None
     assert result["ok"] is True
     assert calls == ["hello"]

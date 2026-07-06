@@ -5062,11 +5062,17 @@ def test_sandbox_desktop_provider_snapshot_json_shape_is_stable() -> None:
         "launch_hint",
         "foreground_mutation_supported",
         "keyboard_mouse_capture_supported",
+        "desktop_session_kind",
+        "desktop_session_isolated",
+        "foreground_takeover_required",
         "requires_real_sandbox_for",
     ]
     assert payload["available"] is False
     assert payload["adapter_ready"] is False
     assert payload["keyboard_mouse_capture_supported"] is None
+    assert payload["desktop_session_kind"] == ""
+    assert payload["desktop_session_isolated"] is None
+    assert payload["foreground_takeover_required"] is None
     assert payload["requires_real_sandbox_for"] == []
     assert payload["blocking_conditions"] == ["sandbox_desktop_provider_required"]
     assert payload["health"]["status"] == "not_configured"
@@ -5081,6 +5087,8 @@ def test_sandbox_desktop_provider_snapshot_json_shape_is_stable() -> None:
         "http://127.0.0.1:19091"
     )
     assert default_status["launch_hint"]["foreground_mutation_supported"] is False
+    assert default_status["launch_hint"]["desktop_session_kind"] == "headless_read_only"
+    assert default_status["launch_hint"]["desktop_session_isolated"] is True
     assert default_status["launch_hint"]["controlled_provider"]["provider_id"] == (
         "local-controlled-desktop"
     )
@@ -5092,6 +5100,12 @@ def test_sandbox_desktop_provider_snapshot_json_shape_is_stable() -> None:
     assert default_status["launch_hint"]["controlled_provider"][
         "keyboard_mouse_capture_supported"
     ] is True
+    assert default_status["launch_hint"]["controlled_provider"][
+        "desktop_session_kind"
+    ] == "user_foreground"
+    assert default_status["launch_hint"]["controlled_provider"][
+        "desktop_session_isolated"
+    ] is False
     assert explicit_status["available"] is True
     assert explicit_status["adapter_ready"] is True
     assert explicit_status["status"] == "available"
@@ -5236,6 +5250,37 @@ def test_agent_studio_route_blocks_keyboard_mouse_without_controlled_provider(
     assert route["sandbox_required"] is True
     assert route["fallback_mode"] == "supervised_live"
     assert route["blocking_conditions"] == ["sandbox_keyboard_mouse_provider_required"]
+
+
+def test_agent_studio_route_blocks_keyboard_mouse_without_isolated_session() -> None:
+    route = desktop_execution_route_decision(
+        "desktop.safe_type_text",
+        policy={"mode": "supervised_live"},
+        execution_mode=DesktopExecutionModeSnapshot(
+            mode="supervised_live",
+            foreground_control=True,
+            keyboard_mouse_capture=True,
+        ),
+        metadata={
+            "desktop_provider_route_foreground": True,
+            "sandbox_provider": {
+                "available": True,
+                "adapter_ready": True,
+                "provider_id": "foreground-control",
+                "provider_kind": "sandbox_desktop",
+                "supported_tools": ["desktop.safe_type_text"],
+                "keyboard_mouse_capture_supported": True,
+                "desktop_session_kind": "user_foreground",
+                "desktop_session_isolated": False,
+                "foreground_takeover_required": True,
+            },
+        },
+    )
+
+    assert route["status"] == "sandbox_desktop_session_required"
+    assert route["can_execute"] is False
+    assert route["selected_provider_id"] == "foreground-control"
+    assert route["blocking_conditions"] == ["sandbox_desktop_session_required"]
 
 
 def test_daily_entrypoint_desktop_execution_policy_defaults_to_input_preview() -> None:
@@ -6585,6 +6630,18 @@ def test_controlled_provider_diagnostics_marks_configured_keyboard_provider_read
         "OHA_YACHIYO_DESKTOP_PROVIDER_FOREGROUND_MUTATION_SUPPORTED",
         "true",
     )
+    monkeypatch.setenv(
+        "OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_KIND",
+        "isolated_desktop",
+    )
+    monkeypatch.setenv(
+        "OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_ISOLATED",
+        "true",
+    )
+    monkeypatch.setenv(
+        "OHA_YACHIYO_DESKTOP_PROVIDER_FOREGROUND_TAKEOVER_REQUIRED",
+        "false",
+    )
     provider = desktop_execution_provider_status_from_env(probe_health=False)
 
     diagnostics = controlled_desktop_provider_diagnostics_snapshot(
@@ -6597,9 +6654,52 @@ def test_controlled_provider_diagnostics_marks_configured_keyboard_provider_read
     assert diagnostics.provider_id == "local-controlled-desktop"
     assert diagnostics.keyboard_mouse_capture_supported is True
     assert diagnostics.foreground_mutation_supported is True
+    assert diagnostics.desktop_session_kind == "isolated_desktop"
+    assert diagnostics.desktop_session_isolated is True
+    assert diagnostics.foreground_takeover_required is False
     assert diagnostics.blocking_conditions == []
     assert diagnostics.endpoint_origin == "http://127.0.0.1:19092"
     assert "desktop.safe_type_text" in diagnostics.supported_tools
+
+
+def test_controlled_provider_diagnostics_requires_isolated_desktop_session(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv(
+        "OHA_YACHIYO_DESKTOP_PROVIDER_URL",
+        "http://127.0.0.1:19092",
+    )
+    monkeypatch.setenv(
+        "OHA_YACHIYO_DESKTOP_PROVIDER_ID",
+        "local-controlled-desktop",
+    )
+    monkeypatch.setenv(
+        "OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS",
+        "desktop.list_apps,desktop.safe_type_text",
+    )
+    monkeypatch.setenv(
+        "OHA_YACHIYO_DESKTOP_PROVIDER_KEYBOARD_MOUSE_CAPTURE_SUPPORTED",
+        "true",
+    )
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_KIND", "user_foreground")
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_ISOLATED", "false")
+    monkeypatch.setenv(
+        "OHA_YACHIYO_DESKTOP_PROVIDER_FOREGROUND_TAKEOVER_REQUIRED",
+        "true",
+    )
+    provider = desktop_execution_provider_status_from_env(probe_health=False)
+
+    diagnostics = controlled_desktop_provider_diagnostics_snapshot(
+        sandbox_provider=provider
+    )
+
+    assert diagnostics.ready is False
+    assert diagnostics.configured is True
+    assert diagnostics.status == "isolated_desktop_session_required"
+    assert diagnostics.desktop_session_kind == "user_foreground"
+    assert diagnostics.desktop_session_isolated is False
+    assert diagnostics.foreground_takeover_required is True
+    assert "sandbox_desktop_session_required" in diagnostics.blocking_conditions
 
 
 def test_runtime_tool_catalog_marks_local_provider_input_tools_as_sandbox_required() -> None:

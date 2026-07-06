@@ -138,6 +138,9 @@ class ControlledDesktopProvider(HeadlessDesktopProvider):
             "execution_mode": "controlled_desktop",
             "foreground_mutation_supported": True,
             "keyboard_mouse_capture_supported": True,
+            "desktop_session_kind": "user_foreground",
+            "desktop_session_isolated": False,
+            "foreground_takeover_required": True,
             "requires_real_sandbox_for": [],
             "approval_required_tools": _sorted_tools(KEYBOARD_MOUSE_CONTROL_TOOLS),
         }
@@ -152,6 +155,9 @@ class ControlledDesktopProvider(HeadlessDesktopProvider):
                 "execution_mode": "controlled_desktop",
                 "foreground_mutation_supported": True,
                 "keyboard_mouse_capture_supported": True,
+                "desktop_session_kind": "user_foreground",
+                "desktop_session_isolated": False,
+                "foreground_takeover_required": True,
                 "requires_real_sandbox_for": [],
                 "capabilities": self.status()["capabilities"],
                 "supported_tools": list(self.supported_tools),
@@ -167,6 +173,13 @@ class ControlledDesktopProvider(HeadlessDesktopProvider):
                     ),
                     "foreground_mutation": (
                         "OHA_YACHIYO_DESKTOP_PROVIDER_FOREGROUND_MUTATION_SUPPORTED"
+                    ),
+                    "session_kind": "OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_KIND",
+                    "session_isolated": (
+                        "OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_ISOLATED"
+                    ),
+                    "foreground_takeover": (
+                        "OHA_YACHIYO_DESKTOP_PROVIDER_FOREGROUND_TAKEOVER_REQUIRED"
                     ),
                 },
                 "entrypoint": {
@@ -184,6 +197,9 @@ class ControlledDesktopProvider(HeadlessDesktopProvider):
                     "remote_default_allowed": False,
                     "foreground_mutation_tools_supported": True,
                     "keyboard_mouse_capture_supported": True,
+                    "desktop_session_kind": "user_foreground",
+                    "desktop_session_isolated": False,
+                    "foreground_takeover_required": True,
                     "requires_runtime_approval": True,
                     "approval_required_tools": _sorted_tools(
                         KEYBOARD_MOUSE_CONTROL_TOOLS

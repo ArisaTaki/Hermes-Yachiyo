@@ -174,6 +174,9 @@ class DesktopProviderHealthSnapshot(_PublicSnapshot):
     capabilities: list[str] = Field(default_factory=list)
     foreground_mutation_supported: bool | None = None
     keyboard_mouse_capture_supported: bool | None = None
+    desktop_session_kind: str = ""
+    desktop_session_isolated: bool | None = None
+    foreground_takeover_required: bool | None = None
     requires_real_sandbox_for: list[str] = Field(default_factory=list)
     error: str = ""
 
@@ -194,6 +197,9 @@ class SandboxDesktopProviderSnapshot(_PublicSnapshot):
     launch_hint: dict[str, Any] = Field(default_factory=dict)
     foreground_mutation_supported: bool | None = None
     keyboard_mouse_capture_supported: bool | None = None
+    desktop_session_kind: str = ""
+    desktop_session_isolated: bool | None = None
+    foreground_takeover_required: bool | None = None
     requires_real_sandbox_for: list[str] = Field(default_factory=list)
 
 
@@ -211,6 +217,9 @@ class ControlledDesktopProviderDiagnosticSnapshot(_PublicSnapshot):
     capabilities: list[str] = Field(default_factory=list)
     foreground_mutation_supported: bool | None = None
     keyboard_mouse_capture_supported: bool | None = None
+    desktop_session_kind: str = ""
+    desktop_session_isolated: bool | None = None
+    foreground_takeover_required: bool | None = None
     requires_real_sandbox_for: list[str] = Field(default_factory=list)
     requires_runtime_approval: bool = True
     approval_required_tools: list[str] = Field(default_factory=list)

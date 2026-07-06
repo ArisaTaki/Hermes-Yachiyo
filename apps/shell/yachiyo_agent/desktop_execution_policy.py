@@ -36,6 +36,9 @@ _SANDBOX_DESKTOP_PROVIDER_DEFAULT: dict[str, Any] = {
         "supported_tools": [],
         "capabilities": [],
     },
+    "desktop_session_kind": "",
+    "desktop_session_isolated": None,
+    "foreground_takeover_required": None,
     "launch_hint": {
         "provider_id": "local-headless-desktop",
         "provider_kind": "sandbox_desktop",
@@ -60,6 +63,9 @@ _SANDBOX_DESKTOP_PROVIDER_DEFAULT: dict[str, Any] = {
         },
         "smoke_command": ["python", "scripts/smoke_headless_desktop_provider.py"],
         "foreground_mutation_supported": False,
+        "desktop_session_kind": "headless_read_only",
+        "desktop_session_isolated": True,
+        "foreground_takeover_required": False,
         "requires_real_sandbox_for": ["click", "type", "shortcut", "focus"],
         "controlled_provider": {
             "provider_id": "local-controlled-desktop",
@@ -82,9 +88,15 @@ _SANDBOX_DESKTOP_PROVIDER_DEFAULT: dict[str, Any] = {
                 "OHA_YACHIYO_DESKTOP_PROVIDER_URL": "http://127.0.0.1:19092",
                 "OHA_YACHIYO_DESKTOP_PROVIDER_ID": "local-controlled-desktop",
                 "OHA_YACHIYO_DESKTOP_PROVIDER_KEYBOARD_MOUSE_CAPTURE_SUPPORTED": "true",
+                "OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_KIND": "user_foreground",
+                "OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_ISOLATED": "false",
+                "OHA_YACHIYO_DESKTOP_PROVIDER_FOREGROUND_TAKEOVER_REQUIRED": "true",
             },
             "foreground_mutation_supported": True,
             "keyboard_mouse_capture_supported": True,
+            "desktop_session_kind": "user_foreground",
+            "desktop_session_isolated": False,
+            "foreground_takeover_required": True,
             "requires_runtime_approval": True,
         },
     },
@@ -359,6 +371,29 @@ def desktop_execution_route_decision(
     if (
         desktop_foreground_provider_route_requested(metadata)
         and (foreground_required or execution_mode_name == "supervised_live")
+        and _sandbox_provider_requires_isolated_keyboard_mouse_session(
+            sandbox_provider,
+            clean_tool,
+            metadata,
+        )
+    ):
+        sandbox_route = _sandbox_route_decision(route, sandbox_provider, clean_tool)
+        return {
+            **sandbox_route,
+            "status": "sandbox_desktop_session_required",
+            "can_execute": False,
+            "can_auto_start": False,
+            "sandbox_required": True,
+            "fallback_mode": "supervised_live",
+            "reason": (
+                "Keyboard and mouse foreground actions must run inside an isolated "
+                "desktop session unless the user explicitly allows foreground takeover."
+            ),
+            "blocking_conditions": ["sandbox_desktop_session_required"],
+        }
+    if (
+        desktop_foreground_provider_route_requested(metadata)
+        and (foreground_required or execution_mode_name == "supervised_live")
         and sandbox_desktop_provider_can_execute_tool(sandbox_provider, clean_tool)
     ):
         sandbox_route = _sandbox_route_decision(route, sandbox_provider, clean_tool)
@@ -571,6 +606,9 @@ def _sandbox_provider_public_payload(payload: Mapping[str, Any]) -> dict[str, An
         "launch_hint",
         "foreground_mutation_supported",
         "keyboard_mouse_capture_supported",
+        "desktop_session_kind",
+        "desktop_session_isolated",
+        "foreground_takeover_required",
         "requires_real_sandbox_for",
     }
     return {
@@ -634,6 +672,15 @@ def _sandbox_provider_payload_from_env(
         "recommended_for": ["foreground_control", "keyboard_mouse_capture"],
         "diagnostic_route": "/yachiyo/studio/tools",
         "source": "runtime_env",
+        "desktop_session_kind": str(
+            provider_status.get("desktop_session_kind") or ""
+        ),
+        "desktop_session_isolated": _optional_bool_value(
+            provider_status.get("desktop_session_isolated")
+        ),
+        "foreground_takeover_required": _optional_bool_value(
+            provider_status.get("foreground_takeover_required")
+        ),
     }
 
 
@@ -743,6 +790,33 @@ def _sandbox_provider_requires_keyboard_mouse_sandbox(
     return not required or clean_tool in required or "keyboard_mouse_capture" in required
 
 
+def _sandbox_provider_requires_isolated_keyboard_mouse_session(
+    sandbox_provider: Mapping[str, Any],
+    tool_name: str,
+    metadata: Mapping[str, Any] | None,
+) -> bool:
+    clean_tool = str(tool_name or "").strip()
+    if clean_tool not in _KEYBOARD_MOUSE_CAPTURE_TOOLS:
+        return False
+    if _metadata_truthy(
+        metadata,
+        "allow_user_foreground_takeover",
+        "desktop_allow_user_foreground_takeover",
+        "allow_nonisolated_desktop_provider",
+    ):
+        return False
+    if _optional_bool_value(sandbox_provider.get("desktop_session_isolated")) is True:
+        return False
+    if _optional_bool_value(sandbox_provider.get("foreground_takeover_required")) is True:
+        return True
+    session_kind = str(sandbox_provider.get("desktop_session_kind") or "").strip()
+    if session_kind in {"isolated_desktop", "sandbox_desktop", "virtual_desktop"}:
+        return False
+    return _optional_bool_value(
+        sandbox_provider.get("keyboard_mouse_capture_supported")
+    ) is True
+
+
 def _execution_mode_payload(value: Mapping[str, Any] | Any | None) -> dict[str, Any]:
     if isinstance(value, Mapping):
         return dict(value)
@@ -803,6 +877,15 @@ def _health_payload(value: Any) -> dict[str, Any]:
     if "keyboard_mouse_capture_supported" in payload:
         payload["keyboard_mouse_capture_supported"] = _optional_bool_value(
             payload.get("keyboard_mouse_capture_supported")
+        )
+    payload["desktop_session_kind"] = str(payload.get("desktop_session_kind") or "")
+    if "desktop_session_isolated" in payload:
+        payload["desktop_session_isolated"] = _optional_bool_value(
+            payload.get("desktop_session_isolated")
+        )
+    if "foreground_takeover_required" in payload:
+        payload["foreground_takeover_required"] = _optional_bool_value(
+            payload.get("foreground_takeover_required")
         )
     payload["requires_real_sandbox_for"] = _string_list(
         payload.get("requires_real_sandbox_for")

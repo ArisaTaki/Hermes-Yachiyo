@@ -1094,6 +1094,9 @@ def test_legacy_studio_tool_catalog_exposes_local_desktop_provider(monkeypatch) 
     assert provider["provider_id"] == LOCAL_DESKTOP_PROVIDER_ID
     assert provider["status"] == "available"
     assert provider["keyboard_mouse_capture_supported"] is False
+    assert provider["desktop_session_kind"] == "user_foreground"
+    assert provider["desktop_session_isolated"] is False
+    assert provider["foreground_takeover_required"] is True
     assert "desktop.safe_type_text" in provider["requires_real_sandbox_for"]
     assert "app.open" in provider["supported_tools"]
     assert "desktop.inspect_app" in provider["supported_tools"]
@@ -1107,7 +1110,11 @@ def test_legacy_studio_tool_catalog_exposes_local_desktop_provider(monkeypatch) 
     assert controlled["status"] == "controlled_provider_required"
     assert controlled["provider_id"] == "local-controlled-desktop"
     assert "controlled_desktop_provider_required" in controlled["blocking_conditions"]
+    assert "sandbox_desktop_session_required" in controlled["blocking_conditions"]
     assert controlled["keyboard_mouse_capture_supported"] is False
+    assert controlled["desktop_session_kind"] == "user_foreground"
+    assert controlled["desktop_session_isolated"] is False
+    assert controlled["foreground_takeover_required"] is True
     assert controlled["launch_command"] == [
         "python",
         "scripts/run_controlled_desktop_provider.py",

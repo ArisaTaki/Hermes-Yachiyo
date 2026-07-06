@@ -72,6 +72,18 @@ _PROVIDER_REQUIRES_REAL_SANDBOX_ENV_KEYS = (
     "OHA_YACHIYO_DESKTOP_PROVIDER_REQUIRES_REAL_SANDBOX_FOR",
     "OHA_YACHIYO_SANDBOX_DESKTOP_PROVIDER_REQUIRES_REAL_SANDBOX_FOR",
 )
+_PROVIDER_SESSION_KIND_ENV_KEYS = (
+    "OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_KIND",
+    "OHA_YACHIYO_SANDBOX_DESKTOP_PROVIDER_SESSION_KIND",
+)
+_PROVIDER_SESSION_ISOLATED_ENV_KEYS = (
+    "OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_ISOLATED",
+    "OHA_YACHIYO_SANDBOX_DESKTOP_PROVIDER_SESSION_ISOLATED",
+)
+_PROVIDER_FOREGROUND_TAKEOVER_ENV_KEYS = (
+    "OHA_YACHIYO_DESKTOP_PROVIDER_FOREGROUND_TAKEOVER_REQUIRED",
+    "OHA_YACHIYO_SANDBOX_DESKTOP_PROVIDER_FOREGROUND_TAKEOVER_REQUIRED",
+)
 LOCAL_DESKTOP_PROVIDER_ID = "local-native-desktop"
 LOCAL_DESKTOP_PROVIDER_KIND = "local_desktop"
 LOCAL_DESKTOP_PROVIDER_TOOLS = (
@@ -234,6 +246,9 @@ class HttpDesktopExecutionProviderAdapter:
         foreground_mutation_supported: bool | None = None,
         keyboard_mouse_capture_supported: bool | None = None,
         requires_real_sandbox_for: Iterable[str] | None = None,
+        desktop_session_kind: str = "",
+        desktop_session_isolated: bool | None = None,
+        foreground_takeover_required: bool | None = None,
     ) -> None:
         self.provider_kind = _clean_provider_kind(provider_kind) or "sandbox_desktop"
         self.provider_id = str(provider_id or "").strip()
@@ -253,6 +268,9 @@ class HttpDesktopExecutionProviderAdapter:
         self.foreground_mutation_supported = foreground_mutation_supported
         self.keyboard_mouse_capture_supported = keyboard_mouse_capture_supported
         self.requires_real_sandbox_for = _string_list(requires_real_sandbox_for)
+        self.desktop_session_kind = str(desktop_session_kind or "").strip()
+        self.desktop_session_isolated = desktop_session_isolated
+        self.foreground_takeover_required = foreground_takeover_required
 
     def can_execute(
         self,
@@ -429,6 +447,32 @@ class HttpDesktopExecutionProviderAdapter:
                 "input_capture_supported",
             ),
         )
+        desktop_session_kind = _provider_session_kind(provider_payload)
+        desktop_session_isolated = _provider_capability_bool(
+            provider_payload,
+            capabilities=capabilities,
+            true_tokens=(
+                "isolated_desktop",
+                "sandbox_desktop_session",
+                "virtual_desktop",
+            ),
+            false_tokens=("user_foreground", "foreground_takeover"),
+            keys=("desktop_session_isolated", "session_isolated"),
+        )
+        foreground_takeover_required = _provider_capability_bool(
+            provider_payload,
+            capabilities=capabilities,
+            true_tokens=("user_foreground", "foreground_takeover"),
+            false_tokens=(
+                "isolated_desktop",
+                "sandbox_desktop_session",
+                "virtual_desktop",
+            ),
+            keys=(
+                "foreground_takeover_required",
+                "user_foreground_takeover_required",
+            ),
+        )
         return self._health_payload(
             ok=ok,
             checked=True,
@@ -448,6 +492,9 @@ class HttpDesktopExecutionProviderAdapter:
             requires_real_sandbox_for=_provider_requires_real_sandbox_for(
                 provider_payload,
             ),
+            desktop_session_kind=desktop_session_kind,
+            desktop_session_isolated=desktop_session_isolated,
+            foreground_takeover_required=foreground_takeover_required,
         )
 
     def _headers(self) -> dict[str, str]:
@@ -470,6 +517,9 @@ class HttpDesktopExecutionProviderAdapter:
             foreground_mutation_supported=self.foreground_mutation_supported,
             keyboard_mouse_capture_supported=self.keyboard_mouse_capture_supported,
             requires_real_sandbox_for=self.requires_real_sandbox_for,
+            desktop_session_kind=self.desktop_session_kind,
+            desktop_session_isolated=self.desktop_session_isolated,
+            foreground_takeover_required=self.foreground_takeover_required,
         )
         supported_tools = _string_list(health.get("supported_tools")) or self.supported_tools
         keyboard_mouse_capture_supported = _coalesce_optional_bool(
@@ -489,6 +539,18 @@ class HttpDesktopExecutionProviderAdapter:
         requires_real_sandbox_for = (
             _string_list(health.get("requires_real_sandbox_for"))
             or self.requires_real_sandbox_for
+        )
+        desktop_session_kind = (
+            str(health.get("desktop_session_kind") or "").strip()
+            or self.desktop_session_kind
+        )
+        desktop_session_isolated = _coalesce_optional_bool(
+            health.get("desktop_session_isolated"),
+            self.desktop_session_isolated,
+        )
+        foreground_takeover_required = _coalesce_optional_bool(
+            health.get("foreground_takeover_required"),
+            self.foreground_takeover_required,
         )
         return {
             "configured": True,
@@ -526,6 +588,9 @@ class HttpDesktopExecutionProviderAdapter:
                 foreground_mutation_supported=foreground_mutation_supported,
                 keyboard_mouse_capture_supported=keyboard_mouse_capture_supported,
                 requires_real_sandbox_for=requires_real_sandbox_for,
+                desktop_session_kind=desktop_session_kind,
+                desktop_session_isolated=desktop_session_isolated,
+                foreground_takeover_required=foreground_takeover_required,
             ),
         }
 
@@ -591,6 +656,9 @@ class HttpDesktopExecutionProviderAdapter:
         foreground_mutation_supported: bool | None = None,
         keyboard_mouse_capture_supported: bool | None = None,
         requires_real_sandbox_for: Iterable[str] | None = None,
+        desktop_session_kind: str = "",
+        desktop_session_isolated: bool | None = None,
+        foreground_takeover_required: bool | None = None,
     ) -> dict[str, Any]:
         parsed = urlparse(self.status_url)
         payload: dict[str, Any] = {
@@ -608,6 +676,9 @@ class HttpDesktopExecutionProviderAdapter:
                 foreground_mutation_supported=foreground_mutation_supported,
                 keyboard_mouse_capture_supported=keyboard_mouse_capture_supported,
                 requires_real_sandbox_for=requires_real_sandbox_for,
+                desktop_session_kind=desktop_session_kind,
+                desktop_session_isolated=desktop_session_isolated,
+                foreground_takeover_required=foreground_takeover_required,
             ),
         }
         if status_code:
@@ -779,10 +850,16 @@ def local_desktop_execution_provider_status(
                 "media_control",
                 "no_keyboard_mouse_capture",
             ],
+            "desktop_session_kind": "user_foreground",
+            "desktop_session_isolated": False,
+            "foreground_takeover_required": True,
         },
         "source": "runtime_local",
         "foreground_mutation_supported": True,
         "keyboard_mouse_capture_supported": False,
+        "desktop_session_kind": "user_foreground",
+        "desktop_session_isolated": False,
+        "foreground_takeover_required": True,
         "requires_real_sandbox_for": list(LOCAL_DESKTOP_PROVIDER_REQUIRES_SANDBOX_TOOLS),
     }
 
@@ -1045,6 +1122,15 @@ def _http_desktop_execution_provider_adapter_from_env(
         requires_real_sandbox_for=_string_list(
             _first_env_value(env, _PROVIDER_REQUIRES_REAL_SANDBOX_ENV_KEYS)
         ),
+        desktop_session_kind=_first_env_value(env, _PROVIDER_SESSION_KIND_ENV_KEYS),
+        desktop_session_isolated=_optional_bool_env_value(
+            env,
+            _PROVIDER_SESSION_ISOLATED_ENV_KEYS,
+        ),
+        foreground_takeover_required=_optional_bool_env_value(
+            env,
+            _PROVIDER_FOREGROUND_TAKEOVER_ENV_KEYS,
+        ),
     )
 
 
@@ -1069,6 +1155,9 @@ def _provider_capability_status_fields(
     foreground_mutation_supported: bool | None = None,
     keyboard_mouse_capture_supported: bool | None = None,
     requires_real_sandbox_for: Iterable[str] | None = None,
+    desktop_session_kind: str = "",
+    desktop_session_isolated: bool | None = None,
+    foreground_takeover_required: bool | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {}
     if foreground_mutation_supported is not None:
@@ -1080,6 +1169,13 @@ def _provider_capability_status_fields(
     sandbox_required_tools = _string_list(requires_real_sandbox_for)
     if sandbox_required_tools:
         payload["requires_real_sandbox_for"] = sandbox_required_tools
+    clean_session_kind = str(desktop_session_kind or "").strip()
+    if clean_session_kind:
+        payload["desktop_session_kind"] = clean_session_kind
+    if desktop_session_isolated is not None:
+        payload["desktop_session_isolated"] = bool(desktop_session_isolated)
+    if foreground_takeover_required is not None:
+        payload["foreground_takeover_required"] = bool(foreground_takeover_required)
     return payload
 
 
@@ -1123,6 +1219,20 @@ def _provider_requires_real_sandbox_for(
     if isinstance(safety, Mapping):
         return _string_list(safety.get("requires_real_sandbox_for"))
     return []
+
+
+def _provider_session_kind(provider_payload: Mapping[str, Any]) -> str:
+    for key in ("desktop_session_kind", "session_kind"):
+        value = str(provider_payload.get(key) or "").strip()
+        if value:
+            return value
+    safety = provider_payload.get("safety")
+    if isinstance(safety, Mapping):
+        for key in ("desktop_session_kind", "session_kind"):
+            value = str(safety.get(key) or "").strip()
+            if value:
+                return value
+    return ""
 
 
 def _coalesce_optional_bool(*values: Any) -> bool | None:

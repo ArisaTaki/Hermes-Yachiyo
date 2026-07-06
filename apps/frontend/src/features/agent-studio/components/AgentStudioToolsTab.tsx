@@ -764,7 +764,10 @@ function ToolDetail({
         data-controlled-provider-ready={String(providerState.controlledReady)}
         data-controlled-provider-reason={providerState.controlledReason}
         data-controlled-provider-requires-approval={String(providerState.controlledRequiresApproval)}
+        data-controlled-provider-session-isolated={String(providerState.controlledSessionIsolated)}
+        data-controlled-provider-session-kind={providerState.controlledSessionKind}
         data-controlled-provider-status={providerState.controlledStatus}
+        data-controlled-provider-takeover-required={String(providerState.controlledForegroundTakeoverRequired)}
         data-provider-ready={String(providerState.ready)}
         data-provider-requires-real-sandbox-for={providerState.requiresRealSandboxFor.join(',')}
         data-provider-status={providerState.status}
@@ -826,6 +829,15 @@ function ToolDetail({
               data-controlled-provider-status={providerState.controlledStatus}
             >
               {providerState.controlledStatus}
+            </span>
+          ) : null}
+          {providerState.controlledSessionKind ? (
+            <span
+              className={providerState.controlledSessionIsolated ? 'studio-tool-permission' : 'studio-tool-permission missing'}
+              data-controlled-provider-session-kind={providerState.controlledSessionKind}
+              data-controlled-provider-session-isolated={String(providerState.controlledSessionIsolated)}
+            >
+              {providerState.controlledSessionKind}
             </span>
           ) : null}
           {providerState.controlledEndpointOrigin ? (
@@ -932,6 +944,9 @@ type ToolProviderState = {
   controlledStatus: string;
   controlledReason: string;
   controlledBlockingConditions: string[];
+  controlledSessionKind: string;
+  controlledSessionIsolated: boolean;
+  controlledForegroundTakeoverRequired: boolean;
   controlledEndpointOrigin: string;
   controlledEndpointPath: string;
 };
@@ -968,6 +983,13 @@ function toolProviderState(tool: ToolCatalogItemSnapshot, catalog: ToolCatalogSn
   const controlledStatus = stringValue(controlledDiagnostics.status);
   const controlledReason = stringValue(controlledDiagnostics.reason);
   const controlledBlockingConditions = stringArray(controlledDiagnostics.blocking_conditions);
+  const controlledSessionKind = stringValue(controlledDiagnostics.desktop_session_kind)
+    || stringValue(controlledProvider.desktop_session_kind);
+  const controlledSessionIsolated = controlledDiagnostics.desktop_session_isolated === true
+    || controlledProvider.desktop_session_isolated === true;
+  const controlledForegroundTakeoverRequired =
+    controlledDiagnostics.foreground_takeover_required === true
+    || controlledProvider.foreground_takeover_required === true;
   const controlledEndpointOrigin = stringValue(controlledDiagnostics.endpoint_origin);
   const controlledEndpointPath = stringValue(controlledDiagnostics.endpoint_path);
   const requiresRealSandbox = Boolean(tool.tool_name && requiresRealSandboxFor.includes(tool.tool_name));
@@ -988,6 +1010,9 @@ function toolProviderState(tool: ToolCatalogItemSnapshot, catalog: ToolCatalogSn
     controlledStatus,
     controlledReason,
     controlledBlockingConditions,
+    controlledSessionKind,
+    controlledSessionIsolated,
+    controlledForegroundTakeoverRequired,
     controlledEndpointOrigin,
     controlledEndpointPath,
   };

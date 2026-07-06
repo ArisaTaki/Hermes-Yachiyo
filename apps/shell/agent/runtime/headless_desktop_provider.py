@@ -69,6 +69,9 @@ class HeadlessDesktopProvider:
             "execution_mode": "headless_read_only",
             "foreground_mutation_supported": False,
             "keyboard_mouse_capture_supported": False,
+            "desktop_session_kind": "headless_read_only",
+            "desktop_session_isolated": True,
+            "foreground_takeover_required": False,
             "requires_real_sandbox_for": ["click", "type", "shortcut", "focus"],
         }
 
@@ -87,6 +90,9 @@ class HeadlessDesktopProvider:
             "execution_mode": "headless_read_only",
             "foreground_mutation_supported": False,
             "keyboard_mouse_capture_supported": False,
+            "desktop_session_kind": "headless_read_only",
+            "desktop_session_isolated": True,
+            "foreground_takeover_required": False,
             "requires_real_sandbox_for": ["click", "type", "shortcut", "focus"],
             "capabilities": [
                 "desktop_discovery",

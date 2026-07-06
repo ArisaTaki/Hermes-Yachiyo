@@ -118,6 +118,9 @@ export type DesktopProviderHealthSnapshot = {
   capabilities?: string[];
   foreground_mutation_supported?: boolean | null;
   keyboard_mouse_capture_supported?: boolean | null;
+  desktop_session_kind?: string;
+  desktop_session_isolated?: boolean | null;
+  foreground_takeover_required?: boolean | null;
   requires_real_sandbox_for?: string[];
   error?: string;
 };
@@ -131,6 +134,9 @@ export type SandboxDesktopProviderLaunchHint = {
   smoke_command?: string[];
   foreground_mutation_supported?: boolean;
   keyboard_mouse_capture_supported?: boolean;
+  desktop_session_kind?: string;
+  desktop_session_isolated?: boolean;
+  foreground_takeover_required?: boolean;
   requires_real_sandbox_for?: string[];
   controlled_provider?: {
     provider_id?: string;
@@ -141,6 +147,9 @@ export type SandboxDesktopProviderLaunchHint = {
     env?: Record<string, string>;
     foreground_mutation_supported?: boolean;
     keyboard_mouse_capture_supported?: boolean;
+    desktop_session_kind?: string;
+    desktop_session_isolated?: boolean;
+    foreground_takeover_required?: boolean;
     requires_runtime_approval?: boolean;
   };
 };
@@ -161,6 +170,9 @@ export type SandboxDesktopProviderSnapshot = {
   launch_hint?: SandboxDesktopProviderLaunchHint;
   foreground_mutation_supported?: boolean;
   keyboard_mouse_capture_supported?: boolean;
+  desktop_session_kind?: string;
+  desktop_session_isolated?: boolean | null;
+  foreground_takeover_required?: boolean | null;
   requires_real_sandbox_for?: string[];
 };
 
@@ -178,6 +190,9 @@ export type ControlledDesktopProviderDiagnosticSnapshot = {
   capabilities?: string[];
   foreground_mutation_supported?: boolean | null;
   keyboard_mouse_capture_supported?: boolean | null;
+  desktop_session_kind?: string;
+  desktop_session_isolated?: boolean | null;
+  foreground_takeover_required?: boolean | null;
   requires_real_sandbox_for?: string[];
   requires_runtime_approval?: boolean;
   approval_required_tools?: string[];

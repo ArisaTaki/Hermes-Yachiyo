@@ -48,24 +48,52 @@ def controlled_desktop_provider_diagnostics_snapshot(
         controlled_launch.get("keyboard_mouse_capture_supported"),
         manifest.get("keyboard_mouse_capture_supported"),
     )
+    manifest_safety = _mapping(manifest.get("safety"))
+    desktop_session_kind = (
+        str(provider.desktop_session_kind or "").strip()
+        or _nested_text(provider.health, "desktop_session_kind")
+        or str(env_status.get("desktop_session_kind") or "").strip()
+        or str(controlled_launch.get("desktop_session_kind") or "").strip()
+        or str(manifest.get("desktop_session_kind") or "").strip()
+        or str(manifest_safety.get("desktop_session_kind") or "").strip()
+    )
+    desktop_session_isolated = _optional_bool(
+        provider.desktop_session_isolated,
+        _nested_bool(provider.health, "desktop_session_isolated"),
+        env_status.get("desktop_session_isolated"),
+        controlled_launch.get("desktop_session_isolated"),
+        manifest.get("desktop_session_isolated"),
+        manifest_safety.get("desktop_session_isolated"),
+    )
+    foreground_takeover_required = _optional_bool(
+        provider.foreground_takeover_required,
+        _nested_bool(provider.health, "foreground_takeover_required"),
+        env_status.get("foreground_takeover_required"),
+        controlled_launch.get("foreground_takeover_required"),
+        manifest.get("foreground_takeover_required"),
+        manifest_safety.get("foreground_takeover_required"),
+    )
     ready = (
         configured
         and provider.available
         and provider.adapter_ready
         and str(provider.provider_kind or "") == "sandbox_desktop"
         and keyboard_mouse_capture_supported is True
+        and desktop_session_isolated is True
     )
     status = _diagnostic_status(
         ready=ready,
         configured=configured,
         provider=provider,
         keyboard_mouse_capture_supported=keyboard_mouse_capture_supported,
+        desktop_session_isolated=desktop_session_isolated,
     )
     blocking_conditions = _diagnostic_blockers(
         ready=ready,
         configured=configured,
         provider=provider,
         keyboard_mouse_capture_supported=keyboard_mouse_capture_supported,
+        desktop_session_isolated=desktop_session_isolated,
     )
     supported_tools = (
         _string_list(provider.supported_tools) if configured else []
@@ -93,6 +121,7 @@ def controlled_desktop_provider_diagnostics_snapshot(
             configured=configured,
             provider=provider,
             keyboard_mouse_capture_supported=keyboard_mouse_capture_supported,
+            desktop_session_isolated=desktop_session_isolated,
         ),
         blocking_conditions=blocking_conditions,
         supported_tools=supported_tools,
@@ -100,6 +129,9 @@ def controlled_desktop_provider_diagnostics_snapshot(
         or _string_list(manifest.get("capabilities")),
         foreground_mutation_supported=foreground_mutation_supported,
         keyboard_mouse_capture_supported=keyboard_mouse_capture_supported,
+        desktop_session_kind=desktop_session_kind,
+        desktop_session_isolated=desktop_session_isolated,
+        foreground_takeover_required=foreground_takeover_required,
         requires_real_sandbox_for=_string_list(provider.requires_real_sandbox_for),
         requires_runtime_approval=bool(
             controlled_launch.get("requires_runtime_approval")
@@ -151,6 +183,7 @@ def _diagnostic_status(
     configured: bool,
     provider: SandboxDesktopProviderSnapshot,
     keyboard_mouse_capture_supported: bool | None,
+    desktop_session_isolated: bool | None,
 ) -> str:
     if ready:
         return "ready"
@@ -158,6 +191,8 @@ def _diagnostic_status(
         return "controlled_provider_required"
     if keyboard_mouse_capture_supported is not True:
         return "keyboard_mouse_capture_required"
+    if desktop_session_isolated is not True:
+        return "isolated_desktop_session_required"
     return provider.status or "provider_unavailable"
 
 
@@ -167,6 +202,7 @@ def _diagnostic_blockers(
     configured: bool,
     provider: SandboxDesktopProviderSnapshot,
     keyboard_mouse_capture_supported: bool | None,
+    desktop_session_isolated: bool | None,
 ) -> list[str]:
     if ready:
         return []
@@ -177,6 +213,8 @@ def _diagnostic_blockers(
         blockers.append("sandbox_desktop_adapter_required")
     if keyboard_mouse_capture_supported is not True:
         blockers.append("sandbox_keyboard_mouse_provider_required")
+    if desktop_session_isolated is not True:
+        blockers.append("sandbox_desktop_session_required")
     return _unique_strings(blockers)
 
 
@@ -186,13 +224,16 @@ def _diagnostic_reason(
     configured: bool,
     provider: SandboxDesktopProviderSnapshot,
     keyboard_mouse_capture_supported: bool | None,
+    desktop_session_isolated: bool | None,
 ) -> str:
     if ready:
-        return "Controlled desktop provider is configured and can run foreground input tools."
+        return "Controlled desktop provider is configured inside an isolated desktop session."
     if not configured:
         return "Start the controlled desktop provider before autonomous foreground input."
     if keyboard_mouse_capture_supported is not True:
         return "Configured provider does not advertise keyboard and mouse capture."
+    if desktop_session_isolated is not True:
+        return "Configured provider controls the user foreground instead of an isolated desktop session."
     return provider.reason or "Controlled desktop provider is configured but not ready."
 
 
@@ -224,6 +265,12 @@ def _nested_bool(snapshot: DesktopProviderHealthSnapshot | None, key: str) -> bo
     if snapshot is None:
         return None
     return _optional_bool(getattr(snapshot, key, None))
+
+
+def _nested_text(snapshot: DesktopProviderHealthSnapshot | None, key: str) -> str:
+    if snapshot is None:
+        return ""
+    return str(getattr(snapshot, key, "") or "").strip()
 
 
 def _optional_bool(*values: Any) -> bool | None:
