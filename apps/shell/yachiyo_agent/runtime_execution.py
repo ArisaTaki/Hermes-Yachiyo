@@ -27,7 +27,7 @@ from .planner_execution import (
     planner_full_plan_execution_tool_requests,
     planner_tool_requests_for_decision,
 )
-from .policy import desktop_tool_execution_mode
+from .policy import desktop_tool_execution_mode_for_input
 from .task_progress_snapshots import task_progress_summary_from_task_core
 
 _NON_EXECUTABLE_REQUEST_STATUSES = {
@@ -767,7 +767,7 @@ def _execution_request_snapshot(
     execution_mode = (
         step.execution_mode
         if step is not None and step.execution_mode is not None
-        else desktop_tool_execution_mode(tool_name)
+        else desktop_tool_execution_mode_for_input(tool_name, request_input)
     )
     desktop_execution_policy = _mapping(request.get("desktop_execution_policy")) or None
     sandbox_provider = _sandbox_provider_for_request(

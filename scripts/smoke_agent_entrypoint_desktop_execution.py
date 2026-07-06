@@ -486,6 +486,27 @@ def _generic_app_inspect_case(
         {},
     )
     inspect_data = inspect_result.get("data") if isinstance(inspect_result.get("data"), dict) else {}
+    inspect_planned_payload = next(
+        (
+            _payload(event)
+            for event in planned_events
+            if _payload(event).get("tool") == "desktop.inspect_app"
+        ),
+        {},
+    )
+    inspect_tool_payload = next(
+        (
+            _payload(event)
+            for event in tool_events
+            if _payload(event).get("tool") == "desktop.inspect_app"
+        ),
+        {},
+    )
+    inspect_route = (
+        inspect_tool_payload.get("desktop_execution_route")
+        if isinstance(inspect_tool_payload.get("desktop_execution_route"), dict)
+        else {}
+    )
     completed_payload = _payload(completed_event)
     selection_payload = _payload(selection_event)
     selected_intent_payload = _payload(selected_intent_event)
@@ -520,6 +541,12 @@ def _generic_app_inspect_case(
         "tool_results_match_chain": tool_result_actions == expected_execution_tools,
         "inspect_result_ready": inspect_data.get("ready_for_foreground_action") is True,
         "inspect_result_has_named_ui": inspect_data.get("ui_element_count") == 2,
+        "inspect_planned_marks_foreground_control": (
+            inspect_planned_payload.get("execution_mode") == "supervised_live"
+            and inspect_planned_payload.get("foreground_control") is True
+            and inspect_planned_payload.get("sandbox_recommended") is True
+        ),
+        "inspect_tool_route_is_supervised_live": inspect_route.get("status") == "supervised_live",
         "completed_from_runtime_planner": completed_payload.get("source") == "runtime_planner",
         "completed_tools_match": completed_payload.get("tools") == expected_execution_tools,
         "completed_after_inspect": completed_payload.get("tool") == "desktop.inspect_app",

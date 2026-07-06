@@ -66,7 +66,7 @@ from apps.shell.yachiyo_agent.planner_projection import (
     planner_selection_payload,
     runtime_planner_decision,
 )
-from apps.shell.yachiyo_agent.policy import desktop_tool_execution_mode
+from apps.shell.yachiyo_agent.policy import desktop_tool_execution_mode_for_input
 from apps.shell.yachiyo_agent.runtime_execution import (
     runtime_execution_envelope_payload,
     runtime_execution_requests_from_envelope_payload,
@@ -165,8 +165,11 @@ _APP_FOREGROUND_ACTION_TOOLS = {
 }
 
 
-def _desktop_execution_mode_payload(tool_name: str) -> dict[str, Any]:
-    snapshot = desktop_tool_execution_mode(tool_name)
+def _desktop_execution_mode_payload(
+    tool_name: str,
+    input_preview: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    snapshot = desktop_tool_execution_mode_for_input(tool_name, input_preview)
     payload = snapshot.model_dump(mode="json")
     return {
         "execution_mode": str(payload.get("mode") or ""),
@@ -520,7 +523,12 @@ class RuntimeCustomApiAgentLoop:
                         ),
                         "input_preview": planned_input,
                     }
-                    planned_payload.update(_desktop_execution_mode_payload(planned_tool))
+                    planned_payload.update(
+                        _desktop_execution_mode_payload(
+                            planned_tool,
+                            planned_input if isinstance(planned_input, Mapping) else {},
+                        )
+                    )
                     presentation = str(planned_tool_request.get("presentation") or "").strip()
                     if presentation:
                         planned_payload["presentation"] = presentation
@@ -1395,7 +1403,10 @@ class RuntimeCustomApiAgentLoop:
                         }
                         auto_payload.update(
                             _desktop_execution_mode_payload(
-                                str(auto_followup_request.get("tool") or "")
+                                str(auto_followup_request.get("tool") or ""),
+                                auto_followup_request.get("input")
+                                if isinstance(auto_followup_request.get("input"), Mapping)
+                                else {},
                             )
                         )
                         for key in (
@@ -4346,7 +4357,14 @@ class RuntimeCustomApiAgentLoop:
                 "input_preview": request.get("input") if isinstance(request.get("input"), dict) else {},
                 "allowed_tools": allowed,
             }
-            payload.update(_desktop_execution_mode_payload(tool_name))
+            payload.update(
+                _desktop_execution_mode_payload(
+                    tool_name,
+                    payload.get("input_preview")
+                    if isinstance(payload.get("input_preview"), Mapping)
+                    else {},
+                )
+            )
             planning_reason = str(
                 request.get("planning_reason") or "clear_daily_desktop_intent"
             ).strip()
@@ -4374,7 +4392,7 @@ class RuntimeCustomApiAgentLoop:
             "reason": "tool_policy_requires_approval",
             "input_preview": tool_input,
         }
-        event_payload.update(_desktop_execution_mode_payload(tool_name))
+        event_payload.update(_desktop_execution_mode_payload(tool_name, tool_input))
         clean_planning_reason = str(planning_reason or "").strip()
         if clean_planning_reason:
             event_payload["planning_reason"] = clean_planning_reason

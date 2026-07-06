@@ -112,6 +112,7 @@ from apps.shell.yachiyo_agent import (
     desktop_action_risk_level,
     desktop_action_risk_snapshots,
     desktop_tool_execution_mode,
+    desktop_tool_execution_mode_for_input,
     desktop_execution_capability_snapshots,
     desktop_execution_route_decision,
     desktop_tool_risk_level,
@@ -6029,6 +6030,20 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
     assert desktop_tool_execution_mode("desktop.ui_elements").mode == (
         "read_only_observation"
     )
+    inspect_default = desktop_tool_execution_mode_for_input(
+        "desktop.inspect_app",
+        {"app_name": "PixelForge"},
+    )
+    assert inspect_default.mode == "supervised_live"
+    assert inspect_default.foreground_control is True
+    assert inspect_default.keyboard_mouse_capture is False
+    assert inspect_default.sandbox_recommended is True
+    inspect_read_only = desktop_tool_execution_mode_for_input(
+        "desktop.inspect_app",
+        {"app_name": "PixelForge", "open_if_needed": False, "focus": False},
+    )
+    assert inspect_read_only.mode == "read_only_observation"
+    assert inspect_read_only.foreground_control is False
     assert desktop_tool_execution_mode("app.open").foreground_control is True
     assert desktop_tool_execution_mode("app.open").keyboard_mouse_capture is False
     assert desktop_tool_execution_mode("desktop.safe_type_text").mode == (

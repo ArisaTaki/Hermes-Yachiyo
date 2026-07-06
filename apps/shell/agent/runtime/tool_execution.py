@@ -28,7 +28,7 @@ from apps.shell.yachiyo_agent.desktop_execution_policy import (
 from apps.shell.yachiyo_agent.isolated_provider_session import (
     start_isolated_desktop_provider_session,
 )
-from apps.shell.yachiyo_agent.policy import desktop_tool_execution_mode
+from apps.shell.yachiyo_agent.policy import desktop_tool_execution_mode_for_input
 from packages.security import redact_api_error_text
 
 _TOOL_REQUEST_TRACE_TEXT_KEYS = (
@@ -455,7 +455,10 @@ def _desktop_execution_policy_skip_result(
 ) -> dict[str, Any] | None:
     policy = _desktop_execution_policy_from_request(tool_request)
     policy_mode = _desktop_execution_policy_mode(policy)
-    execution_mode = desktop_tool_execution_mode(tool_name)
+    execution_mode = desktop_tool_execution_mode_for_input(
+        tool_name,
+        input_preview if isinstance(input_preview, Mapping) else {},
+    )
     execution_payload = execution_mode.model_dump(mode="json")
     sandbox_required_by_policy = _desktop_execution_policy_requires_sandbox(
         policy,
@@ -572,7 +575,11 @@ def _tool_request_with_desktop_execution_route(
     policy = _desktop_execution_policy_from_request(payload)
     if not policy:
         return payload
-    execution_mode = desktop_tool_execution_mode(tool_name).model_dump(mode="json")
+    raw_input = payload.get("input") if isinstance(payload.get("input"), Mapping) else {}
+    execution_mode = desktop_tool_execution_mode_for_input(
+        tool_name,
+        raw_input,
+    ).model_dump(mode="json")
     route_decision = desktop_execution_route_decision(
         tool_name,
         policy=policy,

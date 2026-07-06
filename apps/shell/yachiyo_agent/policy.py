@@ -904,6 +904,50 @@ def desktop_tool_execution_mode(tool_name: str) -> DesktopExecutionModeSnapshot:
     )
 
 
+def desktop_tool_execution_mode_for_input(
+    tool_name: str,
+    input_preview: Mapping[str, Any] | None = None,
+) -> DesktopExecutionModeSnapshot:
+    """Classify execution risk with request payload defaults applied."""
+
+    clean = str(tool_name or "").strip()
+    if clean != "desktop.inspect_app":
+        return desktop_tool_execution_mode(clean)
+
+    payload = input_preview if isinstance(input_preview, Mapping) else {}
+    open_if_needed = _bool_payload_value(payload.get("open_if_needed"), default=True)
+    focus = _bool_payload_value(payload.get("focus"), default=True)
+    if not open_if_needed and not focus:
+        return desktop_tool_execution_mode(clean)
+
+    return DesktopExecutionModeSnapshot(
+        mode="supervised_live",
+        isolation="none",
+        foreground_control=True,
+        keyboard_mouse_capture=False,
+        sandbox_recommended=True,
+        approval_recommended=False,
+        reason="May open or focus a real desktop app before reading its windows and UI.",
+        mitigations=[
+            "Prefer an isolated desktop provider when available.",
+            "Use open_if_needed=false and focus=false for pure read-only inspection.",
+        ],
+    )
+
+
+def _bool_payload_value(value: Any, *, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value in (None, ""):
+        return default
+    text = str(value).strip().lower()
+    if text in {"1", "true", "yes", "y", "on"}:
+        return True
+    if text in {"0", "false", "no", "n", "off"}:
+        return False
+    return default
+
+
 def desktop_action_execution_mode(action_name: str) -> DesktopExecutionModeSnapshot:
     tools = list(DESKTOP_ACTION_TOOL_HINTS.get(str(action_name or "").strip(), ()))
     if not tools:

@@ -82,7 +82,7 @@ from .desktop_plan_hints import (
 from .file_access_plan_hints import file_access_hint
 from .policy import (
     DESKTOP_CAPABILITY_TOOLS,
-    desktop_tool_execution_mode,
+    desktop_tool_execution_mode_for_input,
     desktop_tool_blocking_conditions,
     desktop_tool_missing_permissions,
 )
@@ -7534,7 +7534,12 @@ def _step(
         tool_name=tool_name,
         input_preview=input_preview or {},
         risk_level=risk_level,
-        execution_mode=desktop_tool_execution_mode(tool_name) if tool_name else None,
+        execution_mode=desktop_tool_execution_mode_for_input(
+            tool_name,
+            input_preview,
+        )
+        if tool_name
+        else None,
         approval_required=approval_required,
         depends_on=depends_on or [],
         reason=reason,
