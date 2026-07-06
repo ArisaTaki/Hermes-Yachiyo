@@ -59,6 +59,7 @@ export function RuntimeExecutionEnvelopeSummary({
   const retryTools = uniqueStrings(retrySummaries.map((retry) => retry.tool));
   const blockers = runtimeExecutionBlockers(requests);
   const riskCounts = runtimeExecutionRiskCounts(requests);
+  const executionPolicy = runtimeExecutionPolicySummary(envelope.desktop_execution_policy, requests);
   const isChat = variant === 'chat';
   const classes = [
     isChat
@@ -75,6 +76,8 @@ export function RuntimeExecutionEnvelopeSummary({
       data-intent-kind={envelope.intent_kind || ''}
       data-plan-id={envelope.plan_id || ''}
       data-runtime-blockers={blockers.join(',')}
+      data-desktop-execution-policy={executionPolicy.mode}
+      data-desktop-execution-policy-label={executionPolicy.label}
       data-request-count={requests.length}
       data-risk-levels={riskCounts.map(([risk, count]) => `${risk}:${count}`).join(',')}
       data-route-to-studio={envelope.route_to_studio === undefined ? '' : String(envelope.route_to_studio)}
@@ -96,6 +99,7 @@ export function RuntimeExecutionEnvelopeSummary({
             artifacts={artifacts}
             blockers={blockers}
             debugPillsTestId={debugPillsTestId}
+            executionPolicy={executionPolicy}
             openQuestions={openQuestions}
             retrySummaries={retrySummaries}
             riskCounts={riskCounts}
@@ -127,12 +131,17 @@ export function RuntimeExecutionEnvelopeSummary({
               <small>Route</small>
               <strong>{envelope.route_to_studio ? 'Studio' : 'Direct'}</strong>
             </span>
+            <span>
+              <small>Execution</small>
+              <strong>{executionPolicy.label || 'Default'}</strong>
+            </span>
           </div>
           <RuntimeExecutionEnvelopePills
             approvals={approvals}
             artifacts={artifacts}
             blockers={blockers}
             debugPillsTestId={debugPillsTestId}
+            executionPolicy={executionPolicy}
             openQuestions={openQuestions}
             retrySummaries={retrySummaries}
             riskCounts={riskCounts}
@@ -167,6 +176,7 @@ function RuntimeExecutionEnvelopePills({
   artifacts,
   blockers,
   debugPillsTestId,
+  executionPolicy,
   openQuestions,
   retrySummaries,
   riskCounts,
@@ -178,6 +188,7 @@ function RuntimeExecutionEnvelopePills({
   artifacts: string[];
   blockers: string[];
   debugPillsTestId?: string;
+  executionPolicy: RuntimeExecutionPolicySummary;
   openQuestions: string[];
   retrySummaries: RuntimeExecutionRetrySummary[];
   riskCounts: Array<[string, number]>;
@@ -195,6 +206,7 @@ function RuntimeExecutionEnvelopePills({
     && !retrySummaries.length
     && !riskCounts.length
     && !blockers.length
+    && !executionPolicy.mode
   ) {
     return null;
   }
@@ -203,6 +215,15 @@ function RuntimeExecutionEnvelopePills({
   const missingClassName = isChat ? `${pillClassName} approval` : `${pillClassName} missing`;
   return (
     <div className={rowClassName} data-testid={debugPillsTestId}>
+      {executionPolicy.mode ? (
+        <span
+          className={pillClassName}
+          data-desktop-execution-policy={executionPolicy.mode}
+          title={executionPolicy.reason || undefined}
+        >
+          execution · {executionPolicy.label}
+        </span>
+      ) : null}
       {stageCounts.map(([stage, count]) => (
         <span className={pillClassName} data-runtime-stage={stage} key={`stage:${stage}`}>
           {isChat ? `${stage} · ${count}` : `stage · ${stage}: ${count}`}
@@ -291,12 +312,14 @@ function RuntimeExecutionRequestRow({
   const observationEvidencePreview = requestObservationEvidencePreview(objectRecord(request.observation_evidence));
   const observationRetryPreview = requestObservationRetryPreview(objectRecord(request.observation_retry));
   const replayEvidence = runtimeRequestReplayEvidenceFromRequest(request);
+  const executionPolicy = runtimeExecutionPolicySummary(request.desktop_execution_policy);
   return (
     <div
       className="studio-planner-step"
       data-approval-required={String(request.approval_required === true)}
       data-execution-request-id={request.request_id}
       data-execution-tool={request.tool_name}
+      data-desktop-execution-policy={executionPolicy.mode}
       data-observation-retry={observationRetryPreview}
       data-policy-reason={request.policy_reason || ''}
       data-request-approval-ids={replayEvidence.approvalPreview}
@@ -319,6 +342,9 @@ function RuntimeExecutionRequestRow({
         <span>{request.step_id || request.capability_id || request.request_id}</span>
         {request.risk_level ? (
           <span title={request.policy_reason || undefined}>risk: {request.risk_level}</span>
+        ) : null}
+        {executionPolicy.mode ? (
+          <span title={executionPolicy.reason || undefined}>execution: {executionPolicy.label}</span>
         ) : null}
         <RuntimeRequestReplayEvidencePanel
           className="runtime-execution-request-replay-evidence"
@@ -377,6 +403,61 @@ type RuntimeExecutionRetrySummary = {
   target: string;
   tool: string;
 };
+
+type RuntimeExecutionPolicySummary = {
+  allowLiveForeground: boolean | null;
+  allowMediaControl: boolean | null;
+  label: string;
+  mode: string;
+  reason: string;
+  source: string;
+};
+
+function runtimeExecutionPolicySummary(
+  policy: unknown,
+  requests: RuntimeExecutionRequestSnapshot[] = [],
+): RuntimeExecutionPolicySummary {
+  let record = objectRecord(policy);
+  if (!Object.keys(record).length) {
+    const requestPolicy = requests
+      .map((request) => objectRecord(request.desktop_execution_policy))
+      .find((candidate) => Object.keys(candidate).length > 0);
+    record = requestPolicy || {};
+  }
+  const mode = stringValue(record.mode);
+  const source = stringValue(record.source);
+  const reason = stringValue(record.reason);
+  const allowLiveForeground = booleanValue(record.allow_live_foreground);
+  const allowMediaControl = booleanValue(record.allow_media_control);
+  return {
+    allowLiveForeground,
+    allowMediaControl,
+    label: executionPolicyLabel({
+      allowLiveForeground,
+      allowMediaControl,
+      mode,
+      source,
+    }),
+    mode,
+    reason,
+    source,
+  };
+}
+
+function executionPolicyLabel(policy: {
+  allowLiveForeground: boolean | null;
+  allowMediaControl: boolean | null;
+  mode: string;
+  source: string;
+}): string {
+  if (!policy.mode) return '';
+  const parts = [policy.mode.replace(/_/g, ' ')];
+  if (policy.allowLiveForeground === true) parts.push('live foreground');
+  if (policy.allowMediaControl === true) parts.push('media ok');
+  if (policy.allowMediaControl === false) parts.push('media blocked');
+  if (policy.source) parts.push(policy.source);
+  return compactPreview(parts);
+}
 
 function runtimeExecutionRetrySummaries(
   requests: RuntimeExecutionRequestSnapshot[],
@@ -446,6 +527,10 @@ function objectRecord(value: unknown): Record<string, unknown> {
 
 function stringValue(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function booleanValue(value: unknown): boolean | null {
+  return typeof value === 'boolean' ? value : null;
 }
 
 function addUniqueString(values: string[], value: unknown): void {
