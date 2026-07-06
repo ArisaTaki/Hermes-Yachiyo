@@ -11,8 +11,10 @@ from .contracts import (
     RuntimeCheckpointPolicySnapshot,
     RuntimeExecutionEnvelopeSnapshot,
     RuntimeExecutionRequestSnapshot,
+    SandboxDesktopProviderSnapshot,
     ToolPlanStepSnapshot,
 )
+from .desktop_execution_policy import sandbox_desktop_provider_status
 from .planner_execution import (
     planner_full_plan_execution_tool_requests,
     planner_tool_requests_for_decision,
@@ -72,6 +74,7 @@ def runtime_execution_envelope_from_decision(
         )
     tool_plan = decision.plan.tool_plan
     runtime_metadata = _execution_envelope_runtime_metadata(requests, decision)
+    sandbox_provider = _sandbox_provider_for_envelope(requests)
     return RuntimeExecutionEnvelopeSnapshot(
         envelope_id=f"execution-envelope-{decision.plan.plan_id}",
         decision_id=decision.decision_id,
@@ -85,6 +88,7 @@ def runtime_execution_envelope_from_decision(
         artifacts_expected=list(tool_plan.artifacts_expected),
         open_questions=list(tool_plan.open_questions),
         route_to_studio=bool(decision.plan.route_to_studio),
+        sandbox_provider=sandbox_provider,
         runtime_doctrine=runtime_metadata["runtime_doctrine"],
         runtime_stage_counts=runtime_metadata["runtime_stage_counts"],
         replan_signal_count=runtime_metadata["replan_signal_count"],
@@ -439,6 +443,41 @@ def _request_status_is_non_executable(request: Mapping[str, Any]) -> bool:
     return str(request.get("status") or "").strip() in _NON_EXECUTABLE_REQUEST_STATUSES
 
 
+def _sandbox_provider_for_envelope(
+    requests: Iterable[RuntimeExecutionRequestSnapshot],
+) -> SandboxDesktopProviderSnapshot | None:
+    for request in requests:
+        if request.sandbox_provider is not None:
+            return request.sandbox_provider
+    return None
+
+
+def _sandbox_provider_for_request(
+    request: Mapping[str, Any],
+    *,
+    execution_mode: Any,
+    desktop_execution_policy: Mapping[str, Any] | None,
+) -> SandboxDesktopProviderSnapshot | None:
+    explicit_provider = _mapping(request.get("sandbox_provider")) or _mapping(
+        request.get("sandbox_desktop_provider")
+    )
+    if explicit_provider:
+        return SandboxDesktopProviderSnapshot.model_validate(
+            sandbox_desktop_provider_status({"sandbox_provider": explicit_provider})
+        )
+    policy_mode = str((desktop_execution_policy or {}).get("mode") or "").strip()
+    execution_mode_name = str(getattr(execution_mode, "mode", "") or "").strip()
+    if (
+        bool(getattr(execution_mode, "sandbox_recommended", False))
+        or policy_mode == "sandbox_preferred"
+        or execution_mode_name == "sandbox_preferred"
+    ):
+        return SandboxDesktopProviderSnapshot.model_validate(
+            sandbox_desktop_provider_status(request)
+        )
+    return None
+
+
 def _execution_request_capability_plan_item(
     decision: PlannerDecisionSnapshot,
     *,
@@ -524,6 +563,17 @@ def _execution_request_snapshot(
         runtime_metadata=runtime_metadata,
         task_context=task_context,
     )
+    execution_mode = (
+        step.execution_mode
+        if step is not None and step.execution_mode is not None
+        else desktop_tool_execution_mode(tool_name)
+    )
+    desktop_execution_policy = _mapping(request.get("desktop_execution_policy")) or None
+    sandbox_provider = _sandbox_provider_for_request(
+        request,
+        execution_mode=execution_mode,
+        desktop_execution_policy=desktop_execution_policy,
+    )
     tool_plan_id = str(getattr(decision.plan.tool_plan, "plan_id", "") or "").strip()
     return RuntimeExecutionRequestSnapshot(
         request_id=str(
@@ -573,12 +623,9 @@ def _execution_request_snapshot(
             or (step.risk_level if step is not None else "")
             or "low"
         ),
-        execution_mode=(
-            step.execution_mode
-            if step is not None and step.execution_mode is not None
-            else desktop_tool_execution_mode(tool_name)
-        ),
-        desktop_execution_policy=_mapping(request.get("desktop_execution_policy")) or None,
+        execution_mode=execution_mode,
+        desktop_execution_policy=desktop_execution_policy,
+        sandbox_provider=sandbox_provider,
         policy_reason=str(
             request.get("policy_reason") or request.get("approval_reason") or ""
         ),
@@ -702,6 +749,8 @@ def _tool_request_from_execution_request(
         "approval_required",
         "risk_level",
         "desktop_execution_policy",
+        "sandbox_provider",
+        "sandbox_desktop_provider",
         "policy_reason",
         "continue_to_model",
         "deferred_tool",

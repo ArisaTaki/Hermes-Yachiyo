@@ -2658,6 +2658,9 @@ def _tool_recovery_action_direct_request(
     desktop_execution_policy = action.get("desktop_execution_policy")
     if isinstance(desktop_execution_policy, Mapping) and desktop_execution_policy:
         request["desktop_execution_policy"] = dict(desktop_execution_policy)
+    sandbox_provider = action.get("sandbox_provider")
+    if isinstance(sandbox_provider, Mapping) and sandbox_provider:
+        request["sandbox_provider"] = dict(sandbox_provider)
     for key, value in _tool_call_trace_fields(tool_call).items():
         if value:
             request[key] = value
@@ -2804,6 +2807,9 @@ def _tool_recovery_action_metadata(
     desktop_execution_policy = action.get("desktop_execution_policy")
     if isinstance(desktop_execution_policy, Mapping) and desktop_execution_policy:
         metadata["desktop_execution_policy"] = dict(desktop_execution_policy)
+    sandbox_provider = action.get("sandbox_provider")
+    if isinstance(sandbox_provider, Mapping) and sandbox_provider:
+        metadata["sandbox_provider"] = dict(sandbox_provider)
     required_retry_fields = _string_list_from_any(action.get("required_retry_fields"))
     if required_retry_fields:
         metadata["required_retry_fields"] = required_retry_fields

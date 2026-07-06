@@ -14,6 +14,7 @@ from apps.shell.agent.runtime.event_scopes import (
 )
 from apps.shell.agent.runtime.task_progress import append_task_progress_events_for_tool_result
 from apps.shell.yachiyo_agent.capability_registry import capability_recovery_tools
+from apps.shell.yachiyo_agent.desktop_execution_policy import sandbox_desktop_provider_status
 from apps.shell.yachiyo_agent.policy import desktop_tool_execution_mode
 from packages.security import redact_api_error_text
 
@@ -71,6 +72,8 @@ _TOOL_REQUEST_TRACE_MAPPING_KEYS = (
     "observation_evidence",
     "observation_retry",
     "desktop_execution_policy",
+    "sandbox_provider",
+    "sandbox_desktop_provider",
 )
 
 _ARTIFACT_BODY_TEXT_TOOLS = {
@@ -306,6 +309,7 @@ def _desktop_execution_policy_skip_result(
         return None
 
     execution_payload = execution_mode.model_dump(mode="json")
+    sandbox_provider = sandbox_desktop_provider_status(tool_request)
     blocking_condition = (
         "desktop_execution_handoff_required"
         if policy_mode == "handoff"
@@ -329,6 +333,7 @@ def _desktop_execution_policy_skip_result(
             execution_payload.get("keyboard_mouse_capture")
         ),
         "sandbox_recommended": bool(execution_payload.get("sandbox_recommended")),
+        "sandbox_provider": sandbox_provider,
         "user_handoff_recommended": policy_mode == "handoff",
         "input_preview": input_preview if isinstance(input_preview, dict) else {},
         "recommended_tools": [
@@ -342,6 +347,7 @@ def _desktop_execution_policy_skip_result(
             policy=policy,
             policy_mode=policy_mode,
             execution_mode=execution_payload,
+            sandbox_provider=sandbox_provider,
         ),
         "hint": (
             "Switch the run to supervised_live, continue in Agent Studio, or let the "
@@ -357,6 +363,7 @@ def _desktop_execution_policy_recovery_actions(
     policy: Mapping[str, Any],
     policy_mode: str,
     execution_mode: Mapping[str, Any],
+    sandbox_provider: Mapping[str, Any],
 ) -> list[dict[str, Any]]:
     raw_input = tool_request.get("input")
     tool_input = dict(raw_input) if isinstance(raw_input, Mapping) else {}
@@ -374,6 +381,11 @@ def _desktop_execution_policy_recovery_actions(
         "source": "desktop_execution_policy_recovery",
         "reason": "Prefer a sandbox desktop/session before touching the real foreground desktop.",
     }
+    sandbox_blockers = [
+        str(item).strip()
+        for item in sandbox_provider.get("blocking_conditions", [])
+        if str(item or "").strip()
+    ] or ["sandbox_desktop_provider_required"]
     manual_metadata = {
         "runtime_replan_auto_start_eligible": False,
         "runtime_replan_auto_start_reason": "desktop_execution_policy_requires_supervision",
@@ -436,11 +448,13 @@ def _desktop_execution_policy_recovery_actions(
                 "planning_reason": "desktop_execution_policy_sandbox_handoff",
                 "recovery_action_kind": "sandbox_desktop_handoff",
                 "desktop_execution_policy": sandbox_policy,
+                "sandbox_provider": dict(sandbox_provider),
                 "deferred_continuation": [
                     {
                         "tool": tool_name,
                         "input": tool_input,
                         "desktop_execution_policy": sandbox_policy,
+                        "sandbox_provider": dict(sandbox_provider),
                         "planning_reason": "desktop_execution_policy_sandbox_deferred_tool",
                         "source": "desktop_execution_policy_recovery",
                     }
@@ -448,8 +462,9 @@ def _desktop_execution_policy_recovery_actions(
                 "metadata": {
                     "runtime_replan_auto_start_eligible": False,
                     "runtime_replan_auto_start_reason": "sandbox_desktop_handoff_required",
-                    "runtime_replan_auto_start_blockers": ["sandbox_desktop_provider_required"],
+                    "runtime_replan_auto_start_blockers": sandbox_blockers,
                     "desktop_execution_policy": sandbox_policy,
+                    "sandbox_provider": dict(sandbox_provider),
                     "blocked_desktop_execution_policy": dict(policy),
                     "blocked_desktop_execution_policy_mode": policy_mode,
                     "desktop_execution_mode": dict(execution_mode),

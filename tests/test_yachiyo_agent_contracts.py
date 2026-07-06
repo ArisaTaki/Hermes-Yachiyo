@@ -63,6 +63,7 @@ from apps.shell.yachiyo_agent import (
     RuntimeDebugSummarySnapshot,
     RuntimeExecutionEnvelopeSnapshot,
     RuntimeExecutionRequestSnapshot,
+    SandboxDesktopProviderSnapshot,
     RuntimePlanSnapshot,
     RestrictedPluginToolSnapshot,
     RestrictedToolPluginSnapshot,
@@ -105,6 +106,7 @@ from apps.shell.yachiyo_agent import (
     desktop_tool_execution_mode,
     desktop_execution_capability_snapshots,
     desktop_tool_risk_level,
+    sandbox_desktop_provider_status,
     with_daily_entrypoint_desktop_execution_policy,
     is_high_risk_desktop_action,
     task_requires_user_action,
@@ -388,6 +390,10 @@ def test_runtime_execution_envelope_snapshot_is_public_contract() -> None:
         risk_level="low",
         execution_mode=DesktopExecutionModeSnapshot(mode="read_only_observation"),
         desktop_execution_policy=DesktopExecutionPolicySnapshot(mode="preview_input"),
+        sandbox_provider=SandboxDesktopProviderSnapshot(
+            status="provider_required",
+            blocking_conditions=["sandbox_desktop_provider_required"],
+        ),
         policy_reason="Desktop app discovery is read-only.",
         runtime_doctrine="discover_operate_verify",
         runtime_stage="discover",
@@ -459,6 +465,10 @@ def test_runtime_execution_envelope_snapshot_is_public_contract() -> None:
         approvals_required=["operate-foreground-ui"],
         route_to_studio=True,
         desktop_execution_policy=DesktopExecutionPolicySnapshot(mode="preview_input"),
+        sandbox_provider=SandboxDesktopProviderSnapshot(
+            status="provider_required",
+            blocking_conditions=["sandbox_desktop_provider_required"],
+        ),
         runtime_doctrine="discover_operate_verify",
         runtime_stage_counts={"discover": 1},
         replan_signal_count=1,
@@ -480,6 +490,7 @@ def test_runtime_execution_envelope_snapshot_is_public_contract() -> None:
         "open_questions",
         "route_to_studio",
         "desktop_execution_policy",
+        "sandbox_provider",
         "runtime_doctrine",
         "runtime_stage_counts",
         "replan_signal_count",
@@ -493,6 +504,10 @@ def test_runtime_execution_envelope_snapshot_is_public_contract() -> None:
     assert payload["requests"][0]["risk_level"] == "low"
     assert payload["requests"][0]["execution_mode"]["mode"] == "read_only_observation"
     assert payload["requests"][0]["desktop_execution_policy"]["mode"] == "preview_input"
+    assert payload["requests"][0]["sandbox_provider"]["status"] == "provider_required"
+    assert payload["requests"][0]["sandbox_provider"]["blocking_conditions"] == [
+        "sandbox_desktop_provider_required"
+    ]
     assert payload["requests"][0]["policy_reason"] == "Desktop app discovery is read-only."
     assert payload["requests"][0]["runtime_stage"] == "discover"
     assert payload["requests"][0]["replan_triggers"] == ["verification_failed"]
@@ -545,12 +560,14 @@ def test_runtime_execution_envelope_snapshot_is_public_contract() -> None:
     }
     assert payload["runtime_stage_counts"] == {"discover": 1}
     assert payload["desktop_execution_policy"]["mode"] == "preview_input"
+    assert payload["sandbox_provider"]["status"] == "provider_required"
     assert payload["replan_signal_count"] == 1
     projected_requests = runtime_execution_requests_from_envelope_payload(
         payload,
         allowed_tools=["desktop.list_apps"],
     )
     assert projected_requests[0]["desktop_execution_policy"]["mode"] == "preview_input"
+    assert projected_requests[0]["sandbox_provider"]["status"] == "provider_required"
 
 
 def test_runtime_execution_request_projects_verification_evidence() -> None:
@@ -4959,6 +4976,56 @@ def test_desktop_execution_policy_snapshot_json_shape_is_stable() -> None:
         DesktopExecutionPolicySnapshot(mode="allow", unknown=True)
 
 
+def test_sandbox_desktop_provider_snapshot_json_shape_is_stable() -> None:
+    snapshot = SandboxDesktopProviderSnapshot(
+        available=False,
+        provider_id="",
+        provider_kind="sandbox_desktop",
+        status="provider_required",
+        reason="No sandbox provider is configured.",
+        blocking_conditions=["sandbox_desktop_provider_required"],
+        supported_tools=["desktop.safe_type_text"],
+        recommended_for=["keyboard_mouse_capture"],
+        diagnostic_route="/yachiyo/studio/tools",
+        source="runtime",
+    )
+
+    payload = _json(snapshot)
+    default_status = sandbox_desktop_provider_status()
+    explicit_status = sandbox_desktop_provider_status(
+        {
+            "sandbox_provider": {
+                "available": True,
+                "provider_id": "sandbox-1",
+                "provider_kind": "sandbox_desktop",
+                "supported_tools": ["desktop.safe_type_text"],
+            }
+        }
+    )
+
+    assert list(payload) == [
+        "available",
+        "provider_id",
+        "provider_kind",
+        "status",
+        "reason",
+        "blocking_conditions",
+        "supported_tools",
+        "recommended_for",
+        "diagnostic_route",
+        "source",
+    ]
+    assert payload["available"] is False
+    assert payload["blocking_conditions"] == ["sandbox_desktop_provider_required"]
+    assert default_status["status"] == "provider_required"
+    assert default_status["blocking_conditions"] == ["sandbox_desktop_provider_required"]
+    assert explicit_status["available"] is True
+    assert explicit_status["status"] == "available"
+    assert explicit_status["blocking_conditions"] == []
+    with pytest.raises(ValidationError):
+        SandboxDesktopProviderSnapshot(unknown=True)
+
+
 def test_daily_entrypoint_desktop_execution_policy_defaults_to_input_preview() -> None:
     policy = daily_entrypoint_desktop_execution_policy(surface="bubble")
     metadata = with_daily_entrypoint_desktop_execution_policy(
@@ -5007,6 +5074,10 @@ def test_desktop_recovery_action_metadata_snapshot_json_shape_is_stable() -> Non
             "tool": "screen.capture",
             "reason": "permission_recovered",
         },
+        sandbox_provider=SandboxDesktopProviderSnapshot(
+            status="provider_required",
+            blocking_conditions=["sandbox_desktop_provider_required"],
+        ),
         verification_targets=[{"step_id": "verify-screen", "todo_id": "todo-screen"}],
         task_verification_targets=[
             {"step_id": "verify-screen", "todo_title": "Verify screenshot"}
@@ -5042,6 +5113,7 @@ def test_desktop_recovery_action_metadata_snapshot_json_shape_is_stable() -> Non
         "action_target",
         "observation_evidence",
         "observation_retry",
+        "sandbox_provider",
         "verification_targets",
         "task_verification_targets",
         "recovery_retry_source_event_type",
@@ -5064,6 +5136,7 @@ def test_desktop_recovery_action_metadata_snapshot_json_shape_is_stable() -> Non
         "tool": "screen.capture",
         "reason": "permission_recovered",
     }
+    assert payload["sandbox_provider"]["status"] == "provider_required"
     assert payload["verification_targets"] == [
         {"step_id": "verify-screen", "todo_id": "todo-screen"}
     ]

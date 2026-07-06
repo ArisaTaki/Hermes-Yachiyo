@@ -524,6 +524,14 @@ Exit evidence:
   verify whether the `electron_native_bridge` strategy can own the granted
   desktop permissions instead of hiding the failure behind app-specific rules.
 
+Current sandbox boundary: foreground policy blocks now carry a
+`SandboxDesktopProviderSnapshot` through runtime results, recovery actions,
+deferred continuations, Agent Studio direct runs, Runtime Execution envelopes,
+and shared frontend summaries. The default status is intentionally
+`provider_required` rather than fake availability, so Chat and Studio can show
+why a sandbox handoff cannot auto-run yet while preserving the supervised-live
+fallback and approval/policy gate.
+
 ## Phase 6 - Data Analysis Capability
 
 Add a stable data-analysis path for CSV, XLSX, JSON, and text-table inputs.

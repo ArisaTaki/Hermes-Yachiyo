@@ -6,6 +6,23 @@ from collections.abc import Mapping
 from typing import Any
 
 
+_SANDBOX_DESKTOP_PROVIDER_DEFAULT: dict[str, Any] = {
+    "available": False,
+    "provider_id": "",
+    "provider_kind": "sandbox_desktop",
+    "status": "provider_required",
+    "reason": (
+        "No sandbox desktop provider is configured for this runtime yet; "
+        "foreground input must stay supervised or use user handoff."
+    ),
+    "blocking_conditions": ["sandbox_desktop_provider_required"],
+    "supported_tools": [],
+    "recommended_for": ["foreground_control", "keyboard_mouse_capture"],
+    "diagnostic_route": "/yachiyo/studio/tools",
+    "source": "runtime",
+}
+
+
 def desktop_execution_policy_payload(value: Any) -> dict[str, Any]:
     if isinstance(value, Mapping):
         return dict(value)
@@ -41,6 +58,28 @@ def agent_studio_desktop_execution_policy() -> dict[str, Any]:
         "source": "agent_studio",
         "reason": "Agent Studio is the supervised desktop execution and debugging surface.",
     }
+
+
+def sandbox_desktop_provider_status(
+    metadata: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Return the runtime-visible sandbox desktop provider status."""
+
+    provider = _sandbox_provider_payload(metadata)
+    if provider:
+        payload = {**_SANDBOX_DESKTOP_PROVIDER_DEFAULT, **provider}
+        payload["available"] = bool(payload.get("available"))
+        if payload["available"]:
+            if str(payload.get("status") or "").strip() == "provider_required":
+                payload["status"] = "available"
+            payload["blocking_conditions"] = _string_list(provider.get("blocking_conditions"))
+        else:
+            blockers = _string_list(payload.get("blocking_conditions"))
+            payload["blocking_conditions"] = blockers or ["sandbox_desktop_provider_required"]
+        payload["supported_tools"] = _string_list(payload.get("supported_tools"))
+        payload["recommended_for"] = _string_list(payload.get("recommended_for"))
+        return payload
+    return dict(_SANDBOX_DESKTOP_PROVIDER_DEFAULT)
 
 
 def with_agent_studio_desktop_execution_policy(
@@ -119,3 +158,28 @@ def _ensure_canonical_desktop_execution_policy(
             payload["desktop_execution_policy"] = policy
             return
     payload["desktop_execution_policy"] = dict(fallback_policy)
+
+
+def _sandbox_provider_payload(
+    metadata: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    if not isinstance(metadata, Mapping):
+        return {}
+    for key in (
+        "sandbox_desktop_provider",
+        "sandbox_provider",
+        "desktop_sandbox_provider",
+    ):
+        value = metadata.get(key)
+        if isinstance(value, Mapping):
+            return dict(value)
+    nested_metadata = metadata.get("metadata")
+    if isinstance(nested_metadata, Mapping) and nested_metadata is not metadata:
+        return _sandbox_provider_payload(nested_metadata)
+    return {}
+
+
+def _string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item).strip() for item in value if str(item or "").strip()]

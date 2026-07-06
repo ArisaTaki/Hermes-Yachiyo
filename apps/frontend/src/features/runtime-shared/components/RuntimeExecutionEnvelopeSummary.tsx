@@ -60,6 +60,7 @@ export function RuntimeExecutionEnvelopeSummary({
   const blockers = runtimeExecutionBlockers(requests);
   const riskCounts = runtimeExecutionRiskCounts(requests);
   const executionPolicy = runtimeExecutionPolicySummary(envelope.desktop_execution_policy, requests);
+  const sandboxProvider = runtimeSandboxProviderSummary(envelope.sandbox_provider, requests);
   const isChat = variant === 'chat';
   const classes = [
     isChat
@@ -78,6 +79,8 @@ export function RuntimeExecutionEnvelopeSummary({
       data-runtime-blockers={blockers.join(',')}
       data-desktop-execution-policy={executionPolicy.mode}
       data-desktop-execution-policy-label={executionPolicy.label}
+      data-sandbox-provider-status={sandboxProvider.status}
+      data-sandbox-provider-blockers={sandboxProvider.blockers.join(',')}
       data-request-count={requests.length}
       data-risk-levels={riskCounts.map(([risk, count]) => `${risk}:${count}`).join(',')}
       data-route-to-studio={envelope.route_to_studio === undefined ? '' : String(envelope.route_to_studio)}
@@ -103,6 +106,7 @@ export function RuntimeExecutionEnvelopeSummary({
             openQuestions={openQuestions}
             retrySummaries={retrySummaries}
             riskCounts={riskCounts}
+            sandboxProvider={sandboxProvider}
             stageCounts={stageCounts}
             tools={tools}
             variant={variant}
@@ -135,6 +139,10 @@ export function RuntimeExecutionEnvelopeSummary({
               <small>Execution</small>
               <strong>{executionPolicy.label || 'Default'}</strong>
             </span>
+            <span>
+              <small>Sandbox</small>
+              <strong>{sandboxProvider.label || 'Not needed'}</strong>
+            </span>
           </div>
           <RuntimeExecutionEnvelopePills
             approvals={approvals}
@@ -145,6 +153,7 @@ export function RuntimeExecutionEnvelopeSummary({
             openQuestions={openQuestions}
             retrySummaries={retrySummaries}
             riskCounts={riskCounts}
+            sandboxProvider={sandboxProvider}
             stageCounts={stageCounts}
             tools={tools}
             variant={variant}
@@ -180,6 +189,7 @@ function RuntimeExecutionEnvelopePills({
   openQuestions,
   retrySummaries,
   riskCounts,
+  sandboxProvider,
   stageCounts,
   tools,
   variant,
@@ -192,6 +202,7 @@ function RuntimeExecutionEnvelopePills({
   openQuestions: string[];
   retrySummaries: RuntimeExecutionRetrySummary[];
   riskCounts: Array<[string, number]>;
+  sandboxProvider: RuntimeSandboxProviderSummary;
   stageCounts: Array<[string, number]>;
   tools: string[];
   variant: RuntimeExecutionEnvelopeSummaryVariant;
@@ -206,6 +217,7 @@ function RuntimeExecutionEnvelopePills({
     && !retrySummaries.length
     && !riskCounts.length
     && !blockers.length
+    && !sandboxProvider.status
     && !executionPolicy.mode
   ) {
     return null;
@@ -222,6 +234,15 @@ function RuntimeExecutionEnvelopePills({
           title={executionPolicy.reason || undefined}
         >
           execution · {executionPolicy.label}
+        </span>
+      ) : null}
+      {sandboxProvider.status ? (
+        <span
+          className={sandboxProvider.available ? pillClassName : missingClassName}
+          data-sandbox-provider-status={sandboxProvider.status}
+          title={sandboxProvider.reason || undefined}
+        >
+          sandbox · {sandboxProvider.label}
         </span>
       ) : null}
       {stageCounts.map(([stage, count]) => (
@@ -313,6 +334,7 @@ function RuntimeExecutionRequestRow({
   const observationRetryPreview = requestObservationRetryPreview(objectRecord(request.observation_retry));
   const replayEvidence = runtimeRequestReplayEvidenceFromRequest(request);
   const executionPolicy = runtimeExecutionPolicySummary(request.desktop_execution_policy);
+  const sandboxProvider = runtimeSandboxProviderSummary(request.sandbox_provider);
   return (
     <div
       className="studio-planner-step"
@@ -320,6 +342,8 @@ function RuntimeExecutionRequestRow({
       data-execution-request-id={request.request_id}
       data-execution-tool={request.tool_name}
       data-desktop-execution-policy={executionPolicy.mode}
+      data-sandbox-provider-status={sandboxProvider.status}
+      data-sandbox-provider-blockers={sandboxProvider.blockers.join(',')}
       data-observation-retry={observationRetryPreview}
       data-policy-reason={request.policy_reason || ''}
       data-request-approval-ids={replayEvidence.approvalPreview}
@@ -345,6 +369,9 @@ function RuntimeExecutionRequestRow({
         ) : null}
         {executionPolicy.mode ? (
           <span title={executionPolicy.reason || undefined}>execution: {executionPolicy.label}</span>
+        ) : null}
+        {sandboxProvider.status ? (
+          <span title={sandboxProvider.reason || undefined}>sandbox: {sandboxProvider.label}</span>
         ) : null}
         <RuntimeRequestReplayEvidencePanel
           className="runtime-execution-request-replay-evidence"
@@ -413,6 +440,16 @@ type RuntimeExecutionPolicySummary = {
   source: string;
 };
 
+type RuntimeSandboxProviderSummary = {
+  available: boolean;
+  blockers: string[];
+  label: string;
+  providerId: string;
+  providerKind: string;
+  reason: string;
+  status: string;
+};
+
 function runtimeExecutionPolicySummary(
   policy: unknown,
   requests: RuntimeExecutionRequestSnapshot[] = [],
@@ -442,6 +479,55 @@ function runtimeExecutionPolicySummary(
     reason,
     source,
   };
+}
+
+function runtimeSandboxProviderSummary(
+  provider: unknown,
+  requests: RuntimeExecutionRequestSnapshot[] = [],
+): RuntimeSandboxProviderSummary {
+  let record = objectRecord(provider);
+  if (!Object.keys(record).length) {
+    const requestProvider = requests
+      .map((request) => objectRecord(request.sandbox_provider))
+      .find((candidate) => Object.keys(candidate).length > 0);
+    record = requestProvider || {};
+  }
+  const status = stringValue(record.status);
+  const available = booleanValue(record.available) === true;
+  const providerId = stringValue(record.provider_id);
+  const providerKind = stringValue(record.provider_kind);
+  const reason = stringValue(record.reason);
+  const blockers = stringArray(record.blocking_conditions);
+  return {
+    available,
+    blockers,
+    label: sandboxProviderLabel({ available, blockers, providerId, providerKind, status }),
+    providerId,
+    providerKind,
+    reason,
+    status,
+  };
+}
+
+function sandboxProviderLabel(provider: {
+  available: boolean;
+  blockers: string[];
+  providerId: string;
+  providerKind: string;
+  status: string;
+}): string {
+  if (!provider.status && !provider.providerId && !provider.providerKind && !provider.blockers.length) return '';
+  if (provider.available) {
+    return compactPreview([
+      provider.status || 'available',
+      provider.providerId || provider.providerKind,
+    ]);
+  }
+  return compactPreview([
+    provider.status || 'blocked',
+    provider.blockers[0],
+    provider.providerKind,
+  ]);
 }
 
 function executionPolicyLabel(policy: {
@@ -531,6 +617,11 @@ function stringValue(value: unknown): string {
 
 function booleanValue(value: unknown): boolean | null {
   return typeof value === 'boolean' ? value : null;
+}
+
+function stringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return uniqueStrings(value.map((item) => String(item || '').trim()));
 }
 
 function addUniqueString(values: string[], value: unknown): void {

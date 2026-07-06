@@ -19,6 +19,7 @@ export type RuntimeToolRecoveryAction = {
   deferred_context?: Record<string, unknown>;
   deferred_continuation?: Array<Record<string, unknown>>;
   desktop_execution_policy?: Record<string, unknown>;
+  sandbox_provider?: Record<string, unknown>;
   input: Record<string, unknown>;
   label: string;
   permission_target: string;
@@ -79,6 +80,8 @@ export type RuntimeToolRecoveryActionTaskMetadata = {
   deferred_input?: Record<string, unknown>;
   deferred_context?: Record<string, unknown>;
   deferred_continuation?: Array<Record<string, unknown>>;
+  desktop_execution_policy?: Record<string, unknown>;
+  sandbox_provider?: Record<string, unknown>;
   replan_recovery_action_id?: string;
   replan_request_id?: string;
   recovery_retry_input?: Record<string, unknown>;
@@ -150,6 +153,7 @@ export const RUNTIME_TOOL_RECOVERY_TASK_METADATA_KEYS = [
   'deferred_context',
   'deferred_continuation',
   'desktop_execution_policy',
+  'sandbox_provider',
   'replan_recovery_action_id',
   'replan_request_id',
   'recovery_retry_tool',
@@ -214,6 +218,9 @@ export function runtimeToolRecoveryActionTaskMetadata(
     ...(action.deferred_continuation?.length ? { deferred_continuation: action.deferred_continuation } : {}),
     ...(Object.keys(action.desktop_execution_policy || {}).length
       ? { desktop_execution_policy: action.desktop_execution_policy }
+      : {}),
+    ...(Object.keys(action.sandbox_provider || {}).length
+      ? { sandbox_provider: action.sandbox_provider }
       : {}),
     ...(action.replan_request_id ? { replan_request_id: action.replan_request_id } : {}),
     ...(action.retry_tool ? { recovery_retry_tool: action.retry_tool } : {}),
@@ -316,6 +323,9 @@ function runtimeToolRecoveryApprovalDeferredMetadata(
     ...(Object.keys(action.desktop_execution_policy || {}).length
       ? { desktop_execution_policy: action.desktop_execution_policy }
       : {}),
+    ...(Object.keys(action.sandbox_provider || {}).length
+      ? { sandbox_provider: action.sandbox_provider }
+      : {}),
   };
 }
 
@@ -356,6 +366,7 @@ export function runtimeToolRecoveryRetryAction(
     deferred_context: action.deferred_context,
     deferred_continuation: action.deferred_continuation,
     desktop_execution_policy: action.desktop_execution_policy,
+    sandbox_provider: action.sandbox_provider,
     input: retryInput,
     label: '恢复后重试原操作',
     permission_target: action.permission_target,
@@ -437,6 +448,7 @@ export function runtimeToolRecoveryActionsFromRecord(
   ];
   return rawActions.flatMap((rawAction) => {
     const action = objectValue(rawAction);
+    const metadata = objectValue(action.metadata || source.metadata);
     const tool = String(action.tool || '').trim();
     const input = objectValue(action.input);
     const fallbackLabel = runtimeToolRecoveryExecutableLabel(tool, input);
@@ -456,6 +468,12 @@ export function runtimeToolRecoveryActionsFromRecord(
       deferred_context: objectValue(action.deferred_context || source.deferred_context),
       deferred_continuation: recoveryRecordList(
         action.deferred_continuation || source.deferred_continuation,
+      ),
+      desktop_execution_policy: objectValue(
+        action.desktop_execution_policy || source.desktop_execution_policy || metadata.desktop_execution_policy,
+      ),
+      sandbox_provider: objectValue(
+        action.sandbox_provider || source.sandbox_provider || metadata.sandbox_provider,
       ),
       input,
       label,

@@ -6009,6 +6009,7 @@ def _recovery_actions(result: dict[str, Any]) -> list[dict[str, Any]]:
             "followup_input",
             "recovery_followup_input",
             "desktop_execution_policy",
+            "sandbox_provider",
         ):
             value = raw_action.get(dict_key)
             if isinstance(value, dict):

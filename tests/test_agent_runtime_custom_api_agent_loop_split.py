@@ -966,6 +966,11 @@ def test_recovery_actions_projects_retry_input_contract_fields() -> None:
                         "text_source": "original_request",
                         "character_count": 5,
                     },
+                    "sandbox_provider": {
+                        "available": False,
+                        "status": "provider_required",
+                        "blocking_conditions": ["sandbox_desktop_provider_required"],
+                    },
                     "required_retry_fields": ["x", "y"],
                     "recommended_tools": ["screen.capture", "desktop.click", "desktop.type_text"],
                     "target": "Send",
@@ -1002,6 +1007,11 @@ def test_recovery_actions_projects_retry_input_contract_fields() -> None:
             "recovery_followup_input": {
                 "text_source": "original_request",
                 "character_count": 5,
+            },
+            "sandbox_provider": {
+                "available": False,
+                "status": "provider_required",
+                "blocking_conditions": ["sandbox_desktop_provider_required"],
             },
             "required_retry_fields": ["x", "y"],
             "recommended_tools": ["screen.capture", "desktop.click", "desktop.type_text"],

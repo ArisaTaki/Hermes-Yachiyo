@@ -156,6 +156,19 @@ class DesktopExecutionPolicySnapshot(_PublicSnapshot):
     reason: str = ""
 
 
+class SandboxDesktopProviderSnapshot(_PublicSnapshot):
+    available: bool = False
+    provider_id: str = ""
+    provider_kind: DesktopIsolationKind | str = "sandbox_desktop"
+    status: str = "provider_required"
+    reason: str = ""
+    blocking_conditions: list[str] = Field(default_factory=list)
+    supported_tools: list[str] = Field(default_factory=list)
+    recommended_for: list[str] = Field(default_factory=list)
+    diagnostic_route: str | None = None
+    source: str = "runtime"
+
+
 class DesktopActionRiskSnapshot(_PublicSnapshot):
     action_id: str
     risk_level: DesktopExecutionRisk
@@ -189,6 +202,7 @@ class DesktopRecoveryActionMetadataSnapshot(_PublicSnapshot):
     action_target: dict[str, Any] = Field(default_factory=dict)
     observation_evidence: dict[str, Any] = Field(default_factory=dict)
     observation_retry: dict[str, Any] = Field(default_factory=dict)
+    sandbox_provider: SandboxDesktopProviderSnapshot | None = None
     verification_targets: list[dict[str, Any]] = Field(default_factory=list)
     task_verification_targets: list[dict[str, Any]] = Field(default_factory=list)
     recovery_retry_source_event_type: str | None = None
@@ -717,6 +731,7 @@ class RuntimeExecutionRequestSnapshot(_PublicSnapshot):
     risk_level: str = "low"
     execution_mode: DesktopExecutionModeSnapshot | None = None
     desktop_execution_policy: DesktopExecutionPolicySnapshot | None = None
+    sandbox_provider: SandboxDesktopProviderSnapshot | None = None
     policy_reason: str = ""
     continue_to_model: bool = False
     deferred_tool: str | None = None
@@ -770,6 +785,7 @@ class RuntimeExecutionEnvelopeSnapshot(_PublicSnapshot):
     open_questions: list[str] = Field(default_factory=list)
     route_to_studio: bool = False
     desktop_execution_policy: DesktopExecutionPolicySnapshot | None = None
+    sandbox_provider: SandboxDesktopProviderSnapshot | None = None
     runtime_doctrine: str = ""
     runtime_stage_counts: dict[str, int] = Field(default_factory=dict)
     replan_signal_count: int = 0
