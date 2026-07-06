@@ -365,6 +365,9 @@ def with_daily_entrypoint_desktop_execution_policy(
     surface: str = "chat",
 ) -> dict[str, Any]:
     payload = dict(metadata) if isinstance(metadata, Mapping) else {}
+    payload.setdefault("desktop_provider_health_probe", True)
+    payload.setdefault("desktop_provider_route_readonly", True)
+    payload.setdefault("desktop_provider_route_foreground", True)
     if _has_desktop_execution_policy(payload):
         return payload
     payload["desktop_execution_policy"] = daily_entrypoint_desktop_execution_policy(

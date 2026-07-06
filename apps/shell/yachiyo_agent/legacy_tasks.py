@@ -11,6 +11,7 @@ from .desktop_permissions import (
     desktop_permission_missing_by_capability,
     desktop_runtime_blocking_conditions_by_capability,
 )
+from .desktop_execution_policy import with_daily_entrypoint_desktop_execution_policy
 from .legacy_groups import (
     chat_group_snapshot,
     chat_group_snapshots,
@@ -67,7 +68,10 @@ def _assert_matching_pending_approval(
 
 
 def _planner_metadata_with_desktop_readiness(metadata: dict[str, Any]) -> dict[str, Any]:
-    enriched = dict(metadata or {})
+    enriched = with_daily_entrypoint_desktop_execution_policy(
+        metadata,
+        surface=_daily_entrypoint_surface(metadata),
+    )
     enriched.setdefault("runtime_planner_request_trace", True)
     if not isinstance(enriched.get("desktop_missing_permissions_by_capability"), dict):
         try:
@@ -84,6 +88,20 @@ def _planner_metadata_with_desktop_readiness(metadata: dict[str, Any]) -> dict[s
         if blocking_conditions:
             enriched["desktop_blocking_conditions_by_capability"] = blocking_conditions
     return enriched
+
+
+def _daily_entrypoint_surface(metadata: dict[str, Any]) -> str:
+    launcher_mode = str((metadata or {}).get("launcher_mode") or "").strip()
+    if launcher_mode in {"bubble", "live2d"}:
+        return launcher_mode
+    source = str(
+        (metadata or {}).get("entrypoint_source")
+        or (metadata or {}).get("source")
+        or ""
+    ).strip()
+    if source == "launcher":
+        return "launcher"
+    return "chat"
 
 
 def _chat_runtime_execution_kwargs(

@@ -5204,6 +5204,9 @@ def test_daily_entrypoint_desktop_execution_policy_defaults_to_input_preview() -
     assert metadata["desktop_execution_policy"]["mode"] == "preview_input"
     assert metadata["desktop_execution_policy"]["source"] == "daily_bubble"
     assert explicit["desktop_execution_policy"] == {"mode": "supervised_live"}
+    assert metadata["desktop_provider_health_probe"] is True
+    assert metadata["desktop_provider_route_readonly"] is True
+    assert metadata["desktop_provider_route_foreground"] is True
 
 
 def test_agent_studio_desktop_execution_policy_requests_provider_health_probe() -> None:
@@ -5224,9 +5227,9 @@ def test_agent_studio_desktop_execution_policy_requests_provider_health_probe() 
     assert explicit["desktop_provider_health_probe"] is True
     assert explicit["desktop_provider_route_readonly"] is True
     assert explicit["desktop_provider_route_foreground"] is True
-    assert "desktop_provider_health_probe" not in daily
-    assert "desktop_provider_route_readonly" not in daily
-    assert "desktop_provider_route_foreground" not in daily
+    assert daily["desktop_provider_health_probe"] is True
+    assert daily["desktop_provider_route_readonly"] is True
+    assert daily["desktop_provider_route_foreground"] is True
 
 
 def test_sandbox_desktop_provider_status_probes_health_when_metadata_requests_it(

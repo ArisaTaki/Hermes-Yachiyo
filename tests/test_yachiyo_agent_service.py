@@ -1875,6 +1875,107 @@ def test_agent_studio_service_routes_readonly_desktop_discovery_through_provider
     assert projected[0]["sandbox_provider"]["provider_id"] == "local-headless-desktop"
 
 
+def test_yachiyo_chat_entrypoint_routes_provider_supported_desktop_actions(
+    monkeypatch,
+) -> None:
+    calls: list[str] = []
+
+    class FakeResponse:
+        status = 200
+
+        def __enter__(self) -> "FakeResponse":
+            return self
+
+        def __exit__(self, *_args: Any) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return json.dumps(
+                {
+                    "ok": True,
+                    "status": "ready",
+                    "version": "0.1.0",
+                    "supported_tools": [
+                        "desktop.list_apps",
+                        "app.focus_and_click_ui_element",
+                    ],
+                    "capabilities": [
+                        "desktop_discovery",
+                        "sandbox_foreground",
+                        "read_only_observation",
+                    ],
+                }
+            ).encode("utf-8")
+
+        def getcode(self) -> int:
+            return self.status
+
+    def fake_urlopen(request: Any, *, timeout: float) -> FakeResponse:
+        calls.append(request.full_url)
+        return FakeResponse()
+
+    monkeypatch.setattr(
+        "apps.shell.agent.runtime.desktop_execution_providers.urlopen_with_bundled_ca",
+        fake_urlopen,
+    )
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_URL", "http://127.0.0.1:19091")
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_ID", "local-headless-desktop")
+    monkeypatch.setenv(
+        "OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS",
+        "desktop.list_apps,app.focus_and_click_ui_element",
+    )
+    port = _FakeRuntimePort()
+    service = YachiyoAgentService(port)
+
+    task = service.start_chat_task(
+        StartChatTaskRequest(
+            prompt="在 PixelForge 点击 Export",
+            conversation_id="chat-1",
+            metadata={"launcher_mode": "bubble"},
+            allowed_tools=[
+                "desktop.list_apps",
+                "app.focus_and_click_ui_element",
+                "desktop.ui_elements",
+            ],
+        )
+    )
+
+    request_payload = port.calls[0][1]
+    operation_request = next(
+        request
+        for request in request_payload["direct_tool_requests"]
+        if request["tool"] == "app.focus_and_click_ui_element"
+    )
+    envelope_request = next(
+        request
+        for request in request_payload["metadata"]["yachiyo_execution_envelope"][
+            "requests"
+        ]
+        if request["tool_name"] == "app.focus_and_click_ui_element"
+    )
+
+    assert calls
+    assert request_payload["metadata"]["desktop_provider_health_probe"] is True
+    assert request_payload["metadata"]["desktop_provider_route_readonly"] is True
+    assert request_payload["metadata"]["desktop_provider_route_foreground"] is True
+    assert request_payload["metadata"]["desktop_execution_policy"]["mode"] == (
+        "preview_input"
+    )
+    assert operation_request["desktop_execution_route"]["status"] == "sandbox_ready"
+    assert operation_request["sandbox_provider"]["provider_id"] == (
+        "local-headless-desktop"
+    )
+    assert envelope_request["desktop_execution_route"]["status"] == "sandbox_ready"
+    assert task.runtime_execution_envelope is not None
+    routed_request = next(
+        request
+        for request in task.runtime_execution_envelope.requests
+        if request.tool_name == "app.focus_and_click_ui_element"
+    )
+    assert routed_request.desktop_execution_route is not None
+    assert routed_request.desktop_execution_route.status == "sandbox_ready"
+
+
 def test_agent_studio_service_normalizes_known_app_submit_execution() -> None:
     service = AgentStudioService(_FakeStudioExecutionPort())
 

@@ -31,6 +31,7 @@ from .event_page_windows import (
     events_with_first_page_key_event_window,
     run_event_page_with_projected_events,
 )
+from .desktop_execution_policy import with_daily_entrypoint_desktop_execution_policy
 from .planner_projection import planner_enriched_chat_request
 from .ports import ChatTaskStarter, RuntimePort
 from .runtime_execution import runtime_execution_envelope_from_decision
@@ -78,19 +79,20 @@ class YachiyoAgentService:
         allowed_tools: Iterable[str] | None = None,
         metadata: Mapping[str, Any] | None = None,
     ) -> PlannerDecisionSnapshot:
+        planner_metadata = _daily_chat_metadata(metadata)
         port_planner = getattr(self._runtime_port, "plan_chat_task", None)
         if callable(port_planner):
             payload = port_planner(
                 prompt,
                 allowed_tools=allowed_tools,
-                metadata=metadata or {},
+                metadata=planner_metadata,
             )
             if payload is not None:
                 return PlannerDecisionSnapshot.model_validate(payload)
         return RuntimePlanner().decision(
             prompt,
             allowed_tools=allowed_tools,
-            metadata=metadata,
+            metadata=planner_metadata,
         )
 
     def plan_chat_execution(
@@ -102,6 +104,7 @@ class YachiyoAgentService:
         direct: bool = False,
         full_plan: bool = True,
     ) -> RuntimeExecutionEnvelopeSnapshot:
+        planner_metadata = _daily_chat_metadata(metadata)
         port_planner = getattr(self._runtime_port, "plan_chat_execution", None)
         if callable(port_planner):
             payload = (
@@ -109,7 +112,7 @@ class YachiyoAgentService:
                     port_planner,
                     prompt,
                     allowed_tools=allowed_tools,
-                    metadata=metadata or {},
+                    metadata=planner_metadata,
                     direct=direct,
                     full_plan=full_plan,
                 )
@@ -117,7 +120,7 @@ class YachiyoAgentService:
                 else port_planner(
                     prompt,
                     allowed_tools=allowed_tools,
-                    metadata=metadata or {},
+                    metadata=planner_metadata,
                     direct=direct,
                 )
             )
@@ -126,13 +129,14 @@ class YachiyoAgentService:
         decision = self.plan_chat_task(
             prompt,
             allowed_tools=allowed_tools,
-            metadata=metadata,
+            metadata=planner_metadata,
         )
         envelope = runtime_execution_envelope_from_decision(
             decision,
             allowed_tools=allowed_tools,
             direct=direct,
             full_plan=full_plan,
+            metadata=planner_metadata,
         )
         if envelope is None:
             raise ValueError("Unable to build Yachiyo chat execution plan")
@@ -447,6 +451,28 @@ def _task_with_request_metadata(
             or task_core_snapshot_from_payload({"metadata": merged}),
         }
     )
+
+
+def _daily_chat_metadata(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
+    payload = dict(metadata) if isinstance(metadata, Mapping) else {}
+    return with_daily_entrypoint_desktop_execution_policy(
+        payload,
+        surface=_daily_chat_surface(payload),
+    )
+
+
+def _daily_chat_surface(metadata: Mapping[str, Any]) -> str:
+    launcher_mode = str(metadata.get("launcher_mode") or "").strip()
+    if launcher_mode in {"bubble", "live2d"}:
+        return launcher_mode
+    source = str(
+        metadata.get("entrypoint_source")
+        or metadata.get("source")
+        or ""
+    ).strip()
+    if source == "launcher":
+        return "launcher"
+    return "chat"
 
 
 def _payload_run_id(payload: Any) -> str:

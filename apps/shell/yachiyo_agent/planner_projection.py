@@ -7,6 +7,7 @@ from typing import Any
 
 from .contracts import PlannerDecisionSnapshot, TaskCoreSnapshot
 from .capability_registry import runtime_execution_tool_names
+from .desktop_execution_policy import with_daily_entrypoint_desktop_execution_policy
 from .desktop_plan_hints import (
     discovered_app_open_needs_model_followup,
     discovered_app_pending_user_action,
@@ -301,11 +302,15 @@ def _normalized_entrypoint_metadata(metadata: Mapping[str, Any]) -> dict[str, An
             normalized.setdefault("planner_entrypoint", "launcher_default")
         normalized.setdefault("launcher_surface", launcher_surface or "desktop_launcher")
         normalized.setdefault("runnable_kind", "main")
-        return normalized
+        surface = launcher_mode if launcher_mode in {"bubble", "live2d"} else "launcher"
+        return with_daily_entrypoint_desktop_execution_policy(
+            normalized,
+            surface=surface,
+        )
 
     normalized.setdefault("entrypoint_source", "chat_window")
     normalized.setdefault("planner_entrypoint", "chat_window")
-    return normalized
+    return with_daily_entrypoint_desktop_execution_policy(normalized, surface="chat")
 
 
 def _metadata_text(metadata: Mapping[str, Any], key: str) -> str:
