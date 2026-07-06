@@ -11,6 +11,7 @@ from apps.bridge.routes.yachiyo_models import (
     RunReplanRecoveryActionBody,
     RunToolRecoveryActionBody,
     StartGroupRunBody,
+    StartNextReplanContinuationBody,
 )
 from apps.bridge.routes.yachiyo_services import (
     bad_request,
@@ -121,6 +122,30 @@ async def start_group_replan_recovery_action(
             request,
         )
         return snapshot(run_snapshot)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="GroupRun 不存在") from exc
+    except AgentRuntimeError as exc:
+        raise bad_request(exc) from exc
+
+
+async def start_next_group_replan_continuation(
+    group_run_id: str,
+    request: StartNextReplanContinuationBody,
+    http_request: Request | None = None,
+) -> dict[str, Any]:
+    try:
+        run_snapshot = await asyncio.to_thread(
+            studio_service(http_request).start_next_group_replan_continuation,
+            group_run_id,
+            request,
+        )
+        if run_snapshot is None:
+            return {
+                "started": False,
+                "run": None,
+                "reason": "no_auto_start_eligible_replan_continuation",
+            }
+        return {"started": True, "run": snapshot(run_snapshot)}
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="GroupRun 不存在") from exc
     except AgentRuntimeError as exc:

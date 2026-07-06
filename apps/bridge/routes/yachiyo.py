@@ -26,6 +26,7 @@ from apps.bridge.routes.yachiyo_models import (
     SkillUpdateBody,
     StartAgentRunBody,
     StartGroupRunBody,
+    StartNextReplanContinuationBody,
     StartPlannerOrchestrationBody,
     StartWorkflowRunBody,
     TaskApprovalRequest,
@@ -83,6 +84,20 @@ async def start_task_replan_recovery_action(
     http_request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
     return await yachiyo_chat_handlers.start_replan_recovery_action(
+        task_id,
+        request,
+        http_request,
+    )
+
+
+@router.post("/tasks/{task_id}/replan-recovery-actions/start-next")
+@router.post("/chat/tasks/{task_id}/replan-recovery-actions/start-next")
+async def start_task_next_replan_continuation(
+    task_id: str,
+    request: StartNextReplanContinuationBody,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
+    return await yachiyo_chat_handlers.start_next_replan_continuation(
         task_id,
         request,
         http_request,
@@ -602,6 +617,19 @@ async def start_studio_group_run_replan_recovery_action(
     )
 
 
+@router.post("/studio/group-runs/{group_run_id}/replan-recovery-actions/start-next")
+async def start_studio_group_run_next_replan_continuation(
+    group_run_id: str,
+    request: StartNextReplanContinuationBody,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
+    return await yachiyo_studio_handlers.start_next_group_replan_continuation(
+        group_run_id,
+        request,
+        http_request,
+    )
+
+
 @router.post("/studio/group-runs/{group_run_id}/tool-recovery-actions/start")
 async def start_studio_group_run_tool_recovery_action(
     group_run_id: str,
@@ -717,6 +745,19 @@ async def start_studio_run_replan_recovery_action(
     http_request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
     return await yachiyo_studio_handlers.start_replan_recovery_action(
+        run_id,
+        request,
+        http_request,
+    )
+
+
+@router.post("/studio/runs/{run_id}/replan-recovery-actions/start-next")
+async def start_studio_run_next_replan_continuation(
+    run_id: str,
+    request: StartNextReplanContinuationBody,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
+    return await yachiyo_studio_handlers.start_next_replan_continuation(
         run_id,
         request,
         http_request,

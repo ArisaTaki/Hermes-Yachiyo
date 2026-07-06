@@ -136,6 +136,19 @@ class RunReplanRecoveryActionBody(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class StartNextReplanContinuationBody(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    request_id: str | None = Field(default=None, max_length=240)
+    action_id: str | None = Field(default=None, max_length=240)
+    agent_id: str | None = Field(default=None, max_length=160)
+    title: str | None = Field(default=None, max_length=1000)
+    conversation_id: str | None = Field(default=None, max_length=160)
+    client_run_id: str | None = Field(default=None, max_length=160)
+    continue_to_model: bool = True
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 class RunToolRecoveryActionBody(BaseModel):
     model_config = ConfigDict(extra="allow")
 

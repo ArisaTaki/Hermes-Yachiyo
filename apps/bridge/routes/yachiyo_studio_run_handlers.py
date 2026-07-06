@@ -11,6 +11,7 @@ from apps.bridge.routes.yachiyo_models import (
     RerunRunBody,
     RunReplanRecoveryActionBody,
     RunToolRecoveryActionBody,
+    StartNextReplanContinuationBody,
     TaskApprovalRequest,
 )
 from apps.bridge.routes.yachiyo_services import (
@@ -74,6 +75,30 @@ async def start_replan_recovery_action(
             request,
         )
         return snapshot(run_snapshot)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Run 不存在") from exc
+    except AgentRuntimeError as exc:
+        raise bad_request(exc) from exc
+
+
+async def start_next_replan_continuation(
+    run_id: str,
+    request: StartNextReplanContinuationBody,
+    http_request: Request | None = None,
+) -> dict[str, Any]:
+    try:
+        run_snapshot = await asyncio.to_thread(
+            studio_service(http_request).start_next_replan_continuation,
+            run_id,
+            request,
+        )
+        if run_snapshot is None:
+            return {
+                "started": False,
+                "run": None,
+                "reason": "no_auto_start_eligible_replan_continuation",
+            }
+        return {"started": True, "run": snapshot(run_snapshot)}
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Run 不存在") from exc
     except AgentRuntimeError as exc:

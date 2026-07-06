@@ -24,7 +24,10 @@ from apps.bridge.routes.yachiyo_studio_group_handlers import (
     list_group_runs,
     list_groups,
     save_group,
+    start_group_replan_recovery_action,
     start_group_run,
+    start_group_tool_recovery_action,
+    start_next_group_replan_continuation,
     update_group,
 )
 from apps.bridge.routes.yachiyo_studio_memory_handlers import (
@@ -46,6 +49,9 @@ from apps.bridge.routes.yachiyo_studio_run_handlers import (
     read_run_artifact,
     reject_run_approval,
     rerun_run,
+    start_next_replan_continuation,
+    start_replan_recovery_action,
+    start_tool_recovery_action,
 )
 from apps.bridge.routes.yachiyo_studio_skill_handlers import (
     create_skill_folder,
@@ -125,8 +131,14 @@ __all__ = [
     "start_agent_run",
     "save_group",
     "save_workflow",
+    "start_group_replan_recovery_action",
     "start_group_run",
+    "start_group_tool_recovery_action",
+    "start_next_group_replan_continuation",
+    "start_next_replan_continuation",
     "start_planner_orchestration",
+    "start_replan_recovery_action",
+    "start_tool_recovery_action",
     "start_workflow_run",
     "sync_native_skills",
     "test_agent_model",

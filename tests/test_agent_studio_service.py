@@ -1988,6 +1988,32 @@ def test_agent_studio_service_starts_group_replan_recovery_action_from_child_age
     assert request["direct_tool_requests"][0]["task_verification_targets"][0]["step_id"] == "open-app"
 
 
+def test_agent_studio_service_auto_starts_group_replan_continuation_from_child_agent() -> None:
+    port = _ReplanRecoveryActionPort()
+    service = AgentStudioService(port)
+
+    run = service.start_next_group_replan_continuation(
+        "group-run-1",
+        {"client_run_id": "client-group-auto-1"},
+    )
+
+    assert run is not None
+    assert run.run_id == "recovery-run-1"
+    assert [name for name, _payload in port.calls] == [
+        "get_group_run",
+        "list_tool_catalog",
+        "start_agent_run",
+    ]
+    request = _port_call_payload(port, "start_agent_run")
+    assert request["agent_id"] == "agent-2"
+    assert request["client_run_id"] == "client-group-auto-1"
+    assert request["metadata"]["source"] == "agent_studio_group_replan_auto_continuation"
+    assert request["metadata"]["source_group_run_id"] == "group-run-1"
+    assert request["metadata"]["replan_auto_start_eligible"] is True
+    assert request["direct_tool_requests"][0]["tool"] == "desktop.list_apps"
+    assert request["direct_tool_requests"][0]["approval_required"] is False
+
+
 def test_agent_studio_service_starts_group_tool_recovery_action_from_child_agent() -> None:
     port = _ReplanRecoveryActionPort()
     service = AgentStudioService(port)

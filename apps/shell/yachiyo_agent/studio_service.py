@@ -930,6 +930,23 @@ class AgentStudioService:
         source_run = self.get_group_run(group_run_id)
         return self._start_replan_recovery_action_from_snapshot(source_run, payload)
 
+    def start_next_group_replan_continuation(
+        self,
+        group_run_id: str,
+        request: Mapping[str, Any] | None = None,
+    ) -> RunTimelineSnapshot | None:
+        payload = _request_payload(request or {})
+        source_run = self.get_group_run(group_run_id)
+        continuation = _next_replan_recovery_action_continuation(
+            source_run,
+            payload,
+            source="agent_studio_group_replan_auto_continuation",
+            client_run_id=str(payload.get("client_run_id") or "").strip(),
+        )
+        if continuation is None:
+            return None
+        return self.start_agent_run(_agent_start_payload_from_replan_continuation(continuation))
+
     def start_group_tool_recovery_action(
         self,
         group_run_id: str,

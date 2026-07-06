@@ -10,6 +10,7 @@ from fastapi import HTTPException, Request
 from apps.bridge.routes.yachiyo_models import (
     PlanExecutionBody,
     RunReplanRecoveryActionBody,
+    StartNextReplanContinuationBody,
     TaskApprovalRequest,
 )
 from apps.bridge.routes.yachiyo_services import (
@@ -64,6 +65,30 @@ async def start_replan_recovery_action(
             request.model_dump(exclude_none=True),
         )
         return snapshot(task_snapshot)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Task 不存在") from exc
+    except (AgentRuntimeError, ValueError) as exc:
+        raise bad_request(exc) from exc
+
+
+async def start_next_replan_continuation(
+    task_id: str,
+    request: StartNextReplanContinuationBody,
+    http_request: Request | None = None,
+) -> dict[str, Any]:
+    try:
+        task_snapshot = await asyncio.to_thread(
+            agent_service(http_request).start_next_replan_continuation,
+            task_id,
+            request.model_dump(exclude_none=True),
+        )
+        if task_snapshot is None:
+            return {
+                "started": False,
+                "task": None,
+                "reason": "no_auto_start_eligible_replan_continuation",
+            }
+        return {"started": True, "task": snapshot(task_snapshot)}
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Task 不存在") from exc
     except (AgentRuntimeError, ValueError) as exc:

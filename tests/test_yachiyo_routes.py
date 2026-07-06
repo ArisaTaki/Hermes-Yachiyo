@@ -12,6 +12,7 @@ import pytest
 from apps.bridge.routes import (
     yachiyo,
     yachiyo_chat_handlers,
+    yachiyo_studio_group_handlers,
     yachiyo_studio_run_handlers,
     yachiyo_studio_tool_handlers,
 )
@@ -692,6 +693,171 @@ async def test_yachiyo_task_route_starts_replan_recovery_action(
                     "conversation_id": "chat-1",
                     "continue_to_model": True,
                     "metadata": {"surface": "chat"},
+                },
+            },
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_yachiyo_task_route_starts_next_replan_continuation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _FakeAgentService:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, Any]] = []
+
+        def start_next_replan_continuation(
+            self,
+            task_id: str,
+            payload: dict[str, Any],
+        ) -> AgentTaskSnapshot:
+            self.calls.append(("start_next_replan_continuation", {"task_id": task_id, "payload": payload}))
+            return AgentTaskSnapshot(
+                task_id="next-task-1",
+                conversation_id=payload.get("conversation_id") or "chat-1",
+                title="Auto recover",
+                status="running",
+                metadata={
+                    "source": "yachiyo_chat_replan_auto_continuation",
+                    "replan_request_id": payload.get("request_id"),
+                },
+            )
+
+    service = _FakeAgentService()
+    monkeypatch.setattr(yachiyo_chat_handlers, "agent_service", lambda _request=None: service)
+
+    response = await yachiyo.start_task_next_replan_continuation(
+        "task-1",
+        yachiyo.StartNextReplanContinuationBody(
+            request_id="replan-1",
+            conversation_id="chat-1",
+            metadata={"surface": "chat"},
+        ),
+        None,
+    )
+
+    assert response["started"] is True
+    assert response["task"]["task_id"] == "next-task-1"
+    assert response["task"]["metadata"]["source"] == "yachiyo_chat_replan_auto_continuation"
+    assert service.calls == [
+        (
+            "start_next_replan_continuation",
+            {
+                "task_id": "task-1",
+                "payload": {
+                    "request_id": "replan-1",
+                    "conversation_id": "chat-1",
+                    "continue_to_model": True,
+                    "metadata": {"surface": "chat"},
+                },
+            },
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_yachiyo_studio_run_route_starts_next_replan_continuation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _FakeStudioService:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, Any]] = []
+
+        def start_next_replan_continuation(
+            self,
+            run_id: str,
+            request: Any,
+        ) -> RunTimelineSnapshot:
+            payload = request.model_dump(exclude_none=True) if hasattr(request, "model_dump") else dict(request)
+            self.calls.append(("start_next_replan_continuation", {"run_id": run_id, "payload": payload}))
+            return RunTimelineSnapshot(
+                run_id="next-run-1",
+                title="Auto recover",
+                status="running",
+            )
+
+    service = _FakeStudioService()
+    monkeypatch.setattr(yachiyo_studio_run_handlers, "studio_service", lambda _request=None: service)
+
+    response = await yachiyo.start_studio_run_next_replan_continuation(
+        "run-1",
+        yachiyo.StartNextReplanContinuationBody(
+            request_id="replan-1",
+            agent_id="agent-1",
+            client_run_id="client-auto-1",
+        ),
+        None,
+    )
+
+    assert response["started"] is True
+    assert response["run"]["run_id"] == "next-run-1"
+    assert response["run"]["status"] == "running"
+    assert service.calls == [
+        (
+            "start_next_replan_continuation",
+            {
+                "run_id": "run-1",
+                "payload": {
+                    "request_id": "replan-1",
+                    "agent_id": "agent-1",
+                    "client_run_id": "client-auto-1",
+                    "continue_to_model": True,
+                    "metadata": {},
+                },
+            },
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_yachiyo_studio_group_run_route_starts_next_replan_continuation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _FakeStudioService:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, Any]] = []
+
+        def start_next_group_replan_continuation(
+            self,
+            group_run_id: str,
+            request: Any,
+        ) -> RunTimelineSnapshot:
+            payload = request.model_dump(exclude_none=True) if hasattr(request, "model_dump") else dict(request)
+            self.calls.append(
+                ("start_next_group_replan_continuation", {"group_run_id": group_run_id, "payload": payload})
+            )
+            return RunTimelineSnapshot(
+                run_id="next-group-child-run-1",
+                title="Group auto recover",
+                status="running",
+            )
+
+    service = _FakeStudioService()
+    monkeypatch.setattr(yachiyo_studio_group_handlers, "studio_service", lambda _request=None: service)
+
+    response = await yachiyo.start_studio_group_run_next_replan_continuation(
+        "group-run-1",
+        yachiyo.StartNextReplanContinuationBody(
+            request_id="replan-1",
+            client_run_id="client-group-auto-1",
+        ),
+        None,
+    )
+
+    assert response["started"] is True
+    assert response["run"]["run_id"] == "next-group-child-run-1"
+    assert response["run"]["status"] == "running"
+    assert service.calls == [
+        (
+            "start_next_group_replan_continuation",
+            {
+                "group_run_id": "group-run-1",
+                "payload": {
+                    "request_id": "replan-1",
+                    "client_run_id": "client-group-auto-1",
+                    "continue_to_model": True,
+                    "metadata": {},
                 },
             },
         )
@@ -8667,6 +8833,7 @@ def test_yachiyo_chat_routes_are_registered_as_light_surface_aliases() -> None:
     assert '@router.get("/tasks/{task_id}/events")' in source
     assert '@router.get("/tasks/{task_id}/artifacts/{artifact_path:path}")' in source
     assert '@router.post("/tasks/{task_id}/replan-recovery-actions/start")' in source
+    assert '@router.post("/tasks/{task_id}/replan-recovery-actions/start-next")' in source
     assert '@router.post("/tasks/{task_id}/approve")' in source
     assert '@router.post("/tasks/{task_id}/reject")' in source
     assert '@router.post("/tasks/{task_id}/cancel")' in source
@@ -8679,6 +8846,7 @@ def test_yachiyo_chat_routes_are_registered_as_light_surface_aliases() -> None:
     assert '@router.get("/chat/tasks/{task_id}/events")' in source
     assert '@router.get("/chat/tasks/{task_id}/artifacts/{artifact_path:path}")' in source
     assert '@router.post("/chat/tasks/{task_id}/replan-recovery-actions/start")' in source
+    assert '@router.post("/chat/tasks/{task_id}/replan-recovery-actions/start-next")' in source
     assert '@router.post("/chat/tasks/{task_id}/approve")' in source
     assert '@router.post("/chat/tasks/{task_id}/reject")' in source
     assert '@router.post("/chat/tasks/{task_id}/cancel")' in source
@@ -8701,6 +8869,7 @@ def test_yachiyo_public_routes_delegate_to_chat_and_studio_handlers() -> None:
     assert "from apps.bridge.routes import yachiyo_studio_handlers" in source
     assert "return await yachiyo_chat_handlers.start_task(request, http_request)" in source
     assert "return await yachiyo_chat_handlers.start_replan_recovery_action(" in source
+    assert "return await yachiyo_chat_handlers.start_next_replan_continuation(" in source
     assert "return await yachiyo_chat_handlers.plan_task_execution(request, http_request)" in source
     assert "return await yachiyo_chat_handlers.get_task_timeline(task_id, http_request)" in source
     assert "return await yachiyo_studio_handlers.update_agent(agent_id, request, http_request)" in source
@@ -8719,6 +8888,8 @@ def test_yachiyo_public_routes_delegate_to_chat_and_studio_handlers() -> None:
     assert "return await yachiyo_studio_handlers.update_group(group_id, request, http_request)" in source
     assert "return await yachiyo_studio_handlers.update_workflow(workflow_id, request, http_request)" in source
     assert "return await yachiyo_studio_handlers.start_agent_run(agent_id, request, http_request)" in source
+    assert "return await yachiyo_studio_handlers.start_next_group_replan_continuation(" in source
+    assert "return await yachiyo_studio_handlers.start_next_replan_continuation(" in source
     assert "return await yachiyo_studio_handlers.start_group_run(group_id, request, http_request)" in source
     assert "return await yachiyo_studio_handlers.start_workflow_run(workflow_id, request, http_request)" in source
     assert "return await yachiyo_studio_handlers.get_run_timeline(run_id, http_request)" in source
@@ -8775,12 +8946,14 @@ def test_yachiyo_studio_routes_include_run_action_facade() -> None:
     assert '@router.get("/studio/group-runs")' in source
     assert '@router.get("/studio/group-runs/{group_run_id}")' in source
     assert '@router.post("/studio/group-runs/{group_run_id}/replan-recovery-actions/start")' in source
+    assert '@router.post("/studio/group-runs/{group_run_id}/replan-recovery-actions/start-next")' in source
     assert '@router.post("/studio/group-runs/{group_run_id}/tool-recovery-actions/start")' in source
     assert '@router.get("/studio/group-runs/{group_run_id}/events")' in source
     assert '@router.get("/studio/runs")' in source
     assert '@router.get("/studio/runs/{run_id}")' in source
     assert '@router.post("/studio/runs/{run_id}/rerun")' in source
     assert '@router.post("/studio/runs/{run_id}/replan-recovery-actions/start")' in source
+    assert '@router.post("/studio/runs/{run_id}/replan-recovery-actions/start-next")' in source
     assert '@router.post("/studio/runs/{run_id}/tool-recovery-actions/start")' in source
     assert '@router.post("/studio/runs/{run_id}/cancel")' in source
     assert '@router.delete("/studio/runs/{run_id}")' in source
