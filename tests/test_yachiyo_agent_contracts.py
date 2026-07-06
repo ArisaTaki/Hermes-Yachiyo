@@ -40,6 +40,7 @@ from apps.shell.yachiyo_agent import (
     DesktopActionRiskSnapshot,
     DesktopExecutionCapabilitySnapshot,
     DesktopExecutionModeSnapshot,
+    DesktopExecutionPolicySnapshot,
     DesktopRecoveryActionMetadataSnapshot,
     FutureTaskSnapshot,
     FutureTaskTriggerResultSnapshot,
@@ -4920,6 +4921,28 @@ def test_desktop_execution_mode_snapshot_classifies_live_foreground_tools() -> N
     )
     with pytest.raises(ValidationError):
         DesktopExecutionModeSnapshot(mode="tool_native", unknown=True)
+
+
+def test_desktop_execution_policy_snapshot_json_shape_is_stable() -> None:
+    snapshot = DesktopExecutionPolicySnapshot(
+        mode="preview",
+        allow_live_foreground=False,
+        source="chat",
+        reason="Avoid stealing keyboard focus in daily chat.",
+    )
+
+    payload = _json(snapshot)
+
+    assert list(payload) == [
+        "mode",
+        "allow_live_foreground",
+        "source",
+        "reason",
+    ]
+    assert payload["mode"] == "preview"
+    assert payload["allow_live_foreground"] is False
+    with pytest.raises(ValidationError):
+        DesktopExecutionPolicySnapshot(mode="allow", unknown=True)
 
 
 def test_desktop_recovery_action_metadata_snapshot_json_shape_is_stable() -> None:

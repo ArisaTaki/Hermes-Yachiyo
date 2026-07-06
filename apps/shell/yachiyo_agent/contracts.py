@@ -34,6 +34,12 @@ DesktopIsolationKind = Literal[
     "headless",
     "user_handoff",
 ]
+DesktopExecutionPolicyMode = Literal[
+    "allow",
+    "preview",
+    "handoff_required",
+    "supervised_live",
+]
 RecoveryActionKind = Literal["permission_recovery", "retry_original"]
 TaskWorkspaceItemKind = Literal[
     "input",
@@ -131,6 +137,13 @@ class DesktopExecutionModeSnapshot(_PublicSnapshot):
     approval_recommended: bool = False
     reason: str = ""
     mitigations: list[str] = Field(default_factory=list)
+
+
+class DesktopExecutionPolicySnapshot(_PublicSnapshot):
+    mode: DesktopExecutionPolicyMode | str = "allow"
+    allow_live_foreground: bool | None = None
+    source: str = ""
+    reason: str = ""
 
 
 class DesktopActionRiskSnapshot(_PublicSnapshot):

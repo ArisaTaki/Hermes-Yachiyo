@@ -14,6 +14,7 @@ from apps.shell.agent.runtime.event_scopes import (
 )
 from apps.shell.agent.runtime.task_progress import append_task_progress_events_for_tool_result
 from apps.shell.yachiyo_agent.capability_registry import capability_recovery_tools
+from apps.shell.yachiyo_agent.policy import desktop_tool_execution_mode
 from packages.security import redact_api_error_text
 
 _TOOL_REQUEST_TRACE_TEXT_KEYS = (
@@ -69,6 +70,7 @@ _TOOL_REQUEST_TRACE_MAPPING_KEYS = (
     "action_target",
     "observation_evidence",
     "observation_retry",
+    "desktop_execution_policy",
 )
 
 _ARTIFACT_BODY_TEXT_TOOLS = {
@@ -269,11 +271,129 @@ def _tool_result_requests_user_recovery(result: dict[str, Any]) -> bool:
         or result.get("blocked_by_runtime_readiness")
         or result.get("blocked_by_app_resolution")
         or result.get("blocked_by_file_resolution")
+        or result.get("blocked_by_desktop_execution_policy")
         or result.get("recovery_actions")
         or data.get("recovery_actions")
         or result.get("permission_targets")
         or data.get("permission_targets")
     )
+
+
+def _desktop_execution_policy_skip_result(
+    tool_name: str,
+    tool_request: Mapping[str, Any],
+    input_preview: Any,
+) -> dict[str, Any] | None:
+    policy = _desktop_execution_policy_from_request(tool_request)
+    policy_mode = _desktop_execution_policy_mode(policy)
+    if policy_mode == "allow":
+        return None
+
+    execution_mode = desktop_tool_execution_mode(tool_name)
+    if not (
+        bool(execution_mode.foreground_control)
+        or bool(execution_mode.keyboard_mouse_capture)
+    ):
+        return None
+
+    execution_payload = execution_mode.model_dump(mode="json")
+    blocking_condition = (
+        "desktop_execution_handoff_required"
+        if policy_mode == "handoff"
+        else "desktop_execution_preview_required"
+    )
+    status = "handoff_required" if policy_mode == "handoff" else "preview_required"
+    return {
+        "ok": False,
+        "tool": tool_name,
+        "status": status,
+        "error": "desktop_execution_policy_blocked",
+        "summary": "Desktop foreground execution was blocked by the runtime execution policy.",
+        "blocked_by_desktop_execution_policy": True,
+        "blocking_condition": blocking_condition,
+        "blocking_conditions": [blocking_condition],
+        "desktop_execution_policy": policy,
+        "desktop_execution_mode": execution_payload,
+        "execution_mode": str(execution_payload.get("mode") or ""),
+        "foreground_control": bool(execution_payload.get("foreground_control")),
+        "keyboard_mouse_capture": bool(
+            execution_payload.get("keyboard_mouse_capture")
+        ),
+        "sandbox_recommended": bool(execution_payload.get("sandbox_recommended")),
+        "user_handoff_recommended": policy_mode == "handoff",
+        "input_preview": input_preview if isinstance(input_preview, dict) else {},
+        "recommended_tools": [
+            "screen.capture",
+            "desktop.active_window",
+            "desktop.ui_elements",
+        ],
+        "hint": (
+            "Switch the run to supervised_live, continue in Agent Studio, or let the "
+            "user perform the foreground step manually."
+        ),
+    }
+
+
+def _desktop_execution_policy_from_request(
+    tool_request: Mapping[str, Any],
+) -> dict[str, Any]:
+    for key in (
+        "desktop_execution_policy",
+        "yachiyo_desktop_execution_policy",
+        "desktop_interaction_policy",
+    ):
+        raw = tool_request.get(key)
+        if isinstance(raw, Mapping):
+            return dict(raw)
+        if isinstance(raw, str) and raw.strip():
+            return {"mode": raw.strip()}
+    metadata = tool_request.get("metadata")
+    if isinstance(metadata, Mapping):
+        return _desktop_execution_policy_from_request(metadata)
+    return {}
+
+
+def _desktop_execution_policy_mode(policy: Mapping[str, Any]) -> str:
+    if not policy:
+        return "allow"
+    if policy.get("allow_live_foreground") is True:
+        return "allow"
+    if policy.get("allow_live_foreground") is False:
+        return "preview"
+    raw = str(
+        policy.get("mode")
+        or policy.get("live_foreground")
+        or policy.get("foreground_input")
+        or ""
+    ).strip().lower().replace("-", "_")
+    if raw in {
+        "allow",
+        "allowed",
+        "live",
+        "supervised_live",
+        "foreground",
+        "live_foreground",
+    }:
+        return "allow"
+    if raw in {
+        "handoff",
+        "handoff_required",
+        "user_handoff",
+        "user_handoff_required",
+    }:
+        return "handoff"
+    if raw in {
+        "preview",
+        "dry_run",
+        "dryrun",
+        "observe_only",
+        "observation_only",
+        "read_only",
+        "no_live_foreground",
+        "sandbox_preferred",
+    }:
+        return "preview"
+    return "allow"
 
 
 def _tool_result_with_runtime_recovery_defaults(
@@ -1951,7 +2071,12 @@ class RuntimeToolRequestRunner:
             trace_payload = _tool_request_trace_payload(tool_request)
             input_preview = _input_preview_with_trace_payload(input_preview, trace_payload)
             input_preview = _tool_event_input_preview(tool_name, input_preview)
-            runtime_skip = _unresolved_discovered_app_skip_result(
+            runtime_skip = _desktop_execution_policy_skip_result(
+                tool_name,
+                tool_request,
+                input_preview,
+            )
+            runtime_skip = runtime_skip or _unresolved_discovered_app_skip_result(
                 tool_name,
                 raw_input,
                 app_name_resolution,

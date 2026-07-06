@@ -179,6 +179,66 @@ def _desktop_execution_mode_payload(tool_name: str) -> dict[str, Any]:
         "desktop_execution_mode": payload,
     }
 
+
+def _desktop_execution_policy_from_context(
+    agent: Mapping[str, Any],
+    runtime_execution_metadata: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    for container in (
+        runtime_execution_metadata if isinstance(runtime_execution_metadata, Mapping) else {},
+        agent.get("tool_policy") if isinstance(agent.get("tool_policy"), Mapping) else {},
+        agent,
+    ):
+        policy = _desktop_execution_policy_from_mapping(container)
+        if policy:
+            return policy
+    return {}
+
+
+def _desktop_execution_policy_from_mapping(payload: Mapping[str, Any]) -> dict[str, Any]:
+    for key in (
+        "desktop_execution_policy",
+        "yachiyo_desktop_execution_policy",
+        "desktop_interaction_policy",
+    ):
+        raw = payload.get(key)
+        if isinstance(raw, Mapping):
+            return dict(raw)
+        if isinstance(raw, str) and raw.strip():
+            return {"mode": raw.strip()}
+    return {}
+
+
+def _tool_requests_with_desktop_execution_policy(
+    tool_requests: Iterable[dict[str, Any]] | None,
+    policy: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    requests = [
+        dict(request)
+        for request in (tool_requests or [])
+        if isinstance(request, dict)
+    ]
+    if not policy:
+        return requests
+    return [
+        request
+        if isinstance(request.get("desktop_execution_policy"), Mapping)
+        else {**request, "desktop_execution_policy": dict(policy)}
+        for request in requests
+    ]
+
+
+def _tool_request_with_desktop_execution_policy(
+    tool_request: dict[str, Any] | None,
+    policy: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    if not isinstance(tool_request, dict):
+        return None
+    if not policy or isinstance(tool_request.get("desktop_execution_policy"), Mapping):
+        return dict(tool_request)
+    return {**tool_request, "desktop_execution_policy": dict(policy)}
+
+
 _OPEN_PATH_WITH_APP_TOOLS = {"desktop.open_path_with_app", "app.open_path_with_app"}
 
 _DISCOVERED_APP_DIRECT_COMPLETION_TOOLS = {
@@ -267,12 +327,24 @@ class RuntimeCustomApiAgentLoop:
     ) -> str:
         runtime = self._compile_agent_runtime(agent)
         allowed_tools = runtime["tool_policy"].get("allowed_tools") or []
+        desktop_execution_policy = _desktop_execution_policy_from_context(
+            agent,
+            runtime_execution_metadata,
+        )
+        direct_tool_request = _tool_request_with_desktop_execution_policy(
+            direct_tool_request,
+            desktop_execution_policy,
+        )
         if direct_tool_requests is None:
             direct_tool_requests = _runtime_execution_context_tool_requests(
                 runtime_execution_envelope,
                 runtime_execution_metadata,
                 allowed_tools,
             )
+        direct_tool_requests = _tool_requests_with_desktop_execution_policy(
+            direct_tool_requests,
+            desktop_execution_policy,
+        )
         runtime_execution_selection_payload = _runtime_execution_context_selection_payload(
             runtime_execution_envelope,
             runtime_execution_metadata,
@@ -408,6 +480,10 @@ class RuntimeCustomApiAgentLoop:
                             )
                         planner_replan_only = True
             if planned_tool_requests:
+                planned_tool_requests = _tool_requests_with_desktop_execution_policy(
+                    planned_tool_requests,
+                    desktop_execution_policy,
+                )
                 if runtime_planner_decision is not None:
                     planner_scope_context = _runtime_planner_scope_context(
                         planned_tool_requests,
@@ -1296,6 +1372,13 @@ class RuntimeCustomApiAgentLoop:
                             run_id=run_id,
                         )
                     if auto_followup_request:
+                        auto_followup_request = (
+                            _tool_request_with_desktop_execution_policy(
+                                auto_followup_request,
+                                desktop_execution_policy,
+                            )
+                            or {}
+                        )
                         auto_payload = {
                             "tool": str(auto_followup_request.get("tool") or ""),
                             "status": "planned",
@@ -1407,6 +1490,12 @@ class RuntimeCustomApiAgentLoop:
                         auto_deferred_observed_ui_requests,
                         timeline,
                         tool_timeline_start=tool_timeline_start,
+                    )
+                    auto_deferred_observed_ui_requests = (
+                        _tool_requests_with_desktop_execution_policy(
+                            auto_deferred_observed_ui_requests,
+                            desktop_execution_policy,
+                        )
                     )
                     if auto_deferred_observed_ui_requests:
                         self._record_auto_model_followup_app_write_plan(
@@ -1968,6 +2057,10 @@ class RuntimeCustomApiAgentLoop:
                     )
                 ),
             )
+            tool_requests = _tool_requests_with_desktop_execution_policy(
+                tool_requests,
+                desktop_execution_policy,
+            )
             detail = content[:500] if content else ", ".join(
                 request["tool"] for request in tool_requests
             )[:500]
@@ -2010,6 +2103,10 @@ class RuntimeCustomApiAgentLoop:
                 auto_app_write_requests = _drop_completed_artifact_write_requests(
                     auto_app_write_requests,
                     artifacts,
+                )
+                auto_app_write_requests = _tool_requests_with_desktop_execution_policy(
+                    auto_app_write_requests,
+                    desktop_execution_policy,
                 )
                 if auto_app_write_requests:
                     messages.append({"role": "assistant", "content": content})
@@ -2058,6 +2155,12 @@ class RuntimeCustomApiAgentLoop:
                             )
                         )
                         if discovered_app_write_requests:
+                            discovered_app_write_requests = (
+                                _tool_requests_with_desktop_execution_policy(
+                                    discovered_app_write_requests,
+                                    desktop_execution_policy,
+                                )
+                            )
                             self._record_auto_model_followup_app_write_plan(
                                 discovered_app_write_requests,
                                 timeline=timeline,
@@ -2145,6 +2248,10 @@ class RuntimeCustomApiAgentLoop:
                     auto_pending_plan_requests = _drop_completed_artifact_write_requests(
                         auto_pending_plan_requests,
                         artifacts,
+                    )
+                    auto_pending_plan_requests = _tool_requests_with_desktop_execution_policy(
+                        auto_pending_plan_requests,
+                        desktop_execution_policy,
                     )
                     if auto_pending_plan_requests:
                         messages.append({"role": "assistant", "content": content})
@@ -2318,6 +2425,12 @@ class RuntimeCustomApiAgentLoop:
                         allowed_tools,
                         timeline,
                         tool_timeline_start=tool_timeline_start,
+                    )
+                )
+                auto_pending_continuation_requests = (
+                    _tool_requests_with_desktop_execution_policy(
+                        auto_pending_continuation_requests,
+                        desktop_execution_policy,
                     )
                 )
                 if auto_pending_continuation_requests:
@@ -13772,6 +13885,7 @@ def _request_observability_metadata(request: Mapping[str, Any]) -> dict[str, Any
         "verification_target",
         "deferred_input",
         "deferred_context",
+        "desktop_execution_policy",
     ):
         value = request.get(key)
         if isinstance(value, Mapping) and value:

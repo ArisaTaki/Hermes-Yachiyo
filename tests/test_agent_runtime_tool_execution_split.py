@@ -2230,6 +2230,50 @@ def test_runtime_tool_request_runner_blocks_tools_disallowed_by_user_goal() -> N
     assert "blocked_by_user_goal" in messages[-1]["content"]
 
 
+def test_runtime_tool_request_runner_previews_live_foreground_tools_by_policy() -> None:
+    run_events: list[tuple[str, str, dict[str, Any]]] = []
+    budget = FakeBudget()
+    messages = [{"role": "user", "content": "在当前应用里输入 hello"}]
+    timeline: list[dict[str, Any]] = []
+    calls: list[str] = []
+    runner = _runner(
+        call_agent_tool=lambda *_args, **_kwargs: calls.append("call_agent_tool") or {"ok": True},
+        run_events=run_events,
+    )
+
+    runner.run(
+        [
+            {
+                "tool": "desktop.safe_type_text",
+                "input": {"text": "hello"},
+                "desktop_execution_policy": {"mode": "preview"},
+            }
+        ],
+        ["desktop.safe_type_text"],
+        FakeBroker({"ok": True}),
+        messages,
+        timeline,
+        [],
+        next_iteration=3,
+        run_id="run-1",
+        budget=budget,
+    )
+
+    skipped = next(event for event in timeline if event["event"] == "agent.tool.skipped")
+    result = skipped["result"]
+    assert calls == []
+    assert budget.claims == [("desktop.safe_type_text", False)]
+    assert result["blocked_by_desktop_execution_policy"] is True
+    assert result["status"] == "preview_required"
+    assert result["execution_mode"] == "supervised_live"
+    assert result["keyboard_mouse_capture"] is True
+    assert result["desktop_execution_policy"] == {"mode": "preview"}
+    assert result["blocking_conditions"] == ["desktop_execution_preview_required"]
+    assert run_events[0][1] == "agent.tool.skipped"
+    assert run_events[0][2]["result"]["blocked_by_desktop_execution_policy"] is True
+    assert "blocked_by_desktop_execution_policy" in messages[-1]["content"]
+
+
 def test_runtime_tool_request_runner_uses_discovered_app_name_for_followup_tool() -> None:
     calls: list[tuple[str, dict[str, Any]]] = []
 

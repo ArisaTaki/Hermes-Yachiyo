@@ -17,6 +17,11 @@ export type DesktopIsolationKind =
   | 'sandbox_desktop'
   | 'headless'
   | 'user_handoff';
+export type DesktopExecutionPolicyMode =
+  | 'allow'
+  | 'preview'
+  | 'handoff_required'
+  | 'supervised_live';
 export type TaskIntentKind =
   | 'desktop_operation'
   | 'data_analysis'
@@ -83,6 +88,13 @@ export type DesktopExecutionModeSnapshot = {
   approval_recommended?: boolean;
   reason?: string;
   mitigations?: string[];
+};
+
+export type DesktopExecutionPolicySnapshot = {
+  mode?: DesktopExecutionPolicyMode | string;
+  allow_live_foreground?: boolean | null;
+  source?: string;
+  reason?: string;
 };
 
 export type DesktopActionRiskSnapshot = {
