@@ -2269,6 +2269,19 @@ def test_runtime_tool_request_runner_previews_live_foreground_tools_by_policy() 
     assert result["keyboard_mouse_capture"] is True
     assert result["desktop_execution_policy"] == {"mode": "preview"}
     assert result["blocking_conditions"] == ["desktop_execution_preview_required"]
+    assert [action["tool"] for action in result["recovery_actions"]] == [
+        "desktop.active_window",
+        "desktop.ui_elements",
+        "desktop.safe_type_text",
+    ]
+    supervised_action = result["recovery_actions"][2]
+    assert supervised_action["desktop_execution_policy"]["mode"] == "supervised_live"
+    assert supervised_action["metadata"]["runtime_replan_auto_start_eligible"] is False
+    assert supervised_action["metadata"]["runtime_replan_auto_start_blockers"] == [
+        "desktop_execution_policy",
+        "keyboard_mouse_capture",
+        "foreground_control",
+    ]
     assert run_events[0][1] == "agent.tool.skipped"
     assert run_events[0][2]["result"]["blocked_by_desktop_execution_policy"] is True
     assert "blocked_by_desktop_execution_policy" in messages[-1]["content"]
@@ -2329,6 +2342,10 @@ def test_runtime_tool_request_runner_preview_input_policy_allows_media_but_block
     assert skipped["detail"] == "desktop.safe_type_text"
     assert skipped["result"]["blocked_by_desktop_execution_policy"] is True
     assert skipped["result"]["desktop_execution_policy"] == policy
+    supervised_action = skipped["result"]["recovery_actions"][2]
+    assert supervised_action["tool"] == "desktop.safe_type_text"
+    assert supervised_action["input"] == {"text": "hello"}
+    assert supervised_action["desktop_execution_policy"]["mode"] == "supervised_live"
     assert "blocked_by_desktop_execution_policy" in messages[-1]["content"]
 
 

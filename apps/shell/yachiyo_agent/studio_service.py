@@ -2655,6 +2655,9 @@ def _tool_recovery_action_direct_request(
         request["action_kind"] = action_kind
     if continue_to_model:
         request["continue_to_model"] = True
+    desktop_execution_policy = action.get("desktop_execution_policy")
+    if isinstance(desktop_execution_policy, Mapping) and desktop_execution_policy:
+        request["desktop_execution_policy"] = dict(desktop_execution_policy)
     for key, value in _tool_call_trace_fields(tool_call).items():
         if value:
             request[key] = value
@@ -2798,6 +2801,9 @@ def _tool_recovery_action_metadata(
     recommended_tools = _string_list_from_any(action.get("recommended_tools"))
     if recommended_tools:
         metadata["recommended_tools"] = recommended_tools
+    desktop_execution_policy = action.get("desktop_execution_policy")
+    if isinstance(desktop_execution_policy, Mapping) and desktop_execution_policy:
+        metadata["desktop_execution_policy"] = dict(desktop_execution_policy)
     required_retry_fields = _string_list_from_any(action.get("required_retry_fields"))
     if required_retry_fields:
         metadata["required_retry_fields"] = required_retry_fields

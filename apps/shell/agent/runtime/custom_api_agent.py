@@ -6008,6 +6008,7 @@ def _recovery_actions(result: dict[str, Any]) -> list[dict[str, Any]]:
             "recovery_retry_input_schema",
             "followup_input",
             "recovery_followup_input",
+            "desktop_execution_policy",
         ):
             value = raw_action.get(dict_key)
             if isinstance(value, dict):
@@ -17672,6 +17673,9 @@ def _auto_replan_runtime_recovery_action_requests(
                 request["permission_target"] = permission_target
             if bool(action.get("approval_required")):
                 request["approval_required"] = True
+            desktop_execution_policy = action.get("desktop_execution_policy")
+            if isinstance(desktop_execution_policy, Mapping) and desktop_execution_policy:
+                request["desktop_execution_policy"] = dict(desktop_execution_policy)
             action_id = str(action.get("action_id") or action.get("id") or "").strip()
             if action_id:
                 request["action_id"] = action_id

@@ -336,11 +336,119 @@ def _desktop_execution_policy_skip_result(
             "desktop.active_window",
             "desktop.ui_elements",
         ],
+        "recovery_actions": _desktop_execution_policy_recovery_actions(
+            tool_name,
+            tool_request,
+            policy=policy,
+            policy_mode=policy_mode,
+            execution_mode=execution_payload,
+        ),
         "hint": (
             "Switch the run to supervised_live, continue in Agent Studio, or let the "
             "user perform the foreground step manually."
         ),
     }
+
+
+def _desktop_execution_policy_recovery_actions(
+    tool_name: str,
+    tool_request: Mapping[str, Any],
+    *,
+    policy: Mapping[str, Any],
+    policy_mode: str,
+    execution_mode: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    raw_input = tool_request.get("input")
+    tool_input = dict(raw_input) if isinstance(raw_input, Mapping) else {}
+    action_target = tool_request.get("action_target")
+    observation_evidence = tool_request.get("observation_evidence")
+    observation_retry = tool_request.get("observation_retry")
+    supervised_policy = {
+        "mode": "supervised_live",
+        "allow_live_foreground": True,
+        "source": "desktop_execution_policy_recovery",
+        "reason": "User selected an Agent Studio supervised live retry.",
+    }
+    manual_metadata = {
+        "runtime_replan_auto_start_eligible": False,
+        "runtime_replan_auto_start_reason": "desktop_execution_policy_requires_supervision",
+        "runtime_replan_auto_start_blockers": [
+            "desktop_execution_policy",
+            *(
+                ["keyboard_mouse_capture"]
+                if bool(execution_mode.get("keyboard_mouse_capture"))
+                else []
+            ),
+            *(
+                ["foreground_control"]
+                if bool(execution_mode.get("foreground_control"))
+                else []
+            ),
+        ],
+        "desktop_execution_policy": supervised_policy,
+        "blocked_desktop_execution_policy": dict(policy),
+        "blocked_desktop_execution_policy_mode": policy_mode,
+        "desktop_execution_mode": dict(execution_mode),
+    }
+    actions: list[dict[str, Any]] = [
+        {
+            "label": "Inspect active desktop state",
+            "tool": "desktop.active_window",
+            "input": {},
+            "permission_target": "desktop_observation",
+            "risk_level": "low",
+            "planning_reason": "desktop_execution_policy_observation_recovery",
+            "recovery_action_kind": "observe_desktop_state",
+            "metadata": {
+                "runtime_replan_auto_start_eligible": True,
+                "desktop_execution_policy": dict(policy),
+                "blocked_tool": tool_name,
+            },
+        },
+        {
+            "label": "Inspect visible desktop controls",
+            "tool": "desktop.ui_elements",
+            "input": {},
+            "permission_target": "desktop_observation",
+            "risk_level": "low",
+            "planning_reason": "desktop_execution_policy_observation_recovery",
+            "recovery_action_kind": "observe_desktop_controls",
+            "metadata": {
+                "runtime_replan_auto_start_eligible": True,
+                "desktop_execution_policy": dict(policy),
+                "blocked_tool": tool_name,
+            },
+        },
+        {
+            "label": "Continue in Agent Studio supervised live",
+            "tool": tool_name,
+            "input": tool_input,
+            "permission_target": "desktop_foreground_execution",
+            "risk_level": _desktop_execution_policy_recovery_risk(execution_mode),
+            "approval_required": True,
+            "planning_reason": "desktop_execution_policy_supervised_live_recovery",
+            "recovery_action_kind": "supervised_live_retry",
+            "desktop_execution_policy": supervised_policy,
+            "metadata": manual_metadata,
+        },
+    ]
+    if isinstance(action_target, Mapping) and action_target:
+        actions[-1]["action_target"] = dict(action_target)
+    if isinstance(observation_evidence, Mapping) and observation_evidence:
+        actions[-1]["observation_evidence"] = dict(observation_evidence)
+    if isinstance(observation_retry, Mapping) and observation_retry:
+        actions[-1]["observation_retry"] = dict(observation_retry)
+    return actions
+
+
+def _desktop_execution_policy_recovery_risk(
+    execution_mode: Mapping[str, Any],
+) -> str:
+    if bool(execution_mode.get("keyboard_mouse_capture")):
+        return "high"
+    if bool(execution_mode.get("foreground_control")):
+        return "medium"
+    return "low"
 
 
 def _desktop_execution_policy_blocks_input_tool(

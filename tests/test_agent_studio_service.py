@@ -699,6 +699,11 @@ class _ReplanRecoveryActionPort(_FakeStudioPort):
                         "risk_level": "low",
                         "recovery_retry_tool": "desktop.open_app",
                         "recovery_retry_input": {"app_name": "Music"},
+                        "desktop_execution_policy": {
+                            "mode": "supervised_live",
+                            "allow_live_foreground": True,
+                            "source": "agent_studio_tool_recovery",
+                        },
                     }
                 ],
             },
@@ -1952,6 +1957,7 @@ def test_agent_studio_service_starts_tool_recovery_action_direct_run() -> None:
     assert request["metadata"]["desktop_permission_recovery"] is True
     assert request["metadata"]["recovery_tool"] == "desktop.list_apps"
     assert request["metadata"]["tool_recovery_action_id"] == "tool-action-1"
+    assert request["metadata"]["desktop_execution_policy"]["mode"] == "supervised_live"
     assert request["metadata"]["source_run_id"] == "run-1"
     assert request["metadata"]["source_tool_call_id"] == "tool-call-1"
     direct_request = request["direct_tool_requests"][0]
@@ -1959,6 +1965,7 @@ def test_agent_studio_service_starts_tool_recovery_action_direct_run() -> None:
     assert direct_request["input"] == {"query": "Apple Music"}
     assert direct_request["source"] == "agent_studio_tool_recovery"
     assert direct_request["tool_call_id"] == "tool-call-1"
+    assert direct_request["desktop_execution_policy"]["mode"] == "supervised_live"
     assert direct_request["continue_to_model"] is True
 
 
