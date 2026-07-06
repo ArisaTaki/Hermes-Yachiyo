@@ -379,7 +379,7 @@ async function runLauncherRecoveryAction(
     }),
     task,
   });
-  if (result.mode === 'replan') await refresh();
+  if (result.mode === 'replan' || result.mode === 'desktop_provider_session') await refresh();
   return result.task;
 }
 

@@ -1,4 +1,11 @@
 import {
+  assertRuntimeRecoveryActionApprovalReady,
+  desktopProviderSessionRecoveryStatusMessage,
+  desktopProviderSessionStartRequestFromAction,
+  runtimeRecoveryActionIsDesktopProviderSessionStart,
+  type DesktopProviderSessionSnapshot,
+} from '../runtime-shared/desktopProviderSessionRecovery';
+import {
   runtimeToolRecoveryActionsFromRecords,
   runtimeToolRecoveryActionRunStartRequest,
   runtimeToolRecoveryActionTaskStart,
@@ -7,6 +14,7 @@ import {
   type RuntimeToolRecoveryActionTaskStart,
 } from '../runtime-shared/toolRecoveryActions';
 import {
+  startYachiyoDesktopProviderSession,
   startYachiyoTaskReplanRecoveryAction,
   type YachiyoTaskNextReplanContinuationRequest,
 } from './api';
@@ -22,9 +30,11 @@ export type YachiyoTaskReplanRecoveryActionItem = {
 
 export type YachiyoTaskRecoveryActionStartResult = {
   fallbackResult?: unknown;
-  mode: 'none' | 'replan' | 'task';
+  mode: 'desktop_provider_session' | 'none' | 'replan' | 'task';
   prompt: string;
+  providerSession?: DesktopProviderSessionSnapshot;
   replanAttempted: boolean;
+  statusMessage?: string;
   task: AgentTaskSnapshot | null;
   title: string;
 };
@@ -148,6 +158,21 @@ export async function startYachiyoTaskRecoveryAction({
     source_task_title: task.title || '',
     ...metadata,
   };
+  if (runtimeRecoveryActionIsDesktopProviderSessionStart(action)) {
+    assertRuntimeRecoveryActionApprovalReady(action);
+    const providerSession = await startYachiyoDesktopProviderSession(
+      desktopProviderSessionStartRequestFromAction(action),
+    );
+    return {
+      mode: 'desktop_provider_session',
+      prompt: action.prompt || action.label || action.tool,
+      providerSession,
+      replanAttempted: false,
+      statusMessage: desktopProviderSessionRecoveryStatusMessage(providerSession),
+      task: null,
+      title: action.label || action.prompt || action.tool,
+    };
+  }
   const fallbackStart = runtimeToolRecoveryActionTaskStart(action, sourceMetadata);
   const prompt = fallbackStart.prompt;
   if (!prompt) {

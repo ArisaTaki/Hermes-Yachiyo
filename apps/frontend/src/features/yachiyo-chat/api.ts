@@ -34,6 +34,21 @@ export type LegacyChatRunnableResultSnapshot = {
   error: string;
 };
 
+export type YachiyoDesktopProviderSessionRequest = {
+  host?: string;
+  port?: number;
+  provider_id?: string;
+  tools?: string[];
+};
+
+export type YachiyoDesktopProviderSessionSnapshot = {
+  ok?: boolean;
+  status?: string;
+  running?: boolean;
+  started?: boolean;
+  provider_id?: string;
+};
+
 export type SendLegacyChatMessageRequest = {
   text: string;
   attachments: PendingAttachment[];
@@ -60,6 +75,15 @@ type UpdateChatGroupSessionRequest = ChatGroupSessionRequest & {
 
 export async function getYachiyoReadiness(): Promise<YachiyoReadinessSnapshot> {
   return apiGet('/yachiyo/readiness');
+}
+
+export async function startYachiyoDesktopProviderSession(
+  request: YachiyoDesktopProviderSessionRequest = {},
+): Promise<YachiyoDesktopProviderSessionSnapshot> {
+  return apiPost<YachiyoDesktopProviderSessionSnapshot>(
+    '/yachiyo/studio/tools/desktop-provider/session/start',
+    request,
+  );
 }
 
 export async function sendLegacyChatMessage(

@@ -59,6 +59,12 @@ import { useWorkflowRunReadiness } from '../features/agent-studio/hooks/useWorkf
 import { useWorkflowSaveActions } from '../features/agent-studio/hooks/useWorkflowSaveActions';
 import { useWorkflowCanvasActions } from '../features/agent-studio/hooks/useWorkflowCanvasActions';
 import {
+  assertRuntimeRecoveryActionApprovalReady,
+  desktopProviderSessionRecoveryStatusMessage,
+  desktopProviderSessionStartRequestFromAction,
+  runtimeRecoveryActionIsDesktopProviderSessionStart,
+} from '../features/runtime-shared/desktopProviderSessionRecovery';
+import {
   runtimeToolRecoveryActionRunStartRequest,
   runtimeToolRecoveryActionTaskStart,
   runtimeToolRecoveryActionToolRunStartRequest,
@@ -75,8 +81,6 @@ import {
   startYachiyoRunReplanRecoveryAction,
   startYachiyoRunToolRecoveryAction,
   startYachiyoStudioDesktopProviderSession,
-  type YachiyoStudioDesktopProviderSessionRequest,
-  type YachiyoStudioDesktopProviderSessionSnapshot,
 } from '../features/yachiyo-studio/api';
 import type {
   PlannerOrchestrationStartSnapshot,
@@ -100,83 +104,6 @@ function plannerOrchestrationStatusMessage(result: PlannerOrchestrationStartSnap
     return `已从 Runtime Planner 启动 ${target}。`;
   }
   return result.message || 'Runtime Planner 已返回 Studio 编排 handoff。';
-}
-
-function studioRecord(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
-  return value as Record<string, unknown>;
-}
-
-function studioString(value: unknown): string {
-  return String(value || '').trim();
-}
-
-function studioStringList(value: unknown): string[] {
-  if (Array.isArray(value)) {
-    return Array.from(new Set(value.map((item) => studioString(item)).filter(Boolean)));
-  }
-  const text = studioString(value);
-  return text ? [text] : [];
-}
-
-function studioNumber(value: unknown): number | undefined {
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : undefined;
-}
-
-function studioActionMetadata(action: RuntimeToolRecoveryAction): Record<string, unknown> {
-  return studioRecord(action.metadata);
-}
-
-function isDesktopProviderSessionStartAction(action: RuntimeToolRecoveryAction): boolean {
-  const input = studioRecord(action.input);
-  const metadata = studioActionMetadata(action);
-  const controlAction = studioString(metadata.control_action || input.control_action);
-  const runtimeRetrySource = studioString(metadata.runtime_retry_source || input.runtime_retry_source);
-  const apiRoute = studioString(metadata.api_route || input.api_route);
-  return action.tool === 'desktop.provider_session.start'
-    || controlAction === 'desktop_provider_session.start'
-    || runtimeRetrySource === 'desktop_provider_session'
-    || apiRoute === '/yachiyo/studio/tools/desktop-provider/session/start';
-}
-
-function assertRecoveryActionApprovalReady(action: RuntimeToolRecoveryAction): void {
-  if (action.approval_required !== true) return;
-  const approvalStatus = studioString(action.approval_status);
-  if (approvalStatus === 'approved') return;
-  const detail = approvalStatus ? `当前状态：${approvalStatus}` : '当前状态：pending';
-  throw new Error(`恢复动作需要先通过审批，${detail}`);
-}
-
-function desktopProviderSessionStartRequest(
-  action: RuntimeToolRecoveryAction,
-): YachiyoStudioDesktopProviderSessionRequest {
-  const input = studioRecord(action.input);
-  const metadata = studioActionMetadata(action);
-  const sandboxProvider = studioRecord(action.sandbox_provider);
-  const providerId = studioString(input.provider_id || metadata.provider_id || sandboxProvider.provider_id);
-  const host = studioString(input.host || metadata.host || sandboxProvider.host);
-  const port = studioNumber(input.port || metadata.port || sandboxProvider.port);
-  const tools = studioStringList(input.tools)
-    .concat(studioStringList(input.tool_names))
-    .concat(studioStringList(metadata.tools))
-    .concat(studioStringList(metadata.tool_names));
-  return {
-    ...(host ? { host } : {}),
-    ...(port !== undefined ? { port } : {}),
-    ...(providerId ? { provider_id: providerId } : {}),
-    ...(tools.length ? { tools: Array.from(new Set(tools)) } : {}),
-  };
-}
-
-function desktopProviderSessionRecoveryStatusMessage(
-  session: YachiyoStudioDesktopProviderSessionSnapshot,
-): string {
-  const providerId = session.provider_id || 'local-isolated-desktop';
-  if (session.running || session.started) return `已启动隔离桌面 Provider：${providerId}`;
-  if (session.status) return `已请求启动隔离桌面 Provider：${session.status}`;
-  return `已请求启动隔离桌面 Provider：${providerId}`;
 }
 
 type StudioAutoReplanContinuation = {
@@ -457,10 +384,10 @@ export function AgentStudioView() {
     requestId: string,
     action: RuntimeToolRecoveryAction,
   ) => {
-    if (isDesktopProviderSessionStartAction(action)) {
-      assertRecoveryActionApprovalReady(action);
+    if (runtimeRecoveryActionIsDesktopProviderSessionStart(action)) {
+      assertRuntimeRecoveryActionApprovalReady(action);
       const session = await startYachiyoStudioDesktopProviderSession(
-        desktopProviderSessionStartRequest(action),
+        desktopProviderSessionStartRequestFromAction(action),
       );
       return {
         selectedRunId: runId,
@@ -483,10 +410,10 @@ export function AgentStudioView() {
     requestId: string,
     action: RuntimeToolRecoveryAction,
   ) => {
-    if (isDesktopProviderSessionStartAction(action)) {
-      assertRecoveryActionApprovalReady(action);
+    if (runtimeRecoveryActionIsDesktopProviderSessionStart(action)) {
+      assertRuntimeRecoveryActionApprovalReady(action);
       const session = await startYachiyoStudioDesktopProviderSession(
-        desktopProviderSessionStartRequest(action),
+        desktopProviderSessionStartRequestFromAction(action),
       );
       return {
         statusMessage: desktopProviderSessionRecoveryStatusMessage(session),
