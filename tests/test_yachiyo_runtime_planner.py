@@ -3875,6 +3875,9 @@ def test_runtime_planner_cleans_app_search_action_suffixes() -> None:
     assert _step_by_id(decision, "type-app-search-query").input_preview == {
         "text": "Export preset"
     }
+    assert _step_by_id(decision, "focus-app-search-field").depends_on == [
+        "focus-opened-app"
+    ]
     assert _step_by_id(decision, "submit-app-search").tool_name == "desktop.search_submit"
 
     english = RuntimePlanner().decision(
@@ -3889,6 +3892,9 @@ def test_runtime_planner_cleans_app_search_action_suffixes() -> None:
     assert _step_by_id(english, "type-app-search-query").input_preview == {
         "text": "project plan"
     }
+    assert _step_by_id(english, "focus-app-search-field").depends_on == [
+        "focus-opened-app"
+    ]
 
 
 def test_runtime_planner_clicks_selected_discovered_app_search_results() -> None:

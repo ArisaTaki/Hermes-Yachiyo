@@ -4849,6 +4849,13 @@ class RuntimePlanner:
                 else _app_search_prepare_mode(intent.user_goal, mode)
             )
             app_search_prepare_step_id = selected_discovered_app_step_id or "open-or-focus-app"
+            if not selected_discovered_app_step_id:
+                if any(step.step_id == "focus-opened-app" for step in steps):
+                    app_search_prepare_step_id = "focus-opened-app"
+                elif not any(step.step_id == "open-or-focus-app" for step in steps):
+                    app_search_prepare_step_id = (
+                        desktop_discovery_step_id or "discover-desktop-state"
+                    )
             if app_search_context_source == "selection":
                 if not context_shortcut_tool:
                     return steps
