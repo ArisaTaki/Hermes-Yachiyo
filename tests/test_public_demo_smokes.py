@@ -45,6 +45,8 @@ def test_public_demo_smokes_default_runs_source_flows_only(tmp_path, monkeypatch
     assert summary["passed_required_flow_count"] == 13
     assert summary["publish_candidate_flow_count"] == 13
     assert summary["passed_publish_candidate_flow_count"] == 13
+    assert summary["desktop_executor_flow_count"] == 7
+    assert summary["passed_desktop_executor_flow_count"] == 7
     assert summary["publish_candidate_progress"] == {
         "baseline_id": "publish_candidate",
         "baseline_label": "Publish candidate readiness without foreground takeover",
@@ -97,12 +99,37 @@ def test_public_demo_smokes_default_runs_source_flows_only(tmp_path, monkeypatch
             "Use publish_candidate to track the default non-invasive smoke path."
         ),
     }
+    assert summary["desktop_executor_progress"] == {
+        "baseline_id": "desktop_executor",
+        "baseline_label": "Desktop executor safe runtime readiness",
+        "denominator": "desktop_executor_flow_count",
+        "status_basis": "executed_smoke_results",
+        "passed_count": 7,
+        "total_count": 7,
+        "remaining_count": 0,
+        "percent": 100.0,
+        "selected_count": 7,
+        "selected_passed_count": 7,
+        "selected_remaining_count": 0,
+        "missing_required_flow_ids": [],
+        "opt_in_gap_ids": [],
+        "note": (
+            "This track proves the default desktop executor path: planner, "
+            "Chat/Agent entrypoint execution, real read-only discovery, isolated "
+            "keyboard/mouse interaction, provider routing, and approval boundaries."
+        ),
+    }
     assert summary["release_tracks"]["publish_candidate"] == summary[
         "publish_candidate_progress"
     ]
+    assert summary["release_tracks"]["desktop_executor"] == summary[
+        "desktop_executor_progress"
+    ]
     assert summary["release_tracks"]["full_public_demo"] == summary["release_progress"]
     assert summary["missing_publish_candidate_flow_ids"] == []
+    assert summary["missing_desktop_executor_flow_ids"] == []
     assert summary["publish_candidate_blockers"] == []
+    assert summary["desktop_executor_blockers"] == []
     assert summary["missing_required_flow_ids"] == [
         "real_desktop_app_open",
         "real_desktop_ui_inspection",
@@ -730,6 +757,7 @@ def test_public_demo_smokes_cli_writes_reports(tmp_path, monkeypatch, capsys):
     assert "# Oha-Yachiyo Public Demo Smoke Summary" in markdown
     assert "Release level: publish_candidate_ready" in markdown
     assert "Publish candidate baseline: publish_candidate (13/13 passed, 0 remaining)" in markdown
+    assert "Desktop executor baseline: desktop_executor (7/7 passed, 0 remaining)" in markdown
     assert "Full demo baseline: full_public_demo (13/19 passed, 6 remaining)" in markdown
     assert "## Release Blockers" in markdown
     assert "`data_analysis_artifact`" in markdown

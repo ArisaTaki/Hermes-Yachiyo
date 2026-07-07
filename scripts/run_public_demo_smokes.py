@@ -19,7 +19,17 @@ if str(ROOT) not in sys.path:
 from packages.security import redact_log_text  # noqa: E402
 
 PUBLISH_CANDIDATE_TRACK_ID = "publish_candidate"
+DESKTOP_EXECUTOR_TRACK_ID = "desktop_executor"
 FULL_PUBLIC_DEMO_TRACK_ID = "full_public_demo"
+DESKTOP_EXECUTOR_FLOW_IDS = (
+    "desktop_planner_discovery",
+    "agent_entrypoint_desktop_execution",
+    "real_desktop_discovery",
+    "isolated_desktop_provider",
+    "native_provider_contract",
+    "approval_resume",
+    "yachiyo_route_approval",
+)
 
 
 @dataclass(frozen=True)
@@ -135,7 +145,7 @@ def demo_flows(
         ),
         DemoFlow(
             id="isolated_desktop_provider",
-            label="Isolated desktop provider keyboard/mouse routing",
+            label="Isolated desktop provider keyboard/mouse interaction routing",
             category="sandbox",
             command=(
                 sys.executable,
@@ -550,6 +560,17 @@ def _release_assessment(
     publish_candidate_passed_count = len(publish_candidate_flows) - len(
         publish_candidate_incomplete
     )
+    desktop_executor_flows = [
+        flow for flow in flows if str(flow.get("id") or "") in DESKTOP_EXECUTOR_FLOW_IDS
+    ]
+    desktop_executor_incomplete = [
+        flow
+        for flow in desktop_executor_flows
+        if str(flow.get("status") or "") != "passed"
+    ]
+    desktop_executor_passed_count = len(desktop_executor_flows) - len(
+        desktop_executor_incomplete
+    )
     passed_count = len(flows) - len(incomplete)
     if not flows:
         release_level = "blocked"
@@ -575,6 +596,19 @@ def _release_assessment(
             "require live provider credentials, or start UI harnesses."
         ),
     )
+    desktop_executor_progress = _release_progress(
+        desktop_executor_flows,
+        passed_count=desktop_executor_passed_count,
+        plan_only=plan_only,
+        baseline_id=DESKTOP_EXECUTOR_TRACK_ID,
+        baseline_label="Desktop executor safe runtime readiness",
+        denominator="desktop_executor_flow_count",
+        note=(
+            "This track proves the default desktop executor path: planner, "
+            "Chat/Agent entrypoint execution, real read-only discovery, isolated "
+            "keyboard/mouse interaction, provider routing, and approval boundaries."
+        ),
+    )
     full_public_demo_progress = _release_progress(
         flows,
         passed_count=passed_count,
@@ -593,10 +627,14 @@ def _release_assessment(
         "passed_required_flow_count": passed_count,
         "publish_candidate_flow_count": len(publish_candidate_flows),
         "passed_publish_candidate_flow_count": publish_candidate_passed_count,
+        "desktop_executor_flow_count": len(desktop_executor_flows),
+        "passed_desktop_executor_flow_count": desktop_executor_passed_count,
         "release_progress": full_public_demo_progress,
         "publish_candidate_progress": publish_candidate_progress,
+        "desktop_executor_progress": desktop_executor_progress,
         "release_tracks": {
             PUBLISH_CANDIDATE_TRACK_ID: publish_candidate_progress,
+            DESKTOP_EXECUTOR_TRACK_ID: desktop_executor_progress,
             FULL_PUBLIC_DEMO_TRACK_ID: full_public_demo_progress,
         },
         "missing_required_flow_ids": [
@@ -607,12 +645,22 @@ def _release_assessment(
             for flow in publish_candidate_incomplete
             if flow.get("id")
         ],
+        "missing_desktop_executor_flow_ids": [
+            str(flow.get("id") or "")
+            for flow in desktop_executor_incomplete
+            if flow.get("id")
+        ],
         "release_blockers": [
             _release_blocker(flow) for flow in incomplete if isinstance(flow, Mapping)
         ],
         "publish_candidate_blockers": [
             _release_blocker(flow)
             for flow in publish_candidate_incomplete
+            if isinstance(flow, Mapping)
+        ],
+        "desktop_executor_blockers": [
+            _release_blocker(flow)
+            for flow in desktop_executor_incomplete
             if isinstance(flow, Mapping)
         ],
         "full_demo_command": (
@@ -720,6 +768,7 @@ def _string_list(value: Any) -> list[str]:
 def render_markdown(summary: Mapping[str, Any]) -> str:
     release_progress = _dict(summary.get("release_progress"))
     publish_candidate_progress = _dict(summary.get("publish_candidate_progress"))
+    desktop_executor_progress = _dict(summary.get("desktop_executor_progress"))
     lines = [
         "# Oha-Yachiyo Public Demo Smoke Summary",
         "",
@@ -732,6 +781,11 @@ def render_markdown(summary: Mapping[str, Any]) -> str:
             f"{summary.get('publish_candidate_flow_count')} passed"
         ),
         (
+            "Desktop executor flows: "
+            f"{summary.get('passed_desktop_executor_flow_count')}/"
+            f"{summary.get('desktop_executor_flow_count')} passed"
+        ),
+        (
             "Required demo flows: "
             f"{summary.get('passed_required_flow_count')}/{summary.get('required_flow_count')} passed"
         ),
@@ -741,6 +795,13 @@ def render_markdown(summary: Mapping[str, Any]) -> str:
             f"({publish_candidate_progress.get('passed_count', summary.get('passed_publish_candidate_flow_count'))}/"
             f"{publish_candidate_progress.get('total_count', summary.get('publish_candidate_flow_count'))} passed, "
             f"{publish_candidate_progress.get('remaining_count', '?')} remaining)"
+        ),
+        (
+            "Desktop executor baseline: "
+            f"{desktop_executor_progress.get('baseline_id') or DESKTOP_EXECUTOR_TRACK_ID} "
+            f"({desktop_executor_progress.get('passed_count', summary.get('passed_desktop_executor_flow_count'))}/"
+            f"{desktop_executor_progress.get('total_count', summary.get('desktop_executor_flow_count'))} passed, "
+            f"{desktop_executor_progress.get('remaining_count', '?')} remaining)"
         ),
         (
             "Full demo baseline: "
