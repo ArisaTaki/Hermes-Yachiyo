@@ -8,6 +8,7 @@ import json
 import platform
 import re
 import sys
+import threading
 import time
 from pathlib import Path
 from typing import Any, Sequence
@@ -16,6 +17,14 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from apps.shell.agent.runtime.desktop_execution_providers import (
+    desktop_execution_provider_registry_from_env,
+    desktop_execution_provider_status_from_env,
+)
+from apps.shell.agent.runtime.isolated_desktop_provider import (
+    IsolatedDesktopProvider,
+    build_isolated_desktop_provider_server,
+)
 from apps.shell.agent.tools import desktop as desktop_tools
 from scripts.smoke_real_desktop_app_open import (
     DEFAULT_APP_NAME,
@@ -52,6 +61,18 @@ TOOL_CHAIN = [
     "desktop.active_window",
     "desktop.click_ui_element",
     "desktop.ui_elements",
+    "app.status",
+]
+ISOLATED_INTERACTION_TOOL_CHAIN = [
+    "desktop.list_apps",
+    "app.status",
+    "app.open",
+    "app.focus",
+    "desktop.read_ui",
+    "desktop.click_ui_element",
+    "desktop.safe_type_text",
+    "desktop.safe_shortcut",
+    "desktop.verify",
     "app.status",
 ]
 _PRIMARY_CLICK_TARGET_HINTS = (
@@ -227,23 +248,29 @@ def _interaction_case(
     app_name: str,
     checks: dict[str, Any],
     stage: str | None = None,
+    tool_chain: Sequence[str] | None = None,
 ) -> dict[str, Any]:
     return _desktop_execution_case(
         "type_click_verify_control",
         app_name=app_name,
-        tool_chain=TOOL_CHAIN,
+        tool_chain=list(tool_chain or TOOL_CHAIN),
         checks=checks,
         stage=stage,
     )
 
 
-def _interaction_planner_alignment(app_name: str) -> dict[str, Any]:
+def _interaction_planner_alignment(
+    app_name: str,
+    *,
+    tool_chain: Sequence[str] | None = None,
+    mutates_desktop: bool = True,
+) -> dict[str, Any]:
     return _planner_alignment(
         intent_category="desktop_type_click_verify",
         app_name=app_name,
         capabilities=INTERACTION_CAPABILITIES,
-        tool_chain=TOOL_CHAIN,
-        mutates_desktop=True,
+        tool_chain=list(tool_chain or TOOL_CHAIN),
+        mutates_desktop=mutates_desktop,
     )
 
 
@@ -279,10 +306,17 @@ def run_smoke(
     input_text: str = DEFAULT_INPUT_TEXT,
     cleanup: bool = True,
     allow_existing_app: bool = False,
+    provider_mode: str = "real",
 ) -> dict[str, Any]:
+    clean_provider_mode = str(provider_mode or "real").strip().lower()
     current_platform = platform.system()
     clean_app_name = str(app_name or "").strip() or DEFAULT_APP_NAME
     clean_input = str(input_text or "").strip() or DEFAULT_INPUT_TEXT
+    if clean_provider_mode == "isolated":
+        return _run_isolated_provider_smoke(
+            app_name=clean_app_name,
+            input_text=clean_input,
+        )
     if current_platform != "Darwin":
         return {
             "ok": True,
@@ -290,6 +324,7 @@ def run_smoke(
             "skipped": True,
             "platform": current_platform,
             "app_name": clean_app_name,
+            "provider_mode": clean_provider_mode,
             "tool_chain": TOOL_CHAIN,
             "reason": "real desktop interaction smoke only runs on macOS",
         }
@@ -687,6 +722,7 @@ def run_smoke(
         "app_name": clean_app_name,
         "opened_app_name": opened_app_name,
         "allow_existing_app": bool(allow_existing_app),
+        "provider_mode": clean_provider_mode,
         "tool_chain": TOOL_CHAIN,
         "case_count": 1,
         "cases": [
@@ -735,11 +771,295 @@ def run_smoke(
     }
 
 
+def _run_isolated_provider_smoke(
+    *,
+    app_name: str,
+    input_text: str,
+) -> dict[str, Any]:
+    provider = IsolatedDesktopProvider(
+        provider_id="smoke-isolated-interaction",
+        supported_tools=ISOLATED_INTERACTION_TOOL_CHAIN,
+    )
+    server = build_isolated_desktop_provider_server(
+        host="127.0.0.1",
+        port=0,
+        provider=provider,
+        quiet=True,
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        base_url = f"http://127.0.0.1:{server.server_address[1]}"
+        env = {
+            "OHA_YACHIYO_DESKTOP_PROVIDER_URL": base_url,
+            "OHA_YACHIYO_DESKTOP_PROVIDER_ID": provider.provider_id,
+            "OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS": ",".join(
+                ISOLATED_INTERACTION_TOOL_CHAIN
+            ),
+            "OHA_YACHIYO_DESKTOP_PROVIDER_TIMEOUT_SECONDS": "10",
+        }
+        status = desktop_execution_provider_status_from_env(env, probe_health=True)
+        registry = desktop_execution_provider_registry_from_env(env)
+        discovery = _execute_isolated_tool(
+            registry,
+            provider.provider_id,
+            "desktop.list_apps",
+            {"query": app_name, "limit": 10},
+        )
+        before_status = _execute_isolated_tool(
+            registry,
+            provider.provider_id,
+            "app.status",
+            {"app_name": app_name},
+        )
+        open_result = _execute_isolated_tool(
+            registry,
+            provider.provider_id,
+            "app.open",
+            {
+                "app_name": "<selected app from desktop.list_apps>",
+                "selection_source": "desktop.list_apps",
+                "query": app_name,
+            },
+        )
+        focus_result = _execute_isolated_tool(
+            registry,
+            provider.provider_id,
+            "app.focus",
+            {"app_name": app_name},
+        )
+        before_ui = _execute_isolated_tool(
+            registry,
+            provider.provider_id,
+            "desktop.read_ui",
+            {"app_name": app_name, "limit": 80},
+        )
+        click_result = _execute_isolated_tool(
+            registry,
+            provider.provider_id,
+            "desktop.click_ui_element",
+            {
+                "target": "Search",
+                "role_filter": "text_field",
+                "expected_app_name": app_name,
+            },
+        )
+        type_result = _execute_isolated_tool(
+            registry,
+            provider.provider_id,
+            "desktop.safe_type_text",
+            {"text": input_text},
+        )
+        shortcut_result = _execute_isolated_tool(
+            registry,
+            provider.provider_id,
+            "desktop.safe_shortcut",
+            {"action": "submit"},
+        )
+        verify_result = _execute_isolated_tool(
+            registry,
+            provider.provider_id,
+            "desktop.verify",
+            {
+                "app_name": app_name,
+                "target": "Search",
+                "expected_text": input_text,
+            },
+        )
+        after_status = _execute_isolated_tool(
+            registry,
+            provider.provider_id,
+            "app.status",
+            {"app_name": app_name},
+        )
+        tool_results = [
+            discovery,
+            before_status,
+            open_result,
+            focus_result,
+            before_ui,
+            click_result,
+            type_result,
+            shortcut_result,
+            verify_result,
+            after_status,
+        ]
+        discovery_matches = _data(discovery).get("matches")
+        before_ui_data = _data(before_ui)
+        click_data = _data(click_result)
+        type_data = _data(type_result)
+        shortcut_data = _data(shortcut_result)
+        verify_data = _data(verify_result)
+        after_status_data = _data(after_status)
+        checks = {
+            "provider_available": bool(status.get("available")),
+            "provider_session_isolated": status.get("desktop_session_isolated") is True,
+            "foreground_takeover_not_required": (
+                status.get("foreground_takeover_required") is False
+            ),
+            "keyboard_mouse_supported": (
+                status.get("keyboard_mouse_capture_supported") is True
+            ),
+            "all_tools_routed": all(
+                isinstance(item, dict)
+                and item.get("desktop_execution_provider_routed") is True
+                for item in tool_results
+            ),
+            "all_tool_results_ok": all(
+                isinstance(item, dict) and item.get("ok") is not False
+                for item in tool_results
+            ),
+            "all_tool_results_isolated": all(
+                isinstance(item, dict)
+                and item.get("isolated_desktop_provider", {}).get(
+                    "desktop_session_isolated"
+                )
+                is True
+                for item in tool_results
+            ),
+            "discovered_app": isinstance(discovery_matches, list)
+            and bool(discovery_matches),
+            "before_status_checked": before_status.get("ok") is True,
+            "open_ok": open_result.get("ok") is True,
+            "focus_verified": _data(focus_result).get("focused") is True,
+            "read_ui_returned_elements": bool(before_ui_data.get("elements")),
+            "click_target_recorded": (
+                click_data.get("isolated_event", {}).get("target") == "Search"
+            ),
+            "type_text_recorded": (
+                type_data.get("isolated_event", {}).get("text_buffer") == input_text
+            ),
+            "submit_recorded": (
+                shortcut_data.get("isolated_event", {}).get("tool")
+                == "desktop.safe_shortcut"
+            ),
+            "verify_expected_text": verify_data.get("expected_text_found") is True,
+            "verify_target_focused": verify_data.get("expected_target_focused") is True,
+            "after_status_running": after_status_data.get("running") is True,
+        }
+        return {
+            "ok": all(checks.values()),
+            "mode": "isolated_desktop_interaction_smoke",
+            "skipped": False,
+            "platform": platform.system(),
+            "provider_mode": "isolated",
+            "app_name": app_name,
+            "opened_app_name": app_name,
+            "base_url": base_url,
+            "tool_chain": ISOLATED_INTERACTION_TOOL_CHAIN,
+            "case_count": 1,
+            "cases": [
+                _interaction_case(
+                    app_name=app_name,
+                    checks=checks,
+                    stage="isolated_type_click_verify",
+                    tool_chain=ISOLATED_INTERACTION_TOOL_CHAIN,
+                )
+            ],
+            "planner_alignment": _interaction_planner_alignment(
+                app_name,
+                tool_chain=ISOLATED_INTERACTION_TOOL_CHAIN,
+                mutates_desktop=False,
+            ),
+            "desktop_session_kind": str(status.get("desktop_session_kind") or ""),
+            "desktop_session_isolated": status.get("desktop_session_isolated"),
+            "foreground_takeover_required": status.get("foreground_takeover_required"),
+            "keyboard_mouse_capture_supported": status.get(
+                "keyboard_mouse_capture_supported"
+            ),
+            "supported_tools": status.get("supported_tools") or [],
+            "covered_tools": ISOLATED_INTERACTION_TOOL_CHAIN,
+            "input_text": input_text,
+            "typed_value_visible": True,
+            "click_target": "Search",
+            "sign_target": "Search",
+            "before_values": [str(before_ui_data.get("text_buffer") or "")],
+            "after_values": [str(verify_data.get("text_buffer") or "")],
+            "status": status,
+            "discovery": {"result": discovery, "names": _app_names(discovery)},
+            "before_status": before_status,
+            "open_result": open_result,
+            "focus_result": focus_result,
+            "before_ui": before_ui,
+            "click_result": click_result,
+            "type_result": type_result,
+            "shortcut_result": shortcut_result,
+            "verify_result": verify_result,
+            "after_status": after_status,
+            "tool_results": tool_results,
+            "checks": checks,
+        }
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+def _execute_isolated_tool(
+    registry: Any,
+    provider_id: str,
+    tool_name: str,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    result = registry.execute_if_routed(
+        tool_name,
+        payload,
+        tool_request=_isolated_tool_request(provider_id, tool_name, payload),
+        broker=object(),
+        approved=True,
+    )
+    return dict(result) if isinstance(result, dict) else {"ok": False}
+
+
+def _isolated_tool_request(
+    provider_id: str,
+    tool_name: str,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "tool": tool_name,
+        "input": dict(payload),
+        "desktop_execution_route": {
+            "route_id": f"desktop-route:{tool_name}",
+            "tool_name": tool_name,
+            "requested_mode": "sandbox_preferred",
+            "selected_provider_kind": "sandbox_desktop",
+            "selected_provider_id": provider_id,
+            "status": "sandbox_ready",
+            "can_execute": True,
+            "can_auto_start": True,
+            "sandbox_required": True,
+            "blocking_conditions": [],
+        },
+        "sandbox_provider": {
+            "available": True,
+            "adapter_ready": True,
+            "provider_kind": "sandbox_desktop",
+            "provider_id": provider_id,
+            "status": "available",
+            "supported_tools": list(ISOLATED_INTERACTION_TOOL_CHAIN),
+            "keyboard_mouse_capture_supported": True,
+            "desktop_session_kind": "isolated_desktop",
+            "desktop_session_isolated": True,
+            "foreground_takeover_required": False,
+        },
+    }
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--app-name", default=DEFAULT_APP_NAME)
     parser.add_argument("--input-text", default=DEFAULT_INPUT_TEXT)
     parser.add_argument("--no-cleanup", action="store_true")
+    parser.add_argument(
+        "--provider-mode",
+        choices=("real", "isolated"),
+        default="real",
+        help=(
+            "real uses the foreground macOS desktop; isolated runs the same "
+            "interaction contract through the loopback isolated desktop provider."
+        ),
+    )
     parser.add_argument(
         "--allow-existing-app",
         action="store_true",
@@ -773,6 +1093,7 @@ def _console_summary(evidence: dict[str, Any], report_json: Path) -> dict[str, A
         "app_name",
         "opened_app_name",
         "allow_existing_app",
+        "provider_mode",
         "tool_chain",
         "case_count",
         "stage",
@@ -794,6 +1115,10 @@ def _console_summary(evidence: dict[str, Any], report_json: Path) -> dict[str, A
         "pre_click_active_app",
         "retry_active_app",
         "retry_active_app_matches",
+        "desktop_session_kind",
+        "desktop_session_isolated",
+        "foreground_takeover_required",
+        "keyboard_mouse_capture_supported",
     )
     summary = {
         key: evidence[key]
@@ -820,6 +1145,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         input_text=args.input_text,
         cleanup=not args.no_cleanup,
         allow_existing_app=args.allow_existing_app,
+        provider_mode=args.provider_mode,
     )
     if args.report_json is not None:
         _write_report(args.report_json, evidence)

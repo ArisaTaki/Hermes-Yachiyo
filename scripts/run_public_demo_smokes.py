@@ -26,6 +26,7 @@ DESKTOP_EXECUTOR_FLOW_IDS = (
     "agent_entrypoint_desktop_execution",
     "real_desktop_discovery",
     "isolated_desktop_provider",
+    "isolated_desktop_interaction",
     "native_provider_contract",
     "approval_resume",
     "yachiyo_route_approval",
@@ -154,6 +155,18 @@ def demo_flows(
                 str(tmp_dir / "isolated-desktop-provider.json"),
             ),
             report_json=tmp_dir / "isolated-desktop-provider.json",
+        ),
+        DemoFlow(
+            id="isolated_desktop_interaction",
+            label="Isolated desktop type, click, and verify loop",
+            category="sandbox",
+            command=(
+                sys.executable,
+                "scripts/smoke_isolated_desktop_interaction.py",
+                "--report-json",
+                str(tmp_dir / "isolated-desktop-interaction.json"),
+            ),
+            report_json=tmp_dir / "isolated-desktop-interaction.json",
         ),
         DemoFlow(
             id="native_provider_contract",
