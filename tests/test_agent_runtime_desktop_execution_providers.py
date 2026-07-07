@@ -507,9 +507,19 @@ def test_local_desktop_provider_status_routes_safe_app_activation(monkeypatch) -
     assert route["foreground_takeover_required"] is True
     assert route["provider_execution_required"] is True
     assert route["sandbox_required"] is False
+    assert route["reason"] == (
+        "Foreground desktop action can be routed through the local_desktop "
+        "provider, but that provider may use the user's foreground desktop "
+        "session."
+    )
     assert inspect_route["status"] == "provider_ready"
     assert inspect_route["selected_provider_kind"] == LOCAL_DESKTOP_PROVIDER_KIND
     assert inspect_route["foreground_takeover_required"] is True
+    assert inspect_route["reason"] == (
+        "Read-only desktop discovery can be routed through the local_desktop "
+        "provider. It does not request keyboard or mouse capture, but it "
+        "observes the user's desktop session."
+    )
     assert unsupported_input_route["status"] == "sandbox_keyboard_mouse_provider_required"
     assert unsupported_input_route["blocking_conditions"] == [
         "sandbox_keyboard_mouse_provider_required"

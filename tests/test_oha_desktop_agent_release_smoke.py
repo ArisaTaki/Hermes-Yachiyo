@@ -118,4 +118,50 @@ def test_oha_desktop_agent_release_smoke_cli_writes_report(
     payload = json.loads(output_path.read_text(encoding="utf-8"))
     assert payload["ok"] is True
     assert payload["mode"] == "oha_desktop_agent_release_smoke"
-    assert "oha desktop agent release smoke report:" in capsys.readouterr().err
+    captured = capsys.readouterr()
+    assert "oha desktop agent release smoke report:" in captured.err
+    stdout_payload = json.loads(captured.out)
+    assert stdout_payload == {
+        "ok": True,
+        "mode": "oha_desktop_agent_release_smoke",
+        "section_count": 0,
+        "failed_sections": [],
+        "checks": {"all_sections_passed": True},
+        "sections": [],
+    }
+
+
+def test_oha_desktop_agent_release_smoke_cli_can_print_full_report(
+    tmp_path,
+    monkeypatch,
+    capsys,
+) -> None:
+    output_path = tmp_path / "oha-release-smoke.json"
+
+    monkeypatch.setattr(
+        smoke,
+        "run_smoke",
+        lambda **_kwargs: {
+            "ok": True,
+            "mode": "oha_desktop_agent_release_smoke",
+            "section_count": 1,
+            "failed_sections": [],
+            "checks": {"all_sections_passed": True},
+            "sections": [
+                {
+                    "id": "deepagent_core",
+                    "ok": True,
+                    "mode": "deepagent_core",
+                    "report": {"large": "evidence"},
+                }
+            ],
+        },
+    )
+
+    exit_code = smoke.main(
+        ["--report-json", str(output_path), "--print-full-report"]
+    )
+
+    assert exit_code == 0
+    stdout_payload = json.loads(capsys.readouterr().out)
+    assert stdout_payload["sections"][0]["report"] == {"large": "evidence"}

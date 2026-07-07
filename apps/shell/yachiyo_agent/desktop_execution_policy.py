@@ -418,10 +418,7 @@ def desktop_execution_route_decision(
         sandbox_route = _sandbox_route_decision(route, sandbox_provider, clean_tool)
         return {
             **sandbox_route,
-            "reason": (
-                "Read-only desktop discovery can be routed through the sandbox "
-                "desktop provider without taking over foreground input."
-            ),
+            "reason": _readonly_desktop_provider_route_reason(sandbox_provider),
         }
     if (
         foreground_provider_requested
@@ -470,10 +467,7 @@ def desktop_execution_route_decision(
         sandbox_route = _sandbox_route_decision(route, sandbox_provider, clean_tool)
         return {
             **sandbox_route,
-            "reason": (
-                "Foreground desktop action can be routed through the sandbox "
-                "desktop provider instead of the user's foreground session."
-            ),
+            "reason": _foreground_desktop_provider_route_reason(sandbox_provider),
         }
     if not foreground_required and execution_mode_name != "supervised_live":
         return route
@@ -946,6 +940,42 @@ def _desktop_provider_ready_reason(sandbox_provider: Mapping[str, Any]) -> str:
             "but that provider uses the user's foreground desktop session."
         )
     return f"Desktop action can be routed through the {provider_kind} provider."
+
+
+def _readonly_desktop_provider_route_reason(
+    sandbox_provider: Mapping[str, Any],
+) -> str:
+    if _desktop_provider_ready_status(sandbox_provider) == "sandbox_ready":
+        return (
+            "Read-only desktop discovery can be routed through the sandbox "
+            "desktop provider without taking over foreground input."
+        )
+    provider_kind = str(sandbox_provider.get("provider_kind") or "desktop provider").strip()
+    if _optional_bool_value(sandbox_provider.get("foreground_takeover_required")) is True:
+        return (
+            f"Read-only desktop discovery can be routed through the {provider_kind} "
+            "provider. It does not request keyboard or mouse capture, but it "
+            "observes the user's desktop session."
+        )
+    return f"Read-only desktop discovery can be routed through the {provider_kind} provider."
+
+
+def _foreground_desktop_provider_route_reason(
+    sandbox_provider: Mapping[str, Any],
+) -> str:
+    if _desktop_provider_ready_status(sandbox_provider) == "sandbox_ready":
+        return (
+            "Foreground desktop action can be routed through the sandbox "
+            "desktop provider instead of the user's foreground session."
+        )
+    provider_kind = str(sandbox_provider.get("provider_kind") or "desktop provider").strip()
+    if _optional_bool_value(sandbox_provider.get("foreground_takeover_required")) is True:
+        return (
+            f"Foreground desktop action can be routed through the {provider_kind} "
+            "provider, but that provider may use the user's foreground desktop "
+            "session."
+        )
+    return f"Foreground desktop action can be routed through the {provider_kind} provider."
 
 
 def _sandbox_provider_requires_keyboard_mouse_sandbox(

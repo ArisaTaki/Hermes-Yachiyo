@@ -245,7 +245,7 @@ def demo_flows(
             opt_in_reason="opens a real macOS application",
             release_required=False,
             diagnostic_reason=(
-                "manual foreground diagnostic; isolated_desktop_interaction covers "
+                "optional foreground diagnostic; isolated_desktop_interaction covers "
                 "the non-invasive release path"
             ),
         ),
@@ -264,7 +264,7 @@ def demo_flows(
             opt_in_reason="opens and inspects a real macOS application",
             release_required=False,
             diagnostic_reason=(
-                "manual foreground diagnostic; isolated_desktop_interaction covers "
+                "optional foreground diagnostic; isolated_desktop_interaction covers "
                 "the non-invasive release path"
             ),
         ),
@@ -278,7 +278,7 @@ def demo_flows(
             opt_in_reason="types and clicks in a real macOS application",
             release_required=False,
             diagnostic_reason=(
-                "manual foreground diagnostic; isolated_desktop_interaction covers "
+                "optional foreground diagnostic; isolated_desktop_interaction covers "
                 "the non-invasive release path"
             ),
         ),
@@ -678,7 +678,7 @@ def _release_assessment(
         denominator="required_flow_count",
         note=(
             "Use full_public_demo for required release evidence. Foreground "
-            "mouse/keyboard smokes are manual diagnostics; the required desktop "
+            "mouse/keyboard smokes are optional diagnostics; the required desktop "
             "release path is the isolated provider plus real read-only discovery."
         ),
     )

@@ -882,16 +882,17 @@ separately from product code failures. The macOS release workflow now runs the
 default preflight after frontend dependencies and uploads both top-level gate
 reports and nested `release/public-release-gate/*.json` / `.md` / `.zip`
 evidence. Manual workflow-dispatch builds can set `public_demo=full` to opt into
-real desktop, provider Workflow, and UI public-demo evidence.
+the required UI public-demo evidence; live provider and real foreground desktop
+flows are collected separately as optional diagnostics.
 
 `scripts/run_public_demo_smokes.py` now provides the maintained public-demo
 evidence entry point. The default run executes safe default demonstrations for
 data-analysis artifacts, browser-research planner artifacts, desktop planner
 discovery/operate decisions, non-mutating real desktop app discovery, isolated
 desktop provider discover/operate/verify routing, approval resume replay, GroupRun
-replay, and WorkflowRun replay, then reports skipped provider Workflow and UI
-demo flows as required next actions while keeping real foreground desktop
-operation as manual diagnostics.
+replay, and WorkflowRun replay, then reports skipped UI demo flows as required
+next actions while keeping live provider and real foreground desktop operation
+as optional diagnostics.
 Full public demo evidence requires the explicit `--include-ui` flag because the
 remaining required UI flows start Vite/Electron smokes. Live provider smoke is
 kept as an optional diagnostic while `native_provider_contract` remains the
@@ -910,8 +911,8 @@ release evidence points to the real host or credential blocker instead of only
 reporting missing public-demo evidence. Only
 `full_public_demo_ready` is enough for a Hanako/Hermes-level public demo. The
 current default evidence can pass with `complete=false` and
-`release_level=partial_demo_ready`; release parity still requires the opt-in
-flows to pass for the current candidate. `scripts/refresh_local_rc_signoff.py`
+`release_level=partial_demo_ready`; release parity requires the required UI
+opt-in flows to pass for the current candidate. `scripts/refresh_local_rc_signoff.py`
 now writes the public-demo evidence to
 `tmp/rc-verification-<commit>-public-demo.json` and
 `tmp/rc-verification-<commit>-public-demo.md`, so the public project demo is

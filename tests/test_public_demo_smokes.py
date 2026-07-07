@@ -90,7 +90,7 @@ def test_public_demo_smokes_default_runs_source_flows_only(tmp_path, monkeypatch
         ],
         "note": (
             "Use full_public_demo for required release evidence. Foreground "
-            "mouse/keyboard smokes are manual diagnostics; the required desktop "
+            "mouse/keyboard smokes are optional diagnostics; the required desktop "
             "release path is the isolated provider plus real read-only discovery."
         ),
     }

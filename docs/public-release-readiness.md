@@ -85,7 +85,7 @@ python scripts/run_public_demo_smokes.py \
 Use `--include-real-desktop-open`, `--include-real-desktop-ui-inspection`, and
 `--include-real-desktop-interaction` to collect the real desktop evidence in
 smaller batches. `--include-real-desktop` remains the umbrella flag for all
-three. These real desktop flags are manual foreground diagnostics: they open or
+three. These real desktop flags are optional foreground diagnostics: they open or
 operate macOS apps and are no longer required for the non-invasive full public
 demo baseline,
 and `--allow-existing-real-desktop-app` may be added when the interaction smoke
@@ -135,18 +135,18 @@ When the public demo report is partial or blocked, release-smoke keeps the
 `public_demo` item incomplete and carries through the demo `release_level`,
 missing flow IDs, and blocker details so release notes do not have to infer
 what evidence is still absent. Equivalent RC capability evidence is also
-projected into public-demo coverage for flows such as real app open, real UI
-inspection, and real app interaction; provider and UI flows still need their own
-smoke evidence. The archived `release/electron-ui-smoke.json` report is
+projected into optional diagnostic coverage for flows such as real app open,
+real UI inspection, and real app interaction; required UI flows still need their
+own behavior-level smoke evidence. The archived `release/electron-ui-smoke.json` report is
 projected only when the exact Run Detail / Workflow UI smoke scripts pass:
 `scripts/smoke_agent_run_detail_ui.mjs` can cover `studio_replay_ui`, and
 `scripts/smoke_workflow_save_run_ui.mjs` can cover `workflow_ui`. Generic
-packaged UI sampling does not replace those behavior-level UI flows, and
-provider workflow is projected only from live provider evidence: a passed
-`provider_smoke` section whose `native_workflow_full_chain` check exited cleanly
-with `summary.ok=true`, or the standalone
-`scripts/smoke_native_workflow_full_chain.py` report. Local fake provider
-contract evidence does not replace this release-facing provider flow.
+packaged UI sampling does not replace those behavior-level UI flows. Provider
+workflow can still be projected from live provider evidence as an optional
+diagnostic: a passed `provider_smoke` section whose `native_workflow_full_chain`
+check exited cleanly with `summary.ok=true`, or the standalone
+`scripts/smoke_native_workflow_full_chain.py` report. `native_provider_contract`
+is the deterministic required provider-path proof for the public demo baseline.
 
 ## Local Release Gates
 
@@ -202,7 +202,7 @@ The macOS release workflow keeps the default preflight safe on push builds. For
 manual release-candidate runs, set the `public_demo` workflow input to `full` to
 pass `--include-ui` into the preflight after frontend dependencies are
 installed. Run the provider or real desktop flags separately when you explicitly
-want optional live-provider or manual foreground diagnostics.
+want optional live-provider or foreground diagnostics.
 
 `refresh_local_rc_signoff.py` builds/refreshes the current local RC evidence,
 generates the Native Agent capability matrix, writes release readiness

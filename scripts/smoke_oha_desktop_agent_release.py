@@ -441,6 +441,30 @@ def _write_report(path: Path, payload: dict[str, Any]) -> None:
     )
 
 
+def _compact_stdout_summary(payload: dict[str, Any]) -> dict[str, Any]:
+    sections = [
+        {
+            "id": str(section.get("id") or ""),
+            "ok": section.get("ok") is True,
+            "mode": str(section.get("mode") or ""),
+        }
+        for section in payload.get("sections") or []
+        if isinstance(section, dict)
+    ]
+    return {
+        "ok": payload.get("ok") is True,
+        "mode": str(payload.get("mode") or ""),
+        "section_count": int(payload.get("section_count") or len(sections)),
+        "failed_sections": [
+            str(section)
+            for section in payload.get("failed_sections") or []
+            if str(section or "").strip()
+        ],
+        "checks": dict(payload.get("checks") or {}),
+        "sections": sections,
+    }
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -449,6 +473,11 @@ def _parser() -> argparse.ArgumentParser:
         help="Optional persistent workspace for smoke-generated files.",
     )
     parser.add_argument("--report-json", type=Path, help="Optional JSON evidence report path.")
+    parser.add_argument(
+        "--print-full-report",
+        action="store_true",
+        help="Print the complete JSON report to stdout even when --report-json is set.",
+    )
     return parser
 
 
@@ -458,7 +487,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.report_json is not None:
         _write_report(args.report_json, evidence)
         print(f"oha desktop agent release smoke report: {args.report_json}", file=sys.stderr)
-    print(json.dumps(evidence, ensure_ascii=False, indent=2, sort_keys=True))
+    stdout_payload = (
+        evidence
+        if args.report_json is None or args.print_full_report
+        else _compact_stdout_summary(evidence)
+    )
+    print(json.dumps(stdout_payload, ensure_ascii=False, indent=2, sort_keys=True))
     return 0 if evidence.get("ok") is True else 1
 
 

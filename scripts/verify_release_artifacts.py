@@ -221,8 +221,8 @@ USER_FACING_RELEASE_DOC_REQUIRED_TEXT: tuple[tuple[Path, str, str], ...] = (
     ),
     (
         Path("docs/public-release-readiness.md"),
-        "native_workflow_full_chain",
-        "public release readiness guide must document provider Workflow public-demo projection scope",
+        "native_provider_contract",
+        "public release readiness guide must document required provider-path public-demo scope",
     ),
     (
         Path("docs/public-release-readiness.md"),
@@ -1066,8 +1066,8 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release packaging docs must document Electron UI smoke public-demo projection scope",
     ),
     (
-        "fake provider contract / capability summary 不替代",
-        "release packaging docs must document provider Workflow public-demo projection scope",
+        "optional diagnostic `workflow_provider`",
+        "release packaging docs must document provider Workflow optional-diagnostic projection scope",
     ),
     (
         "python scripts/verify_release_candidate.py --source-only --report-json tmp/source-only-rc.json",
