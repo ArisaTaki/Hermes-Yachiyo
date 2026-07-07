@@ -889,12 +889,12 @@ evidence entry point. The default run executes safe default demonstrations for
 data-analysis artifacts, browser-research planner artifacts, desktop planner
 discovery/operate decisions, non-mutating real desktop app discovery, isolated
 desktop provider discover/operate/verify routing, approval resume replay, GroupRun
-replay, and WorkflowRun replay, then reports skipped real desktop operation,
-provider Workflow, and UI demo flows as next actions.
+replay, and WorkflowRun replay, then reports skipped provider Workflow and UI
+demo flows as required next actions while keeping real foreground desktop
+operation as manual diagnostics.
 Full public demo evidence requires the explicit
-`--include-real-desktop`, `--include-provider-workflow`, and `--include-ui`
-flags because those flows open/operate apps, require live credentials, or start
-Vite/Electron UI smokes. The summary now reports `release_level`,
+`--include-provider-workflow` and `--include-ui` flags because those required
+flows need live credentials or start Vite/Electron UI smokes. The summary now reports `release_level`,
 `missing_required_flow_ids`, and `release_blockers`; failed selected flows also
 project per-flow `evidence_summary` details such as `stage`,
 `blocking_condition`, and boolean checks into Release Blockers and Next

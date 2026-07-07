@@ -1288,8 +1288,8 @@ RELEASE_WORKFLOW_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow must pass public demo mode into the preflight gate",
     ),
     (
-        "public_demo_args+=(--include-real-desktop --include-provider-workflow --include-ui)",
-        "macOS release workflow must support full public demo opt-in flags",
+        "public_demo_args+=(--include-provider-workflow --include-ui)",
+        "macOS release workflow must support full required public demo opt-in flags",
     ),
     (
         '"${public_demo_args[@]}"',

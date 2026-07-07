@@ -25,7 +25,7 @@ def _write_public_demo_report(command: list[str], *, release_level: str) -> None
     missing_flow_ids = (
         []
         if release_level == "full_public_demo_ready"
-        else ["real_desktop_interaction", "workflow_provider"]
+        else ["workflow_provider"]
     )
     required_flow_count = len(gate._public_demo_required_flow_ids([]))
     passed_flow_count = required_flow_count - len(missing_flow_ids)
@@ -43,15 +43,14 @@ def _write_public_demo_report(command: list[str], *, release_level: str) -> None
         if release_level == "full_public_demo_ready"
         else [
             {
-                "id": "real_desktop_interaction",
-                "status": "failed",
-                "opt_in_flag": "--include-real-desktop-interaction",
-                "opt_in_reason": "types and clicks in a real macOS application",
-                "reason": "desktop_session_locked",
+                "id": "workflow_provider",
+                "status": "skipped",
+                "opt_in_flag": "--include-provider-workflow",
+                "opt_in_reason": "requires live provider smoke credentials",
+                "reason": "provider_smoke_credentials_missing",
                 "evidence_summary": {
-                    "stage": "session_preflight",
-                    "blocking_condition": "desktop_session_locked",
-                    "checks": {"desktop_session_ready": False},
+                    "stage": "provider_credentials",
+                    "blocking_condition": "provider_smoke_credentials_missing",
                 },
             }
         ],
@@ -260,28 +259,17 @@ def test_public_release_gate_defaults_to_safe_preflight_with_demo_blockers(
     assert str(tmp_path / "tmp" / "gate" / "diagnostics.zip") in release_smoke_command
     public_demo = next(item for item in summary["checks"] if item["id"] == "public_demo")
     assert public_demo["release_level"] == "partial_demo_ready"
-    assert public_demo["missing_required_flow_ids"] == [
-        "real_desktop_interaction",
-        "workflow_provider",
-    ]
-    assert public_demo["release_blockers"][0]["reason"] == "desktop_session_locked"
-    assert summary["public_demo"]["release_level"] == "partial_demo_ready"
-    assert summary["public_demo"]["passed_required_flow_count"] == 17
-    assert summary["public_demo"]["required_flow_count"] == 19
-    assert summary["public_demo"]["remaining_required_flow_count"] == 2
-    desktop_action = next(
-        item for item in summary["next_actions"] if item["id"] == "public_demo_real_desktop"
+    assert public_demo["missing_required_flow_ids"] == ["workflow_provider"]
+    assert public_demo["release_blockers"][0]["reason"] == (
+        "provider_smoke_credentials_missing"
     )
+    assert summary["public_demo"]["release_level"] == "partial_demo_ready"
+    assert summary["public_demo"]["passed_required_flow_count"] == 16
+    assert summary["public_demo"]["required_flow_count"] == 17
+    assert summary["public_demo"]["remaining_required_flow_count"] == 1
     provider_action = next(
         item for item in summary["next_actions"] if item["id"] == "public_demo_provider"
     )
-    assert "--include-real-desktop-interaction" in desktop_action["command"]
-    assert "--include-provider-workflow" not in desktop_action["command"]
-    assert "--include-real-desktop " not in desktop_action["command"]
-    assert "--include-real-desktop-open" not in desktop_action["command"]
-    assert "--include-ui" not in desktop_action["command"]
-    assert "tmp/public-demo-smokes-real-desktop-missing.json" in desktop_action["command"]
-    assert desktop_action["release_blockers"][0]["reason"] == "desktop_session_locked"
     assert provider_action["command"] == (
         "python scripts/run_public_demo_smokes.py --include-provider-workflow "
         "--output-json tmp/public-demo-smokes-provider-missing.json "
@@ -330,13 +318,11 @@ def test_public_release_gate_strict_mode_fails_until_release_ready(
     assert payload["status"] == "needs_release_evidence"
     assert payload["release_smoke"]["status"] == "incomplete"
     markdown = output_markdown.read_text(encoding="utf-8")
-    assert "Public demo: 17/19 required flows (`partial_demo_ready`)" in markdown
+    assert "Public demo: 16/17 required flows (`partial_demo_ready`)" in markdown
     assert "Release level: `partial_demo_ready`" in markdown
     assert "## Release Smoke" in markdown
-    assert "Demo blocker `real_desktop_interaction`: `desktop_session_locked`" in markdown
-    assert "--include-real-desktop-interaction" in markdown
+    assert "Demo blocker `workflow_provider`: `provider_smoke_credentials_missing`" in markdown
     assert "--include-provider-workflow" in markdown
-    assert "tmp/public-demo-smokes-real-desktop-missing.json" in markdown
     assert "tmp/public-demo-smokes-provider-missing.json" in markdown
     assert "--include-real-desktop --include-provider-workflow --include-ui" not in markdown
 
@@ -431,14 +417,13 @@ def test_public_release_gate_accepts_existing_public_demo_reports(
     monkeypatch,
 ):
     monkeypatch.setattr(gate, "ROOT", tmp_path)
-    report_path = tmp_path / "tmp" / "public-demo-real-desktop.json"
+    report_path = tmp_path / "tmp" / "public-demo-provider.json"
     passed_flow_ids = set(gate._public_demo_required_flow_ids([]))
-    passed_flow_ids.remove("real_desktop_ui_inspection")
-    passed_flow_ids.remove("real_desktop_interaction")
+    passed_flow_ids.remove("workflow_provider")
     _write_public_demo_batch_report(
         report_path,
         passed_flow_ids=passed_flow_ids,
-        failed_flow_ids={"real_desktop_ui_inspection", "real_desktop_interaction"},
+        failed_flow_ids={"workflow_provider"},
     )
     commands: list[list[str]] = []
 
@@ -454,23 +439,18 @@ def test_public_release_gate_accepts_existing_public_demo_reports(
         include_public_demo=False,
         include_release_smoke=False,
         include_diagnostics_bundle=False,
-        public_demo_reports=["tmp/public-demo-real-desktop.json"],
+        public_demo_reports=["tmp/public-demo-provider.json"],
     )
 
     assert not any("scripts/run_public_demo_smokes.py" in command for command in commands)
     public_demo = next(item for item in summary["checks"] if item["id"] == "public_demo")
     assert public_demo["release_level"] == "blocked"
     assert "real_desktop_app_open" not in public_demo["missing_required_flow_ids"]
-    assert public_demo["missing_required_flow_ids"] == [
-        "real_desktop_ui_inspection",
-        "real_desktop_interaction",
-    ]
-    desktop_action = next(
-        item for item in summary["next_actions"] if item["id"] == "public_demo_real_desktop"
+    assert public_demo["missing_required_flow_ids"] == ["workflow_provider"]
+    provider_action = next(
+        item for item in summary["next_actions"] if item["id"] == "public_demo_provider"
     )
-    assert "--include-real-desktop-open" not in desktop_action["command"]
-    assert "--include-real-desktop-ui-inspection" in desktop_action["command"]
-    assert "--include-real-desktop-interaction" in desktop_action["command"]
+    assert "--include-provider-workflow" in provider_action["command"]
 
 
 def test_public_release_gate_does_not_double_count_public_demo_release_smoke_blocker(
@@ -481,8 +461,6 @@ def test_public_release_gate_does_not_double_count_public_demo_release_smoke_blo
     report_path = tmp_path / "tmp" / "public-demo.json"
     passed_flow_ids = set(gate._public_demo_required_flow_ids([]))
     missing_flow_ids = {
-        "real_desktop_ui_inspection",
-        "real_desktop_interaction",
         "workflow_provider",
     }
     passed_flow_ids.difference_update(missing_flow_ids)
@@ -530,26 +508,12 @@ def test_public_release_gate_does_not_double_count_public_demo_release_smoke_blo
     )
 
     public_demo = next(item for item in summary["checks"] if item["id"] == "public_demo")
-    assert public_demo["missing_required_flow_ids"] == [
-        "real_desktop_ui_inspection",
-        "real_desktop_interaction",
-        "workflow_provider",
-    ]
+    assert public_demo["missing_required_flow_ids"] == ["workflow_provider"]
     assert summary["release_smoke"]["missing_item_ids"] == ["public_demo"]
-    assert summary["release_blocker_count"] == len(public_demo["release_blockers"]) == 3
-    assert summary["external_requirement_count"] == 2
+    assert summary["release_blocker_count"] == len(public_demo["release_blockers"]) == 1
+    assert summary["external_requirement_count"] == 1
     assert [item["id"] for item in summary["external_requirements"]] == [
-        "real_desktop_smoke_opt_in",
         "provider_smoke_credentials",
-    ]
-    real_desktop_requirement = summary["external_requirements"][0]
-    assert real_desktop_requirement["opt_in_flags"] == [
-        "--include-real-desktop-ui-inspection",
-        "--include-real-desktop-interaction",
-    ]
-    assert real_desktop_requirement["opt_in_reasons"] == [
-        "opens and inspects a real macOS application",
-        "types and clicks in a real macOS application",
     ]
 
 
@@ -767,16 +731,13 @@ def test_public_release_gate_passes_granular_real_desktop_demo_flags(
     assert "--include-real-desktop" not in public_demo_command
     assert "--include-real-desktop-ui-inspection" not in public_demo_command
     assert "--include-real-desktop-interaction" not in public_demo_command
-    desktop_action = next(
-        item for item in summary["next_actions"] if item["id"] == "public_demo_real_desktop"
-    )
     provider_action = next(
         item for item in summary["next_actions"] if item["id"] == "public_demo_provider"
     )
-    assert "--include-real-desktop-open" not in desktop_action["command"]
-    assert "--include-ui" not in desktop_action["command"]
-    assert "--include-real-desktop-interaction" in desktop_action["command"]
-    assert "--include-provider-workflow" not in desktop_action["command"]
+    assert not any(
+        item["id"] == "public_demo_real_desktop"
+        for item in summary["next_actions"]
+    )
     assert "--include-provider-workflow" in provider_action["command"]
     assert summary["status"] == "needs_release_evidence"
 

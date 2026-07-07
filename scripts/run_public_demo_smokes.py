@@ -42,6 +42,8 @@ class DemoFlow:
     report_json: Path | None = None
     opt_in_flag: str = ""
     opt_in_reason: str = ""
+    release_required: bool = True
+    manual_diagnostic_reason: str = ""
 
 
 def demo_flows(
@@ -241,6 +243,11 @@ def demo_flows(
             report_json=tmp_dir / "real-desktop-app-open.json",
             opt_in_flag="--include-real-desktop-open",
             opt_in_reason="opens a real macOS application",
+            release_required=False,
+            manual_diagnostic_reason=(
+                "manual foreground diagnostic; isolated_desktop_interaction covers "
+                "the non-invasive release path"
+            ),
         ),
         DemoFlow(
             id="real_desktop_ui_inspection",
@@ -255,6 +262,11 @@ def demo_flows(
             report_json=tmp_dir / "real-desktop-ui-inspection.json",
             opt_in_flag="--include-real-desktop-ui-inspection",
             opt_in_reason="opens and inspects a real macOS application",
+            release_required=False,
+            manual_diagnostic_reason=(
+                "manual foreground diagnostic; isolated_desktop_interaction covers "
+                "the non-invasive release path"
+            ),
         ),
         DemoFlow(
             id="real_desktop_interaction",
@@ -264,6 +276,11 @@ def demo_flows(
             report_json=tmp_dir / "real-desktop-interaction.json",
             opt_in_flag="--include-real-desktop-interaction",
             opt_in_reason="types and clicks in a real macOS application",
+            release_required=False,
+            manual_diagnostic_reason=(
+                "manual foreground diagnostic; isolated_desktop_interaction covers "
+                "the non-invasive release path"
+            ),
         ),
         DemoFlow(
             id="workflow_provider",
@@ -354,7 +371,13 @@ def run_public_demo_smokes(
     passed = [flow for flow in selected if flow.get("status") == "passed"]
     planned = [flow for flow in selected if flow.get("status") == "planned"]
     selected_ok = bool(selected) and not failed and not planned
-    complete = selected_ok and not skipped
+    required_incomplete = [
+        flow
+        for flow in flow_results
+        if flow.get("release_required") is not False
+        and str(flow.get("status") or "") != "passed"
+    ]
+    complete = selected_ok and not required_incomplete
     status = (
         "planned"
         if plan_only
@@ -399,6 +422,8 @@ def _flow_result(
         "report_json": _display_path(flow.report_json) if flow.report_json else "",
         "opt_in_flag": flow.opt_in_flag,
         "opt_in_reason": flow.opt_in_reason,
+        "release_required": flow.release_required,
+        "manual_diagnostic_reason": flow.manual_diagnostic_reason,
     }
     if not selected:
         return {**base, "status": "skipped"}
@@ -558,10 +583,27 @@ def _release_assessment(
     *,
     plan_only: bool,
 ) -> dict[str, Any]:
-    incomplete = [
-        flow for flow in flows if str(flow.get("status") or "") != "passed"
+    required_flows = [
+        flow for flow in flows if flow.get("release_required") is not False
     ]
-    failed = [flow for flow in flows if str(flow.get("status") or "") == "failed"]
+    diagnostic_flows = [
+        flow for flow in flows if flow.get("release_required") is False
+    ]
+    incomplete = [
+        flow
+        for flow in required_flows
+        if str(flow.get("status") or "") != "passed"
+    ]
+    diagnostic_incomplete = [
+        flow
+        for flow in diagnostic_flows
+        if str(flow.get("status") or "") != "passed"
+    ]
+    failed = [
+        flow
+        for flow in required_flows
+        if str(flow.get("status") or "") == "failed"
+    ]
     publish_candidate_flows = [
         flow for flow in flows if not str(flow.get("opt_in_flag") or "")
     ]
@@ -584,7 +626,7 @@ def _release_assessment(
     desktop_executor_passed_count = len(desktop_executor_flows) - len(
         desktop_executor_incomplete
     )
-    passed_count = len(flows) - len(incomplete)
+    passed_count = len(required_flows) - len(incomplete)
     if not flows:
         release_level = "blocked"
     elif plan_only:
@@ -623,21 +665,38 @@ def _release_assessment(
         ),
     )
     full_public_demo_progress = _release_progress(
-        flows,
+        required_flows,
         passed_count=passed_count,
         plan_only=plan_only,
         baseline_id=FULL_PUBLIC_DEMO_TRACK_ID,
         baseline_label="Full public demo release readiness",
         denominator="required_flow_count",
         note=(
-            "Use full_public_demo for complete release evidence. "
-            "Use publish_candidate to track the default non-invasive smoke path."
+            "Use full_public_demo for required release evidence. Foreground "
+            "mouse/keyboard smokes are manual diagnostics; the required desktop "
+            "release path is the isolated provider plus real read-only discovery."
+        ),
+    )
+    manual_diagnostic_progress = _release_progress(
+        diagnostic_flows,
+        passed_count=len(diagnostic_flows) - len(diagnostic_incomplete),
+        plan_only=plan_only,
+        baseline_id="manual_foreground_diagnostics",
+        baseline_label="Manual foreground desktop diagnostics",
+        denominator="manual_diagnostic_flow_count",
+        note=(
+            "These opt-in smokes open, inspect, type, or click in real foreground "
+            "macOS apps. They are useful diagnostics but are not required for the "
+            "non-invasive public release baseline."
         ),
     )
     return {
         "release_level": release_level,
-        "required_flow_count": len(flows),
+        "required_flow_count": len(required_flows),
         "passed_required_flow_count": passed_count,
+        "manual_diagnostic_flow_count": len(diagnostic_flows),
+        "passed_manual_diagnostic_flow_count": len(diagnostic_flows)
+        - len(diagnostic_incomplete),
         "publish_candidate_flow_count": len(publish_candidate_flows),
         "passed_publish_candidate_flow_count": publish_candidate_passed_count,
         "desktop_executor_flow_count": len(desktop_executor_flows),
@@ -645,10 +704,12 @@ def _release_assessment(
         "release_progress": full_public_demo_progress,
         "publish_candidate_progress": publish_candidate_progress,
         "desktop_executor_progress": desktop_executor_progress,
+        "manual_diagnostic_progress": manual_diagnostic_progress,
         "release_tracks": {
             PUBLISH_CANDIDATE_TRACK_ID: publish_candidate_progress,
             DESKTOP_EXECUTOR_TRACK_ID: desktop_executor_progress,
             FULL_PUBLIC_DEMO_TRACK_ID: full_public_demo_progress,
+            "manual_foreground_diagnostics": manual_diagnostic_progress,
         },
         "missing_required_flow_ids": [
             str(flow.get("id") or "") for flow in incomplete if flow.get("id")
@@ -661,6 +722,11 @@ def _release_assessment(
         "missing_desktop_executor_flow_ids": [
             str(flow.get("id") or "")
             for flow in desktop_executor_incomplete
+            if flow.get("id")
+        ],
+        "manual_diagnostic_gap_ids": [
+            str(flow.get("id") or "")
+            for flow in diagnostic_incomplete
             if flow.get("id")
         ],
         "release_blockers": [
@@ -676,11 +742,22 @@ def _release_assessment(
             for flow in desktop_executor_incomplete
             if isinstance(flow, Mapping)
         ],
+        "manual_diagnostic_actions": [
+            _release_blocker(flow)
+            for flow in diagnostic_incomplete
+            if isinstance(flow, Mapping)
+        ],
         "full_demo_command": (
             "python scripts/run_public_demo_smokes.py "
-            "--include-real-desktop --include-provider-workflow --include-ui "
+            "--include-provider-workflow --include-ui "
             "--output-json tmp/public-demo-smokes-full.json "
             "--output-markdown tmp/public-demo-smokes-full.md"
+        ),
+        "foreground_diagnostic_command": (
+            "python scripts/run_public_demo_smokes.py "
+            "--include-real-desktop "
+            "--output-json tmp/public-demo-smokes-foreground-diagnostics.json "
+            "--output-markdown tmp/public-demo-smokes-foreground-diagnostics.md"
         ),
     }
 
@@ -745,6 +822,8 @@ def _release_blocker(flow: Mapping[str, Any]) -> dict[str, Any]:
         "status": str(flow.get("status") or ""),
         "opt_in_flag": str(flow.get("opt_in_flag") or ""),
         "opt_in_reason": str(flow.get("opt_in_reason") or ""),
+        "release_required": flow.get("release_required") is not False,
+        "manual_diagnostic_reason": str(flow.get("manual_diagnostic_reason") or ""),
         "reason": _flow_blocker_reason(flow),
         "evidence_summary": _dict(flow.get("evidence_summary")),
         "command": " ".join(str(part) for part in flow.get("command") or []),
@@ -782,6 +861,7 @@ def render_markdown(summary: Mapping[str, Any]) -> str:
     release_progress = _dict(summary.get("release_progress"))
     publish_candidate_progress = _dict(summary.get("publish_candidate_progress"))
     desktop_executor_progress = _dict(summary.get("desktop_executor_progress"))
+    manual_diagnostic_progress = _dict(summary.get("manual_diagnostic_progress"))
     lines = [
         "# Oha-Yachiyo Public Demo Smoke Summary",
         "",
@@ -801,6 +881,11 @@ def render_markdown(summary: Mapping[str, Any]) -> str:
         (
             "Required demo flows: "
             f"{summary.get('passed_required_flow_count')}/{summary.get('required_flow_count')} passed"
+        ),
+        (
+            "Manual foreground diagnostics: "
+            f"{summary.get('passed_manual_diagnostic_flow_count')}/"
+            f"{summary.get('manual_diagnostic_flow_count')} passed"
         ),
         (
             "Publish candidate baseline: "
@@ -823,6 +908,13 @@ def render_markdown(summary: Mapping[str, Any]) -> str:
             f"{release_progress.get('total_count', summary.get('required_flow_count'))} passed, "
             f"{release_progress.get('remaining_count', '?')} remaining)"
         ),
+        (
+            "Manual foreground baseline: "
+            f"{manual_diagnostic_progress.get('baseline_id') or 'manual_foreground_diagnostics'} "
+            f"({manual_diagnostic_progress.get('passed_count', summary.get('passed_manual_diagnostic_flow_count'))}/"
+            f"{manual_diagnostic_progress.get('total_count', summary.get('manual_diagnostic_flow_count'))} passed, "
+            f"{manual_diagnostic_progress.get('remaining_count', '?')} remaining)"
+        ),
         f"Complete demo evidence: {str(bool(summary.get('complete'))).lower()}",
         "",
         "## Flows",
@@ -834,6 +926,9 @@ def render_markdown(summary: Mapping[str, Any]) -> str:
         reason = str(flow.get("opt_in_reason") or "")
         if flow.get("status") == "skipped" and reason:
             lines.append(f"  Opt-in: `{flow.get('opt_in_flag')}` ({reason})")
+        diagnostic_reason = str(flow.get("manual_diagnostic_reason") or "")
+        if flow.get("release_required") is False and diagnostic_reason:
+            lines.append(f"  Manual diagnostic: {diagnostic_reason}")
         blocker = _flow_blocker_reason(flow)
         if flow.get("status") == "failed" and blocker:
             lines.append(f"  Blocker: `{blocker}`")
@@ -854,6 +949,20 @@ def render_markdown(summary: Mapping[str, Any]) -> str:
                     lines.append(f"  Blocker: `{reason}`")
             elif reason:
                 lines.append(f"  Reason: {reason}")
+    diagnostics = _dict_list(summary.get("manual_diagnostic_actions"))
+    if diagnostics:
+        lines.extend(["", "## Manual Foreground Diagnostics", ""])
+        for diagnostic in diagnostics:
+            lines.append(
+                f"- `{diagnostic.get('id')}` ({diagnostic.get('status')}) - {diagnostic.get('label')}"
+            )
+            opt_in = str(diagnostic.get("opt_in_flag") or "")
+            opt_in_reason = str(diagnostic.get("opt_in_reason") or "")
+            manual_reason = str(diagnostic.get("manual_diagnostic_reason") or "")
+            if opt_in and opt_in_reason:
+                lines.append(f"  Optional `{opt_in}`: {opt_in_reason}")
+            if manual_reason:
+                lines.append(f"  Reason: {manual_reason}")
     actions = _dict_list(summary.get("next_actions"))
     if actions:
         lines.extend(["", "## Next Actions", ""])

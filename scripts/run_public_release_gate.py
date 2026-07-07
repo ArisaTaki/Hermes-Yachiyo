@@ -360,6 +360,9 @@ def _aggregate_public_demo_reports(report_paths: Sequence[Path]) -> dict[str, An
                     blocker,
                 )
     missing_flow_ids = [flow_id for flow_id in required_flow_ids if flow_id not in passed_flow_ids]
+    passed_required_flow_ids = [
+        flow_id for flow_id in required_flow_ids if flow_id in passed_flow_ids
+    ]
     release_blockers = [
         blocker_by_id.get(flow_id)
         or {
@@ -384,7 +387,9 @@ def _aggregate_public_demo_reports(report_paths: Sequence[Path]) -> dict[str, An
         "selected_count": len(passed_flow_ids),
         "passed_count": len(passed_flow_ids),
         "required_flow_count": len(required_flow_ids),
-        "passed_required_flow_count": len(passed_flow_ids),
+        "passed_required_flow_count": len(passed_required_flow_ids),
+        "required_flow_ids": required_flow_ids,
+        "passed_required_flow_ids": passed_required_flow_ids,
         "missing_required_flow_ids": missing_flow_ids,
         "release_blockers": release_blockers,
         "full_demo_command": _full_demo_command(),
@@ -394,7 +399,11 @@ def _aggregate_public_demo_reports(report_paths: Sequence[Path]) -> dict[str, An
 
 
 def _public_demo_required_flow_ids(reports: Sequence[Mapping[str, Any]]) -> list[str]:
-    canonical = [flow.id for flow in demo_flows(Path("tmp/public-demo-flow-catalog"))]
+    canonical = [
+        flow.id
+        for flow in demo_flows(Path("tmp/public-demo-flow-catalog"))
+        if flow.release_required
+    ]
     if canonical:
         return canonical
     required: list[str] = []
@@ -1340,7 +1349,7 @@ def _dict(value: Any) -> dict[str, Any]:
 def _full_demo_command() -> str:
     return (
         "python scripts/run_public_demo_smokes.py "
-        "--include-real-desktop --include-provider-workflow --include-ui "
+        "--include-provider-workflow --include-ui "
         "--output-json tmp/public-demo-smokes-full.json "
         "--output-markdown tmp/public-demo-smokes-full.md"
     )

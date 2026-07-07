@@ -35,7 +35,7 @@ SECTION_IDS = set(SOURCE_SECTION_CAPABILITIES.values()) | {
 }
 FULL_PUBLIC_DEMO_COMMAND = (
     "python scripts/run_public_demo_smokes.py "
-    "--include-real-desktop --include-provider-workflow --include-ui "
+    "--include-provider-workflow --include-ui "
     "--output-json tmp/public-demo-smokes-full.json "
     "--output-markdown tmp/public-demo-smokes-full.md"
 )
@@ -561,12 +561,19 @@ def _public_demo_is_complete(report: Mapping[str, Any]) -> bool:
 
 def _public_demo_assessment(report: Mapping[str, Any]) -> dict[str, Any]:
     flows = _dict_list(report.get("flows"))
-    required_flow_ids = [str(flow.get("id") or "") for flow in flows if flow.get("id")]
+    required_flow_ids = _string_list(report.get("required_flow_ids")) or [
+        str(flow.get("id") or "")
+        for flow in flows
+        if flow.get("id") and flow.get("release_required") is not False
+    ]
     passed_flow_ids = [
         str(flow.get("id") or "")
         for flow in flows
         if flow.get("id") and flow.get("status") == "passed"
     ]
+    passed_required_flow_ids = _string_list(
+        report.get("passed_required_flow_ids")
+    ) or [flow_id for flow_id in passed_flow_ids if flow_id in required_flow_ids]
     return {
         "status": str(report.get("status") or ""),
         "release_level": str(report.get("release_level") or ""),
@@ -576,7 +583,7 @@ def _public_demo_assessment(report: Mapping[str, Any]) -> dict[str, Any]:
         "required_flow_count": int(report.get("required_flow_count") or 0),
         "passed_required_flow_count": int(report.get("passed_required_flow_count") or 0),
         "required_flow_ids": required_flow_ids,
-        "passed_required_flow_ids": passed_flow_ids,
+        "passed_required_flow_ids": passed_required_flow_ids,
         "missing_required_flow_ids": _string_list(report.get("missing_required_flow_ids")),
         "release_blockers": _dict_list(report.get("release_blockers")),
         "full_demo_command": FULL_PUBLIC_DEMO_COMMAND,
@@ -711,6 +718,9 @@ def _collect_aggregate_public_demo_evidence(
     missing_flow_ids = [
         flow_id for flow_id in required_flow_ids if flow_id not in passed_flow_ids
     ]
+    passed_required_flow_ids = [
+        flow_id for flow_id in required_flow_ids if flow_id in passed_flow_ids
+    ]
     release_blockers = [
         blocker_by_id.get(flow_id)
         or {
@@ -738,9 +748,9 @@ def _collect_aggregate_public_demo_evidence(
         "selected_count": len(passed_flow_ids),
         "passed_count": len(passed_flow_ids),
         "required_flow_count": len(required_flow_ids),
-        "passed_required_flow_count": len(passed_flow_ids),
+        "passed_required_flow_count": len(passed_required_flow_ids),
         "required_flow_ids": required_flow_ids,
-        "passed_required_flow_ids": passed_flow_ids,
+        "passed_required_flow_ids": passed_required_flow_ids,
         "missing_required_flow_ids": missing_flow_ids,
         "release_blockers": release_blockers,
         "full_demo_command": FULL_PUBLIC_DEMO_COMMAND,
@@ -819,6 +829,9 @@ def _collect_public_demo_capability_projection(
     missing_flow_ids = [
         flow_id for flow_id in required_flow_ids if flow_id not in passed_flow_ids
     ]
+    passed_required_flow_ids = [
+        flow_id for flow_id in required_flow_ids if flow_id in passed_flow_ids
+    ]
     complete = not missing_flow_ids
     projection = {
         "source": ", ".join(sources),
@@ -829,9 +842,9 @@ def _collect_public_demo_capability_projection(
         "selected_count": len(passed_flow_ids),
         "passed_count": len(passed_flow_ids),
         "required_flow_count": len(required_flow_ids),
-        "passed_required_flow_count": len(passed_flow_ids),
+        "passed_required_flow_count": len(passed_required_flow_ids),
         "required_flow_ids": required_flow_ids,
-        "passed_required_flow_ids": passed_flow_ids,
+        "passed_required_flow_ids": passed_required_flow_ids,
         "missing_required_flow_ids": missing_flow_ids,
         "release_blockers": [
             {
@@ -880,6 +893,9 @@ def _collect_electron_ui_public_demo_evidence(
     missing_flow_ids = [
         flow_id for flow_id in required_flow_ids if flow_id not in passed_flow_ids
     ]
+    passed_required_flow_ids = [
+        flow_id for flow_id in required_flow_ids if flow_id in passed_flow_ids
+    ]
     complete = not missing_flow_ids
     projection = {
         "source": source,
@@ -890,9 +906,9 @@ def _collect_electron_ui_public_demo_evidence(
         "selected_count": len(passed_flow_ids),
         "passed_count": len(passed_flow_ids),
         "required_flow_count": len(required_flow_ids),
-        "passed_required_flow_count": len(passed_flow_ids),
+        "passed_required_flow_count": len(passed_required_flow_ids),
         "required_flow_ids": required_flow_ids,
-        "passed_required_flow_ids": passed_flow_ids,
+        "passed_required_flow_ids": passed_required_flow_ids,
         "missing_required_flow_ids": missing_flow_ids,
         "release_blockers": [
             {
@@ -930,6 +946,9 @@ def _collect_provider_workflow_public_demo_evidence(
     missing_flow_ids = [
         flow_id for flow_id in required_flow_ids if flow_id not in passed_flow_ids
     ]
+    passed_required_flow_ids = [
+        flow_id for flow_id in required_flow_ids if flow_id in passed_flow_ids
+    ]
     complete = not missing_flow_ids
     projection = {
         "source": source,
@@ -940,9 +959,9 @@ def _collect_provider_workflow_public_demo_evidence(
         "selected_count": len(passed_flow_ids),
         "passed_count": len(passed_flow_ids),
         "required_flow_count": len(required_flow_ids),
-        "passed_required_flow_count": len(passed_flow_ids),
+        "passed_required_flow_count": len(passed_required_flow_ids),
         "required_flow_ids": required_flow_ids,
-        "passed_required_flow_ids": passed_flow_ids,
+        "passed_required_flow_ids": passed_required_flow_ids,
         "missing_required_flow_ids": missing_flow_ids,
         "release_blockers": [
             {
@@ -1038,7 +1057,11 @@ def _collect_oha_desktop_agent_release_evidence(
 
 
 def _canonical_public_demo_flow_ids() -> list[str]:
-    return [flow.id for flow in demo_flows(Path("tmp/public-demo-flow-catalog"))]
+    return [
+        flow.id
+        for flow in demo_flows(Path("tmp/public-demo-flow-catalog"))
+        if flow.release_required
+    ]
 
 
 def _add_evidence(

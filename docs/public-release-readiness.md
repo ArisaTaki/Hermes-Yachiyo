@@ -77,7 +77,6 @@ opt-in:
 
 ```bash
 python scripts/run_public_demo_smokes.py \
-  --include-real-desktop \
   --include-provider-workflow \
   --include-ui \
   --output-json tmp/public-demo-smokes-full.json \
@@ -87,7 +86,9 @@ python scripts/run_public_demo_smokes.py \
 Use `--include-real-desktop-open`, `--include-real-desktop-ui-inspection`, and
 `--include-real-desktop-interaction` to collect the real desktop evidence in
 smaller batches. `--include-real-desktop` remains the umbrella flag for all
-three. These real desktop flags open or operate macOS apps,
+three. These real desktop flags are manual foreground diagnostics: they open or
+operate macOS apps and are no longer required for the non-invasive full public
+demo baseline,
 and `--allow-existing-real-desktop-app` may be added when the interaction smoke
 must use an app that was already running before the smoke started.
 `--include-provider-workflow` requires live provider smoke credentials, and
@@ -198,8 +199,9 @@ back to the full-demo command only for unknown future flows.
 
 The macOS release workflow keeps the default preflight safe on push builds. For
 manual release-candidate runs, set the `public_demo` workflow input to `full` to
-pass `--include-real-desktop --include-provider-workflow --include-ui` into the
-preflight after frontend dependencies are installed.
+pass `--include-provider-workflow --include-ui` into the preflight after frontend
+dependencies are installed. Run the real desktop flags separately when you
+explicitly want manual foreground diagnostics.
 
 `refresh_local_rc_signoff.py` builds/refreshes the current local RC evidence,
 generates the Native Agent capability matrix, writes release readiness

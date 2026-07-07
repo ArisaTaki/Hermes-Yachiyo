@@ -41,8 +41,10 @@ def test_public_demo_smokes_default_runs_source_flows_only(tmp_path, monkeypatch
     assert summary["complete"] is False
     assert summary["status"] == "partial"
     assert summary["release_level"] == "publish_candidate_ready"
-    assert summary["required_flow_count"] == 20
+    assert summary["required_flow_count"] == 17
     assert summary["passed_required_flow_count"] == 14
+    assert summary["manual_diagnostic_flow_count"] == 3
+    assert summary["passed_manual_diagnostic_flow_count"] == 0
     assert summary["publish_candidate_flow_count"] == 14
     assert summary["passed_publish_candidate_flow_count"] == 14
     assert summary["desktop_executor_flow_count"] == 8
@@ -72,31 +74,54 @@ def test_public_demo_smokes_default_runs_source_flows_only(tmp_path, monkeypatch
         "denominator": "required_flow_count",
         "status_basis": "executed_smoke_results",
         "passed_count": 14,
-        "total_count": 20,
-        "remaining_count": 6,
-        "percent": 70.0,
+        "total_count": 17,
+        "remaining_count": 3,
+        "percent": 82.35,
         "selected_count": 14,
         "selected_passed_count": 14,
         "selected_remaining_count": 0,
         "missing_required_flow_ids": [
-            "real_desktop_app_open",
-            "real_desktop_ui_inspection",
-            "real_desktop_interaction",
             "workflow_provider",
             "studio_replay_ui",
             "workflow_ui",
         ],
         "opt_in_gap_ids": [
-            "real_desktop_app_open",
-            "real_desktop_ui_inspection",
-            "real_desktop_interaction",
             "workflow_provider",
             "studio_replay_ui",
             "workflow_ui",
         ],
         "note": (
-            "Use full_public_demo for complete release evidence. "
-            "Use publish_candidate to track the default non-invasive smoke path."
+            "Use full_public_demo for required release evidence. Foreground "
+            "mouse/keyboard smokes are manual diagnostics; the required desktop "
+            "release path is the isolated provider plus real read-only discovery."
+        ),
+    }
+    assert summary["manual_diagnostic_progress"] == {
+        "baseline_id": "manual_foreground_diagnostics",
+        "baseline_label": "Manual foreground desktop diagnostics",
+        "denominator": "manual_diagnostic_flow_count",
+        "status_basis": "executed_smoke_results",
+        "passed_count": 0,
+        "total_count": 3,
+        "remaining_count": 3,
+        "percent": 0.0,
+        "selected_count": 0,
+        "selected_passed_count": 0,
+        "selected_remaining_count": 0,
+        "missing_required_flow_ids": [
+            "real_desktop_app_open",
+            "real_desktop_ui_inspection",
+            "real_desktop_interaction",
+        ],
+        "opt_in_gap_ids": [
+            "real_desktop_app_open",
+            "real_desktop_ui_inspection",
+            "real_desktop_interaction",
+        ],
+        "note": (
+            "These opt-in smokes open, inspect, type, or click in real foreground "
+            "macOS apps. They are useful diagnostics but are not required for the "
+            "non-invasive public release baseline."
         ),
     }
     assert summary["desktop_executor_progress"] == {
@@ -126,17 +151,22 @@ def test_public_demo_smokes_default_runs_source_flows_only(tmp_path, monkeypatch
         "desktop_executor_progress"
     ]
     assert summary["release_tracks"]["full_public_demo"] == summary["release_progress"]
+    assert summary["release_tracks"]["manual_foreground_diagnostics"] == summary[
+        "manual_diagnostic_progress"
+    ]
     assert summary["missing_publish_candidate_flow_ids"] == []
     assert summary["missing_desktop_executor_flow_ids"] == []
     assert summary["publish_candidate_blockers"] == []
     assert summary["desktop_executor_blockers"] == []
     assert summary["missing_required_flow_ids"] == [
-        "real_desktop_app_open",
-        "real_desktop_ui_inspection",
-        "real_desktop_interaction",
         "workflow_provider",
         "studio_replay_ui",
         "workflow_ui",
+    ]
+    assert summary["manual_diagnostic_gap_ids"] == [
+        "real_desktop_app_open",
+        "real_desktop_ui_inspection",
+        "real_desktop_interaction",
     ]
     assert summary["selected_count"] == 14
     assert summary["passed_count"] == 14
@@ -166,11 +196,14 @@ def test_public_demo_smokes_default_runs_source_flows_only(tmp_path, monkeypatch
     assert entrypoint_commands
     assert all("--workdir" not in command for command in entrypoint_commands)
     assert any(action["id"] == "real_desktop_app_open" for action in summary["next_actions"])
-    blocker = next(
-        item for item in summary["release_blockers"] if item["id"] == "real_desktop_app_open"
+    diagnostic = next(
+        item
+        for item in summary["manual_diagnostic_actions"]
+        if item["id"] == "real_desktop_app_open"
     )
-    assert blocker["status"] == "skipped"
-    assert blocker["opt_in_flag"] == "--include-real-desktop-open"
+    assert diagnostic["status"] == "skipped"
+    assert diagnostic["opt_in_flag"] == "--include-real-desktop-open"
+    assert diagnostic["release_required"] is False
 
 
 def test_public_demo_smokes_plan_only_does_not_run_commands(tmp_path, monkeypatch):
@@ -196,7 +229,9 @@ def test_public_demo_smokes_plan_only_does_not_run_commands(tmp_path, monkeypatc
     assert summary["selected_count"] == summary["flow_count"]
     assert {flow["status"] for flow in summary["flows"]} == {"planned"}
     assert set(summary["missing_required_flow_ids"]) == {
-        flow["id"] for flow in summary["flows"]
+        flow["id"]
+        for flow in summary["flows"]
+        if flow["release_required"] is not False
     }
     assert set(summary["missing_publish_candidate_flow_ids"]) == {
         flow["id"] for flow in summary["flows"] if not flow["opt_in_flag"]
@@ -231,9 +266,10 @@ def test_public_demo_smokes_opt_in_selects_all_flows(tmp_path, monkeypatch):
     assert summary["complete"] is True
     assert summary["status"] == "passed"
     assert summary["release_level"] == "full_public_demo_ready"
-    assert summary["passed_required_flow_count"] == summary["required_flow_count"] == 20
-    assert summary["release_progress"]["passed_count"] == 20
-    assert summary["release_progress"]["total_count"] == 20
+    assert summary["passed_required_flow_count"] == summary["required_flow_count"] == 17
+    assert summary["passed_manual_diagnostic_flow_count"] == 3
+    assert summary["release_progress"]["passed_count"] == 17
+    assert summary["release_progress"]["total_count"] == 17
     assert summary["release_progress"]["remaining_count"] == 0
     assert summary["release_progress"]["percent"] == 100.0
     assert summary["release_progress"]["opt_in_gap_ids"] == []
@@ -759,6 +795,10 @@ def test_public_demo_smokes_cli_writes_reports(tmp_path, monkeypatch, capsys):
     assert "Release level: publish_candidate_ready" in markdown
     assert "Publish candidate baseline: publish_candidate (14/14 passed, 0 remaining)" in markdown
     assert "Desktop executor baseline: desktop_executor (8/8 passed, 0 remaining)" in markdown
-    assert "Full demo baseline: full_public_demo (14/20 passed, 6 remaining)" in markdown
+    assert "Full demo baseline: full_public_demo (14/17 passed, 3 remaining)" in markdown
+    assert (
+        "Manual foreground baseline: manual_foreground_diagnostics "
+        "(0/3 passed, 3 remaining)"
+    ) in markdown
     assert "## Release Blockers" in markdown
     assert "`data_analysis_artifact`" in markdown
