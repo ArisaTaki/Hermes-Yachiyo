@@ -148,6 +148,50 @@ def _fake_active_window() -> dict[str, Any]:
     }
 
 
+def _fake_ui_elements(
+    *,
+    app_name: str = "PixelForge",
+    role_filter: str = "",
+    limit: Any = 80,
+) -> dict[str, Any]:
+    clean_name = str(app_name or "PixelForge").strip()
+    clean_limit = int(limit or 80)
+    elements = [
+        {
+            "role": "text_field",
+            "title": "Search",
+            "label": "Search",
+            "focused": True,
+            "app_name": clean_name,
+        },
+        {
+            "role": "button",
+            "title": "Export",
+            "label": "Export",
+            "focused": False,
+            "app_name": clean_name,
+        },
+    ][:clean_limit]
+    return {
+        "ok": True,
+        "action": "desktop.ui_elements",
+        "summary": f"{clean_name} UI contains Search and Export",
+        "data": {
+            "app_name": clean_name,
+            "role_filter": str(role_filter or "").strip(),
+            "limit": clean_limit,
+            "elements": elements,
+            "count": len(elements),
+            "control_like_count": len(elements),
+            "inspection_level": "control",
+            "visibility_limited": False,
+            "visibility_status": "visible",
+        },
+        "permission_error": False,
+        "fallback_used": False,
+    }
+
+
 def _fake_inspect_app(
     app_name: str,
     *,
@@ -979,6 +1023,10 @@ def run_smoke(*, workdir: Path | None = None) -> dict[str, Any]:
                 desktop_tools,
                 "inspect_app",
                 _fake_inspect_app,
+            ), _patched_attr(
+                desktop_tools,
+                "ui_elements",
+                _fake_ui_elements,
             ):
                 cases = [
                     _generic_app_open_case(service, entrypoint="main_chat"),

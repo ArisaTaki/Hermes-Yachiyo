@@ -190,8 +190,6 @@ def _full_plan_tool_requests_from_decision(
         tool_name = _text(getattr(step, "tool_name", None))
         if not tool_name or tool_name not in allowed_tools:
             continue
-        if _skip_executable_full_plan_step(decision, step, allowed_tools):
-            continue
         status = _text(getattr(step, "status", None)) or "planned"
         if status in {"unavailable", "skipped"}:
             continue
@@ -230,26 +228,6 @@ def _full_plan_tool_requests_from_decision(
     return requests
 
 
-def _skip_executable_full_plan_step(
-    decision: PlannerDecisionSnapshot,
-    step: ToolPlanStepSnapshot,
-    allowed_tools: set[str],
-) -> bool:
-    tool_name = _text(getattr(step, "tool_name", None))
-    if tool_name not in {"workspace.read", "fs.read_file", "file.read"}:
-        return False
-    if _text(getattr(decision.selected_intent, "kind", None)) != "data_analysis":
-        return False
-    if "data.analyze" not in allowed_tools:
-        return False
-    return any(
-        _text(getattr(item, "tool_name", None)) == "data.analyze"
-        and (_text(getattr(item, "status", None)) or "planned")
-        not in {"unavailable", "skipped"}
-        for item in list(decision.plan.tool_plan.steps or [])
-    )
-
-
 def _executable_request_input(
     tool_name: str,
     request_input: Mapping[str, Any],
@@ -258,7 +236,10 @@ def _executable_request_input(
     payload = dict(request_input)
     if clean_tool in {"workspace.read", "fs.read_file", "file.read"}:
         path = _text(payload.get("path"))
-        return {"path": path} if path else {}
+        if not path:
+            return {}
+        payload["path"] = path
+        return payload
     return payload
 
 

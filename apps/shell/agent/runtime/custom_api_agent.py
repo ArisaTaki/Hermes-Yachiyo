@@ -81,6 +81,12 @@ _DIRECT_DAILY_DESKTOP_TOOLS = {
     "terminal.run",
 }
 
+_DIRECT_DAILY_SEQUENCE_CONTEXT_TOOLS = {
+    "file.read",
+    "fs.read_file",
+    "workspace.read",
+}
+
 _RUNTIME_REPLAN_ACTION_AUTO_SAFE_TOOLS = {
     "app.focus",
     "app.open",
@@ -4528,6 +4534,8 @@ class RuntimeCustomApiAgentLoop:
         )
         if any(
             bool(request.get("continue_to_model"))
+            and str(request.get("tool") or "").strip()
+            not in {*_DAILY_DESKTOP_DISCOVERY_TOOLS, *_DAILY_DESKTOP_VERIFY_TOOLS}
             for request in planned_tool_requests
             if isinstance(request, dict)
         ):
@@ -4537,7 +4545,10 @@ class RuntimeCustomApiAgentLoop:
         stopped_after_recovery = False
         for request_index, planned_tool_request in enumerate(planned_tool_requests):
             planned_tool = str(planned_tool_request.get("tool") or "")
-            if planned_tool not in _DIRECT_DAILY_DESKTOP_TOOLS:
+            if (
+                planned_tool not in _DIRECT_DAILY_DESKTOP_TOOLS
+                and planned_tool not in _DIRECT_DAILY_SEQUENCE_CONTEXT_TOOLS
+            ):
                 return ""
             planned_input = planned_tool_request.get("input")
             if not isinstance(planned_input, dict):
@@ -4572,8 +4583,24 @@ class RuntimeCustomApiAgentLoop:
                 result.get("ok") is False or result.get("verification_failed") is True
             ):
                 return ""
+            if (
+                result.get("ok") is False
+                and planned_tool not in _DIRECT_DAILY_SEQUENCE_CONTEXT_TOOLS
+            ):
+                remaining_requests = planned_tool_requests[request_index:]
+                if completed_steps and _all_noncritical_daily_desktop_observations(
+                    remaining_requests
+                ):
+                    stopped_after_recovery = True
+                    break
+                return ""
             result = _with_retry_recovery_action(planned_tool, planned_input, result)
             tool_event["result"] = result
+            if (
+                planned_tool in _DIRECT_DAILY_SEQUENCE_CONTEXT_TOOLS
+                and result.get("ok") is False
+            ):
+                return ""
             executed_input = (
                 tool_event.get("input_preview")
                 if isinstance(tool_event.get("input_preview"), dict)
@@ -4586,13 +4613,20 @@ class RuntimeCustomApiAgentLoop:
             ):
                 return ""
             presentation = str(planned_tool_request.get("presentation") or "").strip()
-            summary = self._daily_desktop_summary(
-                planned_tool,
-                executed_input,
-                result,
-                presentation=presentation,
+            summary = (
+                ""
+                if planned_tool in _DIRECT_DAILY_SEQUENCE_CONTEXT_TOOLS
+                else self._daily_desktop_summary(
+                    planned_tool,
+                    executed_input,
+                    result,
+                    presentation=presentation,
+                )
             )
-            if not summary:
+            if (
+                not summary
+                and planned_tool not in _DIRECT_DAILY_SEQUENCE_CONTEXT_TOOLS
+            ):
                 return ""
             completed_step = {
                 "tool": planned_tool,

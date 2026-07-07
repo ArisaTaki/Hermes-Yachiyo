@@ -216,6 +216,13 @@ def test_policy_gate_normalizes_allowed_tool_entries() -> None:
     assert not PolicyGate.allows_tool("terminal.run", ["workspace.read"])
 
 
+def test_workspace_read_accepts_planner_source_kind_metadata() -> None:
+    ToolDescriptorRegistry.validate_payload(
+        "workspace.read",
+        {"path": "inputs/sales.csv", "source_kind": "csv"},
+    )
+
+
 def test_default_daily_agent_policy_exposes_desktop_tools_with_medium_risk_approval() -> None:
     policy = RuntimePolicyCompiler.default_tool_policy("custom")
     allowed_tools = set(policy["allowed_tools"])

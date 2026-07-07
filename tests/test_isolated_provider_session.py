@@ -155,7 +155,7 @@ def test_ensure_isolated_provider_session_detects_keyboard_mouse_requests(
     )
 
 
-def test_ensure_isolated_provider_session_detects_media_app_requests(
+def test_ensure_isolated_provider_session_does_not_start_for_media_app_without_sandbox_route(
     monkeypatch,
 ) -> None:
     starts: list[dict[str, Any] | None] = []
@@ -198,18 +198,16 @@ def test_ensure_isolated_provider_session_detects_media_app_requests(
     session = ensure_isolated_desktop_provider_session_for_envelope(envelope)
     annotated = annotate_envelope_with_desktop_provider_session(envelope, session)
 
-    assert starts == [{"tools": ["media.music_app_open_and_play"]}]
-    assert session["needed"] is True
-    assert session["running"] is True
-    assert session["started"] is True
-    assert session["request_ids"] == ["request-music"]
-    assert session["tool_names"] == ["media.music_app_open_and_play"]
-    assert annotated["requests"][0]["desktop_provider_session"]["provider_id"] == (
-        "local-isolated-desktop"
-    )
+    assert starts == []
+    assert session["needed"] is False
+    assert session["running"] is False
+    assert session["started"] is False
+    assert session["request_ids"] == []
+    assert session["tool_names"] == []
+    assert "desktop_provider_session" not in annotated["requests"][0]
 
 
-def test_ensure_isolated_provider_session_detects_app_open_requests(
+def test_ensure_isolated_provider_session_does_not_start_for_app_open_without_sandbox_route(
     monkeypatch,
 ) -> None:
     starts: list[dict[str, Any] | None] = []
@@ -251,6 +249,63 @@ def test_ensure_isolated_provider_session_detects_app_open_requests(
     session = ensure_isolated_desktop_provider_session_for_envelope(envelope)
     annotated = annotate_envelope_with_desktop_provider_session(envelope, session)
 
+    assert starts == []
+    assert session["needed"] is False
+    assert session["running"] is False
+    assert session["started"] is False
+    assert session["request_ids"] == []
+    assert session["tool_names"] == []
+    assert "desktop_provider_session" not in annotated["requests"][0]
+
+
+def test_ensure_isolated_provider_session_detects_app_open_with_sandbox_route(
+    monkeypatch,
+) -> None:
+    starts: list[dict[str, Any] | None] = []
+
+    monkeypatch.setattr(
+        session_module,
+        "isolated_desktop_provider_session_status",
+        lambda: {"ok": True, "status": "stopped", "running": False},
+    )
+    monkeypatch.setattr(
+        session_module,
+        "start_isolated_desktop_provider_session",
+        lambda request=None: starts.append(request)
+        or {
+            "ok": True,
+            "status": "running",
+            "running": True,
+            "started": True,
+            "provider_id": "local-isolated-desktop",
+            "url": "http://127.0.0.1:19093",
+            "provider_status": {
+                "desktop_session_kind": "isolated_desktop",
+                "desktop_session_isolated": True,
+                "foreground_takeover_required": False,
+                "supported_tools": ["app.open"],
+            },
+        },
+    )
+    envelope = {
+        "requests": [
+            {
+                "request_id": "request-open",
+                "tool_name": "app.open",
+                "input": {"app_name": "PixelForge"},
+                "desktop_execution_route": {
+                    "selected_provider_kind": "sandbox_desktop",
+                    "status": "provider_required",
+                    "sandbox_required": True,
+                    "blocking_conditions": ["sandbox_desktop_provider_required"],
+                },
+            }
+        ]
+    }
+
+    session = ensure_isolated_desktop_provider_session_for_envelope(envelope)
+    annotated = annotate_envelope_with_desktop_provider_session(envelope, session)
+
     assert starts == [{"tools": ["app.open"]}]
     assert session["needed"] is True
     assert session["running"] is True
@@ -262,7 +317,7 @@ def test_ensure_isolated_provider_session_detects_app_open_requests(
     )
 
 
-def test_ensure_isolated_provider_session_detects_inspect_app_requests(
+def test_ensure_isolated_provider_session_detects_inspect_app_with_sandbox_route(
     monkeypatch,
 ) -> None:
     starts: list[dict[str, Any] | None] = []
@@ -297,6 +352,12 @@ def test_ensure_isolated_provider_session_detects_inspect_app_requests(
                 "request_id": "request-inspect",
                 "tool_name": "desktop.inspect_app",
                 "input": {"app_name": "PixelForge", "open_if_needed": True},
+                "desktop_execution_route": {
+                    "selected_provider_kind": "sandbox_desktop",
+                    "status": "provider_required",
+                    "sandbox_required": True,
+                    "blocking_conditions": ["sandbox_desktop_provider_required"],
+                },
             }
         ]
     }

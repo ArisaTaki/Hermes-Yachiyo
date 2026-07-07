@@ -201,9 +201,20 @@ LIVE_DESKTOP_INPUT_TOOLS = frozenset(
         "desktop.type_text",
         "desktop.click",
         "desktop.submit_foreground",
+    }
+)
+STRUCTURED_MEDIA_CONTROL_TOOLS = frozenset(
+    {
+        "media.apple_music_play",
+        "media.apple_music_open_and_play",
+        "media.apple_music_control",
+        "media.system_control",
+    }
+)
+MEDIA_APP_FOREGROUND_CONTROL_TOOLS = frozenset(
+    {
         "media.music_app_open_and_play",
         "media.music_app_control",
-        "media.system_control",
     }
 )
 LOW_RISK_DESKTOP_ACTIONS = frozenset(
@@ -705,8 +716,6 @@ DESKTOP_CAPABILITY_TOOLS: dict[str, tuple[str, ...]] = {
         "app.focus_and_click_ui_element",
         "app.open_and_type_into_ui_element",
         "app.focus_and_type_into_ui_element",
-        "media.music_app_open_and_play",
-        "media.music_app_control",
     ),
     "browser_control": (
         "browser.search",
@@ -836,6 +845,38 @@ def desktop_tool_execution_mode(tool_name: str) -> DesktopExecutionModeSnapshot:
             sandbox_recommended=False,
             reason="Reads desktop or browser state without sending foreground input.",
             mitigations=["Prefer this before acting when target state is uncertain."],
+        )
+    if clean in STRUCTURED_MEDIA_CONTROL_TOOLS:
+        return DesktopExecutionModeSnapshot(
+            mode="tool_native",
+            isolation="process",
+            foreground_control=False,
+            keyboard_mouse_capture=False,
+            sandbox_recommended=False,
+            reason=(
+                "Uses structured media/app automation instead of global desktop "
+                "mouse or keyboard input."
+            ),
+            mitigations=[
+                "Keep platform automation behind the existing macOS permission gate.",
+                "Verify playback or volume state after issuing the control.",
+            ],
+        )
+    if clean in MEDIA_APP_FOREGROUND_CONTROL_TOOLS:
+        return DesktopExecutionModeSnapshot(
+            mode="supervised_live",
+            isolation="none",
+            foreground_control=True,
+            keyboard_mouse_capture=False,
+            sandbox_recommended=False,
+            reason=(
+                "Opens or controls a media app through structured app/media "
+                "automation without global keyboard or mouse capture."
+            ),
+            mitigations=[
+                "Route through the local desktop provider so activation is observable.",
+                "Verify playback state after issuing the control.",
+            ],
         )
     if clean in LIVE_DESKTOP_INPUT_TOOLS:
         return DesktopExecutionModeSnapshot(

@@ -5064,8 +5064,9 @@ def test_desktop_execution_mode_snapshot_classifies_live_foreground_tools() -> N
     assert read_ui["keyboard_mouse_capture"] is False
     music_app = desktop_tool_execution_mode("media.music_app_open_and_play")
     assert music_app.mode == "supervised_live"
-    assert music_app.keyboard_mouse_capture is True
-    assert music_app.sandbox_recommended is True
+    assert music_app.foreground_control is True
+    assert music_app.keyboard_mouse_capture is False
+    assert music_app.sandbox_recommended is False
     assert desktop_tool_execution_mode("media.apple_music_play").mode == "tool_native"
     assert (
         desktop_tool_execution_mode("media.apple_music_status").mode
@@ -6065,7 +6066,7 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
     )
     assert (
         desktop_tool_execution_mode("media.music_app_open_and_play").keyboard_mouse_capture
-        is True
+        is False
     )
     assert desktop_tool_execution_mode("media.apple_music_status").mode == (
         "read_only_observation"

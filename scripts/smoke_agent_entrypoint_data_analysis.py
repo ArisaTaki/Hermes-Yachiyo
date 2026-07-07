@@ -97,6 +97,19 @@ def _first_event(events: Sequence[dict[str, Any]], event_type: str) -> dict[str,
     return {}
 
 
+def _first_tool_event(
+    events: Sequence[dict[str, Any]],
+    event_type: str,
+    tool_name: str,
+) -> dict[str, Any]:
+    for event in events:
+        if not isinstance(event, dict) or event.get("event_type") != event_type:
+            continue
+        if _payload(event).get("tool") == tool_name:
+            return event
+    return {}
+
+
 def _payload(event: dict[str, Any]) -> dict[str, Any]:
     payload = event.get("payload") if isinstance(event, dict) else {}
     return payload if isinstance(payload, dict) else {}
@@ -213,8 +226,10 @@ def _data_analysis_case(
         loop_status = ""
 
     events = service.list_run_events(run_id)["events"]
-    planned_event = _first_event(events, "agent.desktop.intent_planned")
-    tool_event = _first_event(events, "agent.tool.call")
+    planned_event = _first_tool_event(events, "agent.desktop.intent_planned", "data.analyze")
+    read_planned_event = _first_tool_event(events, "agent.desktop.intent_planned", "workspace.read")
+    tool_event = _first_tool_event(events, "agent.tool.call", "data.analyze")
+    read_tool_event = _first_tool_event(events, "agent.tool.call", "workspace.read")
     completed_event = _first_event(events, "agent.desktop.intent_completed")
     selection_event = _first_event(events, "agent.plan.selection")
     artifact_events = [
@@ -236,9 +251,11 @@ def _data_analysis_case(
         "selection_is_data_analysis": _payload(selection_event).get("intent_kind") == "data_analysis",
         "selection_uses_runtime_planner_full_plan": _payload(selection_event).get("selection_reason")
         == "runtime_planner_full_plan_execution",
+        "planned_workspace_read": _payload(read_planned_event).get("tool") == "workspace.read",
         "planned_data_analyze": _payload(planned_event).get("tool") == "data.analyze",
         "planned_input_path": (_payload(planned_event).get("input_preview") or {}).get("path")
         == SAMPLE_PATH,
+        "tool_call_workspace_read": _payload(read_tool_event).get("tool") == "workspace.read",
         "tool_call_data_analyze": _payload(tool_event).get("tool") == "data.analyze",
         "tool_result_ok": tool_result.get("ok") is True,
         "tool_result_rows": tool_result.get("rows") == 3,
@@ -258,7 +275,9 @@ def _data_analysis_case(
         "event_types": _event_types(events),
         "selection_event": selection_event,
         "planned_event": planned_event,
+        "read_planned_event": read_planned_event,
         "tool_event": tool_event,
+        "read_tool_event": read_tool_event,
         "artifact_events": artifact_events,
         "completed_event": completed_event,
         "checks": checks,

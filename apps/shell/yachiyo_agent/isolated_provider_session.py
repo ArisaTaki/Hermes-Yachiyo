@@ -47,17 +47,6 @@ _PROVIDER_START_BLOCKERS = {
     "isolated_desktop_provider_required",
 }
 
-_ISOLATED_SESSION_REQUIRED_TOOLS = {
-    "app.open",
-    "desktop.open_app",
-    "desktop.inspect_app",
-    "app.focus",
-    "desktop.focus_app",
-    "app.focus_window",
-    "media.music_app_open_and_play",
-    "media.music_app_control",
-}
-
 
 class IsolatedDesktopProviderSessionManager:
     """Starts, stops, and probes a local isolated desktop provider process."""
@@ -370,26 +359,46 @@ def _isolated_session_targets(envelope: dict[str, Any] | None) -> list[dict[str,
 
 
 def _request_needs_isolated_session(tool_name: str, request: dict[str, Any]) -> bool:
-    if tool_name not in KEYBOARD_MOUSE_CONTROL_TOOLS | _ISOLATED_SESSION_REQUIRED_TOOLS:
-        return False
-    if tool_name in _ISOLATED_SESSION_REQUIRED_TOOLS:
-        return True
     route = _mapping(request.get("desktop_execution_route"))
     provider = _mapping(request.get("sandbox_provider"))
     mode = _mapping(request.get("execution_mode"))
+    if _route_or_provider_requires_isolated_session(route, provider):
+        return True
+    if tool_name not in KEYBOARD_MOUSE_CONTROL_TOOLS and not bool(
+        mode.get("keyboard_mouse_capture")
+    ):
+        return False
+    if _optional_bool(provider.get("desktop_session_isolated")) is True:
+        return False
+    if _optional_bool(route.get("desktop_session_isolated")) is True:
+        return False
+    return True
+
+
+def _route_or_provider_requires_isolated_session(
+    route: dict[str, Any],
+    provider: dict[str, Any],
+) -> bool:
     route_status = str(route.get("status") or "").strip()
     route_blockers = set(_string_list(route.get("blocking_conditions")))
     provider_blockers = set(_string_list(provider.get("blocking_conditions")))
-    if route_status in _PROVIDER_START_STATUSES:
+    provider_kind = str(
+        route.get("selected_provider_kind")
+        or route.get("provider_kind")
+        or provider.get("provider_kind")
+        or ""
+    ).strip()
+    provider_requested = (
+        provider_kind == "sandbox_desktop"
+        or bool(route.get("sandbox_required"))
+        or bool(route.get("provider_execution_required"))
+        or bool(provider)
+    )
+    if provider_requested and route_status in _PROVIDER_START_STATUSES:
         return True
-    if route_blockers & _PROVIDER_START_BLOCKERS:
+    if provider_requested and route_blockers & _PROVIDER_START_BLOCKERS:
         return True
-    if provider_blockers & _PROVIDER_START_BLOCKERS:
-        return True
-    if (
-        bool(mode.get("keyboard_mouse_capture"))
-        and provider.get("desktop_session_isolated") is not True
-    ):
+    if provider_requested and provider_blockers & _PROVIDER_START_BLOCKERS:
         return True
     return False
 

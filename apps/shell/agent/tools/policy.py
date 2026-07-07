@@ -1133,7 +1133,16 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
             "Read a UTF-8 text file from the allowed workspace. This only accepts file paths; "
             "use workspace.list for directories."
         ),
-        properties={"path": {"type": "string", "description": "Relative file path."}},
+        properties={
+            "path": {"type": "string", "description": "Relative file path."},
+            "source_kind": {
+                "type": "string",
+                "description": (
+                    "Optional planner-observed source kind such as csv, jsonl, "
+                    "xlsx, or text_table. Preserved for replay and analysis context."
+                ),
+            },
+        },
         required=("path",),
     ),
     "fs.find_files": ToolDescriptor(
