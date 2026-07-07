@@ -164,6 +164,91 @@ def test_run_timeline_snapshot_returns_existing_public_snapshot() -> None:
     assert run_timeline_snapshot_from_payload(existing) is existing
 
 
+def test_run_timeline_runtime_debug_reconstructs_planner_from_events() -> None:
+    timeline = run_timeline_snapshot_from_payload(
+        {
+            "run_id": "run-event-planner",
+            "status": "running",
+            "events": [
+                {
+                    "event_id": "event-intent",
+                    "event_type": "agent.intent.selected",
+                    "sequence": 1,
+                    "payload": {
+                        "decision_id": "decision-event",
+                        "plan_id": "plan-event",
+                        "intent": {
+                            "kind": "desktop_operation",
+                            "title": "Open App",
+                        },
+                        "route_to_studio": True,
+                    },
+                },
+                {
+                    "event_id": "event-plan",
+                    "event_type": "agent.plan.created",
+                    "sequence": 2,
+                    "payload": {
+                        "decision_id": "decision-event",
+                        "plan": {
+                            "plan_id": "plan-event",
+                            "route_to_studio": True,
+                            "tool_plan": {
+                                "steps": [
+                                    {
+                                        "step_id": "discover-app",
+                                        "tool_name": "desktop.list_apps",
+                                    },
+                                    {
+                                        "step_id": "open-app",
+                                        "tool_name": "app.open",
+                                    },
+                                ]
+                            },
+                        },
+                        "capability_plan": {
+                            "capabilities": [
+                                {"capability_id": "desktop.app_discovery"},
+                                {"capability_id": "desktop.app_launch"},
+                            ]
+                        },
+                    },
+                },
+                {
+                    "event_id": "event-selection",
+                    "event_type": "agent.plan.selection",
+                    "sequence": 3,
+                    "payload": {
+                        "decision_id": "decision-event",
+                        "plan_id": "plan-event",
+                        "intent_kind": "desktop_operation",
+                        "plan_tools": ["desktop.list_apps", "app.open"],
+                        "plan_capabilities": [
+                            "desktop.app_discovery",
+                            "desktop.app_launch",
+                        ],
+                        "route_to_studio": True,
+                    },
+                },
+            ],
+        }
+    )
+
+    assert timeline.runtime_debug is not None
+    assert timeline.runtime_debug.planner_decision_id == "decision-event"
+    assert timeline.runtime_debug.planner_plan_id == "plan-event"
+    assert timeline.runtime_debug.intent_kind == "desktop_operation"
+    assert timeline.runtime_debug.intent_title == "Open App"
+    assert timeline.runtime_debug.route_to_studio is True
+    assert timeline.runtime_debug.plan_tools == ["desktop.list_apps", "app.open"]
+    assert timeline.runtime_debug.plan_capabilities == [
+        "desktop.app_discovery",
+        "desktop.app_launch",
+    ]
+    assert "planner" in timeline.runtime_debug.debug_surfaces
+    assert "timeline" in timeline.runtime_debug.debug_surfaces
+
+
 def test_run_timeline_projects_failed_runtime_request_into_replan_event() -> None:
     timeline = run_timeline_snapshot_from_payload(
         {

@@ -60,6 +60,7 @@ def runtime_debug_summary_from_runtime_objects(
     skill_items = _items(skill_traces)
     child_items = _items(children)
     replan_items = _items(replan_recoveries)
+    event_planner_summary = _planner_summary_from_events(event_items)
 
     tool_statuses = [_text(_field(item, "status")) for item in tool_items]
     pending_approvals = [
@@ -84,8 +85,16 @@ def runtime_debug_summary_from_runtime_objects(
         task_progress,
         _field(runtime_execution_envelope, "task_progress"),
     )
-    plan_tools = _planner_tools(planner_summary, runtime_execution_envelope)
-    plan_capabilities = _planner_capabilities(planner_summary, runtime_execution_envelope)
+    plan_tools = _planner_tools(
+        planner_summary,
+        runtime_execution_envelope,
+        event_planner_summary,
+    )
+    plan_capabilities = _planner_capabilities(
+        planner_summary,
+        runtime_execution_envelope,
+        event_planner_summary,
+    )
     runtime_stage_counts = _runtime_stage_counts(runtime_execution_envelope)
     task_totals = _task_totals(effective_task_core, effective_task_progress)
     current_step_id = _optional_text(_field(effective_task_progress, "current_step_id"))
@@ -118,7 +127,15 @@ def runtime_debug_summary_from_runtime_objects(
         skill_items=skill_items,
         child_items=child_items,
         replan_items=replan_items,
-        planner_items=[item for item in (planner_summary, runtime_execution_envelope) if item is not None],
+        planner_items=[
+            item
+            for item in (
+                planner_summary,
+                runtime_execution_envelope,
+                event_planner_summary,
+            )
+            if item
+        ],
         task_items=[item for item in (effective_task_core, effective_task_progress) if item is not None],
         provider_session=desktop_provider_session,
     )
@@ -139,19 +156,26 @@ def runtime_debug_summary_from_runtime_objects(
         planner_decision_id=_optional_text(
             _field(planner_summary, "decision_id")
             or _field(runtime_execution_envelope, "decision_id")
+            or _field(event_planner_summary, "decision_id")
         ),
         planner_plan_id=_optional_text(
             _field(planner_summary, "plan_id")
             or _field(runtime_execution_envelope, "plan_id")
+            or _field(event_planner_summary, "plan_id")
         ),
         intent_kind=_optional_text(
             _field(planner_summary, "intent_kind")
             or _field(runtime_execution_envelope, "intent_kind")
+            or _field(event_planner_summary, "intent_kind")
         ),
-        intent_title=_optional_text(_field(planner_summary, "intent_title")),
+        intent_title=_optional_text(
+            _field(planner_summary, "intent_title")
+            or _field(event_planner_summary, "intent_title")
+        ),
         route_to_studio=_optional_bool(
             _field(planner_summary, "route_to_studio"),
             _field(runtime_execution_envelope, "route_to_studio"),
+            _field(event_planner_summary, "route_to_studio"),
         ),
         task_status=_optional_text(_field(effective_task_progress, "status")),
         current_step_id=current_step_id,
@@ -379,30 +403,152 @@ def _debug_surfaces(
     return surfaces
 
 
-def _planner_tools(planner_summary: Any | None, envelope: Any | None) -> list[str]:
+def _planner_tools(
+    planner_summary: Any | None,
+    envelope: Any | None,
+    event_planner_summary: Any | None = None,
+) -> list[str]:
     tools = _string_list(_field(planner_summary, "plan_tools"))
     if tools:
         return tools
     selected = _string_list(_field(planner_summary, "selected_tools"))
     if selected:
         return selected
-    return _unique_strings(
+    request_tools = _unique_strings(
         _text(_field(request, "tool_name"))
         for request in _items(_field(envelope, "requests"))
     )
+    if request_tools:
+        return request_tools
+    tools = _string_list(_field(event_planner_summary, "plan_tools"))
+    if tools:
+        return tools
+    return _string_list(_field(event_planner_summary, "selected_tools"))
 
 
-def _planner_capabilities(planner_summary: Any | None, envelope: Any | None) -> list[str]:
+def _planner_capabilities(
+    planner_summary: Any | None,
+    envelope: Any | None,
+    event_planner_summary: Any | None = None,
+) -> list[str]:
     capabilities = _string_list(_field(planner_summary, "plan_capabilities"))
     if capabilities:
         return capabilities
     required = _string_list(_field(planner_summary, "required_capabilities"))
     if required:
         return required
-    return _unique_strings(
+    request_capabilities = _unique_strings(
         _text(_field(request, "capability_id"))
         for request in _items(_field(envelope, "requests"))
     )
+    if request_capabilities:
+        return request_capabilities
+    capabilities = _string_list(_field(event_planner_summary, "plan_capabilities"))
+    if capabilities:
+        return capabilities
+    return _string_list(_field(event_planner_summary, "required_capabilities"))
+
+
+def _planner_summary_from_events(events: list[Any]) -> dict[str, Any]:
+    summary: dict[str, Any] = {}
+    for event in events:
+        event_type = _text(_field(event, "event_type"))
+        payload = _event_payload(event)
+        if not payload:
+            continue
+        if _is_planner_intent_event(event_type):
+            intent = _dict_field(payload, "intent") or _dict_field(payload, "selected_intent")
+            _set_if_text(summary, "decision_id", payload.get("decision_id"))
+            _set_if_text(summary, "plan_id", payload.get("plan_id"))
+            _set_if_text(summary, "intent_kind", intent.get("kind"))
+            _set_if_text(summary, "intent_title", intent.get("title"))
+            if isinstance(payload.get("route_to_studio"), bool):
+                summary["route_to_studio"] = payload.get("route_to_studio")
+        elif _is_planner_created_event(event_type):
+            plan = _dict_field(payload, "plan") or _dict_field(payload, "runtime_plan")
+            tool_plan = _dict_field(plan, "tool_plan") or _dict_field(payload, "tool_plan")
+            envelope = _dict_field(payload, "runtime_execution_envelope")
+            _set_if_text(summary, "decision_id", payload.get("decision_id"))
+            _set_if_text(summary, "plan_id", payload.get("plan_id") or plan.get("plan_id"))
+            if isinstance(plan.get("route_to_studio"), bool):
+                summary["route_to_studio"] = plan.get("route_to_studio")
+            plan_tools = _tool_names_from_tool_plan(tool_plan) or _tool_names_from_envelope(envelope)
+            if plan_tools:
+                summary["plan_tools"] = plan_tools
+            capabilities = _capability_ids_from_payload(payload)
+            if capabilities:
+                summary["plan_capabilities"] = capabilities
+        elif _is_planner_selection_event(event_type):
+            _set_if_text(summary, "decision_id", payload.get("decision_id"))
+            _set_if_text(summary, "plan_id", payload.get("plan_id"))
+            _set_if_text(summary, "intent_kind", payload.get("intent_kind"))
+            _set_if_list(summary, "plan_tools", payload.get("plan_tools"))
+            _set_if_list(summary, "selected_tools", payload.get("selected_tools"))
+            _set_if_list(summary, "plan_capabilities", payload.get("plan_capabilities"))
+            _set_if_list(summary, "required_capabilities", payload.get("required_capabilities"))
+            if isinstance(payload.get("route_to_studio"), bool):
+                summary["route_to_studio"] = payload.get("route_to_studio")
+    return summary
+
+
+def _event_payload(event: Any) -> dict[str, Any]:
+    payload = _field(event, "payload")
+    return payload if isinstance(payload, dict) else {}
+
+
+def _dict_field(item: Any, key: str) -> dict[str, Any]:
+    value = _field(item, key)
+    return value if isinstance(value, dict) else {}
+
+
+def _is_planner_intent_event(event_type: str) -> bool:
+    return event_type == "agent.intent.selected" or event_type.endswith(".intent.selected")
+
+
+def _is_planner_created_event(event_type: str) -> bool:
+    return event_type == "agent.plan.created" or event_type.endswith(".plan.created")
+
+
+def _is_planner_selection_event(event_type: str) -> bool:
+    return event_type == "agent.plan.selection" or event_type.endswith(".plan.selection")
+
+
+def _tool_names_from_tool_plan(tool_plan: dict[str, Any]) -> list[str]:
+    return _unique_strings(
+        _text(_field(step, "tool_name"))
+        for step in _items(tool_plan.get("steps"))
+    )
+
+
+def _tool_names_from_envelope(envelope: dict[str, Any]) -> list[str]:
+    return _unique_strings(
+        _text(_field(request, "tool_name") or _field(request, "tool"))
+        for request in _items(envelope.get("requests"))
+    )
+
+
+def _capability_ids_from_payload(payload: dict[str, Any]) -> list[str]:
+    capabilities = _string_list(payload.get("plan_capabilities"))
+    if capabilities:
+        return capabilities
+    capability_plan = _dict_field(payload, "capability_plan")
+    raw_items = capability_plan.get("capabilities") or capability_plan.get("items")
+    return _unique_strings(
+        _text(_field(item, "capability_id") or _field(item, "id"))
+        for item in _items(raw_items)
+    )
+
+
+def _set_if_text(target: dict[str, Any], key: str, value: Any) -> None:
+    clean = _text(value)
+    if clean:
+        target[key] = clean
+
+
+def _set_if_list(target: dict[str, Any], key: str, value: Any) -> None:
+    values = _string_list(value)
+    if values:
+        target[key] = values
 
 
 def _runtime_stage_counts(envelope: Any | None) -> dict[str, int]:
