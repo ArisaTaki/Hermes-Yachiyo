@@ -76,7 +76,7 @@ jobs:
           set -euo pipefail
           public_demo_args=()
           if [[ "${PUBLIC_DEMO_MODE}" == "full" ]]; then
-            public_demo_args+=(--include-provider-workflow --include-ui)
+            public_demo_args+=(--include-ui)
           fi
           python scripts/run_public_release_gate.py \
             --tmp-dir release/public-release-gate \

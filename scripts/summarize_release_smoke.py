@@ -35,7 +35,7 @@ SECTION_IDS = set(SOURCE_SECTION_CAPABILITIES.values()) | {
 }
 FULL_PUBLIC_DEMO_COMMAND = (
     "python scripts/run_public_demo_smokes.py "
-    "--include-provider-workflow --include-ui "
+    "--include-ui "
     "--output-json tmp/public-demo-smokes-full.json "
     "--output-markdown tmp/public-demo-smokes-full.md"
 )

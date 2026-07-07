@@ -43,7 +43,7 @@ class DemoFlow:
     opt_in_flag: str = ""
     opt_in_reason: str = ""
     release_required: bool = True
-    manual_diagnostic_reason: str = ""
+    diagnostic_reason: str = ""
 
 
 def demo_flows(
@@ -244,7 +244,7 @@ def demo_flows(
             opt_in_flag="--include-real-desktop-open",
             opt_in_reason="opens a real macOS application",
             release_required=False,
-            manual_diagnostic_reason=(
+            diagnostic_reason=(
                 "manual foreground diagnostic; isolated_desktop_interaction covers "
                 "the non-invasive release path"
             ),
@@ -263,7 +263,7 @@ def demo_flows(
             opt_in_flag="--include-real-desktop-ui-inspection",
             opt_in_reason="opens and inspects a real macOS application",
             release_required=False,
-            manual_diagnostic_reason=(
+            diagnostic_reason=(
                 "manual foreground diagnostic; isolated_desktop_interaction covers "
                 "the non-invasive release path"
             ),
@@ -277,7 +277,7 @@ def demo_flows(
             opt_in_flag="--include-real-desktop-interaction",
             opt_in_reason="types and clicks in a real macOS application",
             release_required=False,
-            manual_diagnostic_reason=(
+            diagnostic_reason=(
                 "manual foreground diagnostic; isolated_desktop_interaction covers "
                 "the non-invasive release path"
             ),
@@ -295,6 +295,11 @@ def demo_flows(
             report_json=tmp_dir / "workflow-provider.json",
             opt_in_flag="--include-provider-workflow",
             opt_in_reason="requires live provider smoke credentials",
+            release_required=False,
+            diagnostic_reason=(
+                "optional live-provider diagnostic; native_provider_contract covers "
+                "the deterministic required provider path"
+            ),
         ),
         DemoFlow(
             id="studio_replay_ui",
@@ -423,7 +428,7 @@ def _flow_result(
         "opt_in_flag": flow.opt_in_flag,
         "opt_in_reason": flow.opt_in_reason,
         "release_required": flow.release_required,
-        "manual_diagnostic_reason": flow.manual_diagnostic_reason,
+        "diagnostic_reason": flow.diagnostic_reason,
     }
     if not selected:
         return {**base, "status": "skipped"}
@@ -677,25 +682,25 @@ def _release_assessment(
             "release path is the isolated provider plus real read-only discovery."
         ),
     )
-    manual_diagnostic_progress = _release_progress(
+    optional_diagnostic_progress = _release_progress(
         diagnostic_flows,
         passed_count=len(diagnostic_flows) - len(diagnostic_incomplete),
         plan_only=plan_only,
-        baseline_id="manual_foreground_diagnostics",
-        baseline_label="Manual foreground desktop diagnostics",
-        denominator="manual_diagnostic_flow_count",
+        baseline_id="optional_diagnostics",
+        baseline_label="Optional diagnostics",
+        denominator="optional_diagnostic_flow_count",
         note=(
-            "These opt-in smokes open, inspect, type, or click in real foreground "
-            "macOS apps. They are useful diagnostics but are not required for the "
-            "non-invasive public release baseline."
+            "These opt-in smokes cover live provider credentials or real foreground "
+            "macOS interactions. They are useful diagnostics but are not required "
+            "for the deterministic non-invasive public release baseline."
         ),
     )
     return {
         "release_level": release_level,
         "required_flow_count": len(required_flows),
         "passed_required_flow_count": passed_count,
-        "manual_diagnostic_flow_count": len(diagnostic_flows),
-        "passed_manual_diagnostic_flow_count": len(diagnostic_flows)
+        "optional_diagnostic_flow_count": len(diagnostic_flows),
+        "passed_optional_diagnostic_flow_count": len(diagnostic_flows)
         - len(diagnostic_incomplete),
         "publish_candidate_flow_count": len(publish_candidate_flows),
         "passed_publish_candidate_flow_count": publish_candidate_passed_count,
@@ -704,12 +709,12 @@ def _release_assessment(
         "release_progress": full_public_demo_progress,
         "publish_candidate_progress": publish_candidate_progress,
         "desktop_executor_progress": desktop_executor_progress,
-        "manual_diagnostic_progress": manual_diagnostic_progress,
+        "optional_diagnostic_progress": optional_diagnostic_progress,
         "release_tracks": {
             PUBLISH_CANDIDATE_TRACK_ID: publish_candidate_progress,
             DESKTOP_EXECUTOR_TRACK_ID: desktop_executor_progress,
             FULL_PUBLIC_DEMO_TRACK_ID: full_public_demo_progress,
-            "manual_foreground_diagnostics": manual_diagnostic_progress,
+            "optional_diagnostics": optional_diagnostic_progress,
         },
         "missing_required_flow_ids": [
             str(flow.get("id") or "") for flow in incomplete if flow.get("id")
@@ -724,7 +729,7 @@ def _release_assessment(
             for flow in desktop_executor_incomplete
             if flow.get("id")
         ],
-        "manual_diagnostic_gap_ids": [
+        "optional_diagnostic_gap_ids": [
             str(flow.get("id") or "")
             for flow in diagnostic_incomplete
             if flow.get("id")
@@ -742,16 +747,22 @@ def _release_assessment(
             for flow in desktop_executor_incomplete
             if isinstance(flow, Mapping)
         ],
-        "manual_diagnostic_actions": [
+        "optional_diagnostic_actions": [
             _release_blocker(flow)
             for flow in diagnostic_incomplete
             if isinstance(flow, Mapping)
         ],
         "full_demo_command": (
             "python scripts/run_public_demo_smokes.py "
-            "--include-provider-workflow --include-ui "
+            "--include-ui "
             "--output-json tmp/public-demo-smokes-full.json "
             "--output-markdown tmp/public-demo-smokes-full.md"
+        ),
+        "provider_diagnostic_command": (
+            "python scripts/run_public_demo_smokes.py "
+            "--include-provider-workflow "
+            "--output-json tmp/public-demo-smokes-provider-diagnostics.json "
+            "--output-markdown tmp/public-demo-smokes-provider-diagnostics.md"
         ),
         "foreground_diagnostic_command": (
             "python scripts/run_public_demo_smokes.py "
@@ -823,7 +834,7 @@ def _release_blocker(flow: Mapping[str, Any]) -> dict[str, Any]:
         "opt_in_flag": str(flow.get("opt_in_flag") or ""),
         "opt_in_reason": str(flow.get("opt_in_reason") or ""),
         "release_required": flow.get("release_required") is not False,
-        "manual_diagnostic_reason": str(flow.get("manual_diagnostic_reason") or ""),
+        "diagnostic_reason": str(flow.get("diagnostic_reason") or ""),
         "reason": _flow_blocker_reason(flow),
         "evidence_summary": _dict(flow.get("evidence_summary")),
         "command": " ".join(str(part) for part in flow.get("command") or []),
@@ -861,7 +872,7 @@ def render_markdown(summary: Mapping[str, Any]) -> str:
     release_progress = _dict(summary.get("release_progress"))
     publish_candidate_progress = _dict(summary.get("publish_candidate_progress"))
     desktop_executor_progress = _dict(summary.get("desktop_executor_progress"))
-    manual_diagnostic_progress = _dict(summary.get("manual_diagnostic_progress"))
+    optional_diagnostic_progress = _dict(summary.get("optional_diagnostic_progress"))
     lines = [
         "# Oha-Yachiyo Public Demo Smoke Summary",
         "",
@@ -883,9 +894,9 @@ def render_markdown(summary: Mapping[str, Any]) -> str:
             f"{summary.get('passed_required_flow_count')}/{summary.get('required_flow_count')} passed"
         ),
         (
-            "Manual foreground diagnostics: "
-            f"{summary.get('passed_manual_diagnostic_flow_count')}/"
-            f"{summary.get('manual_diagnostic_flow_count')} passed"
+            "Optional diagnostics: "
+            f"{summary.get('passed_optional_diagnostic_flow_count')}/"
+            f"{summary.get('optional_diagnostic_flow_count')} passed"
         ),
         (
             "Publish candidate baseline: "
@@ -909,11 +920,11 @@ def render_markdown(summary: Mapping[str, Any]) -> str:
             f"{release_progress.get('remaining_count', '?')} remaining)"
         ),
         (
-            "Manual foreground baseline: "
-            f"{manual_diagnostic_progress.get('baseline_id') or 'manual_foreground_diagnostics'} "
-            f"({manual_diagnostic_progress.get('passed_count', summary.get('passed_manual_diagnostic_flow_count'))}/"
-            f"{manual_diagnostic_progress.get('total_count', summary.get('manual_diagnostic_flow_count'))} passed, "
-            f"{manual_diagnostic_progress.get('remaining_count', '?')} remaining)"
+            "Optional diagnostics baseline: "
+            f"{optional_diagnostic_progress.get('baseline_id') or 'optional_diagnostics'} "
+            f"({optional_diagnostic_progress.get('passed_count', summary.get('passed_optional_diagnostic_flow_count'))}/"
+            f"{optional_diagnostic_progress.get('total_count', summary.get('optional_diagnostic_flow_count'))} passed, "
+            f"{optional_diagnostic_progress.get('remaining_count', '?')} remaining)"
         ),
         f"Complete demo evidence: {str(bool(summary.get('complete'))).lower()}",
         "",
@@ -926,9 +937,9 @@ def render_markdown(summary: Mapping[str, Any]) -> str:
         reason = str(flow.get("opt_in_reason") or "")
         if flow.get("status") == "skipped" and reason:
             lines.append(f"  Opt-in: `{flow.get('opt_in_flag')}` ({reason})")
-        diagnostic_reason = str(flow.get("manual_diagnostic_reason") or "")
+        diagnostic_reason = str(flow.get("diagnostic_reason") or "")
         if flow.get("release_required") is False and diagnostic_reason:
-            lines.append(f"  Manual diagnostic: {diagnostic_reason}")
+            lines.append(f"  Optional diagnostic: {diagnostic_reason}")
         blocker = _flow_blocker_reason(flow)
         if flow.get("status") == "failed" and blocker:
             lines.append(f"  Blocker: `{blocker}`")
@@ -949,16 +960,16 @@ def render_markdown(summary: Mapping[str, Any]) -> str:
                     lines.append(f"  Blocker: `{reason}`")
             elif reason:
                 lines.append(f"  Reason: {reason}")
-    diagnostics = _dict_list(summary.get("manual_diagnostic_actions"))
+    diagnostics = _dict_list(summary.get("optional_diagnostic_actions"))
     if diagnostics:
-        lines.extend(["", "## Manual Foreground Diagnostics", ""])
+        lines.extend(["", "## Optional Diagnostics", ""])
         for diagnostic in diagnostics:
             lines.append(
                 f"- `{diagnostic.get('id')}` ({diagnostic.get('status')}) - {diagnostic.get('label')}"
             )
             opt_in = str(diagnostic.get("opt_in_flag") or "")
             opt_in_reason = str(diagnostic.get("opt_in_reason") or "")
-            manual_reason = str(diagnostic.get("manual_diagnostic_reason") or "")
+            manual_reason = str(diagnostic.get("diagnostic_reason") or "")
             if opt_in and opt_in_reason:
                 lines.append(f"  Optional `{opt_in}`: {opt_in_reason}")
             if manual_reason:

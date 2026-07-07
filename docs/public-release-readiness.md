@@ -77,7 +77,6 @@ opt-in:
 
 ```bash
 python scripts/run_public_demo_smokes.py \
-  --include-provider-workflow \
   --include-ui \
   --output-json tmp/public-demo-smokes-full.json \
   --output-markdown tmp/public-demo-smokes-full.md
@@ -91,9 +90,11 @@ operate macOS apps and are no longer required for the non-invasive full public
 demo baseline,
 and `--allow-existing-real-desktop-app` may be added when the interaction smoke
 must use an app that was already running before the smoke started.
-`--include-provider-workflow` requires live provider smoke credentials, and
-`--include-ui` starts Vite/Electron UI smokes. A default run can pass selected
-source demos while still reporting `complete=false` until opt-in flows pass.
+`--include-provider-workflow` remains available as an optional live-provider
+diagnostic requiring smoke credentials; the required provider path is covered by
+`native_provider_contract`. `--include-ui` starts Vite/Electron UI smokes. A
+default run can pass selected source demos while still reporting
+`complete=false` until required UI flows pass.
 If the provider credentials are not configured, the Workflow provider smoke
 writes `skipped=true`, `reason=provider_smoke_credentials_missing`, and the
 missing `OHA_YACHIYO_SMOKE_*` variable names as release blocker evidence instead
@@ -199,9 +200,9 @@ back to the full-demo command only for unknown future flows.
 
 The macOS release workflow keeps the default preflight safe on push builds. For
 manual release-candidate runs, set the `public_demo` workflow input to `full` to
-pass `--include-provider-workflow --include-ui` into the preflight after frontend
-dependencies are installed. Run the real desktop flags separately when you
-explicitly want manual foreground diagnostics.
+pass `--include-ui` into the preflight after frontend dependencies are
+installed. Run the provider or real desktop flags separately when you explicitly
+want optional live-provider or manual foreground diagnostics.
 
 `refresh_local_rc_signoff.py` builds/refreshes the current local RC evidence,
 generates the Native Agent capability matrix, writes release readiness

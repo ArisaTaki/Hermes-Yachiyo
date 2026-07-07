@@ -274,7 +274,6 @@ def test_release_smoke_summary_projects_rc_capabilities_into_public_demo(
         "real_desktop_app_open",
         "real_desktop_ui_inspection",
         "real_desktop_interaction",
-        "workflow_provider",
         "studio_replay_ui",
         "workflow_ui",
     }
@@ -308,7 +307,6 @@ def test_release_smoke_summary_projects_rc_capabilities_into_public_demo(
     assert "real_desktop_ui_inspection" not in details["missing_required_flow_ids"]
     assert "real_desktop_interaction" not in details["missing_required_flow_ids"]
     assert details["missing_required_flow_ids"] == [
-        "workflow_provider",
         "studio_replay_ui",
         "workflow_ui",
     ]
@@ -324,12 +322,11 @@ def test_release_smoke_summary_projects_rc_capabilities_into_public_demo(
     }
     action = next(item for item in summary["next_actions"] if item["id"] == "public_demo")
     assert action["missing_required_flow_ids"] == [
-        "workflow_provider",
         "studio_replay_ui",
         "workflow_ui",
     ]
     assert action["command"] == (
-        "python scripts/run_public_demo_smokes.py --include-provider-workflow --include-ui "
+        "python scripts/run_public_demo_smokes.py --include-ui "
         "--output-json tmp/public-demo-smokes-missing.json "
         "--output-markdown tmp/public-demo-smokes-missing.md"
     )
@@ -348,7 +345,6 @@ def test_release_smoke_summary_projects_electron_ui_smokes_into_public_demo(
         "real_desktop_app_open",
         "real_desktop_ui_inspection",
         "real_desktop_interaction",
-        "workflow_provider",
         "studio_replay_ui",
         "workflow_ui",
     }
@@ -401,10 +397,10 @@ def test_release_smoke_summary_projects_electron_ui_smokes_into_public_demo(
     )
 
     public_demo = next(item for item in summary["items"] if item["id"] == "public_demo")
-    assert public_demo["status"] == "missing"
+    assert public_demo["status"] == "passed"
     details = public_demo["related_evidence"]["public_demo_assessment"][-1]
     assert details["kind"] == "public_demo_aggregate"
-    assert details["missing_required_flow_ids"] == ["workflow_provider"]
+    assert details["missing_required_flow_ids"] == []
     projection = next(
         item
         for item in public_demo["related_evidence"]["public_demo_assessment"]
@@ -414,15 +410,7 @@ def test_release_smoke_summary_projects_electron_ui_smokes_into_public_demo(
         "scripts/smoke_agent_run_detail_ui.mjs": "studio_replay_ui",
         "scripts/smoke_workflow_save_run_ui.mjs": "workflow_ui",
     }
-    action = next(item for item in summary["next_actions"] if item["id"] == "public_demo")
-    assert action["missing_required_flow_ids"] == ["workflow_provider"]
-    assert action["command"] == (
-        "python scripts/run_public_demo_smokes.py --include-provider-workflow "
-        "--output-json tmp/public-demo-smokes-missing.json "
-        "--output-markdown tmp/public-demo-smokes-missing.md"
-    )
-    assert "--include-ui" not in action["command"]
-    assert "--include-real-desktop" not in action["command"]
+    assert all(item["id"] != "public_demo" for item in summary["next_actions"])
 
 
 def test_release_smoke_summary_projects_provider_workflow_smoke_into_public_demo(
@@ -435,7 +423,6 @@ def test_release_smoke_summary_projects_provider_workflow_smoke_into_public_demo
         "real_desktop_app_open",
         "real_desktop_ui_inspection",
         "real_desktop_interaction",
-        "workflow_provider",
         "studio_replay_ui",
         "workflow_ui",
     }
@@ -528,7 +515,7 @@ def test_release_smoke_summary_projects_provider_workflow_smoke_into_public_demo
         "exit_code": 0,
         "summary_ok": True,
     }
-    assert "workflow_provider" in projection["passed_required_flow_ids"]
+    assert "workflow_provider" not in projection["passed_required_flow_ids"]
     assert all(item["id"] != "public_demo" for item in summary["next_actions"])
 
 
@@ -584,7 +571,7 @@ def test_release_smoke_summary_does_not_project_provider_workflow_from_capabilit
     public_demo_path.write_text(
         json.dumps(
             _public_demo_report_with_passed_flows(
-                set(required_flow_ids) - {"workflow_provider"}
+                set(required_flow_ids) - {"studio_replay_ui"}
             )
         ),
         encoding="utf-8",
@@ -603,8 +590,8 @@ def test_release_smoke_summary_does_not_project_provider_workflow_from_capabilit
         for item in public_demo["related_evidence"]["public_demo_assessment"]
     }
     action = next(item for item in summary["next_actions"] if item["id"] == "public_demo")
-    assert action["missing_required_flow_ids"] == ["workflow_provider"]
-    assert "--include-provider-workflow" in action["command"]
+    assert action["missing_required_flow_ids"] == ["studio_replay_ui"]
+    assert "--include-ui" in action["command"]
 
 
 def test_release_smoke_summary_rejects_inconsistent_public_demo_level(
@@ -751,31 +738,27 @@ def test_release_smoke_summary_keeps_more_informative_public_demo_blocker(
 ):
     monkeypatch.setattr(release_smoke, "ROOT", tmp_path)
     required_flow_ids = release_smoke._canonical_public_demo_flow_ids()
-    passed_flow_ids = set(required_flow_ids) - {"workflow_provider"}
+    passed_flow_ids = set(required_flow_ids) - {"studio_replay_ui"}
     generic_path = tmp_path / "tmp" / "public-demo-generic.json"
     detailed_path = tmp_path / "tmp" / "public-demo-detailed.json"
     generic = _public_demo_report_with_passed_flows(passed_flow_ids)
     generic["release_blockers"] = [
-        {
-            "id": "workflow_provider",
-            "status": "skipped",
-            "reason": "requires live provider smoke credentials",
-        }
+            {
+                "id": "studio_replay_ui",
+                "status": "skipped",
+                "reason": "ui_smoke_not_collected",
+            }
     ]
     detailed = _public_demo_report_with_passed_flows(passed_flow_ids)
     detailed["release_blockers"] = [
-        {
-            "id": "workflow_provider",
-            "status": "skipped",
-            "reason": "provider_smoke_credentials_missing",
-            "evidence_summary": {
-                "blocking_condition": "provider_smoke_credentials_missing",
-                "missing_env": [
-                    "OHA_YACHIYO_SMOKE_BASE_URL",
-                    "OHA_YACHIYO_SMOKE_MODEL",
-                ],
-            },
-        }
+            {
+                "id": "studio_replay_ui",
+                "status": "skipped",
+                "reason": "electron_ui_smoke_failed",
+                "evidence_summary": {
+                    "blocking_condition": "electron_ui_smoke_failed",
+                },
+            }
     ]
     generic_path.parent.mkdir(parents=True, exist_ok=True)
     generic_path.write_text(json.dumps(generic), encoding="utf-8")
@@ -786,13 +769,9 @@ def test_release_smoke_summary_keeps_more_informative_public_demo_blocker(
     public_demo = next(item for item in summary["items"] if item["id"] == "public_demo")
     details = public_demo["related_evidence"]["public_demo_assessment"][-1]
     blocker = next(
-        item for item in details["release_blockers"] if item["id"] == "workflow_provider"
+        item for item in details["release_blockers"] if item["id"] == "studio_replay_ui"
     )
-    assert blocker["reason"] == "provider_smoke_credentials_missing"
-    assert blocker["evidence_summary"]["missing_env"] == [
-        "OHA_YACHIYO_SMOKE_BASE_URL",
-        "OHA_YACHIYO_SMOKE_MODEL",
-    ]
+    assert blocker["reason"] == "electron_ui_smoke_failed"
 
 
 def test_release_smoke_cli_writes_json_and_markdown(tmp_path, monkeypatch, capsys):
@@ -836,13 +815,14 @@ def test_release_smoke_markdown_shows_public_demo_blockers(tmp_path, monkeypatch
                 "status": "partial",
                 "release_level": "partial_demo_ready",
                 "complete": False,
-                "selected_count": 13,
-                "passed_count": 13,
-                "required_flow_count": 19,
-                "passed_required_flow_count": 13,
-                "missing_required_flow_ids": ["workflow_provider"],
+                "selected_count": 14,
+                "passed_count": 14,
+                "required_flow_count": 16,
+                "passed_required_flow_count": 14,
+                "missing_required_flow_ids": ["studio_replay_ui", "workflow_ui"],
                 "release_blockers": [
-                    {"id": "workflow_provider", "status": "skipped"}
+                    {"id": "studio_replay_ui", "status": "skipped"},
+                    {"id": "workflow_ui", "status": "skipped"},
                 ],
                 "flows": [{"id": "workflow_run", "status": "passed"}],
             }
@@ -853,6 +833,6 @@ def test_release_smoke_markdown_shows_public_demo_blockers(tmp_path, monkeypatch
     summary = release_smoke.summarize_release_smoke([public_demo_path])
     markdown = release_smoke.render_markdown(summary)
 
-    assert "Public demo: 13/19 required flows (`partial_demo_ready`)" in markdown
+    assert "Public demo: 14/16 required flows (`partial_demo_ready`)" in markdown
     assert "Public demo level: `partial_demo_ready`" in markdown
-    assert "Missing demo flows: `workflow_provider`" in markdown
+    assert "Missing demo flows: `studio_replay_ui`, `workflow_ui`" in markdown

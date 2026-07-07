@@ -892,9 +892,10 @@ desktop provider discover/operate/verify routing, approval resume replay, GroupR
 replay, and WorkflowRun replay, then reports skipped provider Workflow and UI
 demo flows as required next actions while keeping real foreground desktop
 operation as manual diagnostics.
-Full public demo evidence requires the explicit
-`--include-provider-workflow` and `--include-ui` flags because those required
-flows need live credentials or start Vite/Electron UI smokes. The summary now reports `release_level`,
+Full public demo evidence requires the explicit `--include-ui` flag because the
+remaining required UI flows start Vite/Electron smokes. Live provider smoke is
+kept as an optional diagnostic while `native_provider_contract` remains the
+deterministic required provider path. The summary now reports `release_level`,
 `missing_required_flow_ids`, and `release_blockers`; failed selected flows also
 project per-flow `evidence_summary` details such as `stage`,
 `blocking_condition`, and boolean checks into Release Blockers and Next

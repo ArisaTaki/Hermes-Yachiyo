@@ -1349,7 +1349,7 @@ def _dict(value: Any) -> dict[str, Any]:
 def _full_demo_command() -> str:
     return (
         "python scripts/run_public_demo_smokes.py "
-        "--include-provider-workflow --include-ui "
+        "--include-ui "
         "--output-json tmp/public-demo-smokes-full.json "
         "--output-markdown tmp/public-demo-smokes-full.md"
     )
