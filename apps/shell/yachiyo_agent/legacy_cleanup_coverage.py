@@ -291,21 +291,25 @@ PLANNER_OWNED_LEGACY_ENTRYPOINTS: tuple[dict[str, Any], ...] = (
             "打开 Slack 搜索框输入选中的内容",
         ],
     },
-)
-
-
-REMAINING_FALLBACK_CONTRACTS: tuple[dict[str, Any], ...] = (
-    _fallback_contract(
-        "semantic_ui_targeting",
-        "Semantic UI click/type targeting",
-        "Semantic UI operations are now planner-covered with inspect-before-act and recovery evidence; legacy facade callers still need cleanup.",
-        ["Chrome 点登录", "在 Linear 上的创建按钮点击", "Can you type hello into the search field?"],
-        [
-            "Planner execution must keep read_ui/click/type verification events observable.",
-            "Retry/recovery artifacts must remain linked to target UI evidence.",
+    {
+        "entrypoint_id": "semantic_ui_targeting_facade",
+        "title": "Legacy semantic UI targeting facade",
+        "tools": [
+            "app.focus_and_click_ui_element",
+            "app.open_and_click_ui_element",
+            "desktop.click_ui_element",
+            "desktop.type_into_ui_element",
         ],
-    ),
+        "example_prompts": [
+            "Chrome 点登录",
+            "在 Linear 上的创建按钮点击",
+            "Can you type hello into the search field?",
+        ],
+    },
 )
+
+
+REMAINING_FALLBACK_CONTRACTS: tuple[dict[str, Any], ...] = ()
 
 
 MIGRATED_DAILY_DESKTOP_SAMPLES: tuple[LegacyDesktopMigrationSample, ...] = (
@@ -415,11 +419,16 @@ def legacy_daily_desktop_cleanup_coverage() -> dict[str, Any]:
         for contract in REMAINING_FALLBACK_CONTRACTS
         if contract.get("cleanup_blocker") == "legacy_response_shape_compatibility"
     )
+    cleanup_readiness = (
+        "legacy_fallbacks_eliminated"
+        if not REMAINING_FALLBACK_CONTRACTS
+        else "planner_covered_compat_cleanup_pending"
+    )
     return {
         "legacy_boundary": "legacy_daily_desktop_intent",
         "planner_owner": "runtime_planner",
         "total_samples": len(MIGRATED_DAILY_DESKTOP_SAMPLES),
-        "cleanup_readiness": "planner_covered_compat_cleanup_pending",
+        "cleanup_readiness": cleanup_readiness,
         "remaining_fallback_count": len(REMAINING_FALLBACK_CONTRACTS),
         "planner_covered_fallback_count": planner_covered_fallback_count,
         "compatibility_cleanup_pending_count": compatibility_cleanup_pending_count,

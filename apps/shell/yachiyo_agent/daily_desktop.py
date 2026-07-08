@@ -233,6 +233,12 @@ def _planner_owned_legacy_compatible_entrypoint_requests(
     )
     if search_box_requests:
         return search_box_requests
+    semantic_ui_requests = _legacy_compatible_semantic_ui_entrypoint_requests(
+        planner_requests,
+        text=text,
+    )
+    if semantic_ui_requests:
+        return semantic_ui_requests
     return _legacy_compatible_simple_entrypoint_requests(planner_requests, text=text)
 
 
@@ -421,6 +427,42 @@ def _legacy_compatible_context_transfer_search_box_requests(
             continue
         return []
     return compatible if found_click else []
+
+
+def _legacy_compatible_semantic_ui_entrypoint_requests(
+    requests: Sequence[Mapping[str, Any]] | None,
+    *,
+    text: str,
+) -> list[dict[str, Any]]:
+    if not requests:
+        return []
+    items = [dict(request) for request in requests if isinstance(request, Mapping)]
+    if not items:
+        return []
+    if not any(
+        str(request.get("planning_reason") or "").strip() == "planner_desktop_operation"
+        for request in items
+    ):
+        return []
+    visible = _visible_entrypoint_plan_requests(items)
+    if not visible or any(request.get("continue_to_model") for request in visible):
+        return []
+    if any(_request_has_selected_app_placeholder(request) for request in visible):
+        return []
+    semantic = [
+        request
+        for request in visible
+        if _semantic_ui_entrypoint_tool(str(request.get("tool") or ""))
+    ]
+    if len(semantic) != 1:
+        return []
+    if not _looks_like_semantic_ui_prompt(text):
+        return []
+    request = semantic[0]
+    payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+    if not _semantic_ui_payload(payload):
+        return []
+    return [_legacy_shape_request(request)]
 
 
 def _legacy_compatible_simple_entrypoint_requests(
@@ -635,6 +677,43 @@ def _search_box_click_payload(request: Mapping[str, Any]) -> dict[str, Any]:
     if role_filter not in {"text", "textbox", "search"}:
         return {}
     return dict(payload)
+
+
+def _semantic_ui_entrypoint_tool(tool_name: str) -> bool:
+    clean = str(tool_name or "").strip()
+    return clean in {
+        "app.focus_and_click_ui_element",
+        "app.open_and_click_ui_element",
+        "app.focus_and_type_into_ui_element",
+        "app.open_and_type_into_ui_element",
+        "desktop.click_ui_element",
+        "desktop.type_into_ui_element",
+    }
+
+
+def _looks_like_semantic_ui_prompt(text: str) -> bool:
+    value = str(text or "")
+    return bool(
+        re.search(
+            r"(?:点击|点一下|点按|单击|点|按钮|输入|填写|键入|click|press|tap|type|enter|fill)",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _semantic_ui_payload(payload: Mapping[str, Any]) -> bool:
+    target = str(payload.get("target") or "").strip()
+    if not target:
+        return False
+    role_filter = str(payload.get("role_filter") or "").strip()
+    if role_filter and role_filter not in {"button", "text", "textbox", "search"}:
+        return False
+    text = payload.get("text")
+    if text is not None and not str(text).strip():
+        return False
+    app_name = str(payload.get("app_name") or "").strip()
+    return not app_name or not _generic_non_app_name(app_name)
 
 
 def _app_prompt_has_non_launch_followup(text: str) -> bool:

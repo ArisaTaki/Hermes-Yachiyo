@@ -170,7 +170,7 @@ def _tool_catalog_case() -> dict[str, Any]:
         "cleanup_lists_planner_owned_entrypoints": bool(coverage)
         and len(coverage.planner_owned_entrypoints) >= 5,
         "cleanup_lists_remaining_fallbacks": bool(coverage)
-        and len(coverage.remaining_fallback_contracts) >= 1,
+        and len(coverage.remaining_fallback_contracts) == 0,
         "cleanup_remaining_fallbacks_are_planner_covered": bool(coverage)
         and coverage.remaining_fallback_count == coverage.planner_covered_fallback_count
         and coverage.compatibility_cleanup_pending_count
@@ -359,6 +359,39 @@ def _legacy_facade_planner_ownership_case() -> dict[str, Any]:
                 },
             ],
         },
+        {
+            "id": "semantic_ui_click",
+            "prompt": "在 Linear 上的创建按钮点击",
+            "expected": [
+                {
+                    "protocol": "json_fallback",
+                    "tool": "app.focus_and_click_ui_element",
+                    "input": {
+                        "app_name": "Linear",
+                        "target": "创建",
+                        "role_filter": "button",
+                        "click_count": 1,
+                        "limit": 80,
+                    },
+                },
+            ],
+        },
+        {
+            "id": "semantic_ui_type",
+            "prompt": "Can you type hello into the search field?",
+            "expected": [
+                {
+                    "protocol": "json_fallback",
+                    "tool": "desktop.type_into_ui_element",
+                    "input": {
+                        "target": "search",
+                        "text": "hello",
+                        "role_filter": "text",
+                        "limit": 80,
+                    },
+                },
+            ],
+        },
     ]
     legacy_calls: list[dict[str, Any]] = []
     original_legacy_parser = daily_desktop_module.daily_desktop_entrypoint_tool_requests
@@ -420,6 +453,8 @@ def _legacy_facade_planner_ownership_case() -> dict[str, Any]:
             "browser_app_new_tab_search",
             "context_transfer_search_box",
             "app_context_transfer_search_box",
+            "semantic_ui_click",
+            "semantic_ui_type",
         }.issubset({str(result["id"]) for result in results}),
     }
     return {
