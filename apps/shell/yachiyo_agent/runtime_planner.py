@@ -5419,14 +5419,21 @@ class RuntimePlanner:
                 for step in steps
                 if step.step_id.startswith("operate-foreground-ui-followup")
             ]
+            followup_return_tool = _return_followup_tool(
+                followup_return_hotkey,
+                allowed,
+            )
             steps.append(
                 _step(
                     intent,
                     "operate-foreground-ui-followup-return",
                     "Press Return after foreground input",
                     "desktop.ui_operation",
-                    _first_allowed(("desktop.hotkey",), allowed),
-                    input_preview=dict(followup_return_hotkey),
+                    followup_return_tool,
+                    input_preview=_return_followup_input_preview(
+                        followup_return_tool,
+                        followup_return_hotkey,
+                    ),
                     risk_level="high",
                     approval_required=True,
                     depends_on=[followup_step_ids[-1] if followup_step_ids else "operate-foreground-ui"],
@@ -8281,6 +8288,27 @@ def _first_allowed(tools: Iterable[str], allowed: set[str] | None) -> str | None
         if allowed is not None and alias in allowed:
             return alias
     return None
+
+
+def _return_followup_tool(
+    hotkey_payload: Mapping[str, Any],
+    allowed: set[str] | None,
+) -> str | None:
+    if (
+        str(hotkey_payload.get("key") or "").strip().lower() in {"return", "enter"}
+        and not hotkey_payload.get("modifiers")
+    ):
+        return _first_allowed(("desktop.hotkey", "desktop.submit_foreground"), allowed)
+    return _first_allowed(("desktop.hotkey",), allowed)
+
+
+def _return_followup_input_preview(
+    tool_name: str | None,
+    hotkey_payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    if tool_name == "desktop.submit_foreground":
+        return {"action": "confirm"}
+    return dict(hotkey_payload)
 
 
 def _app_scoped_safe_shortcut_split_tools(

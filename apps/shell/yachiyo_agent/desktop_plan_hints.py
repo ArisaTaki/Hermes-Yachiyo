@@ -251,6 +251,8 @@ def click_target_hint(text: str) -> dict[str, Any] | None:
                 raw_target,
                 flags=re.IGNORECASE,
             ).strip(" .，,。")
+        if _looks_like_keyboard_key_target(raw_target, target):
+            continue
         if not target:
             continue
         return {
@@ -390,6 +392,39 @@ def safe_type_text_hint(text: str) -> str:
 def _looks_like_non_content_type_text(text: str) -> bool:
     value = clean(text)
     return value in _NON_CONTENT_TYPE_TEXTS
+
+
+def _looks_like_keyboard_key_target(raw_target: str, clean_target_value: str) -> bool:
+    raw = clean(raw_target).lower()
+    target = clean(clean_target_value).lower()
+    keyboard_targets = {
+        "回车",
+        "回车键",
+        "enter",
+        "return",
+        "esc",
+        "escape",
+        "tab",
+        "制表",
+        "制表键",
+        "上方向键",
+        "下方向键",
+        "左方向键",
+        "右方向键",
+        "向上箭头",
+        "向下箭头",
+        "向左箭头",
+        "向右箭头",
+        "up",
+        "down",
+        "left",
+        "right",
+        "up arrow",
+        "down arrow",
+        "left arrow",
+        "right arrow",
+    }
+    return bool(raw in keyboard_targets or target in keyboard_targets)
 
 
 def _looks_like_current_input_target(raw_target: str, clean_target_value: str) -> bool:
@@ -2029,7 +2064,9 @@ def _strip_app_prefix_from_type_target(value: str) -> str:
 def clean_followup_text(value: str) -> str:
     text = clean(value)
     text = re.split(
-        r"(?:并且|然后|再|接着|之后|后|并)?\s*(?:发送|提交|确认|回车|搜索|send|submit|confirm|enter|return|search)",
+        r"(?:并且|然后|再|接着|之后|随后|后|并|and\s+then|then|and)?\s*"
+        r"(?:按一下|按下|按|敲|点击|点|press|hit|tap)?\s*"
+        r"(?:发送|提交|确认|回车键?|搜索|send|submit|confirm|enter|return|search)",
         text,
         maxsplit=1,
         flags=re.IGNORECASE,
