@@ -2249,6 +2249,22 @@ def test_agent_studio_service_plans_discovered_desktop_app_execution() -> None:
 def test_agent_studio_service_projects_provider_session_recovery_without_autostart(
     monkeypatch,
 ) -> None:
+    for key in (
+        "OHA_YACHIYO_DESKTOP_PROVIDER_URL",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_ID",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_EXECUTE_URL",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_STATUS_URL",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_KIND",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_KIND",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_ISOLATED",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_FOREGROUND_TAKEOVER_REQUIRED",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_BACKEND_KIND",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_BACKEND_IS_LOOPBACK",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_BACKEND_READY_FOR_PUBLIC_RELEASE",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_REQUIRES_REAL_VIRTUAL_DESKTOP_BACKEND",
+    ):
+        monkeypatch.delenv(key, raising=False)
     start_calls = _install_fake_isolated_provider_session(monkeypatch)
     service = AgentStudioService(_FakeStudioExecutionPort())
 
@@ -2299,7 +2315,11 @@ def test_agent_studio_service_projects_provider_session_recovery_without_autosta
         "desktop.list_apps",
         "desktop.ui_elements",
     }
-    assert action.deferred_continuation[0]["tool"] == "desktop.list_apps"
+    assert [request["tool"] for request in action.deferred_continuation] == [
+        "desktop.list_apps",
+        "app.focus_and_click_ui_element",
+        "desktop.ui_elements",
+    ]
 
 
 def test_agent_studio_service_probes_desktop_provider_health_for_execution(

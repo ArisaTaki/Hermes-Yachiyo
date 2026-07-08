@@ -1839,12 +1839,25 @@ def _desktop_provider_session_recovery_snapshot(
         "api_route": "/yachiyo/studio/tools/desktop-provider/session/start",
     }
     session_payload = _desktop_provider_session_public_payload(session)
-    deferred_request = _desktop_provider_session_deferred_continuation_request(
-        source_request
+    deferred_continuation = _desktop_provider_session_deferred_continuation_requests(
+        envelope,
+        request_ids,
     )
-    deferred_continuation = [deferred_request] if deferred_request else []
-    deferred_tool = _first_text(deferred_request.get("tool")) if deferred_request else ""
-    deferred_input = _mapping(deferred_request.get("input")) if deferred_request else {}
+    if not deferred_continuation:
+        deferred_request = _desktop_provider_session_deferred_continuation_request(
+            source_request
+        )
+        deferred_continuation = [deferred_request] if deferred_request else []
+    deferred_tool = (
+        _first_text(deferred_continuation[0].get("tool"))
+        if deferred_continuation
+        else ""
+    )
+    deferred_input = (
+        _mapping(deferred_continuation[0].get("input"))
+        if deferred_continuation
+        else {}
+    )
     metadata: dict[str, Any] = {
         "runtime_execution_envelope_id": envelope.envelope_id,
         "runtime_execution_request_id": source_request_id,
@@ -1853,7 +1866,11 @@ def _desktop_provider_session_recovery_snapshot(
     }
     if deferred_continuation:
         metadata["deferred_continuation_count"] = len(deferred_continuation)
-        metadata["deferred_tools"] = [deferred_tool]
+        metadata["deferred_tools"] = [
+            continuation_tool
+            for request in deferred_continuation
+            if (continuation_tool := _first_text(request.get("tool")))
+        ]
     action = ReplanRecoveryActionSnapshot(
         action_id=f"{request_id}:action:1:{tool}",
         label="Start isolated desktop provider",
@@ -1977,6 +1994,32 @@ def _desktop_provider_session_source_request(
         if request_id and request_id in request_id_set:
             return request
     return (envelope.requests or [None])[0]
+
+
+def _desktop_provider_session_deferred_continuation_requests(
+    envelope: RuntimeExecutionEnvelopeSnapshot,
+    request_ids: list[str],
+) -> list[dict[str, Any]]:
+    request_id_set = set(request_ids)
+    continuations: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for request in envelope.requests or []:
+        request_id = _text(_runtime_request_value(request, "request_id"))
+        if request_id_set and request_id not in request_id_set:
+            continue
+        continuation = _desktop_provider_session_deferred_continuation_request(request)
+        if not continuation:
+            continue
+        key = (
+            _first_text(continuation.get("tool")),
+            _first_text(continuation.get("step_id")),
+            repr(sorted(_mapping(continuation.get("input")).items())),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        continuations.append(continuation)
+    return continuations
 
 
 def _desktop_provider_session_deferred_continuation_request(
