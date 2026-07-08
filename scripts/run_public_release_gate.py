@@ -155,10 +155,13 @@ def run_public_release_gate(
 ) -> dict[str, Any]:
     resolved_tmp_dir = _resolve_path(Path(tmp_dir))
     resolved_tmp_dir.mkdir(parents=True, exist_ok=True)
+    effective_include_isolated_provider_smoke = (
+        include_isolated_provider_smoke or require_release_ready
+    )
     checks = public_release_gate_checks(
         tmp_dir=resolved_tmp_dir,
         include_public_demo=include_public_demo,
-        include_isolated_provider_smoke=include_isolated_provider_smoke,
+        include_isolated_provider_smoke=effective_include_isolated_provider_smoke,
         include_real_desktop=include_real_desktop,
         include_real_desktop_open=include_real_desktop_open,
         include_real_desktop_ui_inspection=include_real_desktop_ui_inspection,
@@ -271,6 +274,7 @@ def run_public_release_gate(
         "release_ready": release_ready,
         "status": status,
         "require_release_ready": require_release_ready,
+        "include_isolated_provider_smoke": effective_include_isolated_provider_smoke,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "tmp_dir": _display_path(resolved_tmp_dir),
         "check_count": len(check_results),

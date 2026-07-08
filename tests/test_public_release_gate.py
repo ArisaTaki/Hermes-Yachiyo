@@ -337,9 +337,11 @@ def test_public_release_gate_passes_when_full_release_smoke_is_present(
     monkeypatch,
 ):
     monkeypatch.setattr(gate, "ROOT", tmp_path)
+    commands: list[list[str]] = []
 
     def fake_run(command):
         command = list(command)
+        commands.append(command)
         _write_public_demo_report(command, release_level="full_public_demo_ready")
         _write_diagnostics_bundle(command)
         _write_release_smoke_report(command, ok=True)
@@ -355,11 +357,18 @@ def test_public_release_gate_passes_when_full_release_smoke_is_present(
     assert summary["ok"] is True
     assert summary["release_ready"] is True
     assert summary["status"] == "ready"
+    assert summary["include_isolated_provider_smoke"] is True
     assert summary["release_blocker_count"] == 0
     assert summary["next_actions"] == []
     assert summary["progress"]["stage"] == "ready"
     assert summary["progress"]["code_completion_percent"] == 100.0
     assert summary["progress"]["release_completion_percent"] == 100.0
+    oha_product_command = next(
+        command
+        for command in commands
+        if "scripts/smoke_oha_desktop_agent_release.py" in command
+    )
+    assert "--run-isolated-provider-smoke" in oha_product_command
 
 
 def test_public_release_gate_reports_failed_checks(tmp_path, monkeypatch):
