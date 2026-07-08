@@ -957,6 +957,8 @@ export type RuntimeDebugSummarySnapshot = {
   latest_recovery_action_label?: string | null;
   latest_recovery_action_count?: number;
   latest_deferred_tool?: string | null;
+  deferred_continuation_count?: number;
+  latest_deferred_continuation_tool?: string | null;
   latest_tool_call_id?: string | null;
   latest_tool_name?: string | null;
   latest_tool_status?: string | null;

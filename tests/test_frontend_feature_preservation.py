@@ -109,6 +109,9 @@ def test_frontend_runtime_debug_summary_exposes_runtime_trace_facts() -> None:
             "data-desktop-execution-session-mode={summary?.desktop_execution_session_mode || ''}",
             "data-latest-replan-request-id={summary?.latest_replan_request_id || ''}",
             "data-latest-deferred-tool={summary?.latest_deferred_tool || ''}",
+            "data-deferred-continuation-count={String(summary?.deferred_continuation_count || 0)}",
+            "data-latest-deferred-continuation-tool="
+            "{summary?.latest_deferred_continuation_tool || ''}",
             "summary.runtime_doctrine ? `doctrine ${summary.runtime_doctrine}` : ''",
             "summary.current_request_tool_name ? "
             "`request tool ${summary.current_request_tool_name}` : ''",
@@ -125,6 +128,8 @@ def test_frontend_runtime_debug_summary_exposes_runtime_trace_facts() -> None:
             "'no foreground takeover' : ''",
             "summary.latest_approval_tool_name ? "
             "`approval tool ${summary.latest_approval_tool_name}` : ''",
+            "summary.latest_deferred_continuation_tool ? "
+            "`continuation ${summary.latest_deferred_continuation_tool}` : ''",
         ],
     )
 

@@ -658,8 +658,16 @@ class _FirstPageDesktopProviderRuntimePort(_FakeRuntimePort):
                     },
                 },
                 {
-                    "event_type": "agent.tool.progress",
+                    "event_type": "agent.deferred_continuation.enqueued",
                     "sequence": 5,
+                    "payload": {
+                        "deferred_continuation_count": 1,
+                        "deferred_tools": ["desktop.safe_type_text"],
+                    },
+                },
+                {
+                    "event_type": "agent.tool.progress",
+                    "sequence": 6,
                     "payload": {"tool": "app.open"},
                 },
             ],
@@ -3749,9 +3757,11 @@ def test_yachiyo_agent_service_task_event_first_page_includes_provider_session_w
         "agent.plan.created",
         "agent.tool.started",
         "desktop.provider_session.started",
+        "agent.deferred_continuation.enqueued",
     ]
-    assert page.next_after_sequence == 4
-    assert page.events[-1].payload["desktop_provider_session"]["provider_id"] == "isolated-vnc"
+    assert page.next_after_sequence == 5
+    assert page.events[-2].payload["desktop_provider_session"]["provider_id"] == "isolated-vnc"
+    assert page.events[-1].payload["deferred_tools"] == ["desktop.safe_type_text"]
     assert port.calls == [
         (
             "get_task_event_page",

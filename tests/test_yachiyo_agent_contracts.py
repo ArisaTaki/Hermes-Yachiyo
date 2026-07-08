@@ -23,6 +23,9 @@ from apps.shell.agent.runtime.desktop_execution_providers import (
     desktop_execution_provider_status_from_env,
     local_desktop_execution_provider_status,
 )
+from apps.shell.yachiyo_agent.runtime_debug_snapshots import (
+    runtime_debug_summary_from_runtime_objects,
+)
 from apps.shell.yachiyo_agent import (
     AgentDefinitionSnapshot,
     AgentDeskFileEventRequest,
@@ -4204,6 +4207,29 @@ def test_agent_task_snapshot_keeps_verify_events_but_shows_primary_desktop_tool(
     assert snapshot.runtime_debug.tool_call_count == 1
     assert snapshot.runtime_debug.latest_tool_name == "app.open"
     assert snapshot.runtime_debug.debug_surfaces == ["timeline", "tools"]
+
+
+def test_runtime_debug_summary_counts_deferred_continuation_events() -> None:
+    summary = runtime_debug_summary_from_runtime_objects(
+        run_id="run-1",
+        events=[
+            PublicRunEvent(
+                run_id="run-1",
+                sequence=1,
+                event_type="agent.deferred_continuation.enqueued",
+                payload={
+                    "deferred_continuation_count": 2,
+                    "deferred_tools": ["desktop.safe_type_text", "desktop.active_window"],
+                },
+            )
+        ],
+    )
+
+    assert summary.event_count == 1
+    assert summary.deferred_continuation_count == 2
+    assert summary.latest_deferred_continuation_tool == "desktop.active_window"
+    assert summary.latest_deferred_tool == "desktop.active_window"
+    assert "deferred_continuation" in summary.debug_surfaces
 
 
 def test_agent_task_snapshot_uses_first_planned_desktop_step_for_progress() -> None:

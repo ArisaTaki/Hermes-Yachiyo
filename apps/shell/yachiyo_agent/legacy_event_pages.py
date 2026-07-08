@@ -62,6 +62,7 @@ def is_replay_enrichment_event(event: dict[str, Any]) -> bool:
     return event_type.startswith(
         (
             "agent.artifact.",
+            "agent.deferred_continuation.",
             "agent.desktop.",
             "agent.intent.",
             "agent.plan.",

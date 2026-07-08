@@ -114,6 +114,10 @@ def runtime_debug_summary_from_runtime_objects(
         request_items,
         desktop_provider_session,
     )
+    deferred_continuation_events = _deferred_continuation_events(event_items)
+    latest_deferred_continuation_tool = _latest_deferred_continuation_tool(
+        deferred_continuation_events
+    )
     request_statuses = [_text(_field(item, "status")) for item in request_items]
     runtime_context_items = [
         latest_tool,
@@ -132,6 +136,7 @@ def runtime_debug_summary_from_runtime_objects(
         skill_items=skill_items,
         child_items=child_items,
         replan_items=replan_items,
+        deferred_continuation_items=deferred_continuation_events,
         planner_items=[
             item
             for item in (
@@ -335,11 +340,18 @@ def runtime_debug_summary_from_runtime_objects(
             _field(latest_recovery_action, "label")
         ),
         latest_recovery_action_count=len(latest_recovery_actions),
-        latest_deferred_tool=_first_text_from_items(
-            [latest_tool, latest_approval, latest_request, latest_replan],
-            "deferred_tool",
-            "selected_tool_name",
+        latest_deferred_tool=(
+            _first_text_from_items(
+                [latest_tool, latest_approval, latest_request, latest_replan],
+                "deferred_tool",
+                "selected_tool_name",
+            )
+            or latest_deferred_continuation_tool
         ),
+        deferred_continuation_count=_deferred_continuation_count(
+            deferred_continuation_events
+        ),
+        latest_deferred_continuation_tool=latest_deferred_continuation_tool,
         latest_tool_call_id=_optional_text(_field(latest_tool, "tool_call_id")),
         latest_tool_name=_optional_text(_field(latest_tool, "tool_name")),
         latest_tool_status=_optional_text(_field(latest_tool, "status")),
@@ -389,6 +401,7 @@ def _debug_surfaces(
     skill_items: list[Any],
     child_items: list[Any],
     replan_items: list[Any],
+    deferred_continuation_items: list[Any],
     planner_items: list[Any],
     task_items: list[Any],
     provider_session: Any | None = None,
@@ -405,6 +418,7 @@ def _debug_surfaces(
         ("skills", skill_items),
         ("children", child_items),
         ("replan", replan_items),
+        ("deferred_continuation", deferred_continuation_items),
         ("desktop_provider", [provider_session] if provider_session is not None else []),
     ):
         if values:
@@ -498,6 +512,48 @@ def _planner_summary_from_events(events: list[Any]) -> dict[str, Any]:
             if isinstance(payload.get("route_to_studio"), bool):
                 summary["route_to_studio"] = payload.get("route_to_studio")
     return summary
+
+
+def _deferred_continuation_events(events: list[Any]) -> list[Any]:
+    return [
+        event
+        for event in events
+        if _event_is_deferred_continuation(_text(_field(event, "event_type")))
+    ]
+
+
+def _event_is_deferred_continuation(event_type: str) -> bool:
+    clean = _text(event_type)
+    return clean == "agent.deferred_continuation.enqueued" or clean.endswith(
+        ".deferred_continuation.enqueued"
+    )
+
+
+def _deferred_continuation_count(events: list[Any]) -> int:
+    count = 0
+    for event in events:
+        payload = _event_payload(event)
+        raw_count = _field(payload, "deferred_continuation_count")
+        if isinstance(raw_count, int) and raw_count > 0:
+            count += raw_count
+            continue
+        tools = _string_list(payload.get("deferred_tools"))
+        count += len(tools) if tools else 1
+    return count
+
+
+def _latest_deferred_continuation_tool(events: list[Any]) -> str | None:
+    for event in reversed(events):
+        payload = _event_payload(event)
+        tools = _string_list(payload.get("deferred_tools"))
+        if tools:
+            return tools[-1]
+        tool = _optional_text(
+            payload.get("deferred_tool") or payload.get("tool") or payload.get("source_tool")
+        )
+        if tool:
+            return tool
+    return None
 
 
 def _event_payload(event: Any) -> dict[str, Any]:

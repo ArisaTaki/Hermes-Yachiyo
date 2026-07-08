@@ -170,11 +170,19 @@ def test_legacy_run_replay_enrichment_merges_observable_runtime_facts() -> None:
                 "payload": {"desktop_provider_session": {"provider_id": "vnc"}},
             },
             {
-                "event_type": "workflow.run.task_core.created",
+                "event_type": "agent.deferred_continuation.enqueued",
                 "sequence": 12,
+                "payload": {
+                    "deferred_continuation_count": 1,
+                    "deferred_tools": ["desktop.safe_type_text"],
+                },
+            },
+            {
+                "event_type": "workflow.run.task_core.created",
+                "sequence": 13,
                 "payload": {"core_id": "workflow-task-core-1"},
             },
-            {"event_type": "agent.runtime.compiled", "sequence": 13, "payload": {"internal": True}},
+            {"event_type": "agent.runtime.compiled", "sequence": 14, "payload": {"internal": True}},
         ]
     )
     run = {
@@ -196,6 +204,7 @@ def test_legacy_run_replay_enrichment_merges_observable_runtime_facts() -> None:
         "agent.replan.requested",
         "agent.artifact.write",
         "desktop.provider_session.started",
+        "agent.deferred_continuation.enqueued",
         "workflow.run.task_core.created",
     ]
     assert runtime.requests == [{"run_id": "run-1", "limit": 500}]
@@ -208,6 +217,7 @@ def test_legacy_run_replay_enrichment_merges_observable_runtime_facts() -> None:
     assert is_replay_enrichment_event({"event_type": "agent.replan.requested"})
     assert is_replay_enrichment_event({"event_type": "agent.artifact.write"})
     assert is_replay_enrichment_event({"event_type": "desktop.provider_session.started"})
+    assert is_replay_enrichment_event({"event_type": "agent.deferred_continuation.enqueued"})
     assert is_replay_enrichment_event({"event_type": "workflow.run.task_core.created"})
     assert not is_replay_enrichment_event({"event_type": "agent.runtime.compiled"})
 

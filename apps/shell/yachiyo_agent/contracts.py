@@ -1006,6 +1006,8 @@ class RuntimeDebugSummarySnapshot(_PublicSnapshot):
     latest_recovery_action_label: str | None = None
     latest_recovery_action_count: int = 0
     latest_deferred_tool: str | None = None
+    deferred_continuation_count: int = 0
+    latest_deferred_continuation_tool: str | None = None
     latest_tool_call_id: str | None = None
     latest_tool_name: str | None = None
     latest_tool_status: str | None = None

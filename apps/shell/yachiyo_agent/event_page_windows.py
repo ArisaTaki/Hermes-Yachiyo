@@ -12,7 +12,14 @@ FIRST_PAGE_DESKTOP_PROVIDER_SESSION_EVENT_TYPES = {
     "desktop.provider_session.failed",
 }
 
+FIRST_PAGE_DEFERRED_CONTINUATION_EVENT_TYPES = {
+    "agent.deferred_continuation.enqueued",
+    "group.run.deferred_continuation.enqueued",
+    "workflow.run.deferred_continuation.enqueued",
+}
+
 FIRST_PAGE_GROUP_RUN_KEY_EVENT_TYPES = {
+    *FIRST_PAGE_DEFERRED_CONTINUATION_EVENT_TYPES,
     *FIRST_PAGE_DESKTOP_PROVIDER_SESSION_EVENT_TYPES,
     "group.run.approval_required",
     "group.run.completed",
@@ -26,6 +33,7 @@ FIRST_PAGE_GROUP_RUN_KEY_EVENT_TYPES = {
 }
 
 FIRST_PAGE_RUN_KEY_EVENT_TYPES = {
+    *FIRST_PAGE_DEFERRED_CONTINUATION_EVENT_TYPES,
     *FIRST_PAGE_DESKTOP_PROVIDER_SESSION_EVENT_TYPES,
     "run.completed",
     "run.failed",
@@ -47,6 +55,7 @@ FIRST_PAGE_RUN_KEY_EVENT_TYPES = {
 }
 
 FIRST_PAGE_WORKFLOW_RUN_KEY_EVENT_TYPES = {
+    *FIRST_PAGE_DEFERRED_CONTINUATION_EVENT_TYPES,
     *FIRST_PAGE_DESKTOP_PROVIDER_SESSION_EVENT_TYPES,
     "workflow.run.approval_required",
     "workflow.run.completed",

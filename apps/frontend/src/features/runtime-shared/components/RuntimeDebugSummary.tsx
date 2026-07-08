@@ -40,8 +40,10 @@ export function RuntimeDebugSummary({
     <section
       className={classes}
       data-current-capability-id={summary?.current_capability_id || ''}
+      data-deferred-continuation-count={String(summary?.deferred_continuation_count || 0)}
       data-has-user-action={String(Boolean(summary?.needs_user_action))}
       data-intent-kind={summary?.intent_kind || ''}
+      data-latest-deferred-continuation-tool={summary?.latest_deferred_continuation_tool || ''}
       data-latest-deferred-tool={summary?.latest_deferred_tool || ''}
       data-latest-request-id={summary?.latest_request_id || ''}
       data-latest-request-tool-name={summary?.latest_request_tool_name || ''}
@@ -156,6 +158,7 @@ export function runtimeDebugSummaryHasContent(summary?: RuntimeDebugSummarySnaps
     || summary.latest_recovery_tool
     || summary.latest_recovery_action_label
     || summary.latest_deferred_tool
+    || summary.latest_deferred_continuation_tool
     || summary.latest_tool_call_id
     || summary.latest_tool_name
     || summary.latest_tool_status
@@ -205,6 +208,7 @@ function runtimeDebugMetrics(summary: RuntimeDebugSummarySnapshot): RuntimeDebug
   addMetric(metrics, 'artifacts', 'artifacts', summary.artifact_count);
   addMetric(metrics, 'replans', 'replans', summary.replan_recovery_count, 'warning');
   addMetric(metrics, 'recovery_actions', 'recoveries', summary.latest_recovery_action_count, 'warning');
+  addMetric(metrics, 'deferred_continuations', 'deferred', summary.deferred_continuation_count, 'warning');
   addMetric(metrics, 'children', 'children', summary.child_run_count);
   addMetric(metrics, 'memory', 'memory', summary.memory_trace_count);
   addMetric(metrics, 'skills', 'skills', summary.skill_trace_count);
@@ -277,6 +281,7 @@ function runtimeDebugLatestFacts(summary?: RuntimeDebugSummarySnapshot | null): 
     summary.latest_recovery_action_label ? `recovery action ${summary.latest_recovery_action_label}` : '',
     summary.latest_recovery_action_id ? `recovery id ${summary.latest_recovery_action_id}` : '',
     summary.latest_deferred_tool ? `deferred ${summary.latest_deferred_tool}` : '',
+    summary.latest_deferred_continuation_tool ? `continuation ${summary.latest_deferred_continuation_tool}` : '',
     summary.latest_tool_call_id ? `tool call ${summary.latest_tool_call_id}` : '',
     summary.latest_tool_name ? `tool ${summary.latest_tool_name}` : '',
     summary.latest_tool_status ? `tool status ${summary.latest_tool_status}` : '',
