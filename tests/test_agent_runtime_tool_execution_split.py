@@ -2369,8 +2369,16 @@ def test_runtime_tool_call_executor_blocks_policy_required_sandbox_before_broker
     ] is True
     assert broker.calls == []
     assert budget.claims == [("desktop.safe_type_text", False)]
-    assert [event["event"] for event in timeline] == ["agent.tool.skipped"]
+    assert [event["event"] for event in timeline] == [
+        "agent.tool.skipped",
+        "desktop.provider_session.required",
+    ]
     assert run_events[0][1] == "agent.tool.skipped"
+    assert run_events[1][1] == "desktop.provider_session.required"
+    session = run_events[1][2]["desktop_provider_session"]
+    assert session["needed"] is True
+    assert session["provider_id"] == "local-isolated-desktop"
+    assert session["tool_names"] == ["desktop.safe_type_text"]
     assert [call[0] for call in events.calls] == ["requested", "result"]
 
 
@@ -2434,8 +2442,17 @@ def test_runtime_tool_call_executor_blocks_provider_required_app_activation_befo
     assert result["recommended_tools"][0] == "desktop.provider_session.start"
     assert result["recovery_actions"][0]["tool"] == "desktop.provider_session.start"
     assert broker.calls == []
-    assert [event["event"] for event in timeline] == ["agent.tool.skipped"]
+    assert [event["event"] for event in timeline] == [
+        "agent.tool.skipped",
+        "desktop.provider_session.required",
+    ]
     assert run_events[0][1] == "agent.tool.skipped"
+    assert run_events[1][1] == "desktop.provider_session.required"
+    required_payload = run_events[1][2]
+    assert required_payload["blocked_tool"] == "app.open"
+    assert required_payload["desktop_provider_session"]["needed"] is True
+    assert required_payload["desktop_provider_session"]["tool_names"] == ["app.open"]
+    assert required_payload["desktop_execution_route"]["status"] == "provider_required"
 
 
 def test_runtime_tool_call_executor_preserves_planner_trace_on_tool_call_events() -> None:

@@ -12,6 +12,9 @@ from apps.shell.agent.runtime.desktop_execution_providers import (
     desktop_execution_route_payload,
     desktop_execution_route_requires_provider,
 )
+from apps.shell.agent.runtime.desktop_provider_session_events import (
+    desktop_provider_session_public_event,
+)
 from apps.shell.agent.runtime.errors import AgentApprovalRequired, AgentRuntimeError
 from apps.shell.agent.runtime.event_scopes import (
     runtime_replan_base_event_type as _runtime_replan_base_event_type,
@@ -367,6 +370,109 @@ def _desktop_provider_session_control_event(
             payload,
         )
     return None
+
+
+def _desktop_provider_session_required_event(
+    tool_name: str,
+    tool_result: Mapping[str, Any],
+    input_preview: Any,
+) -> tuple[str, str, dict[str, Any]] | None:
+    action = _desktop_provider_session_start_recovery_action(tool_result)
+    if action is None:
+        return None
+    route = _first_mapping(tool_result.get("desktop_execution_route"))
+    sandbox_provider = _first_mapping(
+        tool_result.get("sandbox_provider"),
+        tool_result.get("sandbox_desktop_provider"),
+    )
+    action_input = action.get("input") if isinstance(action.get("input"), Mapping) else {}
+    provider_id = (
+        str(action_input.get("provider_id") or "").strip()
+        or str(route.get("selected_provider_id") or "").strip()
+        or str(sandbox_provider.get("provider_id") or "").strip()
+        or "local-isolated-desktop"
+    )
+    tool_names = (
+        _string_list(action_input.get("tool_names"))
+        or _string_list(action_input.get("tools"))
+        or _string_list(tool_name)
+    )
+    session = {
+        "ok": True,
+        "status": "required",
+        "running": False,
+        "started": False,
+        "needed": True,
+        "auto_start": False,
+        "provider_id": provider_id,
+        "reason": str(
+            tool_result.get("blocking_condition")
+            or action_input.get("reason")
+            or "isolated_provider_required"
+        ),
+        "tool_names": tool_names,
+        "source": "runtime_tool_execution_policy",
+        "desktop_session_kind": str(
+            route.get("desktop_session_kind")
+            or sandbox_provider.get("desktop_session_kind")
+            or "isolated_desktop"
+        ),
+        "desktop_session_isolated": True,
+        "foreground_takeover_required": False,
+        "keyboard_mouse_capture_supported": bool(
+            sandbox_provider.get("keyboard_mouse_capture_supported")
+            or route.get("keyboard_mouse_capture_supported")
+        ),
+    }
+    event = desktop_provider_session_public_event(
+        session,
+        payload_context={
+            "tool": tool_name,
+            "blocked_tool": tool_name,
+            "input_preview": input_preview if isinstance(input_preview, dict) else {},
+            "desktop_execution_route": dict(route),
+            "sandbox_provider": dict(sandbox_provider),
+            "recovery_actions": _mapping_list(tool_result.get("recovery_actions")),
+        },
+        redact=redact_api_error_text,
+    )
+    if event is None:
+        return None
+    return event["event_type"], event["detail"], event["payload"]
+
+
+def _desktop_provider_session_start_recovery_action(
+    tool_result: Mapping[str, Any],
+) -> Mapping[str, Any] | None:
+    for action in _mapping_list(tool_result.get("recovery_actions")):
+        if str(action.get("tool") or "").strip() == "desktop.provider_session.start":
+            return action
+    return None
+
+
+def _append_desktop_provider_session_required_event(
+    *,
+    timeline: list[dict[str, Any]],
+    timeline_factory: Callable[..., dict[str, Any]],
+    append_run_event: Callable[[str, str, dict[str, Any]], Any],
+    run_id: str,
+    tool_name: str,
+    runtime_skip: Mapping[str, Any],
+    input_preview: Any,
+    trace_payload: Mapping[str, Any],
+) -> None:
+    event = _desktop_provider_session_required_event(
+        tool_name,
+        runtime_skip,
+        input_preview,
+    )
+    if event is None:
+        return
+    event_type, detail, event_payload = event
+    event_payload = _event_payload_with_trace_context(event_payload, dict(trace_payload))
+    timeline.append(timeline_factory(event_type, detail, **event_payload))
+    if run_id:
+        append_run_event(run_id, event_type, event_payload)
 
 
 def _input_preview_with_trace_payload(
@@ -2579,6 +2685,16 @@ class RuntimeToolCallExecutor:
                         **trace_payload,
                     },
                 )
+            _append_desktop_provider_session_required_event(
+                timeline=timeline,
+                timeline_factory=self._timeline,
+                append_run_event=self._append_run_event,
+                run_id=run_id,
+                tool_name=tool_name,
+                runtime_skip=runtime_skip,
+                input_preview=input_preview,
+                trace_payload=trace_payload,
+            )
             return runtime_skip
         _append_desktop_foreground_session_notice(
             timeline=timeline,
