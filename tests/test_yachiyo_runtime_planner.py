@@ -26212,6 +26212,80 @@ def test_runtime_planner_routes_clipboard_write_to_clipboard_capability() -> Non
     }
 
 
+def test_runtime_planner_routes_selected_text_transform_back_to_current_input() -> None:
+    prompt = "把当前选择的文字翻译成英文并粘贴回去"
+    allowed_tools = [
+        "desktop.safe_shortcut",
+        "clipboard.read",
+        "artifact.write",
+        "desktop.safe_type_text",
+        "desktop.ui_elements",
+    ]
+    decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+    requests = planner_tool_requests(prompt, allowed_tools)
+
+    assert decision.selected_intent.kind == "report_generation"
+    assert decision.selected_intent.inputs == {
+        "context_source": "selection",
+        "target_action_hint": "current_input_write",
+    }
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "copy-selected-report-context",
+        "read-report-context",
+        "write-report-artifact",
+        "insert-report-into-current-input",
+        "verify-current-input-write",
+    ]
+    assert _step_by_id(decision, "insert-report-into-current-input").input_preview == {
+        "body_source": "report_artifact",
+        "artifact_path": "report.md",
+        "target_action": "current_input_write",
+    }
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "copy"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_report_context",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "clipboard.read",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_report_context",
+            "continue_to_model": True,
+        },
+    ]
+
+    payload = planner_selection_payload(
+        decision=decision,
+        planner_requests=requests,
+        legacy_requests=[],
+        selected_requests=requests,
+        selected_source="runtime_planner",
+        selected_reason="runtime_planner_direct",
+    )
+
+    assert payload["followup_target"] == {
+        "kind": "current_input_write",
+        "target_action": "current_input_write",
+        "body_source": "model_generated_content",
+        "context_source": "selection",
+        "artifact_write": {
+            "target_action": "write_artifact",
+            "path": "report.md",
+            "body_source": "model_generated_content",
+            "tool": "artifact.write",
+            "intent_kind": "report_generation",
+        },
+    }
+    assert runtime_planner_metadata(decision)["yachiyo_followup_target"] == payload[
+        "followup_target"
+    ]
+
+
 def test_runtime_planner_routes_clipboard_read_to_clipboard_capability() -> None:
     decision = RuntimePlanner().decision(
         "读取剪贴板内容",

@@ -11729,6 +11729,99 @@ def test_model_followup_context_instructs_generated_app_write() -> None:
     ) == {}
 
 
+def test_model_followup_context_instructs_current_input_write() -> None:
+    payload = custom_api_agent_module._model_followup_context_payload(
+        [
+            {
+                "tool": "clipboard.read",
+                "planning_reason": "planner_prefetch_report_context",
+                "continue_to_model": True,
+            }
+        ],
+        {
+            "intent_kind": "report_generation",
+            "followup_target": {
+                "kind": "current_input_write",
+                "target_action": "current_input_write",
+                "body_source": "model_generated_content",
+                "context_source": "selection",
+                "artifact_write": {
+                    "target_action": "write_artifact",
+                    "path": "report.md",
+                    "body_source": "model_generated_content",
+                    "tool": "artifact.write",
+                    "intent_kind": "report_generation",
+                },
+            },
+        },
+        allowed_tools=[
+            "clipboard.read",
+            "artifact.write",
+            "desktop.safe_type_text",
+            "desktop.ui_elements",
+        ],
+        timeline=[
+            _timeline(
+                "agent.tool.call",
+                "clipboard.read",
+                input_preview={},
+                result={"ok": True, "text": "原文"},
+            )
+        ],
+    )
+    message = custom_api_agent_module._model_followup_context_message(payload)
+
+    assert payload["followup_target"] == {
+        "kind": "current_input_write",
+        "target_action": "current_input_write",
+        "body_source": "model_generated_content",
+        "write_allowed": True,
+        "recommended_tools": ["desktop.safe_type_text"],
+        "verify_tools": ["desktop.ui_elements"],
+        "context_source": "selection",
+        "artifact_write": {
+            "target_action": "write_artifact",
+            "path": "report.md",
+            "body_source": "model_generated_content",
+            "tool": "artifact.write",
+            "write_allowed": True,
+            "recommended_tools": ["artifact.write"],
+            "intent_kind": "report_generation",
+        },
+    }
+    assert "current foreground input or selected text" in message
+    assert "desktop.safe_type_text" in message
+    assert "Do not write the raw observed source" in message
+
+    assert custom_api_agent_module._model_followup_app_write_requests(
+        "Translated text",
+        payload["followup_target"],
+        ["artifact.write", "desktop.safe_type_text", "desktop.ui_elements"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "artifact.write",
+            "input": {"path": "report.md", "content": "Translated text"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_followup_artifact_write",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "Translated text"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_followup_current_input_write",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_followup_current_input_write",
+        },
+    ]
+
+
 def test_model_followup_app_write_uses_analysis_snapshot_body_source() -> None:
     analysis_text = "Data analysis result for data/sales.csv (csv).\nEast revenue 10."
 

@@ -424,6 +424,9 @@ class TaskIntentRouter:
             return _empty_intent("desktop_operation", text)
         if _looks_like_non_desktop_content_task(text):
             return _empty_intent("desktop_operation", text)
+        transform_target = _dynamic_context_transform_target_hint(text)
+        if str(transform_target.get("target_action_hint") or "").strip() == "current_input_write":
+            return _empty_intent("desktop_operation", text)
         if named_data_source_hint(text) and _data_analysis_action_requested(text):
             return _empty_intent("desktop_operation", text)
         spreadsheet_cell_edit = _spreadsheet_cell_edit_ui_hint(text)
@@ -1899,6 +1902,7 @@ class TaskIntentRouter:
         target_payload = transform_target or app_write_target
         target_app = str(target_payload.get("target_app_hint") or "").strip()
         target_app_capability = target_payload.get("target_app_capability_hint")
+        target_action = str(target_payload.get("target_action_hint") or "").strip()
         if target_app:
             inputs["target_app_hint"] = target_app
             inputs["target_action_hint"] = "app_paste"
@@ -1915,16 +1919,19 @@ class TaskIntentRouter:
             ).strip()
             if container_action:
                 inputs["target_container_action_hint"] = container_action
+        elif target_action == "current_input_write":
+            inputs["target_action_hint"] = "current_input_write"
         if file_context:
             inputs["file_context_hint"] = file_context
         output_target = _task_output_target_hint(text)
         if output_target:
             inputs["output_target_hint"] = output_target
+        current_input_target = target_action == "current_input_write"
         output_capability = (
             "desktop.app_control"
             if target_app
             else "desktop.ui_operation"
-            if isinstance(target_app_capability, Mapping)
+            if isinstance(target_app_capability, Mapping) or current_input_target
             else ("clipboard.read_write" if output_target == "clipboard" else "artifact.write")
         )
         if target_app and context_source:
@@ -1942,6 +1949,14 @@ class TaskIntentRouter:
                     _context_source_required_capability(context_source),
                     "artifact.write",
                     "desktop.app_discovery",
+                    "desktop.ui_operation",
+                ]
+            )
+        elif current_input_target and context_source:
+            file_context_capabilities = _unique_capabilities(
+                [
+                    _context_source_required_capability(context_source),
+                    "artifact.write",
                     "desktop.ui_operation",
                 ]
             )
@@ -1986,6 +2001,8 @@ class TaskIntentRouter:
                         "clipboard.read_write",
                     ]
                     if isinstance(target_app_capability, Mapping)
+                    else ["desktop.ui_operation", "clipboard.read_write"]
+                    if current_input_target
                     else [
                         "clipboard.read_write"
                         if output_target == "clipboard"
@@ -6706,6 +6723,16 @@ class RuntimePlanner:
             target_app_capability = intent.inputs.get("target_app_capability_hint")
             if isinstance(target_app_capability, Mapping):
                 return _append_report_discovered_app_write_target_steps(
+                    intent,
+                    allowed,
+                    context_steps,
+                    depends_on=depends_on,
+                    artifact_path=artifact_path,
+                    body_source=context_source,
+                )
+            target_action = str(intent.inputs.get("target_action_hint") or "").strip()
+            if target_action == "current_input_write":
+                return _append_report_current_input_write_target_steps(
                     intent,
                     allowed,
                     context_steps,
@@ -14384,6 +14411,87 @@ def _append_report_discovered_app_write_target_steps(
     )
 
 
+def _append_report_current_input_write_target_steps(
+    intent: TaskIntentSnapshot,
+    allowed: set[str] | None,
+    steps: list[ToolPlanStepSnapshot],
+    *,
+    depends_on: list[str],
+    artifact_path: str,
+    body_source: str,
+) -> list[ToolPlanStepSnapshot]:
+    insert_tool, insert_input = _safe_type_text_operation_preview(
+        app_name="",
+        mode="focus",
+        allowed=allowed,
+        payload={
+            "body_source": "report_artifact",
+            "artifact_path": artifact_path,
+            "target_action": "current_input_write",
+        },
+    )
+    next_steps = [
+        *steps,
+        _step(
+            intent,
+            "write-report-artifact",
+            "Write report artifact",
+            "artifact.write",
+            _first_allowed(("artifact.write",), allowed),
+            input_preview={
+                "path": artifact_path,
+                "body_source": body_source,
+            },
+            depends_on=depends_on,
+            reason=(
+                "Produce a replayable transformed draft before writing it back "
+                "into the current foreground input."
+            ),
+        ),
+        _step(
+            intent,
+            "insert-report-into-current-input",
+            "Insert report into current input",
+            "desktop.ui_operation",
+            insert_tool,
+            input_preview=insert_input,
+            risk_level=_desktop_operation_risk_level(insert_tool),
+            approval_required=_desktop_operation_approval_required(insert_tool),
+            depends_on=["write-report-artifact"],
+            action="type",
+            reason=(
+                "Insert the generated transformed content into the current foreground "
+                "input or selected text without opening a separate app."
+            ),
+        ),
+    ]
+    verify_tool = _first_allowed(("desktop.ui_elements", "desktop.active_window", "screen.capture"), allowed)
+    if not verify_tool:
+        return next_steps
+    verify_input = (
+        {"reason": "Verify the transformed content was inserted into the current input."}
+        if verify_tool == "screen.capture"
+        else {"role_filter": "text", "limit": 80}
+    )
+    return [
+        *next_steps,
+        _step(
+            intent,
+            "verify-current-input-write",
+            "Verify current input write",
+            "desktop.ui_operation",
+            verify_tool,
+            input_preview=verify_input,
+            depends_on=["insert-report-into-current-input"],
+            action="read_ui" if verify_tool != "screen.capture" else "capture_screen",
+            reason=(
+                "Inspect the foreground UI after insertion so the runtime can replan "
+                "if the transformed content is not visible."
+            ),
+        ),
+    ]
+
+
 def _append_report_target_app_verification_step(
     intent: TaskIntentSnapshot,
     allowed: set[str] | None,
@@ -21669,6 +21777,11 @@ def _dynamic_context_transform_target_hint(text: str) -> dict[str, Any]:
         "visible_text",
     }:
         return {}
+    if _dynamic_context_current_input_write_target(value):
+        return {
+            "context_source": source,
+            "target_action_hint": "current_input_write",
+        }
     app_name = _non_notes_dynamic_context_target_app(value)
     if not app_name:
         return {}
@@ -21922,7 +22035,7 @@ def _dynamic_context_transform_requested(text: str) -> bool:
             r"(?:总结|摘要|概括|归纳|整理|提炼|改写|润色|翻译|转成|转换成|"
             r"变成|做成|生成|待办|任务清单|清单|"
             r"summarize|summary|summarise|brief|organize|organise|rewrite|"
-            r"polish|translate|convert|format|todo|to-do|task list)",
+            r"polish|translate|translation|convert|format|todo|to-do|task list)",
             value,
             flags=re.IGNORECASE,
         )
@@ -21997,6 +22110,12 @@ def _dynamic_context_source_hint(text: str) -> str:
             "选中的文本",
             "选中的内容",
             "选中的数据",
+            "当前选择的文字",
+            "当前选择的文本",
+            "当前选择的内容",
+            "当前选中的文字",
+            "当前选中的文本",
+            "当前选中的内容",
             "选中内容",
             "选中数据",
         ),
@@ -22043,13 +22162,41 @@ def _dynamic_context_ui_target_hint(text: str) -> tuple[str, str]:
             "当前文本框",
             "前台输入框",
             "前台文本框",
+            "粘贴回去",
+            "贴回去",
+            "粘贴回来",
+            "贴回来",
+            "粘贴回当前窗口",
+            "贴回当前窗口",
+            "粘贴到当前窗口",
+            "贴到当前窗口",
+            "回填",
             "这里",
             "此处",
             "here",
+            "paste back",
+            "replace selection",
         ),
     ):
         return "current_input", ""
     return "", ""
+
+
+def _dynamic_context_current_input_write_target(text: str) -> bool:
+    value = _clean_prompt(text)
+    target_kind, _target = _dynamic_context_ui_target_hint(value)
+    if target_kind == "current_input":
+        return True
+    return bool(
+        re.search(
+            r"(?:粘贴回去|贴回去|粘贴回来|贴回来|粘贴回当前窗口|贴回当前窗口|"
+            r"粘贴到当前窗口|贴到当前窗口|回填|替换选中|替换原文|"
+            r"\bpaste\s+back\b|\breplace\s+(?:the\s+)?(?:selection|selected\s+text)\b|"
+            r"\bback\s+into\s+(?:the\s+)?(?:current|same)\b)",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _looks_like_dynamic_context_copy_only(text: str) -> bool:
@@ -22069,7 +22216,7 @@ def _looks_like_dynamic_context_transfer(text: str) -> bool:
         re.search(
             r"(?:粘贴|贴到|输入到|输入进|输入|键入|填到|填入|填写到|填写|"
             r"写进|写入|写到|保存到|记录到|记到|放到|"
-            r"paste|type|enter|insert|put|write|save|record)",
+            r"替换|paste|type|enter|insert|put|write|save|record|replace)",
             value,
             flags=re.IGNORECASE,
         )

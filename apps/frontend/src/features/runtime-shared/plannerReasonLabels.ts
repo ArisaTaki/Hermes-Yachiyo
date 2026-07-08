@@ -23,6 +23,7 @@ const PLANNER_REASON_LABELS: Record<string, string> = {
   planner_followup_app_write: '应用写入后继续',
   planner_followup_communication_observed_compose: '观察输入框后继续发信',
   planner_followup_communication: '通信动作后继续',
+  planner_followup_current_input_write: '当前输入写入后继续',
   planner_followup_deferred_ui_action: '延迟 UI 动作后继续',
   planner_followup_discovered_app_observed_action: '发现应用并观察 UI 后继续',
   planner_followup_discovered_app_write: '发现应用并写入后继续',

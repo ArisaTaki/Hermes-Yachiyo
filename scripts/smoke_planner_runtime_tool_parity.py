@@ -204,6 +204,26 @@ PLANNER_TOOL_PARITY_CASES: tuple[dict[str, Any], ...] = (
         "approval_required": [],
     },
     {
+        "id": "selected_text_transform_back_to_current_input",
+        "category": "orchestrator",
+        "prompt": "把当前选择的文字翻译成英文并粘贴回去",
+        "expected_intent": "report_generation",
+        "expected_plan_tools": [
+            "desktop.safe_shortcut",
+            "clipboard.read",
+            "artifact.write",
+            "desktop.safe_type_text",
+            "desktop.ui_elements",
+        ],
+        "expected_request_tools": ["desktop.safe_shortcut", "clipboard.read"],
+        "expected_deferred_plan_tools": [
+            "artifact.write",
+            "desktop.safe_type_text",
+            "desktop.ui_elements",
+        ],
+        "approval_required": [],
+    },
+    {
         "id": "current_window_markdown_artifact",
         "category": "orchestrator",
         "prompt": "把当前窗口里的内容复制并保存成 markdown",

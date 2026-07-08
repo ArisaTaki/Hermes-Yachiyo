@@ -12016,6 +12016,8 @@ def _model_followup_target_payload(
         return _model_followup_note_write_target_payload(target, allowed)
     if kind == "desktop_observed_action":
         return _model_followup_desktop_observed_action_target_payload(target, allowed)
+    if kind == "current_input_write":
+        return _model_followup_current_input_write_target_payload(target, allowed)
     if kind != "app_write" or not app_name:
         return {}
     container_action = _model_followup_container_action(target)
@@ -12067,6 +12069,33 @@ def _model_followup_artifact_write_target_payload(
     intent_kind = str(target.get("intent_kind") or "").strip()
     if intent_kind:
         payload["intent_kind"] = intent_kind
+    return payload
+
+
+def _model_followup_current_input_write_target_payload(
+    target: Mapping[str, Any],
+    allowed: set[str],
+) -> dict[str, Any]:
+    write_tools = _model_followup_current_input_write_tool_names(allowed)
+    verify_tools = [
+        tool
+        for tool in ("desktop.ui_elements", "desktop.active_window", "screen.capture")
+        if tool in allowed
+    ]
+    payload: dict[str, Any] = {
+        "kind": "current_input_write",
+        "target_action": str(target.get("target_action") or "current_input_write").strip(),
+        "body_source": "model_generated_content",
+        "write_allowed": bool(write_tools),
+        "recommended_tools": write_tools,
+        "verify_tools": verify_tools,
+    }
+    context_source = str(target.get("context_source") or "").strip()
+    if context_source:
+        payload["context_source"] = context_source
+    artifact_write = _model_followup_chained_artifact_write_payload(target, allowed)
+    if artifact_write:
+        payload["artifact_write"] = artifact_write
     return payload
 
 
@@ -19935,6 +19964,14 @@ def _model_followup_app_write_tool_names(
     return []
 
 
+def _model_followup_current_input_write_tool_names(allowed: set[str]) -> list[str]:
+    if "desktop.safe_type_text" in allowed:
+        return ["desktop.safe_type_text"]
+    if "clipboard.write" in allowed and "desktop.safe_shortcut" in allowed:
+        return ["clipboard.write", "desktop.safe_shortcut"]
+    return []
+
+
 def _model_followup_container_tool_names(allowed: set[str]) -> list[str]:
     if "app.focus_and_safe_shortcut" in allowed:
         return ["app.focus_and_safe_shortcut"]
@@ -19967,6 +20004,8 @@ def _model_followup_target_instruction(target: Mapping[str, Any]) -> str:
         return _model_followup_note_write_instruction(target)
     if kind == "desktop_observed_action":
         return _model_followup_desktop_observed_action_instruction(target)
+    if kind == "current_input_write":
+        return _model_followup_current_input_write_instruction(target)
     app_name = str(target.get("app_name") or "").strip()
     if kind != "app_write" or not app_name:
         return ""
@@ -19998,6 +20037,31 @@ def _model_followup_target_instruction(target: Mapping[str, Any]) -> str:
         f"replying inline. Prefer {tool_text}; use the generated transformed content as the "
         "text input. Do not write the raw observed source when the user asked for summary, "
         f"cleanup, translation, or todo conversion.{verify_text} "
+    )
+
+
+def _model_followup_current_input_write_instruction(target: Mapping[str, Any]) -> str:
+    if not bool(target.get("write_allowed")):
+        return (
+            "The user requested the transformed content be written back into the current "
+            "foreground input or selection, but no allowed foreground text insertion tool is "
+            "available. Explain the missing capability instead of claiming the UI was updated."
+        )
+    tools = _string_list(target.get("recommended_tools"))
+    verify_tools = _string_list(target.get("verify_tools"))
+    tool_text = ", ".join(tools) or "the allowed foreground text insertion tools"
+    verify_text = (
+        f" Verify with {', '.join(verify_tools)} after writing."
+        if verify_tools
+        else ""
+    )
+    return (
+        "The user requested the transformed content be written back into the current "
+        "foreground input or selected text. After deriving the final transformed text, "
+        f"call desktop tools next instead of only replying inline. Prefer {tool_text}; "
+        "use the generated transformed content as the text input. Do not write the raw "
+        "observed source when the user asked for summary, cleanup, translation, or todo "
+        f"conversion.{verify_text} "
     )
 
 
@@ -22537,6 +22601,15 @@ def _model_followup_app_write_requests(
                 allowed_tools,
             ),
         ]
+    if str(target.get("kind") or "").strip() == "current_input_write":
+        return [
+            *artifact_requests,
+            *_model_followup_current_input_write_requests(
+                content,
+                target,
+                allowed_tools,
+            ),
+        ]
     app_name = str(target.get("app_name") or "").strip()
     if str(target.get("kind") or "").strip() != "app_write" or not app_name:
         return artifact_requests
@@ -22626,6 +22699,56 @@ def _model_followup_app_write_requests(
         ]
         return [*artifact_requests, *requests, *([verify_request] if verify_request else [])]
     return artifact_requests
+
+
+def _model_followup_current_input_write_requests(
+    generated_content: str,
+    target: Mapping[str, Any],
+    allowed_tools: Iterable[str],
+) -> list[dict[str, Any]]:
+    content = str(generated_content or "").strip()
+    if not content or str(target.get("kind") or "").strip() != "current_input_write":
+        return []
+    allowed = {str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()}
+    planning_reason = "planner_followup_current_input_write"
+    source = "runtime_planner"
+    verify_request = (
+        _request_like(
+            "desktop.ui_elements",
+            {},
+            source=source,
+            planning_reason=planning_reason,
+        )
+        if "desktop.ui_elements" in allowed
+        else None
+    )
+    if "desktop.safe_type_text" in allowed:
+        requests = [
+            _request_like(
+                "desktop.safe_type_text",
+                {"text": content},
+                source=source,
+                planning_reason=planning_reason,
+            )
+        ]
+        return [*requests, *([verify_request] if verify_request else [])]
+    if "clipboard.write" in allowed and "desktop.safe_shortcut" in allowed:
+        requests = [
+            _request_like(
+                "clipboard.write",
+                {"text": content},
+                source=source,
+                planning_reason=planning_reason,
+            ),
+            _request_like(
+                "desktop.safe_shortcut",
+                {"action": "paste"},
+                source=source,
+                planning_reason=planning_reason,
+            ),
+        ]
+        return [*requests, *([verify_request] if verify_request else [])]
+    return []
 
 
 def _model_followup_artifact_target_completed(

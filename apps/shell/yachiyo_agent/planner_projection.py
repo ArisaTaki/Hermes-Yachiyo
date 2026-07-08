@@ -567,6 +567,15 @@ def _selection_followup_target_payload(decision: Any | None) -> dict[str, Any]:
     target_app = str(inputs.get("target_app_hint") or "").strip()
     target_action = str(inputs.get("target_action_hint") or "").strip()
     context_source = str(inputs.get("context_source") or "").strip()
+    if target_action == "current_input_write":
+        payload = {
+            "kind": "current_input_write",
+            "target_action": target_action,
+            "body_source": "model_generated_content",
+        }
+        if context_source:
+            payload["context_source"] = context_source
+        return _with_generated_artifact_write(payload, decision)
     if target_app and target_action == "app_paste":
         payload: dict[str, Any] = {
             "kind": "app_write",
