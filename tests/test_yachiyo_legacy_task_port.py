@@ -947,15 +947,12 @@ def test_runtime_planner_covers_migrated_desktop_samples_before_cleanup() -> Non
     assert coverage["planner_owner"] == "runtime_planner"
     assert coverage["total_samples"] == len(prompts)
     assert coverage["cleanup_readiness"] == "planner_covered_compat_cleanup_pending"
-    assert coverage["remaining_fallback_count"] == 2
-    assert coverage["planner_covered_fallback_count"] == 2
-    assert coverage["compatibility_cleanup_pending_count"] == 2
+    assert coverage["remaining_fallback_count"] == 1
+    assert coverage["planner_covered_fallback_count"] == 1
+    assert coverage["compatibility_cleanup_pending_count"] == 1
     assert {
         contract["fallback_id"] for contract in coverage["remaining_fallback_contracts"]
-    } == {
-        "context_transfer_search_box",
-        "semantic_ui_targeting",
-    }
+    } == {"semantic_ui_targeting"}
     assert "context_transfer" in coverage["areas"]
     assert len(sample_contracts) == len(prompts)
     assert "desktop_operation" in coverage["covered_intents"]

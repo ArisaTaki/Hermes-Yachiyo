@@ -227,6 +227,12 @@ def _planner_owned_legacy_compatible_entrypoint_requests(
     )
     if browser_search_requests:
         return browser_search_requests
+    search_box_requests = _legacy_compatible_context_transfer_search_box_requests(
+        planner_requests,
+        text=text,
+    )
+    if search_box_requests:
+        return search_box_requests
     return _legacy_compatible_simple_entrypoint_requests(planner_requests, text=text)
 
 
@@ -346,6 +352,77 @@ def _legacy_compatible_browser_search_entrypoint_requests(
     return [_legacy_shape_request(request) for request in visible]
 
 
+def _legacy_compatible_context_transfer_search_box_requests(
+    requests: Sequence[Mapping[str, Any]] | None,
+    *,
+    text: str,
+) -> list[dict[str, Any]]:
+    if not requests:
+        return []
+    items = [dict(request) for request in requests if isinstance(request, Mapping)]
+    if not items:
+        return []
+    if not any(
+        str(request.get("planning_reason") or "").strip() == "planner_desktop_operation"
+        for request in items
+    ):
+        return []
+    visible = _visible_entrypoint_plan_requests(items)
+    if not visible or any(request.get("continue_to_model") for request in visible):
+        return []
+    if any(_request_has_selected_app_placeholder(request) for request in visible):
+        return []
+    if not _looks_like_search_box_transfer_prompt(text):
+        return []
+    compatible: list[dict[str, Any]] = []
+    index = 0
+    found_click = False
+    while index < len(visible):
+        request = visible[index]
+        tool_name = str(request.get("tool") or "").strip()
+        if tool_name == "desktop.safe_shortcut":
+            payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+            if str(payload.get("action") or "").strip() not in _CONTEXT_TRANSFER_SAFE_SHORTCUTS:
+                return []
+            compatible.append(_legacy_shape_request(request))
+            index += 1
+            continue
+        if tool_name in {"app.focus", "app.open"}:
+            if index + 1 >= len(visible):
+                return []
+            next_request = visible[index + 1]
+            click_payload = _search_box_click_payload(next_request)
+            if not click_payload:
+                return []
+            payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+            app_name = str(payload.get("app_name") or "").strip()
+            if not app_name or _generic_non_app_name(app_name):
+                return []
+            combined_tool = (
+                "app.open_and_click_ui_element"
+                if tool_name == "app.open"
+                else "app.focus_and_click_ui_element"
+            )
+            compatible.append(
+                {
+                    "protocol": str(next_request.get("protocol") or "json_fallback"),
+                    "tool": combined_tool,
+                    "input": {"app_name": app_name, **click_payload},
+                }
+            )
+            found_click = True
+            index += 2
+            continue
+        click_payload = _search_box_click_payload(request)
+        if click_payload:
+            compatible.append(_legacy_shape_request(request))
+            found_click = True
+            index += 1
+            continue
+        return []
+    return compatible if found_click else []
+
+
 def _legacy_compatible_simple_entrypoint_requests(
     requests: Sequence[Mapping[str, Any]] | None,
     *,
@@ -392,6 +469,7 @@ _LEGACY_COMPATIBLE_SIMPLE_PLANNER_TOOLS = frozenset(
         "app.open_and_safe_shortcut",
         "app.status",
         "browser.open_url",
+        "desktop.safe_shortcut",
         "desktop.open_path",
         "desktop.reveal_path",
         "desktop.running_apps",
@@ -403,6 +481,9 @@ def _legacy_compatible_simple_request(text: str, request: Mapping[str, Any]) -> 
     tool_name = str(request.get("tool") or "").strip()
     if tool_name in {"desktop.open_path", "desktop.reveal_path", "desktop.running_apps"}:
         return True
+    if tool_name == "desktop.safe_shortcut":
+        payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+        return str(payload.get("action") or "").strip() in _CONTEXT_TRANSFER_SAFE_SHORTCUTS
     if tool_name == "browser.open_url":
         return _legacy_compatible_browser_open_request(text, request)
     if tool_name in _LEGACY_COMPATIBLE_APP_ACTION_TOOLS:
@@ -466,6 +547,10 @@ _LEGACY_COMPATIBLE_FINDER_ACTIONS = frozenset(
     {"copy", "finder_get_info", "parent_folder", "rename_selected"}
 )
 
+_CONTEXT_TRANSFER_SAFE_SHORTCUTS = frozenset(
+    {"copy", "copy_current_page_link", "paste", "select_all"}
+)
+
 
 def _legacy_compatible_app_action_request(request: Mapping[str, Any]) -> bool:
     payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
@@ -523,6 +608,33 @@ def _legacy_compatible_browser_open_request(text: str, request: Mapping[str, Any
     if "google.com/search" in url or "/search?" in url:
         return False
     return True
+
+
+def _looks_like_search_box_transfer_prompt(text: str) -> bool:
+    value = str(text or "")
+    return bool(
+        re.search(r"(?:搜索框|搜索栏|查找框|search\s+(?:box|field|input))", value, flags=re.IGNORECASE)
+        and re.search(
+            r"(?:输入|填入|粘贴|贴到|填到|type|enter|paste)",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _search_box_click_payload(request: Mapping[str, Any]) -> dict[str, Any]:
+    if str(request.get("tool") or "").strip() != "desktop.click_ui_element":
+        return {}
+    payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+    target = str(payload.get("target") or "").strip()
+    role_filter = str(payload.get("role_filter") or "").strip()
+    if not target or not role_filter:
+        return {}
+    if not re.search(r"(?:搜索|查找|search|find)", target, flags=re.IGNORECASE):
+        return {}
+    if role_filter not in {"text", "textbox", "search"}:
+        return {}
+    return dict(payload)
 
 
 def _app_prompt_has_non_launch_followup(text: str) -> bool:

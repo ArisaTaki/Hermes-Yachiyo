@@ -276,20 +276,25 @@ PLANNER_OWNED_LEGACY_ENTRYPOINTS: tuple[dict[str, Any], ...] = (
         "tools": ["app.focus", "app.focus_and_safe_shortcut", "browser.open_url"],
         "example_prompts": ["Chrome 搜索 OpenAI", "Chrome 新建标签页搜索 OpenAI", "微信打开搜索"],
     },
+    {
+        "entrypoint_id": "context_transfer_search_box_facade",
+        "title": "Legacy context-transfer search-box facade",
+        "tools": [
+            "desktop.safe_shortcut",
+            "desktop.click_ui_element",
+            "app.focus_and_click_ui_element",
+            "app.open_and_click_ui_element",
+        ],
+        "example_prompts": [
+            "把当前页面内容输入到搜索框",
+            "把当前网页链接输入到 Slack 搜索框",
+            "打开 Slack 搜索框输入选中的内容",
+        ],
+    },
 )
 
 
 REMAINING_FALLBACK_CONTRACTS: tuple[dict[str, Any], ...] = (
-    _fallback_contract(
-        "context_transfer_search_box",
-        "Context-transfer search-box sequences",
-        "Context-transfer search-box prompts are planner-covered, but legacy facade callers still expect merged focus-and-click response shapes.",
-        ["把当前页面内容输入到搜索框", "把当前网页链接输入到 Slack 搜索框", "打开 Slack 搜索框输入选中的内容"],
-        [
-            "Planner must keep context-transfer search-box prompts as inspectable UI plans.",
-            "Legacy response-shape callers must accept separate focus/click/paste steps before the old parser branch is deleted.",
-        ],
-    ),
     _fallback_contract(
         "semantic_ui_targeting",
         "Semantic UI click/type targeting",

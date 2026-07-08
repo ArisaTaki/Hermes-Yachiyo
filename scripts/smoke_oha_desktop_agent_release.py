@@ -170,7 +170,7 @@ def _tool_catalog_case() -> dict[str, Any]:
         "cleanup_lists_planner_owned_entrypoints": bool(coverage)
         and len(coverage.planner_owned_entrypoints) >= 5,
         "cleanup_lists_remaining_fallbacks": bool(coverage)
-        and len(coverage.remaining_fallback_contracts) >= 2,
+        and len(coverage.remaining_fallback_contracts) >= 1,
         "cleanup_remaining_fallbacks_are_planner_covered": bool(coverage)
         and coverage.remaining_fallback_count == coverage.planner_covered_fallback_count
         and coverage.compatibility_cleanup_pending_count
@@ -301,6 +301,64 @@ def _legacy_facade_planner_ownership_case() -> dict[str, Any]:
                 },
             ],
         },
+        {
+            "id": "context_transfer_search_box",
+            "prompt": "把当前页面内容输入到搜索框",
+            "expected": [
+                {
+                    "protocol": "json_fallback",
+                    "tool": "desktop.safe_shortcut",
+                    "input": {"action": "select_all"},
+                },
+                {
+                    "protocol": "json_fallback",
+                    "tool": "desktop.safe_shortcut",
+                    "input": {"action": "copy"},
+                },
+                {
+                    "protocol": "json_fallback",
+                    "tool": "desktop.click_ui_element",
+                    "input": {
+                        "target": "搜索",
+                        "role_filter": "text",
+                        "limit": 80,
+                        "click_count": 1,
+                    },
+                },
+                {
+                    "protocol": "json_fallback",
+                    "tool": "desktop.safe_shortcut",
+                    "input": {"action": "paste"},
+                },
+            ],
+        },
+        {
+            "id": "app_context_transfer_search_box",
+            "prompt": "打开 Slack 搜索框输入选中的内容",
+            "expected": [
+                {
+                    "protocol": "json_fallback",
+                    "tool": "desktop.safe_shortcut",
+                    "input": {"action": "copy"},
+                },
+                {
+                    "protocol": "json_fallback",
+                    "tool": "app.open_and_click_ui_element",
+                    "input": {
+                        "app_name": "Slack",
+                        "target": "搜索",
+                        "role_filter": "text",
+                        "limit": 80,
+                        "click_count": 1,
+                    },
+                },
+                {
+                    "protocol": "json_fallback",
+                    "tool": "desktop.safe_shortcut",
+                    "input": {"action": "paste"},
+                },
+            ],
+        },
     ]
     legacy_calls: list[dict[str, Any]] = []
     original_legacy_parser = daily_desktop_module.daily_desktop_entrypoint_tool_requests
@@ -360,6 +418,8 @@ def _legacy_facade_planner_ownership_case() -> dict[str, Any]:
             "finder_item_shortcut",
             "browser_app_search",
             "browser_app_new_tab_search",
+            "context_transfer_search_box",
+            "app_context_transfer_search_box",
         }.issubset({str(result["id"]) for result in results}),
     }
     return {
