@@ -91,6 +91,10 @@ def runtime_execution_envelope_from_decision(
     runtime_metadata = _execution_envelope_runtime_metadata(requests, decision)
     sandbox_provider = _sandbox_provider_for_envelope(requests)
     desktop_execution_route = _desktop_execution_route_for_envelope(requests)
+    desktop_provider_session = _desktop_provider_session_for_envelope(
+        requests,
+        metadata=metadata,
+    )
     return RuntimeExecutionEnvelopeSnapshot(
         envelope_id=f"execution-envelope-{decision.plan.plan_id}",
         decision_id=decision.decision_id,
@@ -106,6 +110,7 @@ def runtime_execution_envelope_from_decision(
         route_to_studio=bool(decision.plan.route_to_studio),
         sandbox_provider=sandbox_provider,
         desktop_execution_route=desktop_execution_route,
+        desktop_provider_session=desktop_provider_session,
         runtime_doctrine=runtime_metadata["runtime_doctrine"],
         runtime_stage_counts=runtime_metadata["runtime_stage_counts"],
         replan_signal_count=runtime_metadata["replan_signal_count"],
@@ -396,7 +401,24 @@ def _runtime_request_metadata_from_metadata(
     )
     if isinstance(provider, Mapping):
         payload["sandbox_provider"] = dict(provider)
+    desktop_provider_session = _desktop_provider_session_from_metadata(metadata)
+    if desktop_provider_session:
+        payload["desktop_provider_session"] = desktop_provider_session
     return payload
+
+
+def _desktop_provider_session_from_metadata(
+    metadata: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    if not isinstance(metadata, Mapping):
+        return {}
+    session = metadata.get("desktop_provider_session")
+    if isinstance(session, Mapping):
+        return dict(session)
+    nested_metadata = metadata.get("metadata")
+    if isinstance(nested_metadata, Mapping) and nested_metadata is not metadata:
+        return _desktop_provider_session_from_metadata(nested_metadata)
+    return {}
 
 
 def _metadata_truthy(
@@ -579,6 +601,20 @@ def _desktop_execution_route_for_envelope(
         if request.desktop_execution_route is not None:
             return request.desktop_execution_route
     return None
+
+
+def _desktop_provider_session_for_envelope(
+    requests: Iterable[RuntimeExecutionRequestSnapshot],
+    *,
+    metadata: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    metadata_session = _desktop_provider_session_from_metadata(metadata)
+    if metadata_session:
+        return metadata_session
+    for request in requests:
+        if request.desktop_provider_session:
+            return dict(request.desktop_provider_session)
+    return {}
 
 
 def _sandbox_provider_for_request(

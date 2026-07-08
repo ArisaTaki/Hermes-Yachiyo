@@ -1995,6 +1995,45 @@ def test_yachiyo_chat_execution_requires_isolated_provider_for_app_open(
     assert requests["desktop.active_window"].desktop_execution_route.status == "ready"
 
 
+def test_yachiyo_chat_execution_routes_running_isolated_provider_session() -> None:
+    allowed_tools = ["desktop.list_apps", "app.open", "desktop.active_window"]
+    service = YachiyoAgentService(_FakeRuntimePort())
+
+    envelope = service.plan_chat_execution(
+        "打开 PixelForge",
+        allowed_tools=allowed_tools,
+        metadata={
+            "desktop_provider_session": {
+                "needed": True,
+                "started": True,
+                "running": True,
+                "url": "http://127.0.0.1:19093",
+                "provider_id": "local-isolated-desktop",
+                "provider_kind": "sandbox_desktop",
+                "tool_names": allowed_tools,
+                "supported_tools": allowed_tools,
+                "desktop_session_kind": "isolated_desktop",
+                "desktop_session_isolated": True,
+                "foreground_takeover_required": False,
+                "keyboard_mouse_capture_supported": True,
+            },
+        },
+    )
+    requests = {request.tool_name: request for request in envelope.requests}
+
+    assert envelope.desktop_provider_session["provider_id"] == (
+        "local-isolated-desktop"
+    )
+    for tool_name in allowed_tools:
+        assert requests[tool_name].desktop_provider_session["provider_id"] == (
+            "local-isolated-desktop"
+        )
+        assert requests[tool_name].sandbox_provider is not None
+        assert requests[tool_name].sandbox_provider.status == "available"
+        assert requests[tool_name].desktop_execution_route is not None
+        assert requests[tool_name].desktop_execution_route.status == "sandbox_ready"
+
+
 def test_yachiyo_chat_execution_requires_isolated_provider_for_music_playback(
     monkeypatch,
 ) -> None:
