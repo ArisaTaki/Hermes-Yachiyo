@@ -1240,6 +1240,8 @@ def _collect_oha_desktop_backend_evidence(
         report.get("provider_contract_blocking_conditions")
         or provider_contract.get("blocking_conditions")
     )
+    if provider_contract_ok is not True and not provider_contract_blockers:
+        provider_contract_blockers = ["virtual_desktop_provider_contract_not_ready"]
     if not backend_kind and backend_ready is None and requires_real_backend is None:
         return
     backend_payload = {
@@ -1262,7 +1264,7 @@ def _collect_oha_desktop_backend_evidence(
     if (
         backend_ready is True
         and backend_is_loopback is not True
-        and provider_contract_ok is not False
+        and provider_contract_ok is True
     ):
         _add_evidence(
             evidence,

@@ -319,6 +319,44 @@ def test_release_smoke_summary_requires_real_virtual_desktop_backend(
     assert "--use-configured-virtual-desktop-provider" in action["command"]
 
 
+def test_release_smoke_summary_requires_verified_desktop_provider_contract(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(release_smoke, "ROOT", tmp_path)
+    report_path = tmp_path / "tmp" / "oha-unverified-provider-contract.json"
+    payload = _oha_desktop_agent_release_smoke_report()
+    backend_without_contract = {
+        "desktop_backend_kind": "virtual_desktop_backend",
+        "desktop_backend_is_loopback": False,
+        "desktop_backend_ready_for_public_release": True,
+        "requires_real_virtual_desktop_backend": False,
+    }
+    payload["isolated_provider_backend"] = dict(backend_without_contract)
+    for section in payload["sections"]:
+        if section["id"] == "isolated_desktop_provider":
+            section["report"] = {"ok": True, **backend_without_contract}
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    summary = release_smoke.summarize_release_smoke([report_path])
+
+    assert "oha_desktop_agent_product" in summary["missing_item_ids"]
+    oha_item = next(
+        item for item in summary["items"] if item["id"] == "oha_desktop_agent_product"
+    )
+    assert oha_item["present_evidence_ids"] == [
+        release_smoke.OHA_DESKTOP_AGENT_RELEASE_SMOKE_MODE,
+        "oha_isolated_desktop_provider",
+    ]
+    assert oha_item["missing_evidence_ids"] == ["oha_real_virtual_desktop_backend"]
+    evidence_summary = oha_item["release_blockers"][0]["evidence_summary"]
+    assert evidence_summary["provider_contract_ok"] is None
+    assert evidence_summary["provider_contract_blocking_conditions"] == [
+        "virtual_desktop_provider_contract_not_ready"
+    ]
+
+
 def test_release_smoke_summary_keeps_backend_blocker_when_release_smoke_fails(
     tmp_path,
     monkeypatch,
