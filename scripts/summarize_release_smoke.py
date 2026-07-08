@@ -67,8 +67,13 @@ ELECTRON_UI_PUBLIC_DEMO_FLOW_MAP: dict[str, str] = {
     "scripts/smoke_workflow_save_run_ui.mjs": "workflow_ui",
 }
 PROVIDER_WORKFLOW_PUBLIC_DEMO_FLOW_ID = "workflow_provider"
+PROVIDER_WORKFLOW_CONTRACT_DEMO_FLOW_ID = "native_provider_contract"
 PROVIDER_WORKFLOW_PROVIDER_CHECK_LABEL = "native_workflow_full_chain"
+PROVIDER_WORKFLOW_CONTRACT_CHECK_LABEL = "native_workflow_full_chain_contract"
 PROVIDER_WORKFLOW_SMOKE_MODE = "native_workflow_full_chain_smoke"
+PROVIDER_WORKFLOW_PROVIDER_EVIDENCE_KIND = "provider_workflow_full_chain"
+PROVIDER_WORKFLOW_CONTRACT_EVIDENCE_KIND = "provider_contract_full_chain"
+NATIVE_PROVIDER_CONTRACT_SMOKE_MODE = "native_provider_contract_smoke"
 OHA_DESKTOP_AGENT_RELEASE_SMOKE_MODE = "oha_desktop_agent_release_smoke"
 OHA_DESKTOP_AGENT_SECTION_EVIDENCE: dict[str, str] = {
     "deepagent_core": "oha_deepagent_core",
@@ -149,18 +154,20 @@ SMOKE_ITEMS: tuple[dict[str, Any], ...] = (
     },
     {
         "id": "workflow",
-        "label": "Workflow has source entrypoint and provider orchestration evidence",
+        "label": "Workflow has source entrypoint and provider-contract orchestration evidence",
         "required": (
             "source_agent_entrypoint_data_analysis",
             "advanced_workflow_orchestration",
         ),
         "required_evidence_kinds": {
-            "advanced_workflow_orchestration": ("provider_workflow_full_chain",),
+            "advanced_workflow_orchestration": (
+                PROVIDER_WORKFLOW_PROVIDER_EVIDENCE_KIND,
+                PROVIDER_WORKFLOW_CONTRACT_EVIDENCE_KIND,
+            ),
         },
         "next_action": (
-            "python scripts/verify_release_candidate.py --require-artifacts "
-            "--check-dmg-mount --run-provider-smoke "
-            "--report-json tmp/rc-verification-provider-smoke.json"
+            "python scripts/verify_release_candidate.py --source-only "
+            "--report-json tmp/rc-verification-source-capabilities.json"
         ),
     },
     {
@@ -1002,7 +1009,11 @@ def _collect_provider_workflow_public_demo_evidence(
         provider_evidence=provider_evidence,
     )
     required_flow_ids = _canonical_public_demo_flow_ids()
-    passed_flow_ids = [PROVIDER_WORKFLOW_PUBLIC_DEMO_FLOW_ID]
+    flow_id = str(
+        provider_evidence.get("public_demo_flow_id")
+        or PROVIDER_WORKFLOW_PUBLIC_DEMO_FLOW_ID
+    )
+    passed_flow_ids = [flow_id]
     missing_flow_ids = [
         flow_id for flow_id in required_flow_ids if flow_id not in passed_flow_ids
     ]
@@ -1046,12 +1057,16 @@ def _add_provider_workflow_release_evidence(
     evidence: dict[str, list[dict[str, Any]]],
     provider_evidence: Mapping[str, Any],
 ) -> None:
+    evidence_kind = str(
+        provider_evidence.get("release_evidence_kind")
+        or PROVIDER_WORKFLOW_PROVIDER_EVIDENCE_KIND
+    )
     for evidence_id in ("advanced_workflow_orchestration", "workflow_budget_boundary"):
         _add_evidence(
             evidence,
             evidence_id,
             source=source,
-            kind="provider_workflow_full_chain",
+            kind=evidence_kind,
             provider_workflow_evidence=dict(provider_evidence),
         )
 
@@ -1073,6 +1088,8 @@ def _provider_workflow_public_demo_evidence(report: Mapping[str, Any]) -> dict[s
                 "check_label": label,
                 "exit_code": check.get("exit_code"),
                 "summary_ok": True,
+                "release_evidence_kind": PROVIDER_WORKFLOW_PROVIDER_EVIDENCE_KIND,
+                "public_demo_flow_id": PROVIDER_WORKFLOW_PUBLIC_DEMO_FLOW_ID,
             }
     if (
         report.get("mode") == PROVIDER_WORKFLOW_SMOKE_MODE
@@ -1083,7 +1100,56 @@ def _provider_workflow_public_demo_evidence(report: Mapping[str, Any]) -> dict[s
             "source_kind": PROVIDER_WORKFLOW_SMOKE_MODE,
             "mode": PROVIDER_WORKFLOW_SMOKE_MODE,
             "summary_ok": True,
+            "release_evidence_kind": PROVIDER_WORKFLOW_PROVIDER_EVIDENCE_KIND,
+            "public_demo_flow_id": PROVIDER_WORKFLOW_PUBLIC_DEMO_FLOW_ID,
         }
+    contract_evidence = _provider_workflow_contract_evidence(report)
+    if contract_evidence:
+        return contract_evidence
+    return {}
+
+
+def _provider_workflow_contract_evidence(report: Mapping[str, Any]) -> dict[str, Any]:
+    contract_report = _native_provider_contract_report(report)
+    if not contract_report:
+        return {}
+    for check in _dict_list(contract_report.get("checks")):
+        label = str(check.get("label") or "").strip()
+        if label != PROVIDER_WORKFLOW_CONTRACT_CHECK_LABEL:
+            continue
+        summary = check.get("summary")
+        if not isinstance(summary, dict) or summary.get("ok") is not True:
+            continue
+        nested = {
+            str(item.get("name") or "").strip(): item
+            for item in _dict_list(summary.get("checks"))
+            if str(item.get("name") or "").strip()
+        }
+        if not all(
+            _dict(nested.get(name)).get("ok") is True
+            for name in ("advanced_workflow_orchestration", "workflow_budget_boundary")
+        ):
+            continue
+        return {
+            "source_kind": NATIVE_PROVIDER_CONTRACT_SMOKE_MODE,
+            "check_label": label,
+            "summary_ok": True,
+            "release_evidence_kind": PROVIDER_WORKFLOW_CONTRACT_EVIDENCE_KIND,
+            "public_demo_flow_id": PROVIDER_WORKFLOW_CONTRACT_DEMO_FLOW_ID,
+            "provider": str(contract_report.get("provider") or ""),
+        }
+    return {}
+
+
+def _native_provider_contract_report(report: Mapping[str, Any]) -> Mapping[str, Any]:
+    if report.get("mode") == NATIVE_PROVIDER_CONTRACT_SMOKE_MODE and report.get("ok") is True:
+        return report
+    section = report.get(NATIVE_PROVIDER_CONTRACT_SMOKE_MODE)
+    if not isinstance(section, Mapping) or section.get("status") != "passed":
+        return {}
+    evidence = section.get("evidence")
+    if isinstance(evidence, Mapping) and evidence.get("ok") is True:
+        return evidence
     return {}
 
 

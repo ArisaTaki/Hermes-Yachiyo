@@ -112,6 +112,27 @@ def _provider_workflow_full_chain_report() -> dict[str, object]:
     }
 
 
+def _native_provider_contract_report() -> dict[str, object]:
+    return {
+        "mode": "native_provider_contract_smoke",
+        "ok": True,
+        "provider": "local_fake_openai_compatible_sse",
+        "checks": [
+            {
+                "label": "native_workflow_full_chain_contract",
+                "ok": True,
+                "summary": {
+                    "ok": True,
+                    "checks": [
+                        {"name": "advanced_workflow_orchestration", "ok": True},
+                        {"name": "workflow_budget_boundary", "ok": True},
+                    ],
+                },
+            },
+        ],
+    }
+
+
 def test_release_smoke_summary_passes_with_required_evidence(tmp_path, monkeypatch):
     monkeypatch.setattr(release_smoke, "ROOT", tmp_path)
     report_path = tmp_path / "tmp" / "rc.json"
@@ -553,11 +574,16 @@ def test_release_smoke_summary_projects_provider_workflow_smoke_into_public_demo
         for item in public_demo["related_evidence"]["public_demo_assessment"]
         if item["kind"] == "provider_workflow_public_demo_projection"
     )
-    assert projection["provider_workflow_evidence"] == {
+    assert {
+        "release_evidence_kind": "",
+        "public_demo_flow_id": "",
+    } | projection["provider_workflow_evidence"] == {
         "source_kind": "provider_smoke",
         "check_label": "native_workflow_full_chain",
         "exit_code": 0,
         "summary_ok": True,
+        "release_evidence_kind": "provider_workflow_full_chain",
+        "public_demo_flow_id": "workflow_provider",
     }
     assert "workflow_provider" not in projection["passed_required_flow_ids"]
     assert all(item["id"] != "public_demo" for item in summary["next_actions"])
@@ -595,6 +621,71 @@ def test_release_smoke_summary_uses_provider_workflow_as_workflow_release_eviden
     )
     assert "workflow" not in summary["missing_item_ids"]
     assert all(item["id"] != "workflow" for item in summary["next_actions"])
+
+
+def test_release_smoke_summary_uses_native_provider_contract_as_workflow_release_evidence(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(release_smoke, "ROOT", tmp_path)
+    source_report_path = tmp_path / "tmp" / "source-capabilities.json"
+    contract_report_path = tmp_path / "tmp" / "native-provider-contract.json"
+    source_report_path.parent.mkdir(parents=True, exist_ok=True)
+    source_report_path.write_text(
+        json.dumps(_matrix_report("source_agent_entrypoint_data_analysis")),
+        encoding="utf-8",
+    )
+    contract_report_path.write_text(
+        json.dumps(_native_provider_contract_report()),
+        encoding="utf-8",
+    )
+
+    summary = release_smoke.summarize_release_smoke(
+        [source_report_path, contract_report_path]
+    )
+
+    workflow = next(item for item in summary["items"] if item["id"] == "workflow")
+    assert workflow["status"] == "passed"
+    assert workflow["evidence"]["advanced_workflow_orchestration"][0]["kind"] == (
+        "provider_contract_full_chain"
+    )
+    provider_evidence = workflow["evidence"]["advanced_workflow_orchestration"][0][
+        "provider_workflow_evidence"
+    ]
+    assert provider_evidence["source_kind"] == "native_provider_contract_smoke"
+    assert provider_evidence["public_demo_flow_id"] == "native_provider_contract"
+    assert "workflow" not in summary["missing_item_ids"]
+    assert all(item["id"] != "workflow" for item in summary["next_actions"])
+
+
+def test_release_smoke_summary_uses_native_provider_contract_section_from_rc_report(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(release_smoke, "ROOT", tmp_path)
+    report_path = tmp_path / "tmp" / "rc-source-only.json"
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(
+        json.dumps(
+            {
+                **_matrix_report("source_agent_entrypoint_data_analysis"),
+                "native_provider_contract_smoke": {
+                    "status": "passed",
+                    "evidence": _native_provider_contract_report(),
+                    "findings": [],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    summary = release_smoke.summarize_release_smoke([report_path])
+
+    workflow = next(item for item in summary["items"] if item["id"] == "workflow")
+    assert workflow["status"] == "passed"
+    assert workflow["evidence"]["advanced_workflow_orchestration"][0]["kind"] == (
+        "provider_contract_full_chain"
+    )
 
 
 def test_release_smoke_summary_does_not_project_provider_workflow_from_capability_matrix(
@@ -640,7 +731,10 @@ def test_release_smoke_summary_does_not_project_provider_workflow_from_capabilit
     assert workflow["present_evidence_ids"] == ["source_agent_entrypoint_data_analysis"]
     assert workflow["missing_evidence_ids"] == ["advanced_workflow_orchestration"]
     assert workflow["required_evidence_kinds"] == {
-        "advanced_workflow_orchestration": ["provider_workflow_full_chain"]
+        "advanced_workflow_orchestration": [
+            "provider_workflow_full_chain",
+            "provider_contract_full_chain",
+        ]
     }
     assert workflow["rejected_evidence"]["advanced_workflow_orchestration"][0]["kind"] == (
         "capability"
