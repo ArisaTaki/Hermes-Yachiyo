@@ -12,6 +12,15 @@ FIRST_PAGE_DESKTOP_PROVIDER_SESSION_EVENT_TYPES = {
     "desktop.provider_session.failed",
 }
 
+FIRST_PAGE_DESKTOP_PROVIDER_EXECUTION_EVENT_TYPES = {
+    "desktop.provider_execution.routed",
+}
+
+FIRST_PAGE_DESKTOP_PROVIDER_EVENT_TYPES = (
+    FIRST_PAGE_DESKTOP_PROVIDER_SESSION_EVENT_TYPES
+    | FIRST_PAGE_DESKTOP_PROVIDER_EXECUTION_EVENT_TYPES
+)
+
 FIRST_PAGE_DEFERRED_CONTINUATION_EVENT_TYPES = {
     "agent.deferred_continuation.enqueued",
     "group.run.deferred_continuation.enqueued",
@@ -20,7 +29,7 @@ FIRST_PAGE_DEFERRED_CONTINUATION_EVENT_TYPES = {
 
 FIRST_PAGE_GROUP_RUN_KEY_EVENT_TYPES = {
     *FIRST_PAGE_DEFERRED_CONTINUATION_EVENT_TYPES,
-    *FIRST_PAGE_DESKTOP_PROVIDER_SESSION_EVENT_TYPES,
+    *FIRST_PAGE_DESKTOP_PROVIDER_EVENT_TYPES,
     "group.run.approval_required",
     "group.run.completed",
     "group.run.failed",
@@ -35,7 +44,7 @@ FIRST_PAGE_GROUP_RUN_KEY_EVENT_TYPES = {
 
 FIRST_PAGE_RUN_KEY_EVENT_TYPES = {
     *FIRST_PAGE_DEFERRED_CONTINUATION_EVENT_TYPES,
-    *FIRST_PAGE_DESKTOP_PROVIDER_SESSION_EVENT_TYPES,
+    *FIRST_PAGE_DESKTOP_PROVIDER_EVENT_TYPES,
     "run.completed",
     "run.failed",
     "run.cancelled",
@@ -58,7 +67,7 @@ FIRST_PAGE_RUN_KEY_EVENT_TYPES = {
 
 FIRST_PAGE_WORKFLOW_RUN_KEY_EVENT_TYPES = {
     *FIRST_PAGE_DEFERRED_CONTINUATION_EVENT_TYPES,
-    *FIRST_PAGE_DESKTOP_PROVIDER_SESSION_EVENT_TYPES,
+    *FIRST_PAGE_DESKTOP_PROVIDER_EVENT_TYPES,
     "workflow.run.approval_required",
     "workflow.run.completed",
     "workflow.run.failed",
@@ -171,13 +180,13 @@ def _first_page_key_event_sequence(
     preferred_event_types = (
         set(event_types)
         - FIRST_PAGE_RUNTIME_STATE_EVENT_TYPES
-        - FIRST_PAGE_DESKTOP_PROVIDER_SESSION_EVENT_TYPES
+        - FIRST_PAGE_DESKTOP_PROVIDER_EVENT_TYPES
     )
     for event in stream:
         if event.event_type in preferred_event_types:
             return int(event.sequence or 0)
 
-    provider_event_types = set(event_types) & FIRST_PAGE_DESKTOP_PROVIDER_SESSION_EVENT_TYPES
+    provider_event_types = set(event_types) & FIRST_PAGE_DESKTOP_PROVIDER_EVENT_TYPES
     for event in stream:
         if event.event_type in provider_event_types:
             return int(event.sequence or 0)

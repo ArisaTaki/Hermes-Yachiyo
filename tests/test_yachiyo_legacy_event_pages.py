@@ -99,6 +99,41 @@ def test_legacy_run_event_page_first_page_includes_provider_session_window() -> 
     }
 
 
+def test_legacy_run_event_page_first_page_includes_provider_execution_window() -> None:
+    page = run_event_page_from_legacy_stream(
+        {
+            "run_id": "legacy-run",
+            "events": [
+                {"event_type": "run.started", "sequence": 1},
+                {"event_type": "agent.plan.created", "sequence": 2},
+                {"event_type": "agent.tool.started", "sequence": 3},
+                {
+                    "event_type": "desktop.provider_execution.routed",
+                    "sequence": 4,
+                    "payload": {
+                        "desktop_execution_provider": {"provider_id": "sandbox-1"}
+                    },
+                },
+                {"event_type": "agent.tool.progress", "sequence": 5},
+            ],
+        },
+        run_id="fallback-run",
+        after_sequence=0,
+        limit=2,
+    )
+
+    assert page["next_after_sequence"] == 4
+    assert [event["event_type"] for event in page["events"]] == [
+        "run.started",
+        "agent.plan.created",
+        "agent.tool.started",
+        "desktop.provider_execution.routed",
+    ]
+    assert page["events"][-1]["payload"]["desktop_execution_provider"] == {
+        "provider_id": "sandbox-1"
+    }
+
+
 def test_legacy_run_event_page_first_page_includes_workspace_state_window() -> None:
     page = run_event_page_from_legacy_stream(
         {
@@ -212,8 +247,16 @@ def test_legacy_run_replay_enrichment_merges_observable_runtime_facts() -> None:
                 "payload": {"desktop_provider_session": {"provider_id": "vnc"}},
             },
             {
-                "event_type": "agent.deferred_continuation.enqueued",
+                "event_type": "desktop.provider_execution.routed",
                 "sequence": 12,
+                "payload": {
+                    "desktop_execution_provider": {"provider_id": "vnc"},
+                    "desktop_execution_route": {"status": "sandbox_ready"},
+                },
+            },
+            {
+                "event_type": "agent.deferred_continuation.enqueued",
+                "sequence": 13,
                 "payload": {
                     "deferred_continuation_count": 1,
                     "deferred_tools": ["desktop.safe_type_text"],
@@ -221,10 +264,10 @@ def test_legacy_run_replay_enrichment_merges_observable_runtime_facts() -> None:
             },
             {
                 "event_type": "workflow.run.task_core.created",
-                "sequence": 13,
+                "sequence": 14,
                 "payload": {"core_id": "workflow-task-core-1"},
             },
-            {"event_type": "agent.runtime.compiled", "sequence": 14, "payload": {"internal": True}},
+            {"event_type": "agent.runtime.compiled", "sequence": 15, "payload": {"internal": True}},
         ]
     )
     run = {
@@ -246,6 +289,7 @@ def test_legacy_run_replay_enrichment_merges_observable_runtime_facts() -> None:
         "agent.replan.requested",
         "agent.artifact.write",
         "desktop.provider_session.started",
+        "desktop.provider_execution.routed",
         "agent.deferred_continuation.enqueued",
         "workflow.run.task_core.created",
     ]
@@ -259,6 +303,7 @@ def test_legacy_run_replay_enrichment_merges_observable_runtime_facts() -> None:
     assert is_replay_enrichment_event({"event_type": "agent.replan.requested"})
     assert is_replay_enrichment_event({"event_type": "agent.artifact.write"})
     assert is_replay_enrichment_event({"event_type": "desktop.provider_session.started"})
+    assert is_replay_enrichment_event({"event_type": "desktop.provider_execution.routed"})
     assert is_replay_enrichment_event({"event_type": "agent.deferred_continuation.enqueued"})
     assert is_replay_enrichment_event({"event_type": "workflow.run.task_core.created"})
     assert not is_replay_enrichment_event({"event_type": "agent.runtime.compiled"})

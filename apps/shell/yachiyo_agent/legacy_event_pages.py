@@ -6,7 +6,7 @@ import json
 from typing import Any
 
 from .event_page_windows import (
-    FIRST_PAGE_DESKTOP_PROVIDER_SESSION_EVENT_TYPES,
+    FIRST_PAGE_DESKTOP_PROVIDER_EVENT_TYPES,
     FIRST_PAGE_LEGACY_KEY_EVENT_TYPES,
     FIRST_PAGE_RUNTIME_STATE_EVENT_TYPES,
 )
@@ -71,6 +71,7 @@ def is_replay_enrichment_event(event: dict[str, Any]) -> bool:
             "agent.task.",
             "agent.task_core.",
             "agent.tool.",
+            "desktop.provider_execution.",
             "desktop.provider_session.",
             "group.artifact.",
             "group.member.",
@@ -172,7 +173,7 @@ def _first_page_key_event_sequence(
     preferred_event_types = (
         FIRST_PAGE_LEGACY_KEY_EVENT_TYPES
         - FIRST_PAGE_RUNTIME_STATE_EVENT_TYPES
-        - FIRST_PAGE_DESKTOP_PROVIDER_SESSION_EVENT_TYPES
+        - FIRST_PAGE_DESKTOP_PROVIDER_EVENT_TYPES
     )
     sequence = _first_event_sequence(
         events,
@@ -185,7 +186,7 @@ def _first_page_key_event_sequence(
     sequence = _first_event_sequence(
         events,
         next_after_sequence,
-        FIRST_PAGE_DESKTOP_PROVIDER_SESSION_EVENT_TYPES,
+        FIRST_PAGE_DESKTOP_PROVIDER_EVENT_TYPES,
     )
     if sequence > next_after_sequence:
         return sequence
