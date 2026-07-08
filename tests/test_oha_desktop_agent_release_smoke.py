@@ -123,10 +123,17 @@ def test_oha_desktop_agent_release_smoke_can_include_isolated_provider(
         run_isolated_provider_smoke=True,
     )
 
-    assert report["ok"] is True
+    assert report["ok"] is False
     assert report["isolated_provider_smoke_requested"] is True
     assert report["isolated_provider_smoke_collected"] is True
+    assert report["isolated_provider_smoke_mode"] == "dev_loopback_provider_smoke"
+    assert report["isolated_provider_release_ready"] is False
+    assert report["isolated_provider_release_blockers"] == [
+        "configured_virtual_desktop_provider_required",
+        "loopback_desktop_backend",
+    ]
     assert report["checks"]["covers_isolated_desktop_provider"] is True
+    assert report["checks"]["isolated_provider_release_backend_verified"] is False
     section_by_id = {section["id"]: section for section in report["sections"]}
     assert section_by_id["isolated_desktop_provider"]["mode"] == (
         "isolated_desktop_provider_smoke"
@@ -143,6 +150,48 @@ def test_oha_desktop_agent_release_smoke_can_include_isolated_provider(
         "provider_contract_version": "oha-yachiyo.desktop-provider.v1",
         "provider_contract_blocking_conditions": ["loopback_desktop_backend"],
     }
+
+
+def test_oha_desktop_agent_release_smoke_accepts_configured_virtual_provider(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        smoke.smoke_isolated_desktop_provider,
+        "run_smoke",
+        lambda **_kwargs: {
+            "ok": True,
+            "mode": "isolated_desktop_provider_smoke",
+            "covered_tools": ["desktop.list_apps", "app.open", "desktop.verify"],
+            "desktop_session_isolated": True,
+            "foreground_takeover_required": False,
+            "keyboard_mouse_capture_supported": True,
+            "desktop_backend_kind": "virtual_desktop",
+            "desktop_backend_is_loopback": False,
+            "desktop_backend_ready_for_public_release": True,
+            "requires_real_virtual_desktop_backend": False,
+            "provider_contract": {
+                "ok": True,
+                "contract_version": "oha-yachiyo.desktop-provider.v1",
+                "blocking_conditions": [],
+            },
+        },
+    )
+
+    report = smoke.run_smoke(
+        workdir=tmp_path / "oha-release-smoke",
+        run_isolated_provider_smoke=True,
+        use_configured_virtual_desktop_provider=True,
+    )
+
+    assert report["ok"] is True
+    assert report["configured_virtual_desktop_provider_requested"] is True
+    assert report["isolated_provider_smoke_mode"] == (
+        "release_virtual_desktop_provider_smoke"
+    )
+    assert report["isolated_provider_release_ready"] is True
+    assert report["isolated_provider_release_blockers"] == []
+    assert report["checks"]["isolated_provider_release_backend_verified"] is True
 
 
 def test_oha_desktop_agent_release_smoke_cli_writes_report(
@@ -187,6 +236,9 @@ def test_oha_desktop_agent_release_smoke_cli_writes_report(
         "isolated_provider_smoke_requested": False,
         "configured_virtual_desktop_provider_requested": False,
         "isolated_provider_smoke_collected": False,
+        "isolated_provider_smoke_mode": "",
+        "isolated_provider_release_ready": False,
+        "isolated_provider_release_blockers": [],
         "isolated_provider_backend": {},
         "sections": [],
     }

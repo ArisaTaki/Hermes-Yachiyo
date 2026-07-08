@@ -594,6 +594,14 @@ def run_smoke(
             provider_manifest=provider_manifest,
         )
     failed = [section for section in sections if section.get("ok") is not True]
+    isolated_provider_backend = _isolated_provider_backend_summary(sections)
+    isolated_provider_release_blockers = _isolated_provider_release_blockers(
+        run_isolated_provider_smoke=run_isolated_provider_smoke,
+        configured_virtual_desktop_provider_requested=bool(
+            use_configured_virtual_desktop_provider or provider_manifest is not None
+        ),
+        isolated_provider_backend=isolated_provider_backend,
+    )
     checks = {
         "all_sections_passed": not failed,
         "covers_deepagent_core": any(section["id"] == "deepagent_core" for section in sections),
@@ -627,7 +635,9 @@ def run_smoke(
         checks["covers_isolated_desktop_provider"] = any(
             section["id"] == "isolated_desktop_provider" for section in sections
         )
-    isolated_provider_backend = _isolated_provider_backend_summary(sections)
+        checks["isolated_provider_release_backend_verified"] = (
+            not isolated_provider_release_blockers
+        )
     return {
         "ok": all(checks.values()),
         "mode": "oha_desktop_agent_release_smoke",
@@ -639,11 +649,28 @@ def run_smoke(
             use_configured_virtual_desktop_provider or provider_manifest is not None
         ),
         "provider_manifest": str(provider_manifest or ""),
+        "isolated_provider_smoke_mode": (
+            "release_virtual_desktop_provider_smoke"
+            if run_isolated_provider_smoke
+            and (
+                use_configured_virtual_desktop_provider
+                or provider_manifest is not None
+            )
+            else (
+                "dev_loopback_provider_smoke"
+                if run_isolated_provider_smoke
+                else ""
+            )
+        ),
         "isolated_provider_smoke_collected": any(
             section.get("id") == "isolated_desktop_provider"
             and section.get("ok") is True
             for section in sections
         ),
+        "isolated_provider_release_ready": (
+            run_isolated_provider_smoke and not isolated_provider_release_blockers
+        ),
+        "isolated_provider_release_blockers": isolated_provider_release_blockers,
         "isolated_provider_backend": isolated_provider_backend,
         "sections": sections,
     }
@@ -689,6 +716,43 @@ def _isolated_provider_backend_summary(
     }
 
 
+def _isolated_provider_release_blockers(
+    *,
+    run_isolated_provider_smoke: bool,
+    configured_virtual_desktop_provider_requested: bool,
+    isolated_provider_backend: dict[str, Any],
+) -> list[str]:
+    if not run_isolated_provider_smoke:
+        return []
+    blockers: list[str] = []
+    if not configured_virtual_desktop_provider_requested:
+        blockers.append("configured_virtual_desktop_provider_required")
+    if isolated_provider_backend.get("provider_contract_ok") is not True:
+        blockers.extend(
+            str(item)
+            for item in isolated_provider_backend.get(
+                "provider_contract_blocking_conditions",
+                [],
+            )
+            if str(item or "").strip()
+        )
+        if not blockers:
+            blockers.append("virtual_desktop_provider_contract_not_ready")
+    return _unique_strings(blockers)
+
+
+def _unique_strings(values: Sequence[str]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        item = str(value or "").strip()
+        if not item or item in seen:
+            continue
+        result.append(item)
+        seen.add(item)
+    return result
+
+
 def _write_report(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
@@ -726,6 +790,17 @@ def _compact_stdout_summary(payload: dict[str, Any]) -> dict[str, Any]:
         "isolated_provider_smoke_collected": bool(
             payload.get("isolated_provider_smoke_collected") is True
         ),
+        "isolated_provider_smoke_mode": str(
+            payload.get("isolated_provider_smoke_mode") or ""
+        ),
+        "isolated_provider_release_ready": bool(
+            payload.get("isolated_provider_release_ready") is True
+        ),
+        "isolated_provider_release_blockers": [
+            str(item)
+            for item in payload.get("isolated_provider_release_blockers") or []
+            if str(item or "").strip()
+        ],
         "isolated_provider_backend": dict(
             payload.get("isolated_provider_backend") or {}
         ),
