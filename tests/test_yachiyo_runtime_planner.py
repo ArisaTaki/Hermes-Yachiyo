@@ -2252,6 +2252,43 @@ def test_runtime_planner_routes_context_data_analysis_to_communication() -> None
         "transform": "report",
     }
 
+    app_only = RuntimePlanner().decision(
+        "分析当前窗口的数据并生成一份带图表的报告再发到微信",
+        allowed_tools=[
+            "desktop.ui_elements",
+            "data.analyze",
+            "app.focus",
+            "desktop.safe_type_text",
+            "artifact.write",
+        ],
+    )
+    assert app_only.selected_intent.kind == "data_analysis"
+    assert app_only.selected_intent.inputs["communication_target_hint"] == {
+        "body_source": "analysis_artifact",
+        "mode": "focus",
+        "send_action": "draft",
+        "app_name": "WeChat",
+        "content_transform_hint": "report",
+    }
+    assert [step.step_id for step in app_only.plan.tool_plan.steps] == [
+        "read-data-context",
+        "analyze-data-context",
+        "open-or-focus-analysis-communication-app",
+        "draft-analysis-communication-message",
+        "verify-analysis-communication-app",
+    ]
+    assert _step_by_id(app_only, "open-or-focus-analysis-communication-app").input_preview == {
+        "app_name": "WeChat"
+    }
+    assert _step_by_id(app_only, "draft-analysis-communication-message").input_preview == {
+        "body_source": "analysis_artifact",
+        "artifact_path": "analysis-report.md",
+        "transform": "report",
+    }
+    assert "send-analysis-communication-message" not in {
+        step.step_id for step in app_only.plan.tool_plan.steps
+    }
+
 
 def test_runtime_planner_does_not_treat_plain_csv_send_as_analysis() -> None:
     decision = RuntimePlanner().decision(

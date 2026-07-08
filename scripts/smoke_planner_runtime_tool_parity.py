@@ -150,6 +150,27 @@ PLANNER_TOOL_PARITY_CASES: tuple[dict[str, Any], ...] = (
         "approval_required": [],
     },
     {
+        "id": "visible_data_analysis_to_wechat_draft",
+        "category": "orchestrator",
+        "prompt": "分析当前窗口的数据并生成一份带图表的报告再发到微信",
+        "expected_intent": "data_analysis",
+        "expected_plan_tools": [
+            "desktop.ui_elements",
+            "data.analyze",
+            "app.focus",
+            "desktop.safe_type_text",
+            "desktop.ui_elements",
+        ],
+        "expected_request_tools": ["desktop.ui_elements"],
+        "expected_deferred_plan_tools": [
+            "data.analyze",
+            "app.focus",
+            "desktop.safe_type_text",
+            "desktop.ui_elements",
+        ],
+        "approval_required": [],
+    },
+    {
         "id": "current_page_report",
         "category": "orchestrator",
         "prompt": "把当前网页总结成一份报告",

@@ -13756,8 +13756,91 @@ def _append_orchestration_communication_steps(
                 action="send_message",
                 reason="Final message sending remains approval-gated.",
             )
-        )
+    )
     return [*next_steps, *communication_steps]
+
+
+def _append_analysis_app_only_communication_steps(
+    intent: TaskIntentSnapshot,
+    allowed: set[str] | None,
+    steps: list[ToolPlanStepSnapshot],
+    *,
+    app_name: str,
+    mode: str,
+    artifact_path: str,
+    transform: str,
+    depends_on: str,
+) -> list[ToolPlanStepSnapshot]:
+    app_tool = _first_allowed(app_control_tool_candidates(mode), allowed)
+    if not app_tool:
+        return steps
+    draft_input = {
+        "body_source": "analysis_artifact",
+        "artifact_path": artifact_path,
+    }
+    if transform:
+        draft_input["transform"] = transform
+    draft_tool, draft_input = _safe_type_text_operation_preview(
+        app_name=app_name,
+        mode=mode,
+        allowed=allowed,
+        payload=draft_input,
+    )
+    next_steps = [
+        *steps,
+        _step(
+            intent,
+            "open-or-focus-analysis-communication-app",
+            "Open or focus communication app",
+            "desktop.app_control",
+            app_tool,
+            input_preview={"app_name": app_name},
+            depends_on=[depends_on],
+            reason=(
+                "Prepare the requested communication app after the analysis artifact is "
+                "available, even when the user did not name a recipient."
+            ),
+        ),
+        _step(
+            intent,
+            "draft-analysis-communication-message",
+            "Draft analysis communication message",
+            "communication.compose",
+            draft_tool,
+            input_preview=draft_input,
+            depends_on=["open-or-focus-analysis-communication-app"],
+            action="draft_message",
+            reason=(
+                "Draft the analysis artifact into the requested communication app without "
+                "sending when no explicit recipient was provided."
+            ),
+        ),
+    ]
+    verify_tool = _first_allowed(("desktop.ui_elements", "desktop.active_window", "screen.capture"), allowed)
+    if not verify_tool:
+        return next_steps
+    verify_input = (
+        {"reason": "Verify the analysis draft is visible in the communication app."}
+        if verify_tool == "screen.capture"
+        else {"app_name": app_name, "role_filter": "text", "limit": 80}
+    )
+    return [
+        *next_steps,
+        _step(
+            intent,
+            "verify-analysis-communication-app",
+            "Verify analysis communication app",
+            "desktop.ui_operation",
+            verify_tool,
+            input_preview=verify_input,
+            depends_on=["draft-analysis-communication-message"],
+            action="read_ui" if verify_tool != "screen.capture" else "capture_screen",
+            reason=(
+                "Inspect the communication app after drafting so the runtime can replan "
+                "if the content is not visible."
+            ),
+        ),
+    ]
 
 
 def _append_analysis_communication_steps(
@@ -13772,17 +13855,28 @@ def _append_analysis_communication_steps(
     if not isinstance(target, Mapping):
         return steps
     recipient = str(target.get("recipient") or "").strip()
-    if not recipient:
+    app_name = str(target.get("app_name") or "").strip()
+    if not recipient and not app_name:
         return steps
     artifact_path = _analysis_communication_artifact_path(intent.user_goal, artifact_paths)
     if not artifact_path:
         return steps
-    app_name = str(target.get("app_name") or "").strip()
     channel = str(target.get("channel") or "").strip()
     transform = str(target.get("content_transform_hint") or "").strip()
     mode = str(target.get("mode") or "focus").strip() or "focus"
     selected_app_payload: dict[str, Any] = {}
     communication_steps: list[ToolPlanStepSnapshot] = []
+    if app_name and not recipient:
+        return _append_analysis_app_only_communication_steps(
+            intent,
+            allowed,
+            steps,
+            app_name=app_name,
+            mode=mode,
+            artifact_path=artifact_path,
+            transform=transform,
+            depends_on=depends_on,
+        )
     if not app_name:
         app_name = _default_communication_app_for_channel(channel, mode, allowed)
     if not app_name:
@@ -17487,18 +17581,19 @@ def _data_analysis_communication_target_hint(text: str) -> dict[str, str]:
     if not target:
         return {}
     app_name, recipient = _split_communication_surface_and_recipient(target)
-    if not recipient:
+    if not recipient and not app_name:
         recipient = _clean_communication_recipient_text(target)
         if recipient and not app_name:
             app_name = _communication_surface_for_recipient_hint(recipient)
-    if not recipient:
+    if not recipient and not app_name:
         return {}
     hint: dict[str, str] = {
-        "recipient": recipient,
         "body_source": "analysis_artifact",
         "mode": _communication_app_mode(value),
-        "send_action": _communication_send_action(value),
+        "send_action": "draft" if app_name and not recipient else _communication_send_action(value),
     }
+    if recipient:
+        hint["recipient"] = recipient
     if app_name:
         hint["app_name"] = app_name
     channel = _data_analysis_delivery_channel_hint(value) or _generic_communication_target_channel_hint(target)
@@ -24585,7 +24680,7 @@ def _split_communication_surface_and_recipient(target: str) -> tuple[str, str]:
     lowered = value.lower()
     for surface in known_surfaces:
         if lowered == surface.lower():
-            return "", ""
+            return _canonical_app_name_hint(surface), ""
         if lowered.startswith(surface.lower() + " "):
             recipient = _strip_communication_surface_connector(value[len(surface) :])
             return (
