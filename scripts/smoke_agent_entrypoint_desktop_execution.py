@@ -342,6 +342,74 @@ def _is_desktop_operation_planning_reason(value: Any) -> bool:
     }
 
 
+def _task_core_from_selection_event(selection_event: dict[str, Any]) -> dict[str, Any]:
+    payload = _payload(selection_event)
+    for key in ("runtime_plan", "yachiyo_execution_envelope"):
+        nested = payload.get(key)
+        if isinstance(nested, dict) and isinstance(nested.get("task_core"), dict):
+            return dict(nested["task_core"])
+    studio_core = payload.get("yachiyo_task_core")
+    return dict(studio_core) if isinstance(studio_core, dict) else {}
+
+
+def _task_core_summary(task_core: dict[str, Any]) -> dict[str, Any]:
+    workspace = task_core.get("workspace")
+    workspace = workspace if isinstance(workspace, dict) else {}
+    workspace_items = workspace.get("items")
+    workspace_items = workspace_items if isinstance(workspace_items, list) else []
+    todos = task_core.get("todos")
+    todos = todos if isinstance(todos, list) else []
+    checkpoints = task_core.get("checkpoints")
+    checkpoints = checkpoints if isinstance(checkpoints, list) else []
+    replan_signals = task_core.get("replan_signals")
+    replan_signals = replan_signals if isinstance(replan_signals, list) else []
+    return {
+        "core_id": str(task_core.get("core_id") or ""),
+        "workspace_id": str(workspace.get("workspace_id") or ""),
+        "workspace_item_count": len(workspace_items),
+        "todo_step_ids": [
+            str(item.get("step_id") or "")
+            for item in todos
+            if isinstance(item, dict) and str(item.get("step_id") or "").strip()
+        ],
+        "todo_tool_names": [
+            str(item.get("tool_name") or "")
+            for item in todos
+            if isinstance(item, dict) and str(item.get("tool_name") or "").strip()
+        ],
+        "checkpoint_step_ids": [
+            str(item.get("after_step_id") or "")
+            for item in checkpoints
+            if isinstance(item, dict) and str(item.get("after_step_id") or "").strip()
+        ],
+        "replan_triggers": [
+            str(item.get("trigger") or "")
+            for item in replan_signals
+            if isinstance(item, dict) and str(item.get("trigger") or "").strip()
+        ],
+    }
+
+
+def _task_core_checks(
+    task_core_summary: dict[str, Any],
+    *,
+    expected_step_ids: Sequence[str],
+    expected_tools: Sequence[str],
+) -> dict[str, bool]:
+    todo_step_ids = set(task_core_summary.get("todo_step_ids") or [])
+    checkpoint_step_ids = set(task_core_summary.get("checkpoint_step_ids") or [])
+    todo_tool_names = set(task_core_summary.get("todo_tool_names") or [])
+    return {
+        "task_core_projected": bool(task_core_summary.get("core_id")),
+        "task_core_has_workspace": bool(task_core_summary.get("workspace_id")),
+        "task_core_has_workspace_items": int(task_core_summary.get("workspace_item_count") or 0) > 0,
+        "task_core_has_todo_steps": all(step_id in todo_step_ids for step_id in expected_step_ids),
+        "task_core_has_todo_tools": all(tool in todo_tool_names for tool in expected_tools),
+        "task_core_has_checkpoints": all(step_id in checkpoint_step_ids for step_id in expected_step_ids),
+        "task_core_has_replan_signal": bool(task_core_summary.get("replan_triggers")),
+    }
+
+
 def _model_event_free(events: Sequence[dict[str, Any]]) -> bool:
     return not any(
         event_type in {"model.request.started", "model.requested"}
@@ -417,8 +485,14 @@ def _generic_app_open_case(
     completed_tools = completed_payload.get("tools")
     selection_payload = _payload(selection_event)
     selected_intent_payload = _payload(selected_intent_event)
+    task_core_summary = _task_core_summary(_task_core_from_selection_event(selection_event))
     expected_plan_tools = ["desktop.list_apps", "app.open", "desktop.active_window"]
     expected_execution_tools = expected_plan_tools
+    expected_step_ids = [
+        "discover-desktop-state",
+        "open-or-focus-app",
+        "verify-desktop-result",
+    ]
     checks = {
         "run_completed": updated.get("status") == "completed",
         "summary_names_generic_app": "已打开 PixelForge" in str(updated.get("result") or ""),
@@ -450,6 +524,11 @@ def _generic_app_open_case(
         "completed_summary_names_generic_app": "已打开 PixelForge" in str(
             completed_payload.get("summary") or ""
         ),
+        **_task_core_checks(
+            task_core_summary,
+            expected_step_ids=expected_step_ids,
+            expected_tools=expected_plan_tools,
+        ),
     }
     return {
         "id": f"{entrypoint}_generic_app_open_before_model",
@@ -463,6 +542,7 @@ def _generic_app_open_case(
         "planned_events": planned_events,
         "tool_events": tool_events,
         "completed_event": completed_event,
+        "task_core_summary": task_core_summary,
         "checks": checks,
     }
 
@@ -569,8 +649,10 @@ def _generic_app_inspect_case(
     completed_payload = _payload(completed_event)
     selection_payload = _payload(selection_event)
     selected_intent_payload = _payload(selected_intent_event)
+    task_core_summary = _task_core_summary(_task_core_from_selection_event(selection_event))
     expected_plan_tools = ["desktop.inspect_app"]
     expected_execution_tools = ["desktop.list_apps", "desktop.inspect_app"]
+    expected_step_ids = ["inspect-app"]
     expected_input = {"app_name": "PixelForge", "open_if_needed": True, "focus": True, "limit": 80}
     checks = {
         "run_completed": updated.get("status") == "completed",
@@ -618,6 +700,11 @@ def _generic_app_inspect_case(
         "completed_from_runtime_planner": completed_payload.get("source") == "runtime_planner",
         "completed_tools_match": completed_payload.get("tools") == expected_execution_tools,
         "completed_after_inspect": completed_payload.get("tool") == "desktop.inspect_app",
+        **_task_core_checks(
+            task_core_summary,
+            expected_step_ids=expected_step_ids,
+            expected_tools=expected_plan_tools,
+        ),
     }
     return {
         "id": f"{entrypoint}_generic_app_inspect_before_model",
@@ -631,6 +718,7 @@ def _generic_app_inspect_case(
         "planned_events": planned_events,
         "tool_events": tool_events,
         "completed_event": completed_event,
+        "task_core_summary": task_core_summary,
         "checks": checks,
     }
 
@@ -674,6 +762,13 @@ def _capability_discovered_app_open_case(service: AgentRuntimeService) -> dict[s
     )
     selected_intent_payload = _payload(selected_intent_event)
     completed_payload = _payload(completed_event)
+    task_core_summary = _task_core_summary(_task_core_from_selection_event(selection_event))
+    expected_tools = ["desktop.list_apps", "app.open", "desktop.active_window"]
+    expected_step_ids = [
+        "discover_apps-desktop-state",
+        "open-selected-discovered-app",
+        "verify-desktop-result",
+    ]
     app_open_input = (
         _payload(tool_events[1]).get("input_preview")
         if len(tool_events) > 1 and isinstance(_payload(tool_events[1]), dict)
@@ -741,8 +836,13 @@ def _capability_discovered_app_open_case(service: AgentRuntimeService) -> dict[s
         else False,
         "completed_from_runtime_planner": completed_payload.get("source") == "runtime_planner",
         "completed_tools_match": completed_payload.get("tools")
-        == ["desktop.list_apps", "app.open", "desktop.active_window"],
+        == expected_tools,
         "completed_after_discovered_app_open": completed_payload.get("tool") == "app.open",
+        **_task_core_checks(
+            task_core_summary,
+            expected_step_ids=expected_step_ids,
+            expected_tools=expected_tools,
+        ),
     }
     return {
         "id": "main_chat_capability_discovered_app_open_before_model",
@@ -756,6 +856,7 @@ def _capability_discovered_app_open_case(service: AgentRuntimeService) -> dict[s
         "planned_events": planned_events,
         "tool_events": tool_events,
         "completed_event": completed_event,
+        "task_core_summary": task_core_summary,
         "checks": checks,
     }
 
@@ -808,6 +909,17 @@ def _capability_discovered_app_open_path_case(service: AgentRuntimeService) -> d
     )
     selected_intent_payload = _payload(selected_intent_event)
     completed_payload = _payload(completed_event)
+    task_core_summary = _task_core_summary(_task_core_from_selection_event(selection_event))
+    expected_tools = [
+        "desktop.list_apps",
+        "desktop.open_path_with_app",
+        "desktop.ui_elements",
+    ]
+    expected_step_ids = [
+        "discover_apps-desktop-state",
+        "open-selected-discovered-app",
+        "verify-desktop-result",
+    ]
     open_path_input = (
         _payload(tool_events[1]).get("input_preview")
         if len(tool_events) > 1 and isinstance(_payload(tool_events[1]), dict)
@@ -879,9 +991,13 @@ def _capability_discovered_app_open_path_case(service: AgentRuntimeService) -> d
         else False,
         "resolved_event_recorded": _payload(resolved_event).get("resolved_app_name") == "PixelForge",
         "completed_from_runtime_planner": completed_payload.get("source") == "runtime_planner",
-        "completed_tools_match": completed_payload.get("tools")
-        == ["desktop.list_apps", "desktop.open_path_with_app", "desktop.ui_elements"],
+        "completed_tools_match": completed_payload.get("tools") == expected_tools,
         "completed_after_open_path": completed_payload.get("tool") == "desktop.open_path_with_app",
+        **_task_core_checks(
+            task_core_summary,
+            expected_step_ids=expected_step_ids,
+            expected_tools=expected_tools,
+        ),
     }
     return {
         "id": "main_chat_capability_discovered_app_open_path_before_model",
@@ -896,6 +1012,7 @@ def _capability_discovered_app_open_path_case(service: AgentRuntimeService) -> d
         "tool_events": tool_events,
         "resolved_event": resolved_event,
         "completed_event": completed_event,
+        "task_core_summary": task_core_summary,
         "checks": checks,
     }
 
@@ -917,8 +1034,12 @@ def _main_chat_loop_case(service: AgentRuntimeService) -> dict[str, Any]:
     planned_event = _first_event(events, "agent.desktop.intent_planned")
     tool_event = _first_event(events, "agent.tool.call")
     completed_event = _first_event(events, "agent.desktop.intent_completed")
+    selection_event = _first_event(events, "agent.plan.selection")
+    task_core_summary = _task_core_summary(_task_core_from_selection_event(selection_event))
     tool_payload = _payload(tool_event)
     tool_result = tool_payload.get("result") if isinstance(tool_payload.get("result"), dict) else {}
+    expected_tools = ["media.music_app_open_and_play"]
+    expected_step_ids = ["control-media-playback"]
     checks = {
         "run_completed": updated.get("status") == "completed",
         "loop_summary_names_apple_music": "已打开 Apple Music，并开始播放"
@@ -932,6 +1053,11 @@ def _main_chat_loop_case(service: AgentRuntimeService) -> dict[str, Any]:
         "tool_result_used_apple_music_automation": tool_result.get("action")
         == "media.apple_music_open_and_play",
         "completed_from_runtime_planner": _payload(completed_event).get("source") == "runtime_planner",
+        **_task_core_checks(
+            task_core_summary,
+            expected_step_ids=expected_step_ids,
+            expected_tools=expected_tools,
+        ),
     }
     return {
         "id": "main_chat_daily_desktop_before_model",
@@ -942,9 +1068,11 @@ def _main_chat_loop_case(service: AgentRuntimeService) -> dict[str, Any]:
         "result": updated.get("result"),
         "loop_result": loop_result.get("result"),
         "event_types": _event_types(events),
+        "selection_event": selection_event,
         "planned_event": planned_event,
         "tool_event": tool_event,
         "completed_event": completed_event,
+        "task_core_summary": task_core_summary,
         "checks": checks,
     }
 
@@ -975,10 +1103,14 @@ def _agent_run_overlay_case(service: AgentRuntimeService) -> dict[str, Any]:
     )
     events = service.list_run_events(str(run["run_id"]))["events"]
     planned_event = _first_event(events, "agent.desktop.intent_planned")
+    selection_event = _first_event(events, "agent.plan.selection")
     policy_event = _first_event(events, "agent.tool.policy_decision")
     tool_event = _first_event(events, "agent.tool.call")
+    task_core_summary = _task_core_summary(_task_core_from_selection_event(selection_event))
     tool_payload = _payload(tool_event)
     tool_result = tool_payload.get("result") if isinstance(tool_payload.get("result"), dict) else {}
+    expected_tools = ["media.music_app_open_and_play"]
+    expected_step_ids = ["control-media-playback"]
     checks = {
         "run_completed": run.get("status") == "completed",
         "summary_names_apple_music": "已打开 Apple Music，并开始播放" in str(run.get("result") or ""),
@@ -989,6 +1121,11 @@ def _agent_run_overlay_case(service: AgentRuntimeService) -> dict[str, Any]:
         "tool_called": tool_payload.get("tool") == "media.music_app_open_and_play",
         "tool_result_used_apple_music_automation": tool_result.get("action")
         == "media.apple_music_open_and_play",
+        **_task_core_checks(
+            task_core_summary,
+            expected_step_ids=expected_step_ids,
+            expected_tools=expected_tools,
+        ),
     }
     return {
         "id": "agent_run_daily_desktop_overlay_before_model",
@@ -997,9 +1134,11 @@ def _agent_run_overlay_case(service: AgentRuntimeService) -> dict[str, Any]:
         "status": run.get("status"),
         "result": run.get("result"),
         "event_types": _event_types(events),
+        "selection_event": selection_event,
         "planned_event": planned_event,
         "policy_event": policy_event,
         "tool_event": tool_event,
+        "task_core_summary": task_core_summary,
         "checks": checks,
     }
 
