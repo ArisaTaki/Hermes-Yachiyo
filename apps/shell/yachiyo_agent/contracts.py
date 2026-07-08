@@ -979,6 +979,8 @@ class RuntimeDebugSummarySnapshot(_PublicSnapshot):
     desktop_provider_session_foreground_takeover_required: bool | None = None
     desktop_provider_session_keyboard_mouse_capture_supported: bool | None = None
     desktop_provider_session_supported_tools: list[str] = Field(default_factory=list)
+    desktop_execution_session_mode: str | None = None
+    desktop_execution_session_label: str | None = None
     event_count: int = 0
     tool_call_count: int = 0
     completed_tool_call_count: int = 0

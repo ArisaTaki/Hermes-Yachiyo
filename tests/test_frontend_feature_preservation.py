@@ -105,6 +105,8 @@ def test_frontend_runtime_debug_summary_exposes_runtime_trace_facts() -> None:
             "data-desktop-provider-session-foreground-takeover="
             "{String(summary?.desktop_provider_session_foreground_takeover_required ?? '')}",
             "data-desktop-provider-session-kind={summary?.desktop_provider_session_kind || ''}",
+            "data-desktop-execution-session-label={summary?.desktop_execution_session_label || ''}",
+            "data-desktop-execution-session-mode={summary?.desktop_execution_session_mode || ''}",
             "data-latest-replan-request-id={summary?.latest_replan_request_id || ''}",
             "data-latest-deferred-tool={summary?.latest_deferred_tool || ''}",
             "summary.runtime_doctrine ? `doctrine ${summary.runtime_doctrine}` : ''",
@@ -113,6 +115,10 @@ def test_frontend_runtime_debug_summary_exposes_runtime_trace_facts() -> None:
             "summary.latest_request_tool_name ? "
             "`latest request tool ${summary.latest_request_tool_name}` : ''",
             "summary.current_capability_id ? `capability ${summary.current_capability_id}` : ''",
+            "summary.desktop_execution_session_label ? "
+            "`execution session ${summary.desktop_execution_session_label}` : ''",
+            "summary.desktop_execution_session_mode ? "
+            "`execution mode ${summary.desktop_execution_session_mode}` : ''",
             "summary.desktop_provider_session_isolated === true ? "
             "'isolated desktop session' : ''",
             "summary.desktop_provider_session_foreground_takeover_required === false ? "
@@ -1916,6 +1922,12 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "data-desktop-execution-policy-prefer-isolated",
             "data-desktop-execution-policy-avoid-foreground-takeover",
             "data-desktop-execution-policy-require-keyboard-mouse-sandbox",
+            "data-desktop-execution-session-detail={executionSession.detail}",
+            "data-desktop-execution-session-label={executionSession.label}",
+            "data-desktop-execution-session-mode={executionSession.mode}",
+            "runtimeExecutionSessionModeSummary",
+            "runtimeExecutionSessionModeLabel",
+            "session · {executionSession.label}",
             "data-runtime-stages={stageCounts.map(([stage, count]) => `${stage}:${count}`).join(',')}",
             "data-sandbox-provider-health-status={sandboxProvider.healthStatus}",
             "data-sandbox-provider-launch-command={sandboxProvider.launchCommand.join(' ')}",
@@ -3203,6 +3215,8 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "export type TaskProgressSummarySnapshot",
             "task_progress?: TaskProgressSummarySnapshot | null;",
             "planner_summary?: PlannerTraceSummarySnapshot | null;",
+            "desktop_execution_session_mode?: string | null;",
+            "desktop_execution_session_label?: string | null;",
             "pending_verification_count?: number;",
             "failed_verification_count?: number;",
             "verified_verification_count?: number;",

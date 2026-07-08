@@ -62,6 +62,11 @@ export function RuntimeExecutionEnvelopeSummary({
   const executionPolicy = runtimeExecutionPolicySummary(envelope.desktop_execution_policy, requests);
   const sandboxProvider = runtimeSandboxProviderSummary(envelope.sandbox_provider, requests);
   const executionRoute = runtimeExecutionRouteSummary(envelope.desktop_execution_route, requests);
+  const executionSession = runtimeExecutionSessionModeSummary({
+    executionRoute,
+    sandboxProvider,
+    session: envelope.desktop_provider_session,
+  });
   const isChat = variant === 'chat';
   const classes = [
     isChat
@@ -126,6 +131,9 @@ export function RuntimeExecutionEnvelopeSummary({
           ? ''
           : String(executionRoute.desktopSessionIsolated)
       }
+      data-desktop-execution-session-detail={executionSession.detail}
+      data-desktop-execution-session-label={executionSession.label}
+      data-desktop-execution-session-mode={executionSession.mode}
       data-request-count={requests.length}
       data-risk-levels={riskCounts.map(([risk, count]) => `${risk}:${count}`).join(',')}
       data-route-to-studio={envelope.route_to_studio === undefined ? '' : String(envelope.route_to_studio)}
@@ -149,6 +157,7 @@ export function RuntimeExecutionEnvelopeSummary({
             debugPillsTestId={debugPillsTestId}
             executionRoute={executionRoute}
             executionPolicy={executionPolicy}
+            executionSession={executionSession}
             openQuestions={openQuestions}
             retrySummaries={retrySummaries}
             riskCounts={riskCounts}
@@ -193,6 +202,10 @@ export function RuntimeExecutionEnvelopeSummary({
               <small>Provider</small>
               <strong>{executionRoute.label || 'Default'}</strong>
             </span>
+            <span>
+              <small>Session</small>
+              <strong>{executionSession.label || 'None'}</strong>
+            </span>
           </div>
           <RuntimeExecutionEnvelopePills
             approvals={approvals}
@@ -201,6 +214,7 @@ export function RuntimeExecutionEnvelopeSummary({
             debugPillsTestId={debugPillsTestId}
             executionRoute={executionRoute}
             executionPolicy={executionPolicy}
+            executionSession={executionSession}
             openQuestions={openQuestions}
             retrySummaries={retrySummaries}
             riskCounts={riskCounts}
@@ -238,6 +252,7 @@ function RuntimeExecutionEnvelopePills({
   debugPillsTestId,
   executionRoute,
   executionPolicy,
+  executionSession,
   openQuestions,
   retrySummaries,
   riskCounts,
@@ -252,6 +267,7 @@ function RuntimeExecutionEnvelopePills({
   debugPillsTestId?: string;
   executionRoute: RuntimeExecutionRouteSummary;
   executionPolicy: RuntimeExecutionPolicySummary;
+  executionSession: RuntimeExecutionSessionModeSummary;
   openQuestions: string[];
   retrySummaries: RuntimeExecutionRetrySummary[];
   riskCounts: Array<[string, number]>;
@@ -275,6 +291,7 @@ function RuntimeExecutionEnvelopePills({
     && !sandboxProvider.healthStatus
     && !sandboxProvider.launchCommand.length
     && !sandboxProvider.controlledCommand.length
+    && !executionSession.mode
     && !executionPolicy.mode
   ) {
     return null;
@@ -327,6 +344,17 @@ function RuntimeExecutionEnvelopePills({
           title={executionRoute.reason || undefined}
         >
           route · {executionRoute.label}
+        </span>
+      ) : null}
+      {executionSession.mode ? (
+        <span
+          className={pillClassName}
+          data-desktop-execution-session-detail={executionSession.detail}
+          data-desktop-execution-session-label={executionSession.label}
+          data-desktop-execution-session-mode={executionSession.mode}
+          title={executionSession.detail || undefined}
+        >
+          session · {executionSession.label}
         </span>
       ) : null}
       {sandboxProvider.status ? (
@@ -467,6 +495,11 @@ function RuntimeExecutionRequestRow({
   const executionPolicy = runtimeExecutionPolicySummary(request.desktop_execution_policy);
   const sandboxProvider = runtimeSandboxProviderSummary(request.sandbox_provider);
   const executionRoute = runtimeExecutionRouteSummary(request.desktop_execution_route);
+  const executionSession = runtimeExecutionSessionModeSummary({
+    executionRoute,
+    sandboxProvider,
+    session: request.desktop_provider_session,
+  });
   return (
     <div
       className="studio-planner-step"
@@ -505,6 +538,9 @@ function RuntimeExecutionRequestRow({
           ? ''
           : String(executionRoute.desktopSessionIsolated)
       }
+      data-desktop-execution-session-detail={executionSession.detail}
+      data-desktop-execution-session-label={executionSession.label}
+      data-desktop-execution-session-mode={executionSession.mode}
       data-observation-retry={observationRetryPreview}
       data-policy-reason={request.policy_reason || ''}
       data-request-approval-ids={replayEvidence.approvalPreview}
@@ -542,6 +578,9 @@ function RuntimeExecutionRequestRow({
         ) : null}
         {executionRoute.status ? (
           <span title={executionRoute.reason || undefined}>route: {executionRoute.label}</span>
+        ) : null}
+        {executionSession.mode ? (
+          <span title={executionSession.detail || undefined}>session: {executionSession.label}</span>
         ) : null}
         <RuntimeRequestReplayEvidencePanel
           className="runtime-execution-request-replay-evidence"
@@ -640,7 +679,10 @@ type RuntimeSandboxProviderSummary = {
   controlledLabel: string;
   controlledProviderId: string;
   controlledSmokeCommand: string[];
+  desktopSessionIsolated: boolean | null;
+  desktopSessionKind: string;
   foregroundMutationSupported: boolean | null;
+  foregroundTakeoverRequired: boolean | null;
   keyboardMouseCaptureSupported: boolean | null;
   healthBlockers: string[];
   healthChecked: boolean | null;
@@ -659,6 +701,82 @@ type RuntimeSandboxProviderSummary = {
   requiresRealSandboxFor: string[];
   status: string;
 };
+
+type RuntimeExecutionSessionModeSummary = {
+  detail: string;
+  label: string;
+  mode: string;
+};
+
+function runtimeExecutionSessionModeSummary({
+  executionRoute,
+  sandboxProvider,
+  session,
+}: {
+  executionRoute: RuntimeExecutionRouteSummary;
+  sandboxProvider: RuntimeSandboxProviderSummary;
+  session?: Record<string, unknown>;
+}): RuntimeExecutionSessionModeSummary {
+  const sessionRecord = objectRecord(session);
+  const sessionStatus = stringValue(sessionRecord.status).toLowerCase();
+  const sessionKind = stringValue(sessionRecord.desktop_session_kind).toLowerCase();
+  const sessionOk = booleanValue(sessionRecord.ok);
+  const sessionIsolated = booleanValue(sessionRecord.desktop_session_isolated);
+  const sessionForeground = booleanValue(sessionRecord.foreground_takeover_required);
+  let mode = '';
+  if (sessionOk === false || sessionStatus === 'start_failed' || sessionStatus === 'failed') {
+    mode = 'provider_failed';
+  } else if (sessionKind) {
+    mode = sessionKind;
+  } else if (sessionIsolated === true) {
+    mode = 'isolated_desktop';
+  } else if (sessionForeground === true) {
+    mode = 'user_foreground';
+  } else if (booleanValue(sessionRecord.needed) === true && booleanValue(sessionRecord.running) !== true) {
+    mode = 'provider_required';
+  } else if (executionRoute.status === 'provider_required' || executionRoute.blockers.some((item) => item.includes('provider_required'))) {
+    mode = 'provider_required';
+  } else if (executionRoute.desktopSessionIsolated === true || sandboxProvider.desktopSessionIsolated === true) {
+    mode = 'isolated_desktop';
+  } else if (executionRoute.foregroundTakeoverRequired === true || sandboxProvider.foregroundTakeoverRequired === true) {
+    mode = 'user_foreground';
+  } else if (sandboxProvider.desktopSessionKind) {
+    mode = sandboxProvider.desktopSessionKind;
+  } else if (sandboxProvider.foregroundMutationSupported === false) {
+    mode = 'headless_read_only';
+  } else if (executionRoute.status || sandboxProvider.status) {
+    mode = 'provider_routed';
+  }
+  return {
+    detail: compactPreview([
+      mode,
+      stringValue(sessionRecord.provider_id) || executionRoute.providerId || sandboxProvider.providerId,
+      sessionStatus,
+      executionRoute.status,
+      sandboxProvider.status,
+      executionRoute.foregroundTakeoverRequired === true || sandboxProvider.foregroundTakeoverRequired === true
+        ? 'foreground takeover'
+        : '',
+      executionRoute.desktopSessionIsolated === true || sandboxProvider.desktopSessionIsolated === true
+        ? 'isolated'
+        : '',
+    ]),
+    label: runtimeExecutionSessionModeLabel(mode),
+    mode,
+  };
+}
+
+function runtimeExecutionSessionModeLabel(mode: string): string {
+  return {
+    headless_read_only: 'headless read-only',
+    isolated_desktop: 'isolated desktop',
+    provider_failed: 'provider failed',
+    provider_required: 'provider required',
+    provider_routed: 'provider routed',
+    sandbox_desktop: 'sandbox desktop',
+    user_foreground: 'real desktop foreground',
+  }[mode] || mode.replace(/_/g, ' ');
+}
 
 function runtimeExecutionPolicySummary(
   policy: unknown,
@@ -816,6 +934,15 @@ function runtimeSandboxProviderSummary(
   const controlledEnvUrl = stringValue(controlledEnv.OHA_YACHIYO_DESKTOP_PROVIDER_URL);
   const launchProviderId = stringValue(launchHint.provider_id) || providerId;
   const launchEnvUrl = stringValue(launchEnv.OHA_YACHIYO_DESKTOP_PROVIDER_URL);
+  const desktopSessionKind = stringValue(record.desktop_session_kind)
+    || stringValue(health.desktop_session_kind)
+    || stringValue(launchHint.desktop_session_kind);
+  const desktopSessionIsolated = booleanValue(record.desktop_session_isolated)
+    ?? booleanValue(health.desktop_session_isolated)
+    ?? booleanValue(launchHint.desktop_session_isolated);
+  const foregroundTakeoverRequired = booleanValue(record.foreground_takeover_required)
+    ?? booleanValue(health.foreground_takeover_required)
+    ?? booleanValue(launchHint.foreground_takeover_required);
   const foregroundMutationSupported = booleanValue(record.foreground_mutation_supported)
     ?? booleanValue(launchHint.foreground_mutation_supported);
   const keyboardMouseCaptureSupported = booleanValue(record.keyboard_mouse_capture_supported);
@@ -836,7 +963,10 @@ function runtimeSandboxProviderSummary(
     }),
     controlledProviderId,
     controlledSmokeCommand,
+    desktopSessionIsolated,
+    desktopSessionKind,
     foregroundMutationSupported,
+    foregroundTakeoverRequired,
     keyboardMouseCaptureSupported,
     healthBlockers,
     healthChecked,

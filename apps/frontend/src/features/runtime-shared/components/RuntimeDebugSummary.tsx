@@ -56,6 +56,8 @@ export function RuntimeDebugSummary({
       data-desktop-provider-session-foreground-takeover={String(summary?.desktop_provider_session_foreground_takeover_required ?? '')}
       data-desktop-provider-session-kind={summary?.desktop_provider_session_kind || ''}
       data-desktop-provider-session-status={summary?.desktop_provider_session_status || ''}
+      data-desktop-execution-session-label={summary?.desktop_execution_session_label || ''}
+      data-desktop-execution-session-mode={summary?.desktop_execution_session_mode || ''}
       data-current-request-id={summary?.current_request_id || ''}
       data-current-request-tool-name={summary?.current_request_tool_name || ''}
       data-runtime-doctrine={summary?.runtime_doctrine || ''}
@@ -140,6 +142,8 @@ export function runtimeDebugSummaryHasContent(summary?: RuntimeDebugSummarySnaps
     || summary.desktop_provider_session_provider_id
     || summary.desktop_provider_session_reason
     || summary.desktop_provider_session_kind
+    || summary.desktop_execution_session_label
+    || summary.desktop_execution_session_mode
     || summary.runtime_doctrine
     || summary.runtime_stage
     || summary.runtime_role
@@ -257,6 +261,8 @@ function runtimeDebugLatestFacts(summary?: RuntimeDebugSummarySnapshot | null): 
     summary.desktop_provider_session_provider_id ? `desktop provider ${summary.desktop_provider_session_provider_id}` : '',
     summary.desktop_provider_session_status ? `desktop provider status ${summary.desktop_provider_session_status}` : '',
     summary.desktop_provider_session_kind ? `desktop session ${summary.desktop_provider_session_kind}` : '',
+    summary.desktop_execution_session_label ? `execution session ${summary.desktop_execution_session_label}` : '',
+    summary.desktop_execution_session_mode ? `execution mode ${summary.desktop_execution_session_mode}` : '',
     summary.desktop_provider_session_isolated === true ? 'isolated desktop session' : '',
     summary.desktop_provider_session_foreground_takeover_required === true ? 'foreground takeover required' : '',
     summary.desktop_provider_session_foreground_takeover_required === false ? 'no foreground takeover' : '',

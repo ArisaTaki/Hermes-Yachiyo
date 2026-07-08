@@ -109,6 +109,11 @@ def runtime_debug_summary_from_runtime_objects(
         runtime_execution_envelope,
         request_items,
     )
+    desktop_execution_session_mode = _desktop_execution_session_mode(
+        runtime_execution_envelope,
+        request_items,
+        desktop_provider_session,
+    )
     request_statuses = [_text(_field(item, "status")) for item in request_items]
     runtime_context_items = [
         latest_tool,
@@ -268,6 +273,10 @@ def runtime_debug_summary_from_runtime_objects(
         ),
         desktop_provider_session_supported_tools=_string_list(
             _field(desktop_provider_session, "supported_tools")
+        ),
+        desktop_execution_session_mode=desktop_execution_session_mode,
+        desktop_execution_session_label=_desktop_execution_session_label(
+            desktop_execution_session_mode
         ),
         event_count=len(event_items),
         tool_call_count=len(tool_items),
@@ -592,6 +601,93 @@ def _desktop_provider_session_needs_replan(session: Any | None) -> bool:
     if status in {"start_failed", "failed", "stopped", "provider_required"}:
         return True
     return bool(_field(session, "needed")) and not bool(_field(session, "running"))
+
+
+def _desktop_execution_session_mode(
+    envelope: Any | None,
+    requests: list[Any],
+    session: Any | None,
+) -> str | None:
+    session_mode = _desktop_execution_session_mode_from_session(session)
+    if session_mode:
+        return session_mode
+    for item in [envelope, *requests]:
+        route = _field(item, "desktop_execution_route")
+        provider = _field(item, "sandbox_provider")
+        mode = _desktop_execution_session_mode_from_route_provider(route, provider)
+        if mode:
+            return mode
+    return None
+
+
+def _desktop_execution_session_mode_from_session(session: Any | None) -> str | None:
+    if session is None:
+        return None
+    status = _text(_field(session, "status")).lower()
+    if _field(session, "ok") is False or status in {"start_failed", "failed"}:
+        return "provider_failed"
+    kind = _text(_field(session, "desktop_session_kind")).lower()
+    if kind:
+        return kind
+    if _optional_bool(_field(session, "desktop_session_isolated")) is True:
+        return "isolated_desktop"
+    if _optional_bool(_field(session, "foreground_takeover_required")) is True:
+        return "user_foreground"
+    if bool(_field(session, "needed")) and not bool(_field(session, "running")):
+        return "provider_required"
+    return None
+
+
+def _desktop_execution_session_mode_from_route_provider(
+    route: Any | None,
+    provider: Any | None,
+) -> str | None:
+    route_status = _text(_field(route, "status")).lower()
+    provider_status = _text(_field(provider, "status")).lower()
+    route_blockers = set(_string_list(_field(route, "blocking_conditions")))
+    provider_blockers = set(_string_list(_field(provider, "blocking_conditions")))
+    blockers = route_blockers | provider_blockers
+    if (
+        route_status in {"provider_required", "sandbox_keyboard_mouse_provider_required"}
+        or provider_status in {"provider_required", "not_configured"}
+        or any("provider_required" in blocker for blocker in blockers)
+    ):
+        return "provider_required"
+    kind = (
+        _text(_field(route, "desktop_session_kind")).lower()
+        or _text(_field(provider, "desktop_session_kind")).lower()
+    )
+    if kind:
+        return kind
+    if (
+        _optional_bool(_field(route, "desktop_session_isolated")) is True
+        or _optional_bool(_field(provider, "desktop_session_isolated")) is True
+    ):
+        return "isolated_desktop"
+    if (
+        _optional_bool(_field(route, "foreground_takeover_required")) is True
+        or _optional_bool(_field(provider, "foreground_takeover_required")) is True
+    ):
+        return "user_foreground"
+    if _optional_bool(_field(provider, "foreground_mutation_supported")) is False:
+        return "headless_read_only"
+    if route_status or provider_status:
+        return "provider_routed"
+    return None
+
+
+def _desktop_execution_session_label(mode: str | None) -> str | None:
+    if not mode:
+        return None
+    return {
+        "headless_read_only": "headless read-only desktop provider",
+        "isolated_desktop": "isolated desktop provider",
+        "provider_failed": "desktop provider failed",
+        "provider_required": "desktop provider required",
+        "provider_routed": "desktop provider routed",
+        "sandbox_desktop": "sandbox desktop provider",
+        "user_foreground": "real desktop foreground",
+    }.get(mode, mode.replace("_", " "))
 
 
 def _task_totals(task_core: Any | None, task_progress: Any | None) -> dict[str, int]:

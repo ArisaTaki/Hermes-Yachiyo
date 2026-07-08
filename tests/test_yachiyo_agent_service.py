@@ -2346,6 +2346,10 @@ def test_yachiyo_chat_entrypoint_auto_starts_isolated_provider_for_input(
         task.runtime_debug.desktop_provider_session_keyboard_mouse_capture_supported
         is True
     )
+    assert task.runtime_debug.desktop_execution_session_mode == "isolated_desktop"
+    assert task.runtime_debug.desktop_execution_session_label == (
+        "isolated desktop provider"
+    )
     assert "desktop_provider" in task.runtime_debug.debug_surfaces
 
 
@@ -2407,6 +2411,8 @@ def test_yachiyo_chat_entrypoint_routes_app_open_through_local_provider_without_
     assert task.runtime_debug is not None
     assert task.runtime_debug.desktop_provider_session_needed is False
     assert task.runtime_debug.desktop_provider_session_tool_names == []
+    assert task.runtime_debug.desktop_execution_session_mode == "user_foreground"
+    assert task.runtime_debug.desktop_execution_session_label == "real desktop foreground"
 
 
 def test_yachiyo_chat_entrypoint_routes_music_through_local_provider_without_isolated_session(

@@ -930,6 +930,8 @@ export type RuntimeDebugSummarySnapshot = {
   desktop_provider_session_foreground_takeover_required?: boolean | null;
   desktop_provider_session_keyboard_mouse_capture_supported?: boolean | null;
   desktop_provider_session_supported_tools?: string[];
+  desktop_execution_session_mode?: string | null;
+  desktop_execution_session_label?: string | null;
   event_count?: number;
   tool_call_count?: number;
   completed_tool_call_count?: number;
