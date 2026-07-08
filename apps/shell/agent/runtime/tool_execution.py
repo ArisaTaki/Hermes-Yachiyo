@@ -484,11 +484,14 @@ def _desktop_execution_policy_skip_result(
         return None
 
     sandbox_provider = sandbox_desktop_provider_status(tool_request)
-    route_decision = desktop_execution_route_payload(tool_request) or desktop_execution_route_decision(
-        tool_name,
-        policy=policy,
-        execution_mode=execution_payload,
-        metadata=tool_request,
+    route_decision = (
+        desktop_execution_route_payload(tool_request)
+        or desktop_execution_route_decision(
+            tool_name,
+            policy=policy,
+            execution_mode=execution_payload,
+            metadata=tool_request,
+        )
     )
     if desktop_execution_route_allows_provider_execution(route_decision):
         return None
@@ -498,7 +501,11 @@ def _desktop_execution_policy_skip_result(
         if str(item or "").strip()
     ]
     if policy_mode == "allow" and sandbox_required_by_policy:
-        blocking_condition = route_blockers[0] if route_blockers else "desktop_execution_sandbox_required"
+        blocking_condition = (
+            route_blockers[0]
+            if route_blockers
+            else "desktop_execution_sandbox_required"
+        )
         status = str(route_decision.get("status") or "provider_required")
     else:
         blocking_condition = (
@@ -507,6 +514,25 @@ def _desktop_execution_policy_skip_result(
             else "desktop_execution_preview_required"
         )
         status = "handoff_required" if policy_mode == "handoff" else "preview_required"
+    recovery_actions = _desktop_execution_policy_recovery_actions(
+        tool_name,
+        tool_request,
+        policy=policy,
+        policy_mode=policy_mode,
+        execution_mode=execution_payload,
+        sandbox_provider=sandbox_provider,
+        route_decision=route_decision,
+    )
+    recommended_tools = [
+        "screen.capture",
+        "desktop.active_window",
+        "desktop.ui_elements",
+    ]
+    if any(
+        str(action.get("tool") or "").strip() == "desktop.provider_session.start"
+        for action in recovery_actions
+    ):
+        recommended_tools = ["desktop.provider_session.start", *recommended_tools]
     return {
         "ok": False,
         "tool": tool_name,
@@ -528,20 +554,8 @@ def _desktop_execution_policy_skip_result(
         "sandbox_provider": sandbox_provider,
         "user_handoff_recommended": policy_mode == "handoff",
         "input_preview": input_preview if isinstance(input_preview, dict) else {},
-        "recommended_tools": [
-            "screen.capture",
-            "desktop.active_window",
-            "desktop.ui_elements",
-        ],
-        "recovery_actions": _desktop_execution_policy_recovery_actions(
-            tool_name,
-            tool_request,
-            policy=policy,
-            policy_mode=policy_mode,
-            execution_mode=execution_payload,
-            sandbox_provider=sandbox_provider,
-            route_decision=route_decision,
-        ),
+        "recommended_tools": recommended_tools,
+        "recovery_actions": recovery_actions,
         "hint": (
             "Switch the run to supervised_live, continue in Agent Studio, or let the "
             "user perform the foreground step manually."
@@ -652,6 +666,14 @@ def _desktop_execution_policy_recovery_actions(
         "desktop_execution_mode": dict(execution_mode),
     }
     actions: list[dict[str, Any]] = [
+        *_desktop_execution_provider_session_start_recovery_actions(
+            tool_name,
+            tool_request,
+            route_decision=route_decision,
+            sandbox_provider=sandbox_provider,
+            desktop_policy=policy,
+            sandbox_blockers=sandbox_blockers,
+        ),
         {
             "label": "Inspect active desktop state",
             "tool": "desktop.active_window",
@@ -742,6 +764,128 @@ def _desktop_execution_policy_recovery_actions(
     if isinstance(observation_retry, Mapping) and observation_retry:
         actions[-1]["observation_retry"] = dict(observation_retry)
     return actions
+
+
+def _desktop_execution_provider_session_start_recovery_actions(
+    tool_name: str,
+    tool_request: Mapping[str, Any],
+    *,
+    route_decision: Mapping[str, Any],
+    sandbox_provider: Mapping[str, Any],
+    desktop_policy: Mapping[str, Any],
+    sandbox_blockers: list[str],
+) -> list[dict[str, Any]]:
+    clean_tool = str(tool_name or "").strip()
+    if not clean_tool or not _desktop_execution_policy_should_offer_session_start(
+        route_decision,
+        sandbox_provider,
+    ):
+        return []
+    raw_input = tool_request.get("input")
+    tool_input = dict(raw_input) if isinstance(raw_input, Mapping) else {}
+    provider_id = (
+        str(route_decision.get("selected_provider_id") or "").strip()
+        or str(sandbox_provider.get("provider_id") or "").strip()
+        or "local-isolated-desktop"
+    )
+    deferred_request = {
+        "tool": clean_tool,
+        "input": dict(tool_input),
+        "desktop_execution_policy": {
+            **dict(desktop_policy),
+            "mode": str(desktop_policy.get("mode") or "sandbox_preferred"),
+            "prefer_isolated_desktop": True,
+            "avoid_user_foreground_takeover": True,
+            "require_sandbox_for_keyboard_mouse": True,
+            "source": "desktop_execution_policy_recovery",
+        },
+        "planning_reason": "desktop_execution_policy_retry_after_session_start",
+        "source": "desktop_execution_policy_recovery",
+    }
+    for key in (
+        "decision_id",
+        "plan_id",
+        "tool_plan_id",
+        "step_id",
+        "planner_step_id",
+        "capability_id",
+        "target_capability_id",
+        "runtime_stage",
+        "runtime_role",
+    ):
+        value = str(tool_request.get(key) or "").strip()
+        if value:
+            deferred_request[key] = value
+    return [
+        {
+            "label": "Start isolated desktop provider",
+            "tool": "desktop.provider_session.start",
+            "input": {
+                "provider_id": provider_id,
+                "tools": [clean_tool],
+                "tool_names": [clean_tool],
+                "reason": "desktop_execution_policy_requires_isolated_provider",
+                "diagnostic_route": "/yachiyo/studio/tools",
+                "api_route": "/yachiyo/studio/tools/desktop-provider/session/start",
+            },
+            "permission_target": "isolated_desktop_provider",
+            "risk_level": "medium",
+            "approval_required": True,
+            "approval_status": "pending",
+            "planning_reason": "desktop_execution_policy_provider_session_recovery",
+            "recovery_action_kind": "desktop_provider_session_start",
+            "deferred_tool": clean_tool,
+            "deferred_input": dict(tool_input),
+            "deferred_continuation": [deferred_request],
+            "metadata": {
+                "runtime_retry_source": "desktop_provider_session",
+                "runtime_replan_auto_start_eligible": False,
+                "runtime_replan_auto_start_reason": "desktop_provider_session_start_requires_approval",
+                "runtime_replan_auto_start_blockers": [
+                    "approval_required",
+                    *sandbox_blockers,
+                ],
+                "desktop_execution_route": dict(route_decision),
+                "sandbox_provider": dict(sandbox_provider),
+                "sandbox_original_tool": clean_tool,
+                "sandbox_original_input": dict(tool_input),
+            },
+        }
+    ]
+
+
+def _desktop_execution_policy_should_offer_session_start(
+    route_decision: Mapping[str, Any],
+    sandbox_provider: Mapping[str, Any],
+) -> bool:
+    route_status = str(route_decision.get("status") or "").strip()
+    route_blockers = {
+        str(item).strip()
+        for item in route_decision.get("blocking_conditions", [])
+        if str(item or "").strip()
+    }
+    provider_blockers = {
+        str(item).strip()
+        for item in sandbox_provider.get("blocking_conditions", [])
+        if str(item or "").strip()
+    }
+    if route_status in {
+        "provider_required",
+        "sandbox_adapter_required",
+        "sandbox_desktop_session_required",
+        "sandbox_keyboard_mouse_provider_required",
+    }:
+        return True
+    return bool(
+        (route_blockers | provider_blockers)
+        & {
+            "sandbox_desktop_provider_required",
+            "sandbox_desktop_adapter_required",
+            "sandbox_desktop_session_required",
+            "sandbox_keyboard_mouse_provider_required",
+            "isolated_desktop_provider_required",
+        }
+    )
 
 
 def _desktop_execution_policy_recovery_risk(

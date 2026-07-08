@@ -2323,6 +2323,16 @@ def test_runtime_tool_call_executor_blocks_policy_required_sandbox_before_broker
     assert result["desktop_execution_route"]["can_execute"] is False
     assert result["desktop_execution_route"]["sandbox_required"] is True
     assert result["desktop_execution_policy"]["allow_live_foreground"] is True
+    assert result["recommended_tools"][0] == "desktop.provider_session.start"
+    recovery = result["recovery_actions"][0]
+    assert recovery["tool"] == "desktop.provider_session.start"
+    assert recovery["approval_required"] is True
+    assert recovery["metadata"]["runtime_retry_source"] == "desktop_provider_session"
+    assert recovery["metadata"]["runtime_replan_auto_start_eligible"] is False
+    assert recovery["deferred_tool"] == "desktop.safe_type_text"
+    assert recovery["deferred_continuation"][0]["desktop_execution_policy"][
+        "prefer_isolated_desktop"
+    ] is True
     assert broker.calls == []
     assert budget.claims == [("desktop.safe_type_text", False)]
     assert [event["event"] for event in timeline] == ["agent.tool.skipped"]
@@ -2946,18 +2956,26 @@ def test_runtime_tool_request_runner_previews_live_foreground_tools_by_policy() 
     assert result["desktop_execution_route"]["fallback_mode"] == "supervised_live"
     assert result["blocking_conditions"] == ["desktop_execution_preview_required"]
     assert [action["tool"] for action in result["recovery_actions"]] == [
+        "desktop.provider_session.start",
         "desktop.active_window",
         "desktop.ui_elements",
         "screen.capture",
         "desktop.safe_type_text",
     ]
     assert [action["recovery_action_kind"] for action in result["recovery_actions"]] == [
+        "desktop_provider_session_start",
         "observe_desktop_state",
         "observe_desktop_controls",
         "sandbox_desktop_handoff",
         "supervised_live_retry",
     ]
-    sandbox_action = result["recovery_actions"][2]
+    session_action = result["recovery_actions"][0]
+    assert session_action["approval_required"] is True
+    assert session_action["metadata"]["runtime_retry_source"] == (
+        "desktop_provider_session"
+    )
+    assert session_action["deferred_tool"] == "desktop.safe_type_text"
+    sandbox_action = result["recovery_actions"][3]
     assert sandbox_action["desktop_execution_policy"]["mode"] == "sandbox_preferred"
     assert sandbox_action["desktop_execution_route"]["status"] == "provider_required"
     assert sandbox_action["sandbox_provider"]["status"] == "provider_required"
@@ -2976,7 +2994,7 @@ def test_runtime_tool_request_runner_previews_live_foreground_tools_by_policy() 
         sandbox_action["deferred_continuation"][0]["desktop_execution_policy"]["mode"]
         == "sandbox_preferred"
     )
-    supervised_action = result["recovery_actions"][3]
+    supervised_action = result["recovery_actions"][4]
     assert supervised_action["desktop_execution_policy"]["mode"] == "supervised_live"
     assert supervised_action["metadata"]["runtime_replan_auto_start_eligible"] is False
     assert supervised_action["metadata"]["runtime_replan_auto_start_blockers"] == [
@@ -3264,7 +3282,7 @@ def test_runtime_tool_request_runner_preview_input_policy_allows_media_but_block
     assert skipped["detail"] == "desktop.safe_type_text"
     assert skipped["result"]["blocked_by_desktop_execution_policy"] is True
     assert skipped["result"]["desktop_execution_policy"] == policy
-    supervised_action = skipped["result"]["recovery_actions"][3]
+    supervised_action = skipped["result"]["recovery_actions"][4]
     assert supervised_action["tool"] == "desktop.safe_type_text"
     assert supervised_action["input"] == {"text": "hello"}
     assert supervised_action["desktop_execution_policy"]["mode"] == "supervised_live"
