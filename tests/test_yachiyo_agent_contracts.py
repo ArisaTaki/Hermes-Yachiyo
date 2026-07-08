@@ -4280,6 +4280,46 @@ def test_runtime_debug_summary_counts_deferred_continuation_events() -> None:
     assert "deferred_continuation" in summary.debug_surfaces
 
 
+def test_runtime_debug_summary_projects_provider_session_from_replay_events() -> None:
+    summary = runtime_debug_summary_from_runtime_objects(
+        run_id="run-1",
+        events=[
+            PublicRunEvent(
+                run_id="run-1",
+                sequence=1,
+                event_type="desktop.provider_session.required",
+                payload={
+                    "desktop_provider_session": {
+                        "ok": True,
+                        "status": "required",
+                        "needed": True,
+                        "running": False,
+                        "provider_id": "local-isolated-desktop",
+                        "reason": "sandbox_desktop_provider_required",
+                        "tool_names": ["app.open"],
+                        "desktop_session_kind": "isolated_desktop",
+                        "desktop_session_isolated": True,
+                        "foreground_takeover_required": False,
+                    }
+                },
+            )
+        ],
+    )
+
+    assert summary.desktop_provider_session_status == "required"
+    assert summary.desktop_provider_session_needed is True
+    assert summary.desktop_provider_session_running is False
+    assert summary.desktop_provider_session_provider_id == "local-isolated-desktop"
+    assert summary.desktop_provider_session_reason == "sandbox_desktop_provider_required"
+    assert summary.desktop_provider_session_tool_names == ["app.open"]
+    assert summary.desktop_provider_session_kind == "isolated_desktop"
+    assert summary.desktop_provider_session_isolated is True
+    assert summary.desktop_provider_session_foreground_takeover_required is False
+    assert summary.needs_user_action is True
+    assert summary.needs_replan is True
+    assert "desktop_provider" in summary.debug_surfaces
+
+
 def test_agent_task_snapshot_uses_first_planned_desktop_step_for_progress() -> None:
     snapshot = agent_task_snapshot_from_payload(
         {
@@ -5399,6 +5439,9 @@ def test_desktop_execution_route_decision_reports_provider_boundaries() -> None:
         "can_auto_start",
         "provider_execution_required",
         "sandbox_required",
+        "isolated_desktop_preferred",
+        "foreground_takeover_allowed",
+        "desktop_execution_session_policy",
         "user_foreground_takeover_risk",
         "requires_user_foreground_session",
         "foreground_mutation_supported",
@@ -6469,6 +6512,7 @@ def test_tool_catalog_snapshot_json_shape_is_stable() -> None:
         "tools",
         "capabilities",
         "sandbox_provider",
+        "controlled_provider_diagnostics",
         "plugins",
         "legacy_cleanup_coverage",
         "source",

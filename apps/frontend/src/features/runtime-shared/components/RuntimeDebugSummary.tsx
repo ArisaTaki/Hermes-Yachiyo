@@ -54,10 +54,14 @@ export function RuntimeDebugSummary({
       data-plan-capabilities={(summary?.plan_capabilities || []).join(',')}
       data-plan-tools={(summary?.plan_tools || []).join(',')}
       data-desktop-provider-session-id={summary?.desktop_provider_session_provider_id || ''}
+      data-desktop-provider-session-needed={String(Boolean(summary?.desktop_provider_session_needed))}
+      data-desktop-provider-session-running={String(Boolean(summary?.desktop_provider_session_running))}
+      data-desktop-provider-session-started={String(Boolean(summary?.desktop_provider_session_started))}
       data-desktop-provider-session-isolated={String(summary?.desktop_provider_session_isolated ?? '')}
       data-desktop-provider-session-foreground-takeover={String(summary?.desktop_provider_session_foreground_takeover_required ?? '')}
       data-desktop-provider-session-kind={summary?.desktop_provider_session_kind || ''}
       data-desktop-provider-session-status={summary?.desktop_provider_session_status || ''}
+      data-desktop-provider-session-tool-names={(summary?.desktop_provider_session_tool_names || []).join(',')}
       data-desktop-execution-session-label={summary?.desktop_execution_session_label || ''}
       data-desktop-execution-session-mode={summary?.desktop_execution_session_mode || ''}
       data-current-request-id={summary?.current_request_id || ''}
@@ -182,6 +186,7 @@ function runtimeDebugMetrics(summary: RuntimeDebugSummarySnapshot): RuntimeDebug
   addMetric(metrics, 'failed_runtime_requests', 'failed reqs', summary.failed_runtime_request_count, 'danger');
   addMetric(metrics, 'blocked_runtime_requests', 'blocked reqs', summary.blocked_runtime_request_count, 'warning');
   addMetric(metrics, 'waiting_runtime_requests', 'waiting reqs', summary.waiting_runtime_request_count, 'warning');
+  addProviderSessionMetric(metrics, summary);
   addMetric(metrics, 'tools', 'tools', summary.tool_call_count);
   addMetric(metrics, 'completed_tools', 'done', summary.completed_tool_call_count, 'ready');
   addMetric(metrics, 'failed_tools', 'failed', summary.failed_tool_call_count, 'danger');
@@ -213,6 +218,36 @@ function runtimeDebugMetrics(summary: RuntimeDebugSummarySnapshot): RuntimeDebug
   addMetric(metrics, 'memory', 'memory', summary.memory_trace_count);
   addMetric(metrics, 'skills', 'skills', summary.skill_trace_count);
   return metrics.slice(0, 12);
+}
+
+function addProviderSessionMetric(
+  metrics: RuntimeDebugMetric[],
+  summary: RuntimeDebugSummarySnapshot,
+) {
+  const status = String(summary.desktop_provider_session_status || '').trim().toLowerCase();
+  const needed = Boolean(summary.desktop_provider_session_needed);
+  const running = Boolean(summary.desktop_provider_session_running);
+  const started = Boolean(summary.desktop_provider_session_started);
+  if (!status && !needed && !running && !started) return;
+  if (status === 'start_failed' || status === 'failed') {
+    metrics.push({ key: 'desktop_provider_session', label: 'desktop env', tone: 'danger', value: 'failed' });
+    return;
+  }
+  if (needed && !running) {
+    metrics.push({ key: 'desktop_provider_session', label: 'desktop env', tone: 'warning', value: 'needed' });
+    return;
+  }
+  if (started) {
+    metrics.push({ key: 'desktop_provider_session', label: 'desktop env', tone: 'ready', value: 'started' });
+    return;
+  }
+  if (running) {
+    metrics.push({ key: 'desktop_provider_session', label: 'desktop env', tone: 'ready', value: 'ready' });
+    return;
+  }
+  if (status) {
+    metrics.push({ key: 'desktop_provider_session', label: 'desktop env', value: status });
+  }
 }
 
 function addMetric(

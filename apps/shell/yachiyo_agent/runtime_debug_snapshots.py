@@ -108,6 +108,7 @@ def runtime_debug_summary_from_runtime_objects(
     desktop_provider_session = _desktop_provider_session(
         runtime_execution_envelope,
         request_items,
+        event_items,
     )
     desktop_execution_session_mode = _desktop_execution_session_mode(
         runtime_execution_envelope,
@@ -299,7 +300,11 @@ def runtime_debug_summary_from_runtime_objects(
         skill_trace_count=len(skill_items),
         child_run_count=len(child_items),
         replan_recovery_count=len(replan_items),
-        needs_user_action=bool(needs_user_action or pending_approvals),
+        needs_user_action=bool(
+            needs_user_action
+            or pending_approvals
+            or _desktop_provider_session_needs_user_action(desktop_provider_session)
+        ),
         needs_replan=bool(replan_needed),
         latest_event_type=_optional_text(_field(latest_event, "event_type")),
         current_capability_id=_first_text_from_items(
@@ -637,6 +642,7 @@ def _runtime_stage_counts(envelope: Any | None) -> dict[str, int]:
 def _desktop_provider_session(
     envelope: Any | None,
     requests: list[Any],
+    events: list[Any] | None = None,
 ) -> Any | None:
     session = _field(envelope, "desktop_provider_session")
     if session is not None:
@@ -645,7 +651,25 @@ def _desktop_provider_session(
         session = _field(request, "desktop_provider_session")
         if session is not None:
             return session
+    for event in reversed(events or []):
+        event_type = _text(_field(event, "event_type") or _field(event, "event"))
+        if not event_type.startswith("desktop.provider_session."):
+            continue
+        session = _field(_event_payload(event), "desktop_provider_session")
+        if session is not None:
+            return session
     return None
+
+
+def _desktop_provider_session_needs_user_action(session: Any | None) -> bool:
+    if session is None:
+        return False
+    if _field(session, "ok") is False:
+        return True
+    status = _text(_field(session, "status")).lower()
+    if status in {"start_failed", "failed", "required", "provider_required"}:
+        return True
+    return bool(_field(session, "needed")) and not bool(_field(session, "running"))
 
 
 def _desktop_provider_session_needs_replan(session: Any | None) -> bool:

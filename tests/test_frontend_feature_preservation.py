@@ -100,11 +100,21 @@ def test_frontend_runtime_debug_summary_exposes_runtime_trace_facts() -> None:
             "data-intent-kind={summary?.intent_kind || ''}",
             "data-plan-capabilities={(summary?.plan_capabilities || []).join(',')}",
             "data-plan-tools={(summary?.plan_tools || []).join(',')}",
+            "data-desktop-provider-session-needed="
+            "{String(Boolean(summary?.desktop_provider_session_needed))}",
+            "data-desktop-provider-session-running="
+            "{String(Boolean(summary?.desktop_provider_session_running))}",
+            "data-desktop-provider-session-started="
+            "{String(Boolean(summary?.desktop_provider_session_started))}",
             "data-desktop-provider-session-isolated="
             "{String(summary?.desktop_provider_session_isolated ?? '')}",
             "data-desktop-provider-session-foreground-takeover="
             "{String(summary?.desktop_provider_session_foreground_takeover_required ?? '')}",
             "data-desktop-provider-session-kind={summary?.desktop_provider_session_kind || ''}",
+            "data-desktop-provider-session-tool-names="
+            "{(summary?.desktop_provider_session_tool_names || []).join(',')}",
+            "addProviderSessionMetric(metrics, summary);",
+            "metrics.push({ key: 'desktop_provider_session', label: 'desktop env', tone: 'warning', value: 'needed' });",
             "data-desktop-execution-session-label={summary?.desktop_execution_session_label || ''}",
             "data-desktop-execution-session-mode={summary?.desktop_execution_session_mode || ''}",
             "data-latest-replan-request-id={summary?.latest_replan_request_id || ''}",
