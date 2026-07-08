@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from apps.shell.yachiyo_agent import AgentStudioService
+from tests.test_yachiyo_agent_service import _install_fake_isolated_provider_session
 
 
 def test_studio_start_agent_run_enriches_bare_port_payload_with_planner_events() -> None:
@@ -92,6 +93,57 @@ def test_studio_start_agent_run_routes_media_query_through_desktop_fallback() ->
         "play-media-search-result",
         "verify-media-search",
     ]
+
+
+def test_studio_start_entrypoints_auto_start_isolated_desktop_provider(
+    monkeypatch,
+) -> None:
+    _clear_desktop_provider_env(monkeypatch)
+    start_calls = _install_fake_isolated_provider_session(monkeypatch)
+    service_port = _BareStartPort()
+    service = AgentStudioService(service_port)
+    request_payload = {
+        "objective": "打开 PixelForge",
+        "allowed_tools": ["desktop.list_apps", "app.open", "desktop.active_window"],
+    }
+
+    agent_run = service.start_agent_run({"agent_id": "agent-1", **request_payload})
+    _clear_desktop_provider_env(monkeypatch)
+    group_run = service.start_group_run({"group_id": "group-1", **request_payload})
+    _clear_desktop_provider_env(monkeypatch)
+    workflow_run = service.start_workflow_run(
+        {"workflow_id": "workflow-1", **request_payload}
+    )
+
+    assert start_calls == [
+        {"tools": ["app.open", "desktop.active_window", "desktop.list_apps"]},
+        {"tools": ["app.open", "desktop.active_window", "desktop.list_apps"]},
+        {"tools": ["app.open", "desktop.active_window", "desktop.list_apps"]},
+    ]
+    _assert_start_payload_uses_isolated_session(service_port.agent_run_payloads[0])
+    _assert_start_payload_uses_isolated_session(
+        service_port.group_run_payloads[0],
+        context_key="group_id",
+        context_value="group-1",
+    )
+    _assert_start_payload_uses_isolated_session(
+        service_port.workflow_run_payloads[0],
+        context_key="workflow_id",
+        context_value="workflow-1",
+    )
+    _assert_plan_event_uses_isolated_session(agent_run.events, "agent.plan.created")
+    _assert_plan_event_uses_isolated_session(
+        group_run.events,
+        "group.run.plan.created",
+        context_key="group_run_id",
+        context_value="group-run-1",
+    )
+    _assert_plan_event_uses_isolated_session(
+        workflow_run.events,
+        "workflow.run.plan.created",
+        context_key="workflow_run_id",
+        context_value="workflow-run-1",
+    )
 
 
 def test_studio_start_group_run_enriches_bare_port_payload_with_group_scoped_events() -> None:
@@ -327,3 +379,75 @@ class _BareStartPort:
             "status": "running",
             "events": [],
         }
+
+
+def _clear_desktop_provider_env(monkeypatch: Any) -> None:
+    for key in (
+        "OHA_YACHIYO_DESKTOP_PROVIDER_URL",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_ID",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_KEYBOARD_MOUSE_CAPTURE_SUPPORTED",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_KIND",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_ISOLATED",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_FOREGROUND_TAKEOVER_REQUIRED",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+
+def _assert_start_payload_uses_isolated_session(
+    payload: dict[str, Any],
+    *,
+    context_key: str = "",
+    context_value: str = "",
+) -> None:
+    envelope = payload["runtime_execution_envelope"]
+    session = envelope["desktop_provider_session"]
+    assert session["needed"] is True
+    assert session["started"] is True
+    assert session["running"] is True
+    assert session["provider_id"] == "local-isolated-desktop"
+    assert session["desktop_session_kind"] == "isolated_desktop"
+    assert session["desktop_session_isolated"] is True
+    assert session["foreground_takeover_required"] is False
+    assert session["tool_names"] == [
+        "app.open",
+        "desktop.active_window",
+        "desktop.list_apps",
+    ]
+    assert [request["tool"] for request in payload["direct_tool_requests"]] == [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.active_window",
+    ]
+    assert {
+        request["desktop_provider_session"]["provider_id"]
+        for request in payload["direct_tool_requests"]
+    } == {"local-isolated-desktop"}
+    assert payload["direct_tool_requests"][1]["desktop_execution_route"]["status"] == (
+        "sandbox_ready"
+    )
+    if context_key:
+        assert {request.get(context_key) for request in payload["direct_tool_requests"]} == {
+            context_value
+        }
+
+
+def _assert_plan_event_uses_isolated_session(
+    events: list[Any],
+    event_type: str,
+    *,
+    context_key: str = "",
+    context_value: str = "",
+) -> None:
+    plan_event = next(event for event in events if event.event_type == event_type)
+    envelope = plan_event.payload["runtime_execution_envelope"]
+    session = envelope["desktop_provider_session"]
+    assert session["needed"] is True
+    assert session["running"] is True
+    assert session["provider_id"] == "local-isolated-desktop"
+    assert session["desktop_session_kind"] == "isolated_desktop"
+    assert envelope["requests"][1]["desktop_provider_session"]["provider_id"] == (
+        "local-isolated-desktop"
+    )
+    if context_key:
+        assert envelope["requests"][0][context_key] == context_value

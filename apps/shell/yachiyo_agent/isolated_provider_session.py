@@ -423,7 +423,10 @@ def _request_allows_user_foreground_session(request: dict[str, Any]) -> bool:
     if user_foreground_takeover_allowed(request):
         return True
     policy = _mapping(request.get("desktop_execution_policy"))
-    if _optional_bool(policy.get("allow_live_foreground")) is True:
+    if (
+        _optional_bool(policy.get("allow_live_foreground")) is True
+        and not _policy_prefers_isolated_foreground(policy)
+    ):
         return True
     mode = str(policy.get("mode") or "").strip().lower().replace("-", "_")
     if mode == "allow" and not _policy_prefers_isolated_foreground(policy):
