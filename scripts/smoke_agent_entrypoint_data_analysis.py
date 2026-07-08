@@ -132,6 +132,65 @@ def _artifact_paths(artifacts: Any) -> list[str]:
     ]
 
 
+def _task_core_from_payloads(
+    updated: dict[str, Any],
+    selection_event: dict[str, Any],
+) -> dict[str, Any]:
+    direct = updated.get("task_core")
+    if isinstance(direct, dict) and direct:
+        return direct
+    payload = _payload(selection_event)
+    for key in ("runtime_plan", "yachiyo_execution_envelope"):
+        nested = payload.get(key)
+        if isinstance(nested, dict) and isinstance(nested.get("task_core"), dict):
+            return dict(nested["task_core"])
+    studio_core = payload.get("yachiyo_task_core")
+    return dict(studio_core) if isinstance(studio_core, dict) else {}
+
+
+def _task_core_summary(task_core: dict[str, Any]) -> dict[str, Any]:
+    workspace = task_core.get("workspace")
+    workspace = workspace if isinstance(workspace, dict) else {}
+    workspace_items = workspace.get("items")
+    workspace_items = workspace_items if isinstance(workspace_items, list) else []
+    todos = task_core.get("todos")
+    todos = todos if isinstance(todos, list) else []
+    checkpoints = task_core.get("checkpoints")
+    checkpoints = checkpoints if isinstance(checkpoints, list) else []
+    replan_signals = task_core.get("replan_signals")
+    replan_signals = replan_signals if isinstance(replan_signals, list) else []
+    return {
+        "core_id": str(task_core.get("core_id") or ""),
+        "workspace_id": str(workspace.get("workspace_id") or ""),
+        "workspace_item_count": len(workspace_items),
+        "workspace_paths": [
+            str(item.get("path") or "")
+            for item in workspace_items
+            if isinstance(item, dict) and str(item.get("path") or "").strip()
+        ],
+        "todo_step_ids": [
+            str(item.get("step_id") or "")
+            for item in todos
+            if isinstance(item, dict) and str(item.get("step_id") or "").strip()
+        ],
+        "checkpoint_step_ids": [
+            str(item.get("after_step_id") or "")
+            for item in checkpoints
+            if isinstance(item, dict) and str(item.get("after_step_id") or "").strip()
+        ],
+        "replan_triggers": [
+            str(item.get("trigger") or "")
+            for item in replan_signals
+            if isinstance(item, dict) and str(item.get("trigger") or "").strip()
+        ],
+    }
+
+
+def _contains_all(values: Sequence[str], expected: Sequence[str]) -> bool:
+    value_set = set(values)
+    return all(value in value_set for value in expected)
+
+
 def _data_analysis_case(
     service: AgentRuntimeService,
     *,
@@ -243,6 +302,9 @@ def _data_analysis_case(
     completed_result = completed_result if isinstance(completed_result, dict) else {}
     artifacts = updated.get("artifacts")
     summary_text = str(updated.get("result") or _payload(completed_event).get("summary") or "")
+    task_core = _task_core_from_payloads(updated, selection_event)
+    task_core_summary = _task_core_summary(task_core)
+    expected_step_ids = ["read-data-source", "analyze-data-file"]
     checks = {
         "run_completed": updated.get("status") == "completed",
         "summary_mentions_data_analysis": f"已分析「{SAMPLE_PATH}」（3 行、3 列）"
@@ -263,6 +325,21 @@ def _data_analysis_case(
         "artifact_projection_recorded": ARTIFACT_PATH in _artifact_paths(artifacts),
         "completed_from_runtime_planner": _payload(completed_event).get("source") == "runtime_planner",
         "completed_artifact_path": completed_result.get("artifact_path") == ARTIFACT_PATH,
+        "task_core_projected": bool(task_core),
+        "task_core_has_workspace": bool(task_core_summary["workspace_id"]),
+        "task_core_tracks_dataset_and_artifact": (
+            SAMPLE_PATH in task_core_summary["workspace_paths"]
+            and ARTIFACT_PATH in task_core_summary["workspace_paths"]
+        ),
+        "task_core_has_todo_steps": _contains_all(
+            task_core_summary["todo_step_ids"],
+            expected_step_ids,
+        ),
+        "task_core_has_checkpoints": _contains_all(
+            task_core_summary["checkpoint_step_ids"],
+            expected_step_ids,
+        ),
+        "task_core_has_replan_signal": bool(task_core_summary["replan_triggers"]),
     }
     return {
         "id": f"{entrypoint}_data_analysis_before_model",
@@ -280,6 +357,7 @@ def _data_analysis_case(
         "read_tool_event": read_tool_event,
         "artifact_events": artifact_events,
         "completed_event": completed_event,
+        "task_core_summary": task_core_summary,
         "checks": checks,
     }
 
