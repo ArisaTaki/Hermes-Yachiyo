@@ -487,6 +487,8 @@ def _native_agent_capability_matrix_with_source(
                 "capability_count",
                 "status_counts",
                 "missing_capability_ids",
+                "optional_missing_capability_ids",
+                "all_missing_capability_ids",
             ):
                 result.setdefault(key, status_summary[key])
             result.setdefault(
@@ -494,7 +496,15 @@ def _native_agent_capability_matrix_with_source(
                 status_summary["category_status_counts"],
             )
             result.setdefault("missing_by_category", status_summary["missing_by_category"])
+            result.setdefault(
+                "optional_missing_by_category",
+                status_summary["optional_missing_by_category"],
+            )
             result.setdefault("next_actions", status_summary["next_actions"])
+            result.setdefault(
+                "optional_next_actions",
+                status_summary["optional_next_actions"],
+            )
             result["capabilities"] = capabilities
             if str(result.get("status") or "").strip() not in {"passed", "incomplete"}:
                 result["status"] = "passed" if result.get("ok") is True else "incomplete"
@@ -720,11 +730,30 @@ def _native_agent_capability_matrix_summary_label(
     if isinstance(raw_counts, dict):
         raw_passed_count = raw_counts.get("passed")
         passed_count = raw_passed_count if isinstance(raw_passed_count, int) else 0
+    optional_missing = _native_agent_capability_matrix_optional_missing_ids(
+        capability_matrix
+    )
+    if optional_missing and capability_count:
+        required_total = max(capability_count - len(optional_missing), 0)
+        required_passed = min(passed_count, required_total)
+        label = f"{status} ({required_passed}/{required_total} required capabilities passed"
+        if optional_missing:
+            label += f"; {len(optional_missing)} optional opt-in pending"
+        return label + ")"
     if status == "passed" and capability_count:
         return f"passed ({capability_count} capabilities)"
     if capability_count:
         return f"{status} ({passed_count}/{capability_count} passed)"
     return status
+
+
+def _native_agent_capability_matrix_optional_missing_ids(
+    capability_matrix: dict[str, Any],
+) -> list[str]:
+    raw_optional_missing = capability_matrix.get("optional_missing_capability_ids")
+    if not isinstance(raw_optional_missing, list):
+        return []
+    return [str(item) for item in raw_optional_missing if str(item)]
 
 
 def _native_agent_capability_matrix_missing_by_category_lines(
@@ -745,10 +774,32 @@ def _native_agent_capability_matrix_missing_by_category_lines(
     return lines
 
 
+def _native_agent_capability_matrix_optional_missing_by_category_lines(
+    capability_matrix: dict[str, Any],
+) -> list[str]:
+    raw_missing_by_category = capability_matrix.get("optional_missing_by_category")
+    if not isinstance(raw_missing_by_category, dict):
+        return []
+    lines: list[str] = []
+    for category in ("source", "provider", "packaged", "unknown"):
+        raw_ids = raw_missing_by_category.get(category)
+        if not isinstance(raw_ids, list) or not raw_ids:
+            continue
+        lines.append(
+            f"- optional[{category}]: "
+            + ", ".join(str(item) for item in raw_ids if str(item))
+        )
+    return lines
+
+
 def _native_agent_capability_matrix_next_actions(
     capability_matrix: dict[str, Any],
+    *,
+    optional: bool = False,
 ) -> list[dict[str, Any]]:
-    raw_next_actions = capability_matrix.get("next_actions")
+    raw_next_actions = capability_matrix.get(
+        "optional_next_actions" if optional else "next_actions"
+    )
     if not isinstance(raw_next_actions, list):
         return []
     actions: list[dict[str, Any]] = []
@@ -775,10 +826,34 @@ def _print_native_agent_capability_matrix_summary(
         print("- missing: " + ", ".join(str(item) for item in missing_ids))
     for line in _native_agent_capability_matrix_missing_by_category_lines(capability_matrix):
         print(line)
+    optional_missing_ids = _native_agent_capability_matrix_optional_missing_ids(
+        capability_matrix
+    )
+    if optional_missing_ids:
+        print("- optional opt-in: " + ", ".join(optional_missing_ids))
+    for line in _native_agent_capability_matrix_optional_missing_by_category_lines(
+        capability_matrix
+    ):
+        print(line)
     next_actions = _native_agent_capability_matrix_next_actions(capability_matrix)
     if next_actions:
         print("Native Agent capability matrix next actions:")
         for action in next_actions:
+            raw_capability_ids = action.get("capability_ids")
+            capability_ids = (
+                [str(item) for item in raw_capability_ids if str(item)]
+                if isinstance(raw_capability_ids, list)
+                else []
+            )
+            suffix = f" ({', '.join(capability_ids)})" if capability_ids else ""
+            print(f"- {action['id']}{suffix}: {action['command']}")
+    optional_next_actions = _native_agent_capability_matrix_next_actions(
+        capability_matrix,
+        optional=True,
+    )
+    if optional_next_actions:
+        print("Native Agent capability matrix optional next actions:")
+        for action in optional_next_actions:
             raw_capability_ids = action.get("capability_ids")
             capability_ids = (
                 [str(item) for item in raw_capability_ids if str(item)]
@@ -809,6 +884,9 @@ def _native_agent_capability_matrix_markdown_lines(
         raw_passed_count = raw_counts.get("passed")
         passed_count = raw_passed_count if isinstance(raw_passed_count, int) else 0
     missing_ids = capability_matrix.get("missing_capability_ids")
+    optional_missing_ids = _native_agent_capability_matrix_optional_missing_ids(
+        capability_matrix
+    )
     source_reports = _native_agent_capability_matrix_source_reports(capability_matrix)
     lines = [
         "## Native Agent Capability Matrix",
@@ -826,7 +904,17 @@ def _native_agent_capability_matrix_markdown_lines(
         f"- Status: {summary_label}",
     ]
     if capability_count:
-        lines.append(f"- Capabilities: {passed_count}/{capability_count} passed")
+        if optional_missing_ids:
+            required_total = max(capability_count - len(optional_missing_ids), 0)
+            required_passed = min(passed_count, required_total)
+            lines.append(
+                f"- Required capabilities: {required_passed}/{required_total} passed"
+            )
+            lines.append(
+                f"- Optional opt-in capabilities: {len(optional_missing_ids)} pending"
+            )
+        else:
+            lines.append(f"- Capabilities: {passed_count}/{capability_count} passed")
     if source_reports:
         lines.append(
             "- Source reports: "
@@ -846,10 +934,43 @@ def _native_agent_capability_matrix_markdown_lines(
             lines.append(
                 line.replace("- missing[", "- `").replace("]: ", "`: ")
             )
+    optional_category_lines = (
+        _native_agent_capability_matrix_optional_missing_by_category_lines(
+            capability_matrix
+        )
+    )
+    if optional_category_lines:
+        lines.extend(["", "### Optional Opt-In Evidence", ""])
+        for line in optional_category_lines:
+            lines.append(
+                line.replace("- optional[", "- `").replace("]: ", "`: ")
+            )
     next_actions = _native_agent_capability_matrix_next_actions(capability_matrix)
     if next_actions:
         lines.extend(["", "### Next Actions", ""])
         for action in next_actions:
+            raw_capability_ids = action.get("capability_ids")
+            capability_ids = (
+                [str(item) for item in raw_capability_ids if str(item)]
+                if isinstance(raw_capability_ids, list)
+                else []
+            )
+            reason = str(action.get("reason") or "").strip()
+            if reason:
+                lines.append(f"- {reason}")
+            if capability_ids:
+                lines.append(
+                    "  - Capabilities: "
+                    + ", ".join(f"`{capability_id}`" for capability_id in capability_ids)
+                )
+            lines.extend(["  ```bash", f"  {action['command']}", "  ```"])
+    optional_next_actions = _native_agent_capability_matrix_next_actions(
+        capability_matrix,
+        optional=True,
+    )
+    if optional_next_actions:
+        lines.extend(["", "### Optional Next Actions", ""])
+        for action in optional_next_actions:
             raw_capability_ids = action.get("capability_ids")
             capability_ids = (
                 [str(item) for item in raw_capability_ids if str(item)]

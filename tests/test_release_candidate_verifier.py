@@ -1691,10 +1691,15 @@ def test_release_candidate_verifier_reports_planner_runtime_tool_parity_smoke(
 
     output = capsys.readouterr().out
     assert "planner runtime tool parity smoke: passed" in output
-    assert "Native Agent capability matrix: incomplete (26/31 passed)" in output
+    assert (
+        "Native Agent capability matrix: incomplete "
+        "(26/28 required capabilities passed; 3 optional opt-in pending)"
+    ) in output
     assert "- missing[provider]:" not in output
     assert "- missing[packaged]: packaged_backend_bridge_identity, packaged_app_bridge_isolation" in output
     assert "Native Agent capability matrix next actions:" in output
+    assert "Native Agent capability matrix optional next actions:" in output
+    assert "- optional opt-in: source_real_desktop_app_open" in output
     assert "real_desktop_smokes" in output
     assert "packaged_backend_bridge_smoke" in output
     report = json.loads((tmp_path / "tmp" / "source-only-rc.json").read_text(encoding="utf-8"))

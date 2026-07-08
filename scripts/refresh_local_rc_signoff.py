@@ -942,20 +942,26 @@ def _print_release_readiness_status(*, label: str) -> None:
     passed = report.get("passed_count")
     total = report.get("capability_count")
     print(f"- status: {status}")
+    optional_missing_ids = report.get("optional_missing_capability_ids")
+    optional_missing = (
+        [str(item) for item in optional_missing_ids if str(item)]
+        if isinstance(optional_missing_ids, list)
+        else []
+    )
     if isinstance(passed, int) and isinstance(total, int):
-        print(f"- capabilities: {passed}/{total} passed")
+        if optional_missing:
+            required_total = max(total - len(optional_missing), 0)
+            required_passed = min(passed, required_total)
+            print(f"- required capabilities: {required_passed}/{required_total} passed")
+        else:
+            print(f"- capabilities: {passed}/{total} passed")
     missing_ids = report.get("missing_capability_ids")
     if isinstance(missing_ids, list) and missing_ids:
         missing = ", ".join(str(item) for item in missing_ids if str(item))
         if missing:
             print(f"- missing capabilities: {missing}")
-    optional_missing_ids = report.get("optional_missing_capability_ids")
-    if isinstance(optional_missing_ids, list) and optional_missing_ids:
-        optional_missing = ", ".join(
-            str(item) for item in optional_missing_ids if str(item)
-        )
-        if optional_missing:
-            print(f"- optional opt-in capabilities: {optional_missing}")
+    if optional_missing:
+        print(f"- optional opt-in capabilities: {', '.join(optional_missing)}")
     blockers = report.get("blockers")
     if isinstance(blockers, list):
         for blocker in blockers:
