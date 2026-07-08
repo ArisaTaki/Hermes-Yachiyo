@@ -249,7 +249,29 @@ def test_oha_parity_summary_marks_missing_oha_product_smoke(tmp_path):
     assert oha_product["status"] == "missing"
     assert "DeepAgent Core" in oha_product["required_evidence"]
     assert "scripts/smoke_oha_desktop_agent_release.py" in oha_product["next_action"]
+    assert "--run-isolated-provider-smoke" in oha_product["next_action"]
     assert "oha_desktop_agent_product" in summary["incomplete_area_ids"]
+
+
+def test_oha_parity_summary_requires_isolated_provider_section(tmp_path):
+    _write_product_identity_files(tmp_path)
+    report = _oha_desktop_agent_smoke_report()
+    report["sections"] = [
+        section
+        for section in report["sections"]
+        if section["id"] != "isolated_desktop_provider"
+    ]
+    report["section_count"] = len(report["sections"])
+    report_path = tmp_path / "oha-smoke.json"
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+
+    summary = parity.summarize_parity(tmp_path, Path("oha-smoke.json"))
+
+    areas = {area["id"]: area for area in summary["areas"]}
+    oha_product = areas["oha_desktop_agent_product"]
+    assert oha_product["status"] == "missing"
+    assert oha_product["missing_section_ids"] == ["isolated_desktop_provider"]
+    assert "--run-isolated-provider-smoke" in oha_product["next_action"]
 
 
 def test_oha_parity_summary_can_read_release_smoke_oha_item(tmp_path):
@@ -259,10 +281,19 @@ def test_oha_parity_summary_can_read_release_smoke_oha_item(tmp_path):
         {
             "id": "oha_desktop_agent_product",
             "status": "passed",
-            "required_evidence_ids": [parity.OHA_DESKTOP_AGENT_RELEASE_SMOKE_MODE],
-            "present_evidence_ids": [parity.OHA_DESKTOP_AGENT_RELEASE_SMOKE_MODE],
+            "required_evidence_ids": [
+                parity.OHA_DESKTOP_AGENT_RELEASE_SMOKE_MODE,
+                "oha_isolated_desktop_provider",
+            ],
+            "present_evidence_ids": [
+                parity.OHA_DESKTOP_AGENT_RELEASE_SMOKE_MODE,
+                "oha_isolated_desktop_provider",
+            ],
             "missing_evidence_ids": [],
-            "related_evidence_ids": ["oha_deepagent_core", "oha_agent_studio_orchestration"],
+            "related_evidence_ids": [
+                "oha_deepagent_core",
+                "oha_agent_studio_orchestration",
+            ],
             "next_action": parity.OHA_DESKTOP_AGENT_NEXT_ACTION,
         }
     ]
@@ -275,7 +306,8 @@ def test_oha_parity_summary_can_read_release_smoke_oha_item(tmp_path):
     oha_product = areas["oha_desktop_agent_product"]
     assert oha_product["status"] == "passed"
     assert oha_product["present_evidence_ids"] == [
-        parity.OHA_DESKTOP_AGENT_RELEASE_SMOKE_MODE
+        parity.OHA_DESKTOP_AGENT_RELEASE_SMOKE_MODE,
+        "oha_isolated_desktop_provider",
     ]
     assert oha_product["related_evidence_count"] == 2
 

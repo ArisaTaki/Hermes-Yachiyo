@@ -115,9 +115,11 @@ OHA_DESKTOP_AGENT_REQUIRED_SECTIONS: tuple[str, ...] = (
     "workflow_run_timeline",
     "approval_policy_gate",
     "studio_tool_catalog",
+    "isolated_desktop_provider",
 )
 OHA_DESKTOP_AGENT_NEXT_ACTION = (
     "python scripts/smoke_oha_desktop_agent_release.py "
+    "--run-isolated-provider-smoke "
     "--report-json tmp/oha-desktop-agent-release-smoke.json"
 )
 

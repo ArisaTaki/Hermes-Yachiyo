@@ -88,10 +88,14 @@ SMOKE_ITEMS: tuple[dict[str, Any], ...] = (
     {
         "id": "oha_desktop_agent_product",
         "label": "Oha desktop-agent product smoke covers the new Core, Executor, and Studio path",
-        "required": (OHA_DESKTOP_AGENT_RELEASE_SMOKE_MODE,),
+        "required": (
+            OHA_DESKTOP_AGENT_RELEASE_SMOKE_MODE,
+            "oha_isolated_desktop_provider",
+        ),
         "related": tuple(OHA_DESKTOP_AGENT_SECTION_EVIDENCE.values()),
         "next_action": (
             "python scripts/smoke_oha_desktop_agent_release.py "
+            "--run-isolated-provider-smoke "
             "--report-json tmp/oha-desktop-agent-release-smoke.json"
         ),
     },

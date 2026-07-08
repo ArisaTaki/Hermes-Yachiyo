@@ -173,10 +173,41 @@ def test_release_smoke_summary_passes_with_required_evidence(tmp_path, monkeypat
     assert summary["missing_item_ids"] == []
     oha_item = next(item for item in summary["items"] if item["id"] == "oha_desktop_agent_product")
     assert oha_item["present_evidence_ids"] == [
-        release_smoke.OHA_DESKTOP_AGENT_RELEASE_SMOKE_MODE
+        release_smoke.OHA_DESKTOP_AGENT_RELEASE_SMOKE_MODE,
+        "oha_isolated_desktop_provider",
     ]
     assert "oha_deepagent_core" in oha_item["related_evidence_ids"]
     assert "oha_isolated_desktop_provider" in oha_item["related_evidence_ids"]
+
+
+def test_release_smoke_summary_requires_isolated_desktop_provider_section(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(release_smoke, "ROOT", tmp_path)
+    report_path = tmp_path / "tmp" / "oha-without-isolated-provider.json"
+    payload = _oha_desktop_agent_release_smoke_report()
+    payload["sections"] = [
+        section
+        for section in payload["sections"]
+        if section["id"] != "isolated_desktop_provider"
+    ]
+    payload["section_count"] = len(payload["sections"])
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    summary = release_smoke.summarize_release_smoke([report_path])
+
+    assert "oha_desktop_agent_product" in summary["missing_item_ids"]
+    oha_item = next(item for item in summary["items"] if item["id"] == "oha_desktop_agent_product")
+    assert oha_item["present_evidence_ids"] == [
+        release_smoke.OHA_DESKTOP_AGENT_RELEASE_SMOKE_MODE
+    ]
+    assert oha_item["missing_evidence_ids"] == ["oha_isolated_desktop_provider"]
+    action = next(
+        item for item in summary["next_actions"] if item["id"] == "oha_desktop_agent_product"
+    )
+    assert "--run-isolated-provider-smoke" in action["command"]
 
 
 def test_release_smoke_summary_reports_missing_items_and_next_actions(
