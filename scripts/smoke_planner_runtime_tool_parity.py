@@ -285,6 +285,15 @@ PLANNER_TOOL_PARITY_CASES: tuple[dict[str, Any], ...] = (
         "approval_required": [],
     },
     {
+        "id": "generic_calendar_event",
+        "category": "orchestrator",
+        "prompt": "打开任意日历应用，安排明天下午三点开会",
+        "expected_intent": "schedule",
+        "expected_plan_tools": ["calendar.create_event"],
+        "expected_request_tools": ["calendar.create_event"],
+        "approval_required": [],
+    },
+    {
         "id": "file_organize_invoices",
         "category": "orchestrator",
         "prompt": "把下载里的发票整理到一个文件夹",

@@ -263,7 +263,9 @@ def _strip_schedule_app_surface_prefix(text: str) -> str:
     previous = None
     while previous != value:
         previous = value
-        value = _SCHEDULE_APP_SURFACE_PREFIX_RE.sub("", value, count=1).strip()
+        value = _SCHEDULE_APP_SURFACE_PREFIX_RE.sub("", value, count=1).strip(
+            " ，,、:："
+        )
     return _clean(value)
 
 

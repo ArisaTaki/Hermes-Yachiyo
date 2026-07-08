@@ -26847,6 +26847,10 @@ def test_runtime_planner_routes_relative_calendar_event_to_schedule_capability(m
         "用任意可用的日历应用创建明天下午三点开会",
         allowed_tools=["calendar.create_event"],
     )
+    generic_open_surface = RuntimePlanner().decision(
+        "打开任意日历应用，安排明天下午三点开会",
+        allowed_tools=["calendar.create_event"],
+    )
     time_first_create = RuntimePlanner().decision(
         "明天下午三点创建一个项目评审日程",
         allowed_tools=["calendar.create_event"],
@@ -26892,7 +26896,11 @@ def test_runtime_planner_routes_relative_calendar_event_to_schedule_capability(m
         "start_at": tomorrow_1500,
         "end_at": tomorrow_1600,
     }
-    for calendar_decision in (generic_surface, generic_surface_without_target_suffix):
+    for calendar_decision in (
+        generic_surface,
+        generic_surface_without_target_suffix,
+        generic_open_surface,
+    ):
         assert calendar_decision.selected_intent.kind == "schedule"
         calendar_step = _step_by_id(calendar_decision, "create-schedule-item")
         assert calendar_step.tool_name == "calendar.create_event"
