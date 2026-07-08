@@ -1064,8 +1064,9 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help=(
             "Include opt-in real desktop app open, UI inspection, and interaction "
-            "smokes in the source capability and public-demo reports. The packaged "
-            "batch report always uses the full local Native Agent RC bundle."
+            "smokes in the source capability, packaged batch, and public-demo "
+            "reports. By default, local RC refresh uses isolated desktop evidence "
+            "and avoids foreground mouse/keyboard capture."
         ),
     )
     parser.add_argument("--skip-screen-smoke", action="store_true")
