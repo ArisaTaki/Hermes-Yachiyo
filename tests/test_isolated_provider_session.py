@@ -206,6 +206,59 @@ def test_start_isolated_provider_session_can_start_managed_external_provider(
     manager.stop()
 
 
+def test_start_isolated_provider_session_requires_real_virtual_backend(
+    monkeypatch,
+) -> None:
+    for key in session_module._ENV_KEYS:
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.delenv("OHA_YACHIYO_DESKTOP_PROVIDER_START_COMMAND", raising=False)
+    monkeypatch.delenv("OHA_YACHIYO_DESKTOP_PROVIDER_MANIFEST", raising=False)
+    start_calls: list[dict[str, Any]] = []
+
+    monkeypatch.setattr(
+        session_module._SESSION_MANAGER,
+        "status",
+        lambda probe_health=True: {"ok": True, "status": "stopped", "running": False},
+    )
+    monkeypatch.setattr(
+        session_module._SESSION_MANAGER,
+        "start",
+        lambda **kwargs: start_calls.append(dict(kwargs)) or {},
+    )
+    monkeypatch.setattr(
+        session_module,
+        "desktop_execution_provider_status_from_env",
+        lambda *args, **kwargs: {
+            "configured": False,
+            "available": False,
+            "adapter_ready": False,
+            "provider_kind": "sandbox_desktop",
+            "provider_id": "",
+            "status": "not_configured",
+        },
+    )
+
+    started = session_module.start_isolated_desktop_provider_session(
+        {
+            "provider_id": "local-isolated-desktop",
+            "tools": ["app.open"],
+            "requires_real_virtual_desktop_backend": True,
+        }
+    )
+
+    assert start_calls == []
+    assert started["ok"] is False
+    assert started["running"] is False
+    assert started["started"] is False
+    assert started["status"] == "real_virtual_desktop_provider_required"
+    assert started["provider_id"] == "local-isolated-desktop"
+    assert started["requires_real_virtual_desktop_backend"] is True
+    assert "configured_virtual_desktop_provider_required" in started[
+        "blocking_conditions"
+    ]
+    assert "real_virtual_desktop_backend_required" in started["blocking_conditions"]
+
+
 def test_start_isolated_provider_session_can_start_provider_from_manifest(
     monkeypatch,
     tmp_path,

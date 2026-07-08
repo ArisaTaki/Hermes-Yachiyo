@@ -528,6 +528,7 @@ function runtimeEventMetadata(
       label: 'provider real backend required',
       value: desktopProviderSession.requiresRealVirtualDesktopBackend,
     },
+    { label: 'provider blockers', value: desktopProviderSession.blockingConditions.join(', ') },
     { label: 'provider foreground takeover', value: desktopProviderSession.foregroundTakeoverRequired },
     { label: 'provider keyboard/mouse', value: desktopProviderSession.keyboardMouseCaptureSupported },
     { label: 'provider tools', value: desktopProviderSession.toolNames.join(', ') },

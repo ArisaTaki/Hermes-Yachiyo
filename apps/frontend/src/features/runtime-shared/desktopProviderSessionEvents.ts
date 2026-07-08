@@ -5,6 +5,7 @@ import {
 } from './desktopEvents';
 
 export type RuntimeDesktopProviderSessionContext = {
+  blockingConditions: string[];
   desktopBackendIsLoopback: string;
   desktopBackendKind: string;
   desktopBackendReadyForPublicRelease: string;
@@ -42,6 +43,7 @@ export function runtimeDesktopProviderSessionContext(
   const route = runtimeFirstNestedRecord(contextSourceRecords, 'desktop_execution_route');
   const contextRecords = [session, provider, sandboxProvider, route, ...baseRecords, ...resultRecords];
   return {
+    blockingConditions: runtimeUniqueStrings(contextRecords.flatMap((record) => runtimeStringList(record.blocking_conditions))),
     desktopBackendIsLoopback: runtimeFirstBoolLabel(contextRecords, 'desktop_backend_is_loopback'),
     desktopBackendKind: runtimeFirstString(contextRecords, 'desktop_backend_kind'),
     desktopBackendReadyForPublicRelease: runtimeFirstBoolLabel(contextRecords, 'desktop_backend_ready_for_public_release'),
@@ -112,6 +114,7 @@ export function runtimeDesktopProviderSessionDetail(
     context.desktopBackendReadyForPublicRelease === 'true' ? 'release-ready backend' : '',
     context.desktopBackendReadyForPublicRelease === 'false' ? 'backend not release-ready' : '',
     context.requiresRealVirtualDesktopBackend === 'true' ? 'real virtual desktop required' : '',
+    context.blockingConditions.length ? `blockers ${context.blockingConditions.slice(0, 3).join(', ')}` : '',
     context.foregroundTakeoverRequired === 'false' ? 'no foreground takeover' : '',
     context.foregroundTakeoverRequired === 'true' ? 'foreground takeover required' : '',
     context.keyboardMouseCaptureSupported === 'true' ? 'keyboard/mouse ready' : '',

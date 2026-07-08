@@ -404,6 +404,83 @@ def test_runtime_tool_call_executor_starts_provider_session_control_action(
     assert event_session["keyboard_mouse_capture_supported"] is True
 
 
+def test_runtime_tool_call_executor_preserves_real_backend_provider_start_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    start_calls: list[dict[str, Any]] = []
+    run_events: list[tuple[str, str, dict[str, Any]]] = []
+
+    def fake_start(request: dict[str, Any] | None = None) -> dict[str, Any]:
+        start_calls.append(dict(request or {}))
+        return {
+            "ok": False,
+            "status": "real_virtual_desktop_provider_required",
+            "running": False,
+            "started": False,
+            "provider_id": "real-virtual-desktop",
+            "requires_real_virtual_desktop_backend": True,
+            "blocking_conditions": [
+                "configured_virtual_desktop_provider_required",
+                "real_virtual_desktop_backend_required",
+            ],
+            "source": "isolated_provider_session_manager",
+        }
+
+    monkeypatch.setattr(
+        "apps.shell.agent.runtime.tool_execution.start_isolated_desktop_provider_session",
+        fake_start,
+    )
+    timeline: list[dict[str, Any]] = []
+    executor = _executor(
+        tool_call_events=FakeToolCallEvents(),
+        run_events=run_events,
+    )
+
+    result = executor.execute(
+        {
+            "tool": "desktop.provider_session.start",
+            "control_action": "desktop_provider_session.start",
+            "input": {
+                "provider_id": "real-virtual-desktop",
+                "tool_names": ["app.open"],
+                "requires_real_virtual_desktop_backend": True,
+            },
+            "source": "agent_studio_replan_recovery",
+            "replan_request_id": "replan-real-provider",
+            "replan_recovery_action_id": (
+                "replan-real-provider:action:1:desktop.provider_session.start"
+            ),
+        },
+        [],
+        FakeBroker({"ok": True}),
+        timeline,
+        approved=True,
+        run_id="run-real-provider-start",
+    )
+
+    assert start_calls == [
+        {
+            "provider_id": "real-virtual-desktop",
+            "tools": ["app.open"],
+            "requires_real_virtual_desktop_backend": True,
+        }
+    ]
+    assert result["ok"] is False
+    assert result["status"] == "real_virtual_desktop_provider_required"
+    assert result["desktop_provider_session"]["requires_real_virtual_desktop_backend"] is True
+    assert "real_virtual_desktop_backend_required" in result[
+        "desktop_provider_session"
+    ]["blocking_conditions"]
+    assert any(event["event"] == "desktop.provider_session.failed" for event in timeline)
+    provider_events = [
+        event for event in run_events if event[1] == "desktop.provider_session.failed"
+    ]
+    assert provider_events
+    assert provider_events[0][2]["desktop_provider_session"][
+        "requires_real_virtual_desktop_backend"
+    ] is True
+
+
 def test_runtime_tool_request_runner_continues_after_provider_session_start(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

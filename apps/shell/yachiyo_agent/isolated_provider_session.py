@@ -58,6 +58,7 @@ _PROVIDER_START_STATUSES = {
     "sandbox_keyboard_mouse_provider_required",
     "sandbox_desktop_session_required",
     "sandbox_adapter_required",
+    "real_virtual_desktop_provider_required",
 }
 
 _PROVIDER_START_BLOCKERS = {
@@ -66,6 +67,8 @@ _PROVIDER_START_BLOCKERS = {
     "sandbox_desktop_session_required",
     "sandbox_desktop_adapter_required",
     "isolated_desktop_provider_required",
+    "loopback_desktop_backend",
+    "real_virtual_desktop_backend_required",
 }
 
 
@@ -288,14 +291,39 @@ def start_isolated_desktop_provider_session(
     payload = dict(request or {})
     tools = payload.get("tools")
     clean_tools = [str(item) for item in tools] if isinstance(tools, list) else None
+    requires_real_backend = _optional_bool(
+        payload.get("requires_real_virtual_desktop_backend"),
+        payload.get("require_real_virtual_desktop_backend"),
+        payload.get("real_virtual_desktop_backend_required"),
+    ) is True
     external_status = _external_isolated_desktop_provider_session_status()
     if bool(external_status.get("running")) and _session_status_supports_targets(
         external_status,
         [{"request_id": "", "tool_name": tool} for tool in clean_tools or []],
     ):
+        if requires_real_backend and not _session_status_uses_real_virtual_backend(
+            external_status
+        ):
+            return _real_virtual_desktop_provider_required_status(
+                payload,
+                current_status=external_status,
+            )
         return {**external_status, "started": False}
     if _managed_external_provider_start_configured():
-        return _SESSION_MANAGER.start_managed_external(tools=clean_tools)
+        started = _SESSION_MANAGER.start_managed_external(tools=clean_tools)
+        if requires_real_backend and not _session_status_uses_real_virtual_backend(
+            started
+        ):
+            return _real_virtual_desktop_provider_required_status(
+                payload,
+                current_status=started,
+            )
+        return started
+    if requires_real_backend:
+        return _real_virtual_desktop_provider_required_status(
+            payload,
+            current_status=external_status,
+        )
     return _SESSION_MANAGER.start(
         host=str(payload.get("host") or "127.0.0.1"),
         port=int(payload.get("port") or 0),
@@ -1090,6 +1118,10 @@ def _public_session_status(status: dict[str, Any]) -> dict[str, Any]:
             status.get("requires_real_virtual_desktop_backend"),
             provider_status.get("requires_real_virtual_desktop_backend"),
         ),
+        "blocking_conditions": _string_list(
+            status.get("blocking_conditions")
+            or provider_status.get("blocking_conditions")
+        ),
         "supported_tools": _string_list(
             status.get("supported_tools") or provider_status.get("supported_tools")
         ),
@@ -1101,6 +1133,96 @@ def _public_session_status(status: dict[str, Any]) -> dict[str, Any]:
         }
         if isinstance(status.get("env"), dict)
         else {},
+        "source": str(status.get("source") or "isolated_provider_session_manager"),
+    }
+
+
+def _session_status_uses_real_virtual_backend(status: dict[str, Any]) -> bool:
+    provider_status = _mapping(status.get("provider_status"))
+    backend_kind = str(
+        status.get("desktop_backend_kind")
+        or provider_status.get("desktop_backend_kind")
+        or ""
+    ).strip()
+    backend_is_loopback = _optional_bool(
+        status.get("desktop_backend_is_loopback"),
+        provider_status.get("desktop_backend_is_loopback"),
+    )
+    backend_release_ready = _optional_bool(
+        status.get("desktop_backend_ready_for_public_release"),
+        provider_status.get("desktop_backend_ready_for_public_release"),
+    )
+    requires_real_backend = _optional_bool(
+        status.get("requires_real_virtual_desktop_backend"),
+        provider_status.get("requires_real_virtual_desktop_backend"),
+    )
+    session_kind = str(
+        status.get("desktop_session_kind")
+        or provider_status.get("desktop_session_kind")
+        or ""
+    ).strip()
+    session_isolated = _optional_bool(
+        status.get("desktop_session_isolated"),
+        provider_status.get("desktop_session_isolated"),
+    )
+    return bool(
+        backend_kind
+        and backend_is_loopback is False
+        and backend_release_ready is True
+        and requires_real_backend is False
+        and (
+            session_isolated is True
+            or session_kind in {"isolated_desktop", "virtual_desktop"}
+        )
+    )
+
+
+def _real_virtual_desktop_provider_required_status(
+    request: dict[str, Any],
+    *,
+    current_status: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    status = dict(current_status or {})
+    provider_status = _mapping(status.get("provider_status"))
+    provider_id = str(
+        status.get("provider_id")
+        or provider_status.get("provider_id")
+        or request.get("provider_id")
+        or "real-virtual-desktop"
+    ).strip()
+    blockers = _string_list(status.get("blocking_conditions"))
+    for blocker in (
+        "configured_virtual_desktop_provider_required",
+        "real_virtual_desktop_backend_required",
+    ):
+        if blocker not in blockers:
+            blockers.append(blocker)
+    return {
+        **status,
+        "ok": False,
+        "status": "real_virtual_desktop_provider_required",
+        "running": bool(status.get("running")),
+        "started": bool(status.get("started")),
+        "provider_id": provider_id,
+        "reason": (
+            "A real non-loopback virtual desktop provider is required before "
+            "desktop app execution can continue."
+        ),
+        "blocking_conditions": blockers,
+        "desktop_backend_kind": str(
+            status.get("desktop_backend_kind")
+            or provider_status.get("desktop_backend_kind")
+            or ""
+        ),
+        "desktop_backend_is_loopback": _optional_bool(
+            status.get("desktop_backend_is_loopback"),
+            provider_status.get("desktop_backend_is_loopback"),
+        ),
+        "desktop_backend_ready_for_public_release": _optional_bool(
+            status.get("desktop_backend_ready_for_public_release"),
+            provider_status.get("desktop_backend_ready_for_public_release"),
+        ),
+        "requires_real_virtual_desktop_backend": True,
         "source": str(status.get("source") or "isolated_provider_session_manager"),
     }
 

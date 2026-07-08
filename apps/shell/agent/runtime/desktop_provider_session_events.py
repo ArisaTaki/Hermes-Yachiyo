@@ -126,6 +126,7 @@ def desktop_provider_session_event_payload(
         "desktop_backend_is_loopback",
         "desktop_backend_ready_for_public_release",
         "requires_real_virtual_desktop_backend",
+        "blocking_conditions",
         "supported_tools",
     ):
         value = session.get(key)

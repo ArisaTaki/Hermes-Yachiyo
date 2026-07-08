@@ -271,6 +271,14 @@ def _desktop_provider_session_start_request(
     tools = _string_list(payload.get("tools")) or _string_list(payload.get("tool_names"))
     if tools:
         request["tools"] = tools
+    for key in (
+        "requires_real_virtual_desktop_backend",
+        "require_real_virtual_desktop_backend",
+        "real_virtual_desktop_backend_required",
+    ):
+        value = _optional_bool(payload.get(key))
+        if value is not None:
+            request[key] = value
     return request
 
 
@@ -292,6 +300,11 @@ def _public_desktop_provider_session(session: Mapping[str, Any]) -> dict[str, An
         "desktop_session_isolated",
         "foreground_takeover_required",
         "keyboard_mouse_capture_supported",
+        "desktop_backend_kind",
+        "desktop_backend_is_loopback",
+        "desktop_backend_ready_for_public_release",
+        "requires_real_virtual_desktop_backend",
+        "blocking_conditions",
     ):
         value = session.get(key)
         if value not in (None, "", [], {}):
@@ -1072,6 +1085,15 @@ def _desktop_execution_provider_session_start_recovery_actions(
         or str(sandbox_provider.get("provider_id") or "").strip()
         or "local-isolated-desktop"
     )
+    requires_real_backend = bool(
+        {
+            "loopback_desktop_backend",
+            "real_virtual_desktop_backend_required",
+        }
+        & set(sandbox_blockers)
+    ) or str(route_decision.get("status") or "").strip() == (
+        "real_virtual_desktop_provider_required"
+    )
     deferred_request = {
         "tool": clean_tool,
         "input": dict(tool_input),
@@ -1108,6 +1130,11 @@ def _desktop_execution_provider_session_start_recovery_actions(
                 "provider_id": provider_id,
                 "tools": [clean_tool],
                 "tool_names": [clean_tool],
+                **(
+                    {"requires_real_virtual_desktop_backend": True}
+                    if requires_real_backend
+                    else {}
+                ),
                 "reason": "desktop_execution_policy_requires_isolated_provider",
                 "diagnostic_route": "/yachiyo/studio/tools",
                 "api_route": "/yachiyo/studio/tools/desktop-provider/session/start",
@@ -1123,6 +1150,11 @@ def _desktop_execution_provider_session_start_recovery_actions(
             "deferred_continuation": [deferred_request],
             "metadata": {
                 "runtime_retry_source": "desktop_provider_session",
+                **(
+                    {"requires_real_virtual_desktop_backend": True}
+                    if requires_real_backend
+                    else {}
+                ),
                 "runtime_replan_auto_start_eligible": False,
                 "runtime_replan_auto_start_reason": "desktop_provider_session_start_requires_approval",
                 "runtime_replan_auto_start_blockers": [
@@ -1158,6 +1190,7 @@ def _desktop_execution_policy_should_offer_session_start(
         "sandbox_adapter_required",
         "sandbox_desktop_session_required",
         "sandbox_keyboard_mouse_provider_required",
+        "real_virtual_desktop_provider_required",
     }:
         return True
     return bool(
@@ -1168,6 +1201,8 @@ def _desktop_execution_policy_should_offer_session_start(
             "sandbox_desktop_session_required",
             "sandbox_keyboard_mouse_provider_required",
             "isolated_desktop_provider_required",
+            "loopback_desktop_backend",
+            "real_virtual_desktop_backend_required",
         }
     )
 
@@ -5619,3 +5654,17 @@ def _string_list(value: Any) -> list[str]:
         if text and text not in items:
             items.append(text)
     return items
+
+
+def _optional_bool(value: Any) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int) and value in {0, 1}:
+        return bool(value)
+    if isinstance(value, str):
+        clean = value.strip().lower()
+        if clean in {"1", "true", "yes", "on"}:
+            return True
+        if clean in {"0", "false", "no", "off"}:
+            return False
+    return None

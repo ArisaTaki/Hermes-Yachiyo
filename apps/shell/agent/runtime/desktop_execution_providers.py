@@ -1262,6 +1262,12 @@ def desktop_execution_provider_simulated_backend_result(
                 "desktop app operations through this path."
             ),
             "recommended_tools": ["desktop.provider_session.start"],
+            "recovery_actions": _real_virtual_provider_recovery_actions(
+                tool_name,
+                route=route,
+                tool_request=tool_request,
+                blocking_conditions=blockers,
+            ),
         },
         tool_name=tool_name,
         route=route,
@@ -1348,6 +1354,99 @@ def _provider_unavailable_recovery_actions(
                 "runtime_replan_auto_start_blockers": [
                     "approval_required",
                     "desktop_execution_provider_unavailable",
+                ],
+                "desktop_execution_route": dict(route),
+                "sandbox_provider": dict(sandbox_provider),
+                "sandbox_original_tool": clean_tool,
+                "sandbox_original_input": dict(raw_input),
+            },
+        }
+    ]
+
+
+def _real_virtual_provider_recovery_actions(
+    tool_name: str,
+    *,
+    route: Mapping[str, Any],
+    tool_request: Mapping[str, Any],
+    blocking_conditions: Iterable[str],
+) -> list[dict[str, Any]]:
+    clean_tool = str(tool_name or "").strip()
+    if not clean_tool:
+        return []
+    sandbox_provider = sandbox_provider_payload(tool_request)
+    provider_id = (
+        str(route.get("selected_provider_id") or "").strip()
+        or str(sandbox_provider.get("provider_id") or "").strip()
+        or "real-virtual-desktop"
+    )
+    blockers = _unique_strings(blocking_conditions)
+    raw_input = (
+        tool_request.get("input") if isinstance(tool_request.get("input"), Mapping) else {}
+    )
+    desktop_policy = (
+        dict(tool_request.get("desktop_execution_policy"))
+        if isinstance(tool_request.get("desktop_execution_policy"), Mapping)
+        else {"mode": "sandbox_preferred"}
+    )
+    deferred_request = {
+        "tool": clean_tool,
+        "input": dict(raw_input),
+        "desktop_execution_policy": {
+            **desktop_policy,
+            "mode": str(desktop_policy.get("mode") or "sandbox_preferred"),
+            "prefer_isolated_desktop": True,
+            "avoid_user_foreground_takeover": True,
+            "require_sandbox_for_keyboard_mouse": True,
+            "source": "real_virtual_desktop_provider_recovery",
+        },
+        "planning_reason": "real_virtual_desktop_provider_retry_after_start",
+        "source": "real_virtual_desktop_provider_recovery",
+    }
+    for key in (
+        "decision_id",
+        "plan_id",
+        "tool_plan_id",
+        "step_id",
+        "planner_step_id",
+        "capability_id",
+        "target_capability_id",
+        "runtime_stage",
+        "runtime_role",
+    ):
+        value = str(tool_request.get(key) or "").strip()
+        if value:
+            deferred_request[key] = value
+    return [
+        {
+            "label": "Start real virtual desktop provider",
+            "tool": "desktop.provider_session.start",
+            "input": {
+                "provider_id": provider_id,
+                "tools": [clean_tool],
+                "tool_names": [clean_tool],
+                "requires_real_virtual_desktop_backend": True,
+                "reason": "real_virtual_desktop_provider_required",
+                "diagnostic_route": "/yachiyo/studio/tools",
+                "api_route": "/yachiyo/studio/tools/desktop-provider/session/start",
+            },
+            "permission_target": "real_virtual_desktop_provider",
+            "risk_level": "medium",
+            "approval_required": True,
+            "approval_status": "pending",
+            "planning_reason": "real_virtual_desktop_provider_recovery",
+            "recovery_action_kind": "desktop_provider_session_start",
+            "deferred_tool": clean_tool,
+            "deferred_input": dict(raw_input),
+            "deferred_continuation": [deferred_request],
+            "metadata": {
+                "runtime_retry_source": "desktop_provider_session",
+                "requires_real_virtual_desktop_backend": True,
+                "runtime_replan_auto_start_eligible": False,
+                "runtime_replan_auto_start_reason": "real_virtual_desktop_provider_requires_approval",
+                "runtime_replan_auto_start_blockers": [
+                    "approval_required",
+                    *blockers,
                 ],
                 "desktop_execution_route": dict(route),
                 "sandbox_provider": dict(sandbox_provider),

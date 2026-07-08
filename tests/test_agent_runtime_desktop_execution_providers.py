@@ -189,6 +189,13 @@ def test_desktop_provider_registry_blocks_loopback_backend_even_with_ready_route
         "loopback_desktop_backend",
         "real_virtual_desktop_backend_required",
     ]
+    recovery = result["recovery_actions"][0]
+    assert recovery["tool"] == "desktop.provider_session.start"
+    assert recovery["input"]["requires_real_virtual_desktop_backend"] is True
+    assert recovery["input"]["tools"] == ["desktop.safe_type_text"]
+    assert recovery["permission_target"] == "real_virtual_desktop_provider"
+    assert recovery["metadata"]["requires_real_virtual_desktop_backend"] is True
+    assert recovery["metadata"]["runtime_replan_auto_start_eligible"] is False
     assert requests == []
 
 

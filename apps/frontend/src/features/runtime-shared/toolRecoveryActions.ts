@@ -6,7 +6,8 @@ export type RuntimeToolRecoveryAction = {
     | 'observe_desktop_state'
     | 'observe_desktop_controls'
     | 'supervised_live_retry'
-    | 'sandbox_desktop_handoff';
+    | 'sandbox_desktop_handoff'
+    | 'desktop_provider_session_start';
   approval_required?: boolean;
   approval_id?: string;
   approval_status?: string;
