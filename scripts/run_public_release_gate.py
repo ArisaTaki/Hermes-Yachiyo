@@ -49,6 +49,7 @@ def public_release_gate_checks(
         "--report-json",
         str(tmp_dir / "oha-desktop-agent-release-smoke.json"),
     ]
+    source_capabilities_json = tmp_dir / "rc-verification-source-capabilities.json"
     if include_isolated_provider_smoke:
         oha_release_smoke_command.append("--run-isolated-provider-smoke")
     checks = [
@@ -71,6 +72,18 @@ def public_release_gate_checks(
             id="planner_runtime_tool_parity",
             label="Runtime Planner to executable tool parity smoke",
             command=(sys.executable, "scripts/smoke_planner_runtime_tool_parity.py"),
+        ),
+        GateCheck(
+            id="source_capabilities",
+            label="Source-level Chat, Studio, approval, artifact, and timeline evidence",
+            command=(
+                sys.executable,
+                "scripts/verify_release_candidate.py",
+                "--source-only",
+                "--report-json",
+                str(source_capabilities_json),
+            ),
+            report_json=source_capabilities_json,
         ),
         GateCheck(
             id="oha_desktop_agent_release_smoke",

@@ -103,6 +103,42 @@ def _write_release_smoke_report(command: list[str], *, ok: bool) -> None:
     output_path.write_text(json.dumps(payload), encoding="utf-8")
 
 
+def _write_source_capabilities_report(command: list[str]) -> None:
+    if "scripts/verify_release_candidate.py" not in command or "--source-only" not in command:
+        return
+    output_json = command[command.index("--report-json") + 1]
+    output_path = gate._resolve_path(Path(output_json))
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "ok": True,
+        "source_release_guards": {"status": "passed", "findings": []},
+        "data_analysis_artifact_smoke": {"status": "passed", "evidence": {}, "findings": []},
+        "agent_entrypoint_desktop_execution_smoke": {
+            "status": "passed",
+            "evidence": {},
+            "findings": [],
+        },
+        "agent_entrypoint_data_analysis_smoke": {
+            "status": "passed",
+            "evidence": {},
+            "findings": [],
+        },
+        "approval_resume_timeline_smoke": {
+            "status": "passed",
+            "evidence": {},
+            "findings": [],
+        },
+        "yachiyo_route_approval_smoke": {
+            "status": "passed",
+            "evidence": {},
+            "findings": [],
+        },
+        "group_run_timeline_smoke": {"status": "passed", "evidence": {}, "findings": []},
+        "built_artifact_guards": {"status": "skipped", "artifact_paths": [], "findings": []},
+    }
+    output_path.write_text(json.dumps(payload), encoding="utf-8")
+
+
 def _write_diagnostics_bundle(command: list[str]) -> None:
     if "scripts/collect_release_diagnostics.py" not in command:
         return
@@ -201,6 +237,7 @@ def test_public_release_gate_defaults_to_safe_preflight_with_demo_blockers(
     def fake_run(command):
         command = list(command)
         commands.append(command)
+        _write_source_capabilities_report(command)
         _write_public_demo_report(command, release_level="partial_demo_ready")
         _write_diagnostics_bundle(command)
         _write_release_smoke_report(command, ok=False)
@@ -213,7 +250,7 @@ def test_public_release_gate_defaults_to_safe_preflight_with_demo_blockers(
     assert summary["ok"] is True
     assert summary["release_ready"] is False
     assert summary["status"] == "needs_release_evidence"
-    assert summary["check_count"] == 8
+    assert summary["check_count"] == 9
     assert summary["failed_count"] == 0
     assert [command[:2] for command in commands[:2]] == [
         [sys.executable, "scripts/verify_release_artifacts.py"],
@@ -226,6 +263,13 @@ def test_public_release_gate_defaults_to_safe_preflight_with_demo_blockers(
     assert any(
         "scripts/smoke_planner_runtime_tool_parity.py" in command
         for command in commands
+    )
+    source_command = next(
+        command for command in commands if "scripts/verify_release_candidate.py" in command
+    )
+    assert "--source-only" in source_command
+    assert source_command[source_command.index("--report-json") + 1] == str(
+        tmp_path / "tmp" / "gate" / "rc-verification-source-capabilities.json"
     )
     oha_product_command = next(
         command for command in commands if "scripts/smoke_oha_desktop_agent_release.py" in command
@@ -256,6 +300,9 @@ def test_public_release_gate_defaults_to_safe_preflight_with_demo_blockers(
         command for command in commands if "scripts/summarize_release_smoke.py" in command
     )
     assert str(
+        tmp_path / "tmp" / "gate" / "rc-verification-source-capabilities.json"
+    ) in release_smoke_command
+    assert str(
         tmp_path / "tmp" / "gate" / "oha-desktop-agent-release-smoke.json"
     ) in release_smoke_command
     assert str(tmp_path / "tmp" / "gate" / "diagnostics.zip") in release_smoke_command
@@ -280,7 +327,7 @@ def test_public_release_gate_defaults_to_safe_preflight_with_demo_blockers(
     assert "diagnostics_export" not in summary["release_smoke"]["missing_item_ids"]
     assert any(action["id"] == "packaged_launch" for action in summary["next_actions"])
     assert summary["progress"]["stage"] == "release_evidence"
-    assert summary["progress"]["automated_checks"] == {"passed": 8, "total": 8}
+    assert summary["progress"]["automated_checks"] == {"passed": 9, "total": 9}
     assert summary["progress"]["public_demo"] == {"passed": 14, "total": 16}
     assert summary["progress"]["release_smoke"] == {"passed": 3, "total": 10}
     assert summary["progress"]["external_blocked"] is False
@@ -297,6 +344,7 @@ def test_public_release_gate_strict_mode_fails_until_release_ready(
 
     def fake_run(command):
         command = list(command)
+        _write_source_capabilities_report(command)
         _write_public_demo_report(command, release_level="partial_demo_ready")
         _write_diagnostics_bundle(command)
         _write_release_smoke_report(command, ok=False)
@@ -328,7 +376,7 @@ def test_public_release_gate_strict_mode_fails_until_release_ready(
     assert "## Release Smoke" in markdown
     assert "Demo blocker `studio_replay_ui`: `ui_smoke_not_collected`" in markdown
     assert "Progress stage: `release_evidence`" in markdown
-    assert "Code progress: 73.5% (26.5% remaining)" in markdown
+    assert "Code progress: 74.3% (25.7% remaining)" in markdown
     assert "--include-ui" in markdown
     assert "tmp/public-demo-smokes-ui-missing.json" in markdown
     assert "--include-real-desktop --include-provider-workflow --include-ui" not in markdown
@@ -344,6 +392,7 @@ def test_public_release_gate_passes_when_full_release_smoke_is_present(
     def fake_run(command):
         command = list(command)
         commands.append(command)
+        _write_source_capabilities_report(command)
         _write_public_demo_report(command, release_level="full_public_demo_ready")
         _write_diagnostics_bundle(command)
         _write_release_smoke_report(command, ok=True)
@@ -378,6 +427,7 @@ def test_public_release_gate_reports_failed_checks(tmp_path, monkeypatch):
 
     def fake_run(command):
         command = list(command)
+        _write_source_capabilities_report(command)
         _write_public_demo_report(command, release_level="full_public_demo_ready")
         _write_diagnostics_bundle(command)
         _write_release_smoke_report(command, ok=True)
@@ -410,6 +460,7 @@ def test_public_release_gate_accepts_existing_release_smoke_sources(
     def fake_run(command):
         command = list(command)
         commands.append(command)
+        _write_source_capabilities_report(command)
         _write_release_smoke_report(command, ok=False)
         return _completed(command)
 
