@@ -291,3 +291,39 @@ def test_oha_desktop_agent_release_smoke_cli_passes_configured_provider_flag(
     assert exit_code == 0
     assert captured_kwargs["run_isolated_provider_smoke"] is True
     assert captured_kwargs["use_configured_virtual_desktop_provider"] is True
+
+
+def test_oha_desktop_agent_release_smoke_cli_passes_provider_manifest(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    captured_kwargs: dict[str, object] = {}
+    manifest_path = tmp_path / "provider-manifest.json"
+    manifest_path.write_text("{}", encoding="utf-8")
+
+    def fake_run_smoke(**kwargs):
+        captured_kwargs.update(kwargs)
+        return {
+            "ok": True,
+            "mode": "oha_desktop_agent_release_smoke",
+            "section_count": 0,
+            "failed_sections": [],
+            "checks": {"all_sections_passed": True},
+            "sections": [],
+        }
+
+    monkeypatch.setattr(smoke, "run_smoke", fake_run_smoke)
+
+    exit_code = smoke.main(
+        [
+            "--run-isolated-provider-smoke",
+            "--provider-manifest",
+            str(manifest_path),
+            "--report-json",
+            str(tmp_path / "oha-release-smoke.json"),
+        ]
+    )
+
+    assert exit_code == 0
+    assert captured_kwargs["run_isolated_provider_smoke"] is True
+    assert captured_kwargs["provider_manifest"] == manifest_path

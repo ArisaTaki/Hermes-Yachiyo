@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,7 @@ def test_isolated_provider_session_manager_starts_applies_env_and_stops(
 ) -> None:
     for key in session_module._ENV_KEYS:
         monkeypatch.delenv(key, raising=False)
+    monkeypatch.delenv("OHA_YACHIYO_DESKTOP_PROVIDER_MANIFEST", raising=False)
 
     popen_calls: list[list[str]] = []
 
@@ -93,6 +95,7 @@ def test_start_isolated_provider_session_can_start_managed_external_provider(
 ) -> None:
     for key in session_module._ENV_KEYS:
         monkeypatch.delenv(key, raising=False)
+    monkeypatch.delenv("OHA_YACHIYO_DESKTOP_PROVIDER_MANIFEST", raising=False)
     monkeypatch.setenv(
         "OHA_YACHIYO_DESKTOP_PROVIDER_START_COMMAND",
         "python -m fake_virtual_desktop_provider",
@@ -201,6 +204,207 @@ def test_start_isolated_provider_session_can_start_managed_external_provider(
     )
 
     manager.stop()
+
+
+def test_start_isolated_provider_session_can_start_provider_from_manifest(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    for key in session_module._ENV_KEYS:
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.delenv("OHA_YACHIYO_DESKTOP_PROVIDER_START_COMMAND", raising=False)
+    manifest_path = tmp_path / "provider-manifest.json"
+    provider_script = tmp_path / "provider.py"
+    provider_script.write_text("# fake provider\n", encoding="utf-8")
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "provider_id": "manifest-virtual-desktop",
+                "provider_kind": "sandbox_desktop",
+                "supported_tools": ["app.open", "desktop.verify"],
+                "keyboard_mouse_capture_supported": True,
+                "foreground_mutation_supported": True,
+                "desktop_session_kind": "virtual_desktop",
+                "desktop_session_isolated": True,
+                "foreground_takeover_required": False,
+                "entrypoint": {
+                    "script": "provider.py",
+                    "args": ["--host", "127.0.0.1", "--port", "0"],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_MANIFEST", str(manifest_path))
+    popen_calls: list[dict[str, Any]] = []
+
+    class FakeProcess:
+        pid = 6262
+
+        def __init__(self) -> None:
+            payload = {
+                "ok": True,
+                "url": "http://127.0.0.1:29095",
+                "execute_url": "http://127.0.0.1:29095/tools/execute",
+                "status_url": "http://127.0.0.1:29095/status",
+            }
+            self.stdout = io.StringIO(json.dumps(payload) + "\n")
+            self.stderr = io.StringIO("")
+            self.terminated = False
+
+        def poll(self) -> int | None:
+            return 0 if self.terminated else None
+
+        def terminate(self) -> None:
+            self.terminated = True
+
+        def wait(self, timeout: float | None = None) -> int:
+            self.terminated = True
+            return 0
+
+        def kill(self) -> None:
+            self.terminated = True
+
+    def fake_popen(command: list[str], **kwargs: Any) -> FakeProcess:
+        popen_calls.append({"command": command, **kwargs})
+        return FakeProcess()
+
+    def fake_provider_status(env=None, probe_health=False):
+        clean_env = dict(env or {})
+        configured = bool(clean_env.get("OHA_YACHIYO_DESKTOP_PROVIDER_URL"))
+        return {
+            "configured": configured,
+            "available": configured,
+            "adapter_ready": configured,
+            "provider_id": clean_env.get("OHA_YACHIYO_DESKTOP_PROVIDER_ID", ""),
+            "endpoint_origin": clean_env.get("OHA_YACHIYO_DESKTOP_PROVIDER_URL", ""),
+            "status": "available" if configured else "not_configured",
+            "probe_health": probe_health,
+            "desktop_session_kind": clean_env.get(
+                "OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_KIND",
+                "",
+            ),
+            "desktop_session_isolated": True if configured else None,
+            "foreground_takeover_required": False if configured else None,
+            "keyboard_mouse_capture_supported": True if configured else None,
+            "supported_tools": ["app.open", "desktop.verify"] if configured else [],
+        }
+
+    monkeypatch.setattr(session_module.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(
+        session_module,
+        "desktop_execution_provider_status_from_env",
+        fake_provider_status,
+    )
+
+    manager = IsolatedDesktopProviderSessionManager(repo_root=Path("/repo"))
+    monkeypatch.setattr(session_module, "_SESSION_MANAGER", manager)
+
+    started = session_module.start_isolated_desktop_provider_session(
+        {"tools": ["app.open", "desktop.verify"]}
+    )
+
+    assert popen_calls[0]["command"] == [
+        sys.executable,
+        str(provider_script),
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "0",
+    ]
+    assert popen_calls[0]["cwd"] == str(tmp_path)
+    assert popen_calls[0]["env"]["OHA_YACHIYO_DESKTOP_PROVIDER_REQUESTED_TOOLS"] == (
+        "app.open,desktop.verify"
+    )
+    assert started["started"] is True
+    assert started["source"] == "managed_external_provider_session"
+    assert started["provider_id"] == "manifest-virtual-desktop"
+    assert started["desktop_session_kind"] == "virtual_desktop"
+    assert session_module.os.environ["OHA_YACHIYO_DESKTOP_PROVIDER_EXECUTE_URL"] == (
+        "http://127.0.0.1:29095/tools/execute"
+    )
+
+    manager.stop()
+
+
+def test_isolated_provider_session_status_can_use_manifest_endpoint(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    for key in session_module._ENV_KEYS:
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.delenv("OHA_YACHIYO_DESKTOP_PROVIDER_START_COMMAND", raising=False)
+    manifest_path = tmp_path / "provider-manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "provider_id": "manifest-running-desktop",
+                "provider_kind": "sandbox_desktop",
+                "endpoint_urls": {
+                    "status": "http://127.0.0.1:29096/status",
+                    "execute": "http://127.0.0.1:29096/tools/execute",
+                },
+                "supported_tools": ["app.open", "desktop.verify"],
+                "keyboard_mouse_capture_supported": True,
+                "desktop_session_kind": "virtual_desktop",
+                "desktop_session_isolated": True,
+                "foreground_takeover_required": False,
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_MANIFEST", str(manifest_path))
+
+    manager = IsolatedDesktopProviderSessionManager(repo_root=Path("/repo"))
+    monkeypatch.setattr(session_module, "_SESSION_MANAGER", manager)
+    monkeypatch.setattr(
+        manager,
+        "status",
+        lambda probe_health=True: {"ok": True, "status": "stopped", "running": False},
+    )
+
+    def fake_provider_status(env=None, probe_health=False):
+        clean_env = dict(env or {})
+        configured = bool(clean_env.get("OHA_YACHIYO_DESKTOP_PROVIDER_EXECUTE_URL"))
+        return {
+            "configured": configured,
+            "available": configured,
+            "adapter_ready": configured,
+            "provider_id": clean_env.get("OHA_YACHIYO_DESKTOP_PROVIDER_ID", ""),
+            "endpoint_origin": clean_env.get("OHA_YACHIYO_DESKTOP_PROVIDER_URL", ""),
+            "status": "available" if configured else "not_configured",
+            "probe_health": probe_health,
+            "desktop_session_kind": clean_env.get(
+                "OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_KIND",
+                "",
+            ),
+            "desktop_session_isolated": True if configured else None,
+            "foreground_takeover_required": False if configured else None,
+            "keyboard_mouse_capture_supported": True if configured else None,
+            "supported_tools": ["app.open", "desktop.verify"] if configured else [],
+        }
+
+    monkeypatch.setattr(
+        session_module,
+        "desktop_execution_provider_status_from_env",
+        fake_provider_status,
+    )
+
+    try:
+        status = session_module.isolated_desktop_provider_session_status()
+
+        assert status["running"] is True
+        assert status["source"] == "provider_manifest"
+        assert status["provider_id"] == "manifest-running-desktop"
+        assert status["env"]["OHA_YACHIYO_DESKTOP_PROVIDER_EXECUTE_URL"] == (
+            "http://127.0.0.1:29096/tools/execute"
+        )
+        assert session_module.os.environ["OHA_YACHIYO_DESKTOP_PROVIDER_EXECUTE_URL"] == (
+            "http://127.0.0.1:29096/tools/execute"
+        )
+    finally:
+        for key in session_module._ENV_KEYS:
+            session_module.os.environ.pop(key, None)
 
 
 def test_ensure_isolated_provider_session_detects_keyboard_mouse_requests(

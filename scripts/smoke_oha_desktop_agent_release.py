@@ -497,6 +497,7 @@ def _build_sections(
     *,
     run_isolated_provider_smoke: bool = False,
     use_configured_virtual_desktop_provider: bool = False,
+    provider_manifest: Path | None = None,
 ) -> list[dict[str, Any]]:
     sections = [
         _run_section(
@@ -563,7 +564,11 @@ def _build_sections(
                 "isolated_desktop_provider",
                 "Desktop provider can execute discover, operate, input, and verify without taking over the user's foreground session.",
                 lambda: smoke_isolated_desktop_provider.run_smoke(
-                    use_configured_provider=use_configured_virtual_desktop_provider
+                    use_configured_provider=(
+                        use_configured_virtual_desktop_provider
+                        or provider_manifest is not None
+                    ),
+                    provider_manifest=provider_manifest,
                 ),
             )
         )
@@ -575,6 +580,7 @@ def run_smoke(
     workdir: Path | None = None,
     run_isolated_provider_smoke: bool = False,
     use_configured_virtual_desktop_provider: bool = False,
+    provider_manifest: Path | None = None,
 ) -> dict[str, Any]:
     with tempfile.TemporaryDirectory(prefix="oha-desktop-agent-release-smoke-") as temp_dir:
         root = Path(workdir) if workdir is not None else Path(temp_dir)
@@ -585,6 +591,7 @@ def run_smoke(
             use_configured_virtual_desktop_provider=(
                 use_configured_virtual_desktop_provider
             ),
+            provider_manifest=provider_manifest,
         )
     failed = [section for section in sections if section.get("ok") is not True]
     checks = {
@@ -629,8 +636,9 @@ def run_smoke(
         "checks": checks,
         "isolated_provider_smoke_requested": run_isolated_provider_smoke,
         "configured_virtual_desktop_provider_requested": bool(
-            use_configured_virtual_desktop_provider
+            use_configured_virtual_desktop_provider or provider_manifest is not None
         ),
+        "provider_manifest": str(provider_manifest or ""),
         "isolated_provider_smoke_collected": any(
             section.get("id") == "isolated_desktop_provider"
             and section.get("ok") is True
@@ -751,6 +759,15 @@ def _parser() -> argparse.ArgumentParser:
             "instead of the local loopback harness."
         ),
     )
+    parser.add_argument(
+        "--provider-manifest",
+        type=Path,
+        help=(
+            "Provider manifest JSON for the isolated provider smoke. The manifest "
+            "may point to an already-running virtual desktop provider or provide "
+            "an entrypoint for Oha-Yachiyo to start."
+        ),
+    )
     return parser
 
 
@@ -762,6 +779,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         use_configured_virtual_desktop_provider=bool(
             args.use_configured_virtual_desktop_provider
         ),
+        provider_manifest=args.provider_manifest,
     )
     if args.report_json is not None:
         _write_report(args.report_json, evidence)

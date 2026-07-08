@@ -12,6 +12,7 @@ import threading
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from apps.shell.agent.runtime.controlled_desktop_provider import (
     CONTROLLED_DESKTOP_PROVIDER_TOOLS,
@@ -45,6 +46,7 @@ _ENV_KEYS = {
 
 _PROVIDER_START_COMMAND_ENV = "OHA_YACHIYO_DESKTOP_PROVIDER_START_COMMAND"
 _PROVIDER_START_CWD_ENV = "OHA_YACHIYO_DESKTOP_PROVIDER_START_CWD"
+_PROVIDER_MANIFEST_ENV = "OHA_YACHIYO_DESKTOP_PROVIDER_MANIFEST"
 _PROVIDER_REQUESTED_TOOLS_ENV = "OHA_YACHIYO_DESKTOP_PROVIDER_REQUESTED_TOOLS"
 
 _PROVIDER_START_STATUSES = {
@@ -193,7 +195,11 @@ class IsolatedDesktopProviderSessionManager:
             current = self.status(probe_health=True)
             if current["running"]:
                 return {**current, "started": False}
-            command = _managed_external_provider_start_command()
+            manifest = _managed_external_provider_manifest(self._repo_root)
+            command = _managed_external_provider_start_command(
+                self._repo_root,
+                manifest=manifest,
+            )
             if not command:
                 raise RuntimeError("desktop provider start command is not configured")
             start_env = dict(os.environ)
@@ -208,7 +214,12 @@ class IsolatedDesktopProviderSessionManager:
                 start_env[_PROVIDER_REQUESTED_TOOLS_ENV] = ",".join(requested_tools)
             process = subprocess.Popen(
                 command,
-                cwd=str(_managed_external_provider_start_cwd(self._repo_root)),
+                cwd=str(
+                    _managed_external_provider_start_cwd(
+                        self._repo_root,
+                        manifest=manifest,
+                    )
+                ),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
@@ -223,7 +234,7 @@ class IsolatedDesktopProviderSessionManager:
             except Exception:
                 _terminate_process(process)
                 raise
-            env = _runtime_env_from_launch(launch)
+            env = _runtime_env_from_launch(_merge_manifest_launch(manifest, launch))
             self._process = process
             self._command = command
             self._env = env
@@ -428,6 +439,7 @@ def _read_launch_payload(
 
 
 def _runtime_env_from_launch(launch: dict[str, Any]) -> dict[str, str]:
+    launch = _provider_runtime_payload(launch)
     supported_tools = _string_list(launch.get("supported_tools"))
     tools = ",".join(supported_tools) if supported_tools else "desktop.safe_type_text"
     env = {
@@ -474,17 +486,187 @@ def _runtime_env_from_launch(launch: dict[str, Any]) -> dict[str, str]:
 
 
 def _managed_external_provider_start_configured() -> bool:
-    return bool(str(os.environ.get(_PROVIDER_START_COMMAND_ENV) or "").strip())
+    if str(os.environ.get(_PROVIDER_START_COMMAND_ENV) or "").strip():
+        return True
+    return bool(str(os.environ.get(_PROVIDER_MANIFEST_ENV) or "").strip())
 
 
-def _managed_external_provider_start_command() -> list[str]:
+def _managed_external_provider_start_command(
+    repo_root: Path,
+    *,
+    manifest: dict[str, Any] | None = None,
+) -> list[str]:
     raw = str(os.environ.get(_PROVIDER_START_COMMAND_ENV) or "").strip()
-    return shlex.split(raw) if raw else []
+    if raw:
+        return shlex.split(raw)
+    manifest_payload = (
+        manifest
+        if manifest is not None
+        else _managed_external_provider_manifest(repo_root)
+    )
+    entrypoint = _mapping(manifest_payload.get("entrypoint"))
+    command = entrypoint.get("command") or entrypoint.get("argv")
+    if isinstance(command, str):
+        return shlex.split(command)
+    if isinstance(command, list):
+        return [str(item) for item in command if str(item or "").strip()]
+    args = _string_list(entrypoint.get("args"))
+    script = str(entrypoint.get("script") or "").strip()
+    if script:
+        cwd = _managed_external_provider_start_cwd(
+            repo_root,
+            manifest=manifest_payload,
+        )
+        return [
+            sys.executable,
+            str(
+                _resolve_manifest_entrypoint_path(
+                    script,
+                    cwd=cwd,
+                    repo_root=repo_root,
+                )
+            ),
+            *args,
+        ]
+    module = str(entrypoint.get("module") or "").strip()
+    if module:
+        return [sys.executable, "-m", module, *args]
+    return []
 
 
-def _managed_external_provider_start_cwd(repo_root: Path) -> Path:
+def _managed_external_provider_start_cwd(
+    repo_root: Path,
+    *,
+    manifest: dict[str, Any] | None = None,
+) -> Path:
     raw = str(os.environ.get(_PROVIDER_START_CWD_ENV) or "").strip()
-    return Path(raw).expanduser() if raw else repo_root
+    if raw:
+        return Path(raw).expanduser()
+    entrypoint = _mapping((manifest or {}).get("entrypoint"))
+    cwd = str(entrypoint.get("cwd") or "").strip()
+    if cwd:
+        path = Path(cwd).expanduser()
+        return path if path.is_absolute() else repo_root / path
+    manifest_path = _managed_external_provider_manifest_path(repo_root)
+    return manifest_path.parent if manifest_path is not None else repo_root
+
+
+def _managed_external_provider_manifest(repo_root: Path | None = None) -> dict[str, Any]:
+    path = _managed_external_provider_manifest_path(repo_root)
+    if path is None:
+        return {}
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise RuntimeError("desktop provider manifest must be a JSON object")
+    return payload
+
+
+def _managed_external_provider_manifest_path(
+    repo_root: Path | None = None,
+) -> Path | None:
+    raw = str(os.environ.get(_PROVIDER_MANIFEST_ENV) or "").strip()
+    if not raw:
+        return None
+    path = Path(raw).expanduser()
+    if path.is_absolute():
+        return path
+    base = repo_root or Path.cwd()
+    return base / path
+
+
+def _merge_manifest_launch(
+    manifest: dict[str, Any],
+    launch: dict[str, Any],
+) -> dict[str, Any]:
+    payload = _provider_runtime_payload(manifest)
+    launch_payload = _provider_runtime_payload(launch)
+    payload.update(launch_payload)
+    if launch_payload.get("url") and "execute_url" not in launch_payload:
+        payload.pop("execute_url", None)
+    if launch_payload.get("url") and "status_url" not in launch_payload:
+        payload.pop("status_url", None)
+    return payload
+
+
+def _provider_runtime_payload(config: dict[str, Any]) -> dict[str, Any]:
+    if not isinstance(config, dict):
+        return {}
+    payload = dict(config)
+    safety = _mapping(payload.get("safety"))
+    for key in (
+        "foreground_mutation_supported",
+        "keyboard_mouse_capture_supported",
+        "desktop_session_kind",
+        "desktop_session_isolated",
+        "foreground_takeover_required",
+        "desktop_backend_kind",
+        "desktop_backend_is_loopback",
+        "desktop_backend_ready_for_public_release",
+        "requires_real_virtual_desktop_backend",
+    ):
+        if payload.get(key) in (None, "", [], {}) and key in safety:
+            payload[key] = safety.get(key)
+    endpoint_urls = _mapping(payload.get("endpoint_urls"))
+    if not endpoint_urls:
+        endpoint_urls = {
+            key: value
+            for key, value in _mapping(payload.get("endpoints")).items()
+            if str(value or "").startswith(("http://", "https://"))
+        }
+    execute_url = _first_mapping_value(
+        endpoint_urls,
+        "execute",
+        "tools_execute",
+        "tools.execute",
+        "tools/execute",
+        "execute_url",
+    )
+    status_url = _first_mapping_value(endpoint_urls, "status", "health", "status_url")
+    base_url = (
+        _first_mapping_value(payload, "url", "endpoint_origin", "base_url")
+        or _first_mapping_value(endpoint_urls, "url", "base_url", "base", "origin")
+        or _url_origin(str(execute_url or status_url or ""))
+    )
+    if base_url:
+        payload["url"] = str(base_url)
+    if execute_url:
+        payload["execute_url"] = str(execute_url)
+    if status_url:
+        payload["status_url"] = str(status_url)
+    return payload
+
+
+def _resolve_manifest_entrypoint_path(
+    value: str,
+    *,
+    cwd: Path,
+    repo_root: Path,
+) -> Path:
+    path = Path(value).expanduser()
+    if path.is_absolute():
+        return path
+    cwd_path = cwd / path
+    if cwd_path.exists():
+        return cwd_path
+    repo_path = repo_root / path
+    if repo_path.exists():
+        return repo_path
+    return cwd_path
+
+
+def _first_mapping_value(mapping: dict[str, Any], *keys: str) -> Any:
+    for key in keys:
+        value = mapping.get(key)
+        if value not in (None, "", [], {}):
+            return value
+    return None
+
+
+def _url_origin(value: str) -> str:
+    parsed = urlparse(str(value or ""))
+    if parsed.scheme and parsed.netloc:
+        return f"{parsed.scheme}://{parsed.netloc}"
+    return ""
 
 
 def _bool_env_value(value: Any, *, default: bool) -> str:
@@ -496,8 +678,40 @@ def _bool_env_value(value: Any, *, default: bool) -> str:
 
 def _external_isolated_desktop_provider_session_status() -> dict[str, Any]:
     provider_status = desktop_execution_provider_status_from_env(probe_health=True)
-    if not _external_status_is_isolated_provider_candidate(provider_status):
-        return {}
+    env_snapshot = _provider_env_snapshot()
+    source = "runtime_env"
+    is_candidate = _external_status_is_isolated_provider_candidate(provider_status)
+    running = bool(provider_status.get("available")) and bool(
+        provider_status.get("adapter_ready")
+    )
+    if (
+        not is_candidate
+        or (
+            not running
+            and str(os.environ.get(_PROVIDER_MANIFEST_ENV) or "").strip()
+        )
+    ):
+        try:
+            manifest_env = _runtime_env_from_launch(
+                _managed_external_provider_manifest(_SESSION_MANAGER._repo_root)
+            )
+        except Exception:
+            manifest_env = {}
+        if manifest_env:
+            provider_status = desktop_execution_provider_status_from_env(
+                manifest_env,
+                probe_health=True,
+            )
+            if _external_status_is_isolated_provider_candidate(provider_status):
+                _apply_runtime_env(manifest_env)
+                env_snapshot = dict(manifest_env)
+                source = "provider_manifest"
+            else:
+                if not is_candidate:
+                    return {}
+        else:
+            if not is_candidate:
+                return {}
     running = bool(provider_status.get("available")) and bool(
         provider_status.get("adapter_ready")
     )
@@ -511,15 +725,16 @@ def _external_isolated_desktop_provider_session_status() -> dict[str, Any]:
         "pid": None,
         "provider_id": str(provider_status.get("provider_id") or ""),
         "url": str(
-            os.environ.get("OHA_YACHIYO_DESKTOP_PROVIDER_URL")
+            env_snapshot.get("OHA_YACHIYO_DESKTOP_PROVIDER_URL")
+            or os.environ.get("OHA_YACHIYO_DESKTOP_PROVIDER_URL")
             or provider_status.get("endpoint_origin")
             or ""
         ),
         "command": [],
-        "env": _provider_env_snapshot(),
+        "env": env_snapshot,
         "started_at": 0.0,
         "provider_status": dict(provider_status),
-        "source": "runtime_env",
+        "source": source,
         "external_provider_configured": True,
     }
 

@@ -36,9 +36,24 @@ SMOKE_TOOLS = OHA_DESKTOP_AGENT_RELEASE_PROVIDER_TOOLS
 SMOKE_APP_NAME = "Apple Music"
 SMOKE_TEXT = "morning playlist"
 _PROVIDER_START_COMMAND_ENV = "OHA_YACHIYO_DESKTOP_PROVIDER_START_COMMAND"
+_PROVIDER_MANIFEST_ENV = "OHA_YACHIYO_DESKTOP_PROVIDER_MANIFEST"
 
 
-def run_smoke(*, use_configured_provider: bool = False) -> dict[str, Any]:
+def run_smoke(
+    *,
+    use_configured_provider: bool = False,
+    provider_manifest: Path | None = None,
+) -> dict[str, Any]:
+    if provider_manifest is not None:
+        previous = os.environ.get(_PROVIDER_MANIFEST_ENV)
+        os.environ[_PROVIDER_MANIFEST_ENV] = str(provider_manifest)
+        try:
+            return _run_configured_provider_smoke()
+        finally:
+            if previous is None:
+                os.environ.pop(_PROVIDER_MANIFEST_ENV, None)
+            else:
+                os.environ[_PROVIDER_MANIFEST_ENV] = previous
     if use_configured_provider:
         return _run_configured_provider_smoke()
 
@@ -135,7 +150,10 @@ def _configured_provider_needs_start(status: Mapping[str, Any]) -> bool:
 
 
 def _managed_provider_start_configured() -> bool:
-    return bool(str(os.environ.get(_PROVIDER_START_COMMAND_ENV) or "").strip())
+    return bool(
+        str(os.environ.get(_PROVIDER_START_COMMAND_ENV) or "").strip()
+        or str(os.environ.get(_PROVIDER_MANIFEST_ENV) or "").strip()
+    )
 
 
 def _run_provider_smoke(
@@ -486,6 +504,14 @@ def _parser() -> argparse.ArgumentParser:
         type=Path,
         help="Optional JSON evidence report path.",
     )
+    parser.add_argument(
+        "--provider-manifest",
+        type=Path,
+        help=(
+            "Provider manifest JSON. This can describe an already-running provider "
+            "or an entrypoint that Oha-Yachiyo should start."
+        ),
+    )
     return parser
 
 
@@ -499,7 +525,10 @@ def _write_report(path: Path, payload: dict[str, Any]) -> None:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
-    evidence = run_smoke(use_configured_provider=bool(args.use_configured_provider))
+    evidence = run_smoke(
+        use_configured_provider=bool(args.use_configured_provider),
+        provider_manifest=args.provider_manifest,
+    )
     if args.report_json is not None:
         _write_report(args.report_json, evidence)
     print(json.dumps(evidence, ensure_ascii=False, indent=2, sort_keys=True))

@@ -28,6 +28,39 @@ Oha-Yachiyo 会把本次需要的工具列表传给子进程：
 OHA_YACHIYO_DESKTOP_PROVIDER_REQUESTED_TOOLS
 ```
 
+也可以用 manifest 交接，避免在 Oha-Yachiyo 里写死某个 provider 的启动命令或 app 规则：
+
+```bash
+export OHA_YACHIYO_DESKTOP_PROVIDER_MANIFEST="/path/to/provider-manifest.json"
+python scripts/smoke_oha_desktop_agent_release.py \
+  --run-isolated-provider-smoke \
+  --provider-manifest /path/to/provider-manifest.json \
+  --report-json tmp/oha-desktop-agent-release-smoke.json
+```
+
+manifest 可以只描述已经运行的 endpoint，也可以带 `entrypoint` 让 Oha-Yachiyo 托管启动：
+
+```json
+{
+  "provider_id": "real-virtual-desktop",
+  "provider_kind": "sandbox_desktop",
+  "endpoint_urls": {
+    "status": "http://127.0.0.1:29093/status",
+    "execute": "http://127.0.0.1:29093/tools/execute"
+  },
+  "supported_tools": ["desktop.list_apps", "app.open", "desktop.verify"],
+  "desktop_session_kind": "virtual_desktop",
+  "desktop_session_isolated": true,
+  "foreground_takeover_required": false,
+  "entrypoint": {
+    "script": "provider.py",
+    "args": ["--host", "127.0.0.1", "--port", "0"]
+  }
+}
+```
+
+`entrypoint.command` / `entrypoint.argv` 也可直接提供完整启动命令。`entrypoint.script` 的相对路径默认按 manifest 所在目录解析；如果是仓库内置脚本，也会回退到仓库根目录解析。
+
 ## 启动 JSON
 
 启动进程 stdout 第一行必须是 JSON object：
