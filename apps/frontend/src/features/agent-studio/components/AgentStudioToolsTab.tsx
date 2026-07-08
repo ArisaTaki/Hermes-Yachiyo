@@ -350,14 +350,20 @@ function DesktopProviderSessionPanel({
   const pid = stringValue(session.pid);
   const command = stringArray(session.command);
   const source = stringValue(session.source);
+  const sessionError = stringValue(session.error);
+  const reason = stringValue(session.reason);
+  const toolNames = stringArray(session.tool_names).slice(0, 4);
   return (
     <section
       className="studio-tool-inspector-section"
       data-provider-session-command={command.join(' ')}
+      data-provider-session-error={sessionError}
       data-provider-session-pid={pid}
+      data-provider-session-reason={reason}
       data-provider-session-running={String(running)}
       data-provider-session-source={source}
       data-provider-session-status={status}
+      data-provider-session-tools={toolNames.join(',')}
       data-provider-session-url={url}
       data-testid="studio-desktop-provider-session"
     >
@@ -381,10 +387,21 @@ function DesktopProviderSessionPanel({
             pid {pid}
           </span>
         ) : null}
+        {reason ? (
+          <span className="studio-tool-permission warning" data-provider-session-reason={reason}>
+            {reason}
+          </span>
+        ) : null}
+        {toolNames.length ? (
+          <span className="studio-tool-permission" data-provider-session-tools={toolNames.join(',')}>
+            {toolNames.join(', ')}
+          </span>
+        ) : null}
         {!providerId && !url && !pid ? (
           <span className="studio-tool-permission missing">isolated provider stopped</span>
         ) : null}
       </div>
+      {sessionError ? <div className="notice danger">{sessionError}</div> : null}
       {error ? <div className="notice danger">{error}</div> : null}
       <div className="studio-planner-actions">
         <button

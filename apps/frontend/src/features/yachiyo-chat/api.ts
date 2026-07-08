@@ -42,11 +42,16 @@ export type YachiyoDesktopProviderSessionRequest = {
 };
 
 export type YachiyoDesktopProviderSessionSnapshot = {
+  error?: string;
+  needed?: boolean;
   ok?: boolean;
+  reason?: string;
+  request_ids?: string[];
   status?: string;
   running?: boolean;
   started?: boolean;
   provider_id?: string;
+  tool_names?: string[];
 };
 
 export type SendLegacyChatMessageRequest = {

@@ -51,7 +51,11 @@ export type YachiyoStudioDesktopProviderSessionRequest = {
 };
 
 export type YachiyoStudioDesktopProviderSessionSnapshot = {
+  error?: string;
+  needed?: boolean;
   ok?: boolean;
+  reason?: string;
+  request_ids?: string[];
   status?: string;
   running?: boolean;
   started?: boolean;
@@ -63,6 +67,7 @@ export type YachiyoStudioDesktopProviderSessionSnapshot = {
   env?: Record<string, string>;
   provider_status?: Record<string, unknown>;
   source?: string;
+  tool_names?: string[];
 };
 
 export type YachiyoStudioRunReplanRecoveryActionRequest = {

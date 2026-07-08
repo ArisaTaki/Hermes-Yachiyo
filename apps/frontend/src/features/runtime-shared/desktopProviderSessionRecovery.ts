@@ -8,11 +8,16 @@ export type DesktopProviderSessionStartRequest = {
 };
 
 export type DesktopProviderSessionSnapshot = {
+  error?: string;
+  needed?: boolean;
   ok?: boolean;
+  reason?: string;
+  request_ids?: string[];
   status?: string;
   running?: boolean;
   started?: boolean;
   provider_id?: string;
+  tool_names?: string[];
 };
 
 export function runtimeRecoveryActionIsDesktopProviderSessionStart(
@@ -64,6 +69,10 @@ export function desktopProviderSessionRecoveryStatusMessage(
   session: DesktopProviderSessionSnapshot,
 ): string {
   const providerId = session.provider_id || 'local-isolated-desktop';
+  if (session.ok === false) {
+    const detail = session.error || session.reason || session.status || providerId;
+    return `隔离桌面 Provider 启动失败：${detail}`;
+  }
   if (session.running || session.started) return `已启动隔离桌面 Provider：${providerId}`;
   if (session.status) return `已请求启动隔离桌面 Provider：${session.status}`;
   return `已请求启动隔离桌面 Provider：${providerId}`;
