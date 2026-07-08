@@ -180,6 +180,10 @@ def test_main_chat_run_lifecycle_records_desktop_provider_session_event() -> Non
             "command": ["python", "scripts/run_isolated_desktop_provider.py"],
             "request_ids": ["request-click"],
             "tool_names": ["app.focus_and_click_ui_element"],
+            "supported_tools": [
+                "app.focus_and_click_ui_element",
+                "desktop.inspect_app",
+            ],
         },
     }
 
@@ -222,6 +226,10 @@ def test_main_chat_run_lifecycle_records_desktop_provider_session_event() -> Non
     assert provider_event["desktop_provider_session"]["request_ids"] == [
         "request-click"
     ]
+    assert provider_event["desktop_provider_session"]["supported_tools"] == [
+        "app.focus_and_click_ui_element",
+        "desktop.inspect_app",
+    ]
     assert "env" not in provider_event["desktop_provider_session"]
     assert "command" not in provider_event["desktop_provider_session"]
     snapshot = run_timeline_snapshot_from_payload(run)
@@ -246,6 +254,10 @@ def test_main_chat_run_lifecycle_records_desktop_provider_session_event() -> Non
     assert projected_event.payload["desktop_provider_session"][
         "keyboard_mouse_capture_supported"
     ] is True
+    assert projected_event.payload["desktop_provider_session"]["supported_tools"] == [
+        "app.focus_and_click_ui_element",
+        "desktop.inspect_app",
+    ]
     assert "env" not in projected_event.payload["desktop_provider_session"]
 
 
