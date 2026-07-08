@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import threading
 from pathlib import Path
@@ -22,6 +23,10 @@ from apps.shell.agent.runtime.isolated_desktop_provider import (
     IsolatedDesktopProvider,
     build_isolated_desktop_provider_server,
 )
+from apps.shell.yachiyo_agent.isolated_provider_session import (
+    start_isolated_desktop_provider_session,
+    stop_isolated_desktop_provider_session,
+)
 
 SMOKE_TOOLS = (
     "desktop.list_apps",
@@ -37,6 +42,7 @@ SMOKE_TOOLS = (
 )
 SMOKE_APP_NAME = "Apple Music"
 SMOKE_TEXT = "morning playlist"
+_PROVIDER_START_COMMAND_ENV = "OHA_YACHIYO_DESKTOP_PROVIDER_START_COMMAND"
 
 
 def run_smoke(*, use_configured_provider: bool = False) -> dict[str, Any]:
@@ -80,6 +86,22 @@ def run_smoke(*, use_configured_provider: bool = False) -> dict[str, Any]:
 
 def _run_configured_provider_smoke() -> dict[str, Any]:
     status = desktop_execution_provider_status_from_env(probe_health=True)
+    managed_session: dict[str, Any] = {}
+    stop_managed_session = False
+    if _configured_provider_needs_start(status) and _managed_provider_start_configured():
+        try:
+            managed_session = start_isolated_desktop_provider_session(
+                {"tools": list(SMOKE_TOOLS)}
+            )
+            stop_managed_session = bool(managed_session.get("started"))
+            status = desktop_execution_provider_status_from_env(probe_health=True)
+        except Exception as exc:
+            return _provider_status_only_report(
+                status,
+                reason="managed_external_provider_start_failed",
+                use_configured_provider=True,
+                managed_provider_session={"ok": False, "error": str(exc)},
+            )
     provider_id = str(status.get("provider_id") or "").strip()
     base_url = str(status.get("endpoint_origin") or "").strip()
     if status.get("configured") is not True:
@@ -87,21 +109,40 @@ def _run_configured_provider_smoke() -> dict[str, Any]:
             status,
             reason="desktop_execution_provider_not_configured",
             use_configured_provider=True,
+            managed_provider_session=managed_session,
         )
     if not provider_id:
         return _provider_status_only_report(
             status,
             reason="desktop_execution_provider_missing_provider_id",
             use_configured_provider=True,
+            managed_provider_session=managed_session,
         )
     registry = desktop_execution_provider_registry_from_env()
-    return _run_provider_smoke(
-        registry=registry,
-        provider_id=provider_id,
-        status=status,
-        base_url=base_url,
-        use_configured_provider=True,
-    )
+    try:
+        report = _run_provider_smoke(
+            registry=registry,
+            provider_id=provider_id,
+            status=status,
+            base_url=base_url,
+            use_configured_provider=True,
+        )
+        report["managed_provider_session"] = dict(managed_session)
+        report["managed_provider_started"] = bool(managed_session.get("started"))
+        return report
+    finally:
+        if stop_managed_session:
+            stop_isolated_desktop_provider_session()
+
+
+def _configured_provider_needs_start(status: Mapping[str, Any]) -> bool:
+    if status.get("configured") is not True:
+        return True
+    return not (bool(status.get("available")) and bool(status.get("adapter_ready")))
+
+
+def _managed_provider_start_configured() -> bool:
+    return bool(str(os.environ.get(_PROVIDER_START_COMMAND_ENV) or "").strip())
 
 
 def _run_provider_smoke(
@@ -369,8 +410,10 @@ def _provider_status_only_report(
     *,
     reason: str,
     use_configured_provider: bool,
+    managed_provider_session: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     status_payload = dict(status)
+    session_payload = dict(managed_provider_session or {})
     checks = {
         "provider_configured": status_payload.get("configured") is True,
         "provider_available": bool(status_payload.get("available")),
@@ -394,6 +437,8 @@ def _provider_status_only_report(
         "tool_sequence": list(SMOKE_TOOLS),
         "checks": checks,
         "reason": reason,
+        "managed_provider_session": session_payload,
+        "managed_provider_started": bool(session_payload.get("started")),
         **_provider_status_summary(status_payload),
         "covered_tools": [],
     }

@@ -83,3 +83,93 @@ def test_isolated_desktop_provider_smoke_can_use_configured_provider(monkeypatch
     assert [item["action"] for item in evidence["tool_results"]] == list(
         smoke.SMOKE_TOOLS
     )
+
+
+def test_isolated_desktop_provider_smoke_can_start_managed_configured_provider(
+    monkeypatch,
+) -> None:
+    state = {"started": False, "stopped": False}
+
+    class FakeRegistry:
+        def execute_if_routed(
+            self,
+            tool_name,
+            payload,
+            *,
+            tool_request,
+            broker,
+            approved=False,
+        ):
+            return {
+                "ok": True,
+                "tool": tool_name,
+                "action": tool_name,
+                "desktop_execution_provider_routed": True,
+                "sandbox_provider": dict(tool_request.get("sandbox_provider") or {}),
+                "data": {"verification_passed": tool_name == "desktop.verify"},
+            }
+
+    def fake_status(*args, **kwargs):
+        if not state["started"]:
+            return {
+                "configured": False,
+                "available": False,
+                "adapter_ready": False,
+                "status": "not_configured",
+            }
+        return {
+            "configured": True,
+            "available": True,
+            "adapter_ready": True,
+            "provider_id": "managed-virtual-desktop",
+            "endpoint_origin": "http://127.0.0.1:29093",
+            "desktop_session_kind": "virtual_desktop",
+            "desktop_session_isolated": True,
+            "foreground_takeover_required": False,
+            "keyboard_mouse_capture_supported": True,
+            "desktop_backend_kind": "virtual_desktop_backend",
+            "desktop_backend_is_loopback": False,
+            "desktop_backend_ready_for_public_release": True,
+            "requires_real_virtual_desktop_backend": False,
+            "supported_tools": list(smoke.SMOKE_TOOLS),
+        }
+
+    monkeypatch.setenv(
+        "OHA_YACHIYO_DESKTOP_PROVIDER_START_COMMAND",
+        "python -m fake_virtual_desktop_provider",
+    )
+    monkeypatch.setattr(
+        smoke,
+        "desktop_execution_provider_status_from_env",
+        fake_status,
+    )
+    monkeypatch.setattr(
+        smoke,
+        "desktop_execution_provider_registry_from_env",
+        lambda *args, **kwargs: FakeRegistry(),
+    )
+    monkeypatch.setattr(
+        smoke,
+        "start_isolated_desktop_provider_session",
+        lambda request=None: state.update(started=True)
+        or {
+            "ok": True,
+            "started": True,
+            "running": True,
+            "provider_id": "managed-virtual-desktop",
+        },
+    )
+    monkeypatch.setattr(
+        smoke,
+        "stop_isolated_desktop_provider_session",
+        lambda: state.update(stopped=True) or {"ok": True, "stopped": True},
+    )
+
+    evidence = smoke.run_smoke(use_configured_provider=True)
+
+    assert evidence["ok"] is True
+    assert evidence["use_configured_provider"] is True
+    assert evidence["managed_provider_started"] is True
+    assert evidence["managed_provider_session"]["provider_id"] == "managed-virtual-desktop"
+    assert state["stopped"] is True
+    assert evidence["desktop_backend_ready_for_public_release"] is True
