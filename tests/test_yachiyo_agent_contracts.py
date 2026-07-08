@@ -512,6 +512,17 @@ def test_runtime_execution_envelope_snapshot_is_public_contract() -> None:
             required_capabilities=["desktop.app_discovery"],
             available_capabilities=["desktop.app_discovery"],
         ),
+        execution_strategy=RuntimeExecutionStrategySnapshot(
+            strategy_id="execution-strategy-runtime-plan-1",
+            preferred_environment="isolated_desktop",
+            interaction_mode="read_only",
+            policy_mode="preview_input",
+            isolated_desktop_preferred=True,
+            foreground_takeover_allowed=False,
+            sandbox_required=False,
+            reasons=["policy_prefers_isolated_desktop"],
+            mitigations=["observe_before_operate"],
+        ),
         requests=[request],
         approvals_required=["operate-foreground-ui"],
         route_to_studio=True,
@@ -538,6 +549,7 @@ def test_runtime_execution_envelope_snapshot_is_public_contract() -> None:
         "plan_id",
         "intent_kind",
         "capability_plan",
+        "execution_strategy",
         "requests",
         "task_core",
         "task_progress",
@@ -556,6 +568,8 @@ def test_runtime_execution_envelope_snapshot_is_public_contract() -> None:
     ]
     assert payload["requests"][0]["tool_name"] == "desktop.list_apps"
     assert payload["capability_plan"]["items"][0]["capability_id"] == "desktop.app_discovery"
+    assert payload["execution_strategy"]["preferred_environment"] == "isolated_desktop"
+    assert payload["execution_strategy"]["interaction_mode"] == "read_only"
     assert payload["requests"][0]["capability_title"] == "Discover Desktop Apps"
     assert payload["requests"][0]["capability_selected_tools"] == ["desktop.list_apps"]
     assert payload["requests"][0]["input"] == {"query": "PixelForge", "limit": 20}
@@ -7807,6 +7821,18 @@ def test_runtime_planner_execution_strategy_prefers_isolated_desktop_for_daily_k
     assert strategy.keyboard_mouse_step_count >= 1
     assert "keyboard_mouse_capture_planned" in strategy.reasons
     assert "do_not_take_over_user_foreground_session" in strategy.mitigations
+
+    envelope = runtime_execution_envelope_from_decision(
+        decision,
+        allowed_tools=tools,
+        metadata=metadata,
+    )
+
+    assert envelope is not None
+    assert envelope.execution_strategy is not None
+    assert envelope.execution_strategy.strategy_id == strategy.strategy_id
+    assert envelope.execution_strategy.preferred_environment == "isolated_desktop"
+    assert envelope.execution_strategy.sandbox_required is True
 
 
 def test_runtime_execution_envelope_blocks_keyboard_mouse_without_controlled_provider(

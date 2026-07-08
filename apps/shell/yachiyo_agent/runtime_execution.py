@@ -101,6 +101,7 @@ def runtime_execution_envelope_from_decision(
         plan_id=decision.plan.plan_id,
         intent_kind=str(decision.selected_intent.kind or ""),
         capability_plan=decision.plan.capability_plan,
+        execution_strategy=decision.plan.execution_strategy,
         requests=requests,
         task_core=decision.plan.task_core,
         task_progress=task_progress_summary_from_task_core(decision.plan.task_core),

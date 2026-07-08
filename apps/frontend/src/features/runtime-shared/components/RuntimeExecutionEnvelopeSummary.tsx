@@ -1,6 +1,10 @@
 import type { ReactNode } from 'react';
 
-import type { RuntimeExecutionEnvelopeSnapshot, RuntimeExecutionRequestSnapshot } from '../types';
+import type {
+  RuntimeExecutionEnvelopeSnapshot,
+  RuntimeExecutionRequestSnapshot,
+  RuntimeExecutionStrategySnapshot,
+} from '../types';
 import {
   RuntimeRecoveryEvidencePanel,
   runtimeRecoveryActionTargetPreview,
@@ -59,6 +63,7 @@ export function RuntimeExecutionEnvelopeSummary({
   const retryTools = uniqueStrings(retrySummaries.map((retry) => retry.tool));
   const blockers = runtimeExecutionBlockers(requests);
   const riskCounts = runtimeExecutionRiskCounts(requests);
+  const executionStrategy = envelope.execution_strategy || null;
   const executionPolicy = runtimeExecutionPolicySummary(envelope.desktop_execution_policy, requests);
   const sandboxProvider = runtimeSandboxProviderSummary(envelope.sandbox_provider, requests);
   const executionRoute = runtimeExecutionRouteSummary(envelope.desktop_execution_route, requests);
@@ -166,6 +171,12 @@ export function RuntimeExecutionEnvelopeSummary({
       data-desktop-execution-session-detail={executionSession.detail}
       data-desktop-execution-session-label={executionSession.label}
       data-desktop-execution-session-mode={executionSession.mode}
+      data-execution-strategy-interaction-mode={executionStrategy?.interaction_mode || ''}
+      data-execution-strategy-preferred-environment={executionStrategy?.preferred_environment || ''}
+      data-execution-strategy-sandbox-required={
+        executionStrategy ? String(executionStrategy.sandbox_required === true) : ''
+      }
+      data-execution-strategy-keyboard-mouse-step-count={executionStrategy?.keyboard_mouse_step_count ?? ''}
       data-request-count={requests.length}
       data-risk-levels={riskCounts.map(([risk, count]) => `${risk}:${count}`).join(',')}
       data-route-to-studio={envelope.route_to_studio === undefined ? '' : String(envelope.route_to_studio)}
@@ -190,6 +201,7 @@ export function RuntimeExecutionEnvelopeSummary({
             executionRoute={executionRoute}
             executionPolicy={executionPolicy}
             executionSession={executionSession}
+            executionStrategy={executionStrategy}
             openQuestions={openQuestions}
             retrySummaries={retrySummaries}
             riskCounts={riskCounts}
@@ -238,6 +250,10 @@ export function RuntimeExecutionEnvelopeSummary({
               <small>Session</small>
               <strong>{executionSession.label || 'None'}</strong>
             </span>
+            <span>
+              <small>Strategy</small>
+              <strong>{executionStrategy?.preferred_environment || 'Runtime'}</strong>
+            </span>
           </div>
           <RuntimeExecutionEnvelopePills
             approvals={approvals}
@@ -247,6 +263,7 @@ export function RuntimeExecutionEnvelopeSummary({
             executionRoute={executionRoute}
             executionPolicy={executionPolicy}
             executionSession={executionSession}
+            executionStrategy={executionStrategy}
             openQuestions={openQuestions}
             retrySummaries={retrySummaries}
             riskCounts={riskCounts}
@@ -285,6 +302,7 @@ function RuntimeExecutionEnvelopePills({
   executionRoute,
   executionPolicy,
   executionSession,
+  executionStrategy,
   openQuestions,
   retrySummaries,
   riskCounts,
@@ -300,6 +318,7 @@ function RuntimeExecutionEnvelopePills({
   executionRoute: RuntimeExecutionRouteSummary;
   executionPolicy: RuntimeExecutionPolicySummary;
   executionSession: RuntimeExecutionSessionModeSummary;
+  executionStrategy: RuntimeExecutionStrategySnapshot | null;
   openQuestions: string[];
   retrySummaries: RuntimeExecutionRetrySummary[];
   riskCounts: Array<[string, number]>;
@@ -326,6 +345,7 @@ function RuntimeExecutionEnvelopePills({
     && !sandboxProvider.launchCommand.length
     && !sandboxProvider.controlledCommand.length
     && !executionSession.mode
+    && !executionStrategy?.preferred_environment
     && !executionPolicy.mode
   ) {
     return null;
@@ -389,6 +409,25 @@ function RuntimeExecutionEnvelopePills({
           title={executionSession.detail || undefined}
         >
           session · {executionSession.label}
+        </span>
+      ) : null}
+      {executionStrategy?.preferred_environment ? (
+        <span
+          className={pillClassName}
+          data-execution-strategy-foreground-control-step-count={
+            executionStrategy.foreground_control_step_count ?? 0
+          }
+          data-execution-strategy-interaction-mode={executionStrategy.interaction_mode || ''}
+          data-execution-strategy-keyboard-mouse-step-count={
+            executionStrategy.keyboard_mouse_step_count ?? 0
+          }
+          data-execution-strategy-mitigations={(executionStrategy.mitigations || []).join(',')}
+          data-execution-strategy-preferred-environment={executionStrategy.preferred_environment || ''}
+          data-execution-strategy-reasons={(executionStrategy.reasons || []).join(',')}
+          data-execution-strategy-sandbox-required={String(executionStrategy.sandbox_required === true)}
+          title={(executionStrategy.mitigations || []).join(' · ') || undefined}
+        >
+          strategy · {executionStrategy.preferred_environment}
         </span>
       ) : null}
       {sandboxProvider.status ? (

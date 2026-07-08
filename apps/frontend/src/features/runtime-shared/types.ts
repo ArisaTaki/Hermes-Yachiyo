@@ -888,6 +888,7 @@ export type RuntimeExecutionEnvelopeSnapshot = {
   plan_id: string;
   intent_kind: string;
   capability_plan?: CapabilityPlanSnapshot | null;
+  execution_strategy?: RuntimeExecutionStrategySnapshot | null;
   requests?: RuntimeExecutionRequestSnapshot[];
   task_core?: TaskCoreSnapshot | null;
   task_progress?: TaskProgressSummarySnapshot | null;

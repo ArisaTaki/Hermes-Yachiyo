@@ -945,6 +945,7 @@ class RuntimeExecutionEnvelopeSnapshot(_PublicSnapshot):
     plan_id: str
     intent_kind: str
     capability_plan: CapabilityPlanSnapshot | None = None
+    execution_strategy: RuntimeExecutionStrategySnapshot | None = None
     requests: list[RuntimeExecutionRequestSnapshot] = Field(default_factory=list)
     task_core: TaskCoreSnapshot | None = None
     task_progress: TaskProgressSummarySnapshot | None = None
