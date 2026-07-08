@@ -697,7 +697,11 @@ def refresh_local_rc_signoff(
     ]
     if provider_manifest is not None:
         oha_desktop_agent_smoke_command.extend(
-            ["--provider-manifest", str(provider_manifest)]
+            [
+                "--use-configured-virtual-desktop-provider",
+                "--provider-manifest",
+                str(provider_manifest),
+            ]
         )
     oha_desktop_agent_smoke_code = _run(
         oha_desktop_agent_smoke_command,

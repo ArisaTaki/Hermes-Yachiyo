@@ -411,6 +411,7 @@ def test_refresh_local_rc_signoff_forwards_provider_manifest_to_oha_smoke(
         if "scripts/smoke_oha_desktop_agent_release.py" in command
     )
     assert "--run-isolated-provider-smoke" in oha_smoke_command
+    assert "--use-configured-virtual-desktop-provider" in oha_smoke_command
     assert oha_smoke_command[
         oha_smoke_command.index("--provider-manifest") + 1
     ] == str(provider_manifest)
