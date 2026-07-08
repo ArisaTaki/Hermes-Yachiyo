@@ -75,6 +75,7 @@ from apps.shell.yachiyo_agent import (
     RuntimeCheckpointPolicySnapshot,
     RuntimeDebugSummarySnapshot,
     RuntimeExecutionEnvelopeSnapshot,
+    RuntimeExecutionStrategySnapshot,
     RuntimeExecutionRequestSnapshot,
     SandboxDesktopProviderSnapshot,
     RuntimePlanSnapshot,
@@ -352,12 +353,28 @@ def test_planner_public_snapshots_explain_intent_capabilities_and_tool_plan() ->
         approvals_required=["run-analysis"],
         artifacts_expected=["markdown_report", "chart"],
     )
+    execution_strategy = RuntimeExecutionStrategySnapshot(
+        strategy_id="execution-strategy-1",
+        preferred_environment="isolated_desktop",
+        interaction_mode="foreground",
+        policy_mode="preview_input",
+        isolated_desktop_preferred=True,
+        foreground_takeover_allowed=False,
+        sandbox_required=True,
+        foreground_control_step_count=1,
+        keyboard_mouse_step_count=1,
+        sandbox_recommended_step_count=1,
+        approval_step_count=1,
+        reasons=["keyboard_mouse_capture_planned"],
+        mitigations=["do_not_take_over_user_foreground_session"],
+    )
     runtime_plan = RuntimePlanSnapshot(
         plan_id="runtime-plan-1",
         intent=intent,
         capabilities=[capability],
         capability_plan=capability_plan,
         tool_plan=tool_plan,
+        execution_strategy=execution_strategy,
         timeline_preview=[{"event_type": "agent.plan.created"}],
     )
     decision = PlannerDecisionSnapshot(
@@ -395,6 +412,11 @@ def test_planner_public_snapshots_explain_intent_capabilities_and_tool_plan() ->
         "Compute summary statistics and charts."
     )
     assert payload["plan"]["tool_plan"]["steps"][1]["fallback_tools"] == ["terminal.run"]
+    assert payload["plan"]["execution_strategy"]["preferred_environment"] == (
+        "isolated_desktop"
+    )
+    assert payload["plan"]["execution_strategy"]["sandbox_required"] is True
+    assert payload["plan"]["execution_strategy"]["keyboard_mouse_step_count"] == 1
     assert payload["plan"]["timeline_preview"] == [{"event_type": "agent.plan.created"}]
 
 
@@ -7756,6 +7778,35 @@ def test_desktop_execution_envelope_keeps_blocked_verification_non_executable() 
     assert recoveries[0].recovery_actions[0].observation_retry["reason"] == (
         "screen_capture_blank"
     )
+
+
+def test_runtime_planner_execution_strategy_prefers_isolated_desktop_for_daily_keyboard_mouse() -> None:
+    tools = runtime_execution_tool_names(
+        intent_kind="desktop_operation",
+        prefer_low_level=True,
+    )
+    metadata = with_daily_entrypoint_desktop_execution_policy(
+        {"source": "chat"},
+        surface="chat",
+    )
+    decision = RuntimePlanner().decision(
+        "在当前应用输入 hello",
+        allowed_tools=tools,
+        metadata=metadata,
+    )
+
+    strategy = decision.plan.execution_strategy
+
+    assert strategy is not None
+    assert strategy.preferred_environment == "isolated_desktop"
+    assert strategy.interaction_mode == "foreground"
+    assert strategy.policy_mode == "preview_input"
+    assert strategy.isolated_desktop_preferred is True
+    assert strategy.foreground_takeover_allowed is False
+    assert strategy.sandbox_required is True
+    assert strategy.keyboard_mouse_step_count >= 1
+    assert "keyboard_mouse_capture_planned" in strategy.reasons
+    assert "do_not_take_over_user_foreground_session" in strategy.mitigations
 
 
 def test_runtime_execution_envelope_blocks_keyboard_mouse_without_controlled_provider(

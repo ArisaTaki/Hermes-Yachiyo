@@ -22,6 +22,7 @@ import type {
   PlannerTraceSummarySnapshot,
   PublicRunEvent,
   RuntimeExecutionEnvelopeSnapshot,
+  RuntimeExecutionStrategySnapshot,
   RuntimeExecutionRequestSnapshot,
   RuntimePlanSnapshot,
   ReplanRecoverySnapshot,
@@ -200,6 +201,7 @@ export function PlannerTraceInspector({
     ...(trace.selection?.openQuestions || []),
   ]);
   const confidence = confidenceLabel(intent?.confidence);
+  const executionStrategy = trace.plan?.execution_strategy || null;
   const taskCore = trace.plan?.task_core || trace.taskCore || taskCoreFallback || null;
   const effectiveTaskProgress = taskProgress || trace.taskProgress || null;
   const replanRequests = trace.replanRequests || [];
@@ -212,6 +214,9 @@ export function PlannerTraceInspector({
       data-decision-id={trace.decisionId}
       data-intent-kind={intent?.kind || ''}
       data-plan-id={trace.planId}
+      data-execution-interaction-mode={executionStrategy?.interaction_mode || ''}
+      data-execution-preferred-environment={executionStrategy?.preferred_environment || ''}
+      data-execution-sandbox-required={executionStrategy ? String(executionStrategy.sandbox_required === true) : ''}
       data-route-to-studio={trace.routeToStudio === undefined ? '' : String(trace.routeToStudio)}
       data-summary-fallback={String(trace.summaryFallback)}
       data-testid={testId}
@@ -259,6 +264,10 @@ export function PlannerTraceInspector({
             </div>
             <small>{intent.risk_level || 'risk unknown'}</small>
           </div>
+        ) : null}
+
+        {executionStrategy ? (
+          <PlannerExecutionStrategySummary strategy={executionStrategy} />
         ) : null}
 
         {intentInputEntries.length || expectedOutputs.length || missingInputs.length ? (
@@ -1607,6 +1616,76 @@ function PlannerCapabilityRecoveryInspector({
           </Fragment>
         ))}
       </div>
+    </section>
+  );
+}
+
+function PlannerExecutionStrategySummary({
+  strategy,
+}: {
+  strategy: RuntimeExecutionStrategySnapshot;
+}) {
+  const reasons = uniqueStrings(strategy.reasons || []);
+  const mitigations = uniqueStrings(strategy.mitigations || []);
+  return (
+    <section
+      data-approval-step-count={strategy.approval_step_count ?? 0}
+      data-execution-interaction-mode={strategy.interaction_mode || ''}
+      data-execution-policy-mode={strategy.policy_mode || ''}
+      data-execution-preferred-environment={strategy.preferred_environment || ''}
+      data-foreground-control-step-count={strategy.foreground_control_step_count ?? 0}
+      data-foreground-takeover-allowed={String(strategy.foreground_takeover_allowed === true)}
+      data-handoff-step-count={strategy.handoff_step_count ?? 0}
+      data-isolated-desktop-preferred={String(strategy.isolated_desktop_preferred === true)}
+      data-keyboard-mouse-step-count={strategy.keyboard_mouse_step_count ?? 0}
+      data-sandbox-recommended-step-count={strategy.sandbox_recommended_step_count ?? 0}
+      data-sandbox-required={String(strategy.sandbox_required === true)}
+      data-testid="agent-run-detail-planner-execution-strategy"
+    >
+      <div className="studio-tool-inspector-heading">
+        <h3>Execution Strategy</h3>
+        <span>{strategy.preferred_environment || 'structured_runtime'}</span>
+      </div>
+      <div className="studio-tool-detail-grid">
+        <span>
+          <small>Environment</small>
+          <strong>{strategy.preferred_environment || 'structured_runtime'}</strong>
+        </span>
+        <span>
+          <small>Interaction</small>
+          <strong>{strategy.interaction_mode || 'background'}</strong>
+        </span>
+        <span>
+          <small>Policy</small>
+          <strong>{strategy.policy_mode || 'allow'}</strong>
+        </span>
+        <span>
+          <small>Keyboard / Mouse</small>
+          <strong>{strategy.keyboard_mouse_step_count ?? 0}</strong>
+        </span>
+        <span>
+          <small>Foreground</small>
+          <strong>{strategy.foreground_control_step_count ?? 0}</strong>
+        </span>
+        <span>
+          <small>Sandbox</small>
+          <strong>{strategy.sandbox_required ? 'required' : 'not required'}</strong>
+        </span>
+      </div>
+      {reasons.length || mitigations.length ? (
+        <div className="studio-tool-pill-row">
+          {reasons.map((reason) => (
+            <span className="studio-tool-permission" data-execution-strategy-reason={reason} key={`reason:${reason}`}>
+              reason · {reason}
+            </span>
+          ))}
+          {mitigations.map((mitigation) => (
+            <span className="studio-tool-permission" data-execution-strategy-mitigation={mitigation} key={`mitigation:${mitigation}`}>
+              mitigation · {mitigation}
+            </span>
+          ))}
+        </div>
+      ) : null}
     </section>
   );
 }

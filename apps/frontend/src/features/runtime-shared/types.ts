@@ -107,6 +107,38 @@ export type DesktopExecutionPolicySnapshot = {
   reason?: string;
 };
 
+export type RuntimeExecutionPreferredEnvironment =
+  | 'structured_runtime'
+  | 'isolated_desktop'
+  | 'user_foreground'
+  | 'user_handoff'
+  | string;
+
+export type RuntimeExecutionInteractionMode =
+  | 'background'
+  | 'read_only'
+  | 'foreground'
+  | 'handoff'
+  | string;
+
+export type RuntimeExecutionStrategySnapshot = {
+  strategy_id: string;
+  preferred_environment?: RuntimeExecutionPreferredEnvironment;
+  interaction_mode?: RuntimeExecutionInteractionMode;
+  policy_mode?: DesktopExecutionPolicyMode | string;
+  isolated_desktop_preferred?: boolean;
+  foreground_takeover_allowed?: boolean;
+  sandbox_required?: boolean;
+  foreground_control_step_count?: number;
+  keyboard_mouse_step_count?: number;
+  sandbox_recommended_step_count?: number;
+  approval_step_count?: number;
+  handoff_step_count?: number;
+  reasons?: string[];
+  mitigations?: string[];
+  source?: string;
+};
+
 export type DesktopProviderHealthSnapshot = {
   ok?: boolean;
   checked?: boolean;
@@ -704,6 +736,7 @@ export type RuntimePlanSnapshot = {
   capabilities?: CapabilitySnapshot[];
   capability_plan?: CapabilityPlanSnapshot | null;
   tool_plan: ToolPlanSnapshot;
+  execution_strategy?: RuntimeExecutionStrategySnapshot | null;
   task_core?: TaskCoreSnapshot | null;
   route_to_studio?: boolean;
   timeline_preview?: Array<Record<string, unknown>>;

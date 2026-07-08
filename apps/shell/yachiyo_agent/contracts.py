@@ -42,6 +42,18 @@ DesktopExecutionPolicyMode = Literal[
     "handoff_required",
     "supervised_live",
 ]
+RuntimeExecutionPreferredEnvironment = Literal[
+    "structured_runtime",
+    "isolated_desktop",
+    "user_foreground",
+    "user_handoff",
+]
+RuntimeExecutionInteractionMode = Literal[
+    "background",
+    "read_only",
+    "foreground",
+    "handoff",
+]
 RecoveryActionKind = Literal[
     "permission_recovery",
     "retry_original",
@@ -541,6 +553,24 @@ class ToolPlanSnapshot(_PublicSnapshot):
     source: str = "runtime_planner"
 
 
+class RuntimeExecutionStrategySnapshot(_PublicSnapshot):
+    strategy_id: str
+    preferred_environment: RuntimeExecutionPreferredEnvironment | str = "structured_runtime"
+    interaction_mode: RuntimeExecutionInteractionMode | str = "background"
+    policy_mode: DesktopExecutionPolicyMode | str = "allow"
+    isolated_desktop_preferred: bool = False
+    foreground_takeover_allowed: bool = False
+    sandbox_required: bool = False
+    foreground_control_step_count: int = 0
+    keyboard_mouse_step_count: int = 0
+    sandbox_recommended_step_count: int = 0
+    approval_step_count: int = 0
+    handoff_step_count: int = 0
+    reasons: list[str] = Field(default_factory=list)
+    mitigations: list[str] = Field(default_factory=list)
+    source: str = "runtime_planner"
+
+
 class TaskWorkspaceItemSnapshot(_PublicSnapshot):
     item_id: str
     title: str
@@ -785,6 +815,7 @@ class RuntimePlanSnapshot(_PublicSnapshot):
     capabilities: list[CapabilitySnapshot] = Field(default_factory=list)
     capability_plan: CapabilityPlanSnapshot | None = None
     tool_plan: ToolPlanSnapshot
+    execution_strategy: RuntimeExecutionStrategySnapshot | None = None
     task_core: TaskCoreSnapshot | None = None
     route_to_studio: bool = False
     timeline_preview: list[dict[str, Any]] = Field(default_factory=list)

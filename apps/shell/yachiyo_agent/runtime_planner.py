@@ -29,6 +29,7 @@ from .contracts import (
     CapabilityPlanSnapshot,
     PlannerDecisionSnapshot,
     ReplanSignalSnapshot,
+    RuntimeExecutionStrategySnapshot,
     RuntimePlanSnapshot,
     TaskCheckpointSnapshot,
     TaskCoreSnapshot,
@@ -46,6 +47,11 @@ from .data_analysis_plan_hints import (
     data_source_kind_hint,
     data_source_scope_hint,
     named_data_source_hint,
+)
+from .desktop_execution_policy import (
+    desktop_execution_policy_mode,
+    desktop_execution_policy_payload,
+    user_foreground_takeover_allowed,
 )
 from .desktop_plan_hints import (
     app_management_hint,
@@ -2701,6 +2707,11 @@ class RuntimePlanner:
             capabilities=snapshots,
             capability_plan=capability_plan,
             tool_plan=tool_plan,
+            execution_strategy=_execution_strategy_snapshot(
+                intent,
+                steps,
+                metadata,
+            ),
             task_core=task_core,
             route_to_studio=_route_to_studio(intent, steps),
             timeline_preview=_timeline_preview(intent, steps, task_core),
@@ -7634,6 +7645,206 @@ def _empty_intent(kind: str, text: str) -> TaskIntentSnapshot:
         user_goal=text,
         confidence=0.0,
     )
+
+
+def _execution_strategy_snapshot(
+    intent: TaskIntentSnapshot,
+    steps: Iterable[ToolPlanStepSnapshot],
+    metadata: Mapping[str, Any] | None,
+) -> RuntimeExecutionStrategySnapshot:
+    step_list = list(steps)
+    policy = _planner_desktop_execution_policy(metadata)
+    policy_mode = desktop_execution_policy_mode(policy)
+    decision_context: dict[str, Any] = {}
+    if isinstance(metadata, Mapping):
+        decision_context.update(metadata)
+    decision_context.update(policy)
+    foreground_takeover_allowed = user_foreground_takeover_allowed(decision_context)
+    isolated_desktop_preferred = _strategy_truthy(
+        decision_context,
+        "prefer_isolated_desktop",
+        "avoid_user_foreground_takeover",
+        "require_sandbox_for_keyboard_mouse",
+    )
+    foreground_control_count = sum(
+        1 for step in step_list if _step_execution_mode_flag(step, "foreground_control")
+    )
+    keyboard_mouse_count = sum(
+        1 for step in step_list if _step_execution_mode_flag(step, "keyboard_mouse_capture")
+    )
+    sandbox_recommended_count = sum(
+        1 for step in step_list if _step_execution_mode_flag(step, "sandbox_recommended")
+    )
+    handoff_count = sum(
+        1 for step in step_list if _step_execution_mode_flag(step, "user_handoff_recommended")
+    )
+    approval_count = sum(
+        1
+        for step in step_list
+        if step.approval_required or _step_execution_mode_flag(step, "approval_recommended")
+    )
+    read_only_count = sum(
+        1
+        for step in step_list
+        if _step_execution_mode_value(step, "mode") == "read_only_observation"
+    )
+    if sandbox_recommended_count:
+        isolated_desktop_preferred = True
+    sandbox_required = bool(
+        keyboard_mouse_count
+        and (
+            _strategy_truthy(decision_context, "require_sandbox_for_keyboard_mouse")
+            or sandbox_recommended_count
+            or not foreground_takeover_allowed
+        )
+    )
+    if handoff_count:
+        preferred_environment = "user_handoff"
+        interaction_mode = "handoff"
+    elif foreground_control_count or keyboard_mouse_count:
+        preferred_environment = (
+            "user_foreground"
+            if foreground_takeover_allowed and not isolated_desktop_preferred
+            else "isolated_desktop"
+        )
+        interaction_mode = "foreground"
+    elif read_only_count and isolated_desktop_preferred:
+        preferred_environment = "isolated_desktop"
+        interaction_mode = "read_only"
+    elif read_only_count:
+        preferred_environment = "structured_runtime"
+        interaction_mode = "read_only"
+    else:
+        preferred_environment = "structured_runtime"
+        interaction_mode = "background"
+    reasons = _execution_strategy_reasons(
+        step_count=len(step_list),
+        isolated_desktop_preferred=isolated_desktop_preferred,
+        foreground_control_count=foreground_control_count,
+        keyboard_mouse_count=keyboard_mouse_count,
+        sandbox_recommended_count=sandbox_recommended_count,
+        approval_count=approval_count,
+        handoff_count=handoff_count,
+    )
+    mitigations = _execution_strategy_mitigations(
+        preferred_environment=preferred_environment,
+        interaction_mode=interaction_mode,
+        foreground_takeover_allowed=foreground_takeover_allowed,
+        keyboard_mouse_count=keyboard_mouse_count,
+        read_only_count=read_only_count,
+    )
+    return RuntimeExecutionStrategySnapshot(
+        strategy_id=_stable_id(
+            "execution-strategy",
+            intent.kind,
+            f"{intent.user_goal}:{preferred_environment}:{interaction_mode}",
+        ),
+        preferred_environment=preferred_environment,
+        interaction_mode=interaction_mode,
+        policy_mode=policy_mode,
+        isolated_desktop_preferred=isolated_desktop_preferred,
+        foreground_takeover_allowed=foreground_takeover_allowed,
+        sandbox_required=sandbox_required,
+        foreground_control_step_count=foreground_control_count,
+        keyboard_mouse_step_count=keyboard_mouse_count,
+        sandbox_recommended_step_count=sandbox_recommended_count,
+        approval_step_count=approval_count,
+        handoff_step_count=handoff_count,
+        reasons=reasons,
+        mitigations=mitigations,
+    )
+
+
+def _planner_desktop_execution_policy(
+    metadata: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    if not isinstance(metadata, Mapping):
+        return {}
+    for key in (
+        "desktop_execution_policy",
+        "yachiyo_desktop_execution_policy",
+        "desktop_interaction_policy",
+    ):
+        policy = desktop_execution_policy_payload(metadata.get(key))
+        if policy:
+            return policy
+    return {}
+
+
+def _step_execution_mode_flag(step: ToolPlanStepSnapshot, key: str) -> bool:
+    mode = step.execution_mode
+    if isinstance(mode, Mapping):
+        return bool(mode.get(key))
+    return bool(getattr(mode, key, False))
+
+
+def _step_execution_mode_value(step: ToolPlanStepSnapshot, key: str) -> str:
+    mode = step.execution_mode
+    if isinstance(mode, Mapping):
+        return str(mode.get(key) or "").strip()
+    return str(getattr(mode, key, "") or "").strip()
+
+
+def _strategy_truthy(source: Mapping[str, Any], *keys: str) -> bool:
+    for key in keys:
+        value = source.get(key)
+        if isinstance(value, bool):
+            if value:
+                return True
+            continue
+        if str(value or "").strip().lower() in {"1", "true", "yes", "on"}:
+            return True
+    return False
+
+
+def _execution_strategy_reasons(
+    *,
+    step_count: int,
+    isolated_desktop_preferred: bool,
+    foreground_control_count: int,
+    keyboard_mouse_count: int,
+    sandbox_recommended_count: int,
+    approval_count: int,
+    handoff_count: int,
+) -> list[str]:
+    reasons: list[str] = []
+    if not step_count:
+        reasons.append("no_executable_steps_planned")
+    if isolated_desktop_preferred:
+        reasons.append("policy_prefers_isolated_desktop")
+    if foreground_control_count:
+        reasons.append("foreground_control_planned")
+    if keyboard_mouse_count:
+        reasons.append("keyboard_mouse_capture_planned")
+    if sandbox_recommended_count:
+        reasons.append("sandbox_recommended_by_tool_modes")
+    if approval_count:
+        reasons.append("approval_required_for_risky_steps")
+    if handoff_count:
+        reasons.append("user_handoff_recommended")
+    return _unique_capabilities(reasons)
+
+
+def _execution_strategy_mitigations(
+    *,
+    preferred_environment: str,
+    interaction_mode: str,
+    foreground_takeover_allowed: bool,
+    keyboard_mouse_count: int,
+    read_only_count: int,
+) -> list[str]:
+    mitigations: list[str] = []
+    if preferred_environment == "isolated_desktop":
+        mitigations.append("run_in_controlled_desktop_provider")
+    if interaction_mode in {"foreground", "handoff"}:
+        mitigations.append("verify_after_desktop_action")
+    if keyboard_mouse_count:
+        mitigations.append("require_sandbox_or_approval_for_keyboard_mouse")
+    if not foreground_takeover_allowed:
+        mitigations.append("do_not_take_over_user_foreground_session")
+    if read_only_count:
+        mitigations.append("observe_before_operate")
+    return _unique_capabilities(mitigations)
 
 
 def _step(
