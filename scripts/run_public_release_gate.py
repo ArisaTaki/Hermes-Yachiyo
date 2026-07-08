@@ -1100,10 +1100,22 @@ def _external_requirements(actions: Sequence[Mapping[str, Any]]) -> list[dict[st
                 kind="local_permission",
                 action=action,
             )
+        elif action_id == "oha_desktop_agent_product" and _action_has_blocking_condition(
+            action,
+            "real_virtual_desktop_backend_required",
+        ):
+            _merge_external_requirement(
+                requirements,
+                requirement_id="real_virtual_desktop_backend",
+                label="Real virtual desktop backend",
+                kind="desktop_backend",
+                action=action,
+            )
     order = {
         "real_desktop_smoke_opt_in": 0,
         "provider_smoke_credentials": 1,
         "local_loopback_permission": 2,
+        "real_virtual_desktop_backend": 3,
     }
     return sorted(
         requirements.values(),

@@ -96,8 +96,12 @@ SMOKE_ITEMS: tuple[dict[str, Any], ...] = (
         "required": (
             OHA_DESKTOP_AGENT_RELEASE_SMOKE_MODE,
             "oha_isolated_desktop_provider",
+            "oha_real_virtual_desktop_backend",
         ),
-        "related": tuple(OHA_DESKTOP_AGENT_SECTION_EVIDENCE.values()),
+        "related": (
+            *tuple(OHA_DESKTOP_AGENT_SECTION_EVIDENCE.values()),
+            "oha_isolated_desktop_backend_boundary",
+        ),
         "next_action": (
             "python scripts/smoke_oha_desktop_agent_release.py "
             "--run-isolated-provider-smoke "
@@ -448,6 +452,11 @@ def _item_status(
             evidence_id: evidence[evidence_id]
             for evidence_id in related_present
         },
+        "release_blockers": _item_release_blockers(
+            str(item["id"]),
+            missing,
+            evidence,
+        ),
         "next_action": str(item.get("next_action") or ""),
     }
 
@@ -500,6 +509,9 @@ def _next_actions(missing_items: Sequence[Mapping[str, Any]]) -> list[dict[str, 
             "id": str(item.get("id") or "next_action"),
             "command": command,
         }
+        release_blockers = _dict_list(item.get("release_blockers"))
+        if release_blockers:
+            action["release_blockers"] = release_blockers
         if item.get("id") == "public_demo":
             demo_details = _public_demo_item_details(item)
             if demo_details:
@@ -1180,6 +1192,94 @@ def _collect_oha_desktop_agent_release_evidence(
             mode=str(section.get("mode") or ""),
             objective=str(section.get("objective") or ""),
         )
+        if section_id == "isolated_desktop_provider":
+            _collect_oha_desktop_backend_evidence(
+                section,
+                source=source,
+                evidence=evidence,
+            )
+    backend = report.get("isolated_provider_backend")
+    if isinstance(backend, Mapping):
+        _collect_oha_desktop_backend_evidence(
+            {"id": "isolated_desktop_provider", "report": backend},
+            source=source,
+            evidence=evidence,
+        )
+
+
+def _collect_oha_desktop_backend_evidence(
+    section: Mapping[str, Any],
+    *,
+    source: str,
+    evidence: dict[str, list[dict[str, Any]]],
+) -> None:
+    report = section.get("report") if isinstance(section.get("report"), Mapping) else {}
+    if not report:
+        return
+    backend_kind = str(report.get("desktop_backend_kind") or "").strip()
+    backend_is_loopback = report.get("desktop_backend_is_loopback")
+    backend_ready = report.get("desktop_backend_ready_for_public_release")
+    requires_real_backend = report.get("requires_real_virtual_desktop_backend")
+    if not backend_kind and backend_ready is None and requires_real_backend is None:
+        return
+    backend_payload = {
+        "desktop_backend_kind": backend_kind,
+        "desktop_backend_is_loopback": backend_is_loopback,
+        "desktop_backend_ready_for_public_release": backend_ready,
+        "requires_real_virtual_desktop_backend": requires_real_backend,
+    }
+    _add_evidence(
+        evidence,
+        "oha_isolated_desktop_backend_boundary",
+        source=source,
+        kind="oha_desktop_agent_release_section",
+        section_id=str(section.get("id") or ""),
+        **backend_payload,
+    )
+    if backend_ready is True and backend_is_loopback is not True:
+        _add_evidence(
+            evidence,
+            "oha_real_virtual_desktop_backend",
+            source=source,
+            kind="oha_desktop_backend",
+            **backend_payload,
+        )
+
+
+def _item_release_blockers(
+    item_id: str,
+    missing: Sequence[str],
+    evidence: Mapping[str, list[dict[str, Any]]],
+) -> list[dict[str, Any]]:
+    if (
+        item_id != "oha_desktop_agent_product"
+        or "oha_real_virtual_desktop_backend" not in missing
+    ):
+        return []
+    boundary = _dict_list(evidence.get("oha_isolated_desktop_backend_boundary"))
+    latest = boundary[-1] if boundary else {}
+    return [
+        {
+            "id": "oha_real_virtual_desktop_backend",
+            "status": "missing",
+            "reason": "real_virtual_desktop_backend_required",
+            "evidence_summary": {
+                "blocking_condition": "real_virtual_desktop_backend_required",
+                "desktop_backend_kind": str(
+                    latest.get("desktop_backend_kind") or ""
+                ),
+                "desktop_backend_is_loopback": latest.get(
+                    "desktop_backend_is_loopback"
+                ),
+                "desktop_backend_ready_for_public_release": latest.get(
+                    "desktop_backend_ready_for_public_release"
+                ),
+                "requires_real_virtual_desktop_backend": latest.get(
+                    "requires_real_virtual_desktop_backend"
+                ),
+            },
+        }
+    ]
 
 
 def _canonical_public_demo_flow_ids() -> list[str]:

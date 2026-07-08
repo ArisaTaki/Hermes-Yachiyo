@@ -97,10 +97,28 @@ def _oha_desktop_agent_release_smoke_report() -> dict[str, object]:
                 "objective": f"cover {section_id}",
                 "ok": True,
                 "mode": section_id,
-                "report": {"ok": True},
+                "report": {
+                    "ok": True,
+                    **(
+                        {
+                            "desktop_backend_kind": "virtual_desktop_backend",
+                            "desktop_backend_is_loopback": False,
+                            "desktop_backend_ready_for_public_release": True,
+                            "requires_real_virtual_desktop_backend": False,
+                        }
+                        if section_id == "isolated_desktop_provider"
+                        else {}
+                    ),
+                },
             }
             for section_id in section_ids
         ],
+        "isolated_provider_backend": {
+            "desktop_backend_kind": "virtual_desktop_backend",
+            "desktop_backend_is_loopback": False,
+            "desktop_backend_ready_for_public_release": True,
+            "requires_real_virtual_desktop_backend": False,
+        },
     }
 
 
@@ -196,9 +214,11 @@ def test_release_smoke_summary_passes_with_required_evidence(tmp_path, monkeypat
     assert oha_item["present_evidence_ids"] == [
         release_smoke.OHA_DESKTOP_AGENT_RELEASE_SMOKE_MODE,
         "oha_isolated_desktop_provider",
+        "oha_real_virtual_desktop_backend",
     ]
     assert "oha_deepagent_core" in oha_item["related_evidence_ids"]
     assert "oha_isolated_desktop_provider" in oha_item["related_evidence_ids"]
+    assert "oha_isolated_desktop_backend_boundary" in oha_item["related_evidence_ids"]
 
 
 def test_release_smoke_summary_requires_isolated_desktop_provider_section(
@@ -222,13 +242,56 @@ def test_release_smoke_summary_requires_isolated_desktop_provider_section(
     assert "oha_desktop_agent_product" in summary["missing_item_ids"]
     oha_item = next(item for item in summary["items"] if item["id"] == "oha_desktop_agent_product")
     assert oha_item["present_evidence_ids"] == [
-        release_smoke.OHA_DESKTOP_AGENT_RELEASE_SMOKE_MODE
+        release_smoke.OHA_DESKTOP_AGENT_RELEASE_SMOKE_MODE,
+        "oha_real_virtual_desktop_backend",
     ]
     assert oha_item["missing_evidence_ids"] == ["oha_isolated_desktop_provider"]
     action = next(
         item for item in summary["next_actions"] if item["id"] == "oha_desktop_agent_product"
     )
     assert "--run-isolated-provider-smoke" in action["command"]
+
+
+def test_release_smoke_summary_requires_real_virtual_desktop_backend(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(release_smoke, "ROOT", tmp_path)
+    report_path = tmp_path / "tmp" / "oha-loopback-provider.json"
+    payload = _oha_desktop_agent_release_smoke_report()
+    loopback_backend = {
+        "desktop_backend_kind": "loopback_session_harness",
+        "desktop_backend_is_loopback": True,
+        "desktop_backend_ready_for_public_release": False,
+        "requires_real_virtual_desktop_backend": True,
+    }
+    payload["isolated_provider_backend"] = dict(loopback_backend)
+    for section in payload["sections"]:
+        if section["id"] == "isolated_desktop_provider":
+            section["report"] = {"ok": True, **loopback_backend}
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    summary = release_smoke.summarize_release_smoke([report_path])
+
+    assert "oha_desktop_agent_product" in summary["missing_item_ids"]
+    oha_item = next(
+        item for item in summary["items"] if item["id"] == "oha_desktop_agent_product"
+    )
+    assert oha_item["present_evidence_ids"] == [
+        release_smoke.OHA_DESKTOP_AGENT_RELEASE_SMOKE_MODE,
+        "oha_isolated_desktop_provider",
+    ]
+    assert oha_item["missing_evidence_ids"] == ["oha_real_virtual_desktop_backend"]
+    assert oha_item["release_blockers"][0]["reason"] == (
+        "real_virtual_desktop_backend_required"
+    )
+    action = next(
+        item for item in summary["next_actions"] if item["id"] == "oha_desktop_agent_product"
+    )
+    assert action["release_blockers"][0]["evidence_summary"][
+        "desktop_backend_kind"
+    ] == "loopback_session_harness"
 
 
 def test_release_smoke_summary_reports_missing_items_and_next_actions(

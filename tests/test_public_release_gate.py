@@ -756,6 +756,77 @@ def test_public_release_gate_reports_workflow_provider_smoke_external_requiremen
     assert "`OHA_YACHIYO_SMOKE_API_KEY`" in markdown
 
 
+def test_public_release_gate_reports_real_virtual_desktop_backend_requirement(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+
+    def fake_run(command):
+        command = list(command)
+        if "scripts/summarize_release_smoke.py" in command:
+            output_json = command[command.index("--output-json") + 1]
+            output_path = gate._resolve_path(Path(output_json))
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_text(
+                json.dumps(
+                    {
+                        "ok": False,
+                        "status": "incomplete",
+                        "item_count": 10,
+                        "passed_count": 9,
+                        "missing_count": 1,
+                        "missing_item_ids": ["oha_desktop_agent_product"],
+                        "items": [],
+                        "next_actions": [
+                            {
+                                "id": "oha_desktop_agent_product",
+                                "command": (
+                                    "python scripts/smoke_oha_desktop_agent_release.py "
+                                    "--run-isolated-provider-smoke "
+                                    "--report-json tmp/oha-desktop-agent-release-smoke.json"
+                                ),
+                                "release_blockers": [
+                                    {
+                                        "id": "oha_real_virtual_desktop_backend",
+                                        "reason": "real_virtual_desktop_backend_required",
+                                        "evidence_summary": {
+                                            "blocking_condition": (
+                                                "real_virtual_desktop_backend_required"
+                                            ),
+                                            "desktop_backend_kind": (
+                                                "loopback_session_harness"
+                                            ),
+                                        },
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+        return _completed(command)
+
+    monkeypatch.setattr(gate, "_run_command", fake_run)
+
+    summary = gate.run_public_release_gate(
+        tmp_dir="tmp/gate",
+        include_public_demo=False,
+        include_diagnostics_bundle=False,
+    )
+
+    assert summary["external_requirement_count"] == 1
+    requirement = summary["external_requirements"][0]
+    assert requirement["id"] == "real_virtual_desktop_backend"
+    assert requirement["kind"] == "desktop_backend"
+    assert requirement["blocking_conditions"] == [
+        "real_virtual_desktop_backend_required"
+    ]
+    markdown = gate.render_markdown(summary)
+    assert "Real virtual desktop backend" in markdown
+
+
 def test_public_release_gate_markdown_defaults_missing_blocker_counts():
     markdown = gate.render_markdown(
         {
