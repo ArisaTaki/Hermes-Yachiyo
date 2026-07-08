@@ -35,6 +35,7 @@ def public_release_gate_checks(
     tmp_dir: Path,
     include_public_demo: bool = True,
     include_isolated_provider_smoke: bool = False,
+    provider_manifest: Path | None = None,
     include_real_desktop: bool = False,
     include_real_desktop_open: bool = False,
     include_real_desktop_ui_inspection: bool = False,
@@ -50,8 +51,12 @@ def public_release_gate_checks(
         str(tmp_dir / "oha-desktop-agent-release-smoke.json"),
     ]
     source_capabilities_json = tmp_dir / "rc-verification-source-capabilities.json"
-    if include_isolated_provider_smoke:
+    if include_isolated_provider_smoke or provider_manifest is not None:
         oha_release_smoke_command.append("--run-isolated-provider-smoke")
+    if provider_manifest is not None:
+        oha_release_smoke_command.extend(
+            ["--provider-manifest", str(provider_manifest)]
+        )
     checks = [
         GateCheck(
             id="release_artifacts",
@@ -158,6 +163,7 @@ def run_public_release_gate(
     diagnostics_zips: Sequence[Path | str] = (),
     include_diagnostics_bundle: bool = True,
     include_isolated_provider_smoke: bool = False,
+    provider_manifest: Path | str | None = None,
     include_real_desktop: bool = False,
     include_real_desktop_open: bool = False,
     include_real_desktop_ui_inspection: bool = False,
@@ -170,13 +176,21 @@ def run_public_release_gate(
 ) -> dict[str, Any]:
     resolved_tmp_dir = _resolve_path(Path(tmp_dir))
     resolved_tmp_dir.mkdir(parents=True, exist_ok=True)
+    resolved_provider_manifest = (
+        _resolve_path(Path(provider_manifest))
+        if provider_manifest is not None
+        else None
+    )
     effective_include_isolated_provider_smoke = (
-        include_isolated_provider_smoke or require_release_ready
+        include_isolated_provider_smoke
+        or require_release_ready
+        or resolved_provider_manifest is not None
     )
     checks = public_release_gate_checks(
         tmp_dir=resolved_tmp_dir,
         include_public_demo=include_public_demo,
         include_isolated_provider_smoke=effective_include_isolated_provider_smoke,
+        provider_manifest=resolved_provider_manifest,
         include_real_desktop=include_real_desktop,
         include_real_desktop_open=include_real_desktop_open,
         include_real_desktop_ui_inspection=include_real_desktop_ui_inspection,
@@ -290,6 +304,7 @@ def run_public_release_gate(
         "status": status,
         "require_release_ready": require_release_ready,
         "include_isolated_provider_smoke": effective_include_isolated_provider_smoke,
+        "provider_manifest": _display_path(resolved_provider_manifest),
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "tmp_dir": _display_path(resolved_tmp_dir),
         "check_count": len(check_results),
@@ -1675,6 +1690,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--diagnostics-zip", action="append", default=[], type=Path)
     parser.add_argument("--skip-diagnostics-bundle", action="store_true")
     parser.add_argument("--include-isolated-provider-smoke", action="store_true")
+    parser.add_argument(
+        "--provider-manifest",
+        type=Path,
+        help=(
+            "Provider manifest for the isolated Oha desktop-agent product smoke. "
+            "Passing this also enables --include-isolated-provider-smoke."
+        ),
+    )
     parser.add_argument("--include-real-desktop", action="store_true")
     parser.add_argument("--include-real-desktop-open", action="store_true")
     parser.add_argument("--include-real-desktop-ui-inspection", action="store_true")
@@ -1697,6 +1720,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         diagnostics_zips=args.diagnostics_zip,
         include_diagnostics_bundle=not args.skip_diagnostics_bundle,
         include_isolated_provider_smoke=bool(args.include_isolated_provider_smoke),
+        provider_manifest=args.provider_manifest,
         include_real_desktop=bool(args.include_real_desktop),
         include_real_desktop_open=bool(args.include_real_desktop_open),
         include_real_desktop_ui_inspection=bool(args.include_real_desktop_ui_inspection),

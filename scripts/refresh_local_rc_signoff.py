@@ -475,6 +475,7 @@ def refresh_local_rc_signoff(
     run_provider_smoke: bool = False,
     skip_screen_smoke: bool = False,
     reuse_current_reports: bool = False,
+    provider_manifest: Path | None = None,
     public_demo_reports: tuple[Path, ...] = (),
 ) -> dict[str, Path]:
     label = short_commit or _git_short_commit()
@@ -694,6 +695,10 @@ def refresh_local_rc_signoff(
         "--report-json",
         str(oha_desktop_agent_smoke_report.relative_to(ROOT)),
     ]
+    if provider_manifest is not None:
+        oha_desktop_agent_smoke_command.extend(
+            ["--provider-manifest", str(provider_manifest)]
+        )
     oha_desktop_agent_smoke_code = _run(
         oha_desktop_agent_smoke_command,
         allow_failure=True,
@@ -1249,6 +1254,14 @@ def main(argv: list[str] | None = None) -> int:
         help="Run real provider smoke during the packaged batch gate.",
     )
     parser.add_argument(
+        "--provider-manifest",
+        type=Path,
+        help=(
+            "Provider manifest to pass to the isolated Oha desktop-agent product "
+            "smoke during local RC signoff refresh."
+        ),
+    )
+    parser.add_argument(
         "--public-demo-report",
         action="append",
         default=[],
@@ -1321,6 +1334,7 @@ def main(argv: list[str] | None = None) -> int:
             run_provider_smoke=args.run_provider_smoke,
             skip_screen_smoke=args.skip_screen_smoke,
             reuse_current_reports=args.reuse_current_reports,
+            provider_manifest=args.provider_manifest,
             public_demo_reports=tuple(args.public_demo_report),
         )
     except subprocess.CalledProcessError as exc:

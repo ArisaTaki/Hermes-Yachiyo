@@ -383,6 +383,39 @@ def test_refresh_local_rc_signoff_rejects_non_manual_preview_failure(
         raise AssertionError("non-manual preview findings must fail the refresh")
 
 
+def test_refresh_local_rc_signoff_forwards_provider_manifest_to_oha_smoke(
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setattr(refresh, "ROOT", tmp_path)
+    commands: list[tuple[list[str], bool]] = []
+    provider_manifest = Path("tmp/provider-manifest.json")
+
+    def fake_run(command: list[str], *, allow_failure: bool = False) -> int:
+        commands.append((command, allow_failure))
+        return 0
+
+    monkeypatch.setattr(refresh, "_run", fake_run)
+
+    refresh.refresh_local_rc_signoff(
+        short_commit="abc12345",
+        skip_build=True,
+        skip_source_capability_smoke=True,
+        skip_screen_smoke=True,
+        provider_manifest=provider_manifest,
+    )
+
+    oha_smoke_command = next(
+        command
+        for command, _ in commands
+        if "scripts/smoke_oha_desktop_agent_release.py" in command
+    )
+    assert "--run-isolated-provider-smoke" in oha_smoke_command
+    assert oha_smoke_command[
+        oha_smoke_command.index("--provider-manifest") + 1
+    ] == str(provider_manifest)
+
+
 def test_refresh_local_rc_signoff_reuses_current_reports(monkeypatch, tmp_path):
     commands: list[tuple[list[str], bool]] = []
     monkeypatch.setattr(refresh, "ROOT", tmp_path)
@@ -1197,6 +1230,34 @@ def test_refresh_local_rc_signoff_cli_passes_public_demo_reports(
     )
     output = capsys.readouterr().out
     assert "release_smoke_report: tmp/rc-verification-abc12345-release-smoke.json" in output
+
+
+def test_refresh_local_rc_signoff_cli_passes_provider_manifest(
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setattr(refresh, "ROOT", tmp_path)
+    captured: dict[str, object] = {}
+
+    def fake_refresh(**kwargs: object) -> dict[str, Path]:
+        captured.update(kwargs)
+        report_path = tmp_path / "tmp" / "rc-verification-abc12345-release-smoke.json"
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text("{}", encoding="utf-8")
+        return {"release_smoke_report": report_path}
+
+    monkeypatch.setattr(refresh, "refresh_local_rc_signoff", fake_refresh)
+
+    assert refresh.main(
+        [
+            "--short-commit",
+            "abc12345",
+            "--provider-manifest",
+            "tmp/provider-manifest.json",
+        ]
+    ) == 0
+
+    assert captured["provider_manifest"] == Path("tmp/provider-manifest.json")
 
 
 def test_refresh_local_rc_signoff_prefers_aggregate_public_demo_status():

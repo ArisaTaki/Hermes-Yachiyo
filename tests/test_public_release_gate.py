@@ -971,6 +971,26 @@ def test_public_release_gate_can_request_isolated_provider_smoke(
     assert "--run-isolated-provider-smoke" in oha_product_command
 
 
+def test_public_release_gate_forwards_provider_manifest_to_oha_smoke(tmp_path):
+    provider_manifest = tmp_path / "provider-manifest.json"
+
+    checks = gate.public_release_gate_checks(
+        tmp_dir=tmp_path / "gate",
+        include_public_demo=False,
+        provider_manifest=provider_manifest,
+    )
+
+    oha_product_command = next(
+        check.command
+        for check in checks
+        if check.id == "oha_desktop_agent_release_smoke"
+    )
+    assert "--run-isolated-provider-smoke" in oha_product_command
+    assert oha_product_command[
+        oha_product_command.index("--provider-manifest") + 1
+    ] == str(provider_manifest)
+
+
 def test_public_release_gate_classifies_isolated_provider_loopback_failure(
     tmp_path,
     monkeypatch,
