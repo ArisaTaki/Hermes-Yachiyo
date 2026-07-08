@@ -1095,12 +1095,106 @@ def desktop_execution_provider_unavailable_result(
                 "Continue in supervised_live or configure a sandbox/headless desktop "
                 "execution provider adapter."
             ),
+            "recommended_tools": ["desktop.provider_session.start"],
+            "recovery_actions": _provider_unavailable_recovery_actions(
+                tool_name,
+                route=route,
+                tool_request=tool_request,
+            ),
         },
         tool_name=tool_name,
         route=route,
         tool_request=tool_request,
         adapter_registered=False,
     )
+
+
+def _provider_unavailable_recovery_actions(
+    tool_name: str,
+    *,
+    route: Mapping[str, Any],
+    tool_request: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    clean_tool = str(tool_name or "").strip()
+    if not clean_tool:
+        return []
+    sandbox_provider = sandbox_provider_payload(tool_request)
+    provider_id = (
+        str(route.get("selected_provider_id") or "").strip()
+        or str(sandbox_provider.get("provider_id") or "").strip()
+        or "local-isolated-desktop"
+    )
+    raw_input = (
+        tool_request.get("input") if isinstance(tool_request.get("input"), Mapping) else {}
+    )
+    desktop_policy = (
+        dict(tool_request.get("desktop_execution_policy"))
+        if isinstance(tool_request.get("desktop_execution_policy"), Mapping)
+        else {"mode": "sandbox_preferred"}
+    )
+    deferred_request = {
+        "tool": clean_tool,
+        "input": dict(raw_input),
+        "desktop_execution_policy": {
+            **desktop_policy,
+            "mode": str(desktop_policy.get("mode") or "sandbox_preferred"),
+            "prefer_isolated_desktop": True,
+            "avoid_user_foreground_takeover": True,
+            "source": "desktop_execution_provider_unavailable_recovery",
+        },
+        "planning_reason": "desktop_execution_provider_retry_after_session_start",
+        "source": "desktop_execution_provider_unavailable_recovery",
+    }
+    for key in (
+        "decision_id",
+        "plan_id",
+        "tool_plan_id",
+        "step_id",
+        "planner_step_id",
+        "capability_id",
+        "target_capability_id",
+        "runtime_stage",
+        "runtime_role",
+    ):
+        value = str(tool_request.get(key) or "").strip()
+        if value:
+            deferred_request[key] = value
+    return [
+        {
+            "label": "Start isolated desktop provider",
+            "tool": "desktop.provider_session.start",
+            "input": {
+                "provider_id": provider_id,
+                "tools": [clean_tool],
+                "tool_names": [clean_tool],
+                "reason": "desktop_execution_provider_unavailable",
+                "diagnostic_route": "/yachiyo/studio/tools",
+                "api_route": "/yachiyo/studio/tools/desktop-provider/session/start",
+            },
+            "permission_target": "isolated_desktop_provider",
+            "risk_level": "medium",
+            "approval_required": True,
+            "approval_status": "pending",
+            "planning_reason": "desktop_execution_provider_unavailable_recovery",
+            "recovery_action_kind": "desktop_provider_session_start",
+            "deferred_tool": clean_tool,
+            "deferred_input": dict(raw_input),
+            "deferred_continuation": [deferred_request],
+            "metadata": {
+                "runtime_retry_source": "desktop_provider_session",
+                "runtime_replan_auto_start_eligible": False,
+                "runtime_replan_auto_start_reason": "desktop_provider_session_start_requires_approval",
+                "runtime_replan_auto_start_blockers": [
+                    "approval_required",
+                    "desktop_execution_provider_unavailable",
+                ],
+                "desktop_execution_route": dict(route),
+                "sandbox_provider": dict(sandbox_provider),
+                "sandbox_original_tool": clean_tool,
+                "sandbox_original_input": dict(raw_input),
+            },
+        }
+    ]
 
 
 def _with_desktop_provider_context(

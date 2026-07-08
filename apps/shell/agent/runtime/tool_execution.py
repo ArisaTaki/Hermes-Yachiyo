@@ -441,6 +441,7 @@ def _tool_result_requests_user_recovery(result: dict[str, Any]) -> bool:
         or result.get("blocked_by_app_resolution")
         or result.get("blocked_by_file_resolution")
         or result.get("blocked_by_desktop_execution_policy")
+        or result.get("blocked_by_desktop_execution_provider")
         or result.get("recovery_actions")
         or data.get("recovery_actions")
         or result.get("permission_targets")
@@ -3046,6 +3047,11 @@ def _runtime_replan_trigger(
 ) -> str:
     if result.get("verification_failed"):
         return "verification_failed"
+    if (
+        result.get("blocked_by_desktop_execution_provider")
+        or result.get("error") == "desktop_execution_provider_unavailable"
+    ):
+        return "desktop_execution_provider_unavailable"
     event_text = " ".join(
         str(value or "").lower()
         for value in (

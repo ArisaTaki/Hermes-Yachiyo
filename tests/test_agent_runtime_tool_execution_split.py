@@ -2096,8 +2096,84 @@ def test_runtime_tool_call_executor_fails_closed_when_provider_adapter_is_missin
     assert result["blocking_conditions"] == ["desktop_execution_provider_unavailable"]
     assert result["desktop_execution_provider"]["adapter_registered"] is False
     assert result["desktop_execution_route"]["status"] == "sandbox_ready"
+    assert result["recommended_tools"] == ["desktop.provider_session.start"]
+    recovery = result["recovery_actions"][0]
+    assert recovery["tool"] == "desktop.provider_session.start"
+    assert recovery["input"]["tools"] == ["desktop.safe_type_text"]
+    assert recovery["approval_required"] is True
+    assert recovery["metadata"]["runtime_retry_source"] == "desktop_provider_session"
+    assert recovery["deferred_tool"] == "desktop.safe_type_text"
+    assert recovery["deferred_continuation"][0]["tool"] == "desktop.safe_type_text"
+    assert "desktop_execution_route" not in recovery["deferred_continuation"][0]
     assert broker.calls == []
     assert timeline[-1]["result"]["blocked_by_desktop_execution_provider"] is True
+
+
+def test_runtime_tool_request_runner_replans_missing_desktop_provider() -> None:
+    events = FakeToolCallEvents()
+    run_events: list[tuple[str, str, dict[str, Any]]] = []
+    executor = _executor(
+        tool_call_events=events,
+        run_events=run_events,
+        desktop_provider_registry=DesktopExecutionProviderRegistry(),
+    )
+    runner = _runner(call_agent_tool=executor.execute, run_events=run_events)
+    timeline: list[dict[str, Any]] = []
+
+    runner.run(
+        [
+            {
+                "tool": "desktop.safe_type_text",
+                "input": {"text": "hello"},
+                "desktop_execution_policy": {"mode": "sandbox_preferred"},
+                "desktop_execution_route": {
+                    "route_id": "desktop-route:desktop.safe_type_text",
+                    "tool_name": "desktop.safe_type_text",
+                    "requested_mode": "sandbox_preferred",
+                    "selected_provider_kind": "sandbox_desktop",
+                    "selected_provider_id": "sandbox-1",
+                    "status": "sandbox_ready",
+                    "can_execute": True,
+                    "can_auto_start": True,
+                    "sandbox_required": True,
+                    "blocking_conditions": [],
+                },
+                "sandbox_provider": {
+                    "available": True,
+                    "adapter_ready": True,
+                    "provider_kind": "sandbox_desktop",
+                    "provider_id": "sandbox-1",
+                    "status": "available",
+                },
+            }
+        ],
+        ["desktop.safe_type_text"],
+        FakeBroker({"ok": True, "unexpected": True}),
+        [{"role": "user", "content": "在隔离桌面里输入 hello"}],
+        timeline,
+        [],
+        next_iteration=3,
+        run_id="run-1",
+        budget=FakeBudget(),
+    )
+
+    replan_event = next(
+        event for event in timeline if event["event"] == "agent.replan.requested"
+    )
+    payload = replan_event["payload"]
+    recovery = payload["recovery_actions"][0]
+    assert payload["trigger"] == "desktop_execution_provider_unavailable"
+    assert payload["source_tool_name"] == "desktop.safe_type_text"
+    assert payload["fallback_tools"][0] == "desktop.provider_session.start"
+    assert "desktop.active_window" in payload["fallback_tools"]
+    assert recovery["tool"] == "desktop.provider_session.start"
+    assert recovery["metadata"]["runtime_retry_source"] == "desktop_provider_session"
+    assert recovery["metadata"]["runtime_replan_auto_start_eligible"] is False
+    assert "approval_required" in recovery["metadata"]["runtime_replan_auto_start_blockers"]
+    assert recovery["deferred_continuation"][0]["desktop_execution_policy"][
+        "prefer_isolated_desktop"
+    ] is True
+    assert run_events[-1][1] == "agent.replan.requested"
 
 
 def test_runtime_tool_call_executor_blocks_policy_required_sandbox_before_broker() -> None:
