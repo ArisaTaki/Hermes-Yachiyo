@@ -5,7 +5,11 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from .event_page_windows import FIRST_PAGE_LEGACY_KEY_EVENT_TYPES
+from .event_page_windows import (
+    FIRST_PAGE_DESKTOP_PROVIDER_SESSION_EVENT_TYPES,
+    FIRST_PAGE_LEGACY_KEY_EVENT_TYPES,
+    FIRST_PAGE_RUNTIME_STATE_EVENT_TYPES,
+)
 
 
 def run_with_replay_events(run: dict[str, Any], runtime: Any) -> dict[str, Any]:
@@ -66,6 +70,7 @@ def is_replay_enrichment_event(event: dict[str, Any]) -> bool:
             "agent.task.",
             "agent.task_core.",
             "agent.tool.",
+            "desktop.provider_session.",
             "group.artifact.",
             "group.member.",
             "group.run.",
@@ -138,20 +143,16 @@ def events_with_first_page_key_event_window(
     events: list[dict[str, Any]],
     next_after_sequence: int,
 ) -> list[dict[str, Any]]:
-    key_event_sequence = 0
-    for event in sorted(events, key=event_sequence):
-        sequence = event_sequence(event)
-        if sequence <= next_after_sequence:
-            continue
-        event_type = str(event.get("event_type") or event.get("event") or "").strip()
-        if event_type in FIRST_PAGE_LEGACY_KEY_EVENT_TYPES:
-            key_event_sequence = sequence
-            break
+    ordered_events = sorted(events, key=event_sequence)
+    key_event_sequence = _first_page_key_event_sequence(
+        ordered_events,
+        next_after_sequence,
+    )
     if key_event_sequence <= next_after_sequence:
         return page
     existing_sequences = {event_sequence(event) for event in page}
     enriched = list(page)
-    for event in sorted(events, key=event_sequence):
+    for event in ordered_events:
         sequence = event_sequence(event)
         if sequence <= next_after_sequence:
             continue
@@ -161,6 +162,71 @@ def events_with_first_page_key_event_window(
             enriched.append(event)
             existing_sequences.add(sequence)
     return enriched
+
+
+def _first_page_key_event_sequence(
+    events: list[dict[str, Any]],
+    next_after_sequence: int,
+) -> int:
+    preferred_event_types = (
+        FIRST_PAGE_LEGACY_KEY_EVENT_TYPES
+        - FIRST_PAGE_RUNTIME_STATE_EVENT_TYPES
+        - FIRST_PAGE_DESKTOP_PROVIDER_SESSION_EVENT_TYPES
+    )
+    sequence = _first_event_sequence(
+        events,
+        next_after_sequence,
+        preferred_event_types,
+    )
+    if sequence > next_after_sequence:
+        return sequence
+
+    sequence = _first_event_sequence(
+        events,
+        next_after_sequence,
+        FIRST_PAGE_DESKTOP_PROVIDER_SESSION_EVENT_TYPES,
+    )
+    if sequence > next_after_sequence:
+        return sequence
+
+    return _last_contiguous_state_event_sequence(events, next_after_sequence)
+
+
+def _first_event_sequence(
+    events: list[dict[str, Any]],
+    next_after_sequence: int,
+    event_types: set[str],
+) -> int:
+    for event in events:
+        sequence = event_sequence(event)
+        if sequence <= next_after_sequence:
+            continue
+        if _event_type(event) in event_types:
+            return sequence
+    return 0
+
+
+def _last_contiguous_state_event_sequence(
+    events: list[dict[str, Any]],
+    next_after_sequence: int,
+) -> int:
+    state_sequence = 0
+    capturing_state_block = False
+    for event in events:
+        sequence = event_sequence(event)
+        if sequence <= next_after_sequence:
+            continue
+        if _event_type(event) in FIRST_PAGE_RUNTIME_STATE_EVENT_TYPES:
+            state_sequence = sequence
+            capturing_state_block = True
+            continue
+        if capturing_state_block:
+            break
+    return state_sequence
+
+
+def _event_type(event: dict[str, Any]) -> str:
+    return str(event.get("event_type") or event.get("event") or "").strip()
 
 
 def event_sequence(event: dict[str, Any]) -> int:

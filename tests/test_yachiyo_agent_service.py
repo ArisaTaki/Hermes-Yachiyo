@@ -480,13 +480,23 @@ class _FirstPageKeyStatusRuntimePort(_FakeRuntimePort):
                     "payload": {"plan_id": "plan-1"},
                 },
                 {
-                    "event_type": "agent.tool.started",
+                    "event_type": "desktop.provider_session.started",
                     "sequence": 3,
+                    "payload": {
+                        "desktop_provider_session": {
+                            "provider_id": "isolated-vnc",
+                            "desktop_execution_session_mode": "isolated_provider",
+                        }
+                    },
+                },
+                {
+                    "event_type": "agent.tool.started",
+                    "sequence": 4,
                     "payload": {"tool": "terminal.run"},
                 },
                 {
                     "event_type": "agent.tool.approval_required",
-                    "sequence": 4,
+                    "sequence": 5,
                     "payload": {"tool": "terminal.run", "status": "approval_required"},
                 },
             ],
@@ -579,6 +589,81 @@ class _FirstPageRuntimeStateRuntimePort(_FakeRuntimePort):
                 }
             )
         return {"run_id": "run-runtime-state", "events": events}
+
+
+class _FirstPageDesktopProviderRuntimePort(_FakeRuntimePort):
+    def get_task_event_page(
+        self,
+        task_id: str,
+        *,
+        after_sequence: int = 0,
+        limit: int = 200,
+    ) -> dict[str, Any]:
+        self.calls.append((
+            "get_task_event_page",
+            {
+                "task_id": task_id,
+                "after_sequence": after_sequence,
+                "limit": limit,
+            },
+        ))
+        return {
+            "run_id": "run-provider-session",
+            "after_sequence": after_sequence,
+            "limit": limit,
+            "next_after_sequence": 2,
+            "has_more": True,
+            "events": [
+                {
+                    "event_type": "task.started",
+                    "sequence": 1,
+                    "payload": {"status": "running"},
+                },
+                {
+                    "event_type": "agent.plan.created",
+                    "sequence": 2,
+                    "payload": {"plan_id": "plan-1"},
+                },
+            ],
+        }
+
+    def get_task_event_stream(self, task_id: str) -> dict[str, Any]:
+        self.calls.append(("get_task_event_stream", task_id))
+        return {
+            "run_id": "run-provider-session",
+            "events": [
+                {
+                    "event_type": "task.started",
+                    "sequence": 1,
+                    "payload": {"status": "running"},
+                },
+                {
+                    "event_type": "agent.plan.created",
+                    "sequence": 2,
+                    "payload": {"plan_id": "plan-1"},
+                },
+                {
+                    "event_type": "agent.tool.started",
+                    "sequence": 3,
+                    "payload": {"tool": "desktop.provider_session.start"},
+                },
+                {
+                    "event_type": "desktop.provider_session.started",
+                    "sequence": 4,
+                    "payload": {
+                        "desktop_provider_session": {
+                            "provider_id": "isolated-vnc",
+                            "desktop_execution_session_mode": "isolated_provider",
+                        }
+                    },
+                },
+                {
+                    "event_type": "agent.tool.progress",
+                    "sequence": 5,
+                    "payload": {"tool": "app.open"},
+                },
+            ],
+        }
 
 
 class _SensitiveTaskRuntimePort(_FakeRuntimePort):
@@ -3570,10 +3655,11 @@ def test_yachiyo_agent_service_task_event_first_page_includes_key_status_window(
     assert event_types == [
         "task.started",
         "agent.plan.created",
+        "desktop.provider_session.started",
         "agent.tool.started",
         "agent.tool.approval_required",
     ]
-    assert page.next_after_sequence == 4
+    assert page.next_after_sequence == 5
     assert page.events[-1].task_id == "task-1"
     assert page.events[-1].payload["task_id"] == "task-1"
     assert port.calls == [
@@ -3638,6 +3724,34 @@ def test_yachiyo_agent_service_task_event_first_page_includes_runtime_state_bloc
     assert page.events[2].payload["core_id"] == "task-core-1"
     assert page.events[3].payload["todo_id"] == "todo-1"
     assert page.events[4].payload["checkpoint_id"] == "checkpoint-1"
+    assert port.calls == [
+        (
+            "get_task_event_page",
+            {
+                "task_id": "task-1",
+                "after_sequence": 0,
+                "limit": 2,
+            },
+        ),
+        ("get_task_event_stream", "task-1"),
+    ]
+
+
+def test_yachiyo_agent_service_task_event_first_page_includes_provider_session_window() -> None:
+    port = _FirstPageDesktopProviderRuntimePort()
+    service = YachiyoAgentService(port)
+
+    page = service.get_task_event_page("task-1", after_sequence=0, limit=2)
+    event_types = [event.event_type for event in page.events]
+
+    assert event_types == [
+        "task.started",
+        "agent.plan.created",
+        "agent.tool.started",
+        "desktop.provider_session.started",
+    ]
+    assert page.next_after_sequence == 4
+    assert page.events[-1].payload["desktop_provider_session"]["provider_id"] == "isolated-vnc"
     assert port.calls == [
         (
             "get_task_event_page",

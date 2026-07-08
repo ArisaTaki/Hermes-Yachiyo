@@ -5,7 +5,15 @@ from __future__ import annotations
 from .contracts import PublicRunEvent, RunEventPageSnapshot
 
 
+FIRST_PAGE_DESKTOP_PROVIDER_SESSION_EVENT_TYPES = {
+    "desktop.provider_session.required",
+    "desktop.provider_session.started",
+    "desktop.provider_session.ready",
+    "desktop.provider_session.failed",
+}
+
 FIRST_PAGE_GROUP_RUN_KEY_EVENT_TYPES = {
+    *FIRST_PAGE_DESKTOP_PROVIDER_SESSION_EVENT_TYPES,
     "group.run.approval_required",
     "group.run.completed",
     "group.run.failed",
@@ -18,6 +26,7 @@ FIRST_PAGE_GROUP_RUN_KEY_EVENT_TYPES = {
 }
 
 FIRST_PAGE_RUN_KEY_EVENT_TYPES = {
+    *FIRST_PAGE_DESKTOP_PROVIDER_SESSION_EVENT_TYPES,
     "run.completed",
     "run.failed",
     "run.cancelled",
@@ -38,6 +47,7 @@ FIRST_PAGE_RUN_KEY_EVENT_TYPES = {
 }
 
 FIRST_PAGE_WORKFLOW_RUN_KEY_EVENT_TYPES = {
+    *FIRST_PAGE_DESKTOP_PROVIDER_SESSION_EVENT_TYPES,
     "workflow.run.approval_required",
     "workflow.run.completed",
     "workflow.run.failed",
@@ -141,9 +151,18 @@ def _first_page_key_event_sequence(
     stream: list[PublicRunEvent],
     event_types: set[str],
 ) -> int:
-    preferred_event_types = set(event_types) - FIRST_PAGE_RUNTIME_STATE_EVENT_TYPES
+    preferred_event_types = (
+        set(event_types)
+        - FIRST_PAGE_RUNTIME_STATE_EVENT_TYPES
+        - FIRST_PAGE_DESKTOP_PROVIDER_SESSION_EVENT_TYPES
+    )
     for event in stream:
         if event.event_type in preferred_event_types:
+            return int(event.sequence or 0)
+
+    provider_event_types = set(event_types) & FIRST_PAGE_DESKTOP_PROVIDER_SESSION_EVENT_TYPES
+    for event in stream:
+        if event.event_type in provider_event_types:
             return int(event.sequence or 0)
 
     state_event_types = set(event_types) & FIRST_PAGE_RUNTIME_STATE_EVENT_TYPES

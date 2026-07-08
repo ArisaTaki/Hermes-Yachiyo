@@ -43,6 +43,7 @@ def test_legacy_run_event_page_first_page_includes_key_status_window() -> None:
             "events": [
                 {"event_type": "run.started", "sequence": 1},
                 {"event_type": "agent.tool.call", "sequence": 3},
+                {"event_type": "desktop.provider_session.started", "sequence": 5},
                 {"event_type": "agent.run.completed", "sequence": 7},
             ],
         },
@@ -60,7 +61,40 @@ def test_legacy_run_event_page_first_page_includes_key_status_window() -> None:
         "events": [
             {"event_type": "run.started", "sequence": 1},
             {"event_type": "agent.tool.call", "sequence": 3},
+            {"event_type": "desktop.provider_session.started", "sequence": 5},
             {"event_type": "agent.run.completed", "sequence": 7},
+        ],
+    }
+
+
+def test_legacy_run_event_page_first_page_includes_provider_session_window() -> None:
+    page = run_event_page_from_legacy_stream(
+        {
+            "run_id": "legacy-run",
+            "events": [
+                {"event_type": "run.started", "sequence": 1},
+                {"event_type": "agent.plan.created", "sequence": 2},
+                {"event_type": "agent.tool.started", "sequence": 3},
+                {"event_type": "desktop.provider_session.started", "sequence": 4},
+                {"event_type": "agent.tool.progress", "sequence": 5},
+            ],
+        },
+        run_id="fallback-run",
+        after_sequence=0,
+        limit=2,
+    )
+
+    assert page == {
+        "run_id": "legacy-run",
+        "after_sequence": 0,
+        "limit": 2,
+        "next_after_sequence": 4,
+        "has_more": True,
+        "events": [
+            {"event_type": "run.started", "sequence": 1},
+            {"event_type": "agent.plan.created", "sequence": 2},
+            {"event_type": "agent.tool.started", "sequence": 3},
+            {"event_type": "desktop.provider_session.started", "sequence": 4},
         ],
     }
 
@@ -131,11 +165,16 @@ def test_legacy_run_replay_enrichment_merges_observable_runtime_facts() -> None:
                 "payload": {"artifact": {"path": "report.md"}},
             },
             {
-                "event_type": "workflow.run.task_core.created",
+                "event_type": "desktop.provider_session.started",
                 "sequence": 11,
+                "payload": {"desktop_provider_session": {"provider_id": "vnc"}},
+            },
+            {
+                "event_type": "workflow.run.task_core.created",
+                "sequence": 12,
                 "payload": {"core_id": "workflow-task-core-1"},
             },
-            {"event_type": "agent.runtime.compiled", "sequence": 12, "payload": {"internal": True}},
+            {"event_type": "agent.runtime.compiled", "sequence": 13, "payload": {"internal": True}},
         ]
     )
     run = {
@@ -156,6 +195,7 @@ def test_legacy_run_replay_enrichment_merges_observable_runtime_facts() -> None:
         "agent.task.todo.updated",
         "agent.replan.requested",
         "agent.artifact.write",
+        "desktop.provider_session.started",
         "workflow.run.task_core.created",
     ]
     assert runtime.requests == [{"run_id": "run-1", "limit": 500}]
@@ -167,6 +207,7 @@ def test_legacy_run_replay_enrichment_merges_observable_runtime_facts() -> None:
     assert is_replay_enrichment_event({"event_type": "agent.task.todo.updated"})
     assert is_replay_enrichment_event({"event_type": "agent.replan.requested"})
     assert is_replay_enrichment_event({"event_type": "agent.artifact.write"})
+    assert is_replay_enrichment_event({"event_type": "desktop.provider_session.started"})
     assert is_replay_enrichment_event({"event_type": "workflow.run.task_core.created"})
     assert not is_replay_enrichment_event({"event_type": "agent.runtime.compiled"})
 

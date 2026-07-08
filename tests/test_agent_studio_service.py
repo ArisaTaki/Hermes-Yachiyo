@@ -2988,6 +2988,65 @@ def test_agent_studio_service_group_stream_fallback_first_page_includes_key_stat
     assert port.calls == [("get_group_run_event_stream", "group-run-1")]
 
 
+def test_agent_studio_service_group_first_page_includes_provider_session_window() -> None:
+    class GroupRunProviderSessionPort(_FakeStudioPort):
+        def get_group_run_event_stream(self, group_run_id: str) -> dict[str, Any]:
+            self.calls.append(("get_group_run_event_stream", group_run_id))
+            return {
+                "run_id": group_run_id,
+                "events": [
+                    {
+                        "event_id": "group-provider-1",
+                        "run_id": group_run_id,
+                        "sequence": 1,
+                        "event_type": "group.member.started",
+                        "payload": {"member_agent_id": "agent-1"},
+                    },
+                    {
+                        "event_id": "group-provider-2",
+                        "run_id": group_run_id,
+                        "sequence": 2,
+                        "event_type": "group.member.progress",
+                        "payload": {"member_agent_id": "agent-1"},
+                    },
+                    {
+                        "event_id": "group-provider-3",
+                        "run_id": group_run_id,
+                        "sequence": 3,
+                        "event_type": "desktop.provider_session.started",
+                        "payload": {
+                            "desktop_provider_session": {
+                                "provider_id": "isolated-vnc",
+                                "desktop_execution_session_mode": "isolated_provider",
+                            }
+                        },
+                    },
+                    {
+                        "event_id": "group-provider-4",
+                        "run_id": group_run_id,
+                        "sequence": 4,
+                        "event_type": "group.member.progress",
+                        "payload": {"member_agent_id": "agent-1", "step": "operate_app"},
+                    },
+                ],
+            }
+
+    port = GroupRunProviderSessionPort()
+    service = AgentStudioService(port)
+
+    page = service.get_group_run_event_page("group-run-1", after_sequence=0, limit=1)
+
+    assert [event.event_type for event in page.events] == [
+        "group.member.started",
+        "group.member.progress",
+        "desktop.provider_session.started",
+    ]
+    assert page.next_after_sequence == 3
+    assert page.has_more is True
+    assert page.events[-1].payload["desktop_provider_session"]["provider_id"] == "isolated-vnc"
+    assert port.calls == [("get_group_run_event_stream", "group-run-1")]
+
+
 def test_agent_studio_service_projects_group_run_replan_events_from_port_stream() -> None:
     class ReplanGroupRunEventPort(_FakeStudioPort):
         def get_group_run_event_stream(self, group_run_id: str) -> dict[str, Any]:
