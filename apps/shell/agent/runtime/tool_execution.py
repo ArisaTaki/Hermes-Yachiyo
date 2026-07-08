@@ -92,6 +92,7 @@ _TOOL_REQUEST_TRACE_MAPPING_KEYS = (
     "observation_retry",
     "desktop_execution_policy",
     "desktop_execution_route",
+    "desktop_provider_session",
     "sandbox_provider",
     "sandbox_desktop_provider",
 )
@@ -221,7 +222,10 @@ def _tool_request_trace_payload(tool_request: dict[str, Any]) -> dict[str, Any]:
     for key in _TOOL_REQUEST_TRACE_MAPPING_KEYS:
         value = tool_request.get(key)
         if isinstance(value, Mapping) and value:
-            payload[key] = dict(value)
+            if key == "desktop_provider_session":
+                payload[key] = _public_desktop_provider_session(value)
+            else:
+                payload[key] = dict(value)
     return payload
 
 
@@ -343,6 +347,13 @@ def _desktop_provider_session_start_control_result(
 def _desktop_provider_session_control_event(
     tool_result: Mapping[str, Any],
 ) -> tuple[str, str, dict[str, Any]] | None:
+    control_action = str(tool_result.get("control_action") or "").strip()
+    tool_name = str(tool_result.get("tool") or "").strip()
+    if (
+        control_action != "desktop_provider_session.start"
+        and tool_name != "desktop.provider_session.start"
+    ):
+        return None
     session = tool_result.get("desktop_provider_session")
     if not isinstance(session, Mapping) or not session:
         return None
@@ -2501,6 +2512,22 @@ def _tool_result_extra_artifacts(
     return artifacts
 
 
+def _tool_result_with_desktop_provider_session_context(
+    tool_request: Mapping[str, Any],
+    tool_result: dict[str, Any],
+) -> dict[str, Any]:
+    session = tool_request.get("desktop_provider_session")
+    if not isinstance(session, Mapping) or not session:
+        return tool_result
+    public_session = _public_desktop_provider_session(session)
+    if not public_session or isinstance(
+        tool_result.get("desktop_provider_session"),
+        Mapping,
+    ):
+        return tool_result
+    return {**tool_result, "desktop_provider_session": public_session}
+
+
 _BROKER_APPROVAL_POLICY_EXCEPTIONS = {
     "file.organize",
     "terminal.run",
@@ -2782,6 +2809,10 @@ class RuntimeToolCallExecutor:
                 ),
             }
         tool_result = self._limit_tool_result(tool_result)
+        tool_result = _tool_result_with_desktop_provider_session_context(
+            tool_request,
+            tool_result,
+        )
         tool_result = _tool_result_with_active_window_verification_target(
             tool_name,
             tool_result,

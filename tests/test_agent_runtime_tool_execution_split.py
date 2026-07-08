@@ -3148,6 +3148,16 @@ def test_runtime_tool_request_runner_allows_sandbox_ready_provider_route() -> No
                     "status": "available",
                     "supported_tools": ["desktop.safe_type_text"],
                 },
+                "desktop_provider_session": {
+                    "running": True,
+                    "started": True,
+                    "status": "running",
+                    "provider_id": "sandbox-1",
+                    "url": "http://127.0.0.1:19093",
+                    "tool_names": ["desktop.safe_type_text"],
+                    "command": ["python", "scripts/run_isolated_desktop_provider.py"],
+                    "env": {"OHA_YACHIYO_DESKTOP_PROVIDER_TOKEN": "secret"},
+                },
             }
         ],
         ["desktop.safe_type_text"],
@@ -3197,6 +3207,16 @@ def test_runtime_tool_request_runner_executes_sandbox_route_through_provider() -
                     "status": "available",
                     "supported_tools": ["desktop.safe_type_text"],
                 },
+                "desktop_provider_session": {
+                    "running": True,
+                    "started": True,
+                    "status": "running",
+                    "provider_id": "sandbox-1",
+                    "url": "http://127.0.0.1:19093",
+                    "tool_names": ["desktop.safe_type_text"],
+                    "command": ["python", "scripts/run_isolated_desktop_provider.py"],
+                    "env": {"OHA_YACHIYO_DESKTOP_PROVIDER_TOKEN": "secret"},
+                },
             }
         ],
         ["desktop.safe_type_text"],
@@ -3233,6 +3253,13 @@ def test_runtime_tool_request_runner_executes_sandbox_route_through_provider() -
     tool_call = next(event for event in timeline if event["event"] == "agent.tool.call")
     assert tool_call["result"]["desktop_execution_provider_routed"] is True
     assert tool_call["result"]["desktop_execution_provider"]["provider_id"] == "sandbox-1"
+    assert tool_call["desktop_provider_session"]["provider_id"] == "sandbox-1"
+    assert tool_call["desktop_provider_session"]["running"] is True
+    assert "command" not in tool_call["desktop_provider_session"]
+    assert "env" not in tool_call["desktop_provider_session"]
+    assert tool_call["result"]["desktop_provider_session"]["provider_id"] == "sandbox-1"
+    assert "command" not in tool_call["result"]["desktop_provider_session"]
+    assert "env" not in tool_call["result"]["desktop_provider_session"]
 
 
 def test_runtime_tool_request_runner_routes_running_provider_session() -> None:
