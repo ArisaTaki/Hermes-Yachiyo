@@ -27,6 +27,8 @@ export function RuntimeDebugSummary({
   const metrics = runtimeDebugMetrics(summary);
   const latestFacts = runtimeDebugLatestFacts(summary);
   const contextFacts = runtimeDebugContextFacts(summary);
+  const providerFacts = runtimeDebugProviderFacts(summary, compact);
+  const recoveryFacts = runtimeDebugRecoveryFacts(summary, compact);
   const surfaces = (summary?.debug_surfaces || []).filter(Boolean).slice(0, compact ? 4 : 6);
   const classes = [
     'runtime-debug-summary',
@@ -108,6 +110,31 @@ export function RuntimeDebugSummary({
               <strong>{metric.value}</strong>
               <small>{metric.label}</small>
             </span>
+          ))}
+        </div>
+      ) : null}
+      {providerFacts.length ? (
+        <div
+          className="runtime-debug-provider"
+          data-provider-contract-blockers={(summary?.desktop_provider_contract_blocking_conditions || []).join(',')}
+          data-provider-session-tools={(summary?.desktop_provider_session_tool_names || []).join(',')}
+          data-testid={`${testId}-desktop-provider`}
+        >
+          {providerFacts.map((fact) => (
+            <span key={fact}>{fact}</span>
+          ))}
+        </div>
+      ) : null}
+      {recoveryFacts.length ? (
+        <div
+          className="runtime-debug-recovery"
+          data-deferred-continuation-count={String(summary?.deferred_continuation_count || 0)}
+          data-latest-deferred-continuation-tool={summary?.latest_deferred_continuation_tool || ''}
+          data-latest-recovery-tool={summary?.latest_recovery_tool || ''}
+          data-testid={`${testId}-recovery`}
+        >
+          {recoveryFacts.map((fact) => (
+            <span key={fact}>{fact}</span>
           ))}
         </div>
       ) : null}
@@ -349,6 +376,59 @@ function runtimeDebugLatestFacts(summary?: RuntimeDebugSummarySnapshot | null): 
     planCapabilities.length ? `capabilities ${planCapabilities.join(', ')}` : '',
     ...runtimeStages,
   ].filter(Boolean);
+}
+
+function runtimeDebugProviderFacts(
+  summary?: RuntimeDebugSummarySnapshot | null,
+  compact = false,
+): string[] {
+  if (!summary) return [];
+  const blockers = (summary.desktop_provider_contract_blocking_conditions || [])
+    .filter(Boolean)
+    .slice(0, compact ? 2 : 4);
+  const tools = (summary.desktop_provider_session_tool_names || [])
+    .filter(Boolean)
+    .slice(0, compact ? 3 : 5);
+  const facts = [
+    summary.desktop_provider_session_status ? `status ${summary.desktop_provider_session_status}` : '',
+    summary.desktop_provider_session_needed ? 'provider needed' : '',
+    summary.desktop_provider_session_running ? 'provider running' : '',
+    summary.desktop_provider_session_started ? 'provider started' : '',
+    summary.desktop_provider_session_provider_id ? `provider ${summary.desktop_provider_session_provider_id}` : '',
+    summary.desktop_execution_session_label ? `session ${summary.desktop_execution_session_label}` : '',
+    summary.desktop_provider_session_isolated === true ? 'isolated session' : '',
+    summary.desktop_provider_session_foreground_takeover_required === false ? 'no foreground takeover' : '',
+    summary.desktop_provider_backend_kind ? `backend ${summary.desktop_provider_backend_kind}` : '',
+    summary.desktop_provider_backend_is_loopback === true ? 'loopback backend' : '',
+    summary.desktop_provider_backend_ready_for_public_release === true ? 'release ready backend' : '',
+    summary.desktop_provider_backend_ready_for_public_release === false ? 'backend not release ready' : '',
+    summary.desktop_provider_requires_real_virtual_backend === true ? 'real virtual backend required' : '',
+    summary.desktop_provider_contract_ok === true ? 'contract ready' : '',
+    summary.desktop_provider_contract_ok === false ? 'contract blocked' : '',
+    tools.length ? `tools ${tools.join(', ')}` : '',
+    blockers.length ? `blockers ${blockers.join(', ')}` : '',
+  ].filter(Boolean);
+  return facts.slice(0, compact ? 6 : 10);
+}
+
+function runtimeDebugRecoveryFacts(
+  summary?: RuntimeDebugSummarySnapshot | null,
+  compact = false,
+): string[] {
+  if (!summary) return [];
+  const continuationCount = Number(summary.deferred_continuation_count || 0);
+  const facts = [
+    summary.latest_replan_request_id ? `replan ${summary.latest_replan_request_id}` : '',
+    summary.latest_replan_trigger ? `trigger ${summary.latest_replan_trigger}` : '',
+    summary.latest_replan_status ? `status ${summary.latest_replan_status}` : '',
+    summary.latest_recovery_tool ? `recovery ${summary.latest_recovery_tool}` : '',
+    summary.latest_recovery_action_label ? `action ${summary.latest_recovery_action_label}` : '',
+    summary.latest_recovery_action_count ? `actions ${summary.latest_recovery_action_count}` : '',
+    summary.latest_deferred_tool ? `deferred ${summary.latest_deferred_tool}` : '',
+    continuationCount > 0 ? `continues ${continuationCount}` : '',
+    summary.latest_deferred_continuation_tool ? `next ${summary.latest_deferred_continuation_tool}` : '',
+  ].filter(Boolean);
+  return facts.slice(0, compact ? 5 : 8);
 }
 
 function runtimeDebugContextFacts(summary?: RuntimeDebugSummarySnapshot | null): string[] {

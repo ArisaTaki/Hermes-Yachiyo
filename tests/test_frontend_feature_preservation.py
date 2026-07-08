@@ -126,6 +126,18 @@ def test_frontend_runtime_debug_summary_exposes_runtime_trace_facts() -> None:
             "data-deferred-continuation-count={String(summary?.deferred_continuation_count || 0)}",
             "data-latest-deferred-continuation-tool="
             "{summary?.latest_deferred_continuation_tool || ''}",
+            "const providerFacts = runtimeDebugProviderFacts(summary, compact);",
+            "const recoveryFacts = runtimeDebugRecoveryFacts(summary, compact);",
+            "className=\"runtime-debug-provider\"",
+            "data-testid={`${testId}-desktop-provider`}",
+            "data-provider-contract-blockers="
+            "{(summary?.desktop_provider_contract_blocking_conditions || []).join(',')}",
+            "className=\"runtime-debug-recovery\"",
+            "data-testid={`${testId}-recovery`}",
+            "summary.desktop_provider_session_needed ? 'provider needed' : ''",
+            "summary.desktop_provider_backend_ready_for_public_release === false ? "
+            "'backend not release ready' : ''",
+            "continuationCount > 0 ? `continues ${continuationCount}` : ''",
             "summary.runtime_doctrine ? `doctrine ${summary.runtime_doctrine}` : ''",
             "summary.current_request_tool_name ? "
             "`request tool ${summary.current_request_tool_name}` : ''",

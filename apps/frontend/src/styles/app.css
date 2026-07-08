@@ -19453,6 +19453,8 @@ button.studio-tool-permission:disabled {
 .runtime-debug-summary-state,
 .runtime-debug-context,
 .runtime-debug-metrics,
+.runtime-debug-provider,
+.runtime-debug-recovery,
 .runtime-debug-facts {
   display: flex;
   flex-wrap: wrap;
@@ -19467,6 +19469,8 @@ button.studio-tool-permission:disabled {
 .runtime-debug-summary-state span,
 .runtime-debug-context code,
 .runtime-debug-metric,
+.runtime-debug-provider span,
+.runtime-debug-recovery span,
 .runtime-debug-facts span,
 .runtime-debug-facts em {
   display: inline-flex;
@@ -19500,6 +19504,16 @@ button.studio-tool-permission:disabled {
 .runtime-debug-metric.danger {
   border-color: oklch(62% 0.18 24 / 0.32);
   color: var(--hy-danger);
+}
+
+.runtime-debug-provider span {
+  border-color: oklch(66% 0.12 188 / 0.24);
+  color: var(--hy-teal);
+}
+
+.runtime-debug-recovery span {
+  border-color: oklch(82% 0.135 76 / 0.3);
+  color: var(--hy-warning);
 }
 
 .runtime-debug-context code {
