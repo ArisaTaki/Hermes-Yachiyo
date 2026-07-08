@@ -2966,6 +2966,62 @@ def test_runtime_tool_request_runner_routes_running_provider_session() -> None:
     assert not [event for event in timeline if event["event"] == "agent.tool.skipped"]
 
 
+def test_runtime_tool_request_runner_blocks_failed_provider_session_fallback() -> None:
+    budget = FakeBudget()
+    messages = [{"role": "user", "content": "在隔离桌面里输入 hello"}]
+    timeline: list[dict[str, Any]] = []
+    captured_requests: list[dict[str, Any]] = []
+    runner = _runner(
+        call_agent_tool=lambda tool_request, *_args, **_kwargs: captured_requests.append(
+            tool_request
+        )
+        or {"ok": True, "tool": tool_request.get("tool")},
+    )
+
+    runner.run(
+        [
+            {
+                "tool": "desktop.safe_type_text",
+                "input": {"text": "hello"},
+                "desktop_execution_policy": {
+                    "mode": "preview_input",
+                    "require_sandbox_for_keyboard_mouse": True,
+                    "avoid_user_foreground_takeover": True,
+                },
+                "desktop_provider_session": {
+                    "ok": False,
+                    "needed": True,
+                    "auto_start": True,
+                    "running": False,
+                    "started": False,
+                    "status": "start_failed",
+                    "reason": "isolated_provider_start_failed",
+                    "error": "provider refused to launch",
+                    "tool_names": ["desktop.safe_type_text"],
+                },
+            }
+        ],
+        ["desktop.safe_type_text"],
+        FakeBroker({"ok": True}),
+        messages,
+        timeline,
+        [],
+        next_iteration=3,
+        run_id="run-1",
+        budget=budget,
+    )
+
+    assert captured_requests == []
+    assert budget.claims == [("desktop.safe_type_text", False)]
+    skipped = next(event for event in timeline if event["event"] == "agent.tool.skipped")
+    result = skipped["result"]
+    assert result["blocked_by_desktop_execution_policy"] is True
+    assert result["desktop_execution_route"]["status"] == "provider_required"
+    assert result["desktop_execution_route"]["sandbox_required"] is True
+    assert result["sandbox_provider"]["source"] == "desktop_provider_session"
+    assert result["sandbox_provider"]["available"] is False
+
+
 def test_runtime_tool_request_runner_preview_input_policy_allows_media_but_blocks_typing() -> None:
     run_events: list[tuple[str, str, dict[str, Any]]] = []
     budget = FakeBudget()

@@ -247,6 +247,7 @@ def annotate_envelope_with_desktop_provider_session(
                 "auto_start",
                 "started",
                 "reason",
+                "error",
                 "request_ids",
                 "tool_names",
             )

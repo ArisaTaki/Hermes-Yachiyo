@@ -3083,19 +3083,99 @@ def test_legacy_chat_task_starter_auto_starts_isolated_provider_session(
         conversation_id="chat-1",
         prompt="复制选中文本",
         metadata={"desktop_provider_session_auto_start": True},
+        runtime_execution_envelope={
+            "envelope_id": "envelope-copy",
+            "requests": [
+                {
+                    "request_id": "request:1:desktop.safe_shortcut",
+                    "tool_name": "desktop.safe_shortcut",
+                    "input": {"action": "copy"},
+                }
+            ],
+        },
     )
 
     assert task is not None
     assert auto_start_values == [True]
+    start_call = [
+        call for call in runtime.calls if call[0] == "start_main_chat_run"
+    ][0]
+    start_envelope = start_call[1]["runtime_execution_envelope"]
+    assert start_envelope["desktop_provider_session"]["started"] is True
+    assert start_envelope["desktop_provider_session"]["auto_start"] is True
+    assert start_envelope["desktop_provider_session"]["provider_id"] == (
+        "local-isolated-desktop"
+    )
     model_loop_call = [
         call for call in runtime.calls if call[0] == "execute_main_chat_model_loop"
     ][0]
+    model_envelope = model_loop_call[1]["runtime_execution_envelope"]
+    assert model_envelope["desktop_provider_session"]["started"] is True
+    assert model_envelope["desktop_provider_session"]["provider_id"] == (
+        "local-isolated-desktop"
+    )
     direct_request = model_loop_call[1]["direct_tool_requests"][0]
     assert direct_request["desktop_provider_session"]["started"] is True
     assert direct_request["desktop_provider_session"]["auto_start"] is True
     assert direct_request["desktop_provider_session"]["provider_id"] == (
         "local-isolated-desktop"
     )
+
+
+def test_legacy_chat_task_starter_surfaces_isolated_provider_start_failure(
+    monkeypatch,
+) -> None:
+    app_runtime = _FakeAppRuntime()
+    runtime = _MainChatPlannerEventRuntime()
+    starter = LegacyChatTaskStarter(app_runtime, runtime)
+
+    def fake_ensure(envelope: dict[str, Any], *, auto_start: bool = True) -> dict[str, Any]:
+        assert auto_start is True
+        assert envelope["requests"][0]["tool_name"] == "desktop.safe_shortcut"
+        raise RuntimeError("provider refused to launch")
+
+    monkeypatch.setattr(
+        legacy_ports_module,
+        "ensure_isolated_desktop_provider_session_for_envelope",
+        fake_ensure,
+    )
+
+    task = starter.execute_existing_main_chat_task(
+        task_id="task-copy-start-failed",
+        conversation_id="chat-1",
+        prompt="复制选中文本",
+        metadata={"desktop_provider_session_auto_start": True},
+        runtime_execution_envelope={
+            "envelope_id": "envelope-copy-start-failed",
+            "requests": [
+                {
+                    "request_id": "request:1:desktop.safe_shortcut",
+                    "tool_name": "desktop.safe_shortcut",
+                    "input": {"action": "copy"},
+                }
+            ],
+        },
+    )
+
+    assert task is not None
+    model_loop_call = [
+        call for call in runtime.calls if call[0] == "execute_main_chat_model_loop"
+    ][0]
+    direct_request = model_loop_call[1]["direct_tool_requests"][0]
+    session = direct_request["desktop_provider_session"]
+    assert session["ok"] is False
+    assert session["status"] == "start_failed"
+    assert session["running"] is False
+    assert session["auto_start"] is True
+    assert session["request_ids"] == ["request:1:desktop.safe_shortcut"]
+    assert session["tool_names"] == ["desktop.safe_shortcut"]
+    assert session["error"] == "provider refused to launch"
+    assert session["foreground_takeover_required"] is False
+    envelope_session = model_loop_call[1]["runtime_execution_envelope"][
+        "desktop_provider_session"
+    ]
+    assert envelope_session["status"] == "start_failed"
+    assert envelope_session["error"] == "provider refused to launch"
 
 
 def test_legacy_chat_task_starter_does_not_pass_hotkey_safe_shortcut_full_plan() -> None:

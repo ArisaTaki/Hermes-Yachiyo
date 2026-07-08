@@ -850,11 +850,6 @@ class LegacyChatTaskStarter:
             if supports_keyword(start_main_chat_run, "metadata"):
                 start_kwargs["metadata"] = metadata
             if (
-                effective_runtime_execution_envelope is not None
-                and supports_keyword(start_main_chat_run, "runtime_execution_envelope")
-            ):
-                start_kwargs["runtime_execution_envelope"] = effective_runtime_execution_envelope
-            if (
                 direct_tool_request is not None
                 and supports_keyword(start_main_chat_run, "direct_tool_request")
             ):
@@ -864,6 +859,20 @@ class LegacyChatTaskStarter:
                 and supports_keyword(start_main_chat_run, "direct_tool_requests")
             ):
                 start_kwargs["direct_tool_requests"] = direct_tool_requests
+            effective_runtime_execution_envelope = (
+                _runtime_execution_envelope_with_desktop_provider_session(
+                    effective_runtime_execution_envelope,
+                    direct_tool_request=direct_tool_request,
+                    direct_tool_requests=direct_tool_requests,
+                )
+            )
+            if (
+                effective_runtime_execution_envelope is not None
+                and supports_keyword(start_main_chat_run, "runtime_execution_envelope")
+            ):
+                start_kwargs["runtime_execution_envelope"] = (
+                    effective_runtime_execution_envelope
+                )
             run = start_main_chat_run(**start_kwargs)
             run_id = str(run.get("run_id") or "").strip()
             if not run_id:
@@ -2527,7 +2536,15 @@ def _direct_tool_requests_with_desktop_provider_session(
             envelope,
             auto_start=auto_start,
         )
-    except Exception:
+    except Exception as exc:
+        if not auto_start:
+            return [dict(request) for request in direct_tool_requests if isinstance(request, dict)]
+        session = _failed_desktop_provider_session_for_envelope(
+            envelope_requests,
+            exc,
+            auto_start=auto_start,
+        )
+    if not isinstance(session, Mapping):
         return [dict(request) for request in direct_tool_requests if isinstance(request, dict)]
     if not session.get("needed"):
         return [dict(request) for request in direct_tool_requests if isinstance(request, dict)]
@@ -2564,6 +2581,82 @@ def _direct_tool_requests_with_desktop_provider_session(
         else:
             result.append(dict(request))
     return result
+
+
+def _failed_desktop_provider_session_for_envelope(
+    envelope_requests: list[dict[str, Any]],
+    exc: Exception,
+    *,
+    auto_start: bool,
+) -> dict[str, Any]:
+    request_ids = [
+        str(request.get("request_id") or "").strip()
+        for request in envelope_requests
+        if str(request.get("request_id") or "").strip()
+    ]
+    tool_names = sorted(
+        {
+            str(request.get("tool_name") or request.get("tool") or "").strip()
+            for request in envelope_requests
+            if str(request.get("tool_name") or request.get("tool") or "").strip()
+        }
+    )
+    return {
+        "ok": False,
+        "needed": True,
+        "auto_start": bool(auto_start),
+        "started": False,
+        "running": False,
+        "status": "start_failed",
+        "error": str(exc),
+        "reason": "isolated_provider_start_failed",
+        "source": "isolated_provider_session_manager",
+        "request_ids": request_ids,
+        "tool_names": tool_names,
+        "desktop_session_kind": "isolated_desktop",
+        "desktop_session_isolated": True,
+        "foreground_takeover_required": False,
+        "keyboard_mouse_capture_supported": True,
+    }
+
+
+def _runtime_execution_envelope_with_desktop_provider_session(
+    runtime_execution_envelope: Any | None,
+    *,
+    direct_tool_request: Mapping[str, Any] | None = None,
+    direct_tool_requests: list[dict[str, Any]] | None = None,
+) -> dict[str, Any] | None:
+    if not isinstance(runtime_execution_envelope, Mapping):
+        return None
+    session = _desktop_provider_session_from_direct_requests(
+        direct_tool_request=direct_tool_request,
+        direct_tool_requests=direct_tool_requests,
+    )
+    if not session:
+        return dict(runtime_execution_envelope)
+    payload = dict(runtime_execution_envelope)
+    payload.setdefault("desktop_provider_session", dict(session))
+    return payload
+
+
+def _desktop_provider_session_from_direct_requests(
+    *,
+    direct_tool_request: Mapping[str, Any] | None = None,
+    direct_tool_requests: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    candidates: list[Mapping[str, Any]] = []
+    if isinstance(direct_tool_request, Mapping):
+        candidates.append(direct_tool_request)
+    candidates.extend(
+        request
+        for request in direct_tool_requests or []
+        if isinstance(request, Mapping)
+    )
+    for request in candidates:
+        session = request.get("desktop_provider_session")
+        if isinstance(session, Mapping):
+            return dict(session)
+    return {}
 
 
 def _desktop_provider_session_auto_start_requested(
