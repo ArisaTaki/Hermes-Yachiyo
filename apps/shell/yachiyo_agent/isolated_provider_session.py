@@ -22,6 +22,10 @@ from apps.shell.agent.runtime.desktop_execution_providers import (
 from apps.shell.agent.runtime.isolated_desktop_provider import (
     DEFAULT_ISOLATED_PROVIDER_ID,
 )
+from apps.shell.yachiyo_agent.desktop_execution_policy import (
+    is_user_foreground_takeover_tool,
+    user_foreground_takeover_allowed,
+)
 
 _ENV_KEYS = {
     "OHA_YACHIYO_DESKTOP_PROVIDER_URL",
@@ -392,7 +396,17 @@ def _request_needs_isolated_session(tool_name: str, request: dict[str, Any]) -> 
     route = _mapping(request.get("desktop_execution_route"))
     provider = _mapping(request.get("sandbox_provider"))
     mode = _mapping(request.get("execution_mode"))
+    if _request_allows_user_foreground_session(request):
+        return False
     if _route_or_provider_requires_isolated_session(route, provider):
+        return True
+    if _request_prefers_isolated_foreground_session(
+        tool_name,
+        request,
+        route=route,
+        provider=provider,
+        mode=mode,
+    ):
         return True
     if tool_name not in KEYBOARD_MOUSE_CONTROL_TOOLS and not bool(
         mode.get("keyboard_mouse_capture")
@@ -403,6 +417,59 @@ def _request_needs_isolated_session(tool_name: str, request: dict[str, Any]) -> 
     if _optional_bool(route.get("desktop_session_isolated")) is True:
         return False
     return True
+
+
+def _request_allows_user_foreground_session(request: dict[str, Any]) -> bool:
+    if user_foreground_takeover_allowed(request):
+        return True
+    policy = _mapping(request.get("desktop_execution_policy"))
+    if _optional_bool(policy.get("allow_live_foreground")) is True:
+        return True
+    mode = str(policy.get("mode") or "").strip().lower().replace("-", "_")
+    if mode == "allow" and not _policy_prefers_isolated_foreground(policy):
+        return True
+    return False
+
+
+def _request_prefers_isolated_foreground_session(
+    tool_name: str,
+    request: dict[str, Any],
+    *,
+    route: dict[str, Any],
+    provider: dict[str, Any],
+    mode: dict[str, Any],
+) -> bool:
+    if user_foreground_takeover_allowed(request):
+        return False
+    if _optional_bool(provider.get("desktop_session_isolated")) is True:
+        return False
+    if _optional_bool(route.get("desktop_session_isolated")) is True:
+        return False
+    if not (
+        is_user_foreground_takeover_tool(tool_name)
+        or bool(mode.get("foreground_control"))
+        or bool(route.get("user_foreground_takeover_risk"))
+    ):
+        return False
+    if _optional_bool(route.get("requires_user_foreground_session")) is True:
+        return True
+    if _optional_bool(route.get("user_foreground_takeover_risk")) is True:
+        return True
+    policy = _mapping(request.get("desktop_execution_policy"))
+    if _policy_prefers_isolated_foreground(policy):
+        return True
+    return False
+
+
+def _policy_prefers_isolated_foreground(policy: dict[str, Any]) -> bool:
+    return any(
+        _optional_bool(policy.get(key)) is True
+        for key in (
+            "prefer_isolated_desktop",
+            "avoid_user_foreground_takeover",
+            "require_sandbox_for_keyboard_mouse",
+        )
+    )
 
 
 def _route_or_provider_requires_isolated_session(

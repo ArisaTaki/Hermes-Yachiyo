@@ -216,6 +216,7 @@ _USER_FOREGROUND_TAKEOVER_TOOLS = frozenset(
         "app.focus_window",
         "desktop.open_app",
         "desktop.focus_app",
+        "media.music_app_open_and_play",
     }
 )
 
@@ -624,6 +625,19 @@ def is_readonly_desktop_provider_tool(tool_name: str) -> bool:
     return str(tool_name or "").strip() in _READ_ONLY_DESKTOP_PROVIDER_TOOLS
 
 
+def is_user_foreground_takeover_tool(tool_name: str) -> bool:
+    return str(tool_name or "").strip() in _USER_FOREGROUND_TAKEOVER_TOOLS
+
+
+def user_foreground_takeover_allowed(metadata: Mapping[str, Any] | None) -> bool:
+    return _metadata_truthy(
+        metadata,
+        "allow_user_foreground_takeover",
+        "desktop_allow_user_foreground_takeover",
+        "allow_nonisolated_desktop_provider",
+    )
+
+
 def sandbox_desktop_provider_can_execute_tool(
     sandbox_provider: Mapping[str, Any],
     tool_name: str,
@@ -646,6 +660,20 @@ def with_daily_entrypoint_desktop_execution_policy(
     payload.setdefault("desktop_provider_route_readonly", True)
     payload.setdefault("desktop_provider_route_foreground", True)
     payload.setdefault("desktop_provider_local_native", True)
+    if user_foreground_takeover_allowed(payload):
+        payload["desktop_execution_policy"] = {
+            **daily_entrypoint_desktop_execution_policy(surface=surface),
+            "mode": "allow",
+            "allow_live_foreground": True,
+            "prefer_isolated_desktop": False,
+            "avoid_user_foreground_takeover": False,
+            "require_sandbox_for_keyboard_mouse": False,
+            "reason": (
+                "Daily entrypoint is explicitly allowed to use the user's foreground "
+                "desktop session for this request."
+            ),
+        }
+        return payload
     if _has_desktop_execution_policy(payload):
         return payload
     payload["desktop_execution_policy"] = daily_entrypoint_desktop_execution_policy(

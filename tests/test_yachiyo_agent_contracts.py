@@ -5465,6 +5465,10 @@ def test_daily_entrypoint_desktop_execution_policy_defaults_to_input_preview() -
         {"desktop_execution_policy": {"mode": "supervised_live"}},
         surface="bubble",
     )
+    live_foreground = with_daily_entrypoint_desktop_execution_policy(
+        {"allow_user_foreground_takeover": True},
+        surface="bubble",
+    )
 
     assert policy["mode"] == "preview_input"
     assert policy["prefer_isolated_desktop"] is True
@@ -5477,6 +5481,13 @@ def test_daily_entrypoint_desktop_execution_policy_defaults_to_input_preview() -
     assert metadata["desktop_execution_policy"]["avoid_user_foreground_takeover"] is True
     assert metadata["desktop_execution_policy"]["require_sandbox_for_keyboard_mouse"] is True
     assert explicit["desktop_execution_policy"] == {"mode": "supervised_live"}
+    assert live_foreground["desktop_execution_policy"]["mode"] == "allow"
+    assert live_foreground["desktop_execution_policy"]["allow_live_foreground"] is True
+    assert live_foreground["desktop_execution_policy"]["prefer_isolated_desktop"] is False
+    assert (
+        live_foreground["desktop_execution_policy"]["avoid_user_foreground_takeover"]
+        is False
+    )
     assert metadata["desktop_provider_health_probe"] is True
     assert metadata["desktop_provider_route_readonly"] is True
     assert metadata["desktop_provider_route_foreground"] is True

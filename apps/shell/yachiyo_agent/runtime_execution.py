@@ -372,6 +372,13 @@ def _runtime_request_metadata_from_metadata(
         "local_desktop_provider",
     ):
         payload["desktop_provider_local_native"] = True
+    if _metadata_truthy(
+        metadata,
+        "allow_user_foreground_takeover",
+        "desktop_allow_user_foreground_takeover",
+        "allow_nonisolated_desktop_provider",
+    ):
+        payload["allow_user_foreground_takeover"] = True
     for policy_key in (
         "desktop_execution_policy",
         "yachiyo_desktop_execution_policy",
