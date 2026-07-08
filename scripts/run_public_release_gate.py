@@ -89,6 +89,8 @@ def public_release_gate_checks(
                 "tests/test_release_artifact_verifier.py::test_verifier_accepts_current_release_files",
                 "tests/test_public_release_gate.py",
                 "tests/test_release_smoke_summary.py",
+                "tests/test_oha_desktop_agent_release_smoke.py",
+                "tests/test_oha_parity_summary.py",
                 "tests/test_public_demo_smokes.py",
                 "tests/test_refresh_local_rc_signoff.py",
                 "tests/test_release_diagnostics_bundle.py",
