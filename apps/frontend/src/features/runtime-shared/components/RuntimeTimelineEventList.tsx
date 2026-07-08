@@ -514,6 +514,16 @@ function runtimeEventMetadata(
     { label: 'provider needed', value: desktopProviderSession.needed },
     { label: 'provider session', value: desktopProviderSession.desktopSessionKind },
     { label: 'provider isolated', value: desktopProviderSession.desktopSessionIsolated },
+    { label: 'provider backend', value: desktopProviderSession.desktopBackendKind },
+    { label: 'provider backend loopback', value: desktopProviderSession.desktopBackendIsLoopback },
+    {
+      label: 'provider backend release-ready',
+      value: desktopProviderSession.desktopBackendReadyForPublicRelease,
+    },
+    {
+      label: 'provider real backend required',
+      value: desktopProviderSession.requiresRealVirtualDesktopBackend,
+    },
     { label: 'provider foreground takeover', value: desktopProviderSession.foregroundTakeoverRequired },
     { label: 'provider keyboard/mouse', value: desktopProviderSession.keyboardMouseCaptureSupported },
     { label: 'provider tools', value: desktopProviderSession.toolNames.join(', ') },

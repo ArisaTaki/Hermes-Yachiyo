@@ -2,6 +2,9 @@ import { runtimeToolDisplayLabelOrName } from './approval';
 import { runtimeEventIsDesktopProviderSessionEvent } from './desktopEvents';
 
 export type RuntimeDesktopProviderSessionContext = {
+  desktopBackendIsLoopback: string;
+  desktopBackendKind: string;
+  desktopBackendReadyForPublicRelease: string;
   desktopSessionIsolated: string;
   desktopSessionKind: string;
   executionSessionLabel: string;
@@ -12,6 +15,7 @@ export type RuntimeDesktopProviderSessionContext = {
   needed: string;
   providerId: string;
   reason: string;
+  requiresRealVirtualDesktopBackend: string;
   running: string;
   source: string;
   started: string;
@@ -31,6 +35,9 @@ export function runtimeDesktopProviderSessionContext(
   const session = runtimeFirstNestedRecord([...baseRecords, ...resultRecords], 'desktop_provider_session');
   const contextRecords = [session, ...baseRecords, ...resultRecords];
   return {
+    desktopBackendIsLoopback: runtimeFirstBoolLabel(contextRecords, 'desktop_backend_is_loopback'),
+    desktopBackendKind: runtimeFirstString(contextRecords, 'desktop_backend_kind'),
+    desktopBackendReadyForPublicRelease: runtimeFirstBoolLabel(contextRecords, 'desktop_backend_ready_for_public_release'),
     desktopSessionIsolated: runtimeFirstBoolLabel(contextRecords, 'desktop_session_isolated'),
     desktopSessionKind: runtimeFirstString(contextRecords, 'desktop_session_kind'),
     executionSessionLabel: runtimeFirstString(contextRecords, 'desktop_execution_session_label'),
@@ -41,6 +48,7 @@ export function runtimeDesktopProviderSessionContext(
     needed: runtimeFirstBoolLabel(contextRecords, 'needed'),
     providerId: runtimeFirstString(contextRecords, 'provider_id') || runtimeFirstString(contextRecords, 'selected_provider_id'),
     reason: runtimeFirstString(contextRecords, 'reason'),
+    requiresRealVirtualDesktopBackend: runtimeFirstBoolLabel(contextRecords, 'requires_real_virtual_desktop_backend'),
     running: runtimeFirstBoolLabel(contextRecords, 'running'),
     source: runtimeFirstString(contextRecords, 'source') || runtimeFirstString(contextRecords, 'selected_provider_kind'),
     started: runtimeFirstBoolLabel(contextRecords, 'started'),
@@ -87,7 +95,13 @@ export function runtimeDesktopProviderSessionDetail(
     context.executionSessionMode && !context.executionSessionLabel ? `mode ${context.executionSessionMode}` : '',
     context.status ? `状态 ${context.status}` : '',
     context.desktopSessionKind ? `session ${context.desktopSessionKind}` : '',
+    context.desktopBackendKind ? `backend ${context.desktopBackendKind}` : '',
     context.desktopSessionIsolated === 'true' ? 'isolated' : '',
+    context.desktopBackendIsLoopback === 'true' ? 'loopback backend' : '',
+    context.desktopBackendIsLoopback === 'false' ? 'non-loopback backend' : '',
+    context.desktopBackendReadyForPublicRelease === 'true' ? 'release-ready backend' : '',
+    context.desktopBackendReadyForPublicRelease === 'false' ? 'backend not release-ready' : '',
+    context.requiresRealVirtualDesktopBackend === 'true' ? 'real virtual desktop required' : '',
     context.foregroundTakeoverRequired === 'false' ? 'no foreground takeover' : '',
     context.foregroundTakeoverRequired === 'true' ? 'foreground takeover required' : '',
     context.keyboardMouseCaptureSupported === 'true' ? 'keyboard/mouse ready' : '',
