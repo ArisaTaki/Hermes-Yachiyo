@@ -38,6 +38,12 @@ def test_oha_desktop_agent_release_smoke_covers_product_readiness(tmp_path) -> N
     assert section_by_id["desktop_executor_before_model"]["report"]["checks"][
         "model_never_called"
     ] is True
+    assert section_by_id["desktop_executor_before_model"]["report"]["checks"][
+        "daily_app_open_recommends_isolated_provider"
+    ] is True
+    assert section_by_id["desktop_executor_before_model"]["report"]["checks"][
+        "daily_media_playback_recommends_isolated_provider"
+    ] is True
     assert section_by_id["legacy_facade_planner_ownership"]["report"]["checks"][
         "legacy_parser_not_called"
     ] is True
