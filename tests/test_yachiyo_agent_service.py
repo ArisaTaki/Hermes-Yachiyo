@@ -2816,6 +2816,96 @@ def test_yachiyo_chat_entrypoint_starts_isolated_session_for_music_playback(
     )
 
 
+def test_yachiyo_chat_entrypoint_does_not_direct_execute_blocked_provider_route(
+    monkeypatch,
+) -> None:
+    for key in (
+        "OHA_YACHIYO_DESKTOP_PROVIDER_URL",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_ID",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_KEYBOARD_MOUSE_CAPTURE_SUPPORTED",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_KIND",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_ISOLATED",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_FOREGROUND_TAKEOVER_REQUIRED",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_EXECUTE_URL",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_STATUS_URL",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_KIND",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    start_calls: list[dict[str, Any]] = []
+
+    monkeypatch.setattr(
+        "apps.shell.yachiyo_agent.isolated_provider_session."
+        "isolated_desktop_provider_session_status",
+        lambda: {
+            "ok": True,
+            "status": "stopped",
+            "running": False,
+            "provider_id": "",
+            "url": "",
+            "source": "test",
+        },
+    )
+
+    def fake_start(request: dict[str, Any] | None = None) -> dict[str, Any]:
+        start_calls.append(dict(request or {}))
+        return {
+            "ok": False,
+            "status": "real_virtual_desktop_provider_required",
+            "running": False,
+            "started": False,
+            "provider_id": "real-virtual-desktop",
+            "desktop_session_kind": "virtual_desktop",
+            "desktop_session_isolated": True,
+            "foreground_takeover_required": False,
+            "keyboard_mouse_capture_supported": True,
+            "requires_real_virtual_desktop_backend": True,
+            "blocking_conditions": [
+                "configured_virtual_desktop_provider_required",
+                "real_virtual_desktop_backend_required",
+            ],
+        }
+
+    monkeypatch.setattr(
+        "apps.shell.yachiyo_agent.isolated_provider_session."
+        "start_isolated_desktop_provider_session",
+        fake_start,
+    )
+    port = _FakeRuntimePort()
+    service = YachiyoAgentService(port)
+
+    task = service.start_chat_task(
+        StartChatTaskRequest(
+            prompt="播放 Apple Music",
+            conversation_id="chat-1",
+            metadata={"launcher_mode": "bubble"},
+            allowed_tools=[
+                "media.music_app_open_and_play",
+                "desktop.ui_elements",
+            ],
+        )
+    )
+
+    request_payload = port.calls[0][1]
+    envelope = request_payload["runtime_execution_envelope"]
+    direct_tools = [
+        request["tool"] for request in request_payload.get("direct_tool_requests", [])
+    ]
+
+    assert start_calls == [
+        {"tools": ["desktop.ui_elements", "media.music_app_open_and_play"]}
+    ]
+    assert "media.music_app_open_and_play" not in direct_tools
+    session = envelope["desktop_provider_session"]
+    assert session["status"] == "real_virtual_desktop_provider_required"
+    assert session["running"] is False
+    assert session["requires_real_virtual_desktop_backend"] is True
+    assert task.runtime_debug is not None
+    assert task.runtime_debug.desktop_provider_session_status == (
+        "real_virtual_desktop_provider_required"
+    )
+
+
 def test_agent_studio_service_normalizes_known_app_submit_execution() -> None:
     service = AgentStudioService(_FakeStudioExecutionPort())
 

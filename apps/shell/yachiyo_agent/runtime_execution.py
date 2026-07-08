@@ -571,6 +571,8 @@ def runtime_execution_requests_from_envelope_payload(
             continue
         if _request_status_is_non_executable(request):
             continue
+        if _request_desktop_route_is_non_executable(request):
+            continue
         projected_request = _tool_request_from_execution_request(request, envelope=envelope)
         tool_name = str(projected_request.get("tool") or "").strip()
         if not tool_name:
@@ -583,6 +585,13 @@ def runtime_execution_requests_from_envelope_payload(
 
 def _request_status_is_non_executable(request: Mapping[str, Any]) -> bool:
     return str(request.get("status") or "").strip() in _NON_EXECUTABLE_REQUEST_STATUSES
+
+
+def _request_desktop_route_is_non_executable(request: Mapping[str, Any]) -> bool:
+    route = request.get("desktop_execution_route")
+    if not isinstance(route, Mapping):
+        return False
+    return route.get("can_execute") is False
 
 
 def _sandbox_provider_for_envelope(
