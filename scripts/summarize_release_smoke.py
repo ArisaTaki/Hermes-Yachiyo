@@ -332,14 +332,6 @@ def _collect_report_evidence(
     mode = str(report.get("mode") or "").strip()
     if mode and report.get("ok") is True:
         _add_evidence(evidence, mode, source=source, kind="smoke_mode")
-        capability_id = SECTION_TO_CAPABILITY.get(mode)
-        if capability_id:
-            _add_evidence(
-                evidence,
-                capability_id,
-                source=source,
-                kind="smoke_mode_capability",
-            )
     _collect_public_demo_evidence(
         report,
         source=source,
@@ -541,6 +533,12 @@ def _matrix_from_report(report: Mapping[str, Any]) -> dict[str, Any]:
             return capability_matrix_from_report(dict(report))
         except Exception:
             return dict(raw_matrix)
+    mode = str(report.get("mode") or "").strip()
+    if mode in SECTION_TO_CAPABILITY:
+        status = "passed" if report.get("ok") is True else "failed"
+        return summarize_capabilities(
+            {mode: {"status": status, "evidence": dict(report)}}
+        )
     if _has_capability_sections(report):
         return summarize_capabilities(dict(report))
     raw_capabilities = report.get("capabilities")

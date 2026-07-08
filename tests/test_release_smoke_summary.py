@@ -32,6 +32,14 @@ def _matrix_report(*capability_ids: str) -> dict[str, object]:
     }
 
 
+def _item_by_id(summary: dict[str, object], item_id: str) -> dict[str, object]:
+    return next(
+        item
+        for item in summary["items"]
+        if isinstance(item, dict) and item.get("id") == item_id
+    )
+
+
 def _diagnostics_zip(path):
     path.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(path, "w") as archive:
@@ -227,6 +235,35 @@ def test_release_smoke_summary_passes_with_required_evidence(tmp_path, monkeypat
     assert "oha_deepagent_core" in oha_item["related_evidence_ids"]
     assert "oha_isolated_desktop_provider" in oha_item["related_evidence_ids"]
     assert "oha_isolated_desktop_backend_boundary" in oha_item["related_evidence_ids"]
+
+
+def test_release_smoke_summary_rejects_standalone_entrypoint_smoke_without_task_core(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(release_smoke, "ROOT", tmp_path)
+    report_path = tmp_path / "tmp" / "entrypoint-desktop.json"
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(
+        json.dumps(
+            {
+                "ok": True,
+                "mode": "agent_entrypoint_desktop_execution_smoke",
+                "case_count": 1,
+                "cases": [{"id": "main_chat_generic_app_open_before_model"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    summary = release_smoke.summarize_release_smoke([report_path])
+
+    chat_item = _item_by_id(summary, "chat_desktop_task")
+    assert summary["ok"] is False
+    assert chat_item["status"] == "missing"
+    assert "source_agent_entrypoint_desktop_execution" in chat_item[
+        "missing_evidence_ids"
+    ]
 
 
 def test_release_smoke_summary_requires_isolated_desktop_provider_section(
