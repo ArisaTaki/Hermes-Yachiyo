@@ -1,6 +1,7 @@
 import type { ApprovalCardSnapshot, PublicRunEvent, ToolCallSnapshot } from './types';
 import {
   runtimeEventIsDailyDesktopToolEvent,
+  runtimeEventIsDesktopForegroundSessionNotice,
   runtimeEventIsDesktopIntent,
   runtimeEventIsDesktopPermissionRecovery,
 } from './desktopEvents';
@@ -981,6 +982,7 @@ function isArtifactRunEvent(eventType: string): boolean {
 }
 
 function isToolRunEvent(eventType: string): boolean {
+  if (runtimeEventIsDesktopForegroundSessionNotice(eventType)) return true;
   if (runtimeEventIsDailyDesktopToolEvent(eventType)) return true;
   return [
     'agent.tool.call',
@@ -1034,6 +1036,7 @@ function toolStatusFromRunEventPayload(
   payload: Record<string, unknown>,
   outputPreview: Record<string, unknown>,
 ): string {
+  if (runtimeEventIsDesktopForegroundSessionNotice(eventType)) return 'foreground_session';
   if (runtimeEventIsDesktopIntent(eventType, 'approval_required')) return 'waiting_approval';
   if (runtimeEventIsDesktopPermissionRecovery(eventType)) return 'blocked';
   if (runtimeEventIsDesktopIntent(eventType, 'unavailable')) return 'blocked';

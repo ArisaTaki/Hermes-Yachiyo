@@ -42,6 +42,10 @@ export function runtimeEventIsDesktopProviderSessionEvent(
   return type === `${RUNTIME_DESKTOP_PROVIDER_SESSION_SCOPE}.${suffix}`;
 }
 
+export function runtimeEventIsDesktopForegroundSessionNotice(eventType: string): boolean {
+  return String(eventType || '').trim() === 'agent.tool.foreground_session_notice';
+}
+
 export function runtimeEventIsDailyDesktopToolEvent(eventType: string): boolean {
   return runtimeEventIsDesktopPermissionRecovery(eventType)
     || runtimeEventIsDesktopIntent(eventType, 'approval_required')

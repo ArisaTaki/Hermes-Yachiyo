@@ -8,6 +8,7 @@ import {
 } from '../../runtime-shared/desktopProviderSessionEvents';
 import { runtimePlannerReasonLabel } from '../../runtime-shared/plannerReasonLabels';
 import {
+  runtimeEventIsDesktopForegroundSessionNotice,
   runtimeEventIsDesktopIntent,
   runtimeEventIsDesktopPermissionRecovery,
   runtimeEventIsDesktopProviderSessionEvent,
@@ -149,6 +150,10 @@ export function timelineEventTitle(event: Record<string, unknown>): string {
       detail,
     );
   }
+  if (runtimeEventIsDesktopForegroundSessionNotice(name)) {
+    const toolLabel = plannedDesktopToolLabel(event, detail);
+    return toolLabel ? `前台桌面会话 · ${toolLabel}` : '前台桌面会话';
+  }
   if (name === 'agent.tool.policy_decision' || name === 'tool.policy_decision') {
     return policyDecisionTitle(event, detail);
   }
@@ -252,6 +257,7 @@ export function timelineEventTone(event: Record<string, unknown>): string {
     || runtimeEventIsDesktopProviderSessionEvent(name, 'ready')
   ) return 'ready';
   if (runtimeEventIsDesktopProviderSessionEvent(name, 'required')) return 'approval';
+  if (runtimeEventIsDesktopForegroundSessionNotice(name)) return 'approval';
   if (name === 'agent.model.followup_context') return 'model';
   if (name === 'agent.tool.policy_decision' || name === 'tool.policy_decision') {
     const payload = event.payload && typeof event.payload === 'object' && !Array.isArray(event.payload)
@@ -569,6 +575,12 @@ export function publicRunEventPayloadDetail(event: PublicRunEvent): string {
     if (recoverySummary) return recoverySummary;
   }
   if (runtimeEventIsDesktopProviderSessionEvent(event.event_type)) {
+    const providerSummary = runtimeDesktopProviderSessionDetail(
+      runtimeDesktopProviderSessionContext(payload, publicRunEventPayloadRecord(payload, 'result')),
+    );
+    if (providerSummary) return providerSummary;
+  }
+  if (runtimeEventIsDesktopForegroundSessionNotice(event.event_type)) {
     const providerSummary = runtimeDesktopProviderSessionDetail(
       runtimeDesktopProviderSessionContext(payload, publicRunEventPayloadRecord(payload, 'result')),
     );

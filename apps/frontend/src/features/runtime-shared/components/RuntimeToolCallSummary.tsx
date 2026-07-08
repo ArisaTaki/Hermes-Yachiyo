@@ -1,6 +1,7 @@
 import type { PublicRunEvent, ToolCallSnapshot } from '../types';
 import { runtimeToolDisplayLabelOrName, runtimeToolFamily } from '../approval';
 import {
+  runtimeEventIsDesktopForegroundSessionNotice,
   runtimeEventIsDesktopIntent,
   runtimeEventIsDesktopPermissionRecovery,
 } from '../desktopEvents';
@@ -18,6 +19,7 @@ export type RuntimeToolCallSummaryItem = {
 const TOOL_EVENT_TYPES = new Set([
   'agent.tool.call',
   'agent.tool.denied',
+  'agent.tool.foreground_session_notice',
   'agent.tool.started',
   'agent.tool.failed',
   'agent.tool.skipped',
@@ -254,6 +256,7 @@ function runtimeToolStatusFromEvent(event: PublicRunEvent): string {
   if (resultStatus) return resultStatus;
 
   const eventType = String(event.event_type || '').trim();
+  if (runtimeEventIsDesktopForegroundSessionNotice(eventType)) return 'foreground_session';
   if (eventType === 'agent.tool.denied') return 'denied';
   if (eventType === 'agent.tool.started') return 'running';
   if (eventType === 'agent.tool.failed' || eventType === 'tool.failed') return 'failed';
@@ -296,6 +299,7 @@ function runtimeToolStatusFromEvent(event: PublicRunEvent): string {
 function normalizeRuntimeToolStatus(status: string): string {
   if (!status) return '';
   if (status === 'approval_required') return 'waiting_approval';
+  if (status === 'foreground_session_routed') return 'foreground_session';
   const knownStatuses = [
     'queued',
     'planned',
@@ -310,6 +314,7 @@ function normalizeRuntimeToolStatus(status: string): string {
     'skipped',
     'expired',
     'blocked',
+    'foreground_session',
     'unavailable',
   ];
   if (knownStatuses.includes(status)) {
@@ -352,6 +357,7 @@ function runtimeToolStatusLabel(status: string): string {
   if (status === 'skipped') return '已跳过';
   if (status === 'expired') return '已超时';
   if (status === 'blocked') return '被占用';
+  if (status === 'foreground_session') return '前台会话';
   if (status === 'unavailable') return '不可用';
   return status || '工具';
 }

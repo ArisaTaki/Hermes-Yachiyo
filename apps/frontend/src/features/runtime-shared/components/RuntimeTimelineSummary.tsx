@@ -6,6 +6,7 @@ import {
   runtimeDesktopProviderSessionTitle,
 } from '../desktopProviderSessionEvents';
 import {
+  runtimeEventIsDesktopForegroundSessionNotice,
   runtimeEventIsDesktopIntent,
   runtimeEventIsDesktopPermissionRecovery,
   runtimeEventIsDesktopProviderSessionEvent,
@@ -99,6 +100,10 @@ export function runtimeTimelineEventLabel(event: RuntimeTimelineEventSnapshot): 
       title,
     );
   }
+  if (runtimeEventIsDesktopForegroundSessionNotice(type)) {
+    const toolLabel = runtimeTimelinePlannedDesktopToolLabel(event);
+    return toolLabel ? `前台桌面会话 · ${toolLabel}` : '前台桌面会话';
+  }
   if (runtimeTimelineEventIsReplanRecoveryUpdate(type)) {
     const status = runtimeTimelineRecoveryUpdateStatus(event);
     const toolLabel = runtimeTimelineRecoveryUpdateToolLabel(event);
@@ -169,6 +174,13 @@ function runtimeTimelineEventDetail(event: RuntimeTimelineEventSnapshot): string
     if (recoveredDetail) return recoveredDetail;
   }
   if (runtimeEventIsDesktopProviderSessionEvent(type)) {
+    const record = event as RuntimeTimelineEventSnapshot & Record<string, unknown>;
+    const providerSessionDetail = runtimeDesktopProviderSessionDetail(
+      runtimeDesktopProviderSessionContext(record, runtimeTimelineRecordObject(record, 'payload')),
+    );
+    if (providerSessionDetail) return providerSessionDetail;
+  }
+  if (runtimeEventIsDesktopForegroundSessionNotice(type)) {
     const record = event as RuntimeTimelineEventSnapshot & Record<string, unknown>;
     const providerSessionDetail = runtimeDesktopProviderSessionDetail(
       runtimeDesktopProviderSessionContext(record, runtimeTimelineRecordObject(record, 'payload')),
@@ -368,6 +380,7 @@ function runtimeTimelineEventTypeLabel(type: string): string {
   if (runtimeEventIsDesktopProviderSessionEvent(type, 'started')) return '桌面执行环境已启动';
   if (runtimeEventIsDesktopProviderSessionEvent(type, 'ready')) return '桌面执行环境已就绪';
   if (runtimeEventIsDesktopProviderSessionEvent(type, 'required')) return '需要桌面执行环境';
+  if (runtimeEventIsDesktopForegroundSessionNotice(type)) return '前台桌面会话';
   if (type === 'skill.selected') return 'Skill 已选择';
   if (type.startsWith('skill.dispatch.')) return 'Skill 调度';
   if (type === 'memory.retrieved') return 'Memory 检索';
