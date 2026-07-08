@@ -8,6 +8,7 @@ from typing import Any, get_args
 import pytest
 from pydantic import ValidationError
 
+import apps.shell.yachiyo_agent.isolated_provider_session as isolated_session_module
 from apps.shell.agent.tools.plugins import (
     RestrictedPluginTool,
     RestrictedToolPluginManager,
@@ -5603,6 +5604,158 @@ def test_desktop_execution_route_blocks_loopback_provider_backend() -> None:
     assert allowed_route["status"] == "sandbox_ready"
     assert allowed_route["can_execute"] is True
     assert allowed_route["simulated_desktop_provider"] is True
+
+
+def test_isolated_provider_session_rejects_running_loopback_for_real_backend_route(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    start_calls: list[dict[str, Any]] = []
+
+    def fake_status() -> dict[str, Any]:
+        return {
+            "ok": True,
+            "status": "running",
+            "running": True,
+            "provider_id": "local-isolated-desktop",
+            "supported_tools": ["app.open"],
+            "desktop_session_kind": "isolated_desktop",
+            "desktop_session_isolated": True,
+            "foreground_takeover_required": False,
+            "desktop_backend_kind": "loopback_session_harness",
+            "desktop_backend_is_loopback": True,
+            "desktop_backend_ready_for_public_release": False,
+            "requires_real_virtual_desktop_backend": True,
+            "provider_status": {
+                "supported_tools": ["app.open"],
+                "desktop_backend_kind": "loopback_session_harness",
+                "desktop_backend_is_loopback": True,
+                "desktop_backend_ready_for_public_release": False,
+                "requires_real_virtual_desktop_backend": True,
+            },
+        }
+
+    def fake_start(request: dict[str, Any] | None = None) -> dict[str, Any]:
+        start_calls.append(dict(request or {}))
+        return {"ok": True, "status": "running", "running": True}
+
+    monkeypatch.setattr(
+        isolated_session_module,
+        "isolated_desktop_provider_session_status",
+        fake_status,
+    )
+    monkeypatch.setattr(
+        isolated_session_module,
+        "start_isolated_desktop_provider_session",
+        fake_start,
+    )
+
+    session = isolated_session_module.ensure_isolated_desktop_provider_session_for_envelope(
+        {
+            "requests": [
+                {
+                    "request_id": "request:1:app.open",
+                    "tool_name": "app.open",
+                    "desktop_execution_route": {
+                        "selected_provider_kind": "sandbox_desktop",
+                        "status": "real_virtual_desktop_provider_required",
+                        "can_execute": False,
+                        "requires_real_virtual_desktop_backend": True,
+                        "blocking_conditions": [
+                            "loopback_desktop_backend",
+                            "real_virtual_desktop_backend_required",
+                        ],
+                    },
+                }
+            ]
+        },
+        auto_start=True,
+    )
+
+    assert start_calls == []
+    assert session["ok"] is False
+    assert session["status"] == "real_virtual_desktop_provider_required"
+    assert session["running"] is True
+    assert session["requires_real_virtual_desktop_backend"] is True
+    assert "loopback_desktop_backend" in session["blocking_conditions"]
+    assert "desktop_backend_not_release_ready" in session["blocking_conditions"]
+    assert "real_virtual_desktop_backend_required" in session["blocking_conditions"]
+
+
+def test_isolated_provider_session_auto_start_passes_real_backend_requirement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    start_calls: list[dict[str, Any]] = []
+
+    def fake_status() -> dict[str, Any]:
+        return {
+            "ok": True,
+            "status": "stopped",
+            "running": False,
+            "provider_id": "",
+            "supported_tools": [],
+        }
+
+    def fake_start(request: dict[str, Any] | None = None) -> dict[str, Any]:
+        start_calls.append(dict(request or {}))
+        return {
+            "ok": False,
+            "status": "real_virtual_desktop_provider_required",
+            "running": False,
+            "started": False,
+            "provider_id": "real-virtual-desktop",
+            "requires_real_virtual_desktop_backend": True,
+            "blocking_conditions": [
+                "configured_virtual_desktop_provider_required",
+                "real_virtual_desktop_backend_required",
+            ],
+        }
+
+    monkeypatch.setattr(
+        isolated_session_module,
+        "isolated_desktop_provider_session_status",
+        fake_status,
+    )
+    monkeypatch.setattr(
+        isolated_session_module,
+        "start_isolated_desktop_provider_session",
+        fake_start,
+    )
+
+    session = isolated_session_module.ensure_isolated_desktop_provider_session_for_envelope(
+        {
+            "requests": [
+                {
+                    "request_id": "request:1:app.open",
+                    "tool_name": "app.open",
+                    "desktop_execution_route": {
+                        "selected_provider_kind": "sandbox_desktop",
+                        "status": "real_virtual_desktop_provider_required",
+                        "can_execute": False,
+                        "blocking_conditions": [
+                            "real_virtual_desktop_backend_required"
+                        ],
+                    },
+                }
+            ]
+        },
+        auto_start=True,
+    )
+
+    assert start_calls == [
+        {
+            "tools": ["app.open"],
+            "requires_real_virtual_desktop_backend": True,
+        }
+    ]
+    assert session["ok"] is False
+    assert session["status"] == "real_virtual_desktop_provider_required"
+    assert session["running"] is False
+    assert session["started"] is False
+    assert session["requires_real_virtual_desktop_backend"] is True
+    assert session["blocking_conditions"] == [
+        "configured_virtual_desktop_provider_required",
+        "real_virtual_desktop_backend_required",
+    ]
 
 
 def test_agent_studio_route_blocks_keyboard_mouse_without_controlled_provider(

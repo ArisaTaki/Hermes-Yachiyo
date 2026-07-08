@@ -120,9 +120,9 @@ def test_studio_start_entrypoints_auto_start_isolated_desktop_provider(
     )
 
     assert start_calls == [
-        {"tools": ["app.open", "desktop.active_window", "desktop.list_apps"]},
-        {"tools": ["app.open", "desktop.active_window", "desktop.list_apps"]},
-        {"tools": ["app.open", "desktop.active_window", "desktop.list_apps"]},
+        _real_virtual_backend_start_call(),
+        _real_virtual_backend_start_call(),
+        _real_virtual_backend_start_call(),
     ]
     _assert_start_payload_uses_isolated_session(service_port.agent_run_payloads[0])
     _assert_start_payload_uses_isolated_session(
@@ -429,6 +429,7 @@ def _assert_start_payload_uses_isolated_session(
     assert session["desktop_session_isolated"] is True
     assert session["foreground_takeover_required"] is False
     assert session["keyboard_mouse_capture_supported"] is True
+    assert session["requires_real_virtual_desktop_backend"] is True
     assert session["tool_names"] == [
         "app.open",
         "desktop.active_window",
@@ -466,6 +467,7 @@ def _assert_plan_event_uses_isolated_session(
     assert session["running"] is True
     assert session["provider_id"] == "local-isolated-desktop"
     assert session["desktop_session_kind"] == "isolated_desktop"
+    assert session["requires_real_virtual_desktop_backend"] is True
     assert envelope["requests"][1]["desktop_provider_session"]["provider_id"] == (
         "local-isolated-desktop"
     )
@@ -495,6 +497,7 @@ def _assert_provider_session_event(
     assert session["desktop_session_isolated"] is True
     assert session["foreground_takeover_required"] is False
     assert session["keyboard_mouse_capture_supported"] is True
+    assert session["requires_real_virtual_desktop_backend"] is True
     assert session["tool_names"] == [
         "app.open",
         "desktop.active_window",
@@ -504,3 +507,10 @@ def _assert_provider_session_event(
     assert "command" not in session
     if context_key:
         assert provider_event.payload[context_key] == context_value
+
+
+def _real_virtual_backend_start_call() -> dict[str, Any]:
+    return {
+        "tools": ["app.open", "desktop.active_window", "desktop.list_apps"],
+        "requires_real_virtual_desktop_backend": True,
+    }
