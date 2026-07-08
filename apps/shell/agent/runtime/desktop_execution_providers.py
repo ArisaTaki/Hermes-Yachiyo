@@ -84,6 +84,22 @@ _PROVIDER_FOREGROUND_TAKEOVER_ENV_KEYS = (
     "OHA_YACHIYO_DESKTOP_PROVIDER_FOREGROUND_TAKEOVER_REQUIRED",
     "OHA_YACHIYO_SANDBOX_DESKTOP_PROVIDER_FOREGROUND_TAKEOVER_REQUIRED",
 )
+_PROVIDER_BACKEND_KIND_ENV_KEYS = (
+    "OHA_YACHIYO_DESKTOP_PROVIDER_BACKEND_KIND",
+    "OHA_YACHIYO_SANDBOX_DESKTOP_PROVIDER_BACKEND_KIND",
+)
+_PROVIDER_BACKEND_LOOPBACK_ENV_KEYS = (
+    "OHA_YACHIYO_DESKTOP_PROVIDER_BACKEND_IS_LOOPBACK",
+    "OHA_YACHIYO_SANDBOX_DESKTOP_PROVIDER_BACKEND_IS_LOOPBACK",
+)
+_PROVIDER_BACKEND_RELEASE_READY_ENV_KEYS = (
+    "OHA_YACHIYO_DESKTOP_PROVIDER_BACKEND_READY_FOR_PUBLIC_RELEASE",
+    "OHA_YACHIYO_SANDBOX_DESKTOP_PROVIDER_BACKEND_READY_FOR_PUBLIC_RELEASE",
+)
+_PROVIDER_REQUIRES_REAL_VIRTUAL_DESKTOP_ENV_KEYS = (
+    "OHA_YACHIYO_DESKTOP_PROVIDER_REQUIRES_REAL_VIRTUAL_DESKTOP_BACKEND",
+    "OHA_YACHIYO_SANDBOX_DESKTOP_PROVIDER_REQUIRES_REAL_VIRTUAL_DESKTOP_BACKEND",
+)
 LOCAL_DESKTOP_PROVIDER_ID = "local-native-desktop"
 LOCAL_DESKTOP_PROVIDER_KIND = "local_desktop"
 LOCAL_DESKTOP_PROVIDER_TOOLS = (
@@ -310,6 +326,10 @@ class HttpDesktopExecutionProviderAdapter:
         desktop_session_kind: str = "",
         desktop_session_isolated: bool | None = None,
         foreground_takeover_required: bool | None = None,
+        desktop_backend_kind: str = "",
+        desktop_backend_is_loopback: bool | None = None,
+        desktop_backend_ready_for_public_release: bool | None = None,
+        requires_real_virtual_desktop_backend: bool | None = None,
     ) -> None:
         self.provider_kind = _clean_provider_kind(provider_kind) or "sandbox_desktop"
         self.provider_id = str(provider_id or "").strip()
@@ -332,6 +352,14 @@ class HttpDesktopExecutionProviderAdapter:
         self.desktop_session_kind = str(desktop_session_kind or "").strip()
         self.desktop_session_isolated = desktop_session_isolated
         self.foreground_takeover_required = foreground_takeover_required
+        self.desktop_backend_kind = str(desktop_backend_kind or "").strip()
+        self.desktop_backend_is_loopback = desktop_backend_is_loopback
+        self.desktop_backend_ready_for_public_release = (
+            desktop_backend_ready_for_public_release
+        )
+        self.requires_real_virtual_desktop_backend = (
+            requires_real_virtual_desktop_backend
+        )
 
     def can_execute(
         self,
@@ -610,6 +638,14 @@ class HttpDesktopExecutionProviderAdapter:
             desktop_session_kind=self.desktop_session_kind,
             desktop_session_isolated=self.desktop_session_isolated,
             foreground_takeover_required=self.foreground_takeover_required,
+            desktop_backend_kind=self.desktop_backend_kind,
+            desktop_backend_is_loopback=self.desktop_backend_is_loopback,
+            desktop_backend_ready_for_public_release=(
+                self.desktop_backend_ready_for_public_release
+            ),
+            requires_real_virtual_desktop_backend=(
+                self.requires_real_virtual_desktop_backend
+            ),
         )
         supported_tools = _string_list(health.get("supported_tools")) or self.supported_tools
         keyboard_mouse_capture_supported = _coalesce_optional_bool(
@@ -643,16 +679,23 @@ class HttpDesktopExecutionProviderAdapter:
             self.foreground_takeover_required,
         )
         backend_status = _provider_backend_status_fields(
-            desktop_backend_kind=health.get("desktop_backend_kind"),
+            desktop_backend_kind=health.get("desktop_backend_kind")
+            or self.desktop_backend_kind,
             desktop_backend_is_loopback=_optional_bool_value(
                 health.get("desktop_backend_is_loopback")
-            ),
+            )
+            if "desktop_backend_is_loopback" in health
+            else self.desktop_backend_is_loopback,
             desktop_backend_ready_for_public_release=_optional_bool_value(
                 health.get("desktop_backend_ready_for_public_release")
-            ),
+            )
+            if "desktop_backend_ready_for_public_release" in health
+            else self.desktop_backend_ready_for_public_release,
             requires_real_virtual_desktop_backend=_optional_bool_value(
                 health.get("requires_real_virtual_desktop_backend")
-            ),
+            )
+            if "requires_real_virtual_desktop_backend" in health
+            else self.requires_real_virtual_desktop_backend,
         )
         return {
             "configured": True,
@@ -1341,6 +1384,19 @@ def _http_desktop_execution_provider_adapter_from_env(
         foreground_takeover_required=_optional_bool_env_value(
             env,
             _PROVIDER_FOREGROUND_TAKEOVER_ENV_KEYS,
+        ),
+        desktop_backend_kind=_first_env_value(env, _PROVIDER_BACKEND_KIND_ENV_KEYS),
+        desktop_backend_is_loopback=_optional_bool_env_value(
+            env,
+            _PROVIDER_BACKEND_LOOPBACK_ENV_KEYS,
+        ),
+        desktop_backend_ready_for_public_release=_optional_bool_env_value(
+            env,
+            _PROVIDER_BACKEND_RELEASE_READY_ENV_KEYS,
+        ),
+        requires_real_virtual_desktop_backend=_optional_bool_env_value(
+            env,
+            _PROVIDER_REQUIRES_REAL_VIRTUAL_DESKTOP_ENV_KEYS,
         ),
     )
 

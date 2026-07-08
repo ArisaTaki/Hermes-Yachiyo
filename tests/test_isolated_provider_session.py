@@ -227,6 +227,10 @@ def test_start_isolated_provider_session_can_start_provider_from_manifest(
                 "desktop_session_kind": "virtual_desktop",
                 "desktop_session_isolated": True,
                 "foreground_takeover_required": False,
+                "desktop_backend_kind": "vnc_virtual_desktop",
+                "desktop_backend_is_loopback": False,
+                "desktop_backend_ready_for_public_release": True,
+                "requires_real_virtual_desktop_backend": False,
                 "entrypoint": {
                     "script": "provider.py",
                     "args": ["--host", "127.0.0.1", "--port", "0"],
@@ -287,6 +291,32 @@ def test_start_isolated_provider_session_can_start_provider_from_manifest(
             "desktop_session_isolated": True if configured else None,
             "foreground_takeover_required": False if configured else None,
             "keyboard_mouse_capture_supported": True if configured else None,
+            "desktop_backend_kind": clean_env.get(
+                "OHA_YACHIYO_DESKTOP_PROVIDER_BACKEND_KIND",
+                "",
+            ),
+            "desktop_backend_is_loopback": (
+                clean_env.get("OHA_YACHIYO_DESKTOP_PROVIDER_BACKEND_IS_LOOPBACK")
+                == "true"
+                if configured
+                else None
+            ),
+            "desktop_backend_ready_for_public_release": (
+                clean_env.get(
+                    "OHA_YACHIYO_DESKTOP_PROVIDER_BACKEND_READY_FOR_PUBLIC_RELEASE"
+                )
+                == "true"
+                if configured
+                else None
+            ),
+            "requires_real_virtual_desktop_backend": (
+                clean_env.get(
+                    "OHA_YACHIYO_DESKTOP_PROVIDER_REQUIRES_REAL_VIRTUAL_DESKTOP_BACKEND"
+                )
+                == "true"
+                if configured
+                else None
+            ),
             "supported_tools": ["app.open", "desktop.verify"] if configured else [],
         }
 
@@ -320,9 +350,22 @@ def test_start_isolated_provider_session_can_start_provider_from_manifest(
     assert started["source"] == "managed_external_provider_session"
     assert started["provider_id"] == "manifest-virtual-desktop"
     assert started["desktop_session_kind"] == "virtual_desktop"
+    assert started["desktop_backend_kind"] == "vnc_virtual_desktop"
+    assert started["desktop_backend_is_loopback"] is False
+    assert started["desktop_backend_ready_for_public_release"] is True
+    assert started["requires_real_virtual_desktop_backend"] is False
     assert session_module.os.environ["OHA_YACHIYO_DESKTOP_PROVIDER_EXECUTE_URL"] == (
         "http://127.0.0.1:29095/tools/execute"
     )
+    assert session_module.os.environ["OHA_YACHIYO_DESKTOP_PROVIDER_BACKEND_KIND"] == (
+        "vnc_virtual_desktop"
+    )
+    assert session_module.os.environ[
+        "OHA_YACHIYO_DESKTOP_PROVIDER_BACKEND_READY_FOR_PUBLIC_RELEASE"
+    ] == "true"
+    assert session_module.os.environ[
+        "OHA_YACHIYO_DESKTOP_PROVIDER_REQUIRES_REAL_VIRTUAL_DESKTOP_BACKEND"
+    ] == "false"
 
     manager.stop()
 
@@ -349,6 +392,10 @@ def test_isolated_provider_session_status_can_use_manifest_endpoint(
                 "desktop_session_kind": "virtual_desktop",
                 "desktop_session_isolated": True,
                 "foreground_takeover_required": False,
+                "desktop_backend_kind": "vnc_virtual_desktop",
+                "desktop_backend_is_loopback": False,
+                "desktop_backend_ready_for_public_release": True,
+                "requires_real_virtual_desktop_backend": False,
             }
         ),
         encoding="utf-8",
@@ -381,6 +428,32 @@ def test_isolated_provider_session_status_can_use_manifest_endpoint(
             "desktop_session_isolated": True if configured else None,
             "foreground_takeover_required": False if configured else None,
             "keyboard_mouse_capture_supported": True if configured else None,
+            "desktop_backend_kind": clean_env.get(
+                "OHA_YACHIYO_DESKTOP_PROVIDER_BACKEND_KIND",
+                "",
+            ),
+            "desktop_backend_is_loopback": (
+                clean_env.get("OHA_YACHIYO_DESKTOP_PROVIDER_BACKEND_IS_LOOPBACK")
+                == "true"
+                if configured
+                else None
+            ),
+            "desktop_backend_ready_for_public_release": (
+                clean_env.get(
+                    "OHA_YACHIYO_DESKTOP_PROVIDER_BACKEND_READY_FOR_PUBLIC_RELEASE"
+                )
+                == "true"
+                if configured
+                else None
+            ),
+            "requires_real_virtual_desktop_backend": (
+                clean_env.get(
+                    "OHA_YACHIYO_DESKTOP_PROVIDER_REQUIRES_REAL_VIRTUAL_DESKTOP_BACKEND"
+                )
+                == "true"
+                if configured
+                else None
+            ),
             "supported_tools": ["app.open", "desktop.verify"] if configured else [],
         }
 
@@ -396,8 +469,14 @@ def test_isolated_provider_session_status_can_use_manifest_endpoint(
         assert status["running"] is True
         assert status["source"] == "provider_manifest"
         assert status["provider_id"] == "manifest-running-desktop"
+        assert status["desktop_backend_kind"] == "vnc_virtual_desktop"
+        assert status["desktop_backend_ready_for_public_release"] is True
+        assert status["requires_real_virtual_desktop_backend"] is False
         assert status["env"]["OHA_YACHIYO_DESKTOP_PROVIDER_EXECUTE_URL"] == (
             "http://127.0.0.1:29096/tools/execute"
+        )
+        assert status["env"]["OHA_YACHIYO_DESKTOP_PROVIDER_BACKEND_KIND"] == (
+            "vnc_virtual_desktop"
         )
         assert session_module.os.environ["OHA_YACHIYO_DESKTOP_PROVIDER_EXECUTE_URL"] == (
             "http://127.0.0.1:29096/tools/execute"

@@ -260,6 +260,39 @@ def test_headless_desktop_provider_works_through_runtime_adapter(monkeypatch) ->
     assert result["headless_desktop_provider"]["provider_id"] == "provider-http"
 
 
+def test_desktop_provider_status_reads_backend_release_fields_from_env() -> None:
+    status = desktop_execution_provider_status_from_env(
+        {
+            "OHA_YACHIYO_DESKTOP_PROVIDER_EXECUTE_URL": (
+                "http://127.0.0.1:29093/tools/execute"
+            ),
+            "OHA_YACHIYO_DESKTOP_PROVIDER_STATUS_URL": (
+                "http://127.0.0.1:29093/status"
+            ),
+            "OHA_YACHIYO_DESKTOP_PROVIDER_ID": "virtual-provider",
+            "OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS": "app.open,desktop.verify",
+            "OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_KIND": "virtual_desktop",
+            "OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_ISOLATED": "true",
+            "OHA_YACHIYO_DESKTOP_PROVIDER_FOREGROUND_TAKEOVER_REQUIRED": "false",
+            "OHA_YACHIYO_DESKTOP_PROVIDER_BACKEND_KIND": "vnc_virtual_desktop",
+            "OHA_YACHIYO_DESKTOP_PROVIDER_BACKEND_IS_LOOPBACK": "false",
+            "OHA_YACHIYO_DESKTOP_PROVIDER_BACKEND_READY_FOR_PUBLIC_RELEASE": "true",
+            "OHA_YACHIYO_DESKTOP_PROVIDER_REQUIRES_REAL_VIRTUAL_DESKTOP_BACKEND": "false",
+        },
+        probe_health=False,
+    )
+
+    assert status["available"] is True
+    assert status["provider_id"] == "virtual-provider"
+    assert status["desktop_session_kind"] == "virtual_desktop"
+    assert status["desktop_session_isolated"] is True
+    assert status["foreground_takeover_required"] is False
+    assert status["desktop_backend_kind"] == "vnc_virtual_desktop"
+    assert status["desktop_backend_is_loopback"] is False
+    assert status["desktop_backend_ready_for_public_release"] is True
+    assert status["requires_real_virtual_desktop_backend"] is False
+
+
 def test_headless_desktop_provider_http_requires_token() -> None:
     server = build_headless_desktop_provider_server(
         host="127.0.0.1",

@@ -41,6 +41,10 @@ _ENV_KEYS = {
     "OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_KIND",
     "OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_ISOLATED",
     "OHA_YACHIYO_DESKTOP_PROVIDER_FOREGROUND_TAKEOVER_REQUIRED",
+    "OHA_YACHIYO_DESKTOP_PROVIDER_BACKEND_KIND",
+    "OHA_YACHIYO_DESKTOP_PROVIDER_BACKEND_IS_LOOPBACK",
+    "OHA_YACHIYO_DESKTOP_PROVIDER_BACKEND_READY_FOR_PUBLIC_RELEASE",
+    "OHA_YACHIYO_DESKTOP_PROVIDER_REQUIRES_REAL_VIRTUAL_DESKTOP_BACKEND",
     "OHA_YACHIYO_DESKTOP_PROVIDER_ALLOW_REMOTE",
 }
 
@@ -474,6 +478,16 @@ def _runtime_env_from_launch(launch: dict[str, Any]) -> dict[str, str]:
         "OHA_YACHIYO_DESKTOP_PROVIDER_FOREGROUND_MUTATION_SUPPORTED": (
             "foreground_mutation_supported"
         ),
+        "OHA_YACHIYO_DESKTOP_PROVIDER_BACKEND_KIND": "desktop_backend_kind",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_BACKEND_IS_LOOPBACK": (
+            "desktop_backend_is_loopback"
+        ),
+        "OHA_YACHIYO_DESKTOP_PROVIDER_BACKEND_READY_FOR_PUBLIC_RELEASE": (
+            "desktop_backend_ready_for_public_release"
+        ),
+        "OHA_YACHIYO_DESKTOP_PROVIDER_REQUIRES_REAL_VIRTUAL_DESKTOP_BACKEND": (
+            "requires_real_virtual_desktop_backend"
+        ),
     }
     for env_key, launch_key in optional_keys.items():
         value = launch.get(launch_key)
@@ -734,6 +748,27 @@ def _external_isolated_desktop_provider_session_status() -> dict[str, Any]:
         "env": env_snapshot,
         "started_at": 0.0,
         "provider_status": dict(provider_status),
+        "desktop_session_kind": str(provider_status.get("desktop_session_kind") or ""),
+        "desktop_session_isolated": _optional_bool(
+            provider_status.get("desktop_session_isolated")
+        ),
+        "foreground_takeover_required": _optional_bool(
+            provider_status.get("foreground_takeover_required")
+        ),
+        "keyboard_mouse_capture_supported": _optional_bool(
+            provider_status.get("keyboard_mouse_capture_supported")
+        ),
+        "desktop_backend_kind": str(provider_status.get("desktop_backend_kind") or ""),
+        "desktop_backend_is_loopback": _optional_bool(
+            provider_status.get("desktop_backend_is_loopback")
+        ),
+        "desktop_backend_ready_for_public_release": _optional_bool(
+            provider_status.get("desktop_backend_ready_for_public_release")
+        ),
+        "requires_real_virtual_desktop_backend": _optional_bool(
+            provider_status.get("requires_real_virtual_desktop_backend")
+        ),
+        "supported_tools": _string_list(provider_status.get("supported_tools")),
         "source": source,
         "external_provider_configured": True,
     }
