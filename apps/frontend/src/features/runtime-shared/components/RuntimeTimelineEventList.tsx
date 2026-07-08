@@ -4,7 +4,10 @@ import {
   type RuntimeDesktopProviderSessionContext,
 } from '../desktopProviderSessionEvents';
 import { runtimeAnchorId } from '../runtimeAnchors';
-import { runtimeEventIsDesktopProviderSessionEvent } from '../desktopEvents';
+import {
+  runtimeEventIsDesktopProviderExecutionRouted,
+  runtimeEventIsDesktopProviderSessionEvent,
+} from '../desktopEvents';
 
 export type RuntimeTimelineEventRecord = Record<string, unknown>;
 
@@ -436,6 +439,7 @@ function defaultEventTone(event: RuntimeTimelineEventRecord): string {
   if (
     runtimeEventIsDesktopProviderSessionEvent(name, 'started')
     || runtimeEventIsDesktopProviderSessionEvent(name, 'ready')
+    || runtimeEventIsDesktopProviderExecutionRouted(name)
   ) return 'ready';
   if (runtimeEventIsDesktopProviderSessionEvent(name, 'required')) return 'approval';
   if (status === 'running' || status === 'processing') return 'running';

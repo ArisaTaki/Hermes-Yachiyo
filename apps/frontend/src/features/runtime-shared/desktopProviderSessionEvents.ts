@@ -1,5 +1,8 @@
 import { runtimeToolDisplayLabelOrName } from './approval';
-import { runtimeEventIsDesktopProviderSessionEvent } from './desktopEvents';
+import {
+  runtimeEventIsDesktopProviderExecutionRouted,
+  runtimeEventIsDesktopProviderSessionEvent,
+} from './desktopEvents';
 
 export type RuntimeDesktopProviderSessionContext = {
   desktopBackendIsLoopback: string;
@@ -32,8 +35,12 @@ export function runtimeDesktopProviderSessionContext(
   const resultRecords = baseRecords
     .map((record) => runtimeRecord(record.result))
     .filter((record) => Object.keys(record).length > 0);
-  const session = runtimeFirstNestedRecord([...baseRecords, ...resultRecords], 'desktop_provider_session');
-  const contextRecords = [session, ...baseRecords, ...resultRecords];
+  const contextSourceRecords = [...baseRecords, ...resultRecords];
+  const session = runtimeFirstNestedRecord(contextSourceRecords, 'desktop_provider_session');
+  const provider = runtimeFirstNestedRecord(contextSourceRecords, 'desktop_execution_provider');
+  const sandboxProvider = runtimeFirstNestedRecord(contextSourceRecords, 'sandbox_provider');
+  const route = runtimeFirstNestedRecord(contextSourceRecords, 'desktop_execution_route');
+  const contextRecords = [session, provider, sandboxProvider, route, ...baseRecords, ...resultRecords];
   return {
     desktopBackendIsLoopback: runtimeFirstBoolLabel(contextRecords, 'desktop_backend_is_loopback'),
     desktopBackendKind: runtimeFirstString(contextRecords, 'desktop_backend_kind'),
@@ -65,6 +72,9 @@ export function runtimeDesktopProviderSessionTitle(
   fallback = '',
 ): string {
   const providerLabel = runtimeDesktopProviderSessionLabel(context);
+  if (runtimeEventIsDesktopProviderExecutionRouted(eventType)) {
+    return providerLabel ? `桌面执行环境已执行 · ${providerLabel}` : '桌面执行环境已执行';
+  }
   if (runtimeEventIsDesktopProviderSessionEvent(eventType, 'failed')) {
     return providerLabel ? `桌面执行环境启动失败 · ${providerLabel}` : '桌面执行环境启动失败';
   }

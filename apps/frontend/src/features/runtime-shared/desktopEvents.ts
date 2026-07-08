@@ -17,6 +17,7 @@ const RUNTIME_DESKTOP_EVENT_SCOPES = [
   'workflow.run.desktop',
 ];
 const RUNTIME_DESKTOP_PROVIDER_SESSION_SCOPE = 'desktop.provider_session';
+const RUNTIME_DESKTOP_PROVIDER_EXECUTION_ROUTED_EVENT = 'desktop.provider_execution.routed';
 
 export function runtimeEventIsDesktopIntent(
   eventType: string,
@@ -40,6 +41,10 @@ export function runtimeEventIsDesktopProviderSessionEvent(
   const type = String(eventType || '').trim();
   if (!suffix) return type.startsWith(`${RUNTIME_DESKTOP_PROVIDER_SESSION_SCOPE}.`);
   return type === `${RUNTIME_DESKTOP_PROVIDER_SESSION_SCOPE}.${suffix}`;
+}
+
+export function runtimeEventIsDesktopProviderExecutionRouted(eventType: string): boolean {
+  return String(eventType || '').trim() === RUNTIME_DESKTOP_PROVIDER_EXECUTION_ROUTED_EVENT;
 }
 
 export function runtimeEventIsDesktopForegroundSessionNotice(eventType: string): boolean {

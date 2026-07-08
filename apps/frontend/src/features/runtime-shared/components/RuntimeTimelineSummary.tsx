@@ -9,6 +9,7 @@ import {
   runtimeEventIsDesktopForegroundSessionNotice,
   runtimeEventIsDesktopIntent,
   runtimeEventIsDesktopPermissionRecovery,
+  runtimeEventIsDesktopProviderExecutionRouted,
   runtimeEventIsDesktopProviderSessionEvent,
   runtimeEventIsDesktopReadinessRecovered,
 } from '../desktopEvents';
@@ -92,6 +93,14 @@ export function runtimeTimelineEventLabel(event: RuntimeTimelineEventSnapshot): 
     const toolLabel = runtimeTimelinePlannedDesktopToolLabel(event);
     return toolLabel ? `无法执行 · ${toolLabel}` : '无法执行桌面动作';
   }
+  if (runtimeEventIsDesktopProviderExecutionRouted(type)) {
+    const record = event as RuntimeTimelineEventSnapshot & Record<string, unknown>;
+    return runtimeDesktopProviderSessionTitle(
+      type,
+      runtimeDesktopProviderSessionContext(record, runtimeTimelineRecordObject(record, 'payload')),
+      title,
+    );
+  }
   if (runtimeEventIsDesktopProviderSessionEvent(type)) {
     const record = event as RuntimeTimelineEventSnapshot & Record<string, unknown>;
     return runtimeDesktopProviderSessionTitle(
@@ -172,6 +181,13 @@ function runtimeTimelineEventDetail(event: RuntimeTimelineEventSnapshot): string
   if (runtimeEventIsDesktopReadinessRecovered(type)) {
     const recoveredDetail = runtimeTimelineReadinessRecoveredDetail(event);
     if (recoveredDetail) return recoveredDetail;
+  }
+  if (runtimeEventIsDesktopProviderExecutionRouted(type)) {
+    const record = event as RuntimeTimelineEventSnapshot & Record<string, unknown>;
+    const providerSessionDetail = runtimeDesktopProviderSessionDetail(
+      runtimeDesktopProviderSessionContext(record, runtimeTimelineRecordObject(record, 'payload')),
+    );
+    if (providerSessionDetail) return providerSessionDetail;
   }
   if (runtimeEventIsDesktopProviderSessionEvent(type)) {
     const record = event as RuntimeTimelineEventSnapshot & Record<string, unknown>;
@@ -376,6 +392,7 @@ function runtimeTimelineEventTypeLabel(type: string): string {
   if (type === 'tool.completed' || type === 'agent.tool.completed') return '工具完成';
   if (type === 'tool.failed' || type === 'agent.tool.failed') return '工具失败';
   if (type === 'tool.cancelled') return '工具已取消';
+  if (runtimeEventIsDesktopProviderExecutionRouted(type)) return '桌面执行环境已执行';
   if (runtimeEventIsDesktopProviderSessionEvent(type, 'failed')) return '桌面执行环境启动失败';
   if (runtimeEventIsDesktopProviderSessionEvent(type, 'started')) return '桌面执行环境已启动';
   if (runtimeEventIsDesktopProviderSessionEvent(type, 'ready')) return '桌面执行环境已就绪';
