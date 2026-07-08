@@ -256,7 +256,22 @@ def daily_entrypoint_desktop_execution_policy(
 
 def desktop_provider_session_auto_start_default() -> bool:
     value = os.environ.get("OHA_YACHIYO_DESKTOP_PROVIDER_AUTO_START", "")
-    return value.strip().lower() in {"1", "true", "yes", "on"}
+    raw = value.strip().lower()
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    return any(
+        str(os.environ.get(key) or "").strip()
+        for key in (
+            "OHA_YACHIYO_DESKTOP_PROVIDER_URL",
+            "OHA_YACHIYO_SANDBOX_DESKTOP_PROVIDER_URL",
+            "OHA_YACHIYO_DESKTOP_PROVIDER_EXECUTE_URL",
+            "OHA_YACHIYO_SANDBOX_DESKTOP_PROVIDER_EXECUTE_URL",
+            "OHA_YACHIYO_DESKTOP_PROVIDER_START_COMMAND",
+            "OHA_YACHIYO_DESKTOP_PROVIDER_MANIFEST",
+        )
+    )
 
 
 _LOW_RISK_CREATION_SHORTCUT_ACTIONS = frozenset(

@@ -5625,8 +5625,24 @@ def test_daily_entrypoint_desktop_execution_policy_defaults_to_input_preview() -
     assert metadata["desktop_provider_route_foreground"] is True
 
 
-def test_desktop_provider_session_auto_start_default_is_env_gated(monkeypatch) -> None:
+def test_desktop_provider_session_auto_start_default_uses_provider_config(
+    monkeypatch,
+) -> None:
     monkeypatch.delenv("OHA_YACHIYO_DESKTOP_PROVIDER_AUTO_START", raising=False)
+    monkeypatch.delenv("OHA_YACHIYO_DESKTOP_PROVIDER_URL", raising=False)
+    monkeypatch.delenv("OHA_YACHIYO_SANDBOX_DESKTOP_PROVIDER_URL", raising=False)
+    monkeypatch.delenv("OHA_YACHIYO_DESKTOP_PROVIDER_EXECUTE_URL", raising=False)
+    monkeypatch.delenv("OHA_YACHIYO_SANDBOX_DESKTOP_PROVIDER_EXECUTE_URL", raising=False)
+    monkeypatch.delenv("OHA_YACHIYO_DESKTOP_PROVIDER_START_COMMAND", raising=False)
+    monkeypatch.delenv("OHA_YACHIYO_DESKTOP_PROVIDER_MANIFEST", raising=False)
+
+    assert desktop_provider_session_auto_start_default() is False
+
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_MANIFEST", "/tmp/provider.json")
+
+    assert desktop_provider_session_auto_start_default() is True
+
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_AUTO_START", "false")
 
     assert desktop_provider_session_auto_start_default() is False
 

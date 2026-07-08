@@ -170,6 +170,47 @@ def test_chat_bridge_quick_message_adds_daily_desktop_execution_policy(
         store.close()
 
 
+def test_chat_bridge_quick_message_auto_starts_configured_provider_manifest(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _runtime_with_chat_store(store)
+    bridge = ChatBridge(runtime)
+    captured_metadata: dict[str, Any] = {}
+    monkeypatch.delenv("OHA_YACHIYO_DESKTOP_PROVIDER_AUTO_START", raising=False)
+    monkeypatch.setenv(
+        "OHA_YACHIYO_DESKTOP_PROVIDER_MANIFEST",
+        str(tmp_path / "provider-manifest.json"),
+    )
+
+    def fake_send_message(text: str, **kwargs: Any) -> dict[str, Any]:
+        captured_metadata["metadata"] = kwargs.get("metadata")
+        return {
+            "ok": True,
+            "message_id": "message-hi",
+            "task_id": "task-hi",
+            "status": "pending",
+            "echo": text,
+        }
+
+    bridge._chat_api = SimpleNamespace(send_message=fake_send_message)
+    try:
+        result = bridge.send_quick_message(
+            "你好",
+            metadata={
+                "source": "launcher",
+                "launcher_mode": "bubble",
+                "launcher_surface": "quick_message",
+            },
+        )
+
+        assert result["ok"] is True
+        assert captured_metadata["metadata"]["desktop_provider_session_auto_start"] is True
+    finally:
+        store.close()
+
+
 def test_chat_bridge_quick_message_recommends_isolated_provider_for_input_tasks(
     tmp_path,
     monkeypatch,
