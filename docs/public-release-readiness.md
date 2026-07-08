@@ -210,6 +210,9 @@ diagnostics, exports a redacted diagnostics bundle, summarizes release-smoke
 user paths, writes `tmp/rc-verification-${SHORT_COMMIT}-oha-desktop-agent-release-smoke.json`,
 `tmp/rc-verification-${SHORT_COMMIT}-public-demo.json` and
 `tmp/rc-verification-${SHORT_COMMIT}-public-demo.md`, and writes signoff drafts.
+The Oha desktop-agent smoke is collected with isolated desktop provider
+evidence, so the product smoke proves that daily app/media desktop execution
+does not require taking over the user's foreground mouse or keyboard.
 `--print-status` also prints the public-demo release level, missing required
 demo flows, and blocker hints when those reports exist. If the current commit's
 signoff draft is missing, `--print-status` lists the latest available signoff,

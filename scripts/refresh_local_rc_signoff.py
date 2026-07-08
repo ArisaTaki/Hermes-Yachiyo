@@ -675,6 +675,7 @@ def refresh_local_rc_signoff(
     oha_desktop_agent_smoke_command = [
         sys.executable,
         "scripts/smoke_oha_desktop_agent_release.py",
+        "--run-isolated-provider-smoke",
         "--report-json",
         str(oha_desktop_agent_smoke_report.relative_to(ROOT)),
     ]

@@ -283,6 +283,7 @@ def test_refresh_local_rc_signoff_runs_batch_screen_draft_and_preview(
         [
             sys.executable,
             "scripts/smoke_oha_desktop_agent_release.py",
+            "--run-isolated-provider-smoke",
             "--report-json",
             "tmp/rc-verification-abc12345-oha-desktop-agent-release-smoke.json",
         ],
@@ -511,6 +512,7 @@ def test_refresh_local_rc_signoff_reuses_current_reports(monkeypatch, tmp_path):
         [
             sys.executable,
             "scripts/smoke_oha_desktop_agent_release.py",
+            "--run-isolated-provider-smoke",
             "--report-json",
             "tmp/rc-verification-abc12345-oha-desktop-agent-release-smoke.json",
         ],
