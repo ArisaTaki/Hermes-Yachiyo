@@ -203,6 +203,38 @@ REAL_DESKTOP_OPT_IN_CAPABILITY_IDS = {
     "source_real_desktop_interaction",
 }
 
+AGENT_STUDIO_ORCHESTRATION_SMOKE = "agent_studio_planner_orchestration_smoke"
+AGENT_STUDIO_ORCHESTRATION_REQUIRED_CASE_CHECKS: dict[str, tuple[str, ...]] = {
+    "workflow_orchestration_start": (
+        "metadata_preserves_task_core",
+        "workflow_task_core_events_projected",
+        "task_core_projected",
+        "task_core_has_workspace",
+        "task_core_has_workspace_items",
+        "task_core_has_todo",
+        "task_core_has_checkpoint",
+        "task_core_replan_enabled",
+    ),
+    "group_run_orchestration_start": (
+        "metadata_preserves_task_core",
+        "group_task_core_events_projected",
+        "task_core_projected",
+        "task_core_has_workspace",
+        "task_core_has_workspace_items",
+        "task_core_has_todo",
+        "task_core_has_checkpoint",
+        "task_core_replan_enabled",
+    ),
+    "missing_target_handoff": (
+        "task_core_projected",
+        "task_core_has_workspace",
+        "task_core_has_workspace_items",
+        "task_core_has_todo",
+        "task_core_has_checkpoint",
+        "task_core_replan_enabled",
+    ),
+}
+
 SOURCE_CAPABILITY_IDS = set(SOURCE_SECTION_CAPABILITIES)
 PROVIDER_CAPABILITY_IDS = {
     "provider_text_stream",
@@ -594,18 +626,51 @@ def _section_ok(report: dict[str, Any], section_name: str) -> bool:
     )
 
 
-def _section_case_ids(evidence: dict[str, Any]) -> list[str]:
+def _section_cases_by_id(evidence: dict[str, Any]) -> dict[str, dict[str, Any]]:
     cases = evidence.get("cases")
     if not isinstance(cases, list):
-        return []
-    case_ids: list[str] = []
+        return {}
+    cases_by_id: dict[str, dict[str, Any]] = {}
     for item in cases:
         if not isinstance(item, dict):
             continue
         case_id = str(item.get("id") or item.get("name") or "").strip()
         if case_id:
-            case_ids.append(case_id)
-    return case_ids
+            cases_by_id[case_id] = item
+    return cases_by_id
+
+
+def _section_case_ids(evidence: dict[str, Any]) -> list[str]:
+    return list(_section_cases_by_id(evidence).keys())
+
+
+def _agent_studio_orchestration_release_checks(
+    evidence: dict[str, Any],
+) -> dict[str, bool]:
+    cases_by_id = _section_cases_by_id(evidence)
+    release_checks: dict[str, bool] = {}
+    required_case_checks = AGENT_STUDIO_ORCHESTRATION_REQUIRED_CASE_CHECKS.items()
+    for case_id, required_checks in required_case_checks:
+        case = cases_by_id.get(case_id)
+        release_checks[f"{case_id}:present"] = isinstance(case, dict)
+        raw_checks = case.get("checks") if isinstance(case, dict) else {}
+        checks = raw_checks if isinstance(raw_checks, dict) else {}
+        for check_name in required_checks:
+            release_checks[f"{case_id}:{check_name}"] = (
+                checks.get(check_name) is True
+            )
+    return release_checks
+
+
+def _source_section_ok(report: dict[str, Any], section_name: str) -> bool:
+    if not _section_ok(report, section_name):
+        return False
+    if section_name != AGENT_STUDIO_ORCHESTRATION_SMOKE:
+        return True
+    release_checks = _agent_studio_orchestration_release_checks(
+        _section_evidence(report, section_name)
+    )
+    return bool(release_checks) and all(release_checks.values())
 
 
 def _string_list(value: Any) -> list[str]:
@@ -693,6 +758,15 @@ def _source_section_summary(report: dict[str, Any], section_name: str) -> dict[s
             for key, value in checks.items()
             if isinstance(key, str) and value is not True
         }
+    if section_name == AGENT_STUDIO_ORCHESTRATION_SMOKE:
+        release_checks = _agent_studio_orchestration_release_checks(evidence)
+        failed_release_checks = {
+            key: value for key, value in release_checks.items() if value is not True
+        }
+        if failed_release_checks:
+            existing_checks = summary.get("checks")
+            checks_summary = existing_checks if isinstance(existing_checks, dict) else {}
+            summary["checks"] = {**checks_summary, **failed_release_checks}
     tool_chain = evidence.get("tool_chain")
     if isinstance(tool_chain, list):
         summary["tool_chain"] = [str(item) for item in tool_chain if str(item)]
@@ -728,7 +802,7 @@ def _capability_status(
     source_section = SOURCE_SECTION_CAPABILITIES.get(capability_id)
     if source_section:
         return (
-            "passed" if _section_ok(report, source_section) else "missing",
+            "passed" if _source_section_ok(report, source_section) else "missing",
             _source_section_summary(report, source_section),
         )
     if capability_id == "provider_text_stream":

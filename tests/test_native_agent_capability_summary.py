@@ -30,6 +30,51 @@ def _passed_section(mode: str, *, cases: list[str] | None = None) -> dict[str, o
     }
 
 
+def _studio_orchestration_section(*, include_task_core: bool = True) -> dict[str, object]:
+    cases: list[dict[str, object]] = [
+        {"id": "workflow_orchestration_start"},
+        {"id": "group_run_orchestration_start"},
+        {"id": "missing_target_handoff"},
+    ]
+    if include_task_core:
+        shared_checks = {
+            "task_core_projected": True,
+            "task_core_has_workspace": True,
+            "task_core_has_workspace_items": True,
+            "task_core_has_todo": True,
+            "task_core_has_checkpoint": True,
+            "task_core_replan_enabled": True,
+        }
+        cases = [
+            {
+                "id": "workflow_orchestration_start",
+                "checks": {
+                    **shared_checks,
+                    "metadata_preserves_task_core": True,
+                    "workflow_task_core_events_projected": True,
+                },
+            },
+            {
+                "id": "group_run_orchestration_start",
+                "checks": {
+                    **shared_checks,
+                    "metadata_preserves_task_core": True,
+                    "group_task_core_events_projected": True,
+                },
+            },
+            {"id": "missing_target_handoff", "checks": shared_checks},
+        ]
+    return {
+        "status": "passed",
+        "evidence": {
+            "ok": True,
+            "mode": "agent_studio_planner_orchestration_smoke",
+            "case_count": len(cases),
+            "cases": cases,
+        },
+    }
+
+
 def _skipped_section() -> dict[str, object]:
     return {
         "status": "skipped",
@@ -40,10 +85,14 @@ def _skipped_section() -> dict[str, object]:
 
 
 def _source_sections_report() -> dict[str, object]:
-    return {
+    report = {
         section_name: _passed_section(section_name, cases=[section_name])
         for section_name in summary.SOURCE_SECTION_CAPABILITIES.values()
     }
+    report["agent_studio_planner_orchestration_smoke"] = (
+        _studio_orchestration_section()
+    )
+    return report
 
 
 def _provider_and_packaged_report() -> dict[str, object]:
@@ -233,14 +282,7 @@ def test_capability_summary_reports_full_native_agent_matrix():
             "agent_entrypoint_data_analysis_smoke",
             cases=["studio_agent_run_data_analysis_before_model"],
         ),
-        "agent_studio_planner_orchestration_smoke": _passed_section(
-            "agent_studio_planner_orchestration_smoke",
-            cases=[
-                "workflow_orchestration_start",
-                "group_run_orchestration_start",
-                "missing_target_handoff",
-            ],
-        ),
+        "agent_studio_planner_orchestration_smoke": _studio_orchestration_section(),
         "approval_policy_gate_smoke": _passed_section("approval_policy_gate_smoke"),
         "approval_resume_timeline_smoke": _passed_section("approval_resume_timeline_smoke"),
         "runtime_approval_resume_smoke": _passed_section("runtime_approval_resume_smoke"),
@@ -335,6 +377,32 @@ def test_capability_summary_reports_full_native_agent_matrix():
     assert multi_tool["status"] == "passed"
     assert multi_tool["evidence_summary"]["tool_call_count"] == 2
     assert "pipeline-report.md" in multi_tool["evidence_summary"]["artifact_paths"]
+
+
+def test_capability_summary_requires_studio_task_core_release_evidence():
+    report = {
+        **_source_sections_report(),
+        **_provider_and_packaged_report(),
+        "agent_studio_planner_orchestration_smoke": _studio_orchestration_section(
+            include_task_core=False
+        ),
+    }
+
+    result = summary.summarize_capabilities(report)
+
+    by_id = {item["id"]: item for item in result["capabilities"]}
+    studio_orchestration = by_id["source_agent_studio_planner_orchestration"]
+    assert result["ok"] is False
+    assert studio_orchestration["status"] == "missing"
+    assert "source_agent_studio_planner_orchestration" in result[
+        "missing_capability_ids"
+    ]
+    assert studio_orchestration["evidence_summary"]["checks"][
+        "workflow_orchestration_start:task_core_projected"
+    ] is False
+    assert studio_orchestration["evidence_summary"]["checks"][
+        "group_run_orchestration_start:group_task_core_events_projected"
+    ] is False
 
 
 def test_capability_summary_uses_native_provider_contract_for_streams_and_runtime_full_chain():
