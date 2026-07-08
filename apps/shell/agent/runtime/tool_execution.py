@@ -2579,6 +2579,58 @@ def _tool_result_with_desktop_provider_session_context(
     return {**tool_result, "desktop_provider_session": public_session}
 
 
+def _desktop_provider_execution_event(
+    tool_name: str,
+    tool_request: Mapping[str, Any],
+    tool_result: Mapping[str, Any],
+    input_preview: Any,
+) -> tuple[str, str, dict[str, Any]] | None:
+    if not bool(tool_result.get("desktop_execution_provider_routed")):
+        return None
+    provider = _first_mapping(tool_result.get("desktop_execution_provider"))
+    if (
+        not provider
+        or provider.get("adapter_registered") is False
+        or bool(tool_result.get("blocked_by_desktop_execution_provider"))
+    ):
+        return None
+    route = _first_mapping(
+        tool_result.get("desktop_execution_route"),
+        tool_request.get("desktop_execution_route"),
+    )
+    sandbox_provider = _first_mapping(
+        tool_result.get("sandbox_provider"),
+        tool_request.get("sandbox_provider"),
+        tool_request.get("sandbox_desktop_provider"),
+        tool_request.get("desktop_sandbox_provider"),
+    )
+    payload: dict[str, Any] = {
+        "tool": tool_name,
+        "ok": bool(tool_result.get("ok", True)),
+        "status": str(tool_result.get("status") or ""),
+        "input_preview": input_preview if isinstance(input_preview, dict) else {},
+    }
+    if provider:
+        payload["desktop_execution_provider"] = dict(provider)
+    if route:
+        payload["desktop_execution_route"] = dict(route)
+    if sandbox_provider:
+        payload["sandbox_provider"] = dict(sandbox_provider)
+    session = _first_mapping(
+        tool_result.get("desktop_provider_session"),
+        tool_request.get("desktop_provider_session"),
+    )
+    if session:
+        public_session = _public_desktop_provider_session(session)
+        if public_session:
+            payload["desktop_provider_session"] = public_session
+    return (
+        "desktop.provider_execution.routed",
+        "Desktop tool routed through desktop provider",
+        payload,
+    )
+
+
 _BROKER_APPROVAL_POLICY_EXCEPTIONS = {
     "file.organize",
     "terminal.run",
@@ -2890,6 +2942,18 @@ class RuntimeToolCallExecutor:
                 **trace_payload,
             )
         )
+        provider_execution_event = _desktop_provider_execution_event(
+            tool_name,
+            tool_request,
+            tool_result,
+            input_preview,
+        )
+        if provider_execution_event is not None:
+            event_type, detail, event_payload = provider_execution_event
+            event_payload = _event_payload_with_trace_context(event_payload, trace_payload)
+            timeline.append(self._timeline(event_type, detail, **event_payload))
+            if run_id:
+                self._append_run_event(run_id, event_type, event_payload)
         if run_id:
             self._tool_call_events.agent_tool_call(
                 run_id,

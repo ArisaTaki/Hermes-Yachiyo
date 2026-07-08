@@ -173,6 +173,10 @@ def _timeline(event: str, detail: str = "", **extra: Any) -> dict[str, Any]:
     return {"event": event, "detail": detail, **extra}
 
 
+def _last_event(timeline: list[dict[str, Any]], event_name: str) -> dict[str, Any]:
+    return next(event for event in reversed(timeline) if event["event"] == event_name)
+
+
 def _executor(
     *,
     tool_call_events: FakeToolCallEvents,
@@ -2121,8 +2125,91 @@ def test_runtime_tool_call_executor_routes_sandbox_ready_tool_to_provider() -> N
         }
     ]
     assert broker.calls == []
-    assert timeline[-1]["event"] == "agent.tool.call"
-    assert timeline[-1]["result"]["desktop_execution_provider_routed"] is True
+    tool_call = _last_event(timeline, "agent.tool.call")
+    assert tool_call["result"]["desktop_execution_provider_routed"] is True
+    provider_event = _last_event(timeline, "desktop.provider_execution.routed")
+    assert provider_event["desktop_execution_provider"]["provider_kind"] == "sandbox_desktop"
+    assert provider_event["desktop_execution_route"]["status"] == "sandbox_ready"
+    assert provider_event["sandbox_provider"]["provider_id"] == "sandbox-1"
+
+
+def test_runtime_tool_call_executor_routes_running_provider_session_to_adapter() -> None:
+    events = FakeToolCallEvents()
+    run_events: list[tuple[str, str, dict[str, Any]]] = []
+    adapter = FakeSandboxDesktopAdapter()
+    registry = DesktopExecutionProviderRegistry([adapter])
+    executor = _executor(
+        tool_call_events=events,
+        desktop_provider_registry=registry,
+        run_events=run_events,
+    )
+    timeline: list[dict[str, Any]] = []
+    broker = FakeBroker({"ok": True, "unexpected": True})
+
+    result = executor.execute(
+        {
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "hello"},
+            "desktop_execution_policy": {
+                "mode": "sandbox_preferred",
+                "prefer_isolated_desktop": True,
+                "avoid_user_foreground_takeover": True,
+            },
+            "desktop_provider_session": {
+                "running": True,
+                "status": "running",
+                "provider_id": "sandbox-1",
+                "url": "http://127.0.0.1:19093",
+                "tool_names": ["desktop.safe_type_text"],
+                "command": ["python", "scripts/run_isolated_desktop_provider.py"],
+                "env": {
+                    "OHA_YACHIYO_DESKTOP_PROVIDER_URL": "http://127.0.0.1:19093"
+                },
+                "desktop_session_kind": "isolated_desktop",
+                "desktop_session_isolated": True,
+                "foreground_takeover_required": False,
+                "keyboard_mouse_capture_supported": True,
+            },
+        },
+        ["desktop.safe_type_text"],
+        broker,
+        timeline,
+        run_id="run-1",
+        budget=FakeBudget(),
+    )
+
+    assert result["ok"] is True
+    assert result["desktop_execution_provider_routed"] is True
+    assert result["desktop_execution_route"]["status"] == "sandbox_ready"
+    assert result["desktop_execution_route"]["selected_provider_id"] == "sandbox-1"
+    assert result["sandbox_provider"]["source"] == "desktop_provider_session"
+    assert result["desktop_provider_session"]["provider_id"] == "sandbox-1"
+    assert "command" not in result["desktop_provider_session"]
+    assert "env" not in result["desktop_provider_session"]
+    assert adapter.calls == [
+        {
+            "tool": "desktop.safe_type_text",
+            "payload": {"text": "hello"},
+            "route": result["desktop_execution_route"],
+            "approved": False,
+        }
+    ]
+    assert broker.calls == []
+    provider_event = _last_event(timeline, "desktop.provider_execution.routed")
+    assert provider_event["desktop_execution_provider"]["provider_id"] == "sandbox-1"
+    assert provider_event["desktop_execution_route"]["status"] == "sandbox_ready"
+    assert provider_event["sandbox_provider"]["source"] == "desktop_provider_session"
+    event_session = provider_event["desktop_provider_session"]
+    assert event_session["provider_id"] == "sandbox-1"
+    assert event_session["desktop_session_isolated"] is True
+    assert event_session["foreground_takeover_required"] is False
+    assert "command" not in event_session
+    assert "env" not in event_session
+    assert any(
+        event_type == "desktop.provider_execution.routed"
+        and payload["desktop_execution_provider"]["provider_id"] == "sandbox-1"
+        for _run_id, event_type, payload in run_events
+    )
 
 
 def test_runtime_tool_call_executor_routes_local_desktop_app_open_to_provider() -> None:
@@ -2200,8 +2287,12 @@ def test_runtime_tool_call_executor_routes_local_desktop_app_open_to_provider() 
     )
     assert run_events[0][1] == "agent.tool.foreground_session_notice"
     assert run_events[0][2]["tool"] == "app.open"
-    assert timeline[-1]["event"] == "agent.tool.call"
-    assert timeline[-1]["result"]["local_desktop_provider"]["provider_id"] == (
+    tool_call = _last_event(timeline, "agent.tool.call")
+    assert tool_call["result"]["local_desktop_provider"]["provider_id"] == (
+        LOCAL_DESKTOP_PROVIDER_ID
+    )
+    provider_event = _last_event(timeline, "desktop.provider_execution.routed")
+    assert provider_event["desktop_execution_provider"]["provider_id"] == (
         LOCAL_DESKTOP_PROVIDER_ID
     )
 
@@ -2323,7 +2414,8 @@ def test_runtime_tool_call_executor_fails_closed_when_provider_adapter_is_missin
     assert recovery["deferred_continuation"][0]["tool"] == "desktop.safe_type_text"
     assert "desktop_execution_route" not in recovery["deferred_continuation"][0]
     assert broker.calls == []
-    assert timeline[-1]["result"]["blocked_by_desktop_execution_provider"] is True
+    tool_call = _last_event(timeline, "agent.tool.call")
+    assert tool_call["result"]["blocked_by_desktop_execution_provider"] is True
 
 
 def test_runtime_tool_request_runner_replans_missing_desktop_provider() -> None:
