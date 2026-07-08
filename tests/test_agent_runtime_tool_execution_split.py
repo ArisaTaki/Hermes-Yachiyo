@@ -1003,6 +1003,51 @@ def test_runtime_tool_request_runner_records_verification_failure_recovery_conte
         "status": "planned",
         "after_step_id": "operate-foreground-ui",
     }
+    desktop_execution_policy = {
+        "mode": "preview_input",
+        "prefer_isolated_desktop": True,
+        "avoid_user_foreground_takeover": True,
+    }
+    desktop_provider_session = {
+        "running": True,
+        "started": True,
+        "status": "running",
+        "provider_id": "sandbox-1",
+        "url": "http://127.0.0.1:19093",
+        "tool_names": ["desktop.ui_elements"],
+        "command": ["sandbox-provider", "--token", "secret"],
+        "env": {"SECRET": "not-for-events"},
+    }
+    sandbox_provider = {
+        "available": True,
+        "adapter_ready": True,
+        "provider_kind": "sandbox_desktop",
+        "provider_id": "sandbox-1",
+        "status": "available",
+        "supported_tools": ["desktop.ui_elements"],
+    }
+    desktop_execution_route = {
+        "status": "sandbox_ready",
+        "can_execute": True,
+        "selected_provider_kind": "sandbox_desktop",
+        "selected_provider_id": "sandbox-1",
+        "provider_execution_required": True,
+        "sandbox_required": True,
+    }
+    desktop_loop = {
+        "stage": "verify",
+        "role": "verify_result",
+        "action": "verify_after_action",
+        "source_tool": "desktop.ui_elements",
+        "retry_tool": "desktop.ui_elements",
+        "retry_reason": "verification_failed",
+        "retry_input": {"app_name": "PixelForge", "role_filter": "text", "limit": 80},
+        "verification_target_step_ids": ["operate-foreground-ui"],
+        "requires_observation": True,
+        "requires_post_action_verification": True,
+        "can_auto_retry": True,
+        "source": "runtime_post_action_auto_verify",
+    }
 
     def call_agent_tool(
         tool_request: dict[str, Any],
@@ -1049,6 +1094,11 @@ def test_runtime_tool_request_runner_records_verification_failure_recovery_conte
                 "decision_id": "decision-1",
                 "plan_id": "plan-1",
                 "runtime_stage": "verify",
+                "desktop_execution_policy": desktop_execution_policy,
+                "desktop_execution_route": desktop_execution_route,
+                "desktop_provider_session": desktop_provider_session,
+                "sandbox_provider": sandbox_provider,
+                "desktop_loop": desktop_loop,
                 "depends_on": ["operate-foreground-ui"],
                 "replan_signal_ids": ["signal-verify-export-failed"],
                 "replan_triggers": ["verification_failed"],
@@ -1105,11 +1155,25 @@ def test_runtime_tool_request_runner_records_verification_failure_recovery_conte
     assert payload["observation_retry"]["input"]["app_name"] == "PixelForge"
     assert payload["metadata"]["verification_targets"] == payload["verification_targets"]
     assert payload["metadata"]["action_target"] == payload["action_target"]
+    assert payload["metadata"]["desktop_execution_policy"] == desktop_execution_policy
+    assert payload["metadata"]["desktop_execution_route"] == desktop_execution_route
+    assert payload["metadata"]["sandbox_provider"] == sandbox_provider
+    assert payload["metadata"]["desktop_loop"] == desktop_loop
+    assert payload["metadata"]["desktop_provider_session"]["provider_id"] == "sandbox-1"
+    assert "command" not in payload["metadata"]["desktop_provider_session"]
+    assert "env" not in payload["metadata"]["desktop_provider_session"]
     assert payload["metadata"]["recovery_actions"][0]["tool"] == "desktop.ui_elements"
     assert (
         payload["metadata"]["recovery_actions"][0]["action_target"]["step_id"]
         == "operate-foreground-ui"
     )
+    recovery_metadata = payload["metadata"]["recovery_actions"][0]["metadata"]
+    assert recovery_metadata["desktop_execution_route"] == desktop_execution_route
+    assert recovery_metadata["sandbox_provider"] == sandbox_provider
+    assert recovery_metadata["desktop_loop"] == desktop_loop
+    assert recovery_metadata["desktop_provider_session"]["provider_id"] == "sandbox-1"
+    assert "command" not in recovery_metadata["desktop_provider_session"]
+    assert "env" not in recovery_metadata["desktop_provider_session"]
 
     run_replan_event = next(
         payload
@@ -1118,6 +1182,14 @@ def test_runtime_tool_request_runner_records_verification_failure_recovery_conte
     )
     assert run_replan_event["request_id"] == payload["request_id"]
     assert run_replan_event["metadata"]["action_target"] == payload["action_target"]
+    assert run_replan_event["metadata"]["desktop_execution_route"] == (
+        desktop_execution_route
+    )
+    assert run_replan_event["metadata"]["desktop_provider_session"]["provider_id"] == (
+        "sandbox-1"
+    )
+    assert "command" not in run_replan_event["metadata"]["desktop_provider_session"]
+    assert "env" not in run_replan_event["metadata"]["desktop_provider_session"]
 
     runner.run(
         [

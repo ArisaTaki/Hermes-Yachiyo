@@ -4271,6 +4271,9 @@ def _runtime_replan_enrich_recovery_context(
     )
     if recovery_failure_metadata:
         metadata.update(recovery_failure_metadata)
+    execution_context = _runtime_replan_execution_context(tool_request, result)
+    if execution_context:
+        metadata.update(execution_context)
 
     recovery_actions = _runtime_replan_recovery_actions(tool_request, result)
     if trigger == "verification_failed":
@@ -4314,10 +4317,41 @@ def _runtime_replan_enrich_recovery_context(
     recovery_actions = _dedupe_runtime_replan_recovery_actions(recovery_actions)
     if recovery_actions:
         recovery_actions = [
-            _runtime_replan_recovery_action_with_auto_start_context(action)
+            _runtime_replan_recovery_action_with_auto_start_context(
+                _runtime_replan_recovery_action_with_execution_context(
+                    action,
+                    execution_context,
+                )
+            )
             for action in recovery_actions
         ]
         metadata["recovery_actions"] = recovery_actions
+
+
+def _runtime_replan_execution_context(
+    tool_request: Mapping[str, Any],
+    result: Mapping[str, Any],
+) -> dict[str, Any]:
+    context: dict[str, Any] = {}
+    for key in (
+        "desktop_execution_policy",
+        "desktop_execution_route",
+        "sandbox_provider",
+        "sandbox_desktop_provider",
+        "desktop_loop",
+    ):
+        value = _first_mapping(tool_request.get(key), result.get(key))
+        if value:
+            context[key] = value
+    session = _first_mapping(
+        tool_request.get("desktop_provider_session"),
+        result.get("desktop_provider_session"),
+    )
+    if session:
+        public_session = _public_desktop_provider_session(session)
+        if public_session:
+            context["desktop_provider_session"] = public_session
+    return context
 
 
 def _runtime_replan_recovery_failure_metadata(
@@ -4860,6 +4894,29 @@ def _dedupe_runtime_replan_recovery_actions(
         seen.add(signature)
         deduped.append(dict(action))
     return deduped
+
+
+def _runtime_replan_recovery_action_with_execution_context(
+    action: Mapping[str, Any],
+    execution_context: Mapping[str, Any],
+) -> dict[str, Any]:
+    payload = dict(action)
+    if not execution_context:
+        return payload
+    metadata = (
+        dict(payload.get("metadata"))
+        if isinstance(payload.get("metadata"), Mapping)
+        else {}
+    )
+    for key, value in execution_context.items():
+        if not isinstance(value, Mapping) or not value:
+            continue
+        copied = dict(value)
+        payload.setdefault(key, copied)
+        metadata.setdefault(key, copied)
+    if metadata:
+        payload["metadata"] = metadata
+    return payload
 
 
 def _runtime_replan_recovery_action_with_auto_start_context(
