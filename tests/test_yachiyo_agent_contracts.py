@@ -131,6 +131,9 @@ from apps.shell.yachiyo_agent import (
 from apps.shell.yachiyo_agent.controlled_provider_diagnostics import (
     controlled_desktop_provider_diagnostics_snapshot,
 )
+from apps.shell.yachiyo_agent.desktop_provider_contract import (
+    OHA_DESKTOP_AGENT_RELEASE_PROVIDER_TOOLS,
+)
 from apps.shell.yachiyo_agent.approvals import approval_card_from_payload
 from apps.shell.yachiyo_agent.capability_registry import runtime_execution_tool_names
 from apps.shell.yachiyo_agent.events import public_run_event_from_payload
@@ -7267,7 +7270,7 @@ def test_controlled_provider_diagnostics_marks_configured_keyboard_provider_read
     )
     monkeypatch.setenv(
         "OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS",
-        "desktop.list_apps,desktop.safe_type_text",
+        ",".join(OHA_DESKTOP_AGENT_RELEASE_PROVIDER_TOOLS),
     )
     monkeypatch.setenv(
         "OHA_YACHIYO_DESKTOP_PROVIDER_KEYBOARD_MOUSE_CAPTURE_SUPPORTED",
@@ -7289,6 +7292,19 @@ def test_controlled_provider_diagnostics_marks_configured_keyboard_provider_read
         "OHA_YACHIYO_DESKTOP_PROVIDER_FOREGROUND_TAKEOVER_REQUIRED",
         "false",
     )
+    monkeypatch.setenv(
+        "OHA_YACHIYO_DESKTOP_PROVIDER_BACKEND_KIND",
+        "virtual_desktop_backend",
+    )
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_BACKEND_IS_LOOPBACK", "false")
+    monkeypatch.setenv(
+        "OHA_YACHIYO_DESKTOP_PROVIDER_BACKEND_READY_FOR_PUBLIC_RELEASE",
+        "true",
+    )
+    monkeypatch.setenv(
+        "OHA_YACHIYO_DESKTOP_PROVIDER_REQUIRES_REAL_VIRTUAL_DESKTOP_BACKEND",
+        "false",
+    )
     provider = desktop_execution_provider_status_from_env(probe_health=False)
 
     diagnostics = controlled_desktop_provider_diagnostics_snapshot(
@@ -7304,9 +7320,80 @@ def test_controlled_provider_diagnostics_marks_configured_keyboard_provider_read
     assert diagnostics.desktop_session_kind == "isolated_desktop"
     assert diagnostics.desktop_session_isolated is True
     assert diagnostics.foreground_takeover_required is False
+    assert diagnostics.release_ready is True
+    assert diagnostics.desktop_backend_kind == "virtual_desktop_backend"
+    assert diagnostics.desktop_backend_is_loopback is False
+    assert diagnostics.desktop_backend_ready_for_public_release is True
+    assert diagnostics.requires_real_virtual_desktop_backend is False
+    assert diagnostics.provider_contract["ok"] is True
     assert diagnostics.blocking_conditions == []
     assert diagnostics.endpoint_origin == "http://127.0.0.1:19092"
     assert "desktop.safe_type_text" in diagnostics.supported_tools
+
+
+def test_controlled_provider_diagnostics_blocks_loopback_release_backend(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv(
+        "OHA_YACHIYO_DESKTOP_PROVIDER_URL",
+        "http://127.0.0.1:19092",
+    )
+    monkeypatch.setenv(
+        "OHA_YACHIYO_DESKTOP_PROVIDER_ID",
+        "local-controlled-desktop",
+    )
+    monkeypatch.setenv(
+        "OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS",
+        ",".join(OHA_DESKTOP_AGENT_RELEASE_PROVIDER_TOOLS),
+    )
+    monkeypatch.setenv(
+        "OHA_YACHIYO_DESKTOP_PROVIDER_KEYBOARD_MOUSE_CAPTURE_SUPPORTED",
+        "true",
+    )
+    monkeypatch.setenv(
+        "OHA_YACHIYO_DESKTOP_PROVIDER_FOREGROUND_MUTATION_SUPPORTED",
+        "true",
+    )
+    monkeypatch.setenv(
+        "OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_KIND",
+        "isolated_desktop",
+    )
+    monkeypatch.setenv(
+        "OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_ISOLATED",
+        "true",
+    )
+    monkeypatch.setenv(
+        "OHA_YACHIYO_DESKTOP_PROVIDER_FOREGROUND_TAKEOVER_REQUIRED",
+        "false",
+    )
+    monkeypatch.setenv(
+        "OHA_YACHIYO_DESKTOP_PROVIDER_BACKEND_KIND",
+        "loopback-dev-provider",
+    )
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_BACKEND_IS_LOOPBACK", "true")
+    monkeypatch.setenv(
+        "OHA_YACHIYO_DESKTOP_PROVIDER_BACKEND_READY_FOR_PUBLIC_RELEASE",
+        "false",
+    )
+    monkeypatch.setenv(
+        "OHA_YACHIYO_DESKTOP_PROVIDER_REQUIRES_REAL_VIRTUAL_DESKTOP_BACKEND",
+        "true",
+    )
+    provider = desktop_execution_provider_status_from_env(probe_health=False)
+
+    diagnostics = controlled_desktop_provider_diagnostics_snapshot(
+        sandbox_provider=provider
+    )
+
+    assert diagnostics.ready is False
+    assert diagnostics.release_ready is False
+    assert diagnostics.configured is True
+    assert diagnostics.status == "virtual_desktop_provider_contract_required"
+    assert diagnostics.reason.startswith("Configured provider is not release-ready")
+    assert diagnostics.provider_contract["ok"] is False
+    assert "loopback_desktop_backend" in diagnostics.blocking_conditions
+    assert "desktop_backend_not_release_ready" in diagnostics.blocking_conditions
+    assert "real_virtual_desktop_backend_required" in diagnostics.blocking_conditions
 
 
 def test_controlled_provider_diagnostics_requires_isolated_desktop_session(

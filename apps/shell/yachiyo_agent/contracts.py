@@ -217,6 +217,7 @@ class SandboxDesktopProviderSnapshot(_PublicSnapshot):
 
 class ControlledDesktopProviderDiagnosticSnapshot(_PublicSnapshot):
     ready: bool = False
+    release_ready: bool = False
     configured: bool = False
     status: str = "controlled_provider_required"
     provider_id: str = "local-controlled-desktop"
@@ -232,6 +233,11 @@ class ControlledDesktopProviderDiagnosticSnapshot(_PublicSnapshot):
     desktop_session_kind: str = ""
     desktop_session_isolated: bool | None = None
     foreground_takeover_required: bool | None = None
+    desktop_backend_kind: str = ""
+    desktop_backend_is_loopback: bool | None = None
+    desktop_backend_ready_for_public_release: bool | None = None
+    requires_real_virtual_desktop_backend: bool | None = None
+    provider_contract: dict[str, Any] = Field(default_factory=dict)
     requires_real_sandbox_for: list[str] = Field(default_factory=list)
     requires_runtime_approval: bool = True
     approval_required_tools: list[str] = Field(default_factory=list)

@@ -205,6 +205,7 @@ export type SandboxDesktopProviderSnapshot = {
 
 export type ControlledDesktopProviderDiagnosticSnapshot = {
   ready?: boolean;
+  release_ready?: boolean;
   configured?: boolean;
   status?: string;
   provider_id?: string;
@@ -220,6 +221,11 @@ export type ControlledDesktopProviderDiagnosticSnapshot = {
   desktop_session_kind?: string;
   desktop_session_isolated?: boolean | null;
   foreground_takeover_required?: boolean | null;
+  desktop_backend_kind?: string;
+  desktop_backend_is_loopback?: boolean | null;
+  desktop_backend_ready_for_public_release?: boolean | null;
+  requires_real_virtual_desktop_backend?: boolean | null;
+  provider_contract?: Record<string, unknown>;
   requires_real_sandbox_for?: string[];
   requires_runtime_approval?: boolean;
   approval_required_tools?: string[];

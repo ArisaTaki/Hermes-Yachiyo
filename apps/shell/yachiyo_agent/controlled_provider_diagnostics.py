@@ -16,6 +16,10 @@ from .contracts import (
     DesktopProviderHealthSnapshot,
     SandboxDesktopProviderSnapshot,
 )
+from .desktop_provider_contract import (
+    OHA_DESKTOP_AGENT_RELEASE_PROVIDER_TOOLS,
+    virtual_desktop_provider_contract_evidence,
+)
 from .desktop_execution_policy import sandbox_desktop_provider_status
 from .isolated_provider_session import isolated_desktop_provider_session_status
 
@@ -122,6 +126,62 @@ def controlled_desktop_provider_diagnostics_snapshot(
             provider.foreground_takeover_required,
             _nested_bool(provider.health, "foreground_takeover_required"),
         )
+    desktop_backend_kind = _first_text(
+        provider.desktop_backend_kind,
+        _nested_text(provider.health, "desktop_backend_kind"),
+        env_status.get("desktop_backend_kind"),
+        controlled_launch.get("desktop_backend_kind"),
+        manifest.get("desktop_backend_kind"),
+        manifest_safety.get("desktop_backend_kind"),
+    )
+    desktop_backend_is_loopback = _optional_bool(
+        provider.desktop_backend_is_loopback,
+        _nested_bool(provider.health, "desktop_backend_is_loopback"),
+        env_status.get("desktop_backend_is_loopback"),
+        controlled_launch.get("desktop_backend_is_loopback"),
+        manifest.get("desktop_backend_is_loopback"),
+        manifest_safety.get("desktop_backend_is_loopback"),
+    )
+    desktop_backend_ready_for_public_release = _optional_bool(
+        provider.desktop_backend_ready_for_public_release,
+        _nested_bool(provider.health, "desktop_backend_ready_for_public_release"),
+        env_status.get("desktop_backend_ready_for_public_release"),
+        controlled_launch.get("desktop_backend_ready_for_public_release"),
+        manifest.get("desktop_backend_ready_for_public_release"),
+        manifest_safety.get("desktop_backend_ready_for_public_release"),
+    )
+    requires_real_virtual_desktop_backend = _optional_bool(
+        provider.requires_real_virtual_desktop_backend,
+        _nested_bool(provider.health, "requires_real_virtual_desktop_backend"),
+        env_status.get("requires_real_virtual_desktop_backend"),
+        controlled_launch.get("requires_real_virtual_desktop_backend"),
+        manifest.get("requires_real_virtual_desktop_backend"),
+        manifest_safety.get("requires_real_virtual_desktop_backend"),
+    )
+    supported_tools = (
+        _string_list(provider.supported_tools) if configured else []
+    ) or _string_list(manifest.get("supported_tools"))
+    provider_contract = virtual_desktop_provider_contract_evidence(
+        {
+            "configured": configured,
+            "available": provider.available,
+            "adapter_ready": provider.adapter_ready,
+            "desktop_session_kind": desktop_session_kind,
+            "desktop_session_isolated": desktop_session_isolated,
+            "foreground_takeover_required": foreground_takeover_required,
+            "desktop_backend_kind": desktop_backend_kind,
+            "desktop_backend_is_loopback": desktop_backend_is_loopback,
+            "desktop_backend_ready_for_public_release": (
+                desktop_backend_ready_for_public_release
+            ),
+            "requires_real_virtual_desktop_backend": (
+                requires_real_virtual_desktop_backend
+            ),
+            "supported_tools": supported_tools,
+        },
+        required_tools=OHA_DESKTOP_AGENT_RELEASE_PROVIDER_TOOLS,
+    )
+    release_ready = bool(provider_contract.get("ok"))
     ready = (
         configured
         and provider.available
@@ -129,6 +189,7 @@ def controlled_desktop_provider_diagnostics_snapshot(
         and str(provider.provider_kind or "") == "sandbox_desktop"
         and keyboard_mouse_capture_supported is True
         and desktop_session_isolated is True
+        and release_ready
     )
     status = _diagnostic_status(
         ready=ready,
@@ -136,6 +197,7 @@ def controlled_desktop_provider_diagnostics_snapshot(
         provider=provider,
         keyboard_mouse_capture_supported=keyboard_mouse_capture_supported,
         desktop_session_isolated=desktop_session_isolated,
+        provider_contract=provider_contract,
     )
     blocking_conditions = _diagnostic_blockers(
         ready=ready,
@@ -143,12 +205,11 @@ def controlled_desktop_provider_diagnostics_snapshot(
         provider=provider,
         keyboard_mouse_capture_supported=keyboard_mouse_capture_supported,
         desktop_session_isolated=desktop_session_isolated,
+        provider_contract=provider_contract,
     )
-    supported_tools = (
-        _string_list(provider.supported_tools) if configured else []
-    ) or _string_list(manifest.get("supported_tools"))
     return ControlledDesktopProviderDiagnosticSnapshot(
         ready=ready,
+        release_ready=release_ready,
         configured=configured,
         status=status,
         provider_id=_diagnostic_provider_id(
@@ -171,6 +232,7 @@ def controlled_desktop_provider_diagnostics_snapshot(
             provider=provider,
             keyboard_mouse_capture_supported=keyboard_mouse_capture_supported,
             desktop_session_isolated=desktop_session_isolated,
+            provider_contract=provider_contract,
         ),
         blocking_conditions=blocking_conditions,
         supported_tools=supported_tools,
@@ -181,6 +243,13 @@ def controlled_desktop_provider_diagnostics_snapshot(
         desktop_session_kind=desktop_session_kind,
         desktop_session_isolated=desktop_session_isolated,
         foreground_takeover_required=foreground_takeover_required,
+        desktop_backend_kind=desktop_backend_kind,
+        desktop_backend_is_loopback=desktop_backend_is_loopback,
+        desktop_backend_ready_for_public_release=(
+            desktop_backend_ready_for_public_release
+        ),
+        requires_real_virtual_desktop_backend=requires_real_virtual_desktop_backend,
+        provider_contract=provider_contract,
         requires_real_sandbox_for=_string_list(provider.requires_real_sandbox_for),
         requires_runtime_approval=bool(
             controlled_launch.get("requires_runtime_approval")
@@ -234,6 +303,7 @@ def _diagnostic_status(
     provider: SandboxDesktopProviderSnapshot,
     keyboard_mouse_capture_supported: bool | None,
     desktop_session_isolated: bool | None,
+    provider_contract: Mapping[str, Any],
 ) -> str:
     if ready:
         return "ready"
@@ -245,6 +315,8 @@ def _diagnostic_status(
         return "keyboard_mouse_capture_required"
     if desktop_session_isolated is not True:
         return "isolated_desktop_session_required"
+    if provider_contract.get("ok") is not True:
+        return "virtual_desktop_provider_contract_required"
     return provider.status or "provider_unavailable"
 
 
@@ -255,6 +327,7 @@ def _diagnostic_blockers(
     provider: SandboxDesktopProviderSnapshot,
     keyboard_mouse_capture_supported: bool | None,
     desktop_session_isolated: bool | None,
+    provider_contract: Mapping[str, Any],
 ) -> list[str]:
     if ready:
         return []
@@ -271,6 +344,7 @@ def _diagnostic_blockers(
         blockers.append("sandbox_keyboard_mouse_provider_required")
     if desktop_session_isolated is not True:
         blockers.append("sandbox_desktop_session_required")
+    blockers.extend(_string_list(provider_contract.get("blocking_conditions")))
     return _unique_strings(blockers)
 
 
@@ -281,6 +355,7 @@ def _diagnostic_reason(
     provider: SandboxDesktopProviderSnapshot,
     keyboard_mouse_capture_supported: bool | None,
     desktop_session_isolated: bool | None,
+    provider_contract: Mapping[str, Any],
 ) -> str:
     if ready:
         return "Controlled desktop provider is configured inside an isolated desktop session."
@@ -292,6 +367,15 @@ def _diagnostic_reason(
         return "Configured provider does not advertise keyboard and mouse capture."
     if desktop_session_isolated is not True:
         return "Configured provider controls the user foreground instead of an isolated desktop session."
+    if provider_contract.get("ok") is not True:
+        blockers = _string_list(provider_contract.get("blocking_conditions"))
+        if blockers:
+            return (
+                "Configured provider is not release-ready: "
+                + ", ".join(blockers[:3])
+                + "."
+            )
+        return "Configured provider is not release-ready for public desktop execution."
     return provider.reason or "Controlled desktop provider is configured but not ready."
 
 
@@ -329,6 +413,14 @@ def _nested_text(snapshot: DesktopProviderHealthSnapshot | None, key: str) -> st
     if snapshot is None:
         return ""
     return str(getattr(snapshot, key, "") or "").strip()
+
+
+def _first_text(*values: Any) -> str:
+    for value in values:
+        text = str(value or "").strip()
+        if text:
+            return text
+    return ""
 
 
 def _optional_bool(*values: Any) -> bool | None:

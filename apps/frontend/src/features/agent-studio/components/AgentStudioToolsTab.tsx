@@ -901,15 +901,22 @@ function ToolDetail({
       <div
         className="studio-tool-inspector-section"
         data-controlled-provider-command={providerState.controlledCommand.join(' ')}
+        data-controlled-provider-backend-kind={providerState.controlledBackendKind}
+        data-controlled-provider-backend-is-loopback={String(providerState.controlledBackendIsLoopback ?? '')}
+        data-controlled-provider-backend-release-ready={String(providerState.controlledBackendReadyForPublicRelease ?? '')}
         data-controlled-provider-blockers={providerState.controlledBlockingConditions.join(',')}
         data-controlled-provider-configured={String(providerState.controlledConfigured)}
         data-controlled-provider-env-url={providerState.controlledEnvUrl}
         data-controlled-provider-endpoint-origin={providerState.controlledEndpointOrigin}
         data-controlled-provider-endpoint-path={providerState.controlledEndpointPath}
         data-controlled-provider-id={providerState.controlledProviderId}
+        data-controlled-provider-contract-blockers={providerState.controlledProviderContractBlockers.join(',')}
+        data-controlled-provider-contract-version={providerState.controlledProviderContractVersion}
         data-controlled-provider-ready={String(providerState.controlledReady)}
         data-controlled-provider-reason={providerState.controlledReason}
+        data-controlled-provider-release-ready={String(providerState.controlledReleaseReady)}
         data-controlled-provider-requires-approval={String(providerState.controlledRequiresApproval)}
+        data-controlled-provider-requires-real-virtual-backend={String(providerState.controlledRequiresRealVirtualDesktopBackend ?? '')}
         data-controlled-provider-session-isolated={String(providerState.controlledSessionIsolated)}
         data-controlled-provider-session-kind={providerState.controlledSessionKind}
         data-controlled-provider-session-manager-running={String(providerState.controlledSessionManagerRunning)}
@@ -980,6 +987,30 @@ function ToolDetail({
               {providerState.controlledStatus}
             </span>
           ) : null}
+          <span
+            className={providerState.controlledReleaseReady ? 'studio-tool-permission' : 'studio-tool-permission missing'}
+            data-controlled-provider-release-ready={String(providerState.controlledReleaseReady)}
+          >
+            {providerState.controlledReleaseReady ? 'release provider ready' : 'release provider blocked'}
+          </span>
+          {providerState.controlledProviderContractVersion ? (
+            <span
+              className="studio-tool-permission"
+              data-controlled-provider-contract-version={providerState.controlledProviderContractVersion}
+            >
+              {providerState.controlledProviderContractVersion}
+            </span>
+          ) : null}
+          {providerState.controlledBackendKind ? (
+            <span
+              className={providerState.controlledBackendIsLoopback === false ? 'studio-tool-permission' : 'studio-tool-permission missing'}
+              data-controlled-provider-backend-kind={providerState.controlledBackendKind}
+              data-controlled-provider-backend-is-loopback={String(providerState.controlledBackendIsLoopback ?? '')}
+              data-controlled-provider-backend-release-ready={String(providerState.controlledBackendReadyForPublicRelease ?? '')}
+            >
+              {providerState.controlledBackendKind}
+            </span>
+          ) : null}
           {providerState.controlledSessionManagerStatus ? (
             <span
               className={providerState.controlledSessionManagerRunning ? 'studio-tool-permission' : 'studio-tool-permission missing'}
@@ -1012,6 +1043,17 @@ function ToolDetail({
               {runtimeBlockingLabel(condition)}
             </span>
           ))}
+          {providerState.controlledProviderContractBlockers
+            .filter((condition) => !providerState.controlledBlockingConditions.includes(condition))
+            .map((condition) => (
+              <span
+                className="studio-tool-permission missing"
+                data-controlled-provider-contract-blocker={condition}
+                key={`provider-contract-${condition}`}
+              >
+                {runtimeBlockingLabel(condition)}
+              </span>
+            ))}
           {providerState.blockingConditions.map((condition) => (
             <span
               className="studio-tool-permission missing"
@@ -1098,16 +1140,23 @@ type ToolProviderState = {
   controlledEnvUrl: string;
   controlledRequiresApproval: boolean;
   controlledReady: boolean;
+  controlledReleaseReady: boolean;
   controlledConfigured: boolean;
   controlledStatus: string;
   controlledReason: string;
   controlledBlockingConditions: string[];
+  controlledProviderContractVersion: string;
+  controlledProviderContractBlockers: string[];
   controlledSessionManagerRunning: boolean;
   controlledSessionManagerStatus: string;
   controlledSessionManagerUrl: string;
   controlledSessionKind: string;
   controlledSessionIsolated: boolean;
   controlledForegroundTakeoverRequired: boolean;
+  controlledBackendKind: string;
+  controlledBackendIsLoopback: boolean | null;
+  controlledBackendReadyForPublicRelease: boolean | null;
+  controlledRequiresRealVirtualDesktopBackend: boolean | null;
   controlledEndpointOrigin: string;
   controlledEndpointPath: string;
 };
@@ -1142,10 +1191,14 @@ function toolProviderState(tool: ToolCatalogItemSnapshot, catalog: ToolCatalogSn
   const controlledRequiresApproval = controlledDiagnostics.requires_runtime_approval === true
     || controlledProvider.requires_runtime_approval === true;
   const controlledReady = controlledDiagnostics.ready === true;
+  const controlledReleaseReady = controlledDiagnostics.release_ready === true;
   const controlledConfigured = controlledDiagnostics.configured === true;
   const controlledStatus = stringValue(controlledDiagnostics.status);
   const controlledReason = stringValue(controlledDiagnostics.reason);
   const controlledBlockingConditions = stringArray(controlledDiagnostics.blocking_conditions);
+  const controlledProviderContract = objectRecord(controlledDiagnostics.provider_contract);
+  const controlledProviderContractVersion = stringValue(controlledProviderContract.contract_version);
+  const controlledProviderContractBlockers = stringArray(controlledProviderContract.blocking_conditions);
   const controlledSessionManager = objectRecord(controlledDiagnostics.session_manager);
   const controlledSessionManagerRunning = controlledSessionManager.running === true;
   const controlledSessionManagerStatus = stringValue(controlledSessionManager.status);
@@ -1157,6 +1210,14 @@ function toolProviderState(tool: ToolCatalogItemSnapshot, catalog: ToolCatalogSn
   const controlledForegroundTakeoverRequired =
     controlledDiagnostics.foreground_takeover_required === true
     || controlledProvider.foreground_takeover_required === true;
+  const controlledBackendKind = stringValue(controlledDiagnostics.desktop_backend_kind);
+  const controlledBackendIsLoopback = optionalBoolean(controlledDiagnostics.desktop_backend_is_loopback);
+  const controlledBackendReadyForPublicRelease = optionalBoolean(
+    controlledDiagnostics.desktop_backend_ready_for_public_release,
+  );
+  const controlledRequiresRealVirtualDesktopBackend = optionalBoolean(
+    controlledDiagnostics.requires_real_virtual_desktop_backend,
+  );
   const controlledEndpointOrigin = stringValue(controlledDiagnostics.endpoint_origin);
   const controlledEndpointPath = stringValue(controlledDiagnostics.endpoint_path);
   const requiresRealSandbox = Boolean(tool.tool_name && requiresRealSandboxFor.includes(tool.tool_name));
@@ -1173,16 +1234,23 @@ function toolProviderState(tool: ToolCatalogItemSnapshot, catalog: ToolCatalogSn
     controlledEnvUrl,
     controlledRequiresApproval,
     controlledReady,
+    controlledReleaseReady,
     controlledConfigured,
     controlledStatus,
     controlledReason,
     controlledBlockingConditions,
+    controlledProviderContractVersion,
+    controlledProviderContractBlockers,
     controlledSessionManagerRunning,
     controlledSessionManagerStatus,
     controlledSessionManagerUrl,
     controlledSessionKind,
     controlledSessionIsolated,
     controlledForegroundTakeoverRequired,
+    controlledBackendKind,
+    controlledBackendIsLoopback,
+    controlledBackendReadyForPublicRelease,
+    controlledRequiresRealVirtualDesktopBackend,
     controlledEndpointOrigin,
     controlledEndpointPath,
   };
@@ -1318,6 +1386,10 @@ function stringArray(value: unknown): string[] {
 
 function stringValue(value: unknown): string {
   return String(value || '').trim();
+}
+
+function optionalBoolean(value: unknown): boolean | null {
+  return typeof value === 'boolean' ? value : null;
 }
 
 function uniqueStrings(values: string[]): string[] {
