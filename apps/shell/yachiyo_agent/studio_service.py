@@ -222,6 +222,39 @@ def _studio_runtime_execution_envelope_for_start(
     return annotate_envelope_with_desktop_provider_session(payload, session)
 
 
+def _studio_runtime_execution_envelope_for_plan(
+    envelope: Any,
+    metadata: Mapping[str, Any],
+) -> dict[str, Any]:
+    payload = _studio_runtime_execution_envelope_with_policy(envelope, metadata)
+    existing_session = (
+        dict(payload.get("desktop_provider_session"))
+        if isinstance(payload.get("desktop_provider_session"), Mapping)
+        else {}
+    )
+    if _desktop_provider_session_is_relevant(existing_session):
+        return annotate_envelope_with_desktop_provider_session(payload, existing_session)
+    session = ensure_isolated_desktop_provider_session_for_envelope(
+        payload,
+        auto_start=False,
+    )
+    if not _desktop_provider_session_is_relevant(session):
+        return payload
+    if session.get("needed") and session.get("running"):
+        payload = _studio_runtime_execution_envelope_with_policy(payload, metadata)
+    return annotate_envelope_with_desktop_provider_session(payload, session)
+
+
+def _desktop_provider_session_is_relevant(session: Mapping[str, Any]) -> bool:
+    if not session:
+        return False
+    if session.get("needed") or session.get("running") or session.get("started"):
+        return True
+    if session.get("ok") is False:
+        return True
+    return str(session.get("reason") or "").strip() != ""
+
+
 def _studio_desktop_execution_policy(metadata: Mapping[str, Any]) -> dict[str, Any]:
     for key in (
         "desktop_execution_policy",
@@ -321,7 +354,7 @@ class AgentStudioService:
             )
             if payload is not None:
                 return RuntimeExecutionEnvelopeSnapshot.model_validate(
-                    _studio_runtime_execution_envelope_with_policy(
+                    _studio_runtime_execution_envelope_for_plan(
                         payload,
                         planner_metadata,
                     )
@@ -366,7 +399,7 @@ class AgentStudioService:
         if envelope is None:
             raise ValueError("Unable to build Agent Studio execution plan")
         return RuntimeExecutionEnvelopeSnapshot.model_validate(
-            _studio_runtime_execution_envelope_with_policy(
+            _studio_runtime_execution_envelope_for_plan(
                 envelope.model_dump(mode="json"),
                 planner_metadata,
             )

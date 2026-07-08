@@ -20,6 +20,9 @@ from apps.shell.yachiyo_agent.runtime_execution import (
     runtime_execution_envelope_from_decision,
     runtime_execution_requests_from_envelope_payload,
 )
+from apps.shell.yachiyo_agent.replan_recovery_snapshots import (
+    replan_recovery_snapshots_from_runtime_execution_envelope,
+)
 from apps.shell.yachiyo_agent.task_cards import agent_task_snapshot_from_payload
 
 
@@ -2241,6 +2244,62 @@ def test_agent_studio_service_plans_discovered_desktop_app_execution() -> None:
     assert envelope.requests[2].runtime_stage == "verify"
     assert envelope.requests[2].requires_observation is True
     assert envelope.requests[2].requires_post_action_verification is False
+
+
+def test_agent_studio_service_projects_provider_session_recovery_without_autostart(
+    monkeypatch,
+) -> None:
+    start_calls = _install_fake_isolated_provider_session(monkeypatch)
+    service = AgentStudioService(_FakeStudioExecutionPort())
+
+    envelope = service.plan_execution(
+        "在一个我没提过的新应用 PixelForge 点击 Export",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.focus_and_click_ui_element",
+            "desktop.ui_elements",
+        ],
+        metadata={"surface": "studio"},
+    )
+
+    operation_request = next(
+        request
+        for request in envelope.requests
+        if request.tool_name == "app.focus_and_click_ui_element"
+    )
+    recoveries = replan_recovery_snapshots_from_runtime_execution_envelope(
+        envelope,
+        run_id="run-1",
+        task_id="task-1",
+    )
+    provider_recovery = next(
+        snapshot
+        for snapshot in recoveries
+        if snapshot.selected_tool_name == "desktop.provider_session.start"
+    )
+    action = provider_recovery.recovery_actions[0]
+
+    assert start_calls == []
+    assert envelope.desktop_provider_session["needed"] is True
+    assert envelope.desktop_provider_session["auto_start"] is False
+    assert envelope.desktop_provider_session["running"] is False
+    assert operation_request.desktop_provider_session["needed"] is True
+    assert operation_request.desktop_execution_route is not None
+    assert operation_request.desktop_execution_route.can_execute is False
+    assert provider_recovery.status == "requested"
+    assert provider_recovery.approval_status == "pending"
+    assert provider_recovery.permission_target == "isolated_desktop_provider"
+    assert action.approval_required is True
+    assert action.tool == "desktop.provider_session.start"
+    assert action.input["api_route"] == (
+        "/yachiyo/studio/tools/desktop-provider/session/start"
+    )
+    assert set(action.input["tool_names"]) == {
+        "app.focus_and_click_ui_element",
+        "desktop.list_apps",
+        "desktop.ui_elements",
+    }
+    assert action.deferred_continuation[0]["tool"] == "desktop.list_apps"
 
 
 def test_agent_studio_service_probes_desktop_provider_health_for_execution(
