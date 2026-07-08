@@ -112,6 +112,16 @@ def virtual_desktop_provider_contract_evidence(
         "missing_required_tools": missing_tools,
         "required_tools": required,
         "supported_tools": sorted(supported),
+        "desktop_session_kind": str(
+            status_payload.get("desktop_session_kind") or ""
+        ).strip(),
+        "desktop_session_isolated": _desktop_session_isolated(status_payload),
+        "foreground_takeover_required": _optional_bool(
+            status_payload.get("foreground_takeover_required")
+        ),
+        "keyboard_mouse_capture_supported": _optional_bool(
+            status_payload.get("keyboard_mouse_capture_supported")
+        ),
         "desktop_backend_kind": desktop_backend_kind,
         "desktop_backend_is_loopback": _optional_bool(
             status_payload.get("desktop_backend_is_loopback")

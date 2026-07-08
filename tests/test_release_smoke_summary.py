@@ -109,6 +109,10 @@ def _oha_desktop_agent_release_smoke_report() -> dict[str, object]:
                     "ok": True,
                     **(
                         {
+                            "desktop_session_kind": "virtual_desktop",
+                            "desktop_session_isolated": True,
+                            "foreground_takeover_required": False,
+                            "keyboard_mouse_capture_supported": True,
                             "desktop_backend_kind": "virtual_desktop_backend",
                             "desktop_backend_is_loopback": False,
                             "desktop_backend_ready_for_public_release": True,
@@ -127,6 +131,10 @@ def _oha_desktop_agent_release_smoke_report() -> dict[str, object]:
             for section_id in section_ids
         ],
         "isolated_provider_backend": {
+            "desktop_session_kind": "virtual_desktop",
+            "desktop_session_isolated": True,
+            "foreground_takeover_required": False,
+            "keyboard_mouse_capture_supported": True,
             "desktop_backend_kind": "virtual_desktop_backend",
             "desktop_backend_is_loopback": False,
             "desktop_backend_ready_for_public_release": True,
@@ -418,6 +426,51 @@ def test_release_smoke_summary_requires_verified_desktop_provider_contract(
     assert evidence_summary["provider_contract_ok"] is None
     assert evidence_summary["provider_contract_blocking_conditions"] == [
         "virtual_desktop_provider_contract_not_ready"
+    ]
+
+
+def test_release_smoke_summary_requires_no_user_foreground_takeover(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(release_smoke, "ROOT", tmp_path)
+    report_path = tmp_path / "tmp" / "oha-foreground-takeover-provider.json"
+    payload = _oha_desktop_agent_release_smoke_report()
+    takeover_backend = {
+        "desktop_session_kind": "virtual_desktop",
+        "desktop_session_isolated": True,
+        "foreground_takeover_required": True,
+        "keyboard_mouse_capture_supported": True,
+        "desktop_backend_kind": "virtual_desktop_backend",
+        "desktop_backend_is_loopback": False,
+        "desktop_backend_ready_for_public_release": True,
+        "requires_real_virtual_desktop_backend": False,
+        "provider_contract": {
+            "ok": False,
+            "contract_version": "oha-yachiyo.desktop-provider.v1",
+            "blocking_conditions": ["foreground_takeover_required"],
+        },
+    }
+    payload["isolated_provider_backend"] = dict(takeover_backend)
+    for section in payload["sections"]:
+        if section["id"] == "isolated_desktop_provider":
+            section["report"] = {"ok": True, **takeover_backend}
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    summary = release_smoke.summarize_release_smoke([report_path])
+
+    oha_item = next(
+        item for item in summary["items"] if item["id"] == "oha_desktop_agent_product"
+    )
+    assert oha_item["status"] == "missing"
+    assert oha_item["missing_evidence_ids"] == ["oha_real_virtual_desktop_backend"]
+    evidence_summary = oha_item["release_blockers"][0]["evidence_summary"]
+    assert evidence_summary["desktop_session_kind"] == "virtual_desktop"
+    assert evidence_summary["desktop_session_isolated"] is True
+    assert evidence_summary["foreground_takeover_required"] is True
+    assert "foreground_takeover_required" in evidence_summary[
+        "provider_contract_blocking_conditions"
     ]
 
 

@@ -103,6 +103,7 @@ def test_oha_desktop_agent_release_smoke_can_include_isolated_provider(
             "ok": True,
             "mode": "isolated_desktop_provider_smoke",
             "covered_tools": ["desktop.list_apps", "app.open", "desktop.verify"],
+            "desktop_session_kind": "isolated_desktop",
             "desktop_session_isolated": True,
             "foreground_takeover_required": False,
             "keyboard_mouse_capture_supported": True,
@@ -142,6 +143,10 @@ def test_oha_desktop_agent_release_smoke_can_include_isolated_provider(
         "foreground_takeover_required"
     ] is False
     assert report["isolated_provider_backend"] == {
+        "desktop_session_kind": "isolated_desktop",
+        "desktop_session_isolated": True,
+        "foreground_takeover_required": False,
+        "keyboard_mouse_capture_supported": True,
         "desktop_backend_kind": "loopback_session_harness",
         "desktop_backend_is_loopback": True,
         "desktop_backend_ready_for_public_release": False,
@@ -163,6 +168,7 @@ def test_oha_desktop_agent_release_smoke_accepts_configured_virtual_provider(
             "ok": True,
             "mode": "isolated_desktop_provider_smoke",
             "covered_tools": ["desktop.list_apps", "app.open", "desktop.verify"],
+            "desktop_session_kind": "virtual_desktop",
             "desktop_session_isolated": True,
             "foreground_takeover_required": False,
             "keyboard_mouse_capture_supported": True,

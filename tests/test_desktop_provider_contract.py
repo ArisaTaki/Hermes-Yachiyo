@@ -12,6 +12,7 @@ def _release_ready_status() -> dict[str, object]:
         "desktop_session_kind": "virtual_desktop",
         "desktop_session_isolated": True,
         "foreground_takeover_required": False,
+        "keyboard_mouse_capture_supported": True,
         "desktop_backend_kind": "virtual_desktop_backend",
         "desktop_backend_is_loopback": False,
         "desktop_backend_ready_for_public_release": True,
@@ -41,6 +42,10 @@ def test_virtual_desktop_provider_contract_accepts_release_ready_provider() -> N
     assert evidence["ok"] is True
     assert evidence["blocking_conditions"] == []
     assert evidence["missing_required_tools"] == []
+    assert evidence["desktop_session_kind"] == "virtual_desktop"
+    assert evidence["desktop_session_isolated"] is True
+    assert evidence["foreground_takeover_required"] is False
+    assert evidence["keyboard_mouse_capture_supported"] is True
     assert evidence["checks"]["tool_sequence_covers_required_tools"] is True
 
 

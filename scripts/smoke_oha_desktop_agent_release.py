@@ -696,6 +696,12 @@ def _isolated_provider_backend_summary(
         else {}
     )
     return {
+        "desktop_session_kind": str(report.get("desktop_session_kind") or ""),
+        "desktop_session_isolated": report.get("desktop_session_isolated"),
+        "foreground_takeover_required": report.get("foreground_takeover_required"),
+        "keyboard_mouse_capture_supported": report.get(
+            "keyboard_mouse_capture_supported"
+        ),
         "desktop_backend_kind": str(report.get("desktop_backend_kind") or ""),
         "desktop_backend_is_loopback": report.get("desktop_backend_is_loopback"),
         "desktop_backend_ready_for_public_release": report.get(

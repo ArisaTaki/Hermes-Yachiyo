@@ -1248,6 +1248,12 @@ def _collect_oha_desktop_backend_evidence(
     if not backend_kind and backend_ready is None and requires_real_backend is None:
         return
     backend_payload = {
+        "desktop_session_kind": str(report.get("desktop_session_kind") or ""),
+        "desktop_session_isolated": report.get("desktop_session_isolated"),
+        "foreground_takeover_required": report.get("foreground_takeover_required"),
+        "keyboard_mouse_capture_supported": report.get(
+            "keyboard_mouse_capture_supported"
+        ),
         "desktop_backend_kind": backend_kind,
         "desktop_backend_is_loopback": backend_is_loopback,
         "desktop_backend_ready_for_public_release": backend_ready,
@@ -1297,6 +1303,16 @@ def _item_release_blockers(
             "reason": "real_virtual_desktop_backend_required",
             "evidence_summary": {
                 "blocking_condition": "real_virtual_desktop_backend_required",
+                "desktop_session_kind": str(
+                    latest.get("desktop_session_kind") or ""
+                ),
+                "desktop_session_isolated": latest.get("desktop_session_isolated"),
+                "foreground_takeover_required": latest.get(
+                    "foreground_takeover_required"
+                ),
+                "keyboard_mouse_capture_supported": latest.get(
+                    "keyboard_mouse_capture_supported"
+                ),
                 "desktop_backend_kind": str(
                     latest.get("desktop_backend_kind") or ""
                 ),
