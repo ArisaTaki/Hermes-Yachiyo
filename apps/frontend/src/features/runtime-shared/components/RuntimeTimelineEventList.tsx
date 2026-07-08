@@ -505,6 +505,10 @@ function runtimeEventMetadata(
     { label: 'center', value: observedContext.observedCenter },
     { label: 'desktop provider', value: desktopProviderSession.providerId },
     { label: 'provider status', value: desktopProviderSession.status },
+    {
+      label: 'execution mode',
+      value: desktopProviderSession.executionSessionLabel || desktopProviderSession.executionSessionMode,
+    },
     { label: 'provider running', value: desktopProviderSession.running },
     { label: 'provider started', value: desktopProviderSession.started },
     { label: 'provider needed', value: desktopProviderSession.needed },

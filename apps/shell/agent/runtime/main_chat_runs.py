@@ -254,6 +254,7 @@ def _desktop_provider_session_event_payload(
     redact: Callable[[Any], str] = str,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {}
+    session_mode = _desktop_provider_session_mode(session)
     for key in (
         "ok",
         "status",
@@ -275,4 +276,37 @@ def _desktop_provider_session_event_payload(
             if key == "error":
                 value = redact(value)
             payload[key] = value
+    if session_mode:
+        payload["desktop_execution_session_mode"] = session_mode
+        payload["desktop_execution_session_label"] = _desktop_provider_session_mode_label(
+            session_mode
+        )
     return payload
+
+
+def _desktop_provider_session_mode(session: Mapping[str, Any]) -> str:
+    status = str(session.get("status") or "").strip().lower()
+    if session.get("ok") is False or status in {"start_failed", "failed"}:
+        return "provider_failed"
+    kind = str(session.get("desktop_session_kind") or "").strip().lower()
+    if kind:
+        return kind
+    if session.get("desktop_session_isolated") is True:
+        return "isolated_desktop"
+    if session.get("foreground_takeover_required") is True:
+        return "user_foreground"
+    if session.get("needed") and not session.get("running"):
+        return "provider_required"
+    return ""
+
+
+def _desktop_provider_session_mode_label(mode: str) -> str:
+    return {
+        "headless_read_only": "headless read-only desktop provider",
+        "isolated_desktop": "isolated desktop provider",
+        "provider_failed": "desktop provider failed",
+        "provider_required": "desktop provider required",
+        "provider_routed": "desktop provider routed",
+        "sandbox_desktop": "sandbox desktop provider",
+        "user_foreground": "real desktop foreground",
+    }.get(mode, mode.replace("_", " "))

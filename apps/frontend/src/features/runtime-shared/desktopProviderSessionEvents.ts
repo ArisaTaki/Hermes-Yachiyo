@@ -4,6 +4,8 @@ import { runtimeEventIsDesktopProviderSessionEvent } from './desktopEvents';
 export type RuntimeDesktopProviderSessionContext = {
   desktopSessionIsolated: string;
   desktopSessionKind: string;
+  executionSessionLabel: string;
+  executionSessionMode: string;
   error: string;
   foregroundTakeoverRequired: string;
   keyboardMouseCaptureSupported: string;
@@ -31,6 +33,8 @@ export function runtimeDesktopProviderSessionContext(
   return {
     desktopSessionIsolated: runtimeFirstBoolLabel(contextRecords, 'desktop_session_isolated'),
     desktopSessionKind: runtimeFirstString(contextRecords, 'desktop_session_kind'),
+    executionSessionLabel: runtimeFirstString(contextRecords, 'desktop_execution_session_label'),
+    executionSessionMode: runtimeFirstString(contextRecords, 'desktop_execution_session_mode'),
     error: runtimeFirstString(contextRecords, 'error'),
     foregroundTakeoverRequired: runtimeFirstBoolLabel(contextRecords, 'foreground_takeover_required'),
     keyboardMouseCaptureSupported: runtimeFirstBoolLabel(contextRecords, 'keyboard_mouse_capture_supported'),
@@ -79,6 +83,8 @@ export function runtimeDesktopProviderSessionDetail(
 ): string {
   return [
     context.providerId ? `provider ${context.providerId}` : '',
+    context.executionSessionLabel ? `mode ${context.executionSessionLabel}` : '',
+    context.executionSessionMode && !context.executionSessionLabel ? `mode ${context.executionSessionMode}` : '',
     context.status ? `状态 ${context.status}` : '',
     context.desktopSessionKind ? `session ${context.desktopSessionKind}` : '',
     context.desktopSessionIsolated === 'true' ? 'isolated' : '',

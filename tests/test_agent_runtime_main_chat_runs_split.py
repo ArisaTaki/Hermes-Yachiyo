@@ -172,6 +172,9 @@ def test_main_chat_run_lifecycle_records_desktop_provider_session_event() -> Non
             "needed": True,
             "provider_id": "local-isolated-desktop",
             "url": "http://127.0.0.1:19093",
+            "desktop_session_kind": "isolated_desktop",
+            "desktop_session_isolated": True,
+            "foreground_takeover_required": False,
             "env": {"SECRET": "not-for-timeline"},
             "command": ["python", "scripts/run_isolated_desktop_provider.py"],
             "request_ids": ["request-click"],
@@ -200,6 +203,12 @@ def test_main_chat_run_lifecycle_records_desktop_provider_session_event() -> Non
         "local-isolated-desktop"
     )
     assert provider_event["desktop_provider_session"]["started"] is True
+    assert provider_event["desktop_provider_session"][
+        "desktop_execution_session_mode"
+    ] == "isolated_desktop"
+    assert provider_event["desktop_provider_session"][
+        "desktop_execution_session_label"
+    ] == "isolated desktop provider"
     assert provider_event["desktop_provider_session"]["request_ids"] == [
         "request-click"
     ]
@@ -215,6 +224,9 @@ def test_main_chat_run_lifecycle_records_desktop_provider_session_event() -> Non
     assert projected_event.payload["desktop_provider_session"]["provider_id"] == (
         "local-isolated-desktop"
     )
+    assert projected_event.payload["desktop_provider_session"][
+        "desktop_execution_session_mode"
+    ] == "isolated_desktop"
     assert "env" not in projected_event.payload["desktop_provider_session"]
 
 
