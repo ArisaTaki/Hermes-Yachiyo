@@ -235,6 +235,8 @@ export type DesktopExecutionRouteSnapshot = {
   can_auto_start?: boolean;
   provider_execution_required?: boolean;
   sandbox_required?: boolean;
+  user_foreground_takeover_risk?: boolean;
+  requires_user_foreground_session?: boolean;
   foreground_mutation_supported?: boolean | null;
   keyboard_mouse_capture_supported?: boolean | null;
   desktop_session_kind?: string;
@@ -267,6 +269,8 @@ export type ToolCatalogItemSnapshot = {
   provider_ready?: boolean;
   provider_kind?: DesktopIsolationKind | string;
   provider_id?: string;
+  user_foreground_takeover_risk?: boolean;
+  requires_user_foreground_session?: boolean;
   approval_required?: boolean;
   input_schema?: Record<string, unknown>;
   model_tool_schema?: Record<string, unknown>;

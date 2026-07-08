@@ -3251,6 +3251,8 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "provider_kind?: DesktopIsolationKind | string;",
             "provider_id?: string;",
             "requires_real_sandbox_for?: string[];",
+            "user_foreground_takeover_risk?: boolean;",
+            "requires_user_foreground_session?: boolean;",
             "keyboard_mouse_capture_supported?: boolean;",
             "desktop_session_kind?: string;",
             "desktop_session_isolated?: boolean",

@@ -505,6 +505,8 @@ def test_local_desktop_provider_status_routes_safe_app_activation(monkeypatch) -
     assert route["selected_provider_kind"] == LOCAL_DESKTOP_PROVIDER_KIND
     assert route["selected_provider_id"] == LOCAL_DESKTOP_PROVIDER_ID
     assert route["foreground_takeover_required"] is True
+    assert route["requires_user_foreground_session"] is True
+    assert route["user_foreground_takeover_risk"] is True
     assert route["provider_execution_required"] is True
     assert route["sandbox_required"] is False
     assert route["reason"] == (
@@ -515,6 +517,8 @@ def test_local_desktop_provider_status_routes_safe_app_activation(monkeypatch) -
     assert inspect_route["status"] == "provider_ready"
     assert inspect_route["selected_provider_kind"] == LOCAL_DESKTOP_PROVIDER_KIND
     assert inspect_route["foreground_takeover_required"] is True
+    assert inspect_route["requires_user_foreground_session"] is True
+    assert inspect_route["user_foreground_takeover_risk"] is False
     assert inspect_route["reason"] == (
         "Read-only desktop discovery can be routed through the local_desktop "
         "provider. It does not request keyboard or mouse capture, but it "

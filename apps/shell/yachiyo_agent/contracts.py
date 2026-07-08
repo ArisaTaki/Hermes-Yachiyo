@@ -248,6 +248,8 @@ class DesktopExecutionRouteSnapshot(_PublicSnapshot):
     can_auto_start: bool = True
     provider_execution_required: bool = False
     sandbox_required: bool = False
+    user_foreground_takeover_risk: bool = False
+    requires_user_foreground_session: bool = False
     foreground_mutation_supported: bool | None = None
     keyboard_mouse_capture_supported: bool | None = None
     desktop_session_kind: str = ""
@@ -313,6 +315,8 @@ class ToolCatalogItemSnapshot(_PublicSnapshot):
     provider_ready: bool = False
     provider_kind: DesktopIsolationKind | str = ""
     provider_id: str = ""
+    user_foreground_takeover_risk: bool = False
+    requires_user_foreground_session: bool = False
     approval_required: bool = False
     input_schema: dict[str, Any] = Field(default_factory=dict)
     model_tool_schema: dict[str, Any] = Field(default_factory=dict)

@@ -207,6 +207,18 @@ _KEYBOARD_MOUSE_CAPTURE_TOOLS = frozenset(
     }
 )
 
+_USER_FOREGROUND_TAKEOVER_TOOLS = frozenset(
+    {
+        *_KEYBOARD_MOUSE_CAPTURE_TOOLS,
+        "app.open",
+        "app.focus",
+        "app.show",
+        "app.focus_window",
+        "desktop.open_app",
+        "desktop.focus_app",
+    }
+)
+
 
 def desktop_execution_policy_payload(value: Any) -> dict[str, Any]:
     if isinstance(value, Mapping):
@@ -390,6 +402,8 @@ def desktop_execution_route_decision(
         "can_execute": True,
         "can_auto_start": True,
         "sandbox_required": False,
+        "user_foreground_takeover_risk": False,
+        "requires_user_foreground_session": False,
         "fallback_mode": "",
         "reason": "Tool can run through its structured runtime provider.",
         "blocking_conditions": [],
@@ -826,7 +840,7 @@ def _sandbox_route_decision(
     ]
     provider_kind = str(sandbox_provider.get("provider_kind") or "sandbox_desktop")
     provider_id = str(sandbox_provider.get("provider_id") or "")
-    provider_context = _desktop_provider_route_context(sandbox_provider)
+    provider_context = _desktop_provider_route_context(sandbox_provider, tool_name)
     if not bool(sandbox_provider.get("available")):
         return {
             **dict(route),
@@ -905,7 +919,10 @@ def _sandbox_route_decision(
     }
 
 
-def _desktop_provider_route_context(sandbox_provider: Mapping[str, Any]) -> dict[str, Any]:
+def _desktop_provider_route_context(
+    sandbox_provider: Mapping[str, Any],
+    tool_name: str = "",
+) -> dict[str, Any]:
     payload: dict[str, Any] = {}
     for key in (
         "foreground_mutation_supported",
@@ -918,6 +935,19 @@ def _desktop_provider_route_context(sandbox_provider: Mapping[str, Any]) -> dict
     session_kind = str(sandbox_provider.get("desktop_session_kind") or "").strip()
     if session_kind:
         payload["desktop_session_kind"] = session_kind
+    takeover_required = (
+        _optional_bool_value(sandbox_provider.get("foreground_takeover_required")) is True
+    )
+    isolated_session = (
+        _optional_bool_value(sandbox_provider.get("desktop_session_isolated")) is True
+        or session_kind in {"isolated_desktop", "sandbox_desktop", "virtual_desktop"}
+    )
+    requires_user_session = takeover_required or session_kind == "user_foreground"
+    payload["requires_user_foreground_session"] = requires_user_session and not isolated_session
+    payload["user_foreground_takeover_risk"] = bool(
+        payload["requires_user_foreground_session"]
+        and str(tool_name or "").strip() in _USER_FOREGROUND_TAKEOVER_TOOLS
+    )
     return payload
 
 

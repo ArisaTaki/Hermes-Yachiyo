@@ -163,13 +163,18 @@ def _catalog_item_from_descriptor(
     capability_id = _capability_id_for_tool(tool_name)
     provider_supported = _provider_supports_tool(sandbox_provider, tool_name)
     provider_ready = _provider_ready(sandbox_provider) and provider_supported
+    provider_user_session_required = _provider_user_foreground_session_required(
+        sandbox_provider,
+        provider_supported=provider_supported,
+    )
+    execution_mode = desktop_tool_execution_mode(tool_name)
     return ToolCatalogItemSnapshot(
         tool_name=tool_name,
         function_name=descriptor.function_name,
         description=descriptor.description,
         capability_id=capability_id,
         risk_level=_risk_level_for_tool(tool_name),
-        execution_mode=desktop_tool_execution_mode(tool_name),
+        execution_mode=execution_mode,
         provider_supported=provider_supported,
         provider_ready=provider_ready,
         provider_kind=(
@@ -181,6 +186,11 @@ def _catalog_item_from_descriptor(
             str(sandbox_provider.provider_id)
             if provider_supported and sandbox_provider
             else ""
+        ),
+        requires_user_foreground_session=provider_user_session_required,
+        user_foreground_takeover_risk=(
+            provider_user_session_required
+            and bool(execution_mode.foreground_control or execution_mode.keyboard_mouse_capture)
         ),
         approval_required=_approval_required_for_tool(tool_name),
         input_schema=deepcopy(model_tool_schema["function"]["parameters"]),
@@ -800,6 +810,24 @@ def _provider_ready(sandbox_provider: SandboxDesktopProviderSnapshot | None) -> 
         sandbox_provider is not None
         and sandbox_provider.available
         and sandbox_provider.adapter_ready
+    )
+
+
+def _provider_user_foreground_session_required(
+    sandbox_provider: SandboxDesktopProviderSnapshot | None,
+    *,
+    provider_supported: bool,
+) -> bool:
+    if sandbox_provider is None or not provider_supported:
+        return False
+    isolated = sandbox_provider.desktop_session_isolated is True or str(
+        sandbox_provider.desktop_session_kind or ""
+    ).strip() in {"isolated_desktop", "sandbox_desktop", "virtual_desktop"}
+    if isolated:
+        return False
+    return bool(
+        sandbox_provider.foreground_takeover_required is True
+        or str(sandbox_provider.desktop_session_kind or "").strip() == "user_foreground"
     )
 
 

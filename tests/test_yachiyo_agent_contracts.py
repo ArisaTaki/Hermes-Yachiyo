@@ -5323,6 +5323,8 @@ def test_desktop_execution_route_decision_reports_provider_boundaries() -> None:
         "can_auto_start",
         "provider_execution_required",
         "sandbox_required",
+        "user_foreground_takeover_risk",
+        "requires_user_foreground_session",
         "foreground_mutation_supported",
         "keyboard_mouse_capture_supported",
         "desktop_session_kind",
@@ -5341,6 +5343,8 @@ def test_desktop_execution_route_decision_reports_provider_boundaries() -> None:
     assert sandbox_ready_route["can_execute"] is True
     assert sandbox_ready_route["provider_execution_required"] is True
     assert sandbox_ready_route["selected_provider_id"] == "sandbox-1"
+    assert sandbox_ready_route["requires_user_foreground_session"] is False
+    assert sandbox_ready_route["user_foreground_takeover_risk"] is False
     assert readonly_provider_route["status"] == "sandbox_ready"
     assert readonly_provider_route["can_execute"] is True
     assert readonly_provider_route["selected_provider_id"] == "sandbox-1"
@@ -5349,6 +5353,8 @@ def test_desktop_execution_route_decision_reports_provider_boundaries() -> None:
     assert foreground_provider_route["can_execute"] is True
     assert foreground_provider_route["selected_provider_id"] == "sandbox-1"
     assert foreground_provider_route["sandbox_required"] is True
+    assert foreground_provider_route["requires_user_foreground_session"] is False
+    assert foreground_provider_route["user_foreground_takeover_risk"] is False
     assert browser_route["status"] == "ready"
     assert browser_route["selected_provider_kind"] == "browser_profile"
     assert browser_route["can_execute"] is True
@@ -6730,6 +6736,8 @@ def test_runtime_tool_catalog_surfaces_sandbox_provider_capabilities() -> None:
     assert tools["desktop.list_apps"].provider_ready is True
     assert tools["desktop.list_apps"].provider_id == "sandbox-1"
     assert tools["desktop.list_apps"].provider_kind == "sandbox_desktop"
+    assert tools["desktop.list_apps"].requires_user_foreground_session is False
+    assert tools["desktop.list_apps"].user_foreground_takeover_risk is False
     assert any(
         "Sandbox desktop provider can execute" in note
         for note in tools["desktop.list_apps"].fallback_notes
@@ -6908,6 +6916,8 @@ def test_runtime_tool_catalog_marks_local_provider_input_tools_as_sandbox_requir
     assert catalog.sandbox_provider.keyboard_mouse_capture_supported is False
     assert "desktop.safe_type_text" in catalog.sandbox_provider.requires_real_sandbox_for
     assert tools["app.open"].provider_ready is True
+    assert tools["app.open"].requires_user_foreground_session is True
+    assert tools["app.open"].user_foreground_takeover_risk is True
     assert tools["desktop.safe_type_text"].provider_supported is False
     assert "desktop.safe_type_text" in (
         catalog.capabilities["foreground_input"].provider_blocked_tools
