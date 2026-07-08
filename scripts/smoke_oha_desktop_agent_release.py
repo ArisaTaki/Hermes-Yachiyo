@@ -170,7 +170,7 @@ def _tool_catalog_case() -> dict[str, Any]:
         "cleanup_lists_planner_owned_entrypoints": bool(coverage)
         and len(coverage.planner_owned_entrypoints) >= 5,
         "cleanup_lists_remaining_fallbacks": bool(coverage)
-        and len(coverage.remaining_fallback_contracts) >= 3,
+        and len(coverage.remaining_fallback_contracts) >= 2,
         "cleanup_remaining_fallbacks_are_planner_covered": bool(coverage)
         and coverage.remaining_fallback_count == coverage.planner_covered_fallback_count
         and coverage.compatibility_cleanup_pending_count
@@ -258,6 +258,17 @@ def _legacy_facade_planner_ownership_case() -> dict[str, Any]:
                 },
             ],
         },
+        {
+            "id": "finder_item_shortcut",
+            "prompt": "Finder 重命名选中文件",
+            "expected": [
+                {
+                    "protocol": "json_fallback",
+                    "tool": "app.focus_and_safe_shortcut",
+                    "input": {"app_name": "Finder", "action": "rename_selected"},
+                },
+            ],
+        },
     ]
     legacy_calls: list[dict[str, Any]] = []
     original_legacy_parser = daily_desktop_module.daily_desktop_entrypoint_tool_requests
@@ -314,6 +325,7 @@ def _legacy_facade_planner_ownership_case() -> dict[str, Any]:
             "browser_navigation",
             "safe_app_action",
             "spotlight_search",
+            "finder_item_shortcut",
         }.issubset({str(result["id"]) for result in results}),
     }
     return {

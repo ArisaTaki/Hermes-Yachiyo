@@ -435,7 +435,7 @@ def _legacy_compatible_app_action_request(request: Mapping[str, Any]) -> bool:
     if action not in _LEGACY_COMPATIBLE_APP_ACTIONS:
         return False
     if action in _LEGACY_COMPATIBLE_FINDER_ACTIONS:
-        return False
+        return app_name == "Finder"
     if action == "new_message":
         return app_name in _LEGACY_COMPATIBLE_NEW_MESSAGE_APPS
     expected_creation_app = _LEGACY_COMPATIBLE_CREATION_ACTION_APPS.get(action)

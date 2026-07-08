@@ -264,20 +264,16 @@ PLANNER_OWNED_LEGACY_ENTRYPOINTS: tuple[dict[str, Any], ...] = (
         "tools": ["desktop.safe_shortcut", "desktop.safe_type_text", "desktop.search_submit"],
         "example_prompts": ["Spotlight 搜索 yachiyo", "打开聚焦搜索 yachiyo", "提交当前搜索"],
     },
+    {
+        "entrypoint_id": "finder_item_shortcut_facade",
+        "title": "Legacy Finder selected-item shortcut facade",
+        "tools": ["app.open_and_safe_shortcut", "app.focus_and_safe_shortcut"],
+        "example_prompts": ["Finder 重命名选中文件", "Finder 上一级目录", "打开 Finder 复制选中文件"],
+    },
 )
 
 
 REMAINING_FALLBACK_CONTRACTS: tuple[dict[str, Any], ...] = (
-    _fallback_contract(
-        "finder_item_shortcuts",
-        "Finder selected-item shortcuts",
-        "Finder item actions are now planner-covered, but legacy facade response-shape callers still need cleanup.",
-        ["Finder 重命名选中文件", "Finder 上一级目录", "打开 Finder 复制选中文件"],
-        [
-            "Planner must preserve open-vs-focus action shape for Finder item prompts.",
-            "Planner must keep delete/trash operations rejected or approval-gated.",
-        ],
-    ),
     _fallback_contract(
         "browser_search_and_app_scoped_search",
         "Browser search and app-scoped search sequences",
@@ -360,6 +356,9 @@ MIGRATED_DAILY_DESKTOP_SAMPLES: tuple[LegacyDesktopMigrationSample, ...] = (
         "Chrome 最大化",
         "go back one page",
         "Finder 新建文件夹",
+        "Finder 重命名选中文件",
+        "Finder 上一级目录",
+        "打开 Finder 复制选中文件",
     ),
 )
 
