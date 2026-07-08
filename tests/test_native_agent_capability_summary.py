@@ -30,6 +30,71 @@ def _passed_section(mode: str, *, cases: list[str] | None = None) -> dict[str, o
     }
 
 
+def _desktop_entrypoint_section(*, include_task_core: bool = True) -> dict[str, object]:
+    case_ids = [
+        "main_chat_generic_app_open_before_model",
+        "agent_run_generic_app_open_before_model",
+        "main_chat_generic_app_inspect_before_model",
+        "agent_run_generic_app_inspect_before_model",
+        "main_chat_capability_discovered_app_open_before_model",
+        "main_chat_capability_discovered_app_open_path_before_model",
+        "main_chat_daily_desktop_before_model",
+        "agent_run_daily_desktop_overlay_before_model",
+    ]
+    checks = {
+        "task_core_projected": True,
+        "task_core_has_workspace": True,
+        "task_core_has_workspace_items": True,
+        "task_core_has_todo_steps": True,
+        "task_core_has_todo_tools": True,
+        "task_core_has_checkpoints": True,
+        "task_core_has_replan_signal": True,
+    }
+    cases = [
+        {"id": case_id, **({"checks": checks} if include_task_core else {})}
+        for case_id in case_ids
+    ]
+    return {
+        "status": "passed",
+        "evidence": {
+            "ok": True,
+            "mode": "agent_entrypoint_desktop_execution_smoke",
+            "case_count": len(cases),
+            "cases": cases,
+        },
+    }
+
+
+def _data_entrypoint_section(*, include_task_core: bool = True) -> dict[str, object]:
+    case_ids = [
+        "main_chat_data_analysis_before_model",
+        "agent_run_data_analysis_before_model",
+        "studio_agent_run_data_analysis_before_model",
+        "workflow_agent_node_data_analysis_before_model",
+    ]
+    checks = {
+        "task_core_projected": True,
+        "task_core_has_workspace": True,
+        "task_core_tracks_dataset_and_artifact": True,
+        "task_core_has_todo_steps": True,
+        "task_core_has_checkpoints": True,
+        "task_core_has_replan_signal": True,
+    }
+    cases = [
+        {"id": case_id, **({"checks": checks} if include_task_core else {})}
+        for case_id in case_ids
+    ]
+    return {
+        "status": "passed",
+        "evidence": {
+            "ok": True,
+            "mode": "agent_entrypoint_data_analysis_smoke",
+            "case_count": len(cases),
+            "cases": cases,
+        },
+    }
+
+
 def _studio_orchestration_section(*, include_task_core: bool = True) -> dict[str, object]:
     cases: list[dict[str, object]] = [
         {"id": "workflow_orchestration_start"},
@@ -89,6 +154,10 @@ def _source_sections_report() -> dict[str, object]:
         section_name: _passed_section(section_name, cases=[section_name])
         for section_name in summary.SOURCE_SECTION_CAPABILITIES.values()
     }
+    report["agent_entrypoint_desktop_execution_smoke"] = (
+        _desktop_entrypoint_section()
+    )
+    report["agent_entrypoint_data_analysis_smoke"] = _data_entrypoint_section()
     report["agent_studio_planner_orchestration_smoke"] = (
         _studio_orchestration_section()
     )
@@ -271,17 +340,8 @@ def test_capability_summary_reports_full_native_agent_matrix():
             "media_playback_chain_smoke",
             cases=["apple_music_open_and_play"],
         ),
-        "agent_entrypoint_desktop_execution_smoke": _passed_section(
-            "agent_entrypoint_desktop_execution_smoke",
-            cases=[
-                "main_chat_generic_app_open_before_model",
-                "main_chat_capability_discovered_app_open_before_model",
-            ],
-        ),
-        "agent_entrypoint_data_analysis_smoke": _passed_section(
-            "agent_entrypoint_data_analysis_smoke",
-            cases=["studio_agent_run_data_analysis_before_model"],
-        ),
+        "agent_entrypoint_desktop_execution_smoke": _desktop_entrypoint_section(),
+        "agent_entrypoint_data_analysis_smoke": _data_entrypoint_section(),
         "agent_studio_planner_orchestration_smoke": _studio_orchestration_section(),
         "approval_policy_gate_smoke": _passed_section("approval_policy_gate_smoke"),
         "approval_resume_timeline_smoke": _passed_section("approval_resume_timeline_smoke"),
@@ -364,7 +424,21 @@ def test_capability_summary_reports_full_native_agent_matrix():
     assert source_desktop["category"] == "source"
     assert source_desktop["evidence_summary"]["case_ids"] == [
         "main_chat_generic_app_open_before_model",
+        "agent_run_generic_app_open_before_model",
+        "main_chat_generic_app_inspect_before_model",
+        "agent_run_generic_app_inspect_before_model",
         "main_chat_capability_discovered_app_open_before_model",
+        "main_chat_capability_discovered_app_open_path_before_model",
+        "main_chat_daily_desktop_before_model",
+        "agent_run_daily_desktop_overlay_before_model",
+    ]
+    source_data = by_id["source_agent_entrypoint_data_analysis"]
+    assert source_data["status"] == "passed"
+    assert source_data["evidence_summary"]["case_ids"] == [
+        "main_chat_data_analysis_before_model",
+        "agent_run_data_analysis_before_model",
+        "studio_agent_run_data_analysis_before_model",
+        "workflow_agent_node_data_analysis_before_model",
     ]
     studio_orchestration = by_id["source_agent_studio_planner_orchestration"]
     assert studio_orchestration["status"] == "passed"
@@ -402,6 +476,40 @@ def test_capability_summary_requires_studio_task_core_release_evidence():
     ] is False
     assert studio_orchestration["evidence_summary"]["checks"][
         "group_run_orchestration_start:group_task_core_events_projected"
+    ] is False
+
+
+def test_capability_summary_requires_entrypoint_task_core_release_evidence():
+    report = {
+        **_source_sections_report(),
+        **_provider_and_packaged_report(),
+        "agent_entrypoint_desktop_execution_smoke": _desktop_entrypoint_section(
+            include_task_core=False
+        ),
+        "agent_entrypoint_data_analysis_smoke": _data_entrypoint_section(
+            include_task_core=False
+        ),
+    }
+
+    result = summary.summarize_capabilities(report)
+
+    by_id = {item["id"]: item for item in result["capabilities"]}
+    desktop = by_id["source_agent_entrypoint_desktop_execution"]
+    data = by_id["source_agent_entrypoint_data_analysis"]
+    assert result["ok"] is False
+    assert desktop["status"] == "missing"
+    assert data["status"] == "missing"
+    assert "source_agent_entrypoint_desktop_execution" in result[
+        "missing_capability_ids"
+    ]
+    assert "source_agent_entrypoint_data_analysis" in result[
+        "missing_capability_ids"
+    ]
+    assert desktop["evidence_summary"]["checks"][
+        "main_chat_generic_app_open_before_model:task_core_projected"
+    ] is False
+    assert data["evidence_summary"]["checks"][
+        "studio_agent_run_data_analysis_before_model:task_core_projected"
     ] is False
 
 
@@ -530,13 +638,7 @@ def test_capability_summary_reports_source_only_partial_matrix():
             "desktop_planner_discovery_smoke",
             cases=["generic_app_open"],
         ),
-        "agent_entrypoint_desktop_execution_smoke": _passed_section(
-            "agent_entrypoint_desktop_execution_smoke",
-            cases=[
-                "main_chat_generic_app_open_before_model",
-                "main_chat_capability_discovered_app_open_before_model",
-            ],
-        ),
+        "agent_entrypoint_desktop_execution_smoke": _desktop_entrypoint_section(),
     }
 
     result = summary.summarize_capabilities(report)

@@ -204,35 +204,80 @@ REAL_DESKTOP_OPT_IN_CAPABILITY_IDS = {
 }
 
 AGENT_STUDIO_ORCHESTRATION_SMOKE = "agent_studio_planner_orchestration_smoke"
-AGENT_STUDIO_ORCHESTRATION_REQUIRED_CASE_CHECKS: dict[str, tuple[str, ...]] = {
-    "workflow_orchestration_start": (
-        "metadata_preserves_task_core",
-        "workflow_task_core_events_projected",
-        "task_core_projected",
-        "task_core_has_workspace",
-        "task_core_has_workspace_items",
-        "task_core_has_todo",
-        "task_core_has_checkpoint",
-        "task_core_replan_enabled",
-    ),
-    "group_run_orchestration_start": (
-        "metadata_preserves_task_core",
-        "group_task_core_events_projected",
-        "task_core_projected",
-        "task_core_has_workspace",
-        "task_core_has_workspace_items",
-        "task_core_has_todo",
-        "task_core_has_checkpoint",
-        "task_core_replan_enabled",
-    ),
-    "missing_target_handoff": (
-        "task_core_projected",
-        "task_core_has_workspace",
-        "task_core_has_workspace_items",
-        "task_core_has_todo",
-        "task_core_has_checkpoint",
-        "task_core_replan_enabled",
-    ),
+DESKTOP_ENTRYPOINT_SMOKE = "agent_entrypoint_desktop_execution_smoke"
+DATA_ENTRYPOINT_SMOKE = "agent_entrypoint_data_analysis_smoke"
+
+DESKTOP_ENTRYPOINT_TASK_CORE_CHECKS = (
+    "task_core_projected",
+    "task_core_has_workspace",
+    "task_core_has_workspace_items",
+    "task_core_has_todo_steps",
+    "task_core_has_todo_tools",
+    "task_core_has_checkpoints",
+    "task_core_has_replan_signal",
+)
+DATA_ENTRYPOINT_TASK_CORE_CHECKS = (
+    "task_core_projected",
+    "task_core_has_workspace",
+    "task_core_tracks_dataset_and_artifact",
+    "task_core_has_todo_steps",
+    "task_core_has_checkpoints",
+    "task_core_has_replan_signal",
+)
+
+SOURCE_SECTION_REQUIRED_CASE_CHECKS: dict[str, dict[str, tuple[str, ...]]] = {
+    DESKTOP_ENTRYPOINT_SMOKE: {
+        "main_chat_generic_app_open_before_model": DESKTOP_ENTRYPOINT_TASK_CORE_CHECKS,
+        "agent_run_generic_app_open_before_model": DESKTOP_ENTRYPOINT_TASK_CORE_CHECKS,
+        "main_chat_generic_app_inspect_before_model": DESKTOP_ENTRYPOINT_TASK_CORE_CHECKS,
+        "agent_run_generic_app_inspect_before_model": DESKTOP_ENTRYPOINT_TASK_CORE_CHECKS,
+        "main_chat_capability_discovered_app_open_before_model": (
+            DESKTOP_ENTRYPOINT_TASK_CORE_CHECKS
+        ),
+        "main_chat_capability_discovered_app_open_path_before_model": (
+            DESKTOP_ENTRYPOINT_TASK_CORE_CHECKS
+        ),
+        "main_chat_daily_desktop_before_model": DESKTOP_ENTRYPOINT_TASK_CORE_CHECKS,
+        "agent_run_daily_desktop_overlay_before_model": (
+            DESKTOP_ENTRYPOINT_TASK_CORE_CHECKS
+        ),
+    },
+    DATA_ENTRYPOINT_SMOKE: {
+        "main_chat_data_analysis_before_model": DATA_ENTRYPOINT_TASK_CORE_CHECKS,
+        "agent_run_data_analysis_before_model": DATA_ENTRYPOINT_TASK_CORE_CHECKS,
+        "studio_agent_run_data_analysis_before_model": DATA_ENTRYPOINT_TASK_CORE_CHECKS,
+        "workflow_agent_node_data_analysis_before_model": DATA_ENTRYPOINT_TASK_CORE_CHECKS,
+    },
+    AGENT_STUDIO_ORCHESTRATION_SMOKE: {
+        "workflow_orchestration_start": (
+            "metadata_preserves_task_core",
+            "workflow_task_core_events_projected",
+            "task_core_projected",
+            "task_core_has_workspace",
+            "task_core_has_workspace_items",
+            "task_core_has_todo",
+            "task_core_has_checkpoint",
+            "task_core_replan_enabled",
+        ),
+        "group_run_orchestration_start": (
+            "metadata_preserves_task_core",
+            "group_task_core_events_projected",
+            "task_core_projected",
+            "task_core_has_workspace",
+            "task_core_has_workspace_items",
+            "task_core_has_todo",
+            "task_core_has_checkpoint",
+            "task_core_replan_enabled",
+        ),
+        "missing_target_handoff": (
+            "task_core_projected",
+            "task_core_has_workspace",
+            "task_core_has_workspace_items",
+            "task_core_has_todo",
+            "task_core_has_checkpoint",
+            "task_core_replan_enabled",
+        ),
+    },
 }
 
 SOURCE_CAPABILITY_IDS = set(SOURCE_SECTION_CAPABILITIES)
@@ -644,12 +689,16 @@ def _section_case_ids(evidence: dict[str, Any]) -> list[str]:
     return list(_section_cases_by_id(evidence).keys())
 
 
-def _agent_studio_orchestration_release_checks(
+def _source_section_release_checks(
+    section_name: str,
     evidence: dict[str, Any],
 ) -> dict[str, bool]:
+    required_checks_by_case = SOURCE_SECTION_REQUIRED_CASE_CHECKS.get(section_name)
+    if not required_checks_by_case:
+        return {}
     cases_by_id = _section_cases_by_id(evidence)
     release_checks: dict[str, bool] = {}
-    required_case_checks = AGENT_STUDIO_ORCHESTRATION_REQUIRED_CASE_CHECKS.items()
+    required_case_checks = required_checks_by_case.items()
     for case_id, required_checks in required_case_checks:
         case = cases_by_id.get(case_id)
         release_checks[f"{case_id}:present"] = isinstance(case, dict)
@@ -665,12 +714,13 @@ def _agent_studio_orchestration_release_checks(
 def _source_section_ok(report: dict[str, Any], section_name: str) -> bool:
     if not _section_ok(report, section_name):
         return False
-    if section_name != AGENT_STUDIO_ORCHESTRATION_SMOKE:
-        return True
-    release_checks = _agent_studio_orchestration_release_checks(
-        _section_evidence(report, section_name)
+    release_checks = _source_section_release_checks(
+        section_name,
+        _section_evidence(report, section_name),
     )
-    return bool(release_checks) and all(release_checks.values())
+    if not release_checks:
+        return True
+    return all(release_checks.values())
 
 
 def _string_list(value: Any) -> list[str]:
@@ -758,15 +808,14 @@ def _source_section_summary(report: dict[str, Any], section_name: str) -> dict[s
             for key, value in checks.items()
             if isinstance(key, str) and value is not True
         }
-    if section_name == AGENT_STUDIO_ORCHESTRATION_SMOKE:
-        release_checks = _agent_studio_orchestration_release_checks(evidence)
-        failed_release_checks = {
-            key: value for key, value in release_checks.items() if value is not True
-        }
-        if failed_release_checks:
-            existing_checks = summary.get("checks")
-            checks_summary = existing_checks if isinstance(existing_checks, dict) else {}
-            summary["checks"] = {**checks_summary, **failed_release_checks}
+    release_checks = _source_section_release_checks(section_name, evidence)
+    failed_release_checks = {
+        key: value for key, value in release_checks.items() if value is not True
+    }
+    if failed_release_checks:
+        existing_checks = summary.get("checks")
+        checks_summary = existing_checks if isinstance(existing_checks, dict) else {}
+        summary["checks"] = {**checks_summary, **failed_release_checks}
     tool_chain = evidence.get("tool_chain")
     if isinstance(tool_chain, list):
         summary["tool_chain"] = [str(item) for item in tool_chain if str(item)]
