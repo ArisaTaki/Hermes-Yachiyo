@@ -26319,6 +26319,7 @@ def _spotlight_search_query_hint(text: str) -> str:
     value = _clean_prompt(text)
     patterns = (
         r"^(?:Spotlight|spotlight|聚焦搜索|系统搜索)\s*(?:搜索|查找|检索)?\s*(?P<query>[^。！？!?，,]+)$",
+        r"^(?:打开|启动|显示|呼出|唤起)\s*(?:Spotlight|spotlight|聚焦搜索|系统搜索)\s*(?:搜索|查找|检索)?\s*(?P<query>[^。！？!?，,]+)$",
         r"\b(?:open|launch|start|show)\s+(?:spotlight|system\s+search)\s+(?:and\s+)?(?:search|find|look\s+up)\s+(?:for\s+)?(?P<query>[^.!?,]+)$",
         r"\b(?:use\s+)?(?:spotlight|system\s+search)\s+(?:to\s+)?(?:search|find|look\s+up)\s+(?:for\s+)?(?P<query>[^.!?,]+)$",
     )

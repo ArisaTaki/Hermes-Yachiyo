@@ -947,9 +947,16 @@ def test_runtime_planner_covers_migrated_desktop_samples_before_cleanup() -> Non
     assert coverage["planner_owner"] == "runtime_planner"
     assert coverage["total_samples"] == len(prompts)
     assert coverage["cleanup_readiness"] == "planner_covered_compat_cleanup_pending"
-    assert coverage["remaining_fallback_count"] == 4
-    assert coverage["planner_covered_fallback_count"] == 4
-    assert coverage["compatibility_cleanup_pending_count"] == 4
+    assert coverage["remaining_fallback_count"] == 3
+    assert coverage["planner_covered_fallback_count"] == 3
+    assert coverage["compatibility_cleanup_pending_count"] == 3
+    assert {
+        contract["fallback_id"] for contract in coverage["remaining_fallback_contracts"]
+    } == {
+        "finder_item_shortcuts",
+        "browser_search_and_app_scoped_search",
+        "semantic_ui_targeting",
+    }
     assert "context_transfer" in coverage["areas"]
     assert len(sample_contracts) == len(prompts)
     assert "desktop_operation" in coverage["covered_intents"]
@@ -1676,6 +1683,25 @@ def test_planner_first_direct_selection_owns_search_submit_and_spotlight_without
         ),
         (
             "Spotlight 搜索 yachiyo",
+            [
+                {
+                    "protocol": "json_fallback",
+                    "tool": "desktop.safe_shortcut",
+                    "input": {"action": "spotlight_search"},
+                    "source": "runtime_planner",
+                    "planning_reason": "planner_desktop_operation",
+                },
+                {
+                    "protocol": "json_fallback",
+                    "tool": "desktop.safe_type_text",
+                    "input": {"text": "yachiyo"},
+                    "source": "runtime_planner",
+                    "planning_reason": "planner_desktop_operation",
+                },
+            ],
+        ),
+        (
+            "打开聚焦搜索 yachiyo",
             [
                 {
                     "protocol": "json_fallback",

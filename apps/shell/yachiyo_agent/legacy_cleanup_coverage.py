@@ -71,6 +71,7 @@ AREA_PLANNER_CONTRACTS: dict[str, LegacyDesktopPlannerContract] = {
         ("desktop.app_discovery", "desktop.ui_operation"),
         (
             "desktop.list_apps",
+            "desktop.inspect_app",
             "app.open_and_safe_shortcut",
             "app.focus_and_safe_shortcut",
             "desktop.ui_elements",
@@ -79,7 +80,12 @@ AREA_PLANNER_CONTRACTS: dict[str, LegacyDesktopPlannerContract] = {
     "app_search": LegacyDesktopPlannerContract(
         ("desktop_operation",),
         ("desktop.app_discovery", "desktop.ui_operation"),
-        ("desktop.list_apps", "app.focus_and_safe_shortcut", "desktop.ui_elements"),
+        (
+            "desktop.list_apps",
+            "desktop.inspect_app",
+            "app.focus_and_safe_shortcut",
+            "desktop.ui_elements",
+        ),
     ),
     "context_transfer": LegacyDesktopPlannerContract(
         ("desktop_operation",),
@@ -149,6 +155,7 @@ AREA_PLANNER_CONTRACTS: dict[str, LegacyDesktopPlannerContract] = {
         ("desktop.app_discovery", "desktop.ui_operation"),
         (
             "desktop.list_apps",
+            "desktop.inspect_app",
             "app.open_and_safe_shortcut",
             "app.focus_and_safe_shortcut",
             "desktop.ui_elements",
@@ -164,6 +171,7 @@ AREA_PLANNER_CONTRACTS: dict[str, LegacyDesktopPlannerContract] = {
         ("desktop.app_discovery", "desktop.ui_operation"),
         (
             "desktop.list_apps",
+            "desktop.inspect_app",
             "app.open_and_safe_shortcut",
             "app.focus_and_safe_shortcut",
             "desktop.safe_shortcut",
@@ -250,6 +258,12 @@ PLANNER_OWNED_LEGACY_ENTRYPOINTS: tuple[dict[str, Any], ...] = (
         ],
         "example_prompts": ["Chrome 新建无痕窗口", "在 Slack 里按 Tab", "Slack 新建消息"],
     },
+    {
+        "entrypoint_id": "spotlight_search_facade",
+        "title": "Legacy Spotlight search facade",
+        "tools": ["desktop.safe_shortcut", "desktop.safe_type_text", "desktop.search_submit"],
+        "example_prompts": ["Spotlight 搜索 yachiyo", "打开聚焦搜索 yachiyo", "提交当前搜索"],
+    },
 )
 
 
@@ -262,16 +276,6 @@ REMAINING_FALLBACK_CONTRACTS: tuple[dict[str, Any], ...] = (
         [
             "Planner must preserve open-vs-focus action shape for Finder item prompts.",
             "Planner must keep delete/trash operations rejected or approval-gated.",
-        ],
-    ),
-    _fallback_contract(
-        "spotlight_and_foreground_search",
-        "Spotlight and foreground search sequences",
-        "Foreground search is now planner-covered as a multi-step shortcut/type/submit chain; legacy facade callers still need cleanup.",
-        ["Spotlight 搜索 yachiyo", "打开聚焦搜索 yachiyo", "提交当前搜索"],
-        [
-            "Planner must distinguish Spotlight search from browser/web search.",
-            "Planner must preserve shortcut/type/submit sequence shape for legacy facade callers.",
         ],
     ),
     _fallback_contract(
@@ -347,7 +351,7 @@ MIGRATED_DAILY_DESKTOP_SAMPLES: tuple[LegacyDesktopMigrationSample, ...] = (
         "显示所有隐藏应用",
     ),
     *_samples("low_level_desktop", "点击坐标 120, 240", "输入 hello"),
-    *_samples("foreground_search", "提交当前搜索", "Spotlight 搜索 yachiyo"),
+    *_samples("foreground_search", "提交当前搜索", "Spotlight 搜索 yachiyo", "打开聚焦搜索 yachiyo"),
     *_samples("hotkey", "复制选中文本", "微信按回车", "打开 Slack 后按回车"),
     *_samples(
         "foreground_shortcut",

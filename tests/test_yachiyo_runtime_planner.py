@@ -19525,6 +19525,20 @@ def test_runtime_planner_routes_spotlight_search_to_safe_shortcut_sequence() -> 
         "text": "yachiyo"
     }
 
+    opened_with_query = RuntimePlanner().decision(
+        "打开聚焦搜索 yachiyo",
+        allowed_tools=["desktop.safe_shortcut", "desktop.safe_type_text", "browser.open_url"],
+    )
+    assert opened_with_query.selected_intent.kind == "desktop_operation"
+    assert opened_with_query.selected_intent.inputs["spotlight_search_hint"] == {"query": "yachiyo"}
+    assert [step.step_id for step in opened_with_query.plan.tool_plan.steps] == [
+        "open-spotlight-search",
+        "type-spotlight-search-query",
+    ]
+    assert _step_by_id(opened_with_query, "type-spotlight-search-query").input_preview == {
+        "text": "yachiyo"
+    }
+
     open_only = RuntimePlanner().decision(
         "打开聚焦搜索",
         allowed_tools=["desktop.safe_shortcut", "desktop.safe_type_text", "browser.open_url"],

@@ -170,7 +170,7 @@ def _tool_catalog_case() -> dict[str, Any]:
         "cleanup_lists_planner_owned_entrypoints": bool(coverage)
         and len(coverage.planner_owned_entrypoints) >= 5,
         "cleanup_lists_remaining_fallbacks": bool(coverage)
-        and len(coverage.remaining_fallback_contracts) >= 4,
+        and len(coverage.remaining_fallback_contracts) >= 3,
         "cleanup_remaining_fallbacks_are_planner_covered": bool(coverage)
         and coverage.remaining_fallback_count == coverage.planner_covered_fallback_count
         and coverage.compatibility_cleanup_pending_count
@@ -242,6 +242,22 @@ def _legacy_facade_planner_ownership_case() -> dict[str, Any]:
                 },
             ],
         },
+        {
+            "id": "spotlight_search",
+            "prompt": "打开聚焦搜索 yachiyo",
+            "expected": [
+                {
+                    "protocol": "json_fallback",
+                    "tool": "desktop.safe_shortcut",
+                    "input": {"action": "spotlight_search"},
+                },
+                {
+                    "protocol": "json_fallback",
+                    "tool": "desktop.safe_type_text",
+                    "input": {"text": "yachiyo"},
+                },
+            ],
+        },
     ]
     legacy_calls: list[dict[str, Any]] = []
     original_legacy_parser = daily_desktop_module.daily_desktop_entrypoint_tool_requests
@@ -290,6 +306,14 @@ def _legacy_facade_planner_ownership_case() -> dict[str, Any]:
             "file_reveal",
             "browser_navigation",
             "safe_app_action",
+        }.issubset({str(result["id"]) for result in results}),
+        "covers_media_app_file_browser_action_and_search": {
+            "media_playback",
+            "simple_app_open",
+            "file_reveal",
+            "browser_navigation",
+            "safe_app_action",
+            "spotlight_search",
         }.issubset({str(result["id"]) for result in results}),
     }
     return {

@@ -215,6 +215,12 @@ def _planner_owned_legacy_compatible_entrypoint_requests(
     )
     if media_requests:
         return media_requests
+    search_requests = _legacy_compatible_search_entrypoint_requests(
+        planner_requests,
+        text=text,
+    )
+    if search_requests:
+        return search_requests
     return _legacy_compatible_simple_entrypoint_requests(planner_requests, text=text)
 
 
@@ -248,6 +254,46 @@ def _legacy_compatible_media_entrypoint_requests(
     if _legacy_compatible_named_music_search_sequence(visible, tools, text=text):
         return [_legacy_shape_request(request) for request in visible]
     return []
+
+
+def _legacy_compatible_search_entrypoint_requests(
+    requests: Sequence[Mapping[str, Any]] | None,
+    *,
+    text: str,
+) -> list[dict[str, Any]]:
+    if not requests:
+        return []
+    items = [dict(request) for request in requests if isinstance(request, Mapping)]
+    if not items:
+        return []
+    if not any(
+        str(request.get("planning_reason") or "").strip() == "planner_desktop_operation"
+        for request in items
+    ):
+        return []
+    visible = _visible_entrypoint_plan_requests(items)
+    if not visible:
+        return []
+    if any(_request_has_selected_app_placeholder(request) for request in visible):
+        return []
+    tools = [str(request.get("tool") or "").strip() for request in visible]
+    if tools == ["desktop.search_submit"]:
+        return [_legacy_shape_request(visible[0])]
+    if not _explicit_spotlight_prompt(text):
+        return []
+    if tools not in (
+        ["desktop.safe_shortcut"],
+        ["desktop.safe_shortcut", "desktop.safe_type_text"],
+    ):
+        return []
+    first_input = visible[0].get("input") if isinstance(visible[0].get("input"), Mapping) else {}
+    if str(first_input.get("action") or "").strip() != "spotlight_search":
+        return []
+    if len(visible) == 2:
+        second_input = visible[1].get("input") if isinstance(visible[1].get("input"), Mapping) else {}
+        if not str(second_input.get("text") or "").strip():
+            return []
+    return [_legacy_shape_request(request) for request in visible]
 
 
 def _legacy_compatible_simple_entrypoint_requests(
@@ -494,6 +540,16 @@ def _explicit_music_search_play_prompt(text: str) -> bool:
     return bool(
         re.search(r"(?:打开|启动|运行|拉起|开启)", value)
         or re.search(r"\b(?:open|launch|start)\b", value, flags=re.IGNORECASE)
+    )
+
+
+def _explicit_spotlight_prompt(text: str) -> bool:
+    return bool(
+        re.search(
+            r"(?:Spotlight|spotlight|聚焦搜索|系统搜索)",
+            str(text or ""),
+            flags=re.IGNORECASE,
+        )
     )
 
 
