@@ -37,6 +37,7 @@ export type TaskIntentKind =
   | 'media_playback'
   | 'system_control'
   | 'clipboard_operation'
+  | 'information_capture'
   | 'code_task'
   | 'workflow_orchestration'
   | 'multi_agent'

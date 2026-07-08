@@ -3187,6 +3187,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "| 'file_organization'",
             "| 'system_control'",
             "| 'clipboard_operation'",
+            "| 'information_capture'",
             "export type MemorySnapshot",
             "export type FutureTaskSnapshot",
             "export type FutureTaskTriggerResultSnapshot",

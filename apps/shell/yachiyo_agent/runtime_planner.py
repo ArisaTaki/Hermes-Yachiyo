@@ -24887,6 +24887,13 @@ def _app_scoped_followup_hint(text: str) -> dict[str, str]:
             "focus",
         ),
         (
+            r"^(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?"
+            r"(?:use|using|with|in|inside|within)\s+"
+            r"(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s+"
+            r"(?:to\s+)?(?P<followup>.+?)(?:\s+please)?[.!?]?$",
+            "focus",
+        ),
+        (
             r"^(?P<followup>refresh|reload)\s+"
             r"(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40})$",
             "focus",
@@ -25797,6 +25804,19 @@ def _app_search_query_hint(text: str, app_name: str) -> str:
     if named_scope_query:
         return named_scope_query
     chinese_search_verb = r"(?:搜索|查找|检索|找(?:到)?)(?!框|栏|输入|结果)"
+    raw_scope_patterns = (
+        r"(?:在|用|通过)\s*(?P<raw_app>[\w .·-]{1,40}?)(?:里|中|上|内)?\s*"
+        rf"{chinese_search_verb}\s*(?P<raw_query>[^。！？!?]+)$",
+    )
+    for pattern in raw_scope_patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        if not _app_search_scope_matches_app(match.group("raw_app"), app):
+            continue
+        query = _clean_app_search_query(match.group("raw_query"))
+        if query:
+            return query
     chinese_patterns = (
         rf"(?:在|用|通过)\s*{app_pattern}\s*(?:里|中|上|内)?\s*{chinese_search_verb}\s*(?P<query>[^。！？!?]+)$",
         rf"(?:打开|启动|切到|聚焦)\s*{app_pattern}\s*(?:[，,]\s*)?"
@@ -25813,6 +25833,23 @@ def _app_search_query_hint(text: str, app_name: str) -> str:
 
     lowered = value.lower()
     english_search_verb = r"(?:search|find|look\s+up)(?!\s+(?:box|field|bar|input|result|results)\b)"
+    raw_english_scope_patterns = (
+        r"\b(?:in|inside|within|using|with)\s+(?:the\s+)?"
+        r"(?P<raw_app>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s+"
+        rf"{english_search_verb}\s+(?:for\s+)?(?P<raw_query>[^.!?,]+)$",
+        rf"\b{english_search_verb}\s+(?:for\s+)?(?P<raw_query>[^.!?,]+?)\s+"
+        r"(?:in|inside|within|using|with)\s+(?:the\s+)?"
+        r"(?P<raw_app>[A-Za-z][A-Za-z0-9 ._-]{1,40})\b",
+    )
+    for pattern in raw_english_scope_patterns:
+        match = re.search(pattern, lowered, flags=re.IGNORECASE)
+        if not match:
+            continue
+        if not _app_search_scope_matches_app(match.group("raw_app"), app):
+            continue
+        query = _clean_app_search_query(match.group("raw_query"))
+        if query:
+            return query
     english_patterns = (
         rf"\b(?:in|inside|within|using|with)\s+(?:the\s+)?{app_pattern}\s+{english_search_verb}\s+(?:for\s+)?(?P<query>[^.!?,]+)$",
         rf"\b(?:open|launch|focus|start)\s+(?:the\s+)?{app_pattern}\s+(?:and|then)?\s*{english_search_verb}\s+(?:for\s+)?(?P<query>[^.!?,]+)$",
@@ -25911,6 +25948,8 @@ def _app_search_scope_matches_app(raw_app: str, app_name: str) -> bool:
     expected_app = str(app_name or "").strip()
     if not scoped_app:
         return False
+    scoped_app = _canonical_app_name_hint(scoped_app) or scoped_app
+    expected_app = _canonical_app_name_hint(expected_app) or expected_app
     if not expected_app:
         return True
     compact_scoped = compact_app_name_hint(scoped_app)

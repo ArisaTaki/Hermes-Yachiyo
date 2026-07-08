@@ -188,7 +188,15 @@ def _legacy_requests_with_type_sequence_verification(
 def _planner_requests_need_model_followup(requests: list[dict[str, Any]]) -> bool:
     if not requests:
         return False
-    if any(bool(request.get("continue_to_model")) for request in requests):
+    continuation_tools = [
+        str(request.get("tool") or "").strip()
+        for request in requests
+        if bool(request.get("continue_to_model"))
+    ]
+    if continuation_tools and not (
+        _primary_tool_names_for_requests(requests)
+        and all(tool in _DAILY_DESKTOP_METADATA_VERIFY_TOOLS for tool in continuation_tools)
+    ):
         return True
     tools = set(_tool_names_for_requests(requests))
     return bool(tools) and tools <= {"desktop.ui_elements", "screen.capture"}
@@ -397,6 +405,9 @@ def _expose_runtime_planner_user_metadata(
         "browser.open_url_and_extract_text",
         "data.analyze",
         "future_task.schedule",
+        "calendar.create_event",
+        "notes.create",
+        "reminders.create",
         "terminal.run",
         "workspace.read",
     }:

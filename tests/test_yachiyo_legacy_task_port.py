@@ -284,7 +284,15 @@ def test_legacy_runtime_port_appends_runtime_planner_events_when_available() -> 
     )
     assert task_core_event[1]["payload"]["todo_count"] >= 1
     assert task_core_event[1]["payload"]["checkpoint_count"] >= 1
-    assert planner_events[3][1]["payload"]["step"]["tool_name"] == "data.analyze"
+    plan_steps = [
+        event[1]["payload"]["step"]
+        for event in planner_events
+        if event[1]["event_type"] == "agent.plan.step"
+    ]
+    assert [step["tool_name"] for step in plan_steps] == [
+        "workspace.read",
+        "data.analyze",
+    ]
 
 
 def test_legacy_runtime_port_appends_desktop_readiness_blocked_plan_events(monkeypatch) -> None:
@@ -358,14 +366,17 @@ def test_legacy_runtime_port_appends_media_planner_events() -> None:
     )
 
     planner_events = [call for call in runtime.calls if call[0] == "append_run_event"]
+    planner_event_types = [event[1]["event_type"] for event in planner_events]
     assert task["task_id"] == "task-1"
-    assert [event[1]["event_type"] for event in planner_events] == [
+    assert planner_event_types[:5] == [
         "agent.intent.selected",
         "agent.plan.created",
         "agent.task_core.created",
         "agent.plan.step",
         "agent.plan.step",
     ]
+    assert "agent.task.todo.updated" in planner_event_types
+    assert "agent.task.checkpoint.updated" in planner_event_types
     assert planner_events[0][1]["payload"]["intent"]["kind"] == "media_playback"
     plan = planner_events[1][1]["payload"]["plan"]
     capabilities = {
@@ -2201,7 +2212,7 @@ def test_legacy_chat_task_starter_does_not_override_runtime_planner_selection(
         call for call in runtime.calls if call[0] == "execute_main_chat_model_loop"
     ][0]
     direct_requests = model_loop_call[1]["direct_tool_requests"]
-    assert [request["tool"] for request in direct_requests] == ["artifact.write"]
+    assert [request["tool"] for request in direct_requests] == ["notes.create"]
     assert direct_requests[0]["source"] == "runtime_planner"
 
 
@@ -2247,7 +2258,8 @@ def test_legacy_chat_task_starter_prefers_explicit_direct_tool_requests() -> Non
     assert direct_requests[0]["desktop_loop"]["can_auto_retry"] is True
     assert direct_requests[1]["approval_required"] is True
     assert model_loop_call[1]["tool_policy"] == {
-        "approval_required": {"terminal.run": True}
+        "allowed_tools": ["desktop.list_apps", "terminal.run"],
+        "approval_required": {"terminal.run": True},
     }
 
 
@@ -2277,7 +2289,8 @@ def test_legacy_chat_task_starter_promotes_direct_request_approval_policy() -> N
     direct_requests = model_loop_call[1]["direct_tool_requests"]
     assert [request["tool"] for request in direct_requests] == ["terminal.run"]
     assert model_loop_call[1]["tool_policy"] == {
-        "approval_required": {"terminal.run": True}
+        "allowed_tools": ["terminal.run"],
+        "approval_required": {"terminal.run": True},
     }
 
 
@@ -2629,7 +2642,10 @@ def test_legacy_chat_task_starter_uses_generic_planner_coverage_for_legacy_timel
         "app.open",
         "desktop.active_window",
     ]
-    assert {event["source"] for event in app_timeline} == {"runtime_planner"}
+    assert {event["source"] for event in app_timeline} == {
+        "runtime_planner",
+        "runtime_verification",
+    }
     assert [event["tool"] for event in media_timeline] == [
         "desktop.list_apps",
         "app.open_and_safe_shortcut",
@@ -2638,7 +2654,10 @@ def test_legacy_chat_task_starter_uses_generic_planner_coverage_for_legacy_timel
         "media.music_app_open_and_play",
         "desktop.ui_elements",
     ]
-    assert {event["source"] for event in media_timeline} == {"runtime_planner"}
+    assert {event["source"] for event in media_timeline} == {
+        "runtime_planner",
+        "runtime_verification",
+    }
 
 
 def test_legacy_chat_task_starter_records_known_site_selection_on_runtime_planner(
@@ -2805,7 +2824,7 @@ def test_legacy_chat_task_starter_writes_explicit_note_as_artifact_fallback() ->
     metadata = app_runtime.chat_session.metadata_calls[0]["metadata"]
     assert metadata["yachiyo_runtime_planner"] is True
     assert metadata["yachiyo_intent_kind"] == "information_capture"
-    assert metadata["daily_desktop_tool"] == "artifact.write"
+    assert metadata["daily_desktop_tool"] == "notes.create"
     assert metadata["daily_desktop_source"] == "runtime_planner"
     assert metadata["daily_desktop_planning_reason"] == (
         "planner_fallback_information_capture"
@@ -2817,14 +2836,11 @@ def test_legacy_chat_task_starter_writes_explicit_note_as_artifact_fallback() ->
     direct_requests = model_loop_call[1]["direct_tool_requests"]
     assert len(direct_requests) == 1
     assert direct_requests[0]["protocol"] == "json_fallback"
-    assert direct_requests[0]["tool"] == "artifact.write"
-    assert direct_requests[0]["input"] == {
-        "path": "captured-note.md",
-        "content": "今天要买牛奶",
-    }
+    assert direct_requests[0]["tool"] == "notes.create"
+    assert direct_requests[0]["input"] == {"body": "今天要买牛奶"}
     assert direct_requests[0]["source"] == "runtime_planner"
     assert direct_requests[0]["planning_reason"] == "planner_fallback_information_capture"
-    assert direct_requests[0]["planner_step_id"] == "write-note-artifact"
+    assert direct_requests[0]["planner_step_id"] == "create-note"
 
 
 def test_legacy_chat_task_starter_does_not_pass_full_plan_for_approval_tools() -> None:
@@ -2910,9 +2926,10 @@ def test_legacy_chat_task_starter_uses_main_chat_tools_for_runtime_planner() -> 
     assert metadata["daily_desktop_planning_reason"] == "planner_builtin_data_analysis"
     planner_events = [call for call in runtime.calls if call[0] == "append_run_event"]
     assert planner_events[0][1]["payload"]["intent"]["kind"] == "data_analysis"
-    assert planner_events[1][1]["payload"]["plan"]["tool_plan"]["steps"][0]["tool_name"] == (
-        "data.analyze"
-    )
+    assert [
+        step["tool_name"]
+        for step in planner_events[1][1]["payload"]["plan"]["tool_plan"]["steps"]
+    ] == ["workspace.read", "data.analyze"]
     model_loop_call = [
         call for call in runtime.calls if call[0] == "execute_main_chat_model_loop"
     ][0]
@@ -2944,14 +2961,18 @@ def test_legacy_chat_task_starter_uses_spreadsheet_app_planner_sequence() -> Non
     assert [
         step["tool_name"]
         for step in planner_events[1][1]["payload"]["plan"]["tool_plan"]["steps"]
-    ] == ["app.open", "data.analyze"]
+    ] == ["workspace.read", "app.open", "desktop.open_path", "data.analyze"]
     model_loop_call = [
         call for call in runtime.calls if call[0] == "execute_main_chat_model_loop"
     ][0]
     assert model_loop_call[1]["direct_tool_request"] is None
     direct_requests = model_loop_call[1]["direct_tool_requests"]
-    assert [request["tool"] for request in direct_requests] == ["data.analyze"]
-    assert direct_requests[0]["input"] == {
+    assert [request["tool"] for request in direct_requests] == [
+        "desktop.list_apps",
+        "desktop.open_path",
+        "data.analyze",
+    ]
+    assert direct_requests[2]["input"] == {
         "path": "data/sales.csv",
         "artifact_path": "analysis-report.md",
         "source_kind": "csv",
@@ -2960,8 +2981,8 @@ def test_legacy_chat_task_starter_uses_spreadsheet_app_planner_sequence() -> Non
             {"path": "analysis-report.md", "kind": "markdown"},
         ],
     }
-    assert direct_requests[0]["planning_reason"] == "planner_builtin_data_analysis"
-    assert direct_requests[0]["planner_step_id"] == "analyze-data-file"
+    assert direct_requests[2]["planning_reason"] == "planner_builtin_data_analysis"
+    assert direct_requests[2]["planner_step_id"] == "analyze-data-file"
 
 
 def test_legacy_chat_task_starter_uses_future_task_schedule_fallback() -> None:
@@ -2980,7 +3001,7 @@ def test_legacy_chat_task_starter_uses_future_task_schedule_fallback() -> None:
     metadata = app_runtime.chat_session.metadata_calls[0]["metadata"]
     assert metadata["yachiyo_runtime_planner"] is True
     assert metadata["yachiyo_intent_kind"] == "schedule"
-    assert metadata["daily_desktop_tool"] == "future_task.schedule"
+    assert metadata["daily_desktop_tool"] == "reminders.create"
     assert metadata["daily_desktop_source"] == "runtime_planner"
     assert metadata["daily_desktop_planning_reason"] == "planner_fallback_schedule"
     model_loop_call = [
@@ -2988,16 +3009,19 @@ def test_legacy_chat_task_starter_uses_future_task_schedule_fallback() -> None:
     ][0]
     assert model_loop_call[1]["direct_tool_request"] is None
     direct_requests = model_loop_call[1]["direct_tool_requests"]
-    assert len(direct_requests) == 1
-    assert direct_requests[0]["tool"] == "future_task.schedule"
-    assert direct_requests[0]["input"] == {
-        "title": "买牛奶",
-        "prompt": "提醒用户：买牛奶。原始请求：提醒我明天买牛奶",
-        "scheduled_at_epoch": datetime.fromisoformat(tomorrow_0900).timestamp(),
-    }
-    assert direct_requests[0]["source"] == "runtime_planner"
-    assert direct_requests[0]["planning_reason"] == "planner_fallback_schedule"
-    assert direct_requests[0]["planner_step_id"] == "create-schedule-item"
+    assert direct_requests == []
+    selection_events = [
+        event for event in runtime.calls
+        if event[0] == "append_run_event"
+        and event[1]["event_type"] == "agent.plan.selection"
+    ]
+    assert selection_events[0][1]["payload"]["selected_tools"] == ["reminders.create"]
+    assert selection_events[0][1]["payload"]["approvals_required"] == [
+        "create-schedule-item"
+    ]
+    assert selection_events[0][1]["payload"]["runtime_plan"]["tool_plan"]["steps"][0][
+        "approval_required"
+    ] is True
 
 
 def test_legacy_runtime_port_readiness_includes_desktop_execution_capabilities(monkeypatch) -> None:
@@ -3017,12 +3041,10 @@ def test_legacy_runtime_port_readiness_includes_desktop_execution_capabilities(m
     assert readiness["ok"] is True
     assert capabilities["tasks"] is True
     assert capabilities["runnables"] == 1
-    assert capabilities["sandbox_provider"]["status"] == "provider_required"
-    assert capabilities["sandbox_provider"]["blocking_conditions"] == [
-        "sandbox_desktop_provider_required"
-    ]
-    assert capabilities["desktop_provider_ready"] is False
-    assert capabilities["desktop_provider_supported_tools"] == []
+    assert capabilities["sandbox_provider"]["status"] == "available"
+    assert capabilities["sandbox_provider"]["provider_kind"] == "local_desktop"
+    assert capabilities["desktop_provider_ready"] is True
+    assert "desktop.list_apps" in capabilities["desktop_provider_supported_tools"]
     assert capabilities["desktop_execution"]["platform"] in {
         "macos",
         "windows",
@@ -3544,10 +3566,9 @@ def test_legacy_runtime_port_forwards_runtime_execution_plan_to_workflow_run() -
     )
     assert [request["tool"] for request in direct_requests] == [
         "workspace.read",
-        "python.run",
-        "artifact.write",
+        "data.analyze",
     ]
-    assert direct_requests[1]["approval_required"] is True
+    assert direct_requests[1]["approval_required"] is False
 
 
 def test_legacy_runtime_port_preserves_workflow_identity_after_task_approval() -> None:
@@ -3854,16 +3875,19 @@ def test_legacy_studio_port_start_workflow_run_returns_runtime_events() -> None:
         "agent.task_core.created",
         "agent.plan.step",
     ]
-    assert (
-        "create_workflow_run",
-        {
-            "workflow_id": "workflow-1",
-            "user_goal": "分析 sales.csv 并输出报告",
-            "source": "yachiyo_studio",
-            "client_run_id": "studio-workflow-run-1",
-            "run_group_id": None,
-        },
-    ) in runtime.calls
+    create_call = next(
+        payload
+        for call_name, payload in runtime.calls
+        if call_name == "create_workflow_run"
+    )
+    assert create_call["workflow_id"] == "workflow-1"
+    assert create_call["user_goal"] == "分析 sales.csv 并输出报告"
+    assert create_call["source"] == "yachiyo_studio"
+    assert create_call["client_run_id"] == "studio-workflow-run-1"
+    assert create_call["run_group_id"] is None
+    assert [request["tool"] for request in create_call["direct_tool_requests"]] == [
+        "data.analyze"
+    ]
 
 
 class _StudioStartRuntime:

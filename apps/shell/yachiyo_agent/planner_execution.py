@@ -1986,6 +1986,11 @@ def _annotate_request_trace(
         request["tool_plan_id"] = tool_plan_id
     if intent_kind:
         request["intent_kind"] = intent_kind
+    if bool(getattr(step, "approval_required", False)):
+        request["approval_required"] = True
+    risk_level = str(getattr(step, "risk_level", "") or "").strip()
+    if risk_level:
+        request.setdefault("risk_level", risk_level)
     request.update(_runtime_trace_metadata_for_step(decision, step_id))
     request.update(_task_execution_context_for_step(decision, step_id))
 
