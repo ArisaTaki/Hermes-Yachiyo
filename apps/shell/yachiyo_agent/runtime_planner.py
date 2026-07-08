@@ -4145,6 +4145,10 @@ class RuntimePlanner:
                 if str(operation_tool or "").startswith("app.")
                 else dict(observe_create_shortcut)
             )
+            inspect_readonly = _inspect_app_can_remain_readonly_before_operation(
+                operation_tool,
+                operation_preview,
+            )
             if inspect_tool and not focus_step_added:
                 steps = [
                     _step(
@@ -4156,8 +4160,8 @@ class RuntimePlanner:
                         input_preview=_desktop_inspect_app_input_preview(
                             app_name,
                             observe_payload,
-                            open_if_needed=True,
-                            focus=True,
+                            open_if_needed=not inspect_readonly,
+                            focus=not inspect_readonly,
                         ),
                         reason=(
                             "Inspect the requested app before running the requested create action."
@@ -4758,6 +4762,10 @@ class RuntimePlanner:
             }
             and not focus_step_added
             and not app_search
+            and not _inspect_app_can_remain_readonly_before_operation(
+                operation_tool,
+                operation_preview,
+            )
             and _app_scoped_operation_should_inspect(
                 operation_tool,
                 screen_capture=screen_capture,
@@ -4778,6 +4786,10 @@ class RuntimePlanner:
                             inspect_payload[key] = ui_inspection[key]
                 if screen_capture is not None or ui_inspection is not None:
                     inspect_payload.setdefault("limit", 80)
+                inspect_readonly = _inspect_app_can_remain_readonly_before_operation(
+                    operation_tool,
+                    operation_preview,
+                )
                 inspect_step = _step(
                     intent,
                     "inspect-app",
@@ -4787,8 +4799,8 @@ class RuntimePlanner:
                     input_preview=_desktop_inspect_app_input_preview(
                         app_name,
                         inspect_payload,
-                        open_if_needed=True,
-                        focus=True,
+                        open_if_needed=not inspect_readonly,
+                        focus=not inspect_readonly,
                     ),
                     reason=(
                         "Inspect the requested app with discovery, optional open/focus, "
@@ -12029,6 +12041,18 @@ def _app_scoped_operation_should_inspect(
     if clean_tool.startswith(("app.focus_and_", "app.open_and_")):
         return True
     return screen_capture is not None or ui_inspection is not None
+
+
+def _inspect_app_can_remain_readonly_before_operation(
+    tool_name: str | None,
+    operation_preview: Mapping[str, Any] | None,
+) -> bool:
+    clean_tool = str(tool_name or "").strip()
+    if clean_tool not in {"app.open_and_safe_shortcut", "app.focus_and_safe_shortcut"}:
+        return False
+    preview = operation_preview if isinstance(operation_preview, Mapping) else {}
+    action = str(preview.get("action") or "").strip()
+    return action in {"new_document", "new_note", "new_task"}
 
 
 def _app_management_action(tool_name: str | None) -> str:

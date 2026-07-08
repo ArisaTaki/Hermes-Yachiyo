@@ -3028,6 +3028,54 @@ def test_runtime_tool_request_runner_preview_input_policy_allows_media_but_block
     assert "blocked_by_desktop_execution_policy" in messages[-1]["content"]
 
 
+def test_runtime_tool_request_runner_preview_input_policy_allows_safe_creation_shortcut() -> None:
+    run_events: list[tuple[str, str, dict[str, Any]]] = []
+    budget = FakeBudget()
+    messages = [{"role": "user", "content": "新建一条笔记"}]
+    timeline: list[dict[str, Any]] = []
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    def call_agent_tool(
+        tool_request: dict[str, Any],
+        _allowed_tools: list[str],
+        _broker: Any,
+        timeline_arg: list[dict[str, Any]],
+        **_kwargs: Any,
+    ) -> dict[str, Any]:
+        tool_name = str(tool_request.get("tool") or "")
+        payload = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
+        calls.append((tool_name, payload))
+        result = {"ok": True, "action": tool_name, "summary": "done"}
+        timeline_arg.append(
+            _timeline("agent.tool.call", tool_name, input_preview=payload, result=result)
+        )
+        return result
+
+    runner = _runner(call_agent_tool=call_agent_tool, run_events=run_events)
+    policy = {"mode": "preview_input", "allow_media_control": True}
+
+    runner.run(
+        [
+            {
+                "tool": "desktop.safe_shortcut",
+                "input": {"action": "new_note"},
+                "desktop_execution_policy": policy,
+            },
+        ],
+        ["desktop.safe_shortcut"],
+        FakeBroker({"ok": True}),
+        messages,
+        timeline,
+        [],
+        next_iteration=3,
+        run_id="run-1",
+        budget=budget,
+    )
+
+    assert calls == [("desktop.safe_shortcut", {"action": "new_note"})]
+    assert not [event for event in timeline if event["event"] == "agent.tool.skipped"]
+
+
 def test_runtime_tool_request_runner_allow_policy_still_requires_sandbox_for_keyboard_mouse() -> None:
     budget = FakeBudget()
     messages = [{"role": "user", "content": "在当前应用里输入 hello"}]

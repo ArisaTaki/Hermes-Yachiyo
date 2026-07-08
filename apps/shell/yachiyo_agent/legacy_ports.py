@@ -282,6 +282,9 @@ def _metadata_requests_with_split_app_shortcuts(
         payload = request.get("input") if isinstance(request.get("input"), dict) else {}
         app_name = str(payload.get("app_name") or "").strip()
         action = str(payload.get("action") or "").strip()
+        if action in {"new_document", "new_note", "new_task"}:
+            expanded.append(request)
+            continue
         if not app_name or not action:
             expanded.append(request)
             continue

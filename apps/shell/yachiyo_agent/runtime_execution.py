@@ -23,6 +23,7 @@ from .desktop_execution_policy import (
     sandbox_desktop_provider_status,
     sandbox_desktop_provider_can_execute_tool,
 )
+from .app_name_hints import legacy_app_name_hint
 from .planner_execution import (
     planner_full_plan_execution_tool_requests,
     planner_tool_requests_for_decision,
@@ -918,10 +919,12 @@ def _tool_request_from_execution_request(
     *,
     envelope: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
+    tool_name = str(request.get("tool_name") or request.get("tool") or "").strip()
     request_input = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+    request_input = _canonical_runtime_request_input(tool_name, request_input)
     payload: dict[str, Any] = {
         "protocol": str(request.get("protocol") or "json_fallback"),
-        "tool": str(request.get("tool_name") or request.get("tool") or "").strip(),
+        "tool": tool_name,
         "input": dict(request_input),
         "source": str(request.get("source") or "runtime_planner"),
         "planning_reason": str(request.get("planning_reason") or ""),
@@ -989,6 +992,40 @@ def _tool_request_from_execution_request(
     if isinstance(envelope, Mapping):
         _apply_envelope_task_context(payload, envelope)
     return payload
+
+
+def _canonical_runtime_request_input(
+    tool_name: str,
+    request_input: Mapping[str, Any],
+) -> dict[str, Any]:
+    payload = dict(request_input)
+    if not payload:
+        return payload
+    if str(tool_name or "").strip() not in {
+        "app.open",
+        "app.focus",
+        "app.status",
+        "desktop.open_app",
+        "desktop.focus_app",
+        "desktop.inspect_app",
+        "desktop.windows",
+        "desktop.list_windows",
+        "desktop.ui_elements",
+        "desktop.read_ui",
+        "desktop.verify",
+        "media.music_app_open_and_play",
+    } and not (
+        str(tool_name or "").strip().startswith("app.open_and_")
+        or str(tool_name or "").strip().startswith("app.focus_and_")
+    ):
+        return payload
+    app_name = str(payload.get("app_name") or "").strip()
+    if not app_name or app_name == "企业微信":
+        return payload
+    canonical = str(legacy_app_name_hint(app_name) or "").strip()
+    if not canonical or canonical == app_name:
+        return payload
+    return {**payload, "app_name": canonical}
 
 
 _SELECTED_DESKTOP_APP_NAME = "<selected app from desktop.list_apps>"

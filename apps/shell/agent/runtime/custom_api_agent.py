@@ -14069,6 +14069,9 @@ def _split_combined_foreground_app_requests(
         app_name = str(payload.get("app_name") or "").strip()
         if tool_name in {"app.open_and_safe_shortcut", "app.focus_and_safe_shortcut"}:
             action = str(payload.get("action") or "").strip()
+            if action in {"new_document", "new_note", "new_task"}:
+                split_requests.append(request)
+                continue
             replacement = _split_combined_app_prefix_requests(
                 request,
                 app_name=app_name,

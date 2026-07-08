@@ -212,6 +212,35 @@ def test_direct_browser_entrypoint_ignores_artifact_followup_for_simple_open() -
             "input": {"url": "https://github.com"},
         }
     ]
+    assert direct_browser_entrypoint_requests(
+        [
+            {
+                "protocol": "json_fallback",
+                "tool": "browser.extract_text",
+                "input": {},
+                "source": "runtime_planner",
+                "planning_reason": "planner_full_plan_web_research",
+            },
+            {
+                "protocol": "json_fallback",
+                "tool": "artifact.write",
+                "input": {"path": "research-summary.md"},
+                "source": "runtime_planner",
+                "planning_reason": "planner_full_plan_web_research",
+                "continue_to_model": True,
+            },
+        ],
+        "summarize current webpage",
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.extract_text",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_full_plan_web_research",
+            "presentation": "summary",
+        }
+    ]
 
 
 def test_daily_desktop_requests_can_complete_with_trailing_verification_without_model() -> None:

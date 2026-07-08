@@ -125,6 +125,9 @@ def direct_browser_entrypoint_requests(
     request_list = [request for request in requests or [] if isinstance(request, Mapping)]
     if not request_list:
         return []
+    readback_requests = _direct_browser_readback_entrypoint_requests(request_list, text)
+    if readback_requests:
+        return readback_requests
     if _looks_like_browser_artifact_request(text):
         return []
     for index, request in enumerate(request_list):
@@ -147,6 +150,13 @@ _DIRECT_BROWSER_DEFERRED_OUTPUT_TOOLS = frozenset(
         "browser.extract_text",
         "clipboard.write",
         "data.analyze",
+    }
+)
+_DIRECT_BROWSER_READBACK_TOOLS = frozenset(
+    {
+        "browser.current_page",
+        "browser.extract",
+        "browser.extract_text",
     }
 )
 
@@ -185,6 +195,79 @@ def _direct_browser_entrypoint_suffix_is_deferred_output_only(
         if bool(request.get("approval_required")):
             return False
     return True
+
+
+def _direct_browser_readback_entrypoint_requests(
+    requests: Sequence[Mapping[str, Any]],
+    text: str,
+) -> list[dict[str, Any]]:
+    if _looks_like_browser_persistent_artifact_request(text):
+        return []
+    if not _looks_like_current_page_summary_request(text):
+        return []
+    for index, request in enumerate(requests):
+        normalized = _direct_browser_readback_entrypoint_request(request)
+        if not normalized:
+            continue
+        if not _direct_browser_entrypoint_suffix_is_deferred_output_only(
+            requests[index + 1:],
+        ):
+            continue
+        normalized.setdefault("presentation", "summary")
+        return [normalized]
+    return []
+
+
+def _direct_browser_readback_entrypoint_request(
+    request: Mapping[str, Any],
+) -> dict[str, Any]:
+    tool_name = str(request.get("tool") or "").strip()
+    if tool_name not in _DIRECT_BROWSER_READBACK_TOOLS:
+        return {}
+    source = str(request.get("source") or "").strip()
+    if source and source != "runtime_planner":
+        return {}
+    planning_reason = str(request.get("planning_reason") or "").strip()
+    if planning_reason and "web" not in planning_reason:
+        return {}
+    if bool(request.get("approval_required")):
+        return {}
+    normalized = dict(request)
+    normalized.pop("continue_to_model", None)
+    return normalized
+
+
+def _looks_like_current_page_summary_request(text: str) -> bool:
+    value = str(text or "").strip()
+    if not value:
+        return False
+    return bool(
+        re.search(
+            r"(?:当前(?:网页|页面)|current\s+(?:webpage|page)|this\s+(?:webpage|page))",
+            value,
+            flags=re.IGNORECASE,
+        )
+        and re.search(
+            r"(?:总结|摘要|概括|summari[sz]e|summary|recap)",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _looks_like_browser_persistent_artifact_request(text: str) -> bool:
+    value = str(text or "").strip()
+    if not value:
+        return False
+    return bool(
+        re.search(
+            r"(?:报告|文档|文件|产出|输出|导出|保存|表格|调研|研究|分析|生成\s*(?:一份)?\s*"
+            r"(?:报告|文档|文件|表格)|\breport\b|\bartifact\b|\bsave\b|\bexport\b|"
+            r"\btable\b|\bresearch\b|\banaly[sz]e\b|\bmarkdown\b|\bmd\s+file\b)",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def daily_desktop_requests_can_complete_without_model(
@@ -1063,8 +1146,17 @@ def entrypoint_plan_user_metadata(
     tool = str(metadata.get("daily_desktop_tool") or "").strip()
     tools = metadata.get("daily_desktop_tools")
     tool_list = [str(item or "").strip() for item in tools or [] if str(item or "").strip()]
+    planner_metadata = (
+        {
+            "yachiyo_runtime_planner": True,
+            "yachiyo_plan_source": "runtime_planner",
+        }
+        if source == "runtime_planner"
+        else {}
+    )
     return {
         **metadata,
+        **planner_metadata,
         "entrypoint_plan": True,
         "entrypoint_plan_source": source,
         "entrypoint_plan_reason": reason,

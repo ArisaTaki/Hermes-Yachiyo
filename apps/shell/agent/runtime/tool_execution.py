@@ -472,6 +472,7 @@ def _desktop_execution_policy_skip_result(
             tool_name,
             policy,
             execution_payload,
+            input_preview if isinstance(input_preview, Mapping) else {},
         )
     ):
         return None
@@ -756,13 +757,34 @@ def _desktop_execution_policy_blocks_input_tool(
     tool_name: str,
     policy: Mapping[str, Any],
     execution_mode: Mapping[str, Any],
+    input_preview: Mapping[str, Any] | None = None,
 ) -> bool:
     if not bool(execution_mode.get("keyboard_mouse_capture")):
         return False
     clean_tool = str(tool_name or "").strip()
     if clean_tool.startswith("media.") and policy.get("allow_media_control") is not False:
         return False
+    if _desktop_execution_policy_allows_low_risk_safe_shortcut(
+        clean_tool,
+        input_preview,
+    ):
+        return False
     return True
+
+
+def _desktop_execution_policy_allows_low_risk_safe_shortcut(
+    tool_name: str,
+    input_preview: Mapping[str, Any] | None,
+) -> bool:
+    if tool_name not in {
+        "app.open_and_safe_shortcut",
+        "app.focus_and_safe_shortcut",
+        "desktop.safe_shortcut",
+    }:
+        return False
+    payload = input_preview if isinstance(input_preview, Mapping) else {}
+    action = str(payload.get("action") or "").strip()
+    return action in {"new_document", "new_note", "new_task"}
 
 
 def _desktop_execution_policy_from_request(
