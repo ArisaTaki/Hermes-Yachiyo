@@ -991,6 +991,15 @@ class RuntimeDebugSummarySnapshot(_PublicSnapshot):
     desktop_provider_session_foreground_takeover_required: bool | None = None
     desktop_provider_session_keyboard_mouse_capture_supported: bool | None = None
     desktop_provider_session_supported_tools: list[str] = Field(default_factory=list)
+    desktop_provider_backend_kind: str | None = None
+    desktop_provider_backend_is_loopback: bool | None = None
+    desktop_provider_backend_ready_for_public_release: bool | None = None
+    desktop_provider_requires_real_virtual_backend: bool | None = None
+    desktop_provider_contract_ok: bool | None = None
+    desktop_provider_contract_version: str | None = None
+    desktop_provider_contract_blocking_conditions: list[str] = Field(
+        default_factory=list
+    )
     desktop_execution_session_mode: str | None = None
     desktop_execution_session_label: str | None = None
     event_count: int = 0

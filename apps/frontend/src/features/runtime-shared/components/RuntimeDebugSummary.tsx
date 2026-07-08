@@ -62,6 +62,13 @@ export function RuntimeDebugSummary({
       data-desktop-provider-session-kind={summary?.desktop_provider_session_kind || ''}
       data-desktop-provider-session-status={summary?.desktop_provider_session_status || ''}
       data-desktop-provider-session-tool-names={(summary?.desktop_provider_session_tool_names || []).join(',')}
+      data-desktop-provider-backend-kind={summary?.desktop_provider_backend_kind || ''}
+      data-desktop-provider-backend-is-loopback={String(summary?.desktop_provider_backend_is_loopback ?? '')}
+      data-desktop-provider-backend-release-ready={String(summary?.desktop_provider_backend_ready_for_public_release ?? '')}
+      data-desktop-provider-requires-real-virtual-backend={String(summary?.desktop_provider_requires_real_virtual_backend ?? '')}
+      data-desktop-provider-contract-ok={String(summary?.desktop_provider_contract_ok ?? '')}
+      data-desktop-provider-contract-version={summary?.desktop_provider_contract_version || ''}
+      data-desktop-provider-contract-blockers={(summary?.desktop_provider_contract_blocking_conditions || []).join(',')}
       data-desktop-execution-session-label={summary?.desktop_execution_session_label || ''}
       data-desktop-execution-session-mode={summary?.desktop_execution_session_mode || ''}
       data-current-request-id={summary?.current_request_id || ''}
@@ -148,6 +155,8 @@ export function runtimeDebugSummaryHasContent(summary?: RuntimeDebugSummarySnaps
     || summary.desktop_provider_session_provider_id
     || summary.desktop_provider_session_reason
     || summary.desktop_provider_session_kind
+    || summary.desktop_provider_backend_kind
+    || summary.desktop_provider_contract_version
     || summary.desktop_execution_session_label
     || summary.desktop_execution_session_mode
     || summary.runtime_doctrine
@@ -306,6 +315,16 @@ function runtimeDebugLatestFacts(summary?: RuntimeDebugSummarySnapshot | null): 
     summary.desktop_provider_session_foreground_takeover_required === true ? 'foreground takeover required' : '',
     summary.desktop_provider_session_foreground_takeover_required === false ? 'no foreground takeover' : '',
     summary.desktop_provider_session_keyboard_mouse_capture_supported === true ? 'keyboard mouse capture ready' : '',
+    summary.desktop_provider_backend_kind ? `desktop backend ${summary.desktop_provider_backend_kind}` : '',
+    summary.desktop_provider_backend_ready_for_public_release === true ? 'desktop backend release ready' : '',
+    summary.desktop_provider_backend_ready_for_public_release === false ? 'desktop backend not release ready' : '',
+    summary.desktop_provider_requires_real_virtual_backend === true ? 'real virtual desktop backend required' : '',
+    summary.desktop_provider_contract_ok === true ? 'provider contract ready' : '',
+    summary.desktop_provider_contract_ok === false ? 'provider contract blocked' : '',
+    summary.desktop_provider_contract_version ? `provider contract ${summary.desktop_provider_contract_version}` : '',
+    (summary.desktop_provider_contract_blocking_conditions || []).length
+      ? `provider blockers ${(summary.desktop_provider_contract_blocking_conditions || []).slice(0, 3).join(', ')}`
+      : '',
     (summary.desktop_provider_session_tool_names || []).length
       ? `provider tools ${(summary.desktop_provider_session_tool_names || []).slice(0, 3).join(', ')}`
       : '',

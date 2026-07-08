@@ -113,6 +113,10 @@ def test_frontend_runtime_debug_summary_exposes_runtime_trace_facts() -> None:
             "data-desktop-provider-session-kind={summary?.desktop_provider_session_kind || ''}",
             "data-desktop-provider-session-tool-names="
             "{(summary?.desktop_provider_session_tool_names || []).join(',')}",
+            "data-desktop-provider-backend-kind={summary?.desktop_provider_backend_kind || ''}",
+            "data-desktop-provider-contract-version={summary?.desktop_provider_contract_version || ''}",
+            "data-desktop-provider-contract-blockers="
+            "{(summary?.desktop_provider_contract_blocking_conditions || []).join(',')}",
             "addProviderSessionMetric(metrics, summary);",
             "metrics.push({ key: 'desktop_provider_session', label: 'desktop env', tone: 'warning', value: 'needed' });",
             "data-desktop-execution-session-label={summary?.desktop_execution_session_label || ''}",
@@ -136,6 +140,9 @@ def test_frontend_runtime_debug_summary_exposes_runtime_trace_facts() -> None:
             "'isolated desktop session' : ''",
             "summary.desktop_provider_session_foreground_takeover_required === false ? "
             "'no foreground takeover' : ''",
+            "summary.desktop_provider_backend_kind ? "
+            "`desktop backend ${summary.desktop_provider_backend_kind}` : ''",
+            "summary.desktop_provider_contract_ok === false ? 'provider contract blocked' : ''",
             "summary.latest_approval_tool_name ? "
             "`approval tool ${summary.latest_approval_tool_name}` : ''",
             "summary.latest_deferred_continuation_tool ? "
@@ -3267,6 +3274,8 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "planner_summary?: PlannerTraceSummarySnapshot | null;",
             "desktop_execution_session_mode?: string | null;",
             "desktop_execution_session_label?: string | null;",
+            "desktop_provider_backend_kind?: string | null;",
+            "desktop_provider_contract_blocking_conditions?: string[];",
             "pending_verification_count?: number;",
             "failed_verification_count?: number;",
             "verified_verification_count?: number;",

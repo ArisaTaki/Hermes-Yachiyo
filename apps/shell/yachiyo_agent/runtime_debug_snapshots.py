@@ -110,6 +110,14 @@ def runtime_debug_summary_from_runtime_objects(
         request_items,
         event_items,
     )
+    desktop_provider_context_items = _desktop_provider_context_items(
+        runtime_execution_envelope,
+        request_items,
+        desktop_provider_session,
+    )
+    desktop_provider_contract = _desktop_provider_contract(
+        desktop_provider_context_items
+    )
     desktop_execution_session_mode = _desktop_execution_session_mode(
         runtime_execution_envelope,
         request_items,
@@ -279,6 +287,35 @@ def runtime_debug_summary_from_runtime_objects(
         ),
         desktop_provider_session_supported_tools=_string_list(
             _field(desktop_provider_session, "supported_tools")
+        ),
+        desktop_provider_backend_kind=_first_text_from_items(
+            desktop_provider_context_items,
+            "desktop_backend_kind",
+            "backend_kind",
+        ),
+        desktop_provider_backend_is_loopback=_first_bool_from_items(
+            desktop_provider_context_items,
+            "desktop_backend_is_loopback",
+            "backend_is_loopback",
+        ),
+        desktop_provider_backend_ready_for_public_release=_first_bool_from_items(
+            desktop_provider_context_items,
+            "desktop_backend_ready_for_public_release",
+            "backend_ready_for_public_release",
+        ),
+        desktop_provider_requires_real_virtual_backend=_first_bool_from_items(
+            desktop_provider_context_items,
+            "requires_real_virtual_desktop_backend",
+            "real_virtual_desktop_backend_required",
+        ),
+        desktop_provider_contract_ok=_optional_bool(
+            _field(desktop_provider_contract, "ok")
+        ),
+        desktop_provider_contract_version=_optional_text(
+            _field(desktop_provider_contract, "contract_version")
+        ),
+        desktop_provider_contract_blocking_conditions=_string_list(
+            _field(desktop_provider_contract, "blocking_conditions")
         ),
         desktop_execution_session_mode=desktop_execution_session_mode,
         desktop_execution_session_label=_desktop_execution_session_label(
@@ -661,6 +698,42 @@ def _desktop_provider_session(
     return None
 
 
+def _desktop_provider_context_items(
+    envelope: Any | None,
+    requests: list[Any],
+    session: Any | None,
+) -> list[Any]:
+    items: list[Any] = []
+    for item in (
+        session,
+        _field(session, "provider_status"),
+        _field(session, "health"),
+        _field(envelope, "sandbox_provider"),
+        _field(_field(envelope, "sandbox_provider"), "health"),
+    ):
+        if item is not None:
+            items.append(item)
+    for request in requests:
+        provider = _field(request, "sandbox_provider")
+        for item in (
+            _field(request, "desktop_provider_session"),
+            provider,
+            _field(provider, "health"),
+            _field(request, "desktop_execution_route"),
+        ):
+            if item is not None:
+                items.append(item)
+    return items
+
+
+def _desktop_provider_contract(items: list[Any]) -> Any | None:
+    for item in items:
+        contract = _field(item, "provider_contract")
+        if isinstance(contract, dict):
+            return contract
+    return None
+
+
 def _desktop_provider_session_needs_user_action(session: Any | None) -> bool:
     if session is None:
         return False
@@ -876,6 +949,14 @@ def _first_text_from_items(items: Iterable[Any], *keys: str) -> str | None:
             text = _optional_text(_field(item, key))
             if text:
                 return text
+    return None
+
+
+def _first_bool_from_items(items: Iterable[Any], *keys: str) -> bool | None:
+    for item in items:
+        value = _optional_bool(*(_field(item, key) for key in keys))
+        if value is not None:
+            return value
     return None
 
 

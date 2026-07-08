@@ -942,6 +942,13 @@ export type RuntimeDebugSummarySnapshot = {
   desktop_provider_session_foreground_takeover_required?: boolean | null;
   desktop_provider_session_keyboard_mouse_capture_supported?: boolean | null;
   desktop_provider_session_supported_tools?: string[];
+  desktop_provider_backend_kind?: string | null;
+  desktop_provider_backend_is_loopback?: boolean | null;
+  desktop_provider_backend_ready_for_public_release?: boolean | null;
+  desktop_provider_requires_real_virtual_backend?: boolean | null;
+  desktop_provider_contract_ok?: boolean | null;
+  desktop_provider_contract_version?: string | null;
+  desktop_provider_contract_blocking_conditions?: string[];
   desktop_execution_session_mode?: string | null;
   desktop_execution_session_label?: string | null;
   event_count?: number;

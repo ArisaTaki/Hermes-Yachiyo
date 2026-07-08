@@ -4301,6 +4301,18 @@ def test_runtime_debug_summary_projects_provider_session_from_replay_events() ->
                         "desktop_session_kind": "isolated_desktop",
                         "desktop_session_isolated": True,
                         "foreground_takeover_required": False,
+                        "desktop_backend_kind": "loopback_session_harness",
+                        "desktop_backend_is_loopback": True,
+                        "desktop_backend_ready_for_public_release": False,
+                        "requires_real_virtual_desktop_backend": True,
+                        "provider_contract": {
+                            "ok": False,
+                            "contract_version": "oha-yachiyo.desktop-provider.v1",
+                            "blocking_conditions": [
+                                "loopback_desktop_backend",
+                                "desktop_backend_not_release_ready",
+                            ],
+                        },
                     }
                 },
             )
@@ -4316,6 +4328,19 @@ def test_runtime_debug_summary_projects_provider_session_from_replay_events() ->
     assert summary.desktop_provider_session_kind == "isolated_desktop"
     assert summary.desktop_provider_session_isolated is True
     assert summary.desktop_provider_session_foreground_takeover_required is False
+    assert summary.desktop_provider_backend_kind == "loopback_session_harness"
+    assert summary.desktop_provider_backend_is_loopback is True
+    assert summary.desktop_provider_backend_ready_for_public_release is False
+    assert summary.desktop_provider_requires_real_virtual_backend is True
+    assert summary.desktop_provider_contract_ok is False
+    assert (
+        summary.desktop_provider_contract_version
+        == "oha-yachiyo.desktop-provider.v1"
+    )
+    assert summary.desktop_provider_contract_blocking_conditions == [
+        "loopback_desktop_backend",
+        "desktop_backend_not_release_ready",
+    ]
     assert summary.needs_user_action is True
     assert summary.needs_replan is True
     assert "desktop_provider" in summary.debug_surfaces
