@@ -353,6 +353,11 @@ function DesktopProviderSessionPanel({
   const sessionError = stringValue(session.error);
   const reason = stringValue(session.reason);
   const toolNames = stringArray(session.tool_names).slice(0, 4);
+  const providerContract = objectRecord(session.provider_contract);
+  const providerContractOk = optionalBoolean(providerContract.ok);
+  const providerContractVersion = stringValue(providerContract.contract_version);
+  const providerContractBlockers = stringArray(providerContract.blocking_conditions);
+  const providerContractMissingTools = stringArray(providerContract.missing_required_tools);
   return (
     <section
       className="studio-tool-inspector-section"
@@ -365,6 +370,10 @@ function DesktopProviderSessionPanel({
       data-provider-session-status={status}
       data-provider-session-tools={toolNames.join(',')}
       data-provider-session-url={url}
+      data-provider-session-contract-ok={String(providerContractOk ?? '')}
+      data-provider-session-contract-version={providerContractVersion}
+      data-provider-session-contract-blockers={providerContractBlockers.join(',')}
+      data-provider-session-contract-missing-tools={providerContractMissingTools.join(',')}
       data-testid="studio-desktop-provider-session"
     >
       <div className="studio-tool-inspector-heading">
@@ -397,6 +406,33 @@ function DesktopProviderSessionPanel({
             {toolNames.join(', ')}
           </span>
         ) : null}
+        {providerContractVersion ? (
+          <span
+            className={providerContractOk === true ? 'studio-tool-permission' : 'studio-tool-permission missing'}
+            data-provider-session-contract-version={providerContractVersion}
+            data-provider-session-contract-ok={String(providerContractOk ?? '')}
+          >
+            {providerContractOk === true ? 'provider contract ready' : 'provider contract blocked'}
+          </span>
+        ) : null}
+        {providerContractBlockers.map((condition) => (
+          <span
+            className="studio-tool-permission missing"
+            data-provider-session-contract-blocker={condition}
+            key={`session-provider-contract-${condition}`}
+          >
+            {runtimeBlockingLabel(condition)}
+          </span>
+        ))}
+        {providerContractMissingTools.map((toolName) => (
+          <span
+            className="studio-tool-permission missing"
+            data-provider-session-contract-missing-tool={toolName}
+            key={`session-provider-missing-tool-${toolName}`}
+          >
+            {toolName}
+          </span>
+        ))}
         {!providerId && !url && !pid ? (
           <span className="studio-tool-permission missing">isolated provider stopped</span>
         ) : null}
@@ -925,6 +961,10 @@ function ToolDetail({
         data-controlled-provider-status={providerState.controlledStatus}
         data-controlled-provider-takeover-required={String(providerState.controlledForegroundTakeoverRequired)}
         data-provider-ready={String(providerState.ready)}
+        data-provider-contract-ok={String(providerState.providerContractOk ?? '')}
+        data-provider-contract-version={providerState.providerContractVersion}
+        data-provider-contract-blockers={providerState.providerContractBlockers.join(',')}
+        data-provider-contract-missing-tools={providerState.providerContractMissingTools.join(',')}
         data-provider-requires-real-sandbox-for={providerState.requiresRealSandboxFor.join(',')}
         data-provider-status={providerState.status}
         data-provider-supported={String(providerState.supported)}
@@ -946,6 +986,15 @@ function ToolDetail({
           {providerState.providerKind ? (
             <span className="studio-tool-permission" data-provider-kind={providerState.providerKind}>
               {providerState.providerKind}
+            </span>
+          ) : null}
+          {providerState.providerContractVersion ? (
+            <span
+              className={providerState.providerContractOk === true ? 'studio-tool-permission' : 'studio-tool-permission missing'}
+              data-provider-contract-version={providerState.providerContractVersion}
+              data-provider-contract-ok={String(providerState.providerContractOk ?? '')}
+            >
+              {providerState.providerContractOk === true ? 'provider contract ready' : 'provider contract blocked'}
             </span>
           ) : null}
           {providerState.supportedTools.map((toolName) => (
@@ -1063,6 +1112,24 @@ function ToolDetail({
               {runtimeBlockingLabel(condition)}
             </span>
           ))}
+          {providerState.providerContractBlockers.map((condition) => (
+            <span
+              className="studio-tool-permission missing"
+              data-provider-contract-blocker={condition}
+              key={`provider-contract-${condition}`}
+            >
+              {runtimeBlockingLabel(condition)}
+            </span>
+          ))}
+          {providerState.providerContractMissingTools.map((toolName) => (
+            <span
+              className="studio-tool-permission missing"
+              data-provider-contract-missing-tool={toolName}
+              key={`provider-contract-missing-${toolName}`}
+            >
+              {toolName}
+            </span>
+          ))}
         </div>
       </div>
 
@@ -1133,6 +1200,10 @@ type ToolProviderState = {
   status: string;
   blockingConditions: string[];
   supportedTools: string[];
+  providerContractOk: boolean | null;
+  providerContractVersion: string;
+  providerContractBlockers: string[];
+  providerContractMissingTools: string[];
   requiresRealSandboxFor: string[];
   controlledProviderId: string;
   controlledCommand: string[];
@@ -1172,6 +1243,11 @@ function toolProviderState(tool: ToolCatalogItemSnapshot, catalog: ToolCatalogSn
   const supportedTools = stringArray(provider?.supported_tools);
   const requiresRealSandboxFor = stringArray(provider?.requires_real_sandbox_for);
   const blockingConditions = stringArray(provider?.blocking_conditions);
+  const providerContract = objectRecord(provider?.provider_contract);
+  const providerContractOk = optionalBoolean(providerContract.ok);
+  const providerContractVersion = stringValue(providerContract.contract_version);
+  const providerContractBlockers = stringArray(providerContract.blocking_conditions);
+  const providerContractMissingTools = stringArray(providerContract.missing_required_tools);
   const launchHint = objectRecord(provider?.launch_hint);
   const controlledProvider = Object.keys(objectRecord(launchHint.isolated_provider)).length
     ? objectRecord(launchHint.isolated_provider)
@@ -1227,6 +1303,10 @@ function toolProviderState(tool: ToolCatalogItemSnapshot, catalog: ToolCatalogSn
     status,
     blockingConditions,
     supportedTools,
+    providerContractOk,
+    providerContractVersion,
+    providerContractBlockers,
+    providerContractMissingTools,
     requiresRealSandboxFor,
     controlledProviderId,
     controlledCommand,

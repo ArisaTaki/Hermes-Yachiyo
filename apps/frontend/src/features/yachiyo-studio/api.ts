@@ -66,8 +66,17 @@ export type YachiyoStudioDesktopProviderSessionSnapshot = {
   command?: string[];
   env?: Record<string, string>;
   provider_status?: Record<string, unknown>;
+  provider_contract?: Record<string, unknown>;
   source?: string;
   tool_names?: string[];
+  desktop_session_kind?: string;
+  desktop_session_isolated?: boolean | null;
+  foreground_takeover_required?: boolean | null;
+  keyboard_mouse_capture_supported?: boolean | null;
+  desktop_backend_kind?: string;
+  desktop_backend_is_loopback?: boolean | null;
+  desktop_backend_ready_for_public_release?: boolean | null;
+  requires_real_virtual_desktop_backend?: boolean | null;
 };
 
 export type YachiyoStudioRunReplanRecoveryActionRequest = {
