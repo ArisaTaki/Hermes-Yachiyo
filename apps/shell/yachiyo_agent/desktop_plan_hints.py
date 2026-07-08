@@ -2771,6 +2771,7 @@ def _clean_management_app_name_hint(value: str) -> str:
         app,
         flags=re.IGNORECASE,
     )
+    app = re.sub(r"\s*(?:当前|现在)?(?:正在|正|是否)?$", "", app, flags=re.IGNORECASE)
     app = app.strip(" .，,。")
     generic = {
         "",

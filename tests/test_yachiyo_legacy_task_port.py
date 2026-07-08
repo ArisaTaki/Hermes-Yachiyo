@@ -201,6 +201,9 @@ def test_daily_desktop_requests_can_complete_with_trailing_verification_without_
 
     assert daily_desktop_requests_can_complete_without_model(requests) is True
     assert daily_desktop_requests_can_complete_without_model(
+        [{**requests[-1], "tool": "desktop.running_apps"}]
+    ) is True
+    assert daily_desktop_requests_can_complete_without_model(
         [{**requests[-1], "runtime_stage": "observe", "runtime_role": "read_state"}]
     ) is False
 
@@ -1521,6 +1524,7 @@ def test_planner_first_direct_selection_owns_app_management_without_legacy() -> 
         ("Could you minimize Chrome please?", "app.minimize", {"app_name": "Google Chrome"}),
         ("Chrome 开着吗", "app.status", {"app_name": "Google Chrome"}),
         ("Google Chrome 在运行吗", "app.status", {"app_name": "Google Chrome"}),
+        ("Slack 当前正在运行吗", "app.status", {"app_name": "Slack"}),
         ("检查一下 Slack 是否运行", "app.status", {"app_name": "Slack"}),
         ("Finder 是否运行", "app.status", {"app_name": "Finder"}),
     ]

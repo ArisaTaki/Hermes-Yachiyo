@@ -15511,8 +15511,23 @@ def _auto_replan_verification_recovery_requests(
                 request[key] = value
         _attach_replan_payload_trace_metadata(request, first)
         _attach_replan_active_window_verification_target(request, target)
+        _sanitize_zero_input_observation_recovery_request(request)
         requests.append(request)
     return requests
+
+
+def _sanitize_zero_input_observation_recovery_request(request: dict[str, Any]) -> None:
+    tool_name = str(request.get("tool") or "").strip()
+    if tool_name not in {"desktop.active_window", "desktop.running_apps"}:
+        return
+    request["input"] = {}
+    observation_retry = (
+        request.get("observation_retry")
+        if isinstance(request.get("observation_retry"), Mapping)
+        else None
+    )
+    if observation_retry is not None:
+        request["observation_retry"] = {**dict(observation_retry), "input": {}}
 
 
 def _runtime_recovery_action_tools_for_payload(payload: Mapping[str, Any]) -> set[str]:
@@ -17830,6 +17845,7 @@ def _auto_replan_runtime_recovery_action_requests(
             ):
                 request["continue_to_model"] = True
             _attach_replan_payload_trace_metadata(request, payload)
+            _sanitize_zero_input_observation_recovery_request(request)
             requests.append(request)
     return _dedupe_replan_recovery_requests(requests)
 

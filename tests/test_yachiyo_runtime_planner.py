@@ -17122,6 +17122,7 @@ def test_runtime_planner_routes_named_app_status_to_app_control() -> None:
     cases = [
         ("Chrome 开着吗", "Chrome"),
         ("Google Chrome 在运行吗", "Google Chrome"),
+        ("Slack 当前正在运行吗", "Slack"),
         ("检查一下 Slack 是否运行", "Slack"),
         ("看看 PixelForge 是否打开", "PixelForge"),
         ("check whether PixelForge is open", "PixelForge"),
@@ -17145,14 +17146,12 @@ def test_runtime_planner_routes_named_app_status_to_app_control() -> None:
         assert [step.step_id for step in decision.plan.tool_plan.steps] == [
             "discover-desktop-state",
             "manage-app",
-            "verify-desktop-result",
         ]
         manage = _step_by_id(decision, "manage-app")
         assert manage.tool_name == "app.status"
         assert manage.action == "status_app"
         assert manage.input_preview == {"app_name": app_name}
         assert manage.approval_required is False
-        assert _step_by_id(decision, "verify-desktop-result").depends_on == ["manage-app"]
 
 
 def test_runtime_planner_sequences_app_open_or_focus_before_app_management() -> None:

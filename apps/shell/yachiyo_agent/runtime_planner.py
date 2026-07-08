@@ -4425,6 +4425,8 @@ class RuntimePlanner:
                     reason="Run the requested app management action through the desktop app-control policy gate.",
                 )
             )
+            if action == "status":
+                return steps
             verify_tool = _first_allowed(
                 (
                     "desktop.running_apps",

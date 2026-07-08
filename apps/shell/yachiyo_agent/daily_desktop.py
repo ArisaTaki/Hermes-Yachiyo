@@ -159,7 +159,11 @@ def daily_desktop_requests_can_complete_without_model(
 
 def _deferred_request_is_direct_verification(request: Mapping[str, Any]) -> bool:
     tool_name = str(request.get("tool") or "").strip()
-    if tool_name not in _ENTRYPOINT_VERIFY_TOOLS and tool_name != "desktop.verify":
+    if (
+        tool_name not in _ENTRYPOINT_VERIFY_TOOLS
+        and tool_name not in _ENTRYPOINT_DISCOVERY_TOOLS
+        and tool_name != "desktop.verify"
+    ):
         return False
     if bool(request.get("approval_required")):
         return False
