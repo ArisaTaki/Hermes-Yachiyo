@@ -606,6 +606,68 @@ def test_public_release_gate_keeps_more_informative_public_demo_blocker(
     assert "scripts/run_public_demo_smokes.py --include-ui" in markdown
 
 
+def test_public_release_gate_reports_workflow_provider_smoke_external_requirement(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+    for env_name in gate.PROVIDER_SMOKE_ENV_VARS:
+        monkeypatch.delenv(env_name, raising=False)
+
+    def fake_run(command):
+        command = list(command)
+        if "scripts/summarize_release_smoke.py" in command:
+            output_json = command[command.index("--output-json") + 1]
+            output_path = gate._resolve_path(Path(output_json))
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_text(
+                json.dumps(
+                    {
+                        "ok": False,
+                        "status": "incomplete",
+                        "item_count": 10,
+                        "passed_count": 9,
+                        "missing_count": 1,
+                        "missing_item_ids": ["workflow"],
+                        "items": [],
+                        "next_actions": [
+                            {
+                                "id": "workflow",
+                                "command": (
+                                    "python scripts/verify_release_candidate.py "
+                                    "--require-artifacts --check-dmg-mount "
+                                    "--run-provider-smoke "
+                                    "--report-json tmp/rc-verification-provider-smoke.json"
+                                ),
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+        return _completed(command)
+
+    monkeypatch.setattr(gate, "_run_command", fake_run)
+
+    summary = gate.run_public_release_gate(
+        tmp_dir="tmp/gate",
+        include_public_demo=False,
+        include_diagnostics_bundle=False,
+    )
+
+    assert summary["release_smoke"]["missing_item_ids"] == ["workflow"]
+    assert summary["external_requirement_count"] == 1
+    requirement = summary["external_requirements"][0]
+    assert requirement["id"] == "provider_smoke_credentials"
+    assert requirement["kind"] == "provider_credentials"
+    assert requirement["missing_env"] == list(gate.PROVIDER_SMOKE_ENV_VARS)
+    assert requirement["blocking_conditions"] == ["provider_smoke_credentials_missing"]
+    markdown = gate.render_markdown(summary)
+    assert "External requirements: 1" in markdown
+    assert "Provider Workflow smoke credentials" in markdown
+    assert "`OHA_YACHIYO_SMOKE_API_KEY`" in markdown
+
+
 def test_public_release_gate_markdown_defaults_missing_blocker_counts():
     markdown = gate.render_markdown(
         {

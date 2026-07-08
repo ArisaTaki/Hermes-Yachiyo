@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
 import zipfile
@@ -937,6 +938,14 @@ def _external_requirements(actions: Sequence[Mapping[str, Any]]) -> list[dict[st
                 kind="provider_credentials",
                 action=action,
             )
+        elif action_id == "workflow" and _action_runs_provider_smoke(action):
+            _merge_external_requirement(
+                requirements,
+                requirement_id="provider_smoke_credentials",
+                label="Provider Workflow smoke credentials",
+                kind="provider_credentials",
+                action=action,
+            )
     order = {
         "real_desktop_smoke_opt_in": 0,
         "provider_smoke_credentials": 1,
@@ -978,6 +987,16 @@ def _merge_external_requirement(
     command = str(action.get("command") or "").strip()
     if command:
         _append_unique(requirement["commands"], [command])
+    if kind == "provider_credentials" and "--run-provider-smoke" in command:
+        missing_env = [
+            name for name in PROVIDER_SMOKE_ENV_VARS if not os.getenv(name, "").strip()
+        ]
+        _append_unique(requirement["missing_env"], missing_env)
+        if missing_env:
+            _append_unique(
+                requirement["blocking_conditions"],
+                ["provider_smoke_credentials_missing"],
+            )
     blockers = _dict_list(action.get("release_blockers"))
     if blockers:
         requirement["release_blockers"].extend(blockers)
@@ -1014,6 +1033,11 @@ def _merge_external_requirement(
             _append_unique(requirement["blocking_conditions"], [reason])
 
 
+def _action_runs_provider_smoke(action: Mapping[str, Any]) -> bool:
+    command = str(action.get("command") or "").strip()
+    return "--run-provider-smoke" in command
+
+
 def _append_unique(target: list[Any], values: Sequence[Any]) -> None:
     for value in values:
         if value in (None, "", [], {}):
@@ -1030,6 +1054,12 @@ PUBLIC_DEMO_FLOW_FLAGS: dict[str, tuple[str, str]] = {
     "studio_replay_ui": ("ui", "--include-ui"),
     "workflow_ui": ("ui", "--include-ui"),
 }
+
+PROVIDER_SMOKE_ENV_VARS: tuple[str, ...] = (
+    "OHA_YACHIYO_SMOKE_BASE_URL",
+    "OHA_YACHIYO_SMOKE_MODEL",
+    "OHA_YACHIYO_SMOKE_API_KEY",
+)
 
 PUBLIC_DEMO_FLOW_OPT_IN_REASONS: dict[str, str] = {
     flow.id: flow.opt_in_reason
