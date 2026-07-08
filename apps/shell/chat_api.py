@@ -47,6 +47,7 @@ from apps.shell.agent_runtime import AgentRuntimeError, get_agent_runtime_servic
 from apps.shell.native_capabilities import get_native_image_input_capability
 from apps.shell.yachiyo_agent.daily_desktop import (
     daily_desktop_allowed_tools,
+    daily_desktop_executable_entrypoint_requests,
     daily_desktop_requests_can_complete_without_model,
     daily_desktop_runtime_execution_envelope,
     direct_browser_entrypoint_requests,
@@ -658,6 +659,16 @@ def _remove_attachment_session_dir(session_id: str) -> None:
     if root not in resolved.parents or not resolved.exists():
         return
     shutil.rmtree(resolved, ignore_errors=True)
+
+
+def _direct_input_entrypoint_requests(
+    requests: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    executable = daily_desktop_executable_entrypoint_requests(requests)
+    if len(executable) != 1:
+        return []
+    tool_name = str(executable[0].get("tool") or "").strip()
+    return executable if tool_name in {"desktop.safe_type_text"} else []
 
 
 class ChatAPI:
@@ -1776,6 +1787,7 @@ class ChatAPI:
             )
             direct_daily_desktop_tool_requests = (
                 direct_browser_entrypoint_requests(daily_desktop_requests, task_text)
+                or _direct_input_entrypoint_requests(daily_desktop_requests)
                 if direct_daily_desktop_intent
                 else []
             )

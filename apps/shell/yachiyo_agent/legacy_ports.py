@@ -975,22 +975,39 @@ class LegacyChatTaskStarter:
                 runtime=self._runtime,
             )
         except Exception as exc:
+            failed_run: dict[str, Any] | None = None
             if run_id:
                 fail_main_chat_run = getattr(self._runtime, "fail_main_chat_run", None)
                 if callable(fail_main_chat_run):
                     try:
-                        fail_main_chat_run(run_id, exc)
+                        failed = fail_main_chat_run(run_id, exc)
+                        if isinstance(failed, dict):
+                            failed_run = failed
                     except Exception:
                         pass
-            self._sync_app_task_failed(task_id, str(exc))
+            error_text = str(exc)
+            self._sync_app_task_failed(task_id, error_text)
             self._sync_chat_assistant_message(
                 task_id,
                 conversation_id,
-                str(exc),
+                error_text,
                 status="failed",
-                error=str(exc),
+                error=error_text,
             )
-            raise
+            if run_id:
+                return self._projector.chat_task_payload(
+                    {
+                        **(failed_run or {}),
+                        "run_id": run_id,
+                        "task_id": task_id,
+                        "session_id": conversation_id,
+                        "status": str((failed_run or {}).get("status") or "failed"),
+                        "result": str((failed_run or {}).get("result") or error_text),
+                    },
+                    conversation_id=conversation_id,
+                    runtime=self._runtime,
+                )
+            return None
 
     def _sync_chat_user_daily_desktop_metadata(
         self,
@@ -2304,12 +2321,25 @@ def _has_explicit_runtime_execution_envelope(
     metadata: Mapping[str, Any] | None,
 ) -> bool:
     return any(
-        isinstance(envelope, Mapping)
+        _runtime_execution_envelope_has_requests(envelope)
         for envelope in (
             runtime_execution_envelope,
             metadata.get("runtime_execution_envelope") if isinstance(metadata, Mapping) else None,
             metadata.get("yachiyo_execution_envelope") if isinstance(metadata, Mapping) else None,
         )
+    )
+
+
+def _runtime_execution_envelope_has_requests(envelope: Any | None) -> bool:
+    if not isinstance(envelope, Mapping):
+        return False
+    requests = envelope.get("requests")
+    if not isinstance(requests, list):
+        return False
+    return any(
+        isinstance(request, Mapping)
+        and str(request.get("tool") or request.get("tool_name") or "").strip()
+        for request in requests
     )
 
 

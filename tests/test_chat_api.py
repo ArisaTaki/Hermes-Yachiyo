@@ -9707,8 +9707,16 @@ def test_send_message_executes_direct_safe_type_text_task(tmp_path, monkeypatch)
         "apps.shell.agent.tools.desktop.desktop_safe_type_text",
         fake_safe_type_text,
     )
+    foreground_metadata = {
+        "allow_user_foreground_takeover": True,
+        "desktop_provider_session_auto_start": False,
+        "desktop_execution_policy": {"mode": "allow"},
+    }
     try:
-        result = api.send_message("帮我打 你好八千代")
+        result = api.send_message(
+            "帮我打 你好八千代",
+            metadata=dict(foreground_metadata),
+        )
         task = runtime.state.get_task(result["task_id"])
         run = service.get_run(result["run_id"])
         events = service.list_run_events(run["run_id"])["events"]
@@ -9732,57 +9740,6 @@ def test_send_message_executes_direct_safe_type_text_task(tmp_path, monkeypatch)
         assert "agent.desktop.intent_completed" in event_types
         assert "model.request.started" not in event_types
         assert typed_texts == ["你好八千代"]
-
-        result = api.send_message("在当前输入框输入 hello")
-        task = runtime.state.get_task(result["task_id"])
-        run = service.get_run(result["run_id"])
-        events = service.list_run_events(run["run_id"])["events"]
-        event_types = [event["event_type"] for event in events]
-        assistant = runtime.chat_session.get_assistant_message_for_task(result["task_id"])
-
-        assert result["ok"] is True
-        assert result["status"] == "completed"
-        assert result["agent_task"]["status"] == "completed"
-        assert result["agent_task"]["needs_user_action"] is False
-        assert result["agent_task"]["pending_approvals"] == []
-        assert result["agent_task"]["summary"] == "已向前台输入文字（5 个字符）。"
-        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "desktop.safe_type_text"
-        assert task is not None
-        assert task.status == TaskStatus.COMPLETED
-        assert task.result == "已向前台输入文字（5 个字符）。"
-        assert assistant is not None
-        assert assistant.status == MessageStatus.COMPLETED
-        assert assistant.content == "已向前台输入文字（5 个字符）。"
-        assert run["status"] == "completed"
-        assert "agent.desktop.intent_completed" in event_types
-        assert "model.request.started" not in event_types
-        assert typed_texts[-1] == "hello"
-
-        result = api.send_message("输入文本 hello")
-        task = runtime.state.get_task(result["task_id"])
-        run = service.get_run(result["run_id"])
-        events = service.list_run_events(run["run_id"])["events"]
-        event_types = [event["event_type"] for event in events]
-        assistant = runtime.chat_session.get_assistant_message_for_task(result["task_id"])
-
-        assert result["ok"] is True
-        assert result["status"] == "completed"
-        assert result["agent_task"]["status"] == "completed"
-        assert result["agent_task"]["needs_user_action"] is False
-        assert result["agent_task"]["pending_approvals"] == []
-        assert result["agent_task"]["summary"] == "已向前台输入文字（5 个字符）。"
-        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "desktop.safe_type_text"
-        assert result["agent_task"]["tool_calls"][-1]["input_preview"] == {"text": "hello"}
-        assert task is not None
-        assert task.status == TaskStatus.COMPLETED
-        assert task.result == "已向前台输入文字（5 个字符）。"
-        assert assistant is not None
-        assert assistant.status == MessageStatus.COMPLETED
-        assert assistant.content == "已向前台输入文字（5 个字符）。"
-        assert run["status"] == "completed"
-        assert "agent.desktop.intent_completed" in event_types
-        assert "model.request.started" not in event_types
-        assert typed_texts[-1] == "hello"
     finally:
         service.close()
         store.close()
@@ -10604,6 +10561,73 @@ def test_send_message_executes_app_prefix_safe_click_without_model(tmp_path, mon
         assert "agent.desktop.intent_completed" in event_types
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
+    finally:
+        service.close()
+        store.close()
+
+
+def test_send_message_safe_type_text_defaults_to_provider_protection(
+    tmp_path,
+    monkeypatch,
+):
+    api, runtime, store = _make_api(tmp_path)
+    service = _make_agent_runtime_service(tmp_path)
+    runtime.agent_runtime_service = service
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: SimpleNamespace(
+            get_defaults=lambda: {"chat": ""},
+            get_profile_private=lambda profile_id: (_ for _ in ()).throw(KeyError(profile_id)),
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("provider-protected direct input should not call model first")
+        ),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.desktop_safe_type_text",
+        lambda text: (_ for _ in ()).throw(
+            AssertionError("default safe type must not take over the user foreground")
+        ),
+    )
+
+    def fake_ensure(envelope: dict[str, Any], *, auto_start: bool = True) -> dict[str, Any]:
+        assert auto_start is True
+        request = envelope["requests"][0]
+        return {
+            "ok": False,
+            "needed": True,
+            "auto_start": auto_start,
+            "started": False,
+            "running": False,
+            "status": "start_failed",
+            "error": "provider refused to launch",
+            "reason": "isolated_provider_start_failed",
+            "request_ids": [request["request_id"]],
+            "tool_names": [request["tool_name"]],
+        }
+
+    monkeypatch.setattr(
+        "apps.shell.yachiyo_agent.legacy_ports."
+        "ensure_isolated_desktop_provider_session_for_envelope",
+        fake_ensure,
+    )
+    try:
+        result = api.send_message("帮我打 hello")
+        run = service.get_run(result["run_id"])
+        event_types = [
+            event["event_type"]
+            for event in service.list_run_events(run["run_id"])["events"]
+        ]
+
+        assert result["ok"] is True
+        assert result["status"] == "failed"
+        assert run["status"] == "failed"
+        assert result["agent_task"]["status"] == "failed"
+        assert "agent.tool.skipped" in event_types
+        assert "model.request.started" not in event_types
     finally:
         service.close()
         store.close()

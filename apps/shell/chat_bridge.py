@@ -25,6 +25,7 @@ from apps.core.activity_store import get_activity_store
 from apps.shell.chat_api import ChatAPI
 from apps.shell.yachiyo_agent.daily_desktop import (
     daily_desktop_allowed_tools,
+    daily_desktop_executable_entrypoint_requests,
     daily_desktop_planned_timeline,
     daily_desktop_runtime_execution_envelope,
     direct_browser_entrypoint_requests,
@@ -247,6 +248,16 @@ def _desktop_candidates_for_quick_message(
         include_runtime_context=True,
         allow_legacy_fallback=True,
     )
+
+
+def _direct_input_entrypoint_requests(
+    requests: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    executable = daily_desktop_executable_entrypoint_requests(requests)
+    if len(executable) != 1:
+        return []
+    tool_name = str(executable[0].get("tool") or "").strip()
+    return executable if tool_name in {"desktop.safe_type_text"} else []
 
 
 def agent_task_snapshot_for_task(
@@ -543,6 +554,19 @@ class ChatBridge:
                 desktop_candidates,
             ):
                 execution_metadata.setdefault("desktop_provider_session_auto_start", True)
+            direct_tool_requests = (
+                direct_browser_entrypoint_requests(desktop_candidates, planning_text)
+                or _direct_input_entrypoint_requests(desktop_candidates)
+            )
+            runtime_execution_envelope = (
+                daily_desktop_runtime_execution_envelope(
+                    planning_text,
+                    metadata=execution_metadata,
+                    allowed_tools=planner_allowed_tools,
+                )
+                if direct_tool_requests
+                else {}
+            )
             agent_task = self._agent_task_snapshot_for_quick_message(
                 task_id,
                 has_desktop_intent=True,
@@ -553,15 +577,8 @@ class ChatBridge:
                 task_id,
                 text,
                 metadata=execution_metadata,
-                runtime_execution_envelope=daily_desktop_runtime_execution_envelope(
-                    planning_text,
-                    metadata=execution_metadata,
-                    allowed_tools=planner_allowed_tools,
-                ),
-                direct_tool_requests=(
-                    direct_browser_entrypoint_requests(desktop_candidates, planning_text)
-                    or None
-                ),
+                runtime_execution_envelope=runtime_execution_envelope,
+                direct_tool_requests=direct_tool_requests or None,
             )
             if executed_task is not None:
                 return {**result, "agent_task": executed_task}

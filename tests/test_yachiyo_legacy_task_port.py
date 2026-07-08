@@ -3178,6 +3178,59 @@ def test_legacy_chat_task_starter_surfaces_isolated_provider_start_failure(
     assert envelope_session["error"] == "provider refused to launch"
 
 
+def test_legacy_chat_task_starter_ignores_empty_runtime_envelope_for_selection(
+    monkeypatch,
+) -> None:
+    app_runtime = _FakeAppRuntime()
+    runtime = _MainChatPlannerEventRuntime()
+    starter = LegacyChatTaskStarter(app_runtime, runtime)
+
+    def fake_ensure(envelope: dict[str, Any], *, auto_start: bool = True) -> dict[str, Any]:
+        request = envelope["requests"][0]
+        return {
+            "ok": True,
+            "needed": True,
+            "auto_start": auto_start,
+            "running": True,
+            "status": "running",
+            "provider_id": "local-isolated-desktop",
+            "url": "http://127.0.0.1:19093",
+            "desktop_session_kind": "isolated_desktop",
+            "desktop_session_isolated": True,
+            "foreground_takeover_required": False,
+            "keyboard_mouse_capture_supported": True,
+            "request_ids": [request["request_id"]],
+            "tool_names": [request["tool_name"]],
+        }
+
+    monkeypatch.setattr(
+        legacy_ports_module,
+        "ensure_isolated_desktop_provider_session_for_envelope",
+        fake_ensure,
+    )
+
+    task = starter.execute_existing_main_chat_task(
+        task_id="task-copy-empty-envelope",
+        conversation_id="chat-1",
+        prompt="复制选中文本",
+        metadata={"desktop_provider_session_auto_start": True},
+        runtime_execution_envelope={
+            "envelope_id": "empty-runtime-envelope",
+            "requests": [],
+        },
+    )
+
+    assert task is not None
+    model_loop_call = [
+        call for call in runtime.calls if call[0] == "execute_main_chat_model_loop"
+    ][0]
+    direct_request = model_loop_call[1]["direct_tool_requests"][0]
+    assert direct_request["tool"] == "desktop.safe_shortcut"
+    assert direct_request["desktop_provider_session"]["provider_id"] == (
+        "local-isolated-desktop"
+    )
+
+
 def test_legacy_chat_task_starter_does_not_pass_hotkey_safe_shortcut_full_plan() -> None:
     app_runtime = _FakeAppRuntime()
     runtime = _MainChatPlannerEventRuntime()
