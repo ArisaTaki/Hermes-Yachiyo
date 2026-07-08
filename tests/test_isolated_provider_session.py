@@ -155,6 +155,98 @@ def test_ensure_isolated_provider_session_detects_keyboard_mouse_requests(
     )
 
 
+def test_ensure_isolated_provider_session_scopes_related_desktop_requests(
+    monkeypatch,
+) -> None:
+    starts: list[dict[str, Any] | None] = []
+
+    monkeypatch.setattr(
+        session_module,
+        "isolated_desktop_provider_session_status",
+        lambda: {"ok": True, "status": "stopped", "running": False},
+    )
+    monkeypatch.setattr(
+        session_module,
+        "start_isolated_desktop_provider_session",
+        lambda request=None: starts.append(request)
+        or {
+            "ok": True,
+            "status": "running",
+            "running": True,
+            "started": True,
+            "provider_id": "local-isolated-desktop",
+            "url": "http://127.0.0.1:19093",
+            "provider_status": {
+                "desktop_session_kind": "isolated_desktop",
+                "desktop_session_isolated": True,
+                "foreground_takeover_required": False,
+                "keyboard_mouse_capture_supported": True,
+                "supported_tools": [
+                    "app.open",
+                    "desktop.safe_type_text",
+                    "desktop.verify",
+                ],
+            },
+        },
+    )
+    envelope = {
+        "requests": [
+            {
+                "request_id": "request-open",
+                "tool_name": "app.open",
+                "input": {"app_name": "PixelForge"},
+            },
+            {
+                "request_id": "request-type",
+                "tool_name": "desktop.safe_type_text",
+                "execution_mode": {"keyboard_mouse_capture": True},
+                "desktop_execution_route": {
+                    "status": "sandbox_keyboard_mouse_provider_required",
+                    "blocking_conditions": ["sandbox_keyboard_mouse_provider_required"],
+                },
+                "sandbox_provider": {"desktop_session_isolated": False},
+            },
+            {
+                "request_id": "request-verify",
+                "tool_name": "desktop.verify",
+                "input": {"app_name": "PixelForge", "expected_text": "hello"},
+            },
+            {
+                "request_id": "request-data",
+                "tool_name": "data.analyze",
+            },
+        ]
+    }
+
+    session = ensure_isolated_desktop_provider_session_for_envelope(envelope)
+    annotated = annotate_envelope_with_desktop_provider_session(envelope, session)
+
+    assert starts == [
+        {"tools": ["app.open", "desktop.safe_type_text", "desktop.verify"]}
+    ]
+    assert session["needed"] is True
+    assert session["request_ids"] == [
+        "request-open",
+        "request-type",
+        "request-verify",
+    ]
+    assert session["tool_names"] == [
+        "app.open",
+        "desktop.safe_type_text",
+        "desktop.verify",
+    ]
+    assert annotated["requests"][0]["desktop_provider_session"]["provider_id"] == (
+        "local-isolated-desktop"
+    )
+    assert annotated["requests"][1]["desktop_provider_session"]["provider_id"] == (
+        "local-isolated-desktop"
+    )
+    assert annotated["requests"][2]["desktop_provider_session"]["provider_id"] == (
+        "local-isolated-desktop"
+    )
+    assert "desktop_provider_session" not in annotated["requests"][3]
+
+
 def test_ensure_isolated_provider_session_does_not_start_for_media_app_without_sandbox_route(
     monkeypatch,
 ) -> None:

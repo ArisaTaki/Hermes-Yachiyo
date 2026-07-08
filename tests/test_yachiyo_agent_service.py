@@ -2272,15 +2272,42 @@ def test_yachiyo_chat_entrypoint_auto_starts_isolated_provider_for_input(
         for request in request_payload["direct_tool_requests"]
         if request["tool"] == "app.focus_and_click_ui_element"
     )
+    discovery_request = next(
+        request
+        for request in request_payload["direct_tool_requests"]
+        if request["tool"] == "desktop.list_apps"
+    )
+    read_request = next(
+        request
+        for request in request_payload["direct_tool_requests"]
+        if request["tool"] == "desktop.ui_elements"
+    )
 
-    assert start_calls == [{"tools": ["app.focus_and_click_ui_element"]}]
+    assert start_calls == [
+        {
+            "tools": [
+                "app.focus_and_click_ui_element",
+                "desktop.list_apps",
+                "desktop.ui_elements",
+            ]
+        }
+    ]
     assert session["needed"] is True
     assert session["started"] is True
     assert session["running"] is True
     assert session["provider_id"] == "local-isolated-desktop"
+    assert session["tool_names"] == [
+        "app.focus_and_click_ui_element",
+        "desktop.list_apps",
+        "desktop.ui_elements",
+    ]
     assert session["desktop_session_kind"] == "isolated_desktop"
     assert session["desktop_session_isolated"] is True
     assert session["foreground_takeover_required"] is False
+    assert discovery_request["desktop_provider_session"]["provider_id"] == (
+        "local-isolated-desktop"
+    )
+    assert discovery_request["desktop_execution_route"]["status"] == "sandbox_ready"
     assert operation_request["sandbox_provider"]["provider_id"] == (
         "local-isolated-desktop"
     )
@@ -2288,6 +2315,10 @@ def test_yachiyo_chat_entrypoint_auto_starts_isolated_provider_for_input(
     assert operation_request["desktop_provider_session"]["provider_id"] == (
         "local-isolated-desktop"
     )
+    assert read_request["desktop_provider_session"]["provider_id"] == (
+        "local-isolated-desktop"
+    )
+    assert read_request["desktop_execution_route"]["status"] == "sandbox_ready"
     assert request_payload["metadata"]["yachiyo_execution_envelope"][
         "desktop_provider_session"
     ]["started"] is True
@@ -2301,7 +2332,9 @@ def test_yachiyo_chat_entrypoint_auto_starts_isolated_provider_for_input(
         "local-isolated-desktop"
     )
     assert task.runtime_debug.desktop_provider_session_tool_names == [
-        "app.focus_and_click_ui_element"
+        "app.focus_and_click_ui_element",
+        "desktop.list_apps",
+        "desktop.ui_elements",
     ]
     assert task.runtime_debug.desktop_provider_session_kind == "isolated_desktop"
     assert task.runtime_debug.desktop_provider_session_isolated is True

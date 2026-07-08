@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from apps.shell.agent.runtime.controlled_desktop_provider import (
+    CONTROLLED_DESKTOP_PROVIDER_TOOLS,
     KEYBOARD_MOUSE_CONTROL_TOOLS,
 )
 from apps.shell.agent.runtime.desktop_execution_providers import (
@@ -195,14 +196,15 @@ def ensure_isolated_desktop_provider_session_for_envelope(
     """Start the local isolated provider when a runtime envelope needs it."""
 
     targets = _isolated_session_targets(envelope)
+    scoped_targets = _isolated_session_scope_targets(envelope, targets)
     status = isolated_desktop_provider_session_status()
     base = {
         "ok": True,
         "needed": bool(targets),
         "auto_start": bool(auto_start),
         "started": False,
-        "request_ids": [target["request_id"] for target in targets],
-        "tool_names": sorted({target["tool_name"] for target in targets}),
+        "request_ids": [target["request_id"] for target in scoped_targets],
+        "tool_names": sorted({target["tool_name"] for target in scoped_targets}),
         "reason": "isolated_provider_required" if targets else "",
         "source": "isolated_provider_session_manager",
     }
@@ -214,7 +216,7 @@ def ensure_isolated_desktop_provider_session_for_envelope(
         return {**base, **_public_session_status(status)}
     try:
         started = start_isolated_desktop_provider_session(
-            {"tools": sorted({target["tool_name"] for target in targets})}
+            {"tools": sorted({target["tool_name"] for target in scoped_targets})}
         )
     except Exception as exc:
         return {
@@ -357,6 +359,33 @@ def _isolated_session_targets(envelope: dict[str, Any] | None) -> list[dict[str,
         ).strip()
         targets.append({"request_id": request_id, "tool_name": tool_name})
     return targets
+
+
+def _isolated_session_scope_targets(
+    envelope: dict[str, Any] | None,
+    targets: list[dict[str, str]],
+) -> list[dict[str, str]]:
+    if not targets or not isinstance(envelope, dict):
+        return targets
+    requests = envelope.get("requests")
+    if not isinstance(requests, list):
+        return targets
+    scoped: list[dict[str, str]] = []
+    seen_request_ids: set[str] = set()
+    for index, request in enumerate(requests, start=1):
+        if not isinstance(request, dict):
+            continue
+        tool_name = _request_tool_name(request)
+        if tool_name not in CONTROLLED_DESKTOP_PROVIDER_TOOLS:
+            continue
+        request_id = str(
+            request.get("request_id") or f"request:{index}:{tool_name}"
+        ).strip()
+        if not request_id or request_id in seen_request_ids:
+            continue
+        scoped.append({"request_id": request_id, "tool_name": tool_name})
+        seen_request_ids.add(request_id)
+    return scoped or targets
 
 
 def _request_needs_isolated_session(tool_name: str, request: dict[str, Any]) -> bool:
