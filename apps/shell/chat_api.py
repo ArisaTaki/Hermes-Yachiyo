@@ -1284,6 +1284,7 @@ class ChatAPI:
             metadata_allowed_tools=allowed_daily_desktop_tools,
             execution_normalized=True,
             include_runtime_context=True,
+            allow_legacy_fallback=True,
         )
 
     def _daily_desktop_runtime_execution_envelope(
@@ -1772,6 +1773,11 @@ class ChatAPI:
                     metadata=metadata,
                 )
             )
+            direct_daily_desktop_tool_requests = (
+                direct_browser_entrypoint_requests(daily_desktop_requests, task_text)
+                if direct_daily_desktop_intent
+                else []
+            )
             direct_planner_orchestration_intent = (
                 not raw_attachments
                 and current_context.get("conversation_kind") != "group"
@@ -1878,6 +1884,7 @@ class ChatAPI:
                     prompt=task_text,
                     metadata=user_metadata,
                     runtime_execution_envelope=daily_desktop_runtime_envelope,
+                    direct_tool_requests=direct_daily_desktop_tool_requests or None,
                 )
             direct_planner_orchestration_task: dict[str, Any] | None = None
             if direct_planner_orchestration_intent and direct_daily_desktop_task is None:

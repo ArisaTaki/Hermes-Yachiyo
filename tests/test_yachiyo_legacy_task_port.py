@@ -161,6 +161,14 @@ def test_direct_browser_entrypoint_ignores_artifact_followup_for_simple_open() -
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_web_research",
             "continue_to_model": True,
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "artifact.write",
+            "input": {"path": "research-summary.md"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_full_plan_web_research",
+            "continue_to_model": True,
         }
     ]
 
@@ -174,6 +182,36 @@ def test_direct_browser_entrypoint_ignores_artifact_followup_for_simple_open() -
         }
     ]
     assert direct_browser_entrypoint_requests(requests, "调研 GitHub 并输出报告") == []
+    assert direct_browser_entrypoint_requests(
+        [
+            requests[0],
+            {
+                "protocol": "json_fallback",
+                "tool": "browser.extract_text",
+                "input": {},
+                "source": "runtime_planner",
+                "planning_reason": "planner_fallback_web_research",
+                "continue_to_model": True,
+            },
+        ],
+        "打开 GitHub 并读一下页面",
+    ) == []
+    assert direct_browser_entrypoint_requests(
+        [
+            {
+                "protocol": "json_fallback",
+                "tool": "browser.open_url",
+                "input": {"url": "https://github.com"},
+            }
+        ],
+        "在地址栏输入 github.com 并回车",
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://github.com"},
+        }
+    ]
 
 
 def test_daily_desktop_requests_can_complete_with_trailing_verification_without_model() -> None:

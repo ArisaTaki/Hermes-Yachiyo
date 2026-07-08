@@ -27,6 +27,7 @@ from apps.shell.yachiyo_agent.daily_desktop import (
     daily_desktop_allowed_tools,
     daily_desktop_planned_timeline,
     daily_desktop_runtime_execution_envelope,
+    direct_browser_entrypoint_requests,
     main_chat_entrypoint_allowed_tools,
     planner_first_daily_desktop_entrypoint_requests,
 )
@@ -243,6 +244,7 @@ def _desktop_candidates_for_quick_message(
         allowed_tools=allowed_tools,
         execution_normalized=True,
         include_runtime_context=True,
+        allow_legacy_fallback=True,
     )
 
 
@@ -550,6 +552,10 @@ class ChatBridge:
                     planning_text,
                     metadata=execution_metadata,
                     allowed_tools=planner_allowed_tools,
+                ),
+                direct_tool_requests=(
+                    direct_browser_entrypoint_requests(desktop_candidates, planning_text)
+                    or None
                 ),
             )
             if executed_task is not None:

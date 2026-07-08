@@ -123,24 +123,68 @@ def direct_browser_entrypoint_requests(
     """Return direct low-risk browser requests even when artifact tools are available."""
 
     request_list = [request for request in requests or [] if isinstance(request, Mapping)]
-    if len(request_list) != 1:
+    if not request_list:
         return []
     if _looks_like_browser_artifact_request(text):
         return []
-    request = request_list[0]
+    for index, request in enumerate(request_list):
+        normalized = _direct_browser_entrypoint_request(request)
+        if not normalized:
+            continue
+        if not _direct_browser_entrypoint_suffix_is_deferred_output_only(
+            request_list[index + 1:],
+        ):
+            continue
+        return [normalized]
+    return []
+
+
+_DIRECT_BROWSER_DEFERRED_OUTPUT_TOOLS = frozenset(
+    {
+        "artifact.write",
+        "browser.current_page",
+        "browser.extract",
+        "browser.extract_text",
+        "clipboard.write",
+        "data.analyze",
+    }
+)
+
+
+def _direct_browser_entrypoint_request(
+    request: Mapping[str, Any],
+) -> dict[str, Any]:
     tool_name = str(request.get("tool") or "").strip()
     if tool_name not in _DIRECT_BROWSER_ENTRYPOINT_TOOLS:
-        return []
-    if str(request.get("source") or "").strip() != "runtime_planner":
-        return []
-    if str(request.get("planning_reason") or "").strip() != "planner_fallback_web_research":
-        return []
+        return {}
+    source = str(request.get("source") or "").strip()
+    if source and source != "runtime_planner":
+        return {}
+    planning_reason = str(request.get("planning_reason") or "").strip()
+    if planning_reason and "web" not in planning_reason:
+        return {}
+    if bool(request.get("approval_required")):
+        return {}
     payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
     if not str(payload.get("url") or "").strip():
-        return []
+        return {}
     normalized = dict(request)
     normalized.pop("continue_to_model", None)
-    return [normalized]
+    return normalized
+
+
+def _direct_browser_entrypoint_suffix_is_deferred_output_only(
+    requests: Sequence[Mapping[str, Any]],
+) -> bool:
+    for request in requests:
+        tool_name = str(request.get("tool") or "").strip()
+        if tool_name in _ENTRYPOINT_VERIFY_TOOLS:
+            continue
+        if tool_name not in _DIRECT_BROWSER_DEFERRED_OUTPUT_TOOLS:
+            return False
+        if bool(request.get("approval_required")):
+            return False
+    return True
 
 
 def daily_desktop_requests_can_complete_without_model(
@@ -181,8 +225,11 @@ def _looks_like_browser_artifact_request(text: str) -> bool:
         return False
     return bool(
         re.search(
-            r"(?:报告|文档|文件|产出|输出|导出|保存|生成\s*(?:一份)?\s*(?:报告|文档|文件)|"
-            r"\breport\b|\bartifact\b|\bsave\b|\bexport\b)",
+            r"(?:报告|文档|文件|产出|输出|导出|保存|总结|摘要|表格|调研|研究|分析|阅读|"
+            r"读取|读一下|解释|提炼|生成\s*(?:一份)?\s*(?:报告|文档|文件|总结|摘要|表格)|"
+            r"\breport\b|\bartifact\b|\bsave\b|\bexport\b|\bsummary\b|\bsummarize\b|"
+            r"\bsummarise\b|\btable\b|\bresearch\b|\banaly[sz]e\b|\bread\b|\bextract\b|"
+            r"\bdescribe\b|\bexplain\b)",
             value,
             flags=re.IGNORECASE,
         )
