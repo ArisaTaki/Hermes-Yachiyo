@@ -681,6 +681,7 @@ def _provider_runtime_payload(config: dict[str, Any]) -> dict[str, Any]:
         "desktop_session_kind",
         "desktop_session_isolated",
         "foreground_takeover_required",
+        "keyboard_mouse_capture_supported",
         "desktop_backend_kind",
         "desktop_backend_is_loopback",
         "desktop_backend_ready_for_public_release",
@@ -1393,6 +1394,23 @@ def _real_virtual_desktop_provider_required_status(
             status.get("desktop_backend_kind")
             or provider_status.get("desktop_backend_kind")
             or ""
+        ),
+        "desktop_session_kind": str(
+            status.get("desktop_session_kind")
+            or provider_status.get("desktop_session_kind")
+            or ""
+        ),
+        "desktop_session_isolated": _optional_bool(
+            status.get("desktop_session_isolated"),
+            provider_status.get("desktop_session_isolated"),
+        ),
+        "foreground_takeover_required": _optional_bool(
+            status.get("foreground_takeover_required"),
+            provider_status.get("foreground_takeover_required"),
+        ),
+        "keyboard_mouse_capture_supported": _optional_bool(
+            status.get("keyboard_mouse_capture_supported"),
+            provider_status.get("keyboard_mouse_capture_supported"),
         ),
         "desktop_backend_is_loopback": backend_is_loopback,
         "desktop_backend_ready_for_public_release": backend_release_ready,

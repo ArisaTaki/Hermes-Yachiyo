@@ -5703,6 +5703,13 @@ def test_isolated_provider_session_auto_start_passes_real_backend_requirement(
             "running": False,
             "started": False,
             "provider_id": "real-virtual-desktop",
+            "desktop_session_kind": "virtual_desktop",
+            "desktop_session_isolated": True,
+            "foreground_takeover_required": False,
+            "keyboard_mouse_capture_supported": True,
+            "desktop_backend_kind": "candidate_virtual_backend",
+            "desktop_backend_is_loopback": False,
+            "desktop_backend_ready_for_public_release": False,
             "requires_real_virtual_desktop_backend": True,
             "blocking_conditions": [
                 "configured_virtual_desktop_provider_required",
@@ -5751,6 +5758,14 @@ def test_isolated_provider_session_auto_start_passes_real_backend_requirement(
     assert session["status"] == "real_virtual_desktop_provider_required"
     assert session["running"] is False
     assert session["started"] is False
+    assert session["desktop_session_kind"] == "virtual_desktop"
+    assert session["desktop_session_isolated"] is True
+    assert session["foreground_takeover_required"] is False
+    assert session["keyboard_mouse_capture_supported"] is True
+    assert session["provider_contract"]["desktop_session_kind"] == "virtual_desktop"
+    assert session["provider_contract"]["desktop_session_isolated"] is True
+    assert session["provider_contract"]["foreground_takeover_required"] is False
+    assert session["provider_contract"]["keyboard_mouse_capture_supported"] is True
     assert session["requires_real_virtual_desktop_backend"] is True
     assert session["blocking_conditions"] == [
         "configured_virtual_desktop_provider_required",
