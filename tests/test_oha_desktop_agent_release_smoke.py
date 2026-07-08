@@ -12,6 +12,7 @@ def test_oha_desktop_agent_release_smoke_covers_product_readiness(tmp_path) -> N
     assert report["mode"] == "oha_desktop_agent_release_smoke"
     assert report["isolated_provider_smoke_requested"] is False
     assert report["isolated_provider_smoke_collected"] is False
+    assert report["isolated_provider_backend"] == {}
     assert report["failed_sections"] == []
     assert report["checks"] == {
         "all_sections_passed": True,
@@ -105,6 +106,10 @@ def test_oha_desktop_agent_release_smoke_can_include_isolated_provider(
             "desktop_session_isolated": True,
             "foreground_takeover_required": False,
             "keyboard_mouse_capture_supported": True,
+            "desktop_backend_kind": "loopback_session_harness",
+            "desktop_backend_is_loopback": True,
+            "desktop_backend_ready_for_public_release": False,
+            "requires_real_virtual_desktop_backend": True,
         },
     )
 
@@ -124,6 +129,12 @@ def test_oha_desktop_agent_release_smoke_can_include_isolated_provider(
     assert section_by_id["isolated_desktop_provider"]["report"][
         "foreground_takeover_required"
     ] is False
+    assert report["isolated_provider_backend"] == {
+        "desktop_backend_kind": "loopback_session_harness",
+        "desktop_backend_is_loopback": True,
+        "desktop_backend_ready_for_public_release": False,
+        "requires_real_virtual_desktop_backend": True,
+    }
 
 
 def test_oha_desktop_agent_release_smoke_cli_writes_report(
@@ -144,6 +155,7 @@ def test_oha_desktop_agent_release_smoke_cli_writes_report(
             "checks": {"all_sections_passed": True},
             "isolated_provider_smoke_requested": False,
             "isolated_provider_smoke_collected": False,
+            "isolated_provider_backend": {},
             "sections": [],
         },
     )
@@ -165,6 +177,7 @@ def test_oha_desktop_agent_release_smoke_cli_writes_report(
         "checks": {"all_sections_passed": True},
         "isolated_provider_smoke_requested": False,
         "isolated_provider_smoke_collected": False,
+        "isolated_provider_backend": {},
         "sections": [],
     }
 

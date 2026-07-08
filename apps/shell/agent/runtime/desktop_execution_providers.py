@@ -534,6 +534,34 @@ class HttpDesktopExecutionProviderAdapter:
                 "user_foreground_takeover_required",
             ),
         )
+        backend_status = _provider_backend_status_fields(
+            desktop_backend_kind=_first_mapping_value(
+                provider_payload,
+                "desktop_backend_kind",
+                "backend_kind",
+            ),
+            desktop_backend_is_loopback=_optional_bool_value(
+                _first_mapping_value(
+                    provider_payload,
+                    "desktop_backend_is_loopback",
+                    "backend_is_loopback",
+                )
+            ),
+            desktop_backend_ready_for_public_release=_optional_bool_value(
+                _first_mapping_value(
+                    provider_payload,
+                    "desktop_backend_ready_for_public_release",
+                    "backend_ready_for_public_release",
+                )
+            ),
+            requires_real_virtual_desktop_backend=_optional_bool_value(
+                _first_mapping_value(
+                    provider_payload,
+                    "requires_real_virtual_desktop_backend",
+                    "real_virtual_desktop_backend_required",
+                )
+            ),
+        )
         return self._health_payload(
             ok=ok,
             checked=True,
@@ -556,6 +584,7 @@ class HttpDesktopExecutionProviderAdapter:
             desktop_session_kind=desktop_session_kind,
             desktop_session_isolated=desktop_session_isolated,
             foreground_takeover_required=foreground_takeover_required,
+            **backend_status,
         )
 
     def _headers(self) -> dict[str, str]:
@@ -613,6 +642,18 @@ class HttpDesktopExecutionProviderAdapter:
             health.get("foreground_takeover_required"),
             self.foreground_takeover_required,
         )
+        backend_status = _provider_backend_status_fields(
+            desktop_backend_kind=health.get("desktop_backend_kind"),
+            desktop_backend_is_loopback=_optional_bool_value(
+                health.get("desktop_backend_is_loopback")
+            ),
+            desktop_backend_ready_for_public_release=_optional_bool_value(
+                health.get("desktop_backend_ready_for_public_release")
+            ),
+            requires_real_virtual_desktop_backend=_optional_bool_value(
+                health.get("requires_real_virtual_desktop_backend")
+            ),
+        )
         return {
             "configured": True,
             "available": bool(health.get("ok")) if probe_health else True,
@@ -653,6 +694,7 @@ class HttpDesktopExecutionProviderAdapter:
                 desktop_session_isolated=desktop_session_isolated,
                 foreground_takeover_required=foreground_takeover_required,
             ),
+            **backend_status,
         }
 
     def _transport_failure(
@@ -720,6 +762,10 @@ class HttpDesktopExecutionProviderAdapter:
         desktop_session_kind: str = "",
         desktop_session_isolated: bool | None = None,
         foreground_takeover_required: bool | None = None,
+        desktop_backend_kind: Any = "",
+        desktop_backend_is_loopback: bool | None = None,
+        desktop_backend_ready_for_public_release: bool | None = None,
+        requires_real_virtual_desktop_backend: bool | None = None,
     ) -> dict[str, Any]:
         parsed = urlparse(self.status_url)
         payload: dict[str, Any] = {
@@ -740,6 +786,16 @@ class HttpDesktopExecutionProviderAdapter:
                 desktop_session_kind=desktop_session_kind,
                 desktop_session_isolated=desktop_session_isolated,
                 foreground_takeover_required=foreground_takeover_required,
+            ),
+            **_provider_backend_status_fields(
+                desktop_backend_kind=desktop_backend_kind,
+                desktop_backend_is_loopback=desktop_backend_is_loopback,
+                desktop_backend_ready_for_public_release=(
+                    desktop_backend_ready_for_public_release
+                ),
+                requires_real_virtual_desktop_backend=(
+                    requires_real_virtual_desktop_backend
+                ),
             ),
         }
         if status_code:
@@ -1332,6 +1388,38 @@ def _provider_capability_status_fields(
     if foreground_takeover_required is not None:
         payload["foreground_takeover_required"] = bool(foreground_takeover_required)
     return payload
+
+
+def _provider_backend_status_fields(
+    *,
+    desktop_backend_kind: Any = "",
+    desktop_backend_is_loopback: bool | None = None,
+    desktop_backend_ready_for_public_release: bool | None = None,
+    requires_real_virtual_desktop_backend: bool | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {}
+    clean_backend_kind = str(desktop_backend_kind or "").strip()
+    if clean_backend_kind:
+        payload["desktop_backend_kind"] = clean_backend_kind
+    if desktop_backend_is_loopback is not None:
+        payload["desktop_backend_is_loopback"] = bool(desktop_backend_is_loopback)
+    if desktop_backend_ready_for_public_release is not None:
+        payload["desktop_backend_ready_for_public_release"] = bool(
+            desktop_backend_ready_for_public_release
+        )
+    if requires_real_virtual_desktop_backend is not None:
+        payload["requires_real_virtual_desktop_backend"] = bool(
+            requires_real_virtual_desktop_backend
+        )
+    return payload
+
+
+def _first_mapping_value(mapping: Mapping[str, Any], *keys: str) -> Any:
+    for key in keys:
+        value = mapping.get(key)
+        if value not in (None, "", [], {}):
+            return value
+    return None
 
 
 def _provider_capability_bool(

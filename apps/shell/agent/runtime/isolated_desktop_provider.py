@@ -28,6 +28,7 @@ ISOLATED_DESKTOP_PROVIDER_VERSION = "0.1.0"
 DEFAULT_ISOLATED_PROVIDER_ID = "local-isolated-desktop"
 DEFAULT_ISOLATED_PORT = 19093
 DEFAULT_ISOLATED_SESSION_ID = "oha-yachiyo-isolated-session"
+ISOLATED_BACKEND_KIND = "loopback_session_harness"
 
 
 class IsolatedDesktopProvider(ControlledDesktopProvider):
@@ -88,6 +89,7 @@ class IsolatedDesktopProvider(ControlledDesktopProvider):
             "desktop_session_isolated": True,
             "foreground_takeover_required": False,
             "isolated_session_id": self.session_id,
+            **_isolated_backend_status(),
             "requires_real_sandbox_for": [],
             "approval_required_tools": _sorted_tools(KEYBOARD_MOUSE_CONTROL_TOOLS),
         }
@@ -106,6 +108,7 @@ class IsolatedDesktopProvider(ControlledDesktopProvider):
                 "desktop_session_isolated": True,
                 "foreground_takeover_required": False,
                 "isolated_session_id": self.session_id,
+                **_isolated_backend_status(),
                 "requires_real_sandbox_for": [],
                 "capabilities": self.status()["capabilities"],
                 "supported_tools": list(self.supported_tools),
@@ -128,6 +131,7 @@ class IsolatedDesktopProvider(ControlledDesktopProvider):
                     "desktop_session_kind": "isolated_desktop",
                     "desktop_session_isolated": True,
                     "foreground_takeover_required": False,
+                    **_isolated_backend_status(),
                     "requires_runtime_approval": True,
                     "approval_required_tools": _sorted_tools(
                         KEYBOARD_MOUSE_CONTROL_TOOLS
@@ -731,6 +735,7 @@ class IsolatedDesktopProvider(ControlledDesktopProvider):
             "desktop_session_isolated": True,
             "foreground_takeover_required": False,
             "isolated_session_id": self.session_id,
+            **_isolated_backend_status(),
         }
         payload["controlled_desktop_provider"].update(
             {
@@ -739,6 +744,7 @@ class IsolatedDesktopProvider(ControlledDesktopProvider):
                 "desktop_session_kind": "isolated_desktop",
                 "desktop_session_isolated": True,
                 "foreground_takeover_required": False,
+                **_isolated_backend_status(),
             }
         )
         return payload
@@ -826,6 +832,15 @@ def _isolated_app_record_matches(record: Mapping[str, Any], query: str) -> bool:
     return False
 
 
+def _isolated_backend_status() -> dict[str, Any]:
+    return {
+        "desktop_backend_kind": ISOLATED_BACKEND_KIND,
+        "desktop_backend_is_loopback": True,
+        "desktop_backend_ready_for_public_release": False,
+        "requires_real_virtual_desktop_backend": True,
+    }
+
+
 def build_isolated_desktop_provider_server(
     *,
     host: str = DEFAULT_HOST,
@@ -884,6 +899,7 @@ def serve_isolated_desktop_provider(
                 "desktop_session_kind": "isolated_desktop",
                 "desktop_session_isolated": True,
                 "foreground_takeover_required": False,
+                **_isolated_backend_status(),
             },
             ensure_ascii=False,
             sort_keys=True,

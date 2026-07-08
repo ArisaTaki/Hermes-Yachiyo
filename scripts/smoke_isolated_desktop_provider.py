@@ -165,6 +165,14 @@ def run_smoke() -> dict[str, Any]:
             "foreground_takeover_not_required": (
                 status.get("foreground_takeover_required") is False
             ),
+            "provider_backend_identifies_loopback_harness": (
+                status.get("desktop_backend_kind") == "loopback_session_harness"
+                and status.get("desktop_backend_is_loopback") is True
+            ),
+            "provider_backend_marks_real_virtual_desktop_needed": (
+                status.get("desktop_backend_ready_for_public_release") is False
+                and status.get("requires_real_virtual_desktop_backend") is True
+            ),
             "all_tools_routed": all(
                 isinstance(item, dict)
                 and item.get("desktop_execution_provider_routed") is True
@@ -261,6 +269,14 @@ def run_smoke() -> dict[str, Any]:
             "foreground_takeover_required": status.get("foreground_takeover_required"),
             "keyboard_mouse_capture_supported": status.get(
                 "keyboard_mouse_capture_supported"
+            ),
+            "desktop_backend_kind": status.get("desktop_backend_kind"),
+            "desktop_backend_is_loopback": status.get("desktop_backend_is_loopback"),
+            "desktop_backend_ready_for_public_release": status.get(
+                "desktop_backend_ready_for_public_release"
+            ),
+            "requires_real_virtual_desktop_backend": status.get(
+                "requires_real_virtual_desktop_backend"
             ),
             "supported_tools": status.get("supported_tools") or [],
             "covered_tools": list(SMOKE_TOOLS),

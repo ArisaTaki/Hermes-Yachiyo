@@ -613,6 +613,7 @@ def run_smoke(
         checks["covers_isolated_desktop_provider"] = any(
             section["id"] == "isolated_desktop_provider" for section in sections
         )
+    isolated_provider_backend = _isolated_provider_backend_summary(sections)
     return {
         "ok": all(checks.values()),
         "mode": "oha_desktop_agent_release_smoke",
@@ -625,7 +626,34 @@ def run_smoke(
             and section.get("ok") is True
             for section in sections
         ),
+        "isolated_provider_backend": isolated_provider_backend,
         "sections": sections,
+    }
+
+
+def _isolated_provider_backend_summary(
+    sections: Sequence[dict[str, Any]],
+) -> dict[str, Any]:
+    section = next(
+        (
+            candidate
+            for candidate in sections
+            if candidate.get("id") == "isolated_desktop_provider"
+        ),
+        {},
+    )
+    report = section.get("report") if isinstance(section.get("report"), dict) else {}
+    if not report:
+        return {}
+    return {
+        "desktop_backend_kind": str(report.get("desktop_backend_kind") or ""),
+        "desktop_backend_is_loopback": report.get("desktop_backend_is_loopback"),
+        "desktop_backend_ready_for_public_release": report.get(
+            "desktop_backend_ready_for_public_release"
+        ),
+        "requires_real_virtual_desktop_backend": report.get(
+            "requires_real_virtual_desktop_backend"
+        ),
     }
 
 
@@ -662,6 +690,9 @@ def _compact_stdout_summary(payload: dict[str, Any]) -> dict[str, Any]:
         ),
         "isolated_provider_smoke_collected": bool(
             payload.get("isolated_provider_smoke_collected") is True
+        ),
+        "isolated_provider_backend": dict(
+            payload.get("isolated_provider_backend") or {}
         ),
         "sections": sections,
     }
