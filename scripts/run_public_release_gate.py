@@ -386,6 +386,12 @@ def _check_result(check: GateCheck, *, plan_only: bool) -> dict[str, Any]:
         "stdout_tail": _tail(result.stdout),
         "stderr_tail": _tail(result.stderr),
     }
+    if check.id == "oha_desktop_agent_release_smoke" and status == "failed":
+        blockers = _oha_desktop_agent_loopback_release_blockers(check.report_json)
+        if blockers:
+            payload["status"] = "blocked"
+            payload["failure_category"] = "local_loopback_permission"
+            payload["release_blockers"] = blockers
     if check.id == "public_demo":
         payload.update(_public_demo_gate_fields(check.report_json, command=check.command))
         if payload.get("report_loaded") is True:
@@ -1043,9 +1049,21 @@ def _external_requirements(actions: Sequence[Mapping[str, Any]]) -> list[dict[st
                 kind="provider_credentials",
                 action=action,
             )
+        elif action_id == "oha_desktop_agent_release_smoke" and _action_has_blocking_condition(
+            action,
+            "local_loopback_permission_required",
+        ):
+            _merge_external_requirement(
+                requirements,
+                requirement_id="local_loopback_permission",
+                label="Local loopback permission for isolated desktop provider smoke",
+                kind="local_permission",
+                action=action,
+            )
     order = {
         "real_desktop_smoke_opt_in": 0,
         "provider_smoke_credentials": 1,
+        "local_loopback_permission": 2,
     }
     return sorted(
         requirements.values(),
@@ -1133,6 +1151,55 @@ def _merge_external_requirement(
 def _action_runs_provider_smoke(action: Mapping[str, Any]) -> bool:
     command = str(action.get("command") or "").strip()
     return "--run-provider-smoke" in command
+
+
+def _action_has_blocking_condition(
+    action: Mapping[str, Any],
+    condition: str,
+) -> bool:
+    clean_condition = str(condition or "").strip()
+    if not clean_condition:
+        return False
+    for blocker in _dict_list(action.get("release_blockers")):
+        evidence_summary = _dict(blocker.get("evidence_summary"))
+        conditions = [
+            *_string_list(evidence_summary.get("blocking_condition")),
+            *_string_list(evidence_summary.get("blocking_conditions")),
+            str(blocker.get("reason") or "").strip(),
+        ]
+        if clean_condition in conditions:
+            return True
+    return False
+
+
+def _oha_desktop_agent_loopback_release_blockers(
+    report_json: Path | None,
+) -> list[dict[str, Any]]:
+    report = _load_json(report_json)
+    for section in _dict_list(report.get("sections")):
+        if str(section.get("id") or "").strip() != "isolated_desktop_provider":
+            continue
+        if section.get("ok") is True:
+            return []
+        error = str(section.get("error") or "").strip()
+        if "Operation not permitted" not in error and "Errno 1" not in error:
+            return []
+        return [
+            {
+                "id": "oha_isolated_desktop_provider_loopback_permission",
+                "status": "blocked",
+                "reason": "local_loopback_permission_required",
+                "evidence_summary": {
+                    "blocking_condition": "local_loopback_permission_required",
+                    "error": error,
+                    "recovery_hints": [
+                        "rerun the release gate outside the restricted sandbox",
+                        "or allow python scripts/run_public_release_gate.py to bind the local isolated provider smoke server",
+                    ],
+                },
+            }
+        ]
+    return []
 
 
 def _append_unique(target: list[Any], values: Sequence[Any]) -> None:

@@ -835,6 +835,72 @@ def test_public_release_gate_can_request_isolated_provider_smoke(
     assert "--run-isolated-provider-smoke" in oha_product_command
 
 
+def test_public_release_gate_classifies_isolated_provider_loopback_failure(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+    commands: list[list[str]] = []
+
+    def fake_run(command):
+        command = list(command)
+        commands.append(command)
+        if "scripts/smoke_oha_desktop_agent_release.py" in command:
+            output_json = command[command.index("--report-json") + 1]
+            output_path = gate._resolve_path(Path(output_json))
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_text(
+                json.dumps(
+                    {
+                        "ok": False,
+                        "mode": "oha_desktop_agent_release_smoke",
+                        "sections": [
+                            {
+                                "id": "isolated_desktop_provider",
+                                "ok": False,
+                                "error": "[Errno 1] Operation not permitted",
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            return _completed(command, returncode=1)
+        return _completed(command)
+
+    monkeypatch.setattr(gate, "_run_command", fake_run)
+
+    summary = gate.run_public_release_gate(
+        tmp_dir="tmp/gate",
+        include_public_demo=False,
+        include_release_smoke=False,
+        include_diagnostics_bundle=False,
+        include_isolated_provider_smoke=True,
+    )
+
+    assert summary["ok"] is True
+    assert summary["failed_count"] == 0
+    check = next(
+        item
+        for item in summary["checks"]
+        if item["id"] == "oha_desktop_agent_release_smoke"
+    )
+    assert check["status"] == "blocked"
+    assert check["failure_category"] == "local_loopback_permission"
+    assert check["release_blockers"][0]["evidence_summary"][
+        "blocking_condition"
+    ] == "local_loopback_permission_required"
+    requirement = next(
+        item
+        for item in summary["external_requirements"]
+        if item["id"] == "local_loopback_permission"
+    )
+    assert requirement["kind"] == "local_permission"
+    assert requirement["blocking_conditions"] == [
+        "local_loopback_permission_required"
+    ]
+
+
 def test_public_release_gate_passes_allow_existing_real_desktop_app_flag(
     tmp_path,
     monkeypatch,
