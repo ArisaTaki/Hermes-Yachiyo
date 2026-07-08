@@ -236,6 +236,9 @@ export type DesktopExecutionRouteSnapshot = {
   can_auto_start?: boolean;
   provider_execution_required?: boolean;
   sandbox_required?: boolean;
+  isolated_desktop_preferred?: boolean;
+  foreground_takeover_allowed?: boolean;
+  desktop_execution_session_policy?: string;
   user_foreground_takeover_risk?: boolean;
   requires_user_foreground_session?: boolean;
   foreground_mutation_supported?: boolean | null;

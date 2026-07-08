@@ -121,6 +121,17 @@ export function RuntimeExecutionEnvelopeSummary({
       data-desktop-execution-route-sandbox-required={
         executionRoute.sandboxRequired === null ? '' : String(executionRoute.sandboxRequired)
       }
+      data-desktop-execution-route-isolated-preferred={
+        executionRoute.isolatedDesktopPreferred === null
+          ? ''
+          : String(executionRoute.isolatedDesktopPreferred)
+      }
+      data-desktop-execution-route-foreground-takeover-allowed={
+        executionRoute.foregroundTakeoverAllowed === null
+          ? ''
+          : String(executionRoute.foregroundTakeoverAllowed)
+      }
+      data-desktop-execution-route-session-policy={executionRoute.sessionPolicy}
       data-desktop-execution-route-foreground-takeover-required={
         executionRoute.foregroundTakeoverRequired === null
           ? ''
@@ -659,7 +670,9 @@ type RuntimeExecutionRouteSummary = {
   desktopSessionIsolated: boolean | null;
   fallbackMode: string;
   foregroundMutationSupported: boolean | null;
+  foregroundTakeoverAllowed: boolean | null;
   foregroundTakeoverRequired: boolean | null;
+  isolatedDesktopPreferred: boolean | null;
   keyboardMouseCaptureSupported: boolean | null;
   label: string;
   providerExecutionRequired: boolean | null;
@@ -668,6 +681,7 @@ type RuntimeExecutionRouteSummary = {
   reason: string;
   requestedMode: string;
   sandboxRequired: boolean | null;
+  sessionPolicy: string;
   status: string;
 };
 
@@ -838,6 +852,9 @@ function runtimeExecutionRouteSummary(
   const canAutoStart = booleanValue(record.can_auto_start);
   const providerExecutionRequired = booleanValue(record.provider_execution_required);
   const sandboxRequired = booleanValue(record.sandbox_required);
+  const isolatedDesktopPreferred = booleanValue(record.isolated_desktop_preferred);
+  const foregroundTakeoverAllowed = booleanValue(record.foreground_takeover_allowed);
+  const sessionPolicy = stringValue(record.desktop_execution_session_policy);
   const foregroundMutationSupported = booleanValue(record.foreground_mutation_supported);
   const keyboardMouseCaptureSupported = booleanValue(record.keyboard_mouse_capture_supported);
   const desktopSessionIsolated = booleanValue(record.desktop_session_isolated);
@@ -850,18 +867,23 @@ function runtimeExecutionRouteSummary(
     canExecute,
     desktopSessionIsolated,
     fallbackMode,
+    foregroundTakeoverAllowed,
     foregroundMutationSupported,
     foregroundTakeoverRequired,
+    isolatedDesktopPreferred,
     keyboardMouseCaptureSupported,
     label: executionRouteLabel({
       blockers,
       canExecute,
       desktopSessionIsolated,
       fallbackMode,
+      foregroundTakeoverAllowed,
       foregroundTakeoverRequired,
+      isolatedDesktopPreferred,
       providerId,
       providerKind,
       requestedMode,
+      sessionPolicy,
       status,
     }),
     providerExecutionRequired,
@@ -870,6 +892,7 @@ function runtimeExecutionRouteSummary(
     reason,
     requestedMode,
     sandboxRequired,
+    sessionPolicy,
     status,
   };
 }
@@ -879,10 +902,13 @@ function executionRouteLabel(route: {
   canExecute: boolean | null;
   desktopSessionIsolated: boolean | null;
   fallbackMode: string;
+  foregroundTakeoverAllowed: boolean | null;
   foregroundTakeoverRequired: boolean | null;
+  isolatedDesktopPreferred: boolean | null;
   providerId: string;
   providerKind: string;
   requestedMode: string;
+  sessionPolicy: string;
   status: string;
 }): string {
   if (!route.status && !route.providerKind && !route.blockers.length) return '';
@@ -890,6 +916,9 @@ function executionRouteLabel(route: {
     route.status,
     route.canExecute === false ? route.blockers[0] : '',
     route.providerId || route.providerKind,
+    route.sessionPolicy,
+    route.isolatedDesktopPreferred === true ? 'isolated preferred' : '',
+    route.foregroundTakeoverAllowed === true ? 'foreground allowed' : '',
     route.foregroundTakeoverRequired === true ? 'user foreground' : '',
     route.desktopSessionIsolated === true ? 'isolated session' : '',
     route.fallbackMode ? `fallback ${route.fallbackMode}` : '',

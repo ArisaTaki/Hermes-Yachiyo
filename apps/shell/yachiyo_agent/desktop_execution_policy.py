@@ -468,6 +468,13 @@ def desktop_execution_route_decision(
         str(policy_payload.get("mode") or "").strip().lower().replace("-", "_")
         == "sandbox_preferred"
     )
+    isolated_desktop_preferred = _metadata_truthy(
+        decision_context,
+        "prefer_isolated_desktop",
+        "avoid_user_foreground_takeover",
+        "require_sandbox_for_keyboard_mouse",
+    )
+    foreground_takeover_allowed = user_foreground_takeover_allowed(decision_context)
     isolation = str(mode_payload.get("isolation") or "none").strip() or "none"
     execution_mode_name = str(mode_payload.get("mode") or "tool_native").strip()
     route = {
@@ -480,6 +487,17 @@ def desktop_execution_route_decision(
         "can_execute": True,
         "can_auto_start": True,
         "sandbox_required": False,
+        "isolated_desktop_preferred": isolated_desktop_preferred,
+        "foreground_takeover_allowed": foreground_takeover_allowed,
+        "desktop_execution_session_policy": (
+            "explicit_user_foreground"
+            if foreground_takeover_allowed
+            else (
+                "isolated_preferred"
+                if isolated_desktop_preferred
+                else "structured_runtime"
+            )
+        ),
         "user_foreground_takeover_risk": False,
         "requires_user_foreground_session": False,
         "fallback_mode": "",
@@ -659,8 +677,8 @@ def with_daily_entrypoint_desktop_execution_policy(
     payload.setdefault("desktop_provider_health_probe", True)
     payload.setdefault("desktop_provider_route_readonly", True)
     payload.setdefault("desktop_provider_route_foreground", True)
-    payload.setdefault("desktop_provider_local_native", True)
     if user_foreground_takeover_allowed(payload):
+        payload.setdefault("desktop_provider_local_native", True)
         payload["desktop_execution_policy"] = {
             **daily_entrypoint_desktop_execution_policy(surface=surface),
             "mode": "allow",

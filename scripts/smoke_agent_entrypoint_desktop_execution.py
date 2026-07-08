@@ -590,11 +590,16 @@ def _generic_app_inspect_case(
             and inspect_planned_payload.get("foreground_control") is True
             and inspect_planned_payload.get("sandbox_recommended") is True
         ),
-        "inspect_tool_route_uses_local_provider": (
-            inspect_route.get("status") == "provider_ready"
+        "inspect_tool_route_prefers_isolated_provider": (
+            inspect_route.get("status") == "provider_required"
             and inspect_route.get("requested_mode") == "preview_input"
-            and inspect_route.get("selected_provider_kind") == "local_desktop"
-            and inspect_route.get("foreground_takeover_required") is True
+            and inspect_route.get("selected_provider_kind") == "sandbox_desktop"
+            and inspect_route.get("isolated_desktop_preferred") is True
+            and inspect_route.get("foreground_takeover_allowed") is False
+            and inspect_route.get("desktop_execution_session_policy")
+            == "isolated_preferred"
+            and "sandbox_desktop_provider_required"
+            in list(inspect_route.get("blocking_conditions") or [])
         ),
         "completed_from_runtime_planner": completed_payload.get("source") == "runtime_planner",
         "completed_tools_match": completed_payload.get("tools") == expected_execution_tools,

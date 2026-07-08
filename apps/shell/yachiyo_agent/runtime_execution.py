@@ -618,13 +618,14 @@ def _sandbox_provider_for_request(
         or execution_mode_name == "supervised_live"
     ):
         provider_payload = sandbox_desktop_provider_status(request)
-        if sandbox_desktop_provider_can_execute_tool(
-            provider_payload,
-            tool_name,
-        ) or _sandbox_provider_requires_controlled_input(
-            provider_payload,
-            tool_name=tool_name,
-            execution_mode=execution_mode,
+        if (
+            sandbox_desktop_provider_can_execute_tool(provider_payload, tool_name)
+            or not bool(provider_payload.get("available"))
+            or _sandbox_provider_requires_controlled_input(
+                provider_payload,
+                tool_name=tool_name,
+                execution_mode=execution_mode,
+            )
         ):
             return SandboxDesktopProviderSnapshot.model_validate(provider_payload)
     return None

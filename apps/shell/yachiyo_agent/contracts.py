@@ -248,6 +248,9 @@ class DesktopExecutionRouteSnapshot(_PublicSnapshot):
     can_auto_start: bool = True
     provider_execution_required: bool = False
     sandbox_required: bool = False
+    isolated_desktop_preferred: bool = False
+    foreground_takeover_allowed: bool = False
+    desktop_execution_session_policy: str = ""
     user_foreground_takeover_risk: bool = False
     requires_user_foreground_session: bool = False
     foreground_mutation_supported: bool | None = None
