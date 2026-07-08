@@ -382,6 +382,117 @@ def test_runtime_tool_call_executor_starts_provider_session_control_action(
     assert provider_events[0][2]["replan_request_id"] == "replan-1"
 
 
+def test_runtime_tool_request_runner_continues_after_provider_session_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    start_calls: list[dict[str, Any]] = []
+    run_events: list[tuple[str, str, dict[str, Any]]] = []
+
+    def fake_start(request: dict[str, Any] | None = None) -> dict[str, Any]:
+        start_calls.append(dict(request or {}))
+        return {
+            "ok": True,
+            "status": "running",
+            "running": True,
+            "started": True,
+            "provider_id": "sandbox-1",
+            "url": "http://127.0.0.1:19093",
+            "tool_names": ["desktop.safe_type_text"],
+            "source": "isolated_provider_session_manager",
+        }
+
+    monkeypatch.setattr(
+        "apps.shell.agent.runtime.tool_execution.start_isolated_desktop_provider_session",
+        fake_start,
+    )
+    adapter = FakeSandboxDesktopAdapter()
+    executor = _executor(
+        tool_call_events=FakeToolCallEvents(),
+        run_events=run_events,
+        desktop_provider_registry=DesktopExecutionProviderRegistry([adapter]),
+    )
+    runner = _runner(call_agent_tool=executor.execute, run_events=run_events)
+    timeline: list[dict[str, Any]] = []
+
+    runner.run(
+        [
+            {
+                "tool": "desktop.provider_session.start",
+                "control_action": "desktop_provider_session.start",
+                "input": {
+                    "provider_id": "sandbox-1",
+                    "tool_names": ["desktop.safe_type_text"],
+                },
+                "source": "agent_studio_replan_recovery",
+                "replan_request_id": "replan-1",
+                "replan_recovery_action_id": "replan-1:action:1:desktop.provider_session.start",
+                "deferred_continuation": [
+                    {
+                        "tool": "desktop.safe_type_text",
+                        "input": {"text": "hello"},
+                        "desktop_execution_policy": {
+                            "mode": "sandbox_preferred",
+                            "prefer_isolated_desktop": True,
+                            "avoid_user_foreground_takeover": True,
+                        },
+                        "desktop_execution_route": {
+                            "status": "provider_required",
+                            "can_execute": False,
+                        },
+                        "sandbox_provider": {"status": "provider_required"},
+                    }
+                ],
+            }
+        ],
+        ["desktop.safe_type_text"],
+        FakeBroker({"ok": True, "unexpected": True}),
+        [{"role": "user", "content": "启动隔离桌面后输入 hello"}],
+        timeline,
+        [],
+        next_iteration=3,
+        run_id="run-provider-continuation",
+        budget=FakeBudget(),
+    )
+
+    assert start_calls == [
+        {"provider_id": "sandbox-1", "tools": ["desktop.safe_type_text"]}
+    ]
+    assert adapter.calls == [
+        {
+            "tool": "desktop.safe_type_text",
+            "payload": {"text": "hello"},
+            "route": adapter.calls[0]["route"],
+            "approved": False,
+        }
+    ]
+    assert adapter.calls[0]["route"]["status"] == "sandbox_ready"
+    assert adapter.calls[0]["route"]["selected_provider_id"] == "sandbox-1"
+    provider_events = [
+        event["event"]
+        for event in timeline
+        if event["event"]
+        in {
+            "desktop.provider_session.started",
+            "agent.deferred_continuation.enqueued",
+        }
+    ]
+    assert provider_events == [
+        "desktop.provider_session.started",
+        "agent.deferred_continuation.enqueued",
+    ]
+    tool_calls = [event for event in timeline if event["event"] == "agent.tool.call"]
+    assert [event["detail"] for event in tool_calls] == [
+        "desktop.provider_session.start",
+        "desktop.safe_type_text",
+    ]
+    assert tool_calls[-1]["result"]["desktop_execution_provider_routed"] is True
+    assert any(
+        event_type == "agent.deferred_continuation.enqueued"
+        and payload["deferred_tools"] == ["desktop.safe_type_text"]
+        for _run_id, event_type, payload in run_events
+    )
+
+
 def test_runtime_tool_request_runner_resolves_analysis_artifact_body(tmp_path) -> None:
     artifact_text = "Data analysis result for sales.csv.\nEast revenue: 10."
     artifact_path = tmp_path / "analysis-report.md"

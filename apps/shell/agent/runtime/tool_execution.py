@@ -2826,6 +2826,31 @@ class RuntimeToolRequestRunner:
                 ):
                     continue
                 break
+            deferred_continuation = _provider_session_deferred_continuation_requests(
+                tool_name,
+                tool_request,
+                tool_result,
+                remaining_requests=tool_requests[index + 1 :],
+            )
+            if deferred_continuation:
+                tool_requests[index + 1 : index + 1] = deferred_continuation
+                enqueued_payload = _deferred_continuation_enqueued_payload(
+                    tool_name,
+                    deferred_continuation,
+                )
+                timeline.append(
+                    self._timeline(
+                        "agent.deferred_continuation.enqueued",
+                        tool_name,
+                        **enqueued_payload,
+                    )
+                )
+                if run_id:
+                    self._append_run_event(
+                        run_id,
+                        "agent.deferred_continuation.enqueued",
+                        enqueued_payload,
+                    )
             if tool_name == "desktop.active_window":
                 active_window_verification_target = None
             else:
@@ -2869,6 +2894,92 @@ class RuntimeToolRequestRunner:
             append_run_event=self._append_run_event,
             run_id=run_id,
         )
+
+
+def _provider_session_deferred_continuation_requests(
+    tool_name: str,
+    tool_request: Mapping[str, Any],
+    tool_result: Mapping[str, Any],
+    *,
+    remaining_requests: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if not _is_desktop_provider_session_start_control(tool_name, tool_request):
+        return []
+    if tool_result.get("ok") is not True:
+        return []
+    continuation = _mapping_list(tool_request.get("deferred_continuation"))
+    if not continuation:
+        return []
+    session = _first_mapping(tool_result.get("desktop_provider_session"))
+    existing_signatures = {
+        _deferred_request_signature(request)
+        for request in remaining_requests
+        if isinstance(request, Mapping)
+    }
+    requests: list[dict[str, Any]] = []
+    for item in continuation:
+        request = dict(item)
+        continuation_tool = str(request.get("tool") or request.get("tool_name") or "").strip()
+        if not continuation_tool:
+            continue
+        request["tool"] = continuation_tool
+        request.pop("tool_name", None)
+        request.pop("desktop_execution_route", None)
+        request.pop("sandbox_provider", None)
+        request.pop("sandbox_desktop_provider", None)
+        request.setdefault("source", "desktop_provider_session_deferred_continuation")
+        request.setdefault(
+            "planning_reason",
+            "desktop_provider_session_deferred_continuation",
+        )
+        request.setdefault("runtime_retry_source", "desktop_provider_session")
+        for key in (
+            "replan_request_id",
+            "replan_recovery_action_id",
+            "action_id",
+            "decision_id",
+            "plan_id",
+            "tool_plan_id",
+            "capability_id",
+            "target_capability_id",
+            "runtime_stage",
+            "runtime_role",
+        ):
+            value = tool_request.get(key)
+            if key not in request and value not in (None, "", [], {}):
+                request[key] = value
+        if session:
+            request["desktop_provider_session"] = dict(session)
+        signature = _deferred_request_signature(request)
+        if signature in existing_signatures:
+            continue
+        existing_signatures.add(signature)
+        requests.append(request)
+    return requests
+
+
+def _deferred_request_signature(request: Mapping[str, Any]) -> tuple[str, str]:
+    tool_name = str(request.get("tool") or request.get("tool_name") or "").strip()
+    raw_input = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+    return (tool_name, repr(sorted(dict(raw_input).items())))
+
+
+def _deferred_continuation_enqueued_payload(
+    source_tool_name: str,
+    requests: list[dict[str, Any]],
+) -> dict[str, Any]:
+    return {
+        "tool": source_tool_name,
+        "source_tool": source_tool_name,
+        "status": "enqueued",
+        "deferred_continuation_count": len(requests),
+        "deferred_tools": [
+            str(request.get("tool") or "").strip()
+            for request in requests
+            if str(request.get("tool") or "").strip()
+        ],
+        "runtime_retry_source": "desktop_provider_session",
+    }
 
 
 def append_replan_request_event_for_tool_result(
