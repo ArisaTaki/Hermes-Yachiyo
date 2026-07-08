@@ -108,6 +108,11 @@ CAPABILITY_DEFINITIONS: tuple[dict[str, str], ...] = (
         "evidence": "group_run_timeline_smoke",
     },
     {
+        "id": "source_workflow_run_timeline",
+        "label": "Workflow run timeline observability",
+        "evidence": "workflow_run_timeline_smoke",
+    },
+    {
         "id": "provider_text_stream",
         "label": "Provider text streaming",
         "evidence": "provider_smoke.checks[text_stream].summary",
@@ -195,6 +200,7 @@ SOURCE_SECTION_CAPABILITIES: dict[str, str] = {
     "source_runtime_approval_resume": "runtime_approval_resume_smoke",
     "source_yachiyo_route_approval": "yachiyo_route_approval_smoke",
     "source_group_run_timeline": "group_run_timeline_smoke",
+    "source_workflow_run_timeline": "workflow_run_timeline_smoke",
 }
 
 REAL_DESKTOP_OPT_IN_CAPABILITY_IDS = {

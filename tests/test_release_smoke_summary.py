@@ -183,6 +183,7 @@ def test_release_smoke_summary_passes_with_required_evidence(tmp_path, monkeypat
                 "source_approval_resume_timeline",
                 "source_yachiyo_route_approval",
                 "source_group_run_timeline",
+                "source_workflow_run_timeline",
                 "source_agent_entrypoint_data_analysis",
                 "source_data_analysis_artifact",
             )
@@ -826,7 +827,12 @@ def test_release_smoke_summary_uses_provider_workflow_as_workflow_release_eviden
     provider_report_path = tmp_path / "tmp" / "workflow-provider.json"
     source_report_path.parent.mkdir(parents=True, exist_ok=True)
     source_report_path.write_text(
-        json.dumps(_matrix_report("source_agent_entrypoint_data_analysis")),
+        json.dumps(
+            _matrix_report(
+                "source_agent_entrypoint_data_analysis",
+                "source_workflow_run_timeline",
+            )
+        ),
         encoding="utf-8",
     )
     provider_report_path.write_text(
@@ -842,6 +848,7 @@ def test_release_smoke_summary_uses_provider_workflow_as_workflow_release_eviden
     assert workflow["status"] == "passed"
     assert workflow["present_evidence_ids"] == [
         "source_agent_entrypoint_data_analysis",
+        "source_workflow_run_timeline",
         "advanced_workflow_orchestration",
     ]
     assert workflow["evidence"]["advanced_workflow_orchestration"][0]["kind"] == (
@@ -849,6 +856,36 @@ def test_release_smoke_summary_uses_provider_workflow_as_workflow_release_eviden
     )
     assert "workflow" not in summary["missing_item_ids"]
     assert all(item["id"] != "workflow" for item in summary["next_actions"])
+
+
+def test_release_smoke_summary_requires_workflow_run_timeline_evidence(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(release_smoke, "ROOT", tmp_path)
+    source_report_path = tmp_path / "tmp" / "source-capabilities.json"
+    provider_report_path = tmp_path / "tmp" / "workflow-provider.json"
+    source_report_path.parent.mkdir(parents=True, exist_ok=True)
+    source_report_path.write_text(
+        json.dumps(_matrix_report("source_agent_entrypoint_data_analysis")),
+        encoding="utf-8",
+    )
+    provider_report_path.write_text(
+        json.dumps(_provider_workflow_full_chain_report()),
+        encoding="utf-8",
+    )
+
+    summary = release_smoke.summarize_release_smoke(
+        [source_report_path, provider_report_path]
+    )
+
+    workflow = next(item for item in summary["items"] if item["id"] == "workflow")
+    assert workflow["status"] == "missing"
+    assert workflow["present_evidence_ids"] == [
+        "source_agent_entrypoint_data_analysis",
+        "advanced_workflow_orchestration",
+    ]
+    assert workflow["missing_evidence_ids"] == ["source_workflow_run_timeline"]
 
 
 def test_release_smoke_summary_uses_native_provider_contract_as_workflow_release_evidence(
@@ -860,7 +897,12 @@ def test_release_smoke_summary_uses_native_provider_contract_as_workflow_release
     contract_report_path = tmp_path / "tmp" / "native-provider-contract.json"
     source_report_path.parent.mkdir(parents=True, exist_ok=True)
     source_report_path.write_text(
-        json.dumps(_matrix_report("source_agent_entrypoint_data_analysis")),
+        json.dumps(
+            _matrix_report(
+                "source_agent_entrypoint_data_analysis",
+                "source_workflow_run_timeline",
+            )
+        ),
         encoding="utf-8",
     )
     contract_report_path.write_text(
@@ -896,7 +938,10 @@ def test_release_smoke_summary_uses_native_provider_contract_section_from_rc_rep
     report_path.write_text(
         json.dumps(
             {
-                **_matrix_report("source_agent_entrypoint_data_analysis"),
+                **_matrix_report(
+                    "source_agent_entrypoint_data_analysis",
+                    "source_workflow_run_timeline",
+                ),
                 "native_provider_contract_smoke": {
                     "status": "passed",
                     "evidence": _native_provider_contract_report(),
@@ -937,6 +982,7 @@ def test_release_smoke_summary_does_not_project_provider_workflow_from_capabilit
         json.dumps(
             _matrix_report(
                 "source_agent_entrypoint_data_analysis",
+                "source_workflow_run_timeline",
                 "advanced_workflow_orchestration",
             )
         ),
@@ -956,7 +1002,10 @@ def test_release_smoke_summary_does_not_project_provider_workflow_from_capabilit
     assert "--include-ui" in action["command"]
     workflow = next(item for item in summary["items"] if item["id"] == "workflow")
     assert workflow["status"] == "missing"
-    assert workflow["present_evidence_ids"] == ["source_agent_entrypoint_data_analysis"]
+    assert workflow["present_evidence_ids"] == [
+        "source_agent_entrypoint_data_analysis",
+        "source_workflow_run_timeline",
+    ]
     assert workflow["missing_evidence_ids"] == ["advanced_workflow_orchestration"]
     assert workflow["required_evidence_kinds"] == {
         "advanced_workflow_orchestration": [

@@ -50,6 +50,7 @@ PUBLIC_DEMO_CAPABILITY_FLOW_MAP: dict[str, str] = {
     "source_approval_resume_timeline": "approval_resume",
     "source_yachiyo_route_approval": "yachiyo_route_approval",
     "source_group_run_timeline": "group_run",
+    "source_workflow_run_timeline": "workflow_run",
     "source_real_desktop_app_open": "real_desktop_app_open",
     "source_real_desktop_ui_inspection": "real_desktop_ui_inspection",
     "source_real_desktop_interaction": "real_desktop_interaction",
@@ -166,6 +167,7 @@ SMOKE_ITEMS: tuple[dict[str, Any], ...] = (
         "label": "Workflow has source entrypoint and provider-contract orchestration evidence",
         "required": (
             "source_agent_entrypoint_data_analysis",
+            "source_workflow_run_timeline",
             "advanced_workflow_orchestration",
         ),
         "required_evidence_kinds": {
