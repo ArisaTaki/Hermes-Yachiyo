@@ -798,11 +798,127 @@ def print_local_rc_signoff_status(*, short_commit: str | None = None) -> bool:
         else:
             automation_commands["screen_recording_permission"] = previous_screen_command
     if ok:
+        _print_release_progress_lanes(label=label, signoff_draft=signoff_draft)
         _print_release_readiness_status(label=label)
         _print_release_smoke_status(label=label)
         _print_public_demo_status(label=label)
         _print_os_evidence_command(label=label, signoff_draft=signoff_draft)
     return ok
+
+
+def _print_release_progress_lanes(*, label: str, signoff_draft: Path) -> None:
+    print("release progress lanes:")
+    _print_public_release_gate_lane(label=label)
+    _print_manual_signoff_lane(signoff_draft=signoff_draft)
+    _print_opt_in_real_desktop_lane(label=label)
+
+
+def _print_public_release_gate_lane(*, label: str) -> None:
+    gate_report = ROOT / "tmp" / f"public-release-gate-{label}.json"
+    if not gate_report.exists():
+        print(
+            "- automated/public release gate: evidence not found "
+            f"({gate_report.relative_to(ROOT)})"
+        )
+        return
+    try:
+        report = _load_report(gate_report)
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"- automated/public release gate: unreadable ({exc})")
+        return
+    status = str(report.get("status") or "unknown")
+    release_ready = report.get("release_ready")
+    progress = report.get("progress")
+    automated = progress.get("automated_checks") if isinstance(progress, dict) else {}
+    if not isinstance(automated, dict):
+        automated = {}
+    passed = automated.get("passed", report.get("passed_count"))
+    total = automated.get("total", report.get("check_count"))
+    code_remaining = (
+        progress.get("code_remaining_percent") if isinstance(progress, dict) else None
+    )
+    release_remaining = (
+        progress.get("release_remaining_percent") if isinstance(progress, dict) else None
+    )
+    ready_label = "ready" if release_ready is True else status
+    details = []
+    if isinstance(passed, int) and isinstance(total, int) and total:
+        details.append(f"{passed}/{total} checks")
+    if isinstance(code_remaining, (int, float)):
+        details.append(f"code remaining {code_remaining:.1f}%")
+    if isinstance(release_remaining, (int, float)):
+        details.append(f"release remaining {release_remaining:.1f}%")
+    suffix = f" ({', '.join(details)})" if details else ""
+    print(f"- automated/public release gate: {ready_label}{suffix}")
+
+
+def _print_manual_signoff_lane(*, signoff_draft: Path) -> None:
+    try:
+        report = _load_report(signoff_draft)
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"- local manual signoff: unreadable ({exc})")
+        return
+    summary = report.get("manual_release_candidate_check_summary")
+    if not isinstance(summary, dict):
+        print("- local manual signoff: summary missing")
+        return
+    remaining_ids = _string_items(summary.get("remaining_check_ids"))
+    check_ids = {
+        str(check.get("id") or "")
+        for check in _dict_items(report.get("checks"))
+        if str(check.get("id") or "")
+    }
+    total = summary.get("total")
+    if not isinstance(total, int) and check_ids:
+        total = len(check_ids.union(remaining_ids))
+    remaining = summary.get("remaining_count")
+    if not isinstance(remaining, int) and remaining_ids:
+        remaining = len(remaining_ids)
+    if isinstance(total, int) and isinstance(remaining, int):
+        complete = max(total - remaining, 0)
+        line = f"- local manual signoff: {complete}/{total} complete"
+        if remaining:
+            line += f", {remaining} remaining"
+        if remaining_ids:
+            line += f" ({', '.join(remaining_ids)})"
+        print(line)
+        return
+    if remaining_ids:
+        print(f"- local manual signoff: remaining {', '.join(remaining_ids)}")
+    else:
+        print("- local manual signoff: progress unknown")
+
+
+def _print_opt_in_real_desktop_lane(*, label: str) -> None:
+    missing = _missing_real_desktop_capabilities(label=label)
+    if missing:
+        print(
+            "- opt-in real desktop evidence: not collected by default "
+            f"({', '.join(missing)}); isolated desktop evidence is used to avoid "
+            "foreground mouse/keyboard capture"
+        )
+        return
+    print("- opt-in real desktop evidence: collected or not required")
+
+
+def _missing_real_desktop_capabilities(*, label: str) -> list[str]:
+    for report_path in (
+        ROOT / "tmp" / f"rc-verification-{label}-release-readiness.json",
+        ROOT / "tmp" / f"rc-verification-{label}-native-capability-matrix.json",
+    ):
+        if not report_path.exists():
+            continue
+        try:
+            report = _load_report(report_path)
+        except (OSError, json.JSONDecodeError):
+            continue
+        missing = _string_items(report.get("missing_capability_ids"))
+        real_desktop_missing = [
+            item for item in missing if item.startswith("source_real_desktop_")
+        ]
+        if real_desktop_missing:
+            return real_desktop_missing
+    return []
 
 
 def _print_release_readiness_status(*, label: str) -> None:

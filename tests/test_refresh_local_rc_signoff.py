@@ -1038,10 +1038,41 @@ def test_refresh_local_rc_signoff_print_status_uses_current_draft(
         ),
         encoding="utf-8",
     )
+    public_release_gate = tmp_path / "tmp" / "public-release-gate-abc12345.json"
+    public_release_gate.write_text(
+        json.dumps(
+            {
+                "status": "ready",
+                "release_ready": True,
+                "passed_count": 8,
+                "check_count": 8,
+                "progress": {
+                    "automated_checks": {"passed": 8, "total": 8},
+                    "code_remaining_percent": 0.0,
+                    "release_remaining_percent": 0.0,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
 
     assert refresh.main(["--short-commit", "abc12345", "--print-status"]) == 0
     output = capsys.readouterr().out
     assert "manual release-candidate check progress: 4/7 complete, 3 remaining" in output
+    assert "release progress lanes:" in output
+    assert (
+        "- automated/public release gate: ready "
+        "(8/8 checks, code remaining 0.0%, release remaining 0.0%)"
+    ) in output
+    assert (
+        "- local manual signoff: 4/7 complete, 3 remaining "
+        "(gatekeeper_first_launch, screen_recording_permission, external_integrations_smoke)"
+    ) in output
+    assert (
+        "- opt-in real desktop evidence: not collected by default "
+        "(source_real_desktop_interaction); isolated desktop evidence is used to avoid "
+        "foreground mouse/keyboard capture"
+    ) in output
     assert "local RC release readiness:" in output
     assert "- capabilities: 26/30 passed" in output
     assert "source_real_desktop_interaction" in output
