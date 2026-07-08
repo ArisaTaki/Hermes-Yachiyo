@@ -99,6 +99,48 @@ def test_legacy_run_event_page_first_page_includes_provider_session_window() -> 
     }
 
 
+def test_legacy_run_event_page_first_page_includes_workspace_state_window() -> None:
+    page = run_event_page_from_legacy_stream(
+        {
+            "run_id": "legacy-run",
+            "events": [
+                {"event_type": "run.started", "sequence": 1},
+                {"event_type": "agent.plan.created", "sequence": 2},
+                {"event_type": "agent.task_core.created", "sequence": 3},
+                {
+                    "event_type": "agent.task.workspace_item.updated",
+                    "sequence": 4,
+                    "payload": {"workspace_item_id": "input-sales"},
+                },
+                {
+                    "event_type": "agent.task.todo.updated",
+                    "sequence": 5,
+                    "payload": {"todo_id": "todo-read"},
+                },
+                {
+                    "event_type": "agent.task.checkpoint.updated",
+                    "sequence": 6,
+                    "payload": {"checkpoint_id": "checkpoint-read"},
+                },
+                {"event_type": "agent.tool.started", "sequence": 7},
+            ],
+        },
+        run_id="fallback-run",
+        after_sequence=0,
+        limit=2,
+    )
+
+    assert page["next_after_sequence"] == 6
+    assert [event["event_type"] for event in page["events"]] == [
+        "run.started",
+        "agent.plan.created",
+        "agent.task_core.created",
+        "agent.task.workspace_item.updated",
+        "agent.task.todo.updated",
+        "agent.task.checkpoint.updated",
+    ]
+
+
 def test_legacy_run_event_page_normalizes_empty_legacy_stream() -> None:
     page = run_event_page_from_legacy_stream(
         {"events": [{"event_type": "run.started", "sequence": 0}]},

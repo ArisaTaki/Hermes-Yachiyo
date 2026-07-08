@@ -25,6 +25,7 @@ def task_core_initial_progress_event_payloads(
         "runtime_status": "planned",
     }
     return [
+        *_task_core_workspace_item_event_payloads(task_core, base_payload),
         *_task_core_todo_event_payloads(task_core, base_payload),
         *_task_core_checkpoint_event_payloads(task_core, base_payload),
     ]
@@ -49,7 +50,24 @@ def task_core_progress_event_detail(
 ) -> str:
     if event_type == "agent.task.todo.updated":
         todo = payload.get("todo") if isinstance(payload.get("todo"), dict) else {}
-        return str(todo.get("title") or payload.get("todo_id") or payload.get("step_id") or "").strip()
+        return str(
+            todo.get("title")
+            or payload.get("todo_id")
+            or payload.get("step_id")
+            or ""
+        ).strip()
+    if event_type == "agent.task.workspace_item.updated":
+        workspace_item = (
+            payload.get("workspace_item")
+            if isinstance(payload.get("workspace_item"), dict)
+            else {}
+        )
+        return str(
+            workspace_item.get("title")
+            or payload.get("workspace_item_id")
+            or payload.get("step_id")
+            or ""
+        ).strip()
     if event_type == "agent.task.checkpoint.updated":
         checkpoint = (
             payload.get("checkpoint")
@@ -63,6 +81,32 @@ def task_core_progress_event_detail(
             or ""
         ).strip()
     return str(event_type or "").strip()
+
+
+def _task_core_workspace_item_event_payloads(
+    task_core: TaskCoreSnapshot,
+    base_payload: dict[str, Any],
+) -> list[tuple[str, dict[str, Any]]]:
+    payloads: list[tuple[str, dict[str, Any]]] = []
+    for item in task_core.workspace.items:
+        item_payload = item.model_dump(mode="json")
+        status = str(item_payload.get("status") or "planned").strip() or "planned"
+        payloads.append(
+            (
+                "agent.task.workspace_item.updated",
+                {
+                    **base_payload,
+                    "workspace_item_id": str(
+                        item_payload.get("item_id") or ""
+                    ).strip(),
+                    "step_id": str(item_payload.get("source_step_id") or "").strip(),
+                    "status": status,
+                    "previous_status": "",
+                    "workspace_item": item_payload,
+                },
+            )
+        )
+    return payloads
 
 
 def _task_core_todo_event_payloads(

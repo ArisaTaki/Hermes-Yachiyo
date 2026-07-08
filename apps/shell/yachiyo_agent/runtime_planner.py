@@ -15626,6 +15626,7 @@ def _timeline_preview(
                 "payload": {
                     "core_id": task_core.core_id,
                     "workspace_id": task_core.workspace.workspace_id,
+                    "workspace_item_count": len(task_core.workspace.items),
                     "todo_count": len(task_core.todos),
                     "checkpoint_count": len(task_core.checkpoints),
                     "replan_signal_count": len(task_core.replan_signals),

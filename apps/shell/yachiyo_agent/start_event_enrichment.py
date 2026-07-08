@@ -308,7 +308,11 @@ def _planner_events_with_execution_task_core(
             rebuilt.append(replacement)
             inserted_created = True
             continue
-        if event_type in {"agent.task.todo.updated", "agent.task.checkpoint.updated"}:
+        if event_type in {
+            "agent.task.workspace_item.updated",
+            "agent.task.todo.updated",
+            "agent.task.checkpoint.updated",
+        }:
             continue
         rebuilt.append(dict(event))
 
@@ -394,6 +398,7 @@ def _task_core_created_payload(
         "plan_id": str(context.get("plan_id") or "").strip(),
         "core_id": task_core.core_id,
         "task_core": task_core.model_dump(mode="json"),
+        "workspace_item_count": len(task_core.workspace.items),
         "todo_count": len(task_core.todos),
         "checkpoint_count": len(task_core.checkpoints),
         "replan_signal_count": len(task_core.replan_signals),

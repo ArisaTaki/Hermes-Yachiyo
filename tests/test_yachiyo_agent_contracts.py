@@ -2162,11 +2162,24 @@ def test_planner_plan_created_event_includes_execution_envelope_for_studio_debug
     plan_event = next(
         event for event in events if event["event_type"] == "agent.plan.created"
     )
+    task_core_event = next(
+        event for event in events if event["event_type"] == "agent.task_core.created"
+    )
+    workspace_events = [
+        event
+        for event in events
+        if event["event_type"] == "agent.task.workspace_item.updated"
+    ]
 
     envelope = plan_event["payload"]["runtime_execution_envelope"]
     assert plan_event["payload"]["capability_plan"]["plan_id"] == (
         decision.plan.capability_plan.plan_id
     )
+    assert task_core_event["payload"]["workspace_item_count"] == len(
+        decision.plan.task_core.workspace.items
+    )
+    assert workspace_events
+    assert workspace_events[0]["payload"]["workspace_item_id"]
     assert envelope["capability_plan"]["plan_id"] == decision.plan.capability_plan.plan_id
     assert envelope["decision_id"] == decision.decision_id
     assert envelope["plan_id"] == decision.plan.plan_id

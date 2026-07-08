@@ -2,8 +2,70 @@
 
 from __future__ import annotations
 
+from apps.shell.yachiyo_agent.contracts import (
+    TaskCheckpointSnapshot,
+    TaskCoreSnapshot,
+    TaskTodoItemSnapshot,
+    TaskWorkspaceItemSnapshot,
+    TaskWorkspaceSnapshot,
+)
 from apps.shell.yachiyo_agent.run_timeline_snapshots import run_timeline_snapshot_from_payload
+from apps.shell.yachiyo_agent.task_core_event_projection import (
+    task_core_initial_progress_event_payloads,
+)
 from apps.shell.yachiyo_agent.task_cards import agent_task_snapshot_from_payload
+
+
+def test_task_core_initial_progress_events_include_workspace_items() -> None:
+    task_core = TaskCoreSnapshot(
+        core_id="task-core-1",
+        workspace=TaskWorkspaceSnapshot(
+            workspace_id="workspace-1",
+            title="Analysis Workspace",
+            items=[
+                TaskWorkspaceItemSnapshot(
+                    item_id="input-sales",
+                    title="sales.csv",
+                    kind="input",
+                    path="sales.csv",
+                    source_step_id="read-source",
+                )
+            ],
+        ),
+        todos=[
+            TaskTodoItemSnapshot(
+                todo_id="todo-read",
+                title="Read source",
+                step_id="read-source",
+                tool_name="workspace.read",
+            )
+        ],
+        checkpoints=[
+            TaskCheckpointSnapshot(
+                checkpoint_id="checkpoint-read",
+                title="Verify read",
+                after_step_id="read-source",
+            )
+        ],
+    )
+
+    payloads = task_core_initial_progress_event_payloads(
+        task_core,
+        source="runtime_planner",
+        decision_id="decision-1",
+        plan_id="plan-1",
+    )
+
+    assert [event_type for event_type, _ in payloads] == [
+        "agent.task.workspace_item.updated",
+        "agent.task.todo.updated",
+        "agent.task.checkpoint.updated",
+    ]
+    workspace_payload = payloads[0][1]
+    assert workspace_payload["workspace_item_id"] == "input-sales"
+    assert workspace_payload["step_id"] == "read-source"
+    assert workspace_payload["status"] == "planned"
+    assert workspace_payload["workspace_item"]["path"] == "sales.csv"
 
 
 def test_task_core_reconstructs_from_public_plan_steps_and_updates() -> None:

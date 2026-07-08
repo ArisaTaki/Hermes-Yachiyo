@@ -1495,6 +1495,7 @@ def planner_run_event_payloads(
                     "plan_id": decision.plan.plan_id,
                     "core_id": task_core.core_id,
                     "task_core": task_core.model_dump(mode="json"),
+                    "workspace_item_count": len(task_core.workspace.items),
                     "todo_count": len(task_core.todos),
                     "checkpoint_count": len(task_core.checkpoints),
                     "replan_signal_count": len(task_core.replan_signals),

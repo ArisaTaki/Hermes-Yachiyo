@@ -28,6 +28,7 @@ FIRST_PAGE_GROUP_RUN_KEY_EVENT_TYPES = {
     "group.run.replan.requested",
     "group.run.replan.recovery.updated",
     "group.run.task_core.created",
+    "group.run.task.workspace_item.updated",
     "group.run.task.todo.updated",
     "group.run.task.checkpoint.updated",
 }
@@ -49,6 +50,7 @@ FIRST_PAGE_RUN_KEY_EVENT_TYPES = {
     "agent.replan.requested",
     "agent.replan.recovery.updated",
     "agent.task_core.created",
+    "agent.task.workspace_item.updated",
     "agent.task.todo.updated",
     "agent.task.checkpoint.updated",
     "tool.approval_required",
@@ -67,9 +69,11 @@ FIRST_PAGE_WORKFLOW_RUN_KEY_EVENT_TYPES = {
     "workflow.run.replan.requested",
     "workflow.run.replan.recovery.updated",
     "workflow.task_core.created",
+    "workflow.task.workspace_item.updated",
     "workflow.task.todo.updated",
     "workflow.task.checkpoint.updated",
     "workflow.run.task_core.created",
+    "workflow.run.task.workspace_item.updated",
     "workflow.run.task.todo.updated",
     "workflow.run.task.checkpoint.updated",
 }
@@ -94,15 +98,19 @@ FIRST_PAGE_LEGACY_KEY_EVENT_TYPES = (
 
 FIRST_PAGE_RUNTIME_STATE_EVENT_TYPES = {
     "agent.task_core.created",
+    "agent.task.workspace_item.updated",
     "agent.task.todo.updated",
     "agent.task.checkpoint.updated",
     "group.run.task_core.created",
+    "group.run.task.workspace_item.updated",
     "group.run.task.todo.updated",
     "group.run.task.checkpoint.updated",
     "workflow.task_core.created",
+    "workflow.task.workspace_item.updated",
     "workflow.task.todo.updated",
     "workflow.task.checkpoint.updated",
     "workflow.run.task_core.created",
+    "workflow.run.task.workspace_item.updated",
     "workflow.run.task.todo.updated",
     "workflow.run.task.checkpoint.updated",
 }
