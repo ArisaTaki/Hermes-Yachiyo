@@ -149,6 +149,9 @@ SMOKE_ITEMS: tuple[dict[str, Any], ...] = (
             "source_agent_entrypoint_data_analysis",
             "advanced_workflow_orchestration",
         ),
+        "required_evidence_kinds": {
+            "advanced_workflow_orchestration": ("provider_workflow_full_chain",),
+        },
         "next_action": (
             "python scripts/verify_release_candidate.py --require-artifacts "
             "--check-dmg-mount --run-provider-smoke "
@@ -398,27 +401,79 @@ def _item_status(
 ) -> dict[str, Any]:
     required = tuple(str(value) for value in item.get("required", ()))
     related = tuple(str(value) for value in item.get("related", ()))
-    present = [value for value in required if value in evidence]
-    missing = [value for value in required if value not in evidence]
+    required_kinds = _required_evidence_kinds(item)
+    valid_required_evidence = {
+        value: _matching_evidence_entries(evidence.get(value, []), required_kinds.get(value, ()))
+        for value in required
+    }
+    present = [value for value in required if valid_required_evidence.get(value)]
+    missing = [value for value in required if not valid_required_evidence.get(value)]
     related_present = [value for value in related if value in evidence]
+    rejected = {
+        value: evidence[value]
+        for value in required
+        if value in evidence and not valid_required_evidence.get(value)
+    }
     return {
         "id": str(item["id"]),
         "label": str(item["label"]),
         "status": "passed" if not missing else "missing",
         "required_evidence_ids": list(required),
+        "required_evidence_kinds": {
+            key: list(value)
+            for key, value in required_kinds.items()
+            if key in required
+        },
         "present_evidence_ids": present,
         "missing_evidence_ids": missing,
         "related_evidence_ids": related_present,
         "evidence": {
-            evidence_id: evidence[evidence_id]
+            evidence_id: valid_required_evidence[evidence_id]
             for evidence_id in present
         },
+        "rejected_evidence": rejected,
         "related_evidence": {
             evidence_id: evidence[evidence_id]
             for evidence_id in related_present
         },
         "next_action": str(item.get("next_action") or ""),
     }
+
+
+def _required_evidence_kinds(item: Mapping[str, Any]) -> dict[str, tuple[str, ...]]:
+    raw = item.get("required_evidence_kinds")
+    if not isinstance(raw, Mapping):
+        return {}
+    result: dict[str, tuple[str, ...]] = {}
+    for evidence_id, kinds in raw.items():
+        clean_id = str(evidence_id or "").strip()
+        if not clean_id:
+            continue
+        if isinstance(kinds, str):
+            clean_kinds = (kinds.strip(),)
+        else:
+            clean_kinds = tuple(
+                str(kind or "").strip()
+                for kind in (kinds if isinstance(kinds, Sequence) else ())
+                if str(kind or "").strip()
+            )
+        if clean_kinds:
+            result[clean_id] = clean_kinds
+    return result
+
+
+def _matching_evidence_entries(
+    entries: Sequence[Mapping[str, Any]],
+    required_kinds: Sequence[str],
+) -> list[dict[str, Any]]:
+    clean_kinds = {str(kind or "").strip() for kind in required_kinds if str(kind or "").strip()}
+    if not clean_kinds:
+        return [dict(entry) for entry in entries if isinstance(entry, Mapping)]
+    return [
+        dict(entry)
+        for entry in entries
+        if isinstance(entry, Mapping) and str(entry.get("kind") or "").strip() in clean_kinds
+    ]
 
 
 def _next_actions(missing_items: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:

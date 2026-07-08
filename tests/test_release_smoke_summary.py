@@ -104,11 +104,20 @@ def _oha_desktop_agent_release_smoke_report() -> dict[str, object]:
     }
 
 
+def _provider_workflow_full_chain_report() -> dict[str, object]:
+    return {
+        "mode": "native_workflow_full_chain_smoke",
+        "ok": True,
+        "skipped": False,
+    }
+
+
 def test_release_smoke_summary_passes_with_required_evidence(tmp_path, monkeypatch):
     monkeypatch.setattr(release_smoke, "ROOT", tmp_path)
     report_path = tmp_path / "tmp" / "rc.json"
     public_demo_path = tmp_path / "tmp" / "public-demo.json"
     oha_report_path = tmp_path / "tmp" / "oha-desktop-agent-release-smoke.json"
+    provider_workflow_path = tmp_path / "tmp" / "provider-workflow.json"
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(
         json.dumps(
@@ -119,7 +128,6 @@ def test_release_smoke_summary_passes_with_required_evidence(tmp_path, monkeypat
                 "source_yachiyo_route_approval",
                 "source_group_run_timeline",
                 "source_agent_entrypoint_data_analysis",
-                "advanced_workflow_orchestration",
                 "source_data_analysis_artifact",
             )
         ),
@@ -147,11 +155,15 @@ def test_release_smoke_summary_passes_with_required_evidence(tmp_path, monkeypat
         json.dumps(_oha_desktop_agent_release_smoke_report()),
         encoding="utf-8",
     )
+    provider_workflow_path.write_text(
+        json.dumps(_provider_workflow_full_chain_report()),
+        encoding="utf-8",
+    )
     diagnostics_zip = tmp_path / "tmp" / "diagnostics.zip"
     _diagnostics_zip(diagnostics_zip)
 
     summary = release_smoke.summarize_release_smoke(
-        [report_path, public_demo_path, oha_report_path],
+        [report_path, public_demo_path, oha_report_path, provider_workflow_path],
         diagnostics_zips=[diagnostics_zip],
     )
 
@@ -532,13 +544,7 @@ def test_release_smoke_summary_uses_provider_workflow_as_workflow_release_eviden
         encoding="utf-8",
     )
     provider_report_path.write_text(
-        json.dumps(
-            {
-                "mode": "native_workflow_full_chain_smoke",
-                "ok": True,
-                "skipped": False,
-            }
-        ),
+        json.dumps(_provider_workflow_full_chain_report()),
         encoding="utf-8",
     )
 
@@ -577,7 +583,12 @@ def test_release_smoke_summary_does_not_project_provider_workflow_from_capabilit
         encoding="utf-8",
     )
     rc_report_path.write_text(
-        json.dumps(_matrix_report("advanced_workflow_orchestration")),
+        json.dumps(
+            _matrix_report(
+                "source_agent_entrypoint_data_analysis",
+                "advanced_workflow_orchestration",
+            )
+        ),
         encoding="utf-8",
     )
 
@@ -592,6 +603,16 @@ def test_release_smoke_summary_does_not_project_provider_workflow_from_capabilit
     action = next(item for item in summary["next_actions"] if item["id"] == "public_demo")
     assert action["missing_required_flow_ids"] == ["studio_replay_ui"]
     assert "--include-ui" in action["command"]
+    workflow = next(item for item in summary["items"] if item["id"] == "workflow")
+    assert workflow["status"] == "missing"
+    assert workflow["present_evidence_ids"] == ["source_agent_entrypoint_data_analysis"]
+    assert workflow["missing_evidence_ids"] == ["advanced_workflow_orchestration"]
+    assert workflow["required_evidence_kinds"] == {
+        "advanced_workflow_orchestration": ["provider_workflow_full_chain"]
+    }
+    assert workflow["rejected_evidence"]["advanced_workflow_orchestration"][0]["kind"] == (
+        "capability"
+    )
 
 
 def test_release_smoke_summary_rejects_inconsistent_public_demo_level(
