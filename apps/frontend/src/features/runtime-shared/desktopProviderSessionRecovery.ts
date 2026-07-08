@@ -18,6 +18,11 @@ export type DesktopProviderSessionSnapshot = {
   started?: boolean;
   provider_id?: string;
   tool_names?: string[];
+  desktop_session_kind?: string;
+  desktop_session_isolated?: boolean;
+  foreground_takeover_required?: boolean;
+  keyboard_mouse_capture_supported?: boolean;
+  supported_tools?: string[];
 };
 
 export function runtimeRecoveryActionIsDesktopProviderSessionStart(

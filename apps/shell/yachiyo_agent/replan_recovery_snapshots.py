@@ -1686,6 +1686,22 @@ def _desktop_provider_session_recovery_snapshot(
         "diagnostic_route": "/yachiyo/studio/tools",
         "api_route": "/yachiyo/studio/tools/desktop-provider/session/start",
     }
+    session_payload = _desktop_provider_session_public_payload(session)
+    deferred_request = _desktop_provider_session_deferred_continuation_request(
+        source_request
+    )
+    deferred_continuation = [deferred_request] if deferred_request else []
+    deferred_tool = _first_text(deferred_request.get("tool")) if deferred_request else ""
+    deferred_input = _mapping(deferred_request.get("input")) if deferred_request else {}
+    metadata: dict[str, Any] = {
+        "runtime_execution_envelope_id": envelope.envelope_id,
+        "runtime_execution_request_id": source_request_id,
+        "runtime_retry_source": "desktop_provider_session",
+        "desktop_provider_session": session_payload,
+    }
+    if deferred_continuation:
+        metadata["deferred_continuation_count"] = len(deferred_continuation)
+        metadata["deferred_tools"] = [deferred_tool]
     action = ReplanRecoveryActionSnapshot(
         action_id=f"{request_id}:action:1:{tool}",
         label="Start isolated desktop provider",
@@ -1697,21 +1713,19 @@ def _desktop_provider_session_recovery_snapshot(
         approval_required=True,
         approval_status="pending",
         selected=True,
+        deferred_tool=deferred_tool or None,
+        deferred_input=deferred_input,
+        deferred_continuation=deferred_continuation,
         observation_evidence={
             "blocking_condition": trigger,
-            "desktop_provider_session": _desktop_provider_session_public_payload(session),
+            "desktop_provider_session": session_payload,
         },
         observation_retry={
             "tool": tool,
             "reason": trigger,
             "input": action_input,
         },
-        metadata={
-            "runtime_execution_envelope_id": envelope.envelope_id,
-            "runtime_execution_request_id": source_request_id,
-            "runtime_retry_source": "desktop_provider_session",
-            "desktop_provider_session": _desktop_provider_session_public_payload(session),
-        },
+        metadata=metadata,
     )
     source_group_run_id = _first_text(
         _runtime_request_value(source_request, "group_run_id") if source_request is not None else "",
@@ -1769,6 +1783,9 @@ def _desktop_provider_session_recovery_snapshot(
         permission_target="isolated_desktop_provider",
         risk_level="medium",
         approval_status="pending",
+        deferred_tool=deferred_tool or None,
+        deferred_input=deferred_input,
+        deferred_continuation=deferred_continuation,
         observation_evidence=action.observation_evidence,
         observation_retry=action.observation_retry,
         failure_detail=_first_text(session.get("error"), session.get("reason"), trigger),
@@ -1808,6 +1825,86 @@ def _desktop_provider_session_source_request(
     return (envelope.requests or [None])[0]
 
 
+def _desktop_provider_session_deferred_continuation_request(
+    source_request: RuntimeExecutionRequestSnapshot | Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    if source_request is None:
+        return {}
+    tool_name = _first_text(
+        _runtime_request_value(source_request, "tool_name"),
+        _runtime_request_value(source_request, "tool"),
+    )
+    if not tool_name or tool_name == "desktop.provider_session.start":
+        return {}
+
+    policy = _mapping(_runtime_request_value(source_request, "desktop_execution_policy"))
+    policy = {
+        **policy,
+        "mode": _first_text(policy.get("mode"), "sandbox_preferred"),
+        "prefer_isolated_desktop": True,
+        "avoid_user_foreground_takeover": True,
+        "require_sandbox_for_keyboard_mouse": True,
+        "source": "desktop_provider_session_recovery",
+    }
+    request: dict[str, Any] = {
+        "tool": tool_name,
+        "input": _mapping(_runtime_request_value(source_request, "input")),
+        "desktop_execution_policy": policy,
+        "planning_reason": "desktop_provider_session_retry_after_start",
+        "source": "desktop_provider_session_recovery",
+    }
+    source_request_id = _first_text(_runtime_request_value(source_request, "request_id"))
+    if source_request_id:
+        request["source_request_id"] = source_request_id
+    for key in (
+        "decision_id",
+        "plan_id",
+        "tool_plan_id",
+        "intent_kind",
+        "core_id",
+        "workspace_id",
+        "group_run_id",
+        "run_group_id",
+        "group_id",
+        "workflow_run_id",
+        "workflow_id",
+        "workflow_node_id",
+        "workflow_node_label",
+        "workflow_node_kind",
+        "step_id",
+        "capability_id",
+        "runtime_stage",
+        "runtime_role",
+    ):
+        value = _first_text(_runtime_request_value(source_request, key))
+        if value:
+            request[key] = value
+    for key in ("replan_triggers", "replan_signal_ids"):
+        values = _string_list(_runtime_request_value(source_request, key))
+        if values:
+            request[key] = values
+    for key in (
+        "task_todo",
+        "followup_target",
+        "action_target",
+        "observation_evidence",
+        "observation_retry",
+    ):
+        value = _mapping(_runtime_request_value(source_request, key))
+        if value:
+            request[key] = value
+    for key in (
+        "task_checkpoints",
+        "task_workspace_items",
+        "verification_targets",
+        "task_verification_targets",
+    ):
+        values = _mapping_list(_runtime_request_value(source_request, key))
+        if values:
+            request[key] = values
+    return request
+
+
 def _desktop_provider_session_public_payload(
     session: Mapping[str, Any],
 ) -> dict[str, Any]:
@@ -1826,6 +1923,11 @@ def _desktop_provider_session_public_payload(
         "tool_names",
         "error",
         "source",
+        "desktop_session_kind",
+        "desktop_session_isolated",
+        "foreground_takeover_required",
+        "keyboard_mouse_capture_supported",
+        "supported_tools",
     ):
         value = session.get(key)
         if value not in (None, "", [], {}):

@@ -860,6 +860,27 @@ class _ProviderSessionReplanRecoveryTaskRuntimePort(_ReplanRecoveryTaskRuntimePo
             "risk_level": "medium",
             "approval_required": True,
             "approval_status": "pending",
+            "deferred_tool": "app.focus_and_click_ui_element",
+            "deferred_input": {
+                "app_name": "Apple Music",
+                "target": "Play",
+                "role_filter": "button",
+            },
+            "deferred_continuation": [
+                {
+                    "tool": "app.focus_and_click_ui_element",
+                    "input": {
+                        "app_name": "Apple Music",
+                        "target": "Play",
+                        "role_filter": "button",
+                    },
+                    "desktop_execution_policy": {
+                        "prefer_isolated_desktop": True,
+                        "avoid_user_foreground_takeover": True,
+                        "require_sandbox_for_keyboard_mouse": True,
+                    },
+                }
+            ],
             "metadata": {
                 "runtime_retry_source": "desktop_provider_session",
                 "runtime_stage": "operate",
@@ -1155,6 +1176,24 @@ def test_yachiyo_agent_service_marks_provider_session_recovery_as_control_action
     assert direct_request["diagnostic_route"] == "/yachiyo/studio/tools"
     assert direct_request["approval_required"] is True
     assert direct_request["target_capability_id"] == "desktop.ui_operation"
+    assert direct_request["deferred_tool"] == "app.focus_and_click_ui_element"
+    assert direct_request["deferred_input"] == {
+        "app_name": "Apple Music",
+        "target": "Play",
+        "role_filter": "button",
+    }
+    continuation = direct_request["deferred_continuation"][0]
+    assert continuation["tool"] == "app.focus_and_click_ui_element"
+    assert continuation["input"] == direct_request["deferred_input"]
+    assert continuation["desktop_execution_policy"]["prefer_isolated_desktop"] is True
+    assert (
+        continuation["desktop_execution_policy"]["avoid_user_foreground_takeover"]
+        is True
+    )
+    assert (
+        continuation["desktop_execution_policy"]["require_sandbox_for_keyboard_mouse"]
+        is True
+    )
 
 
 def test_yachiyo_agent_service_preserves_deferred_replan_recovery_context() -> None:

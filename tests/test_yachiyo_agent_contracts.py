@@ -3954,6 +3954,11 @@ def test_agent_task_snapshot_projects_desktop_provider_session_recovery() -> Non
                             "step_id": "operate-foreground-ui",
                             "tool_name": "app.focus_and_click_ui_element",
                             "capability_id": "desktop.ui_operation",
+                            "input": {
+                                "app_name": "Apple Music",
+                                "target": "Play",
+                                "role_filter": "button",
+                            },
                             "runtime_stage": "operate",
                             "runtime_role": "desktop_ui_action",
                         }
@@ -4002,6 +4007,36 @@ def test_agent_task_snapshot_projects_desktop_provider_session_recovery() -> Non
     assert recovery.recovery_actions[0].metadata["runtime_retry_source"] == (
         "desktop_provider_session"
     )
+    assert recovery.deferred_tool == "app.focus_and_click_ui_element"
+    assert recovery.deferred_input == {
+        "app_name": "Apple Music",
+        "target": "Play",
+        "role_filter": "button",
+    }
+    assert recovery.recovery_actions[0].deferred_tool == (
+        "app.focus_and_click_ui_element"
+    )
+    assert recovery.recovery_actions[0].deferred_input == recovery.deferred_input
+    continuation = recovery.recovery_actions[0].deferred_continuation[0]
+    assert continuation["tool"] == "app.focus_and_click_ui_element"
+    assert continuation["input"] == recovery.deferred_input
+    assert continuation["source_request_id"] == "request-click-export"
+    assert "request_id" not in continuation
+    assert continuation["desktop_execution_policy"]["prefer_isolated_desktop"] is True
+    assert (
+        continuation["desktop_execution_policy"]["avoid_user_foreground_takeover"]
+        is True
+    )
+    assert (
+        continuation["desktop_execution_policy"]["require_sandbox_for_keyboard_mouse"]
+        is True
+    )
+    assert continuation["source"] == "desktop_provider_session_recovery"
+    session_metadata = recovery.recovery_actions[0].metadata[
+        "desktop_provider_session"
+    ]
+    assert session_metadata["desktop_session_isolated"] is True
+    assert session_metadata["foreground_takeover_required"] is False
 
 
 def test_agent_task_snapshot_marks_recovered_runtime_request_after_recovery_success() -> None:
