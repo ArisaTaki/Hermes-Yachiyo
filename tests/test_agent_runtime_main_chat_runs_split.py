@@ -176,6 +176,10 @@ def test_main_chat_run_lifecycle_records_desktop_provider_session_event() -> Non
             "desktop_session_isolated": True,
             "foreground_takeover_required": False,
             "keyboard_mouse_capture_supported": True,
+            "desktop_backend_kind": "virtual_desktop_backend",
+            "desktop_backend_is_loopback": False,
+            "desktop_backend_ready_for_public_release": True,
+            "requires_real_virtual_desktop_backend": False,
             "env": {"SECRET": "not-for-timeline"},
             "command": ["python", "scripts/run_isolated_desktop_provider.py"],
             "request_ids": ["request-click"],
@@ -223,6 +227,22 @@ def test_main_chat_run_lifecycle_records_desktop_provider_session_event() -> Non
         provider_event["desktop_provider_session"]["keyboard_mouse_capture_supported"]
         is True
     )
+    assert provider_event["desktop_provider_session"]["desktop_backend_kind"] == (
+        "virtual_desktop_backend"
+    )
+    assert provider_event["desktop_provider_session"]["desktop_backend_is_loopback"] is False
+    assert (
+        provider_event["desktop_provider_session"][
+            "desktop_backend_ready_for_public_release"
+        ]
+        is True
+    )
+    assert (
+        provider_event["desktop_provider_session"][
+            "requires_real_virtual_desktop_backend"
+        ]
+        is False
+    )
     assert provider_event["desktop_provider_session"]["request_ids"] == [
         "request-click"
     ]
@@ -254,6 +274,9 @@ def test_main_chat_run_lifecycle_records_desktop_provider_session_event() -> Non
     assert projected_event.payload["desktop_provider_session"][
         "keyboard_mouse_capture_supported"
     ] is True
+    assert projected_event.payload["desktop_provider_session"][
+        "desktop_backend_kind"
+    ] == "virtual_desktop_backend"
     assert projected_event.payload["desktop_provider_session"]["supported_tools"] == [
         "app.focus_and_click_ui_element",
         "desktop.inspect_app",

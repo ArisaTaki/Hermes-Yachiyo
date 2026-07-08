@@ -122,6 +122,10 @@ def desktop_provider_session_event_payload(
         "desktop_session_isolated",
         "foreground_takeover_required",
         "keyboard_mouse_capture_supported",
+        "desktop_backend_kind",
+        "desktop_backend_is_loopback",
+        "desktop_backend_ready_for_public_release",
+        "requires_real_virtual_desktop_backend",
         "supported_tools",
     ):
         value = session.get(key)

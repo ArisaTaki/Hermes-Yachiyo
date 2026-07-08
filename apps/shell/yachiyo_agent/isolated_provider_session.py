@@ -170,7 +170,13 @@ def isolated_desktop_provider_session_manager() -> IsolatedDesktopProviderSessio
 
 
 def isolated_desktop_provider_session_status() -> dict[str, Any]:
-    return _SESSION_MANAGER.status(probe_health=True)
+    local_status = _SESSION_MANAGER.status(probe_health=True)
+    if bool(local_status.get("running")):
+        return local_status
+    external_status = _external_isolated_desktop_provider_session_status()
+    if external_status:
+        return external_status
+    return local_status
 
 
 def start_isolated_desktop_provider_session(
@@ -214,8 +220,28 @@ def ensure_isolated_desktop_provider_session_for_envelope(
     }
     if not targets:
         return {**base, **_public_session_status(status)}
-    if bool(status.get("running")):
+    if bool(status.get("running")) and _session_status_supports_targets(
+        status,
+        scoped_targets,
+    ):
         return {**base, **_public_session_status(status), "running": True}
+    if bool(status.get("running")):
+        return {
+            **base,
+            **_public_session_status(status),
+            "ok": False,
+            "running": False,
+            "status": "provider_missing_required_tools",
+            "reason": "isolated_provider_missing_required_tools",
+        }
+    if status.get("external_provider_configured") is True:
+        return {
+            **base,
+            **_public_session_status(status),
+            "ok": False,
+            "running": False,
+            "reason": "external_isolated_provider_unavailable",
+        }
     if not auto_start:
         return {**base, **_public_session_status(status)}
     try:
@@ -316,6 +342,80 @@ def _runtime_env_from_launch(launch: dict[str, Any]) -> dict[str, str]:
         "OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_ISOLATED": "true",
         "OHA_YACHIYO_DESKTOP_PROVIDER_FOREGROUND_TAKEOVER_REQUIRED": "false",
     }
+
+
+def _external_isolated_desktop_provider_session_status() -> dict[str, Any]:
+    provider_status = desktop_execution_provider_status_from_env(probe_health=True)
+    if not _external_status_is_isolated_provider_candidate(provider_status):
+        return {}
+    running = bool(provider_status.get("available")) and bool(
+        provider_status.get("adapter_ready")
+    )
+    return {
+        "ok": bool(provider_status.get("available", True)),
+        "status": str(
+            provider_status.get("status")
+            or ("running" if running else "external_provider_unavailable")
+        ),
+        "running": running,
+        "pid": None,
+        "provider_id": str(provider_status.get("provider_id") or ""),
+        "url": str(
+            os.environ.get("OHA_YACHIYO_DESKTOP_PROVIDER_URL")
+            or provider_status.get("endpoint_origin")
+            or ""
+        ),
+        "command": [],
+        "env": _provider_env_snapshot(),
+        "started_at": 0.0,
+        "provider_status": dict(provider_status),
+        "source": "runtime_env",
+        "external_provider_configured": True,
+    }
+
+
+def _external_status_is_isolated_provider_candidate(
+    provider_status: dict[str, Any],
+) -> bool:
+    if not isinstance(provider_status, dict):
+        return False
+    if provider_status.get("configured") is not True:
+        return False
+    session_kind = str(provider_status.get("desktop_session_kind") or "").strip()
+    session_isolated = _optional_bool(provider_status.get("desktop_session_isolated"))
+    foreground_takeover = _optional_bool(
+        provider_status.get("foreground_takeover_required")
+    )
+    return (
+        session_isolated is True
+        or session_kind in {"isolated_desktop", "virtual_desktop"}
+    ) and foreground_takeover is not True
+
+
+def _provider_env_snapshot() -> dict[str, str]:
+    return {
+        key: str(os.environ.get(key) or "")
+        for key in _ENV_KEYS
+        if str(os.environ.get(key) or "").strip()
+    }
+
+
+def _session_status_supports_targets(
+    status: dict[str, Any],
+    targets: list[dict[str, str]],
+) -> bool:
+    tool_names = {
+        str(target.get("tool_name") or "").strip()
+        for target in targets
+        if str(target.get("tool_name") or "").strip()
+    }
+    if not tool_names:
+        return True
+    supported_tools = set(_string_list(status.get("supported_tools")))
+    if not supported_tools:
+        provider_status = _mapping(status.get("provider_status"))
+        supported_tools = set(_string_list(provider_status.get("supported_tools")))
+    return not supported_tools or tool_names.issubset(supported_tools)
 
 
 def _apply_runtime_env(env: dict[str, str]) -> None:
@@ -543,6 +643,23 @@ def _public_session_status(status: dict[str, Any]) -> dict[str, Any]:
         "keyboard_mouse_capture_supported": _optional_bool(
             status.get("keyboard_mouse_capture_supported"),
             provider_status.get("keyboard_mouse_capture_supported"),
+        ),
+        "desktop_backend_kind": str(
+            status.get("desktop_backend_kind")
+            or provider_status.get("desktop_backend_kind")
+            or ""
+        ),
+        "desktop_backend_is_loopback": _optional_bool(
+            status.get("desktop_backend_is_loopback"),
+            provider_status.get("desktop_backend_is_loopback"),
+        ),
+        "desktop_backend_ready_for_public_release": _optional_bool(
+            status.get("desktop_backend_ready_for_public_release"),
+            provider_status.get("desktop_backend_ready_for_public_release"),
+        ),
+        "requires_real_virtual_desktop_backend": _optional_bool(
+            status.get("requires_real_virtual_desktop_backend"),
+            provider_status.get("requires_real_virtual_desktop_backend"),
         ),
         "supported_tools": _string_list(
             status.get("supported_tools") or provider_status.get("supported_tools")

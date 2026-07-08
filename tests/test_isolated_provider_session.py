@@ -155,6 +155,195 @@ def test_ensure_isolated_provider_session_detects_keyboard_mouse_requests(
     )
 
 
+def test_ensure_isolated_provider_session_uses_external_virtual_desktop_provider(
+    monkeypatch,
+) -> None:
+    starts: list[dict[str, Any] | None] = []
+
+    monkeypatch.setattr(
+        session_module._SESSION_MANAGER,
+        "status",
+        lambda probe_health=True: {"ok": True, "status": "stopped", "running": False},
+    )
+    monkeypatch.setattr(
+        session_module,
+        "desktop_execution_provider_status_from_env",
+        lambda *args, **kwargs: {
+            "configured": True,
+            "available": True,
+            "adapter_ready": True,
+            "provider_kind": "sandbox_desktop",
+            "provider_id": "real-virtual-desktop",
+            "status": "available",
+            "endpoint_origin": "http://127.0.0.1:29093",
+            "desktop_session_kind": "virtual_desktop",
+            "desktop_session_isolated": True,
+            "foreground_takeover_required": False,
+            "keyboard_mouse_capture_supported": True,
+            "desktop_backend_kind": "virtual_desktop_backend",
+            "desktop_backend_is_loopback": False,
+            "desktop_backend_ready_for_public_release": True,
+            "requires_real_virtual_desktop_backend": False,
+            "supported_tools": ["app.open", "desktop.active_window"],
+        },
+    )
+    monkeypatch.setattr(
+        session_module,
+        "start_isolated_desktop_provider_session",
+        lambda request=None: starts.append(request) or {},
+    )
+    envelope = {
+        "requests": [
+            {
+                "request_id": "request-open",
+                "tool_name": "app.open",
+                "input": {"app_name": "PixelForge"},
+                "desktop_execution_route": {
+                    "selected_provider_kind": "sandbox_desktop",
+                    "status": "provider_required",
+                    "sandbox_required": True,
+                    "blocking_conditions": ["sandbox_desktop_provider_required"],
+                },
+            }
+        ]
+    }
+
+    session = ensure_isolated_desktop_provider_session_for_envelope(envelope)
+    annotated = annotate_envelope_with_desktop_provider_session(envelope, session)
+
+    assert starts == []
+    assert session["needed"] is True
+    assert session["running"] is True
+    assert session["started"] is False
+    assert session["provider_id"] == "real-virtual-desktop"
+    assert session["source"] == "runtime_env"
+    assert session["desktop_session_kind"] == "virtual_desktop"
+    assert session["desktop_session_isolated"] is True
+    assert session["foreground_takeover_required"] is False
+    assert session["desktop_backend_kind"] == "virtual_desktop_backend"
+    assert session["desktop_backend_is_loopback"] is False
+    assert session["desktop_backend_ready_for_public_release"] is True
+    assert session["requires_real_virtual_desktop_backend"] is False
+    assert annotated["requests"][0]["desktop_provider_session"]["provider_id"] == (
+        "real-virtual-desktop"
+    )
+
+
+def test_ensure_isolated_provider_session_blocks_external_provider_missing_tools(
+    monkeypatch,
+) -> None:
+    starts: list[dict[str, Any] | None] = []
+
+    monkeypatch.setattr(
+        session_module._SESSION_MANAGER,
+        "status",
+        lambda probe_health=True: {"ok": True, "status": "stopped", "running": False},
+    )
+    monkeypatch.setattr(
+        session_module,
+        "desktop_execution_provider_status_from_env",
+        lambda *args, **kwargs: {
+            "configured": True,
+            "available": True,
+            "adapter_ready": True,
+            "provider_kind": "sandbox_desktop",
+            "provider_id": "real-virtual-desktop",
+            "status": "available",
+            "desktop_session_kind": "virtual_desktop",
+            "desktop_session_isolated": True,
+            "foreground_takeover_required": False,
+            "supported_tools": ["app.open"],
+        },
+    )
+    monkeypatch.setattr(
+        session_module,
+        "start_isolated_desktop_provider_session",
+        lambda request=None: starts.append(request) or {},
+    )
+    envelope = {
+        "requests": [
+            {
+                "request_id": "request-type",
+                "tool_name": "desktop.safe_type_text",
+                "execution_mode": {"keyboard_mouse_capture": True},
+                "desktop_execution_route": {
+                    "status": "sandbox_keyboard_mouse_provider_required",
+                    "blocking_conditions": ["sandbox_keyboard_mouse_provider_required"],
+                },
+                "sandbox_provider": {"desktop_session_isolated": False},
+            }
+        ]
+    }
+
+    session = ensure_isolated_desktop_provider_session_for_envelope(envelope)
+
+    assert starts == []
+    assert session["needed"] is True
+    assert session["ok"] is False
+    assert session["running"] is False
+    assert session["status"] == "provider_missing_required_tools"
+    assert session["reason"] == "isolated_provider_missing_required_tools"
+    assert session["provider_id"] == "real-virtual-desktop"
+
+
+def test_ensure_isolated_provider_session_surfaces_unavailable_external_provider(
+    monkeypatch,
+) -> None:
+    starts: list[dict[str, Any] | None] = []
+
+    monkeypatch.setattr(
+        session_module._SESSION_MANAGER,
+        "status",
+        lambda probe_health=True: {"ok": True, "status": "stopped", "running": False},
+    )
+    monkeypatch.setattr(
+        session_module,
+        "desktop_execution_provider_status_from_env",
+        lambda *args, **kwargs: {
+            "configured": True,
+            "available": False,
+            "adapter_ready": False,
+            "provider_kind": "sandbox_desktop",
+            "provider_id": "real-virtual-desktop",
+            "status": "provider_unhealthy",
+            "desktop_session_kind": "virtual_desktop",
+            "desktop_session_isolated": True,
+            "foreground_takeover_required": False,
+            "blocking_conditions": ["desktop_execution_provider_unhealthy"],
+            "supported_tools": ["app.open"],
+        },
+    )
+    monkeypatch.setattr(
+        session_module,
+        "start_isolated_desktop_provider_session",
+        lambda request=None: starts.append(request) or {},
+    )
+    envelope = {
+        "requests": [
+            {
+                "request_id": "request-open",
+                "tool_name": "app.open",
+                "desktop_execution_route": {
+                    "selected_provider_kind": "sandbox_desktop",
+                    "status": "provider_required",
+                    "sandbox_required": True,
+                    "blocking_conditions": ["sandbox_desktop_provider_required"],
+                },
+            }
+        ]
+    }
+
+    session = ensure_isolated_desktop_provider_session_for_envelope(envelope)
+
+    assert starts == []
+    assert session["needed"] is True
+    assert session["ok"] is False
+    assert session["running"] is False
+    assert session["status"] == "provider_unhealthy"
+    assert session["reason"] == "external_isolated_provider_unavailable"
+    assert session["provider_id"] == "real-virtual-desktop"
+
+
 def test_ensure_isolated_provider_session_scopes_related_desktop_requests(
     monkeypatch,
 ) -> None:
