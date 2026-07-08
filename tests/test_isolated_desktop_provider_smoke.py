@@ -18,3 +18,68 @@ def test_isolated_desktop_provider_smoke_covers_operate_verify_sequence() -> Non
     assert [item["action"] for item in evidence["tool_results"]] == list(
         smoke.SMOKE_TOOLS
     )
+
+
+def test_isolated_desktop_provider_smoke_can_use_configured_provider(monkeypatch) -> None:
+    class FakeRegistry:
+        def execute_if_routed(
+            self,
+            tool_name,
+            payload,
+            *,
+            tool_request,
+            broker,
+            approved=False,
+        ):
+            return {
+                "ok": True,
+                "tool": tool_name,
+                "action": tool_name,
+                "desktop_execution_provider_routed": True,
+                "sandbox_provider": dict(tool_request.get("sandbox_provider") or {}),
+                "data": {"verification_passed": tool_name == "desktop.verify"},
+            }
+
+    monkeypatch.setattr(
+        smoke,
+        "desktop_execution_provider_status_from_env",
+        lambda *args, **kwargs: {
+            "configured": True,
+            "available": True,
+            "adapter_ready": True,
+            "provider_id": "real-virtual-desktop",
+            "endpoint_origin": "http://127.0.0.1:29093",
+            "desktop_session_kind": "virtual_desktop",
+            "desktop_session_isolated": True,
+            "foreground_takeover_required": False,
+            "keyboard_mouse_capture_supported": True,
+            "desktop_backend_kind": "virtual_desktop_backend",
+            "desktop_backend_is_loopback": False,
+            "desktop_backend_ready_for_public_release": True,
+            "requires_real_virtual_desktop_backend": False,
+            "supported_tools": list(smoke.SMOKE_TOOLS),
+        },
+    )
+    monkeypatch.setattr(
+        smoke,
+        "desktop_execution_provider_registry_from_env",
+        lambda *args, **kwargs: FakeRegistry(),
+    )
+
+    evidence = smoke.run_smoke(use_configured_provider=True)
+
+    assert evidence["ok"] is True
+    assert evidence["use_configured_provider"] is True
+    assert evidence["desktop_backend_kind"] == "virtual_desktop_backend"
+    assert evidence["desktop_backend_is_loopback"] is False
+    assert evidence["desktop_backend_ready_for_public_release"] is True
+    assert evidence["requires_real_virtual_desktop_backend"] is False
+    assert evidence["checks"]["provider_backend_ready_for_public_release"] is True
+    assert evidence["checks"]["provider_backend_not_loopback"] is True
+    assert evidence["checks"]["all_tool_results_isolated"] is True
+    assert evidence["tool_results"][0]["sandbox_provider"][
+        "desktop_session_isolated"
+    ] is True
+    assert [item["action"] for item in evidence["tool_results"]] == list(
+        smoke.SMOKE_TOOLS
+    )

@@ -496,6 +496,7 @@ def _build_sections(
     workdir: Path,
     *,
     run_isolated_provider_smoke: bool = False,
+    use_configured_virtual_desktop_provider: bool = False,
 ) -> list[dict[str, Any]]:
     sections = [
         _run_section(
@@ -561,7 +562,9 @@ def _build_sections(
             _run_section(
                 "isolated_desktop_provider",
                 "Desktop provider can execute discover, operate, input, and verify without taking over the user's foreground session.",
-                smoke_isolated_desktop_provider.run_smoke,
+                lambda: smoke_isolated_desktop_provider.run_smoke(
+                    use_configured_provider=use_configured_virtual_desktop_provider
+                ),
             )
         )
     return sections
@@ -571,6 +574,7 @@ def run_smoke(
     *,
     workdir: Path | None = None,
     run_isolated_provider_smoke: bool = False,
+    use_configured_virtual_desktop_provider: bool = False,
 ) -> dict[str, Any]:
     with tempfile.TemporaryDirectory(prefix="oha-desktop-agent-release-smoke-") as temp_dir:
         root = Path(workdir) if workdir is not None else Path(temp_dir)
@@ -578,6 +582,9 @@ def run_smoke(
         sections = _build_sections(
             root,
             run_isolated_provider_smoke=run_isolated_provider_smoke,
+            use_configured_virtual_desktop_provider=(
+                use_configured_virtual_desktop_provider
+            ),
         )
     failed = [section for section in sections if section.get("ok") is not True]
     checks = {
@@ -621,6 +628,9 @@ def run_smoke(
         "failed_sections": [str(section["id"]) for section in failed],
         "checks": checks,
         "isolated_provider_smoke_requested": run_isolated_provider_smoke,
+        "configured_virtual_desktop_provider_requested": bool(
+            use_configured_virtual_desktop_provider
+        ),
         "isolated_provider_smoke_collected": any(
             section.get("id") == "isolated_desktop_provider"
             and section.get("ok") is True
@@ -688,6 +698,9 @@ def _compact_stdout_summary(payload: dict[str, Any]) -> dict[str, Any]:
         "isolated_provider_smoke_requested": bool(
             payload.get("isolated_provider_smoke_requested") is True
         ),
+        "configured_virtual_desktop_provider_requested": bool(
+            payload.get("configured_virtual_desktop_provider_requested") is True
+        ),
         "isolated_provider_smoke_collected": bool(
             payload.get("isolated_provider_smoke_collected") is True
         ),
@@ -716,6 +729,14 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Also run the isolated desktop provider smoke; this binds a local test server and proves no foreground mouse/keyboard takeover is required.",
     )
+    parser.add_argument(
+        "--use-configured-virtual-desktop-provider",
+        action="store_true",
+        help=(
+            "Run the isolated provider smoke against OHA_YACHIYO_DESKTOP_PROVIDER_* "
+            "instead of the local loopback harness."
+        ),
+    )
     return parser
 
 
@@ -724,6 +745,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     evidence = run_smoke(
         workdir=args.workdir,
         run_isolated_provider_smoke=bool(args.run_isolated_provider_smoke),
+        use_configured_virtual_desktop_provider=bool(
+            args.use_configured_virtual_desktop_provider
+        ),
     )
     if args.report_json is not None:
         _write_report(args.report_json, evidence)

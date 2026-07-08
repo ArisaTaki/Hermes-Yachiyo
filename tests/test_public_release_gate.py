@@ -784,6 +784,7 @@ def test_public_release_gate_reports_real_virtual_desktop_backend_requirement(
                                 "command": (
                                     "python scripts/smoke_oha_desktop_agent_release.py "
                                     "--run-isolated-provider-smoke "
+                                    "--use-configured-virtual-desktop-provider "
                                     "--report-json tmp/oha-desktop-agent-release-smoke.json"
                                 ),
                                 "release_blockers": [

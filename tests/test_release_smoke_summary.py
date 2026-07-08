@@ -250,6 +250,7 @@ def test_release_smoke_summary_requires_isolated_desktop_provider_section(
         item for item in summary["next_actions"] if item["id"] == "oha_desktop_agent_product"
     )
     assert "--run-isolated-provider-smoke" in action["command"]
+    assert "--use-configured-virtual-desktop-provider" in action["command"]
 
 
 def test_release_smoke_summary_requires_real_virtual_desktop_backend(
@@ -292,6 +293,7 @@ def test_release_smoke_summary_requires_real_virtual_desktop_backend(
     assert action["release_blockers"][0]["evidence_summary"][
         "desktop_backend_kind"
     ] == "loopback_session_harness"
+    assert "--use-configured-virtual-desktop-provider" in action["command"]
 
 
 def test_release_smoke_summary_reports_missing_items_and_next_actions(

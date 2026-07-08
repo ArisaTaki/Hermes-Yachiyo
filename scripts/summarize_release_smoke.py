@@ -105,6 +105,7 @@ SMOKE_ITEMS: tuple[dict[str, Any], ...] = (
         "next_action": (
             "python scripts/smoke_oha_desktop_agent_release.py "
             "--run-isolated-provider-smoke "
+            "--use-configured-virtual-desktop-provider "
             "--report-json tmp/oha-desktop-agent-release-smoke.json"
         ),
     },

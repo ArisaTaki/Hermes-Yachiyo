@@ -99,7 +99,7 @@ def test_oha_desktop_agent_release_smoke_can_include_isolated_provider(
     monkeypatch.setattr(
         smoke.smoke_isolated_desktop_provider,
         "run_smoke",
-        lambda: {
+        lambda **_kwargs: {
             "ok": True,
             "mode": "isolated_desktop_provider_smoke",
             "covered_tools": ["desktop.list_apps", "app.open", "desktop.verify"],
@@ -154,6 +154,7 @@ def test_oha_desktop_agent_release_smoke_cli_writes_report(
             "failed_sections": [],
             "checks": {"all_sections_passed": True},
             "isolated_provider_smoke_requested": False,
+            "configured_virtual_desktop_provider_requested": False,
             "isolated_provider_smoke_collected": False,
             "isolated_provider_backend": {},
             "sections": [],
@@ -176,6 +177,7 @@ def test_oha_desktop_agent_release_smoke_cli_writes_report(
         "failed_sections": [],
         "checks": {"all_sections_passed": True},
         "isolated_provider_smoke_requested": False,
+        "configured_virtual_desktop_provider_requested": False,
         "isolated_provider_smoke_collected": False,
         "isolated_provider_backend": {},
         "sections": [],
@@ -247,3 +249,37 @@ def test_oha_desktop_agent_release_smoke_cli_passes_isolated_provider_flag(
 
     assert exit_code == 0
     assert captured_kwargs["run_isolated_provider_smoke"] is True
+    assert captured_kwargs["use_configured_virtual_desktop_provider"] is False
+
+
+def test_oha_desktop_agent_release_smoke_cli_passes_configured_provider_flag(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    captured_kwargs: dict[str, object] = {}
+
+    def fake_run_smoke(**kwargs):
+        captured_kwargs.update(kwargs)
+        return {
+            "ok": True,
+            "mode": "oha_desktop_agent_release_smoke",
+            "section_count": 0,
+            "failed_sections": [],
+            "checks": {"all_sections_passed": True},
+            "sections": [],
+        }
+
+    monkeypatch.setattr(smoke, "run_smoke", fake_run_smoke)
+
+    exit_code = smoke.main(
+        [
+            "--run-isolated-provider-smoke",
+            "--use-configured-virtual-desktop-provider",
+            "--report-json",
+            str(tmp_path / "oha-release-smoke.json"),
+        ]
+    )
+
+    assert exit_code == 0
+    assert captured_kwargs["run_isolated_provider_smoke"] is True
+    assert captured_kwargs["use_configured_virtual_desktop_provider"] is True
