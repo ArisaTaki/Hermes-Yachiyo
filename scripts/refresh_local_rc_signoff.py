@@ -545,10 +545,25 @@ def refresh_local_rc_signoff(
         batch_command = [
             sys.executable,
             "scripts/verify_release_candidate.py",
-            "--run-full-local-native-agent-rc",
+            "--require-artifacts",
+            "--check-dmg-mount",
+            "--check-gatekeeper-readiness",
+            "--run-packaged-backend-bridge-smoke",
+            "--run-dmg-app-smoke",
+            "--run-dmg-ui-sampling-smoke",
+            "--run-dmg-chat-native-file-smoke",
             "--report-json",
             str(batch_report.relative_to(ROOT)),
         ]
+        if run_real_desktop_smokes:
+            batch_command.extend(
+                [
+                    "--run-real-desktop-app-open-smoke",
+                    "--run-real-desktop-ui-inspection-smoke",
+                    "--run-real-desktop-interaction-smoke",
+                    "--allow-real-desktop-interaction-existing-app",
+                ]
+            )
         if run_provider_smoke:
             batch_command.append("--run-provider-smoke")
         _run(batch_command)

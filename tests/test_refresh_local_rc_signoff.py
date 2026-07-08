@@ -205,7 +205,13 @@ def test_refresh_local_rc_signoff_runs_batch_screen_draft_and_preview(
     assert commands[1][0] == [
         sys.executable,
         "scripts/verify_release_candidate.py",
-        "--run-full-local-native-agent-rc",
+        "--require-artifacts",
+        "--check-dmg-mount",
+        "--check-gatekeeper-readiness",
+        "--run-packaged-backend-bridge-smoke",
+        "--run-dmg-app-smoke",
+        "--run-dmg-ui-sampling-smoke",
+        "--run-dmg-chat-native-file-smoke",
         "--report-json",
         "tmp/rc-verification-abc12345-packaged-batch.json",
     ]
@@ -716,7 +722,13 @@ def test_refresh_local_rc_signoff_does_not_reuse_failed_batch_report(
     assert commands[0][0] == [
         sys.executable,
         "scripts/verify_release_candidate.py",
-        "--run-full-local-native-agent-rc",
+        "--require-artifacts",
+        "--check-dmg-mount",
+        "--check-gatekeeper-readiness",
+        "--run-packaged-backend-bridge-smoke",
+        "--run-dmg-app-smoke",
+        "--run-dmg-ui-sampling-smoke",
+        "--run-dmg-chat-native-file-smoke",
         "--report-json",
         "tmp/rc-verification-abc12345-packaged-batch.json",
     ]
@@ -861,6 +873,12 @@ def test_refresh_local_rc_signoff_can_run_real_desktop_source_capability_smokes(
     assert "--run-real-desktop-ui-inspection-smoke" in source_command
     assert "--run-real-desktop-interaction-smoke" in source_command
     assert "tmp/rc-verification-abc12345-source-capabilities.json" in source_command
+    batch_command = commands[1][0]
+    assert "--run-full-local-native-agent-rc" not in batch_command
+    assert "--run-real-desktop-app-open-smoke" in batch_command
+    assert "--run-real-desktop-ui-inspection-smoke" in batch_command
+    assert "--run-real-desktop-interaction-smoke" in batch_command
+    assert "--allow-real-desktop-interaction-existing-app" in batch_command
     public_demo_command = next(
         command
         for command, _allow_failure in commands
