@@ -446,12 +446,21 @@ async function waitForDocumentReady(client, timeoutMs) {
 async function navigateToChat(client, timeoutMs) {
   await waitFor(client, `
     (() => {
-      if (window.location.hash !== '#/chat') {
+      if (document.querySelector('textarea.chat-input')) return true;
+      const navButtons = Array.from(document.querySelectorAll('.hy-nav button'));
+      const chatButton = navButtons.find((button) => button.textContent.trim() === '对话');
+      if (chatButton) {
+        const now = Date.now();
+        if (!window.__packagedChatSmokeLastChatNavClick || now - window.__packagedChatSmokeLastChatNavClick > 500) {
+          window.__packagedChatSmokeLastChatNavClick = now;
+          chatButton.click();
+        }
+      } else if (window.location.hash !== '#/chat') {
         window.history.pushState(null, '', '#/chat');
         window.dispatchEvent(new Event('oha-route-change'));
         window.dispatchEvent(new HashChangeEvent('hashchange'));
       }
-      return window.location.hash === '#/chat' || Boolean(document.querySelector('textarea.chat-input'));
+      return Boolean(document.querySelector('textarea.chat-input'));
     })()
   `, 'packaged chat route navigation', timeoutMs);
 }
