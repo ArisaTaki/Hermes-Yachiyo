@@ -132,15 +132,30 @@ def test_studio_start_entrypoints_auto_start_isolated_desktop_provider(
         context_value="workflow-1",
     )
     _assert_plan_event_uses_isolated_session(agent_run.events, "agent.plan.created")
+    _assert_provider_session_event(
+        agent_run.events,
+        context_key="",
+        context_value="",
+    )
     _assert_plan_event_uses_isolated_session(
         group_run.events,
         "group.run.plan.created",
         context_key="group_run_id",
         context_value="group-run-1",
     )
+    _assert_provider_session_event(
+        group_run.events,
+        context_key="group_run_id",
+        context_value="group-run-1",
+    )
     _assert_plan_event_uses_isolated_session(
         workflow_run.events,
         "workflow.run.plan.created",
+        context_key="workflow_run_id",
+        context_value="workflow-run-1",
+    )
+    _assert_provider_session_event(
+        workflow_run.events,
         context_key="workflow_run_id",
         context_value="workflow-run-1",
     )
@@ -451,3 +466,32 @@ def _assert_plan_event_uses_isolated_session(
     )
     if context_key:
         assert envelope["requests"][0][context_key] == context_value
+
+
+def _assert_provider_session_event(
+    events: list[Any],
+    *,
+    context_key: str,
+    context_value: str,
+) -> None:
+    provider_event = next(
+        event
+        for event in events
+        if event.event_type == "desktop.provider_session.started"
+    )
+    session = provider_event.payload["desktop_provider_session"]
+    assert session["provider_id"] == "local-isolated-desktop"
+    assert session["started"] is True
+    assert session["running"] is True
+    assert session["needed"] is True
+    assert session["desktop_execution_session_mode"] == "isolated_desktop"
+    assert session["desktop_execution_session_label"] == "isolated desktop provider"
+    assert session["tool_names"] == [
+        "app.open",
+        "desktop.active_window",
+        "desktop.list_apps",
+    ]
+    assert "env" not in session
+    assert "command" not in session
+    if context_key:
+        assert provider_event.payload[context_key] == context_value

@@ -5,6 +5,10 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import Any, Protocol
 
+from apps.shell.agent.runtime.desktop_provider_session_events import (
+    desktop_provider_session_public_event,
+)
+
 from .contracts import PlannerDecisionSnapshot, TaskCoreSnapshot
 from .planner_projection import planner_run_event_payloads
 from .runtime_execution import runtime_execution_envelope_payload_with_request_context
@@ -232,6 +236,13 @@ def _planner_public_events_for_start_payload(
         source_payload,
         run_id=run_id,
     )
+    provider_event = _desktop_provider_session_event_for_start_payload(
+        source_payload,
+        run_id=run_id,
+        event_context=event_context,
+    )
+    if provider_event is not None:
+        events.append(provider_event)
     return _renumber_planner_events(events, after_sequence)
 
 
@@ -249,6 +260,25 @@ def _runtime_execution_envelope_from_payload(
         if isinstance(envelope, Mapping):
             return dict(envelope)
     return None
+
+
+def _desktop_provider_session_event_for_start_payload(
+    source_payload: Mapping[str, Any] | None,
+    *,
+    run_id: str,
+    event_context: Mapping[str, Any] | None,
+) -> dict[str, Any] | None:
+    envelope = _runtime_execution_envelope_from_payload(source_payload)
+    if not isinstance(envelope, Mapping):
+        return None
+    session = envelope.get("desktop_provider_session")
+    if not isinstance(session, Mapping):
+        return None
+    return desktop_provider_session_public_event(
+        session,
+        run_id=run_id,
+        payload_context=event_context,
+    )
 
 
 def _planner_events_with_execution_task_core(
