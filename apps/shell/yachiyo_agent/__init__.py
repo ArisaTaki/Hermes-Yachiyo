@@ -104,6 +104,7 @@ from .desktop_permissions import (
 from .desktop_execution_policy import (
     agent_studio_desktop_execution_policy,
     daily_entrypoint_desktop_execution_policy,
+    desktop_provider_session_auto_start_default,
     desktop_execution_policy_payload,
     desktop_execution_policy_mode,
     desktop_execution_route_decision,
@@ -181,6 +182,7 @@ __all__ = [
     "AgentTaskLightSnapshot",
     "AgentTaskSnapshot",
     "agent_studio_desktop_execution_policy",
+    "desktop_provider_session_auto_start_default",
     "desktop_execution_policy_payload",
     "runtime_execution_envelope_with_desktop_execution_policy",
     "with_agent_studio_desktop_execution_policy",

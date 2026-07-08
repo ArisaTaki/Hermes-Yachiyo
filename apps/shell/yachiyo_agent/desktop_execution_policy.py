@@ -249,6 +249,11 @@ def daily_entrypoint_desktop_execution_policy(
     }
 
 
+def desktop_provider_session_auto_start_default() -> bool:
+    value = os.environ.get("OHA_YACHIYO_DESKTOP_PROVIDER_AUTO_START", "")
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 def agent_studio_desktop_execution_policy() -> dict[str, Any]:
     """Studio is the explicit supervised execution surface."""
 

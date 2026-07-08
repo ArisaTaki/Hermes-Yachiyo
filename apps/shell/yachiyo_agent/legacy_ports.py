@@ -742,14 +742,16 @@ class LegacyChatTaskStarter:
                     allowed_entrypoint_tools,
                 )
             if direct_tool_request:
-                annotated_request = _direct_tool_requests_with_existing_desktop_provider_session(
-                    [direct_tool_request]
+                annotated_request = _direct_tool_requests_with_desktop_provider_session(
+                    [direct_tool_request],
+                    metadata=metadata,
                 )
                 if annotated_request:
                     direct_tool_request = annotated_request[0]
             if direct_tool_requests:
-                direct_tool_requests = _direct_tool_requests_with_existing_desktop_provider_session(
-                    direct_tool_requests
+                direct_tool_requests = _direct_tool_requests_with_desktop_provider_session(
+                    direct_tool_requests,
+                    metadata=metadata,
                 )
             if direct_tool_requests and direct_tool_selection_payload:
                 direct_tool_selection_payload = _selection_payload_with_selected_requests(
@@ -2461,8 +2463,10 @@ def _direct_tool_request_sequence(
     return requests
 
 
-def _direct_tool_requests_with_existing_desktop_provider_session(
+def _direct_tool_requests_with_desktop_provider_session(
     direct_tool_requests: list[dict[str, Any]],
+    *,
+    metadata: Mapping[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     if not direct_tool_requests:
         return []
@@ -2480,14 +2484,17 @@ def _direct_tool_requests_with_existing_desktop_provider_session(
     if not envelope_requests:
         return [dict(request) for request in direct_tool_requests if isinstance(request, dict)]
     envelope = {"requests": envelope_requests}
+    auto_start = _desktop_provider_session_auto_start_requested(metadata)
     try:
         session = ensure_isolated_desktop_provider_session_for_envelope(
             envelope,
-            auto_start=False,
+            auto_start=auto_start,
         )
     except Exception:
         return [dict(request) for request in direct_tool_requests if isinstance(request, dict)]
-    if not (session.get("needed") and session.get("running")):
+    if not session.get("needed"):
+        return [dict(request) for request in direct_tool_requests if isinstance(request, dict)]
+    if not (session.get("running") or auto_start):
         return [dict(request) for request in direct_tool_requests if isinstance(request, dict)]
     annotated = annotate_envelope_with_desktop_provider_session(envelope, session)
     annotated_requests = annotated.get("requests") if isinstance(annotated, dict) else None
@@ -2520,6 +2527,38 @@ def _direct_tool_requests_with_existing_desktop_provider_session(
         else:
             result.append(dict(request))
     return result
+
+
+def _desktop_provider_session_auto_start_requested(
+    metadata: Mapping[str, Any] | None,
+) -> bool:
+    return _metadata_truthy(
+        metadata,
+        "desktop_provider_session_auto_start",
+        "desktop_provider_auto_start",
+        "auto_start_desktop_provider_session",
+        "auto_start_isolated_desktop_provider",
+    )
+
+
+def _metadata_truthy(
+    metadata: Mapping[str, Any] | None,
+    *keys: str,
+) -> bool:
+    if not isinstance(metadata, Mapping):
+        return False
+    for key in keys:
+        value = metadata.get(key)
+        if value is True:
+            return True
+        if isinstance(value, str) and value.strip().lower() in {"1", "true", "yes", "on"}:
+            return True
+    for nested_key in ("metadata", "desktop_execution_policy", "yachiyo_desktop_execution_policy"):
+        nested = metadata.get(nested_key)
+        if isinstance(nested, Mapping) and nested is not metadata:
+            if _metadata_truthy(nested, *keys):
+                return True
+    return False
 
 
 def _explicit_direct_tool_request(

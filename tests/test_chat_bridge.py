@@ -131,11 +131,13 @@ def test_chat_bridge_quick_candidates_use_execution_context() -> None:
 
 def test_chat_bridge_quick_message_adds_daily_desktop_execution_policy(
     tmp_path,
+    monkeypatch,
 ) -> None:
     store = ChatStore(db_path=str(tmp_path / "chat.db"))
     runtime = _runtime_with_chat_store(store)
     bridge = ChatBridge(runtime)
     captured_metadata: dict[str, Any] = {}
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_AUTO_START", "true")
 
     def fake_send_message(text: str, **kwargs: Any) -> dict[str, Any]:
         captured_metadata["metadata"] = kwargs.get("metadata")
@@ -163,6 +165,7 @@ def test_chat_bridge_quick_message_adds_daily_desktop_execution_policy(
         assert policy["mode"] == "preview_input"
         assert policy["allow_media_control"] is True
         assert policy["source"] == "daily_bubble"
+        assert captured_metadata["metadata"]["desktop_provider_session_auto_start"] is True
     finally:
         store.close()
 

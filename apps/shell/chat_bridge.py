@@ -31,6 +31,7 @@ from apps.shell.yachiyo_agent.daily_desktop import (
     planner_first_daily_desktop_entrypoint_requests,
 )
 from apps.shell.yachiyo_agent.desktop_execution_policy import (
+    desktop_provider_session_auto_start_default,
     with_daily_entrypoint_desktop_execution_policy,
 )
 from apps.shell.yachiyo_agent.web_destination_hints import legacy_known_web_destination_url_hint
@@ -514,6 +515,8 @@ class ChatBridge:
             metadata,
             surface=str((metadata or {}).get("launcher_mode") or "launcher"),
         )
+        if desktop_provider_session_auto_start_default():
+            execution_metadata.setdefault("desktop_provider_session_auto_start", True)
         if planning_text != str(text or "").strip():
             execution_metadata["entrypoint_planning_context"] = planning_text
         result = self._chat_api.send_message(text, metadata=execution_metadata)

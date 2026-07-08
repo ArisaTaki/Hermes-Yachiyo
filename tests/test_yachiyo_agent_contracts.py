@@ -109,6 +109,7 @@ from apps.shell.yachiyo_agent import (
     WorkflowSnapshot,
     approval_is_pending,
     daily_entrypoint_desktop_execution_policy,
+    desktop_provider_session_auto_start_default,
     desktop_action_risk_level,
     desktop_action_risk_snapshots,
     desktop_tool_execution_mode,
@@ -5478,6 +5479,16 @@ def test_daily_entrypoint_desktop_execution_policy_defaults_to_input_preview() -
     assert metadata["desktop_provider_health_probe"] is True
     assert metadata["desktop_provider_route_readonly"] is True
     assert metadata["desktop_provider_route_foreground"] is True
+
+
+def test_desktop_provider_session_auto_start_default_is_env_gated(monkeypatch) -> None:
+    monkeypatch.delenv("OHA_YACHIYO_DESKTOP_PROVIDER_AUTO_START", raising=False)
+
+    assert desktop_provider_session_auto_start_default() is False
+
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_AUTO_START", "true")
+
+    assert desktop_provider_session_auto_start_default() is True
 
 
 def test_agent_studio_desktop_execution_policy_requests_provider_health_probe() -> None:
