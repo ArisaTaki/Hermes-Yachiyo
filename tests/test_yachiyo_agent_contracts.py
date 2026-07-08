@@ -5597,6 +5597,10 @@ def test_desktop_execution_route_blocks_loopback_provider_backend() -> None:
     assert route["desktop_backend_is_loopback"] is True
     assert route["requires_real_virtual_desktop_backend"] is True
     assert route["simulated_desktop_provider"] is True
+    assert route["reason"].startswith(
+        "Current desktop provider is a loopback or simulated harness."
+    )
+    assert "can be routed through" not in route["reason"]
     assert route["blocking_conditions"] == [
         "loopback_desktop_backend",
         "real_virtual_desktop_backend_required",

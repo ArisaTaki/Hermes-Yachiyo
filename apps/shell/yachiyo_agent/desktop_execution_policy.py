@@ -577,10 +577,10 @@ def desktop_execution_route_decision(
             clean_tool,
             decision_context,
         )
-        return {
-            **sandbox_route,
-            "reason": _readonly_desktop_provider_route_reason(sandbox_provider),
-        }
+        return _route_with_ready_reason(
+            sandbox_route,
+            _readonly_desktop_provider_route_reason(sandbox_provider),
+        )
     if (
         foreground_provider_requested
         and (foreground_required or execution_mode_name == "supervised_live")
@@ -641,10 +641,10 @@ def desktop_execution_route_decision(
             clean_tool,
             decision_context,
         )
-        return {
-            **sandbox_route,
-            "reason": _foreground_desktop_provider_route_reason(sandbox_provider),
-        }
+        return _route_with_ready_reason(
+            sandbox_route,
+            _foreground_desktop_provider_route_reason(sandbox_provider),
+        )
     if not foreground_required and execution_mode_name != "supervised_live":
         return route
     if policy_mode == "allow":
@@ -1182,6 +1182,16 @@ def _sandbox_route_decision(
         "blocking_conditions": [],
         **provider_context,
     }
+
+
+def _route_with_ready_reason(route: Mapping[str, Any], reason: str) -> dict[str, Any]:
+    payload = dict(route)
+    if (
+        payload.get("can_execute") is True
+        and not _string_list(payload.get("blocking_conditions"))
+    ):
+        payload["reason"] = reason
+    return payload
 
 
 def _desktop_provider_route_context(
