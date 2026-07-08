@@ -176,6 +176,7 @@ def test_release_smoke_summary_passes_with_required_evidence(tmp_path, monkeypat
         release_smoke.OHA_DESKTOP_AGENT_RELEASE_SMOKE_MODE
     ]
     assert "oha_deepagent_core" in oha_item["related_evidence_ids"]
+    assert "oha_isolated_desktop_provider" in oha_item["related_evidence_ids"]
 
 
 def test_release_smoke_summary_reports_missing_items_and_next_actions(

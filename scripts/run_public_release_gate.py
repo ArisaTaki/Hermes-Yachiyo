@@ -34,6 +34,7 @@ def public_release_gate_checks(
     *,
     tmp_dir: Path,
     include_public_demo: bool = True,
+    include_isolated_provider_smoke: bool = False,
     include_real_desktop: bool = False,
     include_real_desktop_open: bool = False,
     include_real_desktop_ui_inspection: bool = False,
@@ -42,6 +43,14 @@ def public_release_gate_checks(
     include_provider_workflow: bool = False,
     include_ui: bool = False,
 ) -> list[GateCheck]:
+    oha_release_smoke_command = [
+        sys.executable,
+        "scripts/smoke_oha_desktop_agent_release.py",
+        "--report-json",
+        str(tmp_dir / "oha-desktop-agent-release-smoke.json"),
+    ]
+    if include_isolated_provider_smoke:
+        oha_release_smoke_command.append("--run-isolated-provider-smoke")
     checks = [
         GateCheck(
             id="release_artifacts",
@@ -66,12 +75,7 @@ def public_release_gate_checks(
         GateCheck(
             id="oha_desktop_agent_release_smoke",
             label="Oha desktop-agent Core, Executor, Studio product smoke",
-            command=(
-                sys.executable,
-                "scripts/smoke_oha_desktop_agent_release.py",
-                "--report-json",
-                str(tmp_dir / "oha-desktop-agent-release-smoke.json"),
-            ),
+            command=tuple(oha_release_smoke_command),
             report_json=tmp_dir / "oha-desktop-agent-release-smoke.json",
         ),
         GateCheck(
@@ -138,6 +142,7 @@ def run_public_release_gate(
     public_demo_reports: Sequence[Path | str] = (),
     diagnostics_zips: Sequence[Path | str] = (),
     include_diagnostics_bundle: bool = True,
+    include_isolated_provider_smoke: bool = False,
     include_real_desktop: bool = False,
     include_real_desktop_open: bool = False,
     include_real_desktop_ui_inspection: bool = False,
@@ -153,6 +158,7 @@ def run_public_release_gate(
     checks = public_release_gate_checks(
         tmp_dir=resolved_tmp_dir,
         include_public_demo=include_public_demo,
+        include_isolated_provider_smoke=include_isolated_provider_smoke,
         include_real_desktop=include_real_desktop,
         include_real_desktop_open=include_real_desktop_open,
         include_real_desktop_ui_inspection=include_real_desktop_ui_inspection,
@@ -1522,6 +1528,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--public-demo-report", action="append", default=[], type=Path)
     parser.add_argument("--diagnostics-zip", action="append", default=[], type=Path)
     parser.add_argument("--skip-diagnostics-bundle", action="store_true")
+    parser.add_argument("--include-isolated-provider-smoke", action="store_true")
     parser.add_argument("--include-real-desktop", action="store_true")
     parser.add_argument("--include-real-desktop-open", action="store_true")
     parser.add_argument("--include-real-desktop-ui-inspection", action="store_true")
@@ -1543,6 +1550,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         public_demo_reports=args.public_demo_report,
         diagnostics_zips=args.diagnostics_zip,
         include_diagnostics_bundle=not args.skip_diagnostics_bundle,
+        include_isolated_provider_smoke=bool(args.include_isolated_provider_smoke),
         include_real_desktop=bool(args.include_real_desktop),
         include_real_desktop_open=bool(args.include_real_desktop_open),
         include_real_desktop_ui_inspection=bool(args.include_real_desktop_ui_inspection),

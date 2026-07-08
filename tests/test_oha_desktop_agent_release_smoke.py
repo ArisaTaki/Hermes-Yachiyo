@@ -10,6 +10,8 @@ def test_oha_desktop_agent_release_smoke_covers_product_readiness(tmp_path) -> N
 
     assert report["ok"] is True
     assert report["mode"] == "oha_desktop_agent_release_smoke"
+    assert report["isolated_provider_smoke_requested"] is False
+    assert report["isolated_provider_smoke_collected"] is False
     assert report["failed_sections"] == []
     assert report["checks"] == {
         "all_sections_passed": True,
@@ -83,6 +85,41 @@ def test_oha_desktop_agent_release_smoke_covers_product_readiness(tmp_path) -> N
     ] is True
 
 
+def test_oha_desktop_agent_release_smoke_can_include_isolated_provider(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        smoke.smoke_isolated_desktop_provider,
+        "run_smoke",
+        lambda: {
+            "ok": True,
+            "mode": "isolated_desktop_provider_smoke",
+            "covered_tools": ["desktop.list_apps", "app.open", "desktop.verify"],
+            "desktop_session_isolated": True,
+            "foreground_takeover_required": False,
+            "keyboard_mouse_capture_supported": True,
+        },
+    )
+
+    report = smoke.run_smoke(
+        workdir=tmp_path / "oha-release-smoke",
+        run_isolated_provider_smoke=True,
+    )
+
+    assert report["ok"] is True
+    assert report["isolated_provider_smoke_requested"] is True
+    assert report["isolated_provider_smoke_collected"] is True
+    assert report["checks"]["covers_isolated_desktop_provider"] is True
+    section_by_id = {section["id"]: section for section in report["sections"]}
+    assert section_by_id["isolated_desktop_provider"]["mode"] == (
+        "isolated_desktop_provider_smoke"
+    )
+    assert section_by_id["isolated_desktop_provider"]["report"][
+        "foreground_takeover_required"
+    ] is False
+
+
 def test_oha_desktop_agent_release_smoke_cli_writes_report(
     tmp_path,
     monkeypatch,
@@ -99,6 +136,8 @@ def test_oha_desktop_agent_release_smoke_cli_writes_report(
             "section_count": 0,
             "failed_sections": [],
             "checks": {"all_sections_passed": True},
+            "isolated_provider_smoke_requested": False,
+            "isolated_provider_smoke_collected": False,
             "sections": [],
         },
     )
@@ -118,6 +157,8 @@ def test_oha_desktop_agent_release_smoke_cli_writes_report(
         "section_count": 0,
         "failed_sections": [],
         "checks": {"all_sections_passed": True},
+        "isolated_provider_smoke_requested": False,
+        "isolated_provider_smoke_collected": False,
         "sections": [],
     }
 
@@ -156,3 +197,34 @@ def test_oha_desktop_agent_release_smoke_cli_can_print_full_report(
     assert exit_code == 0
     stdout_payload = json.loads(capsys.readouterr().out)
     assert stdout_payload["sections"][0]["report"] == {"large": "evidence"}
+
+
+def test_oha_desktop_agent_release_smoke_cli_passes_isolated_provider_flag(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    captured_kwargs: dict[str, object] = {}
+
+    def fake_run_smoke(**kwargs):
+        captured_kwargs.update(kwargs)
+        return {
+            "ok": True,
+            "mode": "oha_desktop_agent_release_smoke",
+            "section_count": 0,
+            "failed_sections": [],
+            "checks": {"all_sections_passed": True},
+            "sections": [],
+        }
+
+    monkeypatch.setattr(smoke, "run_smoke", fake_run_smoke)
+
+    exit_code = smoke.main(
+        [
+            "--run-isolated-provider-smoke",
+            "--report-json",
+            str(tmp_path / "oha-release-smoke.json"),
+        ]
+    )
+
+    assert exit_code == 0
+    assert captured_kwargs["run_isolated_provider_smoke"] is True

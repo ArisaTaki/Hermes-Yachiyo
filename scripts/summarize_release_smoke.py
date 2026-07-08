@@ -82,6 +82,7 @@ OHA_DESKTOP_AGENT_SECTION_EVIDENCE: dict[str, str] = {
     "workflow_run_timeline": "oha_workflow_run_timeline",
     "approval_policy_gate": "oha_approval_policy_gate",
     "studio_tool_catalog": "oha_studio_tool_catalog",
+    "isolated_desktop_provider": "oha_isolated_desktop_provider",
 }
 SMOKE_ITEMS: tuple[dict[str, Any], ...] = (
     {

@@ -26,6 +26,7 @@ from scripts import smoke_agent_studio_planner_orchestration
 from scripts import smoke_approval_policy_gate
 from scripts import smoke_data_analysis_artifacts
 from scripts import smoke_group_run_timeline
+from scripts import smoke_isolated_desktop_provider
 from scripts import smoke_planner_runtime_tool_parity
 from scripts import smoke_workflow_run_timeline
 
@@ -491,8 +492,12 @@ def _run_section(
     }
 
 
-def _build_sections(workdir: Path) -> list[dict[str, Any]]:
-    return [
+def _build_sections(
+    workdir: Path,
+    *,
+    run_isolated_provider_smoke: bool = False,
+) -> list[dict[str, Any]]:
+    sections = [
         _run_section(
             "deepagent_core",
             "Task workspace, todo, checkpoint, and replan signals exist for desktop plans.",
@@ -551,13 +556,29 @@ def _build_sections(workdir: Path) -> list[dict[str, Any]]:
             _tool_catalog_case,
         ),
     ]
+    if run_isolated_provider_smoke:
+        sections.append(
+            _run_section(
+                "isolated_desktop_provider",
+                "Desktop provider can execute discover, operate, input, and verify without taking over the user's foreground session.",
+                smoke_isolated_desktop_provider.run_smoke,
+            )
+        )
+    return sections
 
 
-def run_smoke(*, workdir: Path | None = None) -> dict[str, Any]:
+def run_smoke(
+    *,
+    workdir: Path | None = None,
+    run_isolated_provider_smoke: bool = False,
+) -> dict[str, Any]:
     with tempfile.TemporaryDirectory(prefix="oha-desktop-agent-release-smoke-") as temp_dir:
         root = Path(workdir) if workdir is not None else Path(temp_dir)
         root.mkdir(parents=True, exist_ok=True)
-        sections = _build_sections(root)
+        sections = _build_sections(
+            root,
+            run_isolated_provider_smoke=run_isolated_provider_smoke,
+        )
     failed = [section for section in sections if section.get("ok") is not True]
     checks = {
         "all_sections_passed": not failed,
@@ -588,12 +609,22 @@ def run_smoke(*, workdir: Path | None = None) -> dict[str, Any]:
             section["id"] == "studio_tool_catalog" for section in sections
         ),
     }
+    if run_isolated_provider_smoke:
+        checks["covers_isolated_desktop_provider"] = any(
+            section["id"] == "isolated_desktop_provider" for section in sections
+        )
     return {
         "ok": all(checks.values()),
         "mode": "oha_desktop_agent_release_smoke",
         "section_count": len(sections),
         "failed_sections": [str(section["id"]) for section in failed],
         "checks": checks,
+        "isolated_provider_smoke_requested": run_isolated_provider_smoke,
+        "isolated_provider_smoke_collected": any(
+            section.get("id") == "isolated_desktop_provider"
+            and section.get("ok") is True
+            for section in sections
+        ),
         "sections": sections,
     }
 
@@ -626,6 +657,12 @@ def _compact_stdout_summary(payload: dict[str, Any]) -> dict[str, Any]:
             if str(section or "").strip()
         ],
         "checks": dict(payload.get("checks") or {}),
+        "isolated_provider_smoke_requested": bool(
+            payload.get("isolated_provider_smoke_requested") is True
+        ),
+        "isolated_provider_smoke_collected": bool(
+            payload.get("isolated_provider_smoke_collected") is True
+        ),
         "sections": sections,
     }
 
@@ -643,12 +680,20 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Print the complete JSON report to stdout even when --report-json is set.",
     )
+    parser.add_argument(
+        "--run-isolated-provider-smoke",
+        action="store_true",
+        help="Also run the isolated desktop provider smoke; this binds a local test server and proves no foreground mouse/keyboard takeover is required.",
+    )
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
-    evidence = run_smoke(workdir=args.workdir)
+    evidence = run_smoke(
+        workdir=args.workdir,
+        run_isolated_provider_smoke=bool(args.run_isolated_provider_smoke),
+    )
     if args.report_json is not None:
         _write_report(args.report_json, evidence)
         print(f"oha desktop agent release smoke report: {args.report_json}", file=sys.stderr)

@@ -794,6 +794,36 @@ def test_public_release_gate_passes_granular_real_desktop_demo_flags(
     assert summary["status"] == "needs_release_evidence"
 
 
+def test_public_release_gate_can_request_isolated_provider_smoke(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+    commands: list[list[str]] = []
+
+    def fake_run(command):
+        command = list(command)
+        commands.append(command)
+        _write_public_demo_report(command, release_level="partial_demo_ready")
+        _write_diagnostics_bundle(command)
+        _write_release_smoke_report(command, ok=False)
+        return _completed(command)
+
+    monkeypatch.setattr(gate, "_run_command", fake_run)
+
+    gate.run_public_release_gate(
+        tmp_dir="tmp/gate",
+        include_isolated_provider_smoke=True,
+    )
+
+    oha_product_command = next(
+        command
+        for command in commands
+        if "scripts/smoke_oha_desktop_agent_release.py" in command
+    )
+    assert "--run-isolated-provider-smoke" in oha_product_command
+
+
 def test_public_release_gate_passes_allow_existing_real_desktop_app_flag(
     tmp_path,
     monkeypatch,
