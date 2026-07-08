@@ -90,10 +90,25 @@ def _capabilities(matrix: Mapping[str, Any]) -> list[dict[str, Any]]:
 
 
 def _missing_capabilities(matrix: Mapping[str, Any]) -> list[dict[str, Any]]:
+    capabilities = _capabilities(matrix)
+    if "missing_capability_ids" in matrix:
+        missing_ids = set(_string_list(matrix.get("missing_capability_ids")))
+        return [
+            capability
+            for capability in capabilities
+            if str(capability.get("id") or "") in missing_ids
+        ]
+    return [capability for capability in capabilities if capability.get("status") != "passed"]
+
+
+def _optional_missing_capabilities(matrix: Mapping[str, Any]) -> list[dict[str, Any]]:
+    optional_missing_ids = set(_string_list(matrix.get("optional_missing_capability_ids")))
+    if not optional_missing_ids:
+        return []
     return [
         capability
         for capability in _capabilities(matrix)
-        if capability.get("status") != "passed"
+        if str(capability.get("id") or "") in optional_missing_ids
     ]
 
 
@@ -264,6 +279,7 @@ def release_readiness_diagnostics(
     env = env or os.environ
     capabilities = _capabilities(matrix)
     missing_capabilities = _missing_capabilities(matrix)
+    optional_missing_capabilities = _optional_missing_capabilities(matrix)
     status_counts = matrix.get("status_counts")
     status_counts = status_counts if isinstance(status_counts, dict) else {}
     passed_count = int(status_counts.get("passed") or 0)
@@ -273,18 +289,29 @@ def release_readiness_diagnostics(
     if not isinstance(source_reports, list):
         source_report = matrix.get("source_report")
         source_reports = [source_report] if source_report else []
+    ok = not missing_capabilities and not blockers
     return {
-        "ok": bool(matrix.get("ok") is True and not blockers),
-        "status": "ready" if matrix.get("ok") is True and not blockers else "incomplete",
+        "ok": ok,
+        "status": "ready" if ok else "incomplete",
         "capability_count": capability_count,
         "passed_count": passed_count,
         "missing_count": len(missing_capabilities),
+        "optional_missing_count": len(optional_missing_capabilities),
         "missing_capability_ids": [
             str(capability.get("id") or "") for capability in missing_capabilities
         ],
+        "optional_missing_capability_ids": [
+            str(capability.get("id") or "")
+            for capability in optional_missing_capabilities
+        ],
+        "all_missing_capability_ids": _string_list(
+            matrix.get("all_missing_capability_ids")
+        ),
         "missing_by_category": matrix.get("missing_by_category") or {},
+        "optional_missing_by_category": matrix.get("optional_missing_by_category") or {},
         "blockers": blockers,
         "next_actions": matrix.get("next_actions") or [],
+        "optional_next_actions": matrix.get("optional_next_actions") or [],
         "source_reports": source_reports,
     }
 
@@ -303,6 +330,18 @@ def render_markdown(diagnostics: Mapping[str, Any]) -> str:
     if missing_ids:
         lines.extend(["## Missing Capabilities", ""])
         for capability_id in missing_ids:
+            lines.append(f"- `{capability_id}`")
+        lines.append("")
+    optional_missing_ids = _string_list(
+        diagnostics.get("optional_missing_capability_ids")
+    )
+    if optional_missing_ids:
+        lines.extend(["## Optional Opt-In Evidence", ""])
+        lines.append(
+            "These checks are not required for the default isolated-desktop release path."
+        )
+        lines.append("")
+        for capability_id in optional_missing_ids:
             lines.append(f"- `{capability_id}`")
         lines.append("")
     blockers = diagnostics.get("blockers")

@@ -80,6 +80,39 @@ def test_release_readiness_groups_runtime_and_provider_blockers_without_secret_v
     assert "provider.example" not in serialized
 
 
+def test_release_readiness_treats_default_real_desktop_evidence_as_optional():
+    capabilities = [
+        _capability("source_real_desktop_app_open", "missing", {"status": "skipped", "run_requested": False}),
+        _capability("source_real_desktop_ui_inspection", "missing", {"status": "skipped", "run_requested": False}),
+        _capability("source_real_desktop_interaction", "missing", {"status": "skipped", "run_requested": False}),
+        _capability("provider_text_stream", "passed"),
+        _capability("packaged_backend_bridge_identity", "passed"),
+    ]
+    matrix = {
+        **capability_summary.capability_matrix_status_summary(capabilities),
+        "status": "passed",
+        "capabilities": capabilities,
+        "source_reports": ["tmp/rc-current.json"],
+    }
+
+    diagnostics = readiness.release_readiness_diagnostics(matrix, env={})
+
+    assert diagnostics["ok"] is True
+    assert diagnostics["status"] == "ready"
+    assert diagnostics["missing_count"] == 0
+    assert diagnostics["missing_capability_ids"] == []
+    assert diagnostics["optional_missing_count"] == 3
+    assert diagnostics["optional_missing_capability_ids"] == [
+        "source_real_desktop_app_open",
+        "source_real_desktop_ui_inspection",
+        "source_real_desktop_interaction",
+    ]
+    assert diagnostics["blockers"] == []
+    markdown = readiness.render_markdown(diagnostics)
+    assert "Optional Opt-In Evidence" in markdown
+    assert "default isolated-desktop release path" in markdown
+
+
 def test_release_readiness_cli_writes_json_and_markdown(tmp_path, monkeypatch):
     for name in readiness.PROVIDER_SMOKE_ENV_VARS:
         monkeypatch.delenv(name, raising=False)

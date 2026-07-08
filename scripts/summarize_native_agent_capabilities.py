@@ -446,7 +446,47 @@ def _category_status_counts(capabilities: Sequence[dict[str, Any]]) -> dict[str,
     return counts
 
 
-def _missing_by_category(capabilities: Sequence[dict[str, Any]]) -> dict[str, list[str]]:
+def _is_nonblocking_opt_in_missing(capability: Mapping[str, Any]) -> bool:
+    capability_id = str(capability.get("id") or "").strip()
+    if capability_id not in REAL_DESKTOP_OPT_IN_CAPABILITY_IDS:
+        return False
+    if capability.get("status") == "passed":
+        return False
+    evidence = capability.get("evidence_summary")
+    evidence = evidence if isinstance(evidence, dict) else {}
+    status = str(evidence.get("status") or "").strip()
+    run_requested = evidence.get("run_requested")
+    return run_requested is not True and status in {"", "skipped"}
+
+
+def _missing_capability_ids(
+    capabilities: Sequence[dict[str, Any]],
+    *,
+    include_nonblocking_opt_in: bool = False,
+    only_nonblocking_opt_in: bool = False,
+) -> list[str]:
+    missing_ids: list[str] = []
+    for capability in capabilities:
+        if capability.get("status") == "passed":
+            continue
+        capability_id = str(capability.get("id") or "").strip()
+        if not capability_id:
+            continue
+        opt_in = _is_nonblocking_opt_in_missing(capability)
+        if only_nonblocking_opt_in and not opt_in:
+            continue
+        if not include_nonblocking_opt_in and not only_nonblocking_opt_in and opt_in:
+            continue
+        missing_ids.append(capability_id)
+    return missing_ids
+
+
+def _missing_by_category(
+    capabilities: Sequence[dict[str, Any]],
+    *,
+    include_nonblocking_opt_in: bool = False,
+    only_nonblocking_opt_in: bool = False,
+) -> dict[str, list[str]]:
     missing: dict[str, list[str]] = {}
     for capability in capabilities:
         if capability.get("status") == "passed":
@@ -454,18 +494,29 @@ def _missing_by_category(capabilities: Sequence[dict[str, Any]]) -> dict[str, li
         capability_id = str(capability.get("id") or "").strip()
         if not capability_id:
             continue
+        opt_in = _is_nonblocking_opt_in_missing(capability)
+        if only_nonblocking_opt_in and not opt_in:
+            continue
+        if not include_nonblocking_opt_in and not only_nonblocking_opt_in and opt_in:
+            continue
         category = str(capability.get("category") or capability_category(capability_id))
         missing.setdefault(category, []).append(capability_id)
     return missing
 
 
-def capability_next_actions(capabilities: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
-    missing_ids = {
-        str(capability.get("id") or "").strip()
-        for capability in capabilities
-        if capability.get("status") != "passed"
-    }
-    missing_ids.discard("")
+def capability_next_actions(
+    capabilities: Sequence[dict[str, Any]],
+    *,
+    include_nonblocking_opt_in: bool = False,
+    only_nonblocking_opt_in: bool = False,
+) -> list[dict[str, Any]]:
+    missing_ids = set(
+        _missing_capability_ids(
+            capabilities,
+            include_nonblocking_opt_in=include_nonblocking_opt_in,
+            only_nonblocking_opt_in=only_nonblocking_opt_in,
+        )
+    )
     actions: list[dict[str, Any]] = []
     for action in NEXT_ACTION_DEFINITIONS:
         raw_capability_ids = action.get("capability_ids")
@@ -496,19 +547,33 @@ def capability_next_actions(capabilities: Sequence[dict[str, Any]]) -> list[dict
 def capability_matrix_status_summary(
     capabilities: Sequence[dict[str, Any]],
 ) -> dict[str, Any]:
-    missing_ids = [
-        str(capability.get("id"))
-        for capability in capabilities
-        if capability.get("status") != "passed"
-    ]
+    missing_ids = _missing_capability_ids(capabilities)
+    optional_missing_ids = _missing_capability_ids(
+        capabilities,
+        only_nonblocking_opt_in=True,
+    )
+    all_missing_ids = _missing_capability_ids(
+        capabilities,
+        include_nonblocking_opt_in=True,
+    )
     return {
         "ok": not missing_ids,
         "capability_count": len(capabilities),
         "status_counts": _status_counts(capabilities),
         "category_status_counts": _category_status_counts(capabilities),
         "missing_capability_ids": missing_ids,
+        "optional_missing_capability_ids": optional_missing_ids,
+        "all_missing_capability_ids": all_missing_ids,
         "missing_by_category": _missing_by_category(capabilities),
+        "optional_missing_by_category": _missing_by_category(
+            capabilities,
+            only_nonblocking_opt_in=True,
+        ),
         "next_actions": capability_next_actions(capabilities),
+        "optional_next_actions": capability_next_actions(
+            capabilities,
+            only_nonblocking_opt_in=True,
+        ),
     }
 
 
@@ -616,6 +681,8 @@ def _source_section_summary(report: dict[str, Any], section_name: str) -> dict[s
         "mode": evidence.get("mode"),
         "case_count": evidence.get("case_count"),
     }
+    if "run_requested" in section:
+        summary["run_requested"] = bool(section.get("run_requested"))
     case_ids = _section_case_ids(evidence)
     if case_ids:
         summary["case_ids"] = case_ids
@@ -906,9 +973,13 @@ def _normalize_capability_matrix(matrix: dict[str, Any]) -> dict[str, Any]:
         "capability_count",
         "status_counts",
         "missing_capability_ids",
+        "optional_missing_capability_ids",
+        "all_missing_capability_ids",
         "category_status_counts",
         "missing_by_category",
+        "optional_missing_by_category",
         "next_actions",
+        "optional_next_actions",
     ):
         result.setdefault(key, status_summary[key])
     result["capabilities"] = capabilities

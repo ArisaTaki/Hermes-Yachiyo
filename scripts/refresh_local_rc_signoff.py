@@ -912,7 +912,11 @@ def _missing_real_desktop_capabilities(*, label: str) -> list[str]:
             report = _load_report(report_path)
         except (OSError, json.JSONDecodeError):
             continue
-        missing = _string_items(report.get("missing_capability_ids"))
+        missing = list(dict.fromkeys([
+            *_string_items(report.get("missing_capability_ids")),
+            *_string_items(report.get("optional_missing_capability_ids")),
+            *_string_items(report.get("all_missing_capability_ids")),
+        ]))
         real_desktop_missing = [
             item for item in missing if item.startswith("source_real_desktop_")
         ]
@@ -945,6 +949,13 @@ def _print_release_readiness_status(*, label: str) -> None:
         missing = ", ".join(str(item) for item in missing_ids if str(item))
         if missing:
             print(f"- missing capabilities: {missing}")
+    optional_missing_ids = report.get("optional_missing_capability_ids")
+    if isinstance(optional_missing_ids, list) and optional_missing_ids:
+        optional_missing = ", ".join(
+            str(item) for item in optional_missing_ids if str(item)
+        )
+        if optional_missing:
+            print(f"- optional opt-in capabilities: {optional_missing}")
     blockers = report.get("blockers")
     if isinstance(blockers, list):
         for blocker in blockers:

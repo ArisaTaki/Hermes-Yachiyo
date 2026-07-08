@@ -30,6 +30,15 @@ def _passed_section(mode: str, *, cases: list[str] | None = None) -> dict[str, o
     }
 
 
+def _skipped_section() -> dict[str, object]:
+    return {
+        "status": "skipped",
+        "evidence": {},
+        "findings": [],
+        "run_requested": False,
+    }
+
+
 def _source_sections_report() -> dict[str, object]:
     return {
         section_name: _passed_section(section_name, cases=[section_name])
@@ -354,9 +363,49 @@ def test_capability_summary_uses_native_provider_contract_for_streams_and_runtim
     )
     assert {item["id"] for item in result["next_actions"]} == {
         "source_capability_smoke",
-        "real_desktop_smokes",
         "packaged_backend_bridge_smoke",
         "packaged_app_smoke",
+    }
+    assert {item["id"] for item in result["optional_next_actions"]} == {
+        "real_desktop_smokes"
+    }
+
+
+def test_capability_summary_treats_default_real_desktop_smokes_as_optional():
+    report = {
+        **_source_sections_report(),
+        **_provider_and_packaged_report(),
+        "real_desktop_app_open_smoke": _skipped_section(),
+        "real_desktop_ui_inspection_smoke": _skipped_section(),
+        "real_desktop_interaction_smoke": _skipped_section(),
+    }
+
+    result = summary.summarize_capabilities(report)
+
+    assert result["ok"] is True
+    assert result["status_counts"] == {"passed": 28, "missing": 3}
+    assert result["missing_capability_ids"] == []
+    assert result["missing_by_category"] == {}
+    assert result["optional_missing_capability_ids"] == [
+        "source_real_desktop_app_open",
+        "source_real_desktop_ui_inspection",
+        "source_real_desktop_interaction",
+    ]
+    assert result["all_missing_capability_ids"] == result[
+        "optional_missing_capability_ids"
+    ]
+    assert result["optional_missing_by_category"] == {
+        "source": result["optional_missing_capability_ids"]
+    }
+    assert result["next_actions"] == []
+    assert {item["id"] for item in result["optional_next_actions"]} == {
+        "real_desktop_smokes"
+    }
+    by_id = {item["id"]: item for item in result["capabilities"]}
+    assert by_id["source_real_desktop_interaction"]["status"] == "missing"
+    assert by_id["source_real_desktop_interaction"]["evidence_summary"] == {
+        "status": "skipped",
+        "run_requested": False,
     }
 
 
@@ -441,13 +490,16 @@ def test_capability_summary_reports_source_only_partial_matrix():
     action_by_id = {item["id"]: item for item in result["next_actions"]}
     assert set(action_by_id) == {
         "source_capability_smoke",
-        "real_desktop_smokes",
         "provider_smoke",
         "packaged_backend_bridge_smoke",
         "packaged_app_smoke",
     }
+    optional_action_by_id = {
+        item["id"]: item for item in result["optional_next_actions"]
+    }
+    assert set(optional_action_by_id) == {"real_desktop_smokes"}
     assert "source_browser_research_artifact" in action_by_id["source_capability_smoke"]["capability_ids"]
-    assert "source_real_desktop_interaction" in action_by_id["real_desktop_smokes"]["capability_ids"]
+    assert "source_real_desktop_interaction" in optional_action_by_id["real_desktop_smokes"]["capability_ids"]
     assert "provider_text_stream" in action_by_id["provider_smoke"]["capability_ids"]
     assert "--run-provider-smoke" in action_by_id["provider_smoke"]["command"]
 
