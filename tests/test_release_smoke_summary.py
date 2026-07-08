@@ -179,6 +179,7 @@ def test_release_smoke_summary_passes_with_required_evidence(tmp_path, monkeypat
             _matrix_report(
                 "packaged_app_bridge_isolation",
                 "source_agent_entrypoint_desktop_execution",
+                "source_agent_studio_planner_orchestration",
                 "source_approval_resume_timeline",
                 "source_yachiyo_route_approval",
                 "source_group_run_timeline",
@@ -263,6 +264,31 @@ def test_release_smoke_summary_rejects_standalone_entrypoint_smoke_without_task_
     assert chat_item["status"] == "missing"
     assert "source_agent_entrypoint_desktop_execution" in chat_item[
         "missing_evidence_ids"
+    ]
+
+
+def test_release_smoke_summary_requires_agent_studio_planner_orchestration(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(release_smoke, "ROOT", tmp_path)
+    report_path = tmp_path / "tmp" / "rc.json"
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(
+        json.dumps(
+            _matrix_report(
+                "source_approval_resume_timeline",
+            )
+        ),
+        encoding="utf-8",
+    )
+
+    summary = release_smoke.summarize_release_smoke([report_path])
+
+    studio_item = _item_by_id(summary, "agent_studio_run_timeline")
+    assert studio_item["status"] == "missing"
+    assert studio_item["missing_evidence_ids"] == [
+        "source_agent_studio_planner_orchestration"
     ]
 
 

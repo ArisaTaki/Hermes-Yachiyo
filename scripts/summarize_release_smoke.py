@@ -142,11 +142,14 @@ SMOKE_ITEMS: tuple[dict[str, Any], ...] = (
     },
     {
         "id": "agent_studio_run_timeline",
-        "label": "Agent Studio can show a replayable run timeline",
-        "required": ("source_approval_resume_timeline",),
+        "label": "Agent Studio can start planner orchestration and show a replayable run timeline",
+        "required": (
+            "source_agent_studio_planner_orchestration",
+            "source_approval_resume_timeline",
+        ),
         "next_action": (
-            "python scripts/smoke_approval_resume_timeline.py "
-            "--report-json tmp/approval-resume-timeline.json"
+            "python scripts/verify_release_candidate.py --source-only "
+            "--report-json tmp/rc-verification-source-capabilities.json"
         ),
     },
     {
