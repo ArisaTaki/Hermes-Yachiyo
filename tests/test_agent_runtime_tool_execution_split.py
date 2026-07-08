@@ -3369,6 +3369,69 @@ def test_runtime_tool_request_runner_blocks_failed_provider_session_fallback() -
     assert result["sandbox_provider"]["available"] is False
 
 
+def test_runtime_tool_request_runner_rechecks_stale_ready_route_against_session() -> None:
+    budget = FakeBudget()
+    messages = [{"role": "user", "content": "在隔离桌面里输入 hello"}]
+    timeline: list[dict[str, Any]] = []
+    captured_requests: list[dict[str, Any]] = []
+    runner = _runner(
+        call_agent_tool=lambda tool_request, *_args, **_kwargs: captured_requests.append(
+            tool_request
+        )
+        or {"ok": True, "tool": tool_request.get("tool")},
+    )
+
+    runner.run(
+        [
+            {
+                "tool": "desktop.safe_type_text",
+                "input": {"text": "hello"},
+                "desktop_execution_policy": {
+                    "mode": "preview_input",
+                    "require_sandbox_for_keyboard_mouse": True,
+                    "avoid_user_foreground_takeover": True,
+                },
+                "desktop_execution_route": {
+                    "status": "sandbox_ready",
+                    "can_execute": True,
+                    "selected_provider_kind": "sandbox_desktop",
+                    "selected_provider_id": "sandbox-1",
+                    "provider_execution_required": True,
+                    "sandbox_required": True,
+                    "blocking_conditions": [],
+                },
+                "desktop_provider_session": {
+                    "running": True,
+                    "status": "running",
+                    "provider_id": "sandbox-1",
+                    "url": "http://127.0.0.1:19093",
+                    "tool_names": ["desktop.safe_type_text"],
+                    "keyboard_mouse_capture_supported": False,
+                },
+            }
+        ],
+        ["desktop.safe_type_text"],
+        FakeBroker({"ok": True}),
+        messages,
+        timeline,
+        [],
+        next_iteration=3,
+        run_id="run-1",
+        budget=budget,
+    )
+
+    assert captured_requests == []
+    assert budget.claims == [("desktop.safe_type_text", False)]
+    skipped = next(event for event in timeline if event["event"] == "agent.tool.skipped")
+    result = skipped["result"]
+    assert result["desktop_execution_route"]["status"] == (
+        "sandbox_keyboard_mouse_provider_required"
+    )
+    assert result["desktop_execution_route"]["can_execute"] is False
+    assert result["sandbox_provider"]["source"] == "desktop_provider_session"
+    assert result["sandbox_provider"]["keyboard_mouse_capture_supported"] is False
+
+
 def test_runtime_tool_request_runner_preview_input_policy_allows_media_but_blocks_typing() -> None:
     run_events: list[tuple[str, str, dict[str, Any]]] = []
     budget = FakeBudget()

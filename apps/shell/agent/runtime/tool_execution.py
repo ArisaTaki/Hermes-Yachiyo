@@ -816,7 +816,16 @@ def _tool_request_with_desktop_execution_route(
     tool_request: Mapping[str, Any],
 ) -> dict[str, Any]:
     payload = dict(tool_request)
-    if desktop_execution_route_payload(payload):
+    explicit_route = desktop_execution_route_payload(payload)
+    if explicit_route:
+        route_override = _desktop_execution_route_safety_override(
+            tool_name,
+            payload,
+            explicit_route,
+        )
+        if route_override:
+            payload["desktop_execution_route"] = dict(route_override)
+            payload.setdefault("sandbox_provider", sandbox_desktop_provider_status(payload))
         return payload
     policy = _desktop_execution_policy_from_request(payload)
     if not policy:
@@ -836,6 +845,48 @@ def _tool_request_with_desktop_execution_route(
         payload["desktop_execution_route"] = dict(route_decision)
         payload.setdefault("sandbox_provider", sandbox_desktop_provider_status(payload))
     return payload
+
+
+def _desktop_execution_route_safety_override(
+    tool_name: str,
+    tool_request: Mapping[str, Any],
+    route: Mapping[str, Any],
+) -> dict[str, Any]:
+    if not desktop_execution_route_allows_provider_execution(route):
+        return {}
+    policy = _desktop_execution_policy_from_request(tool_request)
+    if not policy:
+        return {}
+    if not _tool_request_has_desktop_provider_state(tool_request):
+        return {}
+    raw_input = tool_request.get("input")
+    raw_input = dict(raw_input) if isinstance(raw_input, Mapping) else {}
+    execution_mode = desktop_tool_execution_mode_for_input(
+        tool_name,
+        raw_input,
+    ).model_dump(mode="json")
+    route_decision = desktop_execution_route_decision(
+        tool_name,
+        policy=policy,
+        execution_mode=execution_mode,
+        metadata=tool_request,
+    )
+    if _desktop_execution_route_blocks_execution(route_decision):
+        return route_decision
+    if not desktop_execution_route_allows_provider_execution(route_decision):
+        return route_decision
+    return {}
+
+
+def _tool_request_has_desktop_provider_state(tool_request: Mapping[str, Any]) -> bool:
+    return bool(
+        _first_mapping(
+            tool_request.get("sandbox_provider"),
+            tool_request.get("sandbox_desktop_provider"),
+            tool_request.get("desktop_sandbox_provider"),
+            tool_request.get("desktop_provider_session"),
+        )
+    )
 
 
 def _desktop_execution_policy_recovery_actions(
