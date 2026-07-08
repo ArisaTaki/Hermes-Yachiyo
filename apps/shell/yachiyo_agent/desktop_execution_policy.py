@@ -278,7 +278,12 @@ _APPROVAL_FIRST_KEYBOARD_MOUSE_TOOLS = frozenset(
 def desktop_provider_session_auto_start_recommended_for_requests(
     requests: Any,
 ) -> bool:
-    """Return true when daily entrypoint requests should prefer an isolated session."""
+    """Return true when daily entrypoint requests should prefer an isolated session.
+
+    Daily app-open, focus, media, and input actions should execute without taking
+    over the user's foreground desktop; approval-first UI actions still wait for
+    explicit user approval before starting a provider session.
+    """
 
     if isinstance(requests, Mapping):
         candidates = [requests]
@@ -299,7 +304,7 @@ def desktop_provider_session_auto_start_recommended_for_requests(
             continue
         if _low_risk_creation_shortcut_request(tool_name, request):
             continue
-        if tool_name in _KEYBOARD_MOUSE_CAPTURE_TOOLS:
+        if tool_name in _USER_FOREGROUND_TAKEOVER_TOOLS:
             return True
     return False
 

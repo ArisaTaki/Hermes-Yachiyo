@@ -5665,7 +5665,13 @@ def test_desktop_provider_session_auto_start_recommended_for_input_tasks() -> No
         desktop_provider_session_auto_start_recommended_for_requests(
             [{"tool": "app.open", "input": {"app_name": "Music"}}],
         )
-        is False
+        is True
+    )
+    assert (
+        desktop_provider_session_auto_start_recommended_for_requests(
+            [{"tool": "media.music_app_open_and_play", "input": {"app_name": "Music"}}],
+        )
+        is True
     )
     assert (
         desktop_provider_session_auto_start_recommended_for_requests(

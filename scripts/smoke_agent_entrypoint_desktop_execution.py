@@ -19,6 +19,9 @@ import apps.shell.agent_runtime as agent_runtime_mod
 from apps.shell.agent.tools import desktop as desktop_tools
 from apps.shell.agent_runtime import AgentRuntimeService
 from apps.shell.credential_store import MemoryCredentialStore
+from apps.shell.yachiyo_agent.desktop_execution_policy import (
+    desktop_provider_session_auto_start_recommended_for_requests,
+)
 
 
 _SUPERVISED_FOREGROUND_SMOKE_METADATA = {
@@ -1066,6 +1069,23 @@ def run_smoke(*, workdir: Path | None = None) -> dict[str, Any]:
     checks = {
         "all_cases_passed": all(case.get("ok") is True for case in cases),
         "model_never_called": model_call_count == 0,
+        "daily_app_open_recommends_isolated_provider": (
+            desktop_provider_session_auto_start_recommended_for_requests(
+                [{"tool": "app.open", "input": {"app_name": "PixelForge"}}]
+            )
+            is True
+        ),
+        "daily_media_playback_recommends_isolated_provider": (
+            desktop_provider_session_auto_start_recommended_for_requests(
+                [
+                    {
+                        "tool": "media.music_app_open_and_play",
+                        "input": {"app_name": "Music"},
+                    }
+                ]
+            )
+            is True
+        ),
     }
     return {
         "ok": all(checks.values()),
