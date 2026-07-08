@@ -170,6 +170,63 @@ def test_chat_bridge_quick_message_adds_daily_desktop_execution_policy(
         store.close()
 
 
+def test_chat_bridge_quick_message_recommends_isolated_provider_for_input_tasks(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _runtime_with_chat_store(store)
+    bridge = ChatBridge(runtime)
+    captured: dict[str, Any] = {}
+
+    def fake_send_message(text: str, **_kwargs: Any) -> dict[str, Any]:
+        return {
+            "ok": True,
+            "message_id": "message-copy",
+            "task_id": "task-copy",
+            "status": "pending",
+            "echo": text,
+        }
+
+    def fake_execute(
+        task_id: str,
+        text: str,
+        *,
+        metadata: dict[str, Any] | None = None,
+        runtime_execution_envelope: Any | None = None,
+        direct_tool_requests: Any | None = None,
+    ) -> dict[str, Any]:
+        captured["task_id"] = task_id
+        captured["text"] = text
+        captured["metadata"] = metadata
+        captured["runtime_execution_envelope"] = runtime_execution_envelope
+        captured["direct_tool_requests"] = direct_tool_requests
+        return {"task_id": task_id, "status": "completed", "summary": "done"}
+
+    bridge._chat_api = SimpleNamespace(send_message=fake_send_message)
+    monkeypatch.setattr(
+        bridge,
+        "_agent_task_snapshot_for_quick_message",
+        lambda *_args, **_kwargs: None,
+    )
+    monkeypatch.setattr(bridge, "_execute_yachiyo_desktop_quick_task", fake_execute)
+    try:
+        result = bridge.send_quick_message(
+            "复制选中文本",
+            metadata={
+                "source": "launcher",
+                "launcher_mode": "bubble",
+                "launcher_surface": "quick_message",
+            },
+        )
+
+        assert result["ok"] is True
+        assert captured["metadata"]["desktop_provider_session_auto_start"] is True
+        assert captured["metadata"]["desktop_execution_policy"]["mode"] == "preview_input"
+    finally:
+        store.close()
+
+
 def _agent_task_event(
     agent_task: dict[str, Any],
     event_type: str,

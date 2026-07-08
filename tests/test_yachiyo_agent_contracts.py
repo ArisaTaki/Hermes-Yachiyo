@@ -110,6 +110,7 @@ from apps.shell.yachiyo_agent import (
     approval_is_pending,
     daily_entrypoint_desktop_execution_policy,
     desktop_provider_session_auto_start_default,
+    desktop_provider_session_auto_start_recommended_for_requests,
     desktop_action_risk_level,
     desktop_action_risk_snapshots,
     desktop_tool_execution_mode,
@@ -5489,6 +5490,70 @@ def test_desktop_provider_session_auto_start_default_is_env_gated(monkeypatch) -
     monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_AUTO_START", "true")
 
     assert desktop_provider_session_auto_start_default() is True
+
+
+def test_desktop_provider_session_auto_start_recommended_for_input_tasks() -> None:
+    assert (
+        desktop_provider_session_auto_start_recommended_for_requests(
+            [{"tool": "desktop.safe_type_text", "input": {"text": "hello"}}],
+        )
+        is True
+    )
+    assert (
+        desktop_provider_session_auto_start_recommended_for_requests(
+            [
+                {
+                    "tool": "app.open_and_click_ui_element",
+                    "approval_required": True,
+                    "input": {"app_name": "Slack", "target": "Send"},
+                }
+            ],
+        )
+        is False
+    )
+    assert (
+        desktop_provider_session_auto_start_recommended_for_requests(
+            [
+                {
+                    "tool": "app.focus_and_click_ui_element",
+                    "input": {"app_name": "Slack", "target": "Send"},
+                }
+            ],
+        )
+        is False
+    )
+    assert (
+        desktop_provider_session_auto_start_recommended_for_requests(
+            [
+                {
+                    "tool": "app.open_and_safe_shortcut",
+                    "input": {"app_name": "Notes", "action": "new_note"},
+                }
+            ],
+        )
+        is False
+    )
+    assert (
+        desktop_provider_session_auto_start_recommended_for_requests(
+            [{"tool": "app.open", "input": {"app_name": "Music"}}],
+        )
+        is False
+    )
+    assert (
+        desktop_provider_session_auto_start_recommended_for_requests(
+            [
+                {
+                    "tool": "desktop.verify",
+                    "desktop_execution_route": {
+                        "blocking_conditions": [
+                            "sandbox_keyboard_mouse_provider_required"
+                        ]
+                    },
+                }
+            ],
+        )
+        is False
+    )
 
 
 def test_agent_studio_desktop_execution_policy_requests_provider_health_probe() -> None:

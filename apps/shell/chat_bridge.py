@@ -33,6 +33,7 @@ from apps.shell.yachiyo_agent.daily_desktop import (
 )
 from apps.shell.yachiyo_agent.desktop_execution_policy import (
     desktop_provider_session_auto_start_default,
+    desktop_provider_session_auto_start_recommended_for_requests,
     with_daily_entrypoint_desktop_execution_policy,
 )
 from apps.shell.yachiyo_agent.web_destination_hints import legacy_known_web_destination_url_hint
@@ -538,6 +539,10 @@ class ChatBridge:
             allowed_tools=planner_allowed_tools,
         )
         if desktop_candidates:
+            if desktop_provider_session_auto_start_recommended_for_requests(
+                desktop_candidates,
+            ):
+                execution_metadata.setdefault("desktop_provider_session_auto_start", True)
             agent_task = self._agent_task_snapshot_for_quick_message(
                 task_id,
                 has_desktop_intent=True,

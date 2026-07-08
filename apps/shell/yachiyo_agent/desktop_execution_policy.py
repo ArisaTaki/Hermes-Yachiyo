@@ -254,6 +254,78 @@ def desktop_provider_session_auto_start_default() -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+_LOW_RISK_CREATION_SHORTCUT_ACTIONS = frozenset(
+    {"new_document", "new_note", "new_task"}
+)
+
+_APPROVAL_FIRST_KEYBOARD_MOUSE_TOOLS = frozenset(
+    {
+        "app.open_and_safe_click",
+        "app.focus_and_safe_click",
+        "app.open_and_click_ui_element",
+        "app.focus_and_click_ui_element",
+        "app.open_and_type_into_ui_element",
+        "app.focus_and_type_into_ui_element",
+        "desktop.safe_click",
+        "desktop.click_ui_element",
+        "desktop.type_into_ui_element",
+        "desktop.click",
+    }
+)
+
+
+def desktop_provider_session_auto_start_recommended_for_requests(
+    requests: Any,
+) -> bool:
+    """Return true when daily entrypoint requests should prefer an isolated session."""
+
+    if isinstance(requests, Mapping):
+        candidates = [requests]
+    else:
+        try:
+            candidates = list(requests or [])
+        except TypeError:
+            candidates = []
+    for request in candidates:
+        if not isinstance(request, Mapping):
+            continue
+        if bool(request.get("approval_required")):
+            continue
+        tool_name = _request_tool_name(request)
+        if not tool_name:
+            continue
+        if tool_name in _APPROVAL_FIRST_KEYBOARD_MOUSE_TOOLS:
+            continue
+        if _low_risk_creation_shortcut_request(tool_name, request):
+            continue
+        if tool_name in _KEYBOARD_MOUSE_CAPTURE_TOOLS:
+            return True
+    return False
+
+
+def _request_tool_name(request: Mapping[str, Any]) -> str:
+    return str(request.get("tool") or request.get("tool_name") or "").strip()
+
+
+def _low_risk_creation_shortcut_request(
+    tool_name: str,
+    request: Mapping[str, Any],
+) -> bool:
+    if tool_name not in {
+        "app.open_and_safe_shortcut",
+        "app.focus_and_safe_shortcut",
+        "desktop.safe_shortcut",
+    }:
+        return False
+    payload = request.get("input")
+    if not isinstance(payload, Mapping):
+        payload = request.get("input_preview")
+    if not isinstance(payload, Mapping):
+        return False
+    action = str(payload.get("action") or "").strip()
+    return action in _LOW_RISK_CREATION_SHORTCUT_ACTIONS
+
+
 def agent_studio_desktop_execution_policy() -> dict[str, Any]:
     """Studio is the explicit supervised execution surface."""
 
