@@ -1,6 +1,7 @@
 import { ExpandableRuntimeContent } from './ExpandableRuntimeContent';
 import {
   runtimeDesktopProviderSessionContext,
+  runtimeDesktopProviderSessionDetail,
   type RuntimeDesktopProviderSessionContext,
 } from '../desktopProviderSessionEvents';
 import { runtimeAnchorId } from '../runtimeAnchors';
@@ -81,6 +82,9 @@ export function RuntimeTimelineEventList({
           const recoveryTarget = runtimeEventRecoveryTarget(event, payloadRecord);
           const observedContext = runtimeEventObservedContext(event, payloadRecord);
           const desktopProviderSession = runtimeDesktopProviderSessionContext(event, payloadRecord);
+          const desktopProviderSessionVisible = runtimeEventHasDesktopProviderSessionBlock(
+            eventName,
+          );
           const policyReason = eventIsSecret ? '' : runtimeEventPolicyReason(event, payloadRecord);
           const contentSnapshots = eventIsSecret ? [] : runtimeEventContentSnapshots(payloadRecord);
           const capabilityRecovery = eventIsSecret ? [] : runtimeEventCapabilityRecovery(payloadRecord);
@@ -208,6 +212,12 @@ export function RuntimeTimelineEventList({
                     testId={`${eventTestId}-capability-recovery`}
                   />
                 ) : null}
+                {desktopProviderSessionVisible ? (
+                  <RuntimeDesktopProviderSessionBlock
+                    context={desktopProviderSession}
+                    testId={`${eventTestId}-desktop-provider-session`}
+                  />
+                ) : null}
                 {payload ? (
                   <ExpandableRuntimeContent
                     content={payload}
@@ -253,6 +263,55 @@ export function RuntimeTimelineEventList({
         );
       })}
     </ol>
+  );
+}
+
+function RuntimeDesktopProviderSessionBlock({
+  context,
+  testId,
+}: {
+  context: RuntimeDesktopProviderSessionContext;
+  testId: string;
+}) {
+  const detail = runtimeDesktopProviderSessionDetail(context);
+  const rows = [
+    ['Provider', context.providerId],
+    ['Status', context.status || context.reason],
+    ['Session', context.executionSessionLabel || context.desktopSessionKind || context.executionSessionMode],
+    ['Backend', runtimeDesktopProviderBackendSummary(context)],
+    ['Safety', runtimeDesktopProviderSafetySummary(context)],
+    ['Tools', context.toolNames.join(', ') || context.supportedTools.join(', ')],
+    ['Blockers', context.blockingConditions.join(', ')],
+    ['Error', context.error],
+  ].filter(([, value]) => value);
+  return (
+    <section
+      className="run-desktop-provider-session"
+      data-provider-backend={context.desktopBackendKind}
+      data-provider-backend-loopback={context.desktopBackendIsLoopback}
+      data-provider-backend-release-ready={context.desktopBackendReadyForPublicRelease}
+      data-provider-blockers={context.blockingConditions.join(',')}
+      data-provider-id={context.providerId}
+      data-provider-session-kind={context.desktopSessionKind}
+      data-provider-status={context.status}
+      data-provider-tools={context.toolNames.join(',')}
+      data-testid={testId}
+    >
+      <div className="run-desktop-provider-session-head">
+        <strong>桌面执行环境</strong>
+        {detail ? <span>{detail}</span> : null}
+      </div>
+      {rows.length ? (
+        <div className="run-desktop-provider-session-grid">
+          {rows.map(([label, value]) => (
+            <div className="run-desktop-provider-session-row" key={`${label}:${value}`}>
+              <span>{label}</span>
+              <code>{value}</code>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </section>
   );
 }
 
@@ -303,6 +362,37 @@ function RuntimeCapabilityRecoveryList({
       </div>
     </section>
   );
+}
+
+function runtimeEventHasDesktopProviderSessionBlock(eventName: string): boolean {
+  return (
+    runtimeEventIsDesktopProviderSessionEvent(eventName)
+    || runtimeEventIsDesktopProviderExecutionRouted(eventName)
+  );
+}
+
+function runtimeDesktopProviderBackendSummary(
+  context: RuntimeDesktopProviderSessionContext,
+): string {
+  return [
+    context.desktopBackendKind,
+    context.desktopBackendIsLoopback === 'true' ? 'loopback' : '',
+    context.desktopBackendIsLoopback === 'false' ? 'non-loopback' : '',
+    context.desktopBackendReadyForPublicRelease === 'true' ? 'release-ready' : '',
+    context.desktopBackendReadyForPublicRelease === 'false' ? 'not release-ready' : '',
+    context.requiresRealVirtualDesktopBackend === 'true' ? 'real virtual required' : '',
+  ].filter(Boolean).join(' · ');
+}
+
+function runtimeDesktopProviderSafetySummary(
+  context: RuntimeDesktopProviderSessionContext,
+): string {
+  return [
+    context.desktopSessionIsolated === 'true' ? 'isolated' : '',
+    context.foregroundTakeoverRequired === 'false' ? 'no foreground takeover' : '',
+    context.foregroundTakeoverRequired === 'true' ? 'foreground takeover' : '',
+    context.keyboardMouseCaptureSupported === 'true' ? 'keyboard/mouse ready' : '',
+  ].filter(Boolean).join(' · ');
 }
 
 function RuntimeCapabilityRecoveryValue({

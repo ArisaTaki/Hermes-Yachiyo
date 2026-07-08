@@ -18914,6 +18914,70 @@ button.studio-tool-permission:disabled {
   white-space: pre-wrap;
 }
 
+.run-desktop-provider-session {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding-top: 9px;
+  border-top: 1px solid oklch(66% 0.12 188 / 0.2);
+}
+
+.run-desktop-provider-session-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+  min-width: 0;
+}
+
+.run-desktop-provider-session-head strong {
+  color: var(--hy-fg);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.run-desktop-provider-session-head span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--hy-faint);
+  font-size: 10px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-desktop-provider-session-grid {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.run-desktop-provider-session-row {
+  display: grid;
+  grid-template-columns: minmax(70px, max-content) minmax(0, 1fr);
+  gap: 8px;
+  min-width: 0;
+  align-items: baseline;
+}
+
+.run-desktop-provider-session-row span {
+  color: var(--hy-teal);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.run-desktop-provider-session-row code {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--hy-fg);
+  font-family: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .run-capability-recovery {
   display: grid;
   gap: 8px;
