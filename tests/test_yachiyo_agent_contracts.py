@@ -5494,6 +5494,12 @@ def test_desktop_execution_route_decision_reports_provider_boundaries() -> None:
         "desktop_session_kind",
         "desktop_session_isolated",
         "foreground_takeover_required",
+        "desktop_backend_kind",
+        "desktop_backend_is_loopback",
+        "desktop_backend_ready_for_public_release",
+        "requires_real_virtual_desktop_backend",
+        "simulated_desktop_provider",
+        "provider_contract_blocking_conditions",
         "fallback_mode",
         "reason",
         "blocking_conditions",
@@ -5524,6 +5530,76 @@ def test_desktop_execution_route_decision_reports_provider_boundaries() -> None:
     assert browser_route["can_execute"] is True
     with pytest.raises(ValidationError):
         DesktopExecutionRouteSnapshot(unknown=True)
+
+
+def test_desktop_execution_route_blocks_loopback_provider_backend() -> None:
+    route = desktop_execution_route_decision(
+        "app.open",
+        policy={"mode": "supervised_live", "prefer_isolated_desktop": True},
+        execution_mode=DesktopExecutionModeSnapshot(
+            mode="supervised_live",
+            foreground_control=True,
+            keyboard_mouse_capture=False,
+        ),
+        metadata={
+            "desktop_provider_route_foreground": True,
+            "sandbox_provider": {
+                "available": True,
+                "adapter_ready": True,
+                "provider_id": "local-isolated-desktop",
+                "provider_kind": "sandbox_desktop",
+                "supported_tools": ["app.open"],
+                "desktop_session_kind": "isolated_desktop",
+                "desktop_session_isolated": True,
+                "foreground_takeover_required": False,
+                "desktop_backend_kind": "loopback_session_harness",
+                "desktop_backend_is_loopback": True,
+                "desktop_backend_ready_for_public_release": False,
+                "requires_real_virtual_desktop_backend": True,
+            },
+        },
+    )
+    allowed_route = desktop_execution_route_decision(
+        "app.open",
+        policy={"mode": "supervised_live", "prefer_isolated_desktop": True},
+        execution_mode=DesktopExecutionModeSnapshot(
+            mode="supervised_live",
+            foreground_control=True,
+            keyboard_mouse_capture=False,
+        ),
+        metadata={
+            "desktop_provider_route_foreground": True,
+            "allow_simulated_desktop_provider": True,
+            "sandbox_provider": {
+                "available": True,
+                "adapter_ready": True,
+                "provider_id": "local-isolated-desktop",
+                "provider_kind": "sandbox_desktop",
+                "supported_tools": ["app.open"],
+                "desktop_session_kind": "isolated_desktop",
+                "desktop_session_isolated": True,
+                "foreground_takeover_required": False,
+                "desktop_backend_kind": "loopback_session_harness",
+                "desktop_backend_is_loopback": True,
+                "requires_real_virtual_desktop_backend": True,
+            },
+        },
+    )
+
+    assert route["status"] == "real_virtual_desktop_provider_required"
+    assert route["can_execute"] is False
+    assert route["selected_provider_id"] == "local-isolated-desktop"
+    assert route["desktop_backend_kind"] == "loopback_session_harness"
+    assert route["desktop_backend_is_loopback"] is True
+    assert route["requires_real_virtual_desktop_backend"] is True
+    assert route["simulated_desktop_provider"] is True
+    assert route["blocking_conditions"] == [
+        "loopback_desktop_backend",
+        "real_virtual_desktop_backend_required",
+    ]
+    assert allowed_route["status"] == "sandbox_ready"
+    assert allowed_route["can_execute"] is True
+    assert allowed_route["simulated_desktop_provider"] is True
 
 
 def test_agent_studio_route_blocks_keyboard_mouse_without_controlled_provider(

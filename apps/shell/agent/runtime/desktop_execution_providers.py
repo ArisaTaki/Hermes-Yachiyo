@@ -100,6 +100,17 @@ _PROVIDER_REQUIRES_REAL_VIRTUAL_DESKTOP_ENV_KEYS = (
     "OHA_YACHIYO_DESKTOP_PROVIDER_REQUIRES_REAL_VIRTUAL_DESKTOP_BACKEND",
     "OHA_YACHIYO_SANDBOX_DESKTOP_PROVIDER_REQUIRES_REAL_VIRTUAL_DESKTOP_BACKEND",
 )
+_SIMULATED_DESKTOP_PROVIDER_ALLOW_KEYS = (
+    "allow_simulated_desktop_provider",
+    "desktop_provider_allow_simulated_execution",
+    "allow_loopback_desktop_provider_execution",
+    "desktop_allow_loopback_provider_execution",
+)
+_SIMULATED_DESKTOP_PROVIDER_ENV_ALLOW_KEYS = (
+    "OHA_YACHIYO_ALLOW_SIMULATED_DESKTOP_PROVIDER",
+    "OHA_YACHIYO_DESKTOP_PROVIDER_ALLOW_SIMULATED_EXECUTION",
+    "OHA_YACHIYO_ALLOW_LOOPBACK_DESKTOP_PROVIDER_EXECUTION",
+)
 LOCAL_DESKTOP_PROVIDER_ID = "local-native-desktop"
 LOCAL_DESKTOP_PROVIDER_KIND = "local_desktop"
 LOCAL_DESKTOP_PROVIDER_TOOLS = (
@@ -286,6 +297,20 @@ class DesktopExecutionProviderRegistry:
                 tool_name,
                 route=route,
                 tool_request=tool_request,
+            )
+        simulated_blockers = _simulated_desktop_provider_blockers(
+            route,
+            tool_request,
+        )
+        if simulated_blockers and not _simulated_desktop_provider_execution_allowed(
+            route,
+            tool_request,
+        ):
+            return desktop_execution_provider_simulated_backend_result(
+                tool_name,
+                route=route,
+                tool_request=tool_request,
+                blocking_conditions=simulated_blockers,
             )
 
         result = adapter.execute(
@@ -1208,6 +1233,43 @@ def desktop_execution_provider_unavailable_result(
     )
 
 
+def desktop_execution_provider_simulated_backend_result(
+    tool_name: str,
+    *,
+    route: Mapping[str, Any],
+    tool_request: Mapping[str, Any],
+    blocking_conditions: Iterable[str],
+) -> dict[str, Any]:
+    blockers = _unique_strings(blocking_conditions) or ["loopback_desktop_backend"]
+    return _with_desktop_provider_context(
+        {
+            "ok": False,
+            "tool": tool_name,
+            "action": tool_name,
+            "status": "real_virtual_desktop_provider_required",
+            "error": "desktop_execution_provider_simulated_backend",
+            "summary": (
+                "Desktop provider execution was blocked because the selected "
+                "provider reports a loopback or simulated backend."
+            ),
+            "blocked_by_desktop_execution_provider": True,
+            "simulated_desktop_provider": True,
+            "requires_real_virtual_desktop_backend": True,
+            "blocking_condition": blockers[0],
+            "blocking_conditions": blockers,
+            "hint": (
+                "Configure a real isolated virtual desktop provider before routing "
+                "desktop app operations through this path."
+            ),
+            "recommended_tools": ["desktop.provider_session.start"],
+        },
+        tool_name=tool_name,
+        route=route,
+        tool_request=tool_request,
+        adapter_registered=True,
+    )
+
+
 def _provider_unavailable_recovery_actions(
     tool_name: str,
     *,
@@ -1321,8 +1383,59 @@ def _with_desktop_provider_context(
     return result
 
 
+def _simulated_desktop_provider_blockers(
+    route: Mapping[str, Any],
+    tool_request: Mapping[str, Any],
+) -> list[str]:
+    blockers: list[str] = []
+    for source in (
+        route,
+        sandbox_provider_payload(tool_request),
+        _mapping(tool_request.get("desktop_provider_session")),
+    ):
+        if not source:
+            continue
+        backend_kind = str(source.get("desktop_backend_kind") or "").strip()
+        if backend_kind == "loopback_session_harness":
+            blockers.append("loopback_desktop_backend")
+        if _optional_bool_value(source.get("desktop_backend_is_loopback")) is True:
+            blockers.append("loopback_desktop_backend")
+        if (
+            _optional_bool_value(source.get("requires_real_virtual_desktop_backend"))
+            is True
+        ):
+            blockers.append("real_virtual_desktop_backend_required")
+    return _unique_strings(blockers)
+
+
+def _simulated_desktop_provider_execution_allowed(
+    route: Mapping[str, Any],
+    tool_request: Mapping[str, Any],
+) -> bool:
+    if _mapping_truthy(route, *_SIMULATED_DESKTOP_PROVIDER_ALLOW_KEYS):
+        return True
+    if _mapping_truthy(tool_request, *_SIMULATED_DESKTOP_PROVIDER_ALLOW_KEYS):
+        return True
+    metadata = tool_request.get("metadata")
+    if isinstance(metadata, Mapping) and _mapping_truthy(
+        metadata,
+        *_SIMULATED_DESKTOP_PROVIDER_ALLOW_KEYS,
+    ):
+        return True
+    sandbox_provider = sandbox_provider_payload(tool_request)
+    if _mapping_truthy(sandbox_provider, *_SIMULATED_DESKTOP_PROVIDER_ALLOW_KEYS):
+        return True
+    env = os.environ
+    return any(
+        _truthy_env_value(env, key)
+        for key in _SIMULATED_DESKTOP_PROVIDER_ENV_ALLOW_KEYS
+    )
+
+
 def _route_provider_kind(route: Mapping[str, Any]) -> str:
-    return _clean_provider_kind(route.get("selected_provider_kind") or route.get("provider_kind"))
+    return _clean_provider_kind(
+        route.get("selected_provider_kind") or route.get("provider_kind")
+    )
 
 
 def _clean_provider_kind(value: Any) -> str:
@@ -1590,16 +1703,52 @@ def _truthy_env_value(env: Mapping[str, str], key: str) -> bool:
     return str(env.get(key) or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _mapping(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _mapping_truthy(mapping: Mapping[str, Any] | None, *keys: str) -> bool:
+    if not isinstance(mapping, Mapping):
+        return False
+    for key in keys:
+        value = mapping.get(key)
+        if value is True:
+            return True
+        if isinstance(value, str) and value.strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }:
+            return True
+    nested = mapping.get("metadata")
+    if isinstance(nested, Mapping) and nested is not mapping:
+        return _mapping_truthy(nested, *keys)
+    return False
+
+
 def _string_list(value: Any) -> list[str]:
     if isinstance(value, str):
         raw_items = value.split(",")
-    elif isinstance(value, Iterable) and not isinstance(value, (bytes, bytearray, Mapping)):
+    elif isinstance(value, Iterable) and not isinstance(
+        value,
+        (bytes, bytearray, Mapping),
+    ):
         raw_items = value
     else:
         raw_items = []
     items: list[str] = []
     for item in raw_items:
         text = str(item or "").strip()
+        if text and text not in items:
+            items.append(text)
+    return items
+
+
+def _unique_strings(values: Iterable[Any]) -> list[str]:
+    items: list[str] = []
+    for value in values:
+        text = str(value or "").strip()
         if text and text not in items:
             items.append(text)
     return items

@@ -795,6 +795,7 @@ def _desktop_execution_route_blocks_execution(route_decision: Mapping[str, Any])
         "sandbox_desktop_session_required",
         "sandbox_keyboard_mouse_provider_required",
         "sandbox_tool_not_supported",
+        "real_virtual_desktop_provider_required",
     }:
         return True
     provider_blockers = {
@@ -804,6 +805,8 @@ def _desktop_execution_route_blocks_execution(route_decision: Mapping[str, Any])
         "sandbox_desktop_session_required",
         "sandbox_keyboard_mouse_provider_required",
         "isolated_desktop_provider_required",
+        "loopback_desktop_backend",
+        "real_virtual_desktop_backend_required",
     }
     return any(
         str(item or "").strip() in provider_blockers

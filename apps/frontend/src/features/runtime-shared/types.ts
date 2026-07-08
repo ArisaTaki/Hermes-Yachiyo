@@ -255,6 +255,12 @@ export type DesktopExecutionRouteSnapshot = {
   desktop_session_kind?: string;
   desktop_session_isolated?: boolean | null;
   foreground_takeover_required?: boolean | null;
+  desktop_backend_kind?: string;
+  desktop_backend_is_loopback?: boolean | null;
+  desktop_backend_ready_for_public_release?: boolean | null;
+  requires_real_virtual_desktop_backend?: boolean | null;
+  simulated_desktop_provider?: boolean;
+  provider_contract_blocking_conditions?: string[];
   fallback_mode?: DesktopExecutionPolicyMode | string;
   reason?: string;
   blocking_conditions?: string[];

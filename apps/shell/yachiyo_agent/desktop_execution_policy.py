@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, Iterable
 from urllib.parse import urlparse
 
 from apps.shell.agent.runtime.controlled_desktop_provider import (
@@ -157,6 +157,19 @@ _LOCAL_DESKTOP_PROVIDER_KEYS = (
     "desktop_provider_local_native",
     "desktop_provider_local",
     "local_desktop_provider",
+)
+
+_SIMULATED_DESKTOP_PROVIDER_ALLOW_KEYS = (
+    "allow_simulated_desktop_provider",
+    "desktop_provider_allow_simulated_execution",
+    "allow_loopback_desktop_provider_execution",
+    "desktop_allow_loopback_provider_execution",
+)
+
+_SIMULATED_DESKTOP_PROVIDER_ENV_ALLOW_KEYS = (
+    "OHA_YACHIYO_ALLOW_SIMULATED_DESKTOP_PROVIDER",
+    "OHA_YACHIYO_DESKTOP_PROVIDER_ALLOW_SIMULATED_EXECUTION",
+    "OHA_YACHIYO_ALLOW_LOOPBACK_DESKTOP_PROVIDER_EXECUTION",
 )
 
 _READ_ONLY_DESKTOP_PROVIDER_TOOLS = frozenset(
@@ -547,13 +560,23 @@ def desktop_execution_route_decision(
         and foreground_required
         and not bool(sandbox_provider.get("available"))
     ):
-        return _sandbox_route_decision(route, sandbox_provider, clean_tool)
+        return _sandbox_route_decision(
+            route,
+            sandbox_provider,
+            clean_tool,
+            decision_context,
+        )
     if (
         readonly_provider_requested
         and is_readonly_desktop_provider_tool(clean_tool)
         and sandbox_desktop_provider_can_execute_tool(sandbox_provider, clean_tool)
     ):
-        sandbox_route = _sandbox_route_decision(route, sandbox_provider, clean_tool)
+        sandbox_route = _sandbox_route_decision(
+            route,
+            sandbox_provider,
+            clean_tool,
+            decision_context,
+        )
         return {
             **sandbox_route,
             "reason": _readonly_desktop_provider_route_reason(sandbox_provider),
@@ -566,7 +589,12 @@ def desktop_execution_route_decision(
             clean_tool,
         )
     ):
-        sandbox_route = _sandbox_route_decision(route, sandbox_provider, clean_tool)
+        sandbox_route = _sandbox_route_decision(
+            route,
+            sandbox_provider,
+            clean_tool,
+            decision_context,
+        )
         return {
             **sandbox_route,
             "reason": (
@@ -583,7 +611,12 @@ def desktop_execution_route_decision(
             decision_context,
         )
     ):
-        sandbox_route = _sandbox_route_decision(route, sandbox_provider, clean_tool)
+        sandbox_route = _sandbox_route_decision(
+            route,
+            sandbox_provider,
+            clean_tool,
+            decision_context,
+        )
         return {
             **sandbox_route,
             "status": "sandbox_desktop_session_required",
@@ -602,7 +635,12 @@ def desktop_execution_route_decision(
         and (foreground_required or execution_mode_name == "supervised_live")
         and sandbox_desktop_provider_can_execute_tool(sandbox_provider, clean_tool)
     ):
-        sandbox_route = _sandbox_route_decision(route, sandbox_provider, clean_tool)
+        sandbox_route = _sandbox_route_decision(
+            route,
+            sandbox_provider,
+            clean_tool,
+            decision_context,
+        )
         return {
             **sandbox_route,
             "reason": _foreground_desktop_provider_route_reason(sandbox_provider),
@@ -629,7 +667,12 @@ def desktop_execution_route_decision(
             "blocking_conditions": ["desktop_execution_handoff_required"],
         }
     if sandbox_required:
-        return _sandbox_route_decision(route, sandbox_provider, clean_tool)
+        return _sandbox_route_decision(
+            route,
+            sandbox_provider,
+            clean_tool,
+            decision_context,
+        )
     return {
         **route,
         "status": "preview_required",
@@ -1015,6 +1058,7 @@ def _sandbox_route_decision(
     route: Mapping[str, Any],
     sandbox_provider: Mapping[str, Any],
     tool_name: str,
+    metadata: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     blockers = _string_list(sandbox_provider.get("blocking_conditions")) or [
         "sandbox_desktop_provider_required"
@@ -1066,6 +1110,28 @@ def _sandbox_route_decision(
             "fallback_mode": "supervised_live",
             "reason": "Sandbox provider is available but does not support this tool.",
             "blocking_conditions": ["sandbox_tool_not_supported"],
+            **provider_context,
+        }
+    simulated_blockers = _simulated_desktop_provider_blockers(sandbox_provider)
+    if simulated_blockers and not _simulated_desktop_provider_execution_allowed(
+        metadata,
+        sandbox_provider,
+    ):
+        return {
+            **dict(route),
+            "selected_provider_kind": provider_kind,
+            "selected_provider_id": provider_id,
+            "status": "real_virtual_desktop_provider_required",
+            "can_execute": False,
+            "can_auto_start": False,
+            "sandbox_required": True,
+            "fallback_mode": "supervised_live",
+            "reason": (
+                "Current desktop provider is a loopback or simulated harness. "
+                "Real desktop execution requires a non-loopback virtual desktop "
+                "provider before the agent can act on apps."
+            ),
+            "blocking_conditions": simulated_blockers,
             **provider_context,
         }
     if _sandbox_route_requires_isolated_foreground_session(route, provider_context):
@@ -1134,6 +1200,30 @@ def _desktop_provider_route_context(
     session_kind = str(sandbox_provider.get("desktop_session_kind") or "").strip()
     if session_kind:
         payload["desktop_session_kind"] = session_kind
+    for key in (
+        "desktop_backend_kind",
+        "desktop_backend_is_loopback",
+        "desktop_backend_ready_for_public_release",
+        "requires_real_virtual_desktop_backend",
+    ):
+        if key not in sandbox_provider:
+            continue
+        value = sandbox_provider.get(key)
+        if key == "desktop_backend_kind":
+            payload[key] = str(value or "").strip()
+        else:
+            payload[key] = _optional_bool_value(value)
+    provider_contract = sandbox_provider.get("provider_contract")
+    contract_blockers = (
+        _string_list(provider_contract.get("blocking_conditions"))
+        if isinstance(provider_contract, Mapping)
+        else []
+    )
+    if contract_blockers:
+        payload["provider_contract_blocking_conditions"] = contract_blockers
+    payload["simulated_desktop_provider"] = bool(
+        _simulated_desktop_provider_blockers(sandbox_provider)
+    )
     takeover_required = (
         _optional_bool_value(sandbox_provider.get("foreground_takeover_required")) is True
     )
@@ -1207,6 +1297,39 @@ def _foreground_desktop_provider_route_reason(
     return f"Foreground desktop action can be routed through the {provider_kind} provider."
 
 
+def _simulated_desktop_provider_blockers(
+    sandbox_provider: Mapping[str, Any],
+) -> list[str]:
+    blockers: list[str] = []
+    backend_kind = str(sandbox_provider.get("desktop_backend_kind") or "").strip()
+    if backend_kind == "loopback_session_harness":
+        blockers.append("loopback_desktop_backend")
+    if _optional_bool_value(sandbox_provider.get("desktop_backend_is_loopback")) is True:
+        blockers.append("loopback_desktop_backend")
+    if (
+        _optional_bool_value(
+            sandbox_provider.get("requires_real_virtual_desktop_backend")
+        )
+        is True
+    ):
+        blockers.append("real_virtual_desktop_backend_required")
+    return _unique_strings(blockers)
+
+
+def _simulated_desktop_provider_execution_allowed(
+    metadata: Mapping[str, Any] | None,
+    sandbox_provider: Mapping[str, Any] | None = None,
+) -> bool:
+    if _metadata_truthy(metadata, *_SIMULATED_DESKTOP_PROVIDER_ALLOW_KEYS):
+        return True
+    if _metadata_truthy(sandbox_provider, *_SIMULATED_DESKTOP_PROVIDER_ALLOW_KEYS):
+        return True
+    return any(
+        _truthy_env_value(key)
+        for key in _SIMULATED_DESKTOP_PROVIDER_ENV_ALLOW_KEYS
+    )
+
+
 def _sandbox_provider_requires_keyboard_mouse_sandbox(
     sandbox_provider: Mapping[str, Any],
     tool_name: str,
@@ -1234,6 +1357,11 @@ def _sandbox_provider_requires_isolated_foreground_session(
 ) -> bool:
     clean_tool = str(tool_name or "").strip()
     if clean_tool not in _USER_FOREGROUND_TAKEOVER_TOOLS:
+        return False
+    if (
+        str(sandbox_provider.get("provider_kind") or "").strip() == "local_desktop"
+        and clean_tool not in _KEYBOARD_MOUSE_CAPTURE_TOOLS
+    ):
         return False
     if _metadata_truthy(
         metadata,
@@ -1398,6 +1526,15 @@ def _string_list(value: Any) -> list[str]:
     items: list[str] = []
     for item in raw_items:
         text = str(item or "").strip()
+        if text and text not in items:
+            items.append(text)
+    return items
+
+
+def _unique_strings(values: Iterable[Any]) -> list[str]:
+    items: list[str] = []
+    for value in values:
+        text = str(value or "").strip()
         if text and text not in items:
             items.append(text)
     return items

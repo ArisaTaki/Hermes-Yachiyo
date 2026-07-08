@@ -165,6 +165,7 @@ def _run_provider_smoke(
     use_configured_provider: bool,
 ) -> dict[str, Any]:
     status_payload = dict(status)
+    allow_simulated_provider = not use_configured_provider
     tool_results = [
         _execute_tool(
             registry,
@@ -172,6 +173,7 @@ def _run_provider_smoke(
             "desktop.list_apps",
             {"query": SMOKE_APP_NAME, "limit": 20},
             provider_status=status_payload,
+            allow_simulated_provider=allow_simulated_provider,
         ),
         _execute_tool(
             registry,
@@ -183,6 +185,7 @@ def _run_provider_smoke(
                 "query": SMOKE_APP_NAME,
             },
             provider_status=status_payload,
+            allow_simulated_provider=allow_simulated_provider,
         ),
         _execute_tool(
             registry,
@@ -195,6 +198,7 @@ def _run_provider_smoke(
                 "limit": 20,
             },
             provider_status=status_payload,
+            allow_simulated_provider=allow_simulated_provider,
         ),
         _execute_tool(
             registry,
@@ -202,6 +206,7 @@ def _run_provider_smoke(
             "media.music_app_open_and_play",
             {"app_name": SMOKE_APP_NAME},
             provider_status=status_payload,
+            allow_simulated_provider=allow_simulated_provider,
         ),
         _execute_tool(
             registry,
@@ -209,6 +214,7 @@ def _run_provider_smoke(
             "media.music_app_control",
             {"app_name": SMOKE_APP_NAME, "action": "pause"},
             provider_status=status_payload,
+            allow_simulated_provider=allow_simulated_provider,
         ),
         _execute_tool(
             registry,
@@ -216,6 +222,7 @@ def _run_provider_smoke(
             "desktop.read_ui",
             {"app_name": SMOKE_APP_NAME},
             provider_status=status_payload,
+            allow_simulated_provider=allow_simulated_provider,
         ),
         _execute_tool(
             registry,
@@ -227,6 +234,7 @@ def _run_provider_smoke(
                 "expected_app_name": SMOKE_APP_NAME,
             },
             provider_status=status_payload,
+            allow_simulated_provider=allow_simulated_provider,
         ),
         _execute_tool(
             registry,
@@ -234,6 +242,7 @@ def _run_provider_smoke(
             "desktop.safe_type_text",
             {"text": SMOKE_TEXT},
             provider_status=status_payload,
+            allow_simulated_provider=allow_simulated_provider,
         ),
         _execute_tool(
             registry,
@@ -241,6 +250,7 @@ def _run_provider_smoke(
             "desktop.safe_shortcut",
             {"action": "submit"},
             provider_status=status_payload,
+            allow_simulated_provider=allow_simulated_provider,
         ),
         _execute_tool(
             registry,
@@ -252,6 +262,7 @@ def _run_provider_smoke(
                 "expected_text": SMOKE_TEXT,
             },
             provider_status=status_payload,
+            allow_simulated_provider=allow_simulated_provider,
         ),
     ]
     result = tool_results[-1] if tool_results else {}
@@ -542,6 +553,7 @@ def _execute_tool(
     payload: dict[str, Any],
     *,
     provider_status: Mapping[str, Any],
+    allow_simulated_provider: bool = False,
 ) -> dict[str, Any]:
     result = registry.execute_if_routed(
         tool_name,
@@ -551,6 +563,7 @@ def _execute_tool(
             tool_name,
             payload,
             provider_status=provider_status,
+            allow_simulated_provider=allow_simulated_provider,
         ),
         broker=object(),
         approved=True,
@@ -564,11 +577,12 @@ def _tool_request(
     payload: dict[str, Any],
     *,
     provider_status: Mapping[str, Any],
+    allow_simulated_provider: bool = False,
 ) -> dict[str, Any]:
     supported_tools = provider_status.get("supported_tools")
     if not isinstance(supported_tools, list):
         supported_tools = list(SMOKE_TOOLS)
-    return {
+    request = {
         "tool": tool_name,
         "input": dict(payload),
         "desktop_execution_route": {
@@ -619,6 +633,13 @@ def _tool_request(
             ),
         },
     }
+    if allow_simulated_provider:
+        request["allow_simulated_desktop_provider"] = True
+        request["desktop_execution_route"][
+            "allow_simulated_desktop_provider"
+        ] = True
+        request["sandbox_provider"]["allow_simulated_desktop_provider"] = True
+    return request
 
 
 if __name__ == "__main__":

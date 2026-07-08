@@ -267,6 +267,12 @@ class DesktopExecutionRouteSnapshot(_PublicSnapshot):
     desktop_session_kind: str = ""
     desktop_session_isolated: bool | None = None
     foreground_takeover_required: bool | None = None
+    desktop_backend_kind: str = ""
+    desktop_backend_is_loopback: bool | None = None
+    desktop_backend_ready_for_public_release: bool | None = None
+    requires_real_virtual_desktop_backend: bool | None = None
+    simulated_desktop_provider: bool = False
+    provider_contract_blocking_conditions: list[str] = Field(default_factory=list)
     fallback_mode: DesktopExecutionPolicyMode | str = ""
     reason: str = ""
     blocking_conditions: list[str] = Field(default_factory=list)

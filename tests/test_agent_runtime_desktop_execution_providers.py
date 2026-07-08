@@ -138,6 +138,60 @@ def test_desktop_provider_registry_from_env_routes_tool_to_local_http_provider()
     assert requests[0]["payload"]["provider"]["provider_id"] == "sandbox-1"
 
 
+def test_desktop_provider_registry_blocks_loopback_backend_even_with_ready_route() -> None:
+    requests: list[dict[str, Any]] = []
+
+    def fake_urlopen(request: Any, *, timeout: float) -> FakeResponse:
+        requests.append({"url": request.full_url, "timeout": timeout})
+        return FakeResponse({"result": {"ok": True, "data": {"typed": True}}})
+
+    registry = desktop_execution_provider_registry_from_env(
+        {
+            "OHA_YACHIYO_DESKTOP_PROVIDER_URL": "http://127.0.0.1:19091",
+            "OHA_YACHIYO_DESKTOP_PROVIDER_ID": "sandbox-1",
+            "OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS": "desktop.safe_type_text",
+        },
+        urlopen=fake_urlopen,
+    )
+    tool_request = _sandbox_tool_request()
+    tool_request["desktop_execution_route"].update(
+        {
+            "desktop_backend_kind": "loopback_session_harness",
+            "desktop_backend_is_loopback": True,
+            "requires_real_virtual_desktop_backend": True,
+        }
+    )
+    tool_request["sandbox_provider"].update(
+        {
+            "desktop_backend_kind": "loopback_session_harness",
+            "desktop_backend_is_loopback": True,
+            "requires_real_virtual_desktop_backend": True,
+        }
+    )
+
+    result = registry.execute_if_routed(
+        "desktop.safe_type_text",
+        {"text": "hello"},
+        tool_request=tool_request,
+        broker=object(),
+        approved=True,
+    )
+
+    assert result is not None
+    assert result["ok"] is False
+    assert result["status"] == "real_virtual_desktop_provider_required"
+    assert result["error"] == "desktop_execution_provider_simulated_backend"
+    assert result["desktop_execution_provider_routed"] is True
+    assert result["desktop_execution_provider"]["adapter_registered"] is True
+    assert result["simulated_desktop_provider"] is True
+    assert result["requires_real_virtual_desktop_backend"] is True
+    assert result["blocking_conditions"] == [
+        "loopback_desktop_backend",
+        "real_virtual_desktop_backend_required",
+    ]
+    assert requests == []
+
+
 def test_default_desktop_provider_registry_routes_low_risk_tools_to_local_broker() -> None:
     calls: list[tuple[str, dict[str, Any], bool]] = []
 
