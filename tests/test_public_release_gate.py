@@ -277,6 +277,11 @@ def test_public_release_gate_defaults_to_safe_preflight_with_demo_blockers(
     assert "packaged_launch" in summary["release_smoke"]["missing_item_ids"]
     assert "diagnostics_export" not in summary["release_smoke"]["missing_item_ids"]
     assert any(action["id"] == "packaged_launch" for action in summary["next_actions"])
+    assert summary["progress"]["stage"] == "release_evidence"
+    assert summary["progress"]["automated_checks"] == {"passed": 8, "total": 8}
+    assert summary["progress"]["public_demo"] == {"passed": 14, "total": 16}
+    assert summary["progress"]["release_smoke"] == {"passed": 3, "total": 10}
+    assert summary["progress"]["external_blocked"] is False
 
 
 def test_public_release_gate_strict_mode_fails_until_release_ready(
@@ -320,6 +325,8 @@ def test_public_release_gate_strict_mode_fails_until_release_ready(
     assert "Release level: `partial_demo_ready`" in markdown
     assert "## Release Smoke" in markdown
     assert "Demo blocker `studio_replay_ui`: `ui_smoke_not_collected`" in markdown
+    assert "Progress stage: `release_evidence`" in markdown
+    assert "Code progress: 73.5% (26.5% remaining)" in markdown
     assert "--include-ui" in markdown
     assert "tmp/public-demo-smokes-ui-missing.json" in markdown
     assert "--include-real-desktop --include-provider-workflow --include-ui" not in markdown
@@ -350,6 +357,9 @@ def test_public_release_gate_passes_when_full_release_smoke_is_present(
     assert summary["status"] == "ready"
     assert summary["release_blocker_count"] == 0
     assert summary["next_actions"] == []
+    assert summary["progress"]["stage"] == "ready"
+    assert summary["progress"]["code_completion_percent"] == 100.0
+    assert summary["progress"]["release_completion_percent"] == 100.0
 
 
 def test_public_release_gate_reports_failed_checks(tmp_path, monkeypatch):
@@ -657,6 +667,9 @@ def test_public_release_gate_reports_workflow_provider_smoke_external_requiremen
 
     assert summary["release_smoke"]["missing_item_ids"] == ["workflow"]
     assert summary["external_requirement_count"] == 1
+    assert summary["progress"]["stage"] == "external_requirements"
+    assert summary["progress"]["external_blocked"] is True
+    assert summary["progress"]["release_smoke"] == {"passed": 9, "total": 10}
     requirement = summary["external_requirements"][0]
     assert requirement["id"] == "provider_smoke_credentials"
     assert requirement["kind"] == "provider_credentials"

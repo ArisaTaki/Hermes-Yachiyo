@@ -251,6 +251,15 @@ def run_public_release_gate(
     ok = not failed and (release_ready or not require_release_ready)
     next_actions = _next_actions(check_results, release_smoke=release_smoke)
     external_requirements = _external_requirements(next_actions)
+    progress = _release_progress_snapshot(
+        check_results=check_results,
+        public_demo=public_demo,
+        release_smoke=release_smoke,
+        release_ready=release_ready,
+        release_blocker_count=release_blocker_count,
+        external_requirements=external_requirements,
+        plan_only=plan_only,
+    )
     return {
         "ok": ok,
         "release_ready": release_ready,
@@ -264,11 +273,87 @@ def run_public_release_gate(
         "release_blocker_count": release_blocker_count,
         "external_requirement_count": len(external_requirements),
         "external_requirements": external_requirements,
+        "progress": progress,
         "checks": check_results,
         "public_demo": public_demo,
         "release_smoke": release_smoke,
         "next_actions": next_actions,
     }
+
+
+def _release_progress_snapshot(
+    *,
+    check_results: Sequence[Mapping[str, Any]],
+    public_demo: Mapping[str, Any],
+    release_smoke: Mapping[str, Any],
+    release_ready: bool,
+    release_blocker_count: int,
+    external_requirements: Sequence[Mapping[str, Any]],
+    plan_only: bool,
+) -> dict[str, Any]:
+    check_total = len(check_results)
+    check_passed = sum(1 for item in check_results if item.get("status") == "passed")
+    demo_total = _positive_int(public_demo.get("required_flow_count"))
+    demo_passed = _bounded_count(
+        public_demo.get("passed_required_flow_count"),
+        total=demo_total,
+    )
+    smoke_total = _positive_int(release_smoke.get("item_count"))
+    smoke_passed = _bounded_count(release_smoke.get("passed_count"), total=smoke_total)
+    code_total = check_total + demo_total + smoke_total
+    code_passed = check_passed + demo_passed + smoke_passed
+    external_total = 1 if external_requirements else 0
+    release_total = code_total + external_total
+    release_passed = code_passed
+    if release_ready and external_total:
+        release_passed += external_total
+    code_completion = _completion_percent(code_passed, code_total)
+    release_completion = _completion_percent(release_passed, release_total)
+    if plan_only:
+        stage = "planned"
+    elif release_ready:
+        stage = "ready"
+    elif any(item.get("status") == "failed" for item in check_results):
+        stage = "checks_failed"
+    elif external_requirements:
+        stage = "external_requirements"
+    elif release_blocker_count:
+        stage = "release_evidence"
+    else:
+        stage = "needs_release_evidence"
+    return {
+        "stage": stage,
+        "code_completion_percent": code_completion,
+        "release_completion_percent": release_completion,
+        "code_remaining_percent": round(100.0 - code_completion, 1),
+        "release_remaining_percent": round(100.0 - release_completion, 1),
+        "automated_checks": {"passed": check_passed, "total": check_total},
+        "public_demo": {"passed": demo_passed, "total": demo_total},
+        "release_smoke": {"passed": smoke_passed, "total": smoke_total},
+        "external_requirements": len(external_requirements),
+        "external_blocked": bool(external_requirements),
+    }
+
+
+def _positive_int(value: Any) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return 0
+    return max(parsed, 0)
+
+
+def _bounded_count(value: Any, *, total: int) -> int:
+    parsed = _positive_int(value)
+    if total <= 0:
+        return parsed
+    return min(parsed, total)
+
+
+def _completion_percent(passed: int, total: int) -> float:
+    if total <= 0:
+        return 0.0
+    return round(max(0.0, min(100.0, (passed / total) * 100.0)), 1)
 
 
 def _check_result(check: GateCheck, *, plan_only: bool) -> dict[str, Any]:
@@ -1206,6 +1291,7 @@ def _public_demo_next_command(check: Mapping[str, Any]) -> str:
 
 
 def render_markdown(summary: Mapping[str, Any]) -> str:
+    progress = _dict(summary.get("progress"))
     lines = [
         "# Oha-Yachiyo Public Release Gate",
         "",
@@ -1215,6 +1301,22 @@ def render_markdown(summary: Mapping[str, Any]) -> str:
         f"External requirements: {int(summary.get('external_requirement_count') or 0)}",
         f"Checks: {summary.get('passed_count')}/{summary.get('check_count')} passed",
     ]
+    if progress:
+        lines.extend(
+            [
+                f"Progress stage: `{progress.get('stage')}`",
+                (
+                    "Code progress: "
+                    f"{progress.get('code_completion_percent')}% "
+                    f"({progress.get('code_remaining_percent')}% remaining)"
+                ),
+                (
+                    "Release progress: "
+                    f"{progress.get('release_completion_percent')}% "
+                    f"({progress.get('release_remaining_percent')}% remaining)"
+                ),
+            ]
+        )
     public_demo = _dict(summary.get("public_demo"))
     if public_demo:
         passed_flows = int(public_demo.get("passed_required_flow_count") or 0)
