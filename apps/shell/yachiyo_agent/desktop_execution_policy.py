@@ -855,7 +855,11 @@ def _sandbox_provider_payload_from_desktop_provider_session(
         "requires_real_virtual_desktop_backend": _optional_bool_value(
             session.get("requires_real_virtual_desktop_backend")
         ),
-        "keyboard_mouse_capture_supported": True,
+        "keyboard_mouse_capture_supported": _optional_bool_value(
+            session.get("keyboard_mouse_capture_supported")
+        )
+        if "keyboard_mouse_capture_supported" in session
+        else True,
     }
 
 

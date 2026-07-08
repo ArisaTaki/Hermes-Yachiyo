@@ -2034,6 +2034,44 @@ def test_yachiyo_chat_execution_routes_running_isolated_provider_session() -> No
         assert requests[tool_name].desktop_execution_route.status == "sandbox_ready"
 
 
+def test_yachiyo_chat_execution_blocks_provider_session_without_keyboard_capture() -> None:
+    service = YachiyoAgentService(_FakeRuntimePort())
+
+    envelope = service.plan_chat_execution(
+        "在当前应用输入 hello",
+        allowed_tools=["desktop.safe_type_text"],
+        metadata={
+            "desktop_provider_session": {
+                "needed": True,
+                "started": True,
+                "running": True,
+                "url": "http://127.0.0.1:19093",
+                "provider_id": "local-isolated-desktop",
+                "provider_kind": "sandbox_desktop",
+                "tool_names": ["desktop.safe_type_text"],
+                "supported_tools": ["desktop.safe_type_text"],
+                "desktop_session_kind": "isolated_desktop",
+                "desktop_session_isolated": True,
+                "foreground_takeover_required": False,
+                "keyboard_mouse_capture_supported": False,
+            },
+        },
+    )
+    request = next(
+        request
+        for request in envelope.requests
+        if request.tool_name == "desktop.safe_type_text"
+    )
+
+    assert request.sandbox_provider is not None
+    assert request.sandbox_provider.keyboard_mouse_capture_supported is False
+    assert request.desktop_execution_route is not None
+    assert request.desktop_execution_route.status == (
+        "sandbox_keyboard_mouse_provider_required"
+    )
+    assert request.desktop_execution_route.can_execute is False
+
+
 def test_yachiyo_chat_execution_requires_isolated_provider_for_music_playback(
     monkeypatch,
 ) -> None:
