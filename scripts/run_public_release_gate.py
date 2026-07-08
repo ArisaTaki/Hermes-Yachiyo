@@ -325,14 +325,18 @@ def _release_progress_snapshot(
     )
     smoke_total = _positive_int(release_smoke.get("item_count"))
     smoke_passed = _bounded_count(release_smoke.get("passed_count"), total=smoke_total)
-    code_total = check_total + demo_total + smoke_total
-    code_passed = check_passed + demo_passed + smoke_passed
+    evidence_total = demo_total + smoke_total
+    evidence_passed = demo_passed + smoke_passed
+    combined_total = check_total + evidence_total
+    combined_passed = check_passed + evidence_passed
     external_total = 1 if external_requirements else 0
-    release_total = code_total + external_total
-    release_passed = code_passed
+    release_total = combined_total + external_total
+    release_passed = combined_passed
     if release_ready and external_total:
         release_passed += external_total
-    code_completion = _completion_percent(code_passed, code_total)
+    core_completion = _completion_percent(check_passed, check_total)
+    evidence_completion = _completion_percent(evidence_passed, evidence_total)
+    combined_completion = _completion_percent(combined_passed, combined_total)
     release_completion = _completion_percent(release_passed, release_total)
     if plan_only:
         stage = "planned"
@@ -348,10 +352,33 @@ def _release_progress_snapshot(
         stage = "needs_release_evidence"
     return {
         "stage": stage,
-        "code_completion_percent": code_completion,
+        "code_completion_percent": core_completion,
+        "core_code_completion_percent": core_completion,
+        "release_evidence_completion_percent": evidence_completion,
+        "combined_code_and_evidence_completion_percent": combined_completion,
+        "legacy_combined_completion_percent": combined_completion,
         "release_completion_percent": release_completion,
-        "code_remaining_percent": round(100.0 - code_completion, 1),
+        "publication_completion_percent": release_completion,
+        "code_remaining_percent": round(100.0 - core_completion, 1),
+        "core_code_remaining_percent": round(100.0 - core_completion, 1),
+        "release_evidence_remaining_percent": round(100.0 - evidence_completion, 1),
+        "combined_code_and_evidence_remaining_percent": round(
+            100.0 - combined_completion,
+            1,
+        ),
+        "legacy_combined_remaining_percent": round(100.0 - combined_completion, 1),
         "release_remaining_percent": round(100.0 - release_completion, 1),
+        "publication_remaining_percent": round(100.0 - release_completion, 1),
+        "core_code": {"passed": check_passed, "total": check_total},
+        "release_evidence": {"passed": evidence_passed, "total": evidence_total},
+        "publication": {"passed": release_passed, "total": release_total},
+        "progress_basis": {
+            "code_completion_percent": "automated_checks_only",
+            "release_evidence_completion_percent": "public_demo_plus_release_smoke",
+            "release_completion_percent": (
+                "automated_checks_plus_release_evidence_plus_external_requirements"
+            ),
+        },
         "automated_checks": {"passed": check_passed, "total": check_total},
         "public_demo": {"passed": demo_passed, "total": demo_total},
         "release_smoke": {"passed": smoke_passed, "total": smoke_total},
@@ -1394,18 +1421,39 @@ def render_markdown(summary: Mapping[str, Any]) -> str:
         f"Checks: {summary.get('passed_count')}/{summary.get('check_count')} passed",
     ]
     if progress:
+        core_percent = progress.get(
+            "core_code_completion_percent",
+            progress.get("code_completion_percent"),
+        )
+        core_remaining = progress.get(
+            "core_code_remaining_percent",
+            progress.get("code_remaining_percent"),
+        )
+        publication_percent = progress.get(
+            "publication_completion_percent",
+            progress.get("release_completion_percent"),
+        )
+        publication_remaining = progress.get(
+            "publication_remaining_percent",
+            progress.get("release_remaining_percent"),
+        )
         lines.extend(
             [
                 f"Progress stage: `{progress.get('stage')}`",
                 (
-                    "Code progress: "
-                    f"{progress.get('code_completion_percent')}% "
-                    f"({progress.get('code_remaining_percent')}% remaining)"
+                    "Core code progress: "
+                    f"{core_percent}% "
+                    f"({core_remaining}% remaining)"
                 ),
                 (
-                    "Release progress: "
-                    f"{progress.get('release_completion_percent')}% "
-                    f"({progress.get('release_remaining_percent')}% remaining)"
+                    "Release evidence progress: "
+                    f"{progress.get('release_evidence_completion_percent')}% "
+                    f"({progress.get('release_evidence_remaining_percent')}% remaining)"
+                ),
+                (
+                    "Publication progress: "
+                    f"{publication_percent}% "
+                    f"({publication_remaining}% remaining)"
                 ),
             ]
         )

@@ -327,9 +327,20 @@ def test_public_release_gate_defaults_to_safe_preflight_with_demo_blockers(
     assert "diagnostics_export" not in summary["release_smoke"]["missing_item_ids"]
     assert any(action["id"] == "packaged_launch" for action in summary["next_actions"])
     assert summary["progress"]["stage"] == "release_evidence"
+    assert summary["progress"]["code_completion_percent"] == 100.0
+    assert summary["progress"]["core_code_completion_percent"] == 100.0
+    assert summary["progress"]["release_evidence_completion_percent"] == 65.4
+    assert summary["progress"]["release_completion_percent"] == 74.3
+    assert summary["progress"]["legacy_combined_completion_percent"] == 74.3
     assert summary["progress"]["automated_checks"] == {"passed": 9, "total": 9}
     assert summary["progress"]["public_demo"] == {"passed": 14, "total": 16}
     assert summary["progress"]["release_smoke"] == {"passed": 3, "total": 10}
+    assert summary["progress"]["core_code"] == {"passed": 9, "total": 9}
+    assert summary["progress"]["release_evidence"] == {"passed": 17, "total": 26}
+    assert summary["progress"]["publication"] == {"passed": 26, "total": 35}
+    assert summary["progress"]["progress_basis"]["code_completion_percent"] == (
+        "automated_checks_only"
+    )
     assert summary["progress"]["external_blocked"] is False
 
 
@@ -376,7 +387,9 @@ def test_public_release_gate_strict_mode_fails_until_release_ready(
     assert "## Release Smoke" in markdown
     assert "Demo blocker `studio_replay_ui`: `ui_smoke_not_collected`" in markdown
     assert "Progress stage: `release_evidence`" in markdown
-    assert "Code progress: 74.3% (25.7% remaining)" in markdown
+    assert "Core code progress: 100.0% (0.0% remaining)" in markdown
+    assert "Release evidence progress: 65.4% (34.6% remaining)" in markdown
+    assert "Publication progress: 74.3% (25.7% remaining)" in markdown
     assert "--include-ui" in markdown
     assert "tmp/public-demo-smokes-ui-missing.json" in markdown
     assert "--include-real-desktop --include-provider-workflow --include-ui" not in markdown
