@@ -2270,6 +2270,8 @@ class TaskIntentRouter:
             return _empty_intent("workflow_orchestration", text)
         if _looks_like_workspace_ui_development_request(text):
             return _empty_intent("workflow_orchestration", text)
+        if _looks_like_visual_diagram_creation_request(text):
+            return _empty_intent("workflow_orchestration", text)
         score = _score_terms(text, ["workflow", "flow", "工作流", "流程"])
         action_hint = _workflow_action_hint(text)
         known_target_hint = _known_orchestration_target_hint(
@@ -19678,6 +19680,27 @@ def _workflow_target_hint(text: str) -> str:
             "send",
             "run ",
         ),
+    )
+
+
+def _looks_like_visual_diagram_creation_request(text: str) -> bool:
+    value = _clean_prompt(text)
+    if not value:
+        return False
+    if not re.search(
+        r"(?:流程图|思维导图|脑图|flowchart|diagram|mind\s*map)",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        return False
+    return bool(
+        re.search(
+            r"(?:打开|启动|找|找个|找一个|找一款|使用|用|通过|"
+            r"画|绘制|生成|创建|制作|做|设计|"
+            r"\b(?:open|launch|start|find|use|draw|create|make|design)\b)",
+            value,
+            flags=re.IGNORECASE,
+        )
     )
 
 

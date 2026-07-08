@@ -3319,6 +3319,25 @@ def test_planner_selection_payload_surfaces_discovered_app_followup_target() -> 
         },
     }
 
+    creative_diagram_prompt = "找一个能画流程图的软件，画一个登录流程图"
+    creative_diagram_decision = RuntimePlanner().decision(
+        creative_diagram_prompt,
+        allowed_tools=allowed_tools,
+    )
+    creative_diagram_requests = planner_tool_requests(
+        creative_diagram_prompt,
+        allowed_tools,
+    )
+    assert creative_diagram_decision.selected_intent.kind == "desktop_operation"
+    assert creative_diagram_decision.selected_intent.inputs["app_capability_hint"] == {
+        "query": "diagram",
+        "description": "画流程图",
+    }
+    assert [request["tool"] for request in creative_diagram_requests] == [
+        "desktop.list_apps",
+    ]
+    assert creative_diagram_requests[0]["continue_to_model"] is True
+
     message_prompt = "打开一个聊天软件，给 Alice 发送 hello"
     message_decision = RuntimePlanner().decision(
         message_prompt,
