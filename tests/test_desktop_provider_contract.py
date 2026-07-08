@@ -1,0 +1,96 @@
+from apps.shell.yachiyo_agent.desktop_provider_contract import (
+    OHA_DESKTOP_AGENT_RELEASE_PROVIDER_TOOLS,
+    virtual_desktop_provider_contract_evidence,
+)
+
+
+def _release_ready_status() -> dict[str, object]:
+    return {
+        "configured": True,
+        "available": True,
+        "adapter_ready": True,
+        "desktop_session_kind": "virtual_desktop",
+        "desktop_session_isolated": True,
+        "foreground_takeover_required": False,
+        "desktop_backend_kind": "virtual_desktop_backend",
+        "desktop_backend_is_loopback": False,
+        "desktop_backend_ready_for_public_release": True,
+        "requires_real_virtual_desktop_backend": False,
+        "supported_tools": list(OHA_DESKTOP_AGENT_RELEASE_PROVIDER_TOOLS),
+    }
+
+
+def test_virtual_desktop_provider_contract_accepts_release_ready_provider() -> None:
+    tool_results = [
+        {
+            "ok": True,
+            "tool": tool,
+            "action": tool,
+            "desktop_execution_provider_routed": True,
+            "sandbox_provider": {"desktop_session_isolated": True},
+        }
+        for tool in OHA_DESKTOP_AGENT_RELEASE_PROVIDER_TOOLS
+    ]
+
+    evidence = virtual_desktop_provider_contract_evidence(
+        _release_ready_status(),
+        required_tools=OHA_DESKTOP_AGENT_RELEASE_PROVIDER_TOOLS,
+        tool_results=tool_results,
+    )
+
+    assert evidence["ok"] is True
+    assert evidence["blocking_conditions"] == []
+    assert evidence["missing_required_tools"] == []
+    assert evidence["checks"]["tool_sequence_covers_required_tools"] is True
+
+
+def test_virtual_desktop_provider_contract_rejects_loopback_backend() -> None:
+    status = {
+        **_release_ready_status(),
+        "desktop_backend_kind": "loopback_session_harness",
+        "desktop_backend_is_loopback": True,
+        "desktop_backend_ready_for_public_release": False,
+        "requires_real_virtual_desktop_backend": True,
+    }
+
+    evidence = virtual_desktop_provider_contract_evidence(
+        status,
+        required_tools=OHA_DESKTOP_AGENT_RELEASE_PROVIDER_TOOLS,
+    )
+
+    assert evidence["ok"] is False
+    assert "loopback_desktop_backend" in evidence["blocking_conditions"]
+    assert "desktop_backend_not_release_ready" in evidence["blocking_conditions"]
+    assert "real_virtual_desktop_backend_required" in evidence["blocking_conditions"]
+
+
+def test_virtual_desktop_provider_contract_requires_tool_coverage() -> None:
+    required = ["desktop.list_apps", "desktop.verify"]
+    evidence = virtual_desktop_provider_contract_evidence(
+        {**_release_ready_status(), "supported_tools": ["desktop.list_apps"]},
+        required_tools=required,
+    )
+
+    assert evidence["ok"] is False
+    assert evidence["missing_required_tools"] == ["desktop.verify"]
+    assert "desktop_provider_missing_required_tools" in evidence["blocking_conditions"]
+
+
+def test_virtual_desktop_provider_contract_checks_tool_results_when_present() -> None:
+    evidence = virtual_desktop_provider_contract_evidence(
+        _release_ready_status(),
+        required_tools=["desktop.verify"],
+        tool_results=[
+            {
+                "ok": True,
+                "tool": "desktop.verify",
+                "desktop_execution_provider_routed": True,
+                "sandbox_provider": {"desktop_session_isolated": False},
+            }
+        ],
+    )
+
+    assert evidence["ok"] is False
+    assert "desktop_provider_tool_result_not_isolated" in evidence[
+        "blocking_conditions"
+    ]

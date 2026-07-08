@@ -114,6 +114,11 @@ from .desktop_execution_policy import (
     with_agent_studio_desktop_execution_policy,
     with_daily_entrypoint_desktop_execution_policy,
 )
+from .desktop_provider_contract import (
+    DESKTOP_PROVIDER_CONTRACT_VERSION,
+    OHA_DESKTOP_AGENT_RELEASE_PROVIDER_TOOLS,
+    virtual_desktop_provider_contract_evidence,
+)
 from .daily_desktop import (
     daily_desktop_allowed_tools,
     daily_desktop_direct_metadata_request,
@@ -235,7 +240,10 @@ __all__ = [
     "DesktopExecutionRisk",
     "DesktopIsolationKind",
     "DesktopProviderHealthSnapshot",
+    "DESKTOP_PROVIDER_CONTRACT_VERSION",
     "DesktopRecoveryActionMetadataSnapshot",
+    "OHA_DESKTOP_AGENT_RELEASE_PROVIDER_TOOLS",
+    "virtual_desktop_provider_contract_evidence",
     "DESKTOP_TOOL_RISK_LEVELS",
     "desktop_tool_risk_level",
     "desktop_tool_execution_mode",

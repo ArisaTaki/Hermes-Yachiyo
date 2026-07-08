@@ -76,6 +76,8 @@ def test_isolated_desktop_provider_smoke_can_use_configured_provider(monkeypatch
     assert evidence["requires_real_virtual_desktop_backend"] is False
     assert evidence["checks"]["provider_backend_ready_for_public_release"] is True
     assert evidence["checks"]["provider_backend_not_loopback"] is True
+    assert evidence["checks"]["provider_contract_ready"] is True
+    assert evidence["provider_contract"]["ok"] is True
     assert evidence["checks"]["all_tool_results_isolated"] is True
     assert evidence["tool_results"][0]["sandbox_provider"][
         "desktop_session_isolated"
@@ -173,3 +175,4 @@ def test_isolated_desktop_provider_smoke_can_start_managed_configured_provider(
     assert evidence["managed_provider_session"]["provider_id"] == "managed-virtual-desktop"
     assert state["stopped"] is True
     assert evidence["desktop_backend_ready_for_public_release"] is True
+    assert evidence["provider_contract"]["ok"] is True

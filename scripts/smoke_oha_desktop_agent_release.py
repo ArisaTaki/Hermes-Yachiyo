@@ -655,6 +655,11 @@ def _isolated_provider_backend_summary(
     report = section.get("report") if isinstance(section.get("report"), dict) else {}
     if not report:
         return {}
+    provider_contract = (
+        report.get("provider_contract")
+        if isinstance(report.get("provider_contract"), dict)
+        else {}
+    )
     return {
         "desktop_backend_kind": str(report.get("desktop_backend_kind") or ""),
         "desktop_backend_is_loopback": report.get("desktop_backend_is_loopback"),
@@ -664,6 +669,15 @@ def _isolated_provider_backend_summary(
         "requires_real_virtual_desktop_backend": report.get(
             "requires_real_virtual_desktop_backend"
         ),
+        "provider_contract_ok": provider_contract.get("ok"),
+        "provider_contract_version": str(
+            provider_contract.get("contract_version") or ""
+        ),
+        "provider_contract_blocking_conditions": [
+            str(item)
+            for item in provider_contract.get("blocking_conditions") or []
+            if str(item or "").strip()
+        ],
     }
 
 

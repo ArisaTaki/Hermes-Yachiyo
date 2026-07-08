@@ -1172,10 +1172,16 @@ def _collect_oha_desktop_agent_release_evidence(
     source: str,
     evidence: dict[str, list[dict[str, Any]]],
 ) -> None:
-    if (
-        report.get("mode") != OHA_DESKTOP_AGENT_RELEASE_SMOKE_MODE
-        or report.get("ok") is not True
-    ):
+    if report.get("mode") != OHA_DESKTOP_AGENT_RELEASE_SMOKE_MODE:
+        return
+    backend = report.get("isolated_provider_backend")
+    if isinstance(backend, Mapping):
+        _collect_oha_desktop_backend_evidence(
+            {"id": "isolated_desktop_provider", "report": backend},
+            source=source,
+            evidence=evidence,
+        )
+    if report.get("ok") is not True:
         return
     for section in _dict_list(report.get("sections")):
         if section.get("ok") is not True:
@@ -1199,13 +1205,6 @@ def _collect_oha_desktop_agent_release_evidence(
                 source=source,
                 evidence=evidence,
             )
-    backend = report.get("isolated_provider_backend")
-    if isinstance(backend, Mapping):
-        _collect_oha_desktop_backend_evidence(
-            {"id": "isolated_desktop_provider", "report": backend},
-            source=source,
-            evidence=evidence,
-        )
 
 
 def _collect_oha_desktop_backend_evidence(
@@ -1221,6 +1220,25 @@ def _collect_oha_desktop_backend_evidence(
     backend_is_loopback = report.get("desktop_backend_is_loopback")
     backend_ready = report.get("desktop_backend_ready_for_public_release")
     requires_real_backend = report.get("requires_real_virtual_desktop_backend")
+    provider_contract = (
+        report.get("provider_contract")
+        if isinstance(report.get("provider_contract"), dict)
+        else {}
+    )
+    provider_contract_ok = (
+        report.get("provider_contract_ok")
+        if "provider_contract_ok" in report
+        else provider_contract.get("ok")
+    )
+    provider_contract_version = str(
+        report.get("provider_contract_version")
+        or provider_contract.get("contract_version")
+        or ""
+    )
+    provider_contract_blockers = _string_list(
+        report.get("provider_contract_blocking_conditions")
+        or provider_contract.get("blocking_conditions")
+    )
     if not backend_kind and backend_ready is None and requires_real_backend is None:
         return
     backend_payload = {
@@ -1228,6 +1246,9 @@ def _collect_oha_desktop_backend_evidence(
         "desktop_backend_is_loopback": backend_is_loopback,
         "desktop_backend_ready_for_public_release": backend_ready,
         "requires_real_virtual_desktop_backend": requires_real_backend,
+        "provider_contract_ok": provider_contract_ok,
+        "provider_contract_version": provider_contract_version,
+        "provider_contract_blocking_conditions": provider_contract_blockers,
     }
     _add_evidence(
         evidence,
@@ -1237,7 +1258,11 @@ def _collect_oha_desktop_backend_evidence(
         section_id=str(section.get("id") or ""),
         **backend_payload,
     )
-    if backend_ready is True and backend_is_loopback is not True:
+    if (
+        backend_ready is True
+        and backend_is_loopback is not True
+        and provider_contract_ok is not False
+    ):
         _add_evidence(
             evidence,
             "oha_real_virtual_desktop_backend",
@@ -1277,6 +1302,11 @@ def _item_release_blockers(
                 ),
                 "requires_real_virtual_desktop_backend": latest.get(
                     "requires_real_virtual_desktop_backend"
+                ),
+                "provider_contract_ok": latest.get("provider_contract_ok"),
+                "provider_contract_version": latest.get("provider_contract_version"),
+                "provider_contract_blocking_conditions": _string_list(
+                    latest.get("provider_contract_blocking_conditions")
                 ),
             },
         }

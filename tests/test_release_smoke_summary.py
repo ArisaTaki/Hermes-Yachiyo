@@ -105,6 +105,11 @@ def _oha_desktop_agent_release_smoke_report() -> dict[str, object]:
                             "desktop_backend_is_loopback": False,
                             "desktop_backend_ready_for_public_release": True,
                             "requires_real_virtual_desktop_backend": False,
+                            "provider_contract": {
+                                "ok": True,
+                                "contract_version": "oha-yachiyo.desktop-provider.v1",
+                                "blocking_conditions": [],
+                            },
                         }
                         if section_id == "isolated_desktop_provider"
                         else {}
@@ -118,6 +123,9 @@ def _oha_desktop_agent_release_smoke_report() -> dict[str, object]:
             "desktop_backend_is_loopback": False,
             "desktop_backend_ready_for_public_release": True,
             "requires_real_virtual_desktop_backend": False,
+            "provider_contract_ok": True,
+            "provider_contract_version": "oha-yachiyo.desktop-provider.v1",
+            "provider_contract_blocking_conditions": [],
         },
     }
 
@@ -265,6 +273,15 @@ def test_release_smoke_summary_requires_real_virtual_desktop_backend(
         "desktop_backend_is_loopback": True,
         "desktop_backend_ready_for_public_release": False,
         "requires_real_virtual_desktop_backend": True,
+        "provider_contract": {
+            "ok": False,
+            "contract_version": "oha-yachiyo.desktop-provider.v1",
+            "blocking_conditions": [
+                "loopback_desktop_backend",
+                "desktop_backend_not_release_ready",
+                "real_virtual_desktop_backend_required",
+            ],
+        },
     }
     payload["isolated_provider_backend"] = dict(loopback_backend)
     for section in payload["sections"]:
@@ -293,7 +310,52 @@ def test_release_smoke_summary_requires_real_virtual_desktop_backend(
     assert action["release_blockers"][0]["evidence_summary"][
         "desktop_backend_kind"
     ] == "loopback_session_harness"
+    assert action["release_blockers"][0]["evidence_summary"][
+        "provider_contract_ok"
+    ] is False
+    assert "loopback_desktop_backend" in action["release_blockers"][0][
+        "evidence_summary"
+    ]["provider_contract_blocking_conditions"]
     assert "--use-configured-virtual-desktop-provider" in action["command"]
+
+
+def test_release_smoke_summary_keeps_backend_blocker_when_release_smoke_fails(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(release_smoke, "ROOT", tmp_path)
+    report_path = tmp_path / "tmp" / "oha-failed-loopback-provider.json"
+    payload = _oha_desktop_agent_release_smoke_report()
+    payload["ok"] = False
+    payload["failed_sections"] = ["isolated_desktop_provider"]
+    loopback_backend = {
+        "desktop_backend_kind": "loopback_session_harness",
+        "desktop_backend_is_loopback": True,
+        "desktop_backend_ready_for_public_release": False,
+        "requires_real_virtual_desktop_backend": True,
+        "provider_contract_ok": False,
+        "provider_contract_version": "oha-yachiyo.desktop-provider.v1",
+        "provider_contract_blocking_conditions": [
+            "loopback_desktop_backend",
+            "desktop_backend_not_release_ready",
+            "real_virtual_desktop_backend_required",
+        ],
+    }
+    payload["isolated_provider_backend"] = dict(loopback_backend)
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    summary = release_smoke.summarize_release_smoke([report_path])
+
+    action = next(
+        item for item in summary["next_actions"] if item["id"] == "oha_desktop_agent_product"
+    )
+    evidence_summary = action["release_blockers"][0]["evidence_summary"]
+    assert evidence_summary["desktop_backend_kind"] == "loopback_session_harness"
+    assert evidence_summary["provider_contract_ok"] is False
+    assert "loopback_desktop_backend" in evidence_summary[
+        "provider_contract_blocking_conditions"
+    ]
 
 
 def test_release_smoke_summary_reports_missing_items_and_next_actions(

@@ -27,19 +27,12 @@ from apps.shell.yachiyo_agent.isolated_provider_session import (
     start_isolated_desktop_provider_session,
     stop_isolated_desktop_provider_session,
 )
-
-SMOKE_TOOLS = (
-    "desktop.list_apps",
-    "app.open",
-    "desktop.inspect_app",
-    "media.music_app_open_and_play",
-    "media.music_app_control",
-    "desktop.read_ui",
-    "desktop.click_ui_element",
-    "desktop.safe_type_text",
-    "desktop.safe_shortcut",
-    "desktop.verify",
+from apps.shell.yachiyo_agent.desktop_provider_contract import (
+    OHA_DESKTOP_AGENT_RELEASE_PROVIDER_TOOLS,
+    virtual_desktop_provider_contract_evidence,
 )
+
+SMOKE_TOOLS = OHA_DESKTOP_AGENT_RELEASE_PROVIDER_TOOLS
 SMOKE_APP_NAME = "Apple Music"
 SMOKE_TEXT = "morning playlist"
 _PROVIDER_START_COMMAND_ENV = "OHA_YACHIYO_DESKTOP_PROVIDER_START_COMMAND"
@@ -255,6 +248,13 @@ def _run_provider_smoke(
         result_by_tool,
         use_configured_provider=use_configured_provider,
     )
+    provider_contract = virtual_desktop_provider_contract_evidence(
+        status_payload,
+        required_tools=SMOKE_TOOLS,
+        tool_results=tool_results if use_configured_provider else None,
+    )
+    if use_configured_provider:
+        checks["provider_contract_ready"] = provider_contract["ok"] is True
     return {
         "ok": all(checks.values()),
         "mode": "isolated_desktop_provider_smoke",
@@ -265,6 +265,7 @@ def _run_provider_smoke(
         "tool_results": tool_results,
         "tool_sequence": list(SMOKE_TOOLS),
         "checks": checks,
+        "provider_contract": provider_contract,
         **_provider_status_summary(status_payload),
         "covered_tools": list(SMOKE_TOOLS),
     }
@@ -427,6 +428,11 @@ def _provider_status_only_report(
             status_payload.get("desktop_backend_ready_for_public_release") is True
         ),
     }
+    provider_contract = virtual_desktop_provider_contract_evidence(
+        status_payload,
+        required_tools=SMOKE_TOOLS,
+        tool_results=[],
+    )
     return {
         "ok": False,
         "mode": "isolated_desktop_provider_smoke",
@@ -437,6 +443,7 @@ def _provider_status_only_report(
         "tool_sequence": list(SMOKE_TOOLS),
         "checks": checks,
         "reason": reason,
+        "provider_contract": provider_contract,
         "managed_provider_session": session_payload,
         "managed_provider_started": bool(session_payload.get("started")),
         **_provider_status_summary(status_payload),

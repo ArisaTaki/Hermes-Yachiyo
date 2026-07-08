@@ -110,6 +110,11 @@ def test_oha_desktop_agent_release_smoke_can_include_isolated_provider(
             "desktop_backend_is_loopback": True,
             "desktop_backend_ready_for_public_release": False,
             "requires_real_virtual_desktop_backend": True,
+            "provider_contract": {
+                "ok": False,
+                "contract_version": "oha-yachiyo.desktop-provider.v1",
+                "blocking_conditions": ["loopback_desktop_backend"],
+            },
         },
     )
 
@@ -134,6 +139,9 @@ def test_oha_desktop_agent_release_smoke_can_include_isolated_provider(
         "desktop_backend_is_loopback": True,
         "desktop_backend_ready_for_public_release": False,
         "requires_real_virtual_desktop_backend": True,
+        "provider_contract_ok": False,
+        "provider_contract_version": "oha-yachiyo.desktop-provider.v1",
+        "provider_contract_blocking_conditions": ["loopback_desktop_backend"],
     }
 
 
