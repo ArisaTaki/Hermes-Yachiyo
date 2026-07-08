@@ -192,6 +192,32 @@ async function startMockBridge() {
         return;
       }
       const url = new URL(request.url || '/', 'http://127.0.0.1');
+      if (request.method === 'GET' && url.pathname === '/ui/dashboard') {
+        sendJson(response, 200, {
+          assistant: {
+            agent_name: 'Oha-Yachiyo',
+            agent_nickname: 'Yachiyo',
+            agent_avatar_url: '',
+          },
+          bridge: {
+            status: 'running',
+            url: 'mock-packaged-chat-native-file-bridge',
+          },
+          chat: {
+            is_processing: false,
+            processing_count: 0,
+            approval_count: 0,
+            current_session_id: SESSION_ID,
+          },
+          native_agent: {
+            ready: true,
+            readiness_level: 'ready',
+          },
+          activities: [],
+          recent_tasks: [],
+        });
+        return;
+      }
       if (request.method === 'GET' && url.pathname === '/ui/chat/executor') {
         sendJson(response, 200, {
           executor: 'NativeAgentExecutor',
