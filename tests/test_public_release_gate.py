@@ -986,6 +986,7 @@ def test_public_release_gate_forwards_provider_manifest_to_oha_smoke(tmp_path):
         if check.id == "oha_desktop_agent_release_smoke"
     )
     assert "--run-isolated-provider-smoke" in oha_product_command
+    assert "--use-configured-virtual-desktop-provider" in oha_product_command
     assert oha_product_command[
         oha_product_command.index("--provider-manifest") + 1
     ] == str(provider_manifest)

@@ -55,7 +55,11 @@ def public_release_gate_checks(
         oha_release_smoke_command.append("--run-isolated-provider-smoke")
     if provider_manifest is not None:
         oha_release_smoke_command.extend(
-            ["--provider-manifest", str(provider_manifest)]
+            [
+                "--use-configured-virtual-desktop-provider",
+                "--provider-manifest",
+                str(provider_manifest),
+            ]
         )
     checks = [
         GateCheck(
