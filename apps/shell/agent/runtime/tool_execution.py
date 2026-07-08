@@ -567,6 +567,77 @@ def _desktop_execution_policy_skip_result(
     }
 
 
+def _desktop_foreground_session_notice_payload(
+    tool_name: str,
+    tool_request: Mapping[str, Any],
+    input_preview: Any,
+) -> dict[str, Any] | None:
+    route = desktop_execution_route_payload(tool_request)
+    if not isinstance(route, Mapping) or not bool(route.get("can_execute")):
+        return None
+    if bool(route.get("user_foreground_takeover_risk")) is not True:
+        return None
+    policy = _desktop_execution_policy_from_request(tool_request)
+    return {
+        "tool": tool_name,
+        "status": "foreground_session_routed",
+        "summary": (
+            "Desktop action is executable, but it uses the user's foreground "
+            "desktop session; keyboard/mouse input remains sandbox-gated."
+        ),
+        "input_preview": input_preview if isinstance(input_preview, dict) else {},
+        "desktop_execution_policy": policy,
+        "desktop_execution_route": dict(route),
+        "selected_provider_kind": str(route.get("selected_provider_kind") or ""),
+        "selected_provider_id": str(route.get("selected_provider_id") or ""),
+        "foreground_takeover_required": bool(
+            route.get("foreground_takeover_required")
+        ),
+        "requires_user_foreground_session": bool(
+            route.get("requires_user_foreground_session")
+        ),
+        "user_foreground_takeover_risk": True,
+        "mitigation": (
+            "Use an isolated desktop provider for keyboard/mouse workflows, or "
+            "continue in Agent Studio supervised live when foreground takeover is intended."
+        ),
+    }
+
+
+def _append_desktop_foreground_session_notice(
+    *,
+    timeline: list[dict[str, Any]],
+    timeline_factory: Callable[..., dict[str, Any]],
+    append_run_event: Callable[[str, str, dict[str, Any]], Any],
+    run_id: str,
+    tool_name: str,
+    tool_request: Mapping[str, Any],
+    input_preview: Any,
+    trace_payload: Mapping[str, Any],
+) -> None:
+    notice = _desktop_foreground_session_notice_payload(
+        tool_name,
+        tool_request,
+        input_preview,
+    )
+    if notice is None:
+        return
+    payload = {**dict(trace_payload), **notice}
+    timeline.append(
+        timeline_factory(
+            "agent.tool.foreground_session_notice",
+            tool_name,
+            **payload,
+        )
+    )
+    if run_id:
+        append_run_event(
+            run_id,
+            "agent.tool.foreground_session_notice",
+            payload,
+        )
+
+
 def _desktop_execution_policy_requires_sandbox(
     policy: Mapping[str, Any],
     execution_payload: Mapping[str, Any],
@@ -2471,6 +2542,16 @@ class RuntimeToolCallExecutor:
                     },
                 )
             return runtime_skip
+        _append_desktop_foreground_session_notice(
+            timeline=timeline,
+            timeline_factory=self._timeline,
+            append_run_event=self._append_run_event,
+            run_id=run_id,
+            tool_name=tool_name,
+            tool_request=tool_request,
+            input_preview=input_preview,
+            trace_payload=trace_payload,
+        )
         budget.claim_tool_call(
             tool_name,
             terminal_execution=tool_name in {"terminal.run", "python.run"} and approved,

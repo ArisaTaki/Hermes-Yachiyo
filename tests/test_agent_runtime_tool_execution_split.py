@@ -2055,10 +2055,12 @@ def test_runtime_tool_call_executor_routes_sandbox_ready_tool_to_provider() -> N
 
 def test_runtime_tool_call_executor_routes_local_desktop_app_open_to_provider() -> None:
     events = FakeToolCallEvents()
+    run_events: list[tuple[str, str, dict[str, Any]]] = []
     registry = DesktopExecutionProviderRegistry([LocalDesktopExecutionProviderAdapter()])
     executor = _executor(
         tool_call_events=events,
         desktop_provider_registry=registry,
+        run_events=run_events,
     )
     timeline: list[dict[str, Any]] = []
     broker = FakeBroker(
@@ -2081,10 +2083,13 @@ def test_runtime_tool_call_executor_routes_local_desktop_app_open_to_provider() 
                 "requested_mode": "preview_input",
                 "selected_provider_kind": LOCAL_DESKTOP_PROVIDER_KIND,
                 "selected_provider_id": LOCAL_DESKTOP_PROVIDER_ID,
-                "status": "sandbox_ready",
+                "status": "provider_ready",
                 "can_execute": True,
                 "can_auto_start": True,
-                "sandbox_required": True,
+                "sandbox_required": False,
+                "foreground_takeover_required": True,
+                "requires_user_foreground_session": True,
+                "user_foreground_takeover_risk": True,
                 "blocking_conditions": [],
             },
             "sandbox_provider": {
@@ -2109,9 +2114,20 @@ def test_runtime_tool_call_executor_routes_local_desktop_app_open_to_provider() 
     assert result["desktop_execution_provider"]["provider_kind"] == LOCAL_DESKTOP_PROVIDER_KIND
     assert result["desktop_execution_provider"]["provider_id"] == LOCAL_DESKTOP_PROVIDER_ID
     assert result["local_desktop_provider"]["provider_id"] == LOCAL_DESKTOP_PROVIDER_ID
-    assert result["desktop_execution_route"]["status"] == "sandbox_ready"
+    assert result["desktop_execution_route"]["status"] == "provider_ready"
     assert result["sandbox_provider"]["provider_kind"] == LOCAL_DESKTOP_PROVIDER_KIND
     assert broker.calls == [("app.open", {"app_name": "PixelForge"}, False)]
+    notice = next(
+        event for event in timeline if event["event"] == "agent.tool.foreground_session_notice"
+    )
+    assert notice["detail"] == "app.open"
+    assert notice["user_foreground_takeover_risk"] is True
+    assert notice["foreground_takeover_required"] is True
+    assert notice["desktop_execution_route"]["selected_provider_kind"] == (
+        LOCAL_DESKTOP_PROVIDER_KIND
+    )
+    assert run_events[0][1] == "agent.tool.foreground_session_notice"
+    assert run_events[0][2]["tool"] == "app.open"
     assert timeline[-1]["event"] == "agent.tool.call"
     assert timeline[-1]["result"]["local_desktop_provider"]["provider_id"] == (
         LOCAL_DESKTOP_PROVIDER_ID
@@ -3411,7 +3427,9 @@ def test_runtime_tool_request_runner_allow_policy_still_requires_sandbox_for_key
     assert result["desktop_execution_route"]["can_execute"] is False
     assert result["desktop_execution_route"]["sandbox_required"] is True
     assert result["blocking_condition"] in result["desktop_execution_route"]["blocking_conditions"]
-    assert result["recovery_actions"][0]["tool"] == "desktop.active_window"
+    recovery_tools = [action["tool"] for action in result["recovery_actions"]]
+    assert recovery_tools[0] == "desktop.provider_session.start"
+    assert "desktop.active_window" in recovery_tools
     assert "blocked_by_desktop_execution_policy" in messages[-1]["content"]
 
 
