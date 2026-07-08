@@ -147,6 +147,87 @@ def _call_names(calls: Sequence[tuple[str, Any]]) -> list[str]:
     return [name for name, _payload in calls]
 
 
+def _event_types(events: Sequence[Any]) -> list[str]:
+    return [
+        str(
+            getattr(event, "event_type", "")
+            or (event.get("event_type") if isinstance(event, dict) else "")
+            or ""
+        )
+        for event in events
+        if event
+    ]
+
+
+def _snapshot_payload(value: Any) -> dict[str, Any]:
+    if hasattr(value, "model_dump"):
+        return value.model_dump(mode="json")
+    return dict(value) if isinstance(value, dict) else {}
+
+
+def _task_core_summary(task_core: Any) -> dict[str, Any]:
+    payload = _snapshot_payload(task_core)
+    workspace = payload.get("workspace")
+    workspace = workspace if isinstance(workspace, dict) else {}
+    workspace_items = workspace.get("items")
+    workspace_items = workspace_items if isinstance(workspace_items, list) else []
+    todos = payload.get("todos")
+    todos = todos if isinstance(todos, list) else []
+    checkpoints = payload.get("checkpoints")
+    checkpoints = checkpoints if isinstance(checkpoints, list) else []
+    replan_signals = payload.get("replan_signals")
+    replan_signals = replan_signals if isinstance(replan_signals, list) else []
+    return {
+        "core_id": str(payload.get("core_id") or ""),
+        "workspace_id": str(workspace.get("workspace_id") or ""),
+        "workspace_item_count": len(workspace_items),
+        "todo_step_ids": [
+            str(item.get("step_id") or "")
+            for item in todos
+            if isinstance(item, dict) and str(item.get("step_id") or "").strip()
+        ],
+        "checkpoint_step_ids": [
+            str(item.get("after_step_id") or "")
+            for item in checkpoints
+            if isinstance(item, dict) and str(item.get("after_step_id") or "").strip()
+        ],
+        "replan_checkpoint_step_ids": [
+            str(item.get("after_step_id") or "")
+            for item in checkpoints
+            if (
+                isinstance(item, dict)
+                and item.get("replan_on_failure") is True
+                and str(item.get("after_step_id") or "").strip()
+            )
+        ],
+        "replan_triggers": [
+            str(item.get("trigger") or "")
+            for item in replan_signals
+            if isinstance(item, dict) and str(item.get("trigger") or "").strip()
+        ],
+    }
+
+
+def _task_core_checks(
+    summary: dict[str, Any],
+    *,
+    expected_step_id: str,
+) -> dict[str, bool]:
+    todo_step_ids = set(summary.get("todo_step_ids") or [])
+    checkpoint_step_ids = set(summary.get("checkpoint_step_ids") or [])
+    replan_checkpoint_step_ids = set(summary.get("replan_checkpoint_step_ids") or [])
+    return {
+        "task_core_projected": bool(summary.get("core_id")),
+        "task_core_has_workspace": bool(summary.get("workspace_id")),
+        "task_core_has_workspace_items": (
+            int(summary.get("workspace_item_count") or 0) > 0
+        ),
+        "task_core_has_todo": expected_step_id in todo_step_ids,
+        "task_core_has_checkpoint": expected_step_id in checkpoint_step_ids,
+        "task_core_replan_enabled": expected_step_id in replan_checkpoint_step_ids,
+    }
+
+
 def _run_workflow_case(service: AgentStudioService, port: _FakeStudioPort) -> dict[str, Any]:
     before = len(port.calls)
     result = service.start_planner_orchestration(
@@ -163,6 +244,12 @@ def _run_workflow_case(service: AgentStudioService, port: _FakeStudioPort) -> di
     calls = port.calls[before:]
     start_calls = [payload for name, payload in calls if name == "start_workflow_run"]
     metadata = start_calls[0].get("metadata") if start_calls else {}
+    task_core_summary = _task_core_summary(result.decision.plan.task_core)
+    metadata_task_core_summary = _task_core_summary(metadata.get("yachiyo_task_core"))
+    workflow_event_types = _event_types(
+        result.workflow_run.events if result.workflow_run else []
+    )
+    expected_step_id = "workflow-orchestration"
     checks = {
         "started": result.status == "started",
         "kind_workflow": result.kind == "workflow",
@@ -179,6 +266,18 @@ def _run_workflow_case(service: AgentStudioService, port: _FakeStudioPort) -> di
             metadata.get("decision_id") == result.decision.decision_id
             and metadata.get("plan_id") == result.decision.plan.plan_id
         ),
+        "metadata_preserves_task_core": (
+            metadata_task_core_summary["core_id"] == task_core_summary["core_id"]
+        ),
+        "workflow_task_core_events_projected": all(
+            event_type in workflow_event_types
+            for event_type in (
+                "workflow.run.task_core.created",
+                "workflow.run.task.todo.updated",
+                "workflow.run.task.checkpoint.updated",
+            )
+        ),
+        **_task_core_checks(task_core_summary, expected_step_id=expected_step_id),
     }
     return {
         "id": "workflow_orchestration_start",
@@ -193,6 +292,9 @@ def _run_workflow_case(service: AgentStudioService, port: _FakeStudioPort) -> di
         "decision_id": result.decision.decision_id,
         "plan_id": result.decision.plan.plan_id,
         "intent_kind": result.decision.selected_intent.kind,
+        "event_types": workflow_event_types,
+        "task_core_summary": task_core_summary,
+        "metadata_task_core_summary": metadata_task_core_summary,
     }
 
 
@@ -212,6 +314,12 @@ def _run_group_case(service: AgentStudioService, port: _FakeStudioPort) -> dict[
     calls = port.calls[before:]
     start_calls = [payload for name, payload in calls if name == "start_group_run"]
     metadata = start_calls[0].get("metadata") if start_calls else {}
+    task_core_summary = _task_core_summary(result.decision.plan.task_core)
+    metadata_task_core_summary = _task_core_summary(metadata.get("yachiyo_task_core"))
+    group_event_types = _event_types(
+        result.group_run.events if result.group_run else []
+    )
+    expected_step_id = "group-multi_agent"
     checks = {
         "started": result.status == "started",
         "kind_group_run": result.kind == "group_run",
@@ -228,6 +336,18 @@ def _run_group_case(service: AgentStudioService, port: _FakeStudioPort) -> dict[
             metadata.get("decision_id") == result.decision.decision_id
             and metadata.get("plan_id") == result.decision.plan.plan_id
         ),
+        "metadata_preserves_task_core": (
+            metadata_task_core_summary["core_id"] == task_core_summary["core_id"]
+        ),
+        "group_task_core_events_projected": all(
+            event_type in group_event_types
+            for event_type in (
+                "group.run.task_core.created",
+                "group.run.task.todo.updated",
+                "group.run.task.checkpoint.updated",
+            )
+        ),
+        **_task_core_checks(task_core_summary, expected_step_id=expected_step_id),
     }
     return {
         "id": "group_run_orchestration_start",
@@ -242,6 +362,9 @@ def _run_group_case(service: AgentStudioService, port: _FakeStudioPort) -> dict[
         "decision_id": result.decision.decision_id,
         "plan_id": result.decision.plan.plan_id,
         "intent_kind": result.decision.selected_intent.kind,
+        "event_types": group_event_types,
+        "task_core_summary": task_core_summary,
+        "metadata_task_core_summary": metadata_task_core_summary,
     }
 
 
@@ -259,6 +382,7 @@ def _run_missing_target_case(
     )
     calls = port.calls[before:]
     call_names = _call_names(calls)
+    task_core_summary = _task_core_summary(result.decision.plan.task_core)
     checks = {
         "target_not_found": result.status == "target_not_found",
         "kind_workflow": result.kind == "workflow",
@@ -268,6 +392,10 @@ def _run_missing_target_case(
         "no_group_run": result.group_run is None,
         "did_not_start_workflow": "start_workflow_run" not in call_names,
         "did_not_start_group": "start_group_run" not in call_names,
+        **_task_core_checks(
+            task_core_summary,
+            expected_step_id="workflow-orchestration",
+        ),
     }
     return {
         "id": "missing_target_handoff",
@@ -281,6 +409,7 @@ def _run_missing_target_case(
         "plan_id": result.decision.plan.plan_id,
         "intent_kind": result.decision.selected_intent.kind,
         "message": result.message,
+        "task_core_summary": task_core_summary,
     }
 
 
