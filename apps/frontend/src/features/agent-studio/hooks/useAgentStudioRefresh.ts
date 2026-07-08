@@ -1,5 +1,6 @@
 import { useCallback, type Dispatch, type SetStateAction } from 'react';
 
+import { currentParam } from '../../../lib/view';
 import { listModelProfiles, type ModelProfile, type ModelProfileDefaults } from '../../../lib/modelProfiles';
 import type {
   AgentSpec,
@@ -117,7 +118,8 @@ export function useAgentStudioRefresh({
       return '';
     });
     setSelectedRunId((current) => {
-      const desired = options.selectedRunId !== undefined ? options.selectedRunId : current;
+      const routeRunId = (currentParam('run') || currentParam('run_id')).trim();
+      const desired = routeRunId || (options.selectedRunId !== undefined ? options.selectedRunId : current);
       if (desired) return desired;
       return '';
     });
