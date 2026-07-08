@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import queue
+import shlex
 import subprocess
 import sys
 import threading
@@ -29,13 +30,22 @@ from apps.shell.yachiyo_agent.desktop_execution_policy import (
 
 _ENV_KEYS = {
     "OHA_YACHIYO_DESKTOP_PROVIDER_URL",
+    "OHA_YACHIYO_DESKTOP_PROVIDER_EXECUTE_URL",
+    "OHA_YACHIYO_DESKTOP_PROVIDER_STATUS_URL",
+    "OHA_YACHIYO_DESKTOP_PROVIDER_KIND",
     "OHA_YACHIYO_DESKTOP_PROVIDER_ID",
     "OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS",
     "OHA_YACHIYO_DESKTOP_PROVIDER_KEYBOARD_MOUSE_CAPTURE_SUPPORTED",
+    "OHA_YACHIYO_DESKTOP_PROVIDER_FOREGROUND_MUTATION_SUPPORTED",
     "OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_KIND",
     "OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_ISOLATED",
     "OHA_YACHIYO_DESKTOP_PROVIDER_FOREGROUND_TAKEOVER_REQUIRED",
+    "OHA_YACHIYO_DESKTOP_PROVIDER_ALLOW_REMOTE",
 }
+
+_PROVIDER_START_COMMAND_ENV = "OHA_YACHIYO_DESKTOP_PROVIDER_START_COMMAND"
+_PROVIDER_START_CWD_ENV = "OHA_YACHIYO_DESKTOP_PROVIDER_START_CWD"
+_PROVIDER_REQUESTED_TOOLS_ENV = "OHA_YACHIYO_DESKTOP_PROVIDER_REQUESTED_TOOLS"
 
 _PROVIDER_START_STATUSES = {
     "provider_required",
@@ -61,6 +71,7 @@ class IsolatedDesktopProviderSessionManager:
         self._process: subprocess.Popen[str] | None = None
         self._env: dict[str, str] = {}
         self._command: list[str] = []
+        self._source = "isolated_provider_session_manager"
         self._started_at = 0.0
         self._lock = threading.RLock()
 
@@ -74,6 +85,7 @@ class IsolatedDesktopProviderSessionManager:
                 process = None
                 self._env = {}
                 self._command = []
+                self._source = "isolated_provider_session_manager"
                 self._started_at = 0.0
             provider_status = (
                 desktop_execution_provider_status_from_env(
@@ -94,7 +106,32 @@ class IsolatedDesktopProviderSessionManager:
                 "env": dict(self._env),
                 "started_at": self._started_at,
                 "provider_status": provider_status,
-                "source": "isolated_provider_session_manager",
+                "desktop_session_kind": str(
+                    provider_status.get("desktop_session_kind") or ""
+                ),
+                "desktop_session_isolated": _optional_bool(
+                    provider_status.get("desktop_session_isolated")
+                ),
+                "foreground_takeover_required": _optional_bool(
+                    provider_status.get("foreground_takeover_required")
+                ),
+                "keyboard_mouse_capture_supported": _optional_bool(
+                    provider_status.get("keyboard_mouse_capture_supported")
+                ),
+                "desktop_backend_kind": str(
+                    provider_status.get("desktop_backend_kind") or ""
+                ),
+                "desktop_backend_is_loopback": _optional_bool(
+                    provider_status.get("desktop_backend_is_loopback")
+                ),
+                "desktop_backend_ready_for_public_release": _optional_bool(
+                    provider_status.get("desktop_backend_ready_for_public_release")
+                ),
+                "requires_real_virtual_desktop_backend": _optional_bool(
+                    provider_status.get("requires_real_virtual_desktop_backend")
+                ),
+                "supported_tools": _string_list(provider_status.get("supported_tools")),
+                "source": self._source,
             }
 
     def start(
@@ -141,6 +178,56 @@ class IsolatedDesktopProviderSessionManager:
             self._process = process
             self._command = command
             self._env = env
+            self._source = "isolated_provider_session_manager"
+            self._started_at = time.time()
+            _apply_runtime_env(env)
+            return {**self.status(probe_health=True), "started": True, "launch": launch}
+
+    def start_managed_external(
+        self,
+        *,
+        tools: list[str] | None = None,
+        timeout_seconds: float = 10.0,
+    ) -> dict[str, Any]:
+        with self._lock:
+            current = self.status(probe_health=True)
+            if current["running"]:
+                return {**current, "started": False}
+            command = _managed_external_provider_start_command()
+            if not command:
+                raise RuntimeError("desktop provider start command is not configured")
+            start_env = dict(os.environ)
+            requested_tools = sorted(
+                {
+                    str(item or "").strip()
+                    for item in tools or []
+                    if str(item or "").strip()
+                }
+            )
+            if requested_tools:
+                start_env[_PROVIDER_REQUESTED_TOOLS_ENV] = ",".join(requested_tools)
+            process = subprocess.Popen(
+                command,
+                cwd=str(_managed_external_provider_start_cwd(self._repo_root)),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                env=start_env,
+            )
+            try:
+                launch = _read_launch_payload(
+                    process,
+                    timeout_seconds=timeout_seconds,
+                    label="managed desktop provider",
+                )
+            except Exception:
+                _terminate_process(process)
+                raise
+            env = _runtime_env_from_launch(launch)
+            self._process = process
+            self._command = command
+            self._env = env
+            self._source = "managed_external_provider_session"
             self._started_at = time.time()
             _apply_runtime_env(env)
             return {**self.status(probe_health=True), "started": True, "launch": launch}
@@ -155,6 +242,7 @@ class IsolatedDesktopProviderSessionManager:
             self._process = None
             self._env = {}
             self._command = []
+            self._source = "isolated_provider_session_manager"
             self._started_at = 0.0
             return {
                 "ok": True,
@@ -184,13 +272,22 @@ def start_isolated_desktop_provider_session(
 ) -> dict[str, Any]:
     payload = dict(request or {})
     tools = payload.get("tools")
+    clean_tools = [str(item) for item in tools] if isinstance(tools, list) else None
+    external_status = _external_isolated_desktop_provider_session_status()
+    if bool(external_status.get("running")) and _session_status_supports_targets(
+        external_status,
+        [{"request_id": "", "tool_name": tool} for tool in clean_tools or []],
+    ):
+        return {**external_status, "started": False}
+    if _managed_external_provider_start_configured():
+        return _SESSION_MANAGER.start_managed_external(tools=clean_tools)
     return _SESSION_MANAGER.start(
         host=str(payload.get("host") or "127.0.0.1"),
         port=int(payload.get("port") or 0),
         provider_id=str(
             payload.get("provider_id") or DEFAULT_ISOLATED_PROVIDER_ID
         ),
-        tools=[str(item) for item in tools] if isinstance(tools, list) else None,
+        tools=clean_tools,
     )
 
 
@@ -234,7 +331,10 @@ def ensure_isolated_desktop_provider_session_for_envelope(
             "status": "provider_missing_required_tools",
             "reason": "isolated_provider_missing_required_tools",
         }
-    if status.get("external_provider_configured") is True:
+    if (
+        status.get("external_provider_configured") is True
+        and not _managed_external_provider_start_configured()
+    ):
         return {
             **base,
             **_public_session_status(status),
@@ -303,6 +403,7 @@ def _read_launch_payload(
     process: subprocess.Popen[str],
     *,
     timeout_seconds: float,
+    label: str = "isolated desktop provider",
 ) -> dict[str, Any]:
     output: queue.Queue[str] = queue.Queue(maxsize=1)
 
@@ -316,32 +417,81 @@ def _read_launch_payload(
     try:
         line = output.get(timeout=max(0.1, timeout_seconds))
     except queue.Empty as exc:
-        raise RuntimeError("isolated desktop provider did not report launch status") from exc
+        raise RuntimeError(f"{label} did not report launch status") from exc
     if process.poll() is not None and not line:
         stderr = process.stderr.read() if process.stderr is not None else ""
-        raise RuntimeError(f"isolated desktop provider exited early: {stderr}")
+        raise RuntimeError(f"{label} exited early: {stderr}")
     payload = json.loads(str(line or "{}"))
     if not isinstance(payload, dict) or not payload.get("ok"):
-        raise RuntimeError("isolated desktop provider launch failed")
+        raise RuntimeError(f"{label} launch failed")
     return payload
 
 
 def _runtime_env_from_launch(launch: dict[str, Any]) -> dict[str, str]:
-    supported_tools = launch.get("supported_tools")
-    tools = (
-        ",".join(str(item) for item in supported_tools)
-        if isinstance(supported_tools, list)
-        else "desktop.safe_type_text"
-    )
-    return {
-        "OHA_YACHIYO_DESKTOP_PROVIDER_URL": str(launch.get("url") or ""),
+    supported_tools = _string_list(launch.get("supported_tools"))
+    tools = ",".join(supported_tools) if supported_tools else "desktop.safe_type_text"
+    env = {
+        "OHA_YACHIYO_DESKTOP_PROVIDER_URL": str(
+            launch.get("url") or launch.get("endpoint_origin") or ""
+        ),
         "OHA_YACHIYO_DESKTOP_PROVIDER_ID": str(launch.get("provider_id") or ""),
         "OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS": tools,
-        "OHA_YACHIYO_DESKTOP_PROVIDER_KEYBOARD_MOUSE_CAPTURE_SUPPORTED": "true",
-        "OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_KIND": "isolated_desktop",
-        "OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_ISOLATED": "true",
-        "OHA_YACHIYO_DESKTOP_PROVIDER_FOREGROUND_TAKEOVER_REQUIRED": "false",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_KEYBOARD_MOUSE_CAPTURE_SUPPORTED": _bool_env_value(
+            launch.get("keyboard_mouse_capture_supported"),
+            default=True,
+        ),
+        "OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_KIND": str(
+            launch.get("desktop_session_kind")
+            or launch.get("session_kind")
+            or "isolated_desktop"
+        ),
+        "OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_ISOLATED": _bool_env_value(
+            launch.get("desktop_session_isolated"),
+            default=True,
+        ),
+        "OHA_YACHIYO_DESKTOP_PROVIDER_FOREGROUND_TAKEOVER_REQUIRED": _bool_env_value(
+            launch.get("foreground_takeover_required"),
+            default=False,
+        ),
     }
+    optional_keys = {
+        "OHA_YACHIYO_DESKTOP_PROVIDER_EXECUTE_URL": "execute_url",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_STATUS_URL": "status_url",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_KIND": "provider_kind",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_ALLOW_REMOTE": "allow_remote",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_FOREGROUND_MUTATION_SUPPORTED": (
+            "foreground_mutation_supported"
+        ),
+    }
+    for env_key, launch_key in optional_keys.items():
+        value = launch.get(launch_key)
+        if value not in (None, "", [], {}):
+            if isinstance(value, bool):
+                env[env_key] = "true" if value else "false"
+            else:
+                env[env_key] = str(value)
+    return env
+
+
+def _managed_external_provider_start_configured() -> bool:
+    return bool(str(os.environ.get(_PROVIDER_START_COMMAND_ENV) or "").strip())
+
+
+def _managed_external_provider_start_command() -> list[str]:
+    raw = str(os.environ.get(_PROVIDER_START_COMMAND_ENV) or "").strip()
+    return shlex.split(raw) if raw else []
+
+
+def _managed_external_provider_start_cwd(repo_root: Path) -> Path:
+    raw = str(os.environ.get(_PROVIDER_START_CWD_ENV) or "").strip()
+    return Path(raw).expanduser() if raw else repo_root
+
+
+def _bool_env_value(value: Any, *, default: bool) -> str:
+    parsed = _optional_bool(value)
+    if parsed is None:
+        parsed = default
+    return "true" if parsed else "false"
 
 
 def _external_isolated_desktop_provider_session_status() -> dict[str, Any]:
