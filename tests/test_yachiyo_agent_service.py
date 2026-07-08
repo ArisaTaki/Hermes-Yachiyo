@@ -191,6 +191,27 @@ class _BareStartTaskRuntimePort(_FakeRuntimePort):
         )
 
 
+def _clear_test_desktop_provider_env(monkeypatch: Any) -> None:
+    for key in (
+        "OHA_YACHIYO_DESKTOP_PROVIDER_URL",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_ID",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_KEYBOARD_MOUSE_CAPTURE_SUPPORTED",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_KIND",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_ISOLATED",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_FOREGROUND_TAKEOVER_REQUIRED",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_EXECUTE_URL",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_STATUS_URL",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_KIND",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_FOREGROUND_MUTATION_SUPPORTED",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_BACKEND_KIND",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_BACKEND_IS_LOOPBACK",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_BACKEND_READY_FOR_PUBLIC_RELEASE",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_REQUIRES_REAL_VIRTUAL_DESKTOP_BACKEND",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+
 def _install_fake_isolated_provider_session(
     monkeypatch: Any,
     probe_calls: list[str] | None = None,
@@ -218,6 +239,10 @@ def _install_fake_isolated_provider_session(
                         "desktop.list_apps",
                         "app.open",
                         "app.focus_and_click_ui_element",
+                        "desktop.safe_shortcut",
+                        "desktop.type",
+                        "desktop.safe_key",
+                        "desktop.click_ui_element",
                         "desktop.ui_elements",
                         "media.music_app_open_and_play",
                     ],
@@ -227,8 +252,14 @@ def _install_fake_isolated_provider_session(
                         "isolated_desktop",
                     ],
                     "keyboard_mouse_capture_supported": True,
+                    "foreground_mutation_supported": True,
                     "desktop_session_isolated": True,
                     "foreground_takeover_required": False,
+                    "desktop_session_kind": "isolated_desktop",
+                    "desktop_backend_kind": "virtual_desktop",
+                    "desktop_backend_is_loopback": False,
+                    "desktop_backend_ready_for_public_release": True,
+                    "requires_real_virtual_desktop_backend": False,
                 }
             ).encode("utf-8")
 
@@ -257,12 +288,19 @@ def _install_fake_isolated_provider_session(
             "OHA_YACHIYO_DESKTOP_PROVIDER_ID": "local-isolated-desktop",
             "OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS": (
                 "desktop.list_apps,app.open,app.focus_and_click_ui_element,"
-                "desktop.ui_elements,media.music_app_open_and_play"
+                "desktop.safe_shortcut,desktop.type,desktop.safe_key,"
+                "desktop.click_ui_element,desktop.ui_elements,"
+                "media.music_app_open_and_play"
             ),
             "OHA_YACHIYO_DESKTOP_PROVIDER_KEYBOARD_MOUSE_CAPTURE_SUPPORTED": "true",
             "OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_KIND": "isolated_desktop",
             "OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_ISOLATED": "true",
             "OHA_YACHIYO_DESKTOP_PROVIDER_FOREGROUND_TAKEOVER_REQUIRED": "false",
+            "OHA_YACHIYO_DESKTOP_PROVIDER_FOREGROUND_MUTATION_SUPPORTED": "true",
+            "OHA_YACHIYO_DESKTOP_PROVIDER_BACKEND_KIND": "virtual_desktop",
+            "OHA_YACHIYO_DESKTOP_PROVIDER_BACKEND_IS_LOOPBACK": "false",
+            "OHA_YACHIYO_DESKTOP_PROVIDER_BACKEND_READY_FOR_PUBLIC_RELEASE": "true",
+            "OHA_YACHIYO_DESKTOP_PROVIDER_REQUIRES_REAL_VIRTUAL_DESKTOP_BACKEND": "false",
         }
         for key, value in env.items():
             monkeypatch.setenv(key, value)
@@ -281,14 +319,31 @@ def _install_fake_isolated_provider_session(
                 "desktop_session_isolated": True,
                 "foreground_takeover_required": False,
                 "keyboard_mouse_capture_supported": True,
+                "foreground_mutation_supported": True,
                 "supported_tools": [
                     "desktop.list_apps",
                     "app.open",
                     "app.focus_and_click_ui_element",
+                    "desktop.safe_shortcut",
+                    "desktop.type",
+                    "desktop.safe_key",
+                    "desktop.click_ui_element",
                     "desktop.ui_elements",
                     "media.music_app_open_and_play",
                 ],
+                "desktop_backend_kind": "virtual_desktop",
+                "desktop_backend_is_loopback": False,
+                "desktop_backend_ready_for_public_release": True,
+                "requires_real_virtual_desktop_backend": False,
             },
+            "desktop_session_kind": "isolated_desktop",
+            "desktop_session_isolated": True,
+            "foreground_takeover_required": False,
+            "keyboard_mouse_capture_supported": True,
+            "desktop_backend_kind": "virtual_desktop",
+            "desktop_backend_is_loopback": False,
+            "desktop_backend_ready_for_public_release": True,
+            "requires_real_virtual_desktop_backend": False,
             "source": "isolated_provider_session_manager",
         }
 
@@ -1512,7 +1567,11 @@ def test_yachiyo_agent_service_attaches_runtime_planner_metadata_to_chat_task(
     assert metadata["yachiyo_missing_capabilities"] == []
 
 
-def test_yachiyo_agent_service_surfaces_desktop_execution_request_previews() -> None:
+def test_yachiyo_agent_service_surfaces_desktop_execution_request_previews(
+    monkeypatch,
+) -> None:
+    _clear_test_desktop_provider_env(monkeypatch)
+    _install_fake_isolated_provider_session(monkeypatch)
     port = _FakeRuntimePort()
     service = YachiyoAgentService(port)
 
@@ -1588,7 +1647,11 @@ def test_yachiyo_agent_service_surfaces_desktop_execution_request_previews() -> 
     ]
 
 
-def test_yachiyo_agent_service_plans_media_query_with_generic_desktop_tools() -> None:
+def test_yachiyo_agent_service_plans_media_query_with_generic_desktop_tools(
+    monkeypatch,
+) -> None:
+    _clear_test_desktop_provider_env(monkeypatch)
+    _install_fake_isolated_provider_session(monkeypatch)
     port = _FakeRuntimePort()
     service = YachiyoAgentService(port)
 
@@ -2348,6 +2411,10 @@ def test_agent_studio_service_probes_desktop_provider_health_for_execution(
                         "desktop_session_kind": "isolated_desktop",
                         "desktop_session_isolated": True,
                         "foreground_takeover_required": False,
+                        "desktop_backend_kind": "virtual_desktop",
+                        "desktop_backend_is_loopback": False,
+                        "desktop_backend_ready_for_public_release": True,
+                        "requires_real_virtual_desktop_backend": False,
                     }
                 ).encode("utf-8")
 
@@ -2367,6 +2434,22 @@ def test_agent_studio_service_probes_desktop_provider_health_for_execution(
     monkeypatch.setenv(
         "OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS",
         "app.focus_and_click_ui_element",
+    )
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_KIND", "isolated_desktop")
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_ISOLATED", "true")
+    monkeypatch.setenv(
+        "OHA_YACHIYO_DESKTOP_PROVIDER_FOREGROUND_TAKEOVER_REQUIRED",
+        "false",
+    )
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_BACKEND_KIND", "virtual_desktop")
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_BACKEND_IS_LOOPBACK", "false")
+    monkeypatch.setenv(
+        "OHA_YACHIYO_DESKTOP_PROVIDER_BACKEND_READY_FOR_PUBLIC_RELEASE",
+        "true",
+    )
+    monkeypatch.setenv(
+        "OHA_YACHIYO_DESKTOP_PROVIDER_REQUIRES_REAL_VIRTUAL_DESKTOP_BACKEND",
+        "false",
     )
     service = AgentStudioService(_FakeStudioExecutionPort())
 
@@ -2428,6 +2511,13 @@ def test_agent_studio_service_routes_readonly_desktop_discovery_through_provider
                         "read_only_observation",
                         "no_foreground_mutation",
                     ],
+                    "desktop_session_kind": "isolated_desktop",
+                    "desktop_session_isolated": True,
+                    "foreground_takeover_required": False,
+                    "desktop_backend_kind": "virtual_desktop",
+                    "desktop_backend_is_loopback": False,
+                    "desktop_backend_ready_for_public_release": True,
+                    "requires_real_virtual_desktop_backend": False,
                 }
             ).encode("utf-8")
 
@@ -2447,6 +2537,22 @@ def test_agent_studio_service_routes_readonly_desktop_discovery_through_provider
     monkeypatch.setenv(
         "OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS",
         "desktop.list_apps",
+    )
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_KIND", "isolated_desktop")
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_ISOLATED", "true")
+    monkeypatch.setenv(
+        "OHA_YACHIYO_DESKTOP_PROVIDER_FOREGROUND_TAKEOVER_REQUIRED",
+        "false",
+    )
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_BACKEND_KIND", "virtual_desktop")
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_BACKEND_IS_LOOPBACK", "false")
+    monkeypatch.setenv(
+        "OHA_YACHIYO_DESKTOP_PROVIDER_BACKEND_READY_FOR_PUBLIC_RELEASE",
+        "true",
+    )
+    monkeypatch.setenv(
+        "OHA_YACHIYO_DESKTOP_PROVIDER_REQUIRES_REAL_VIRTUAL_DESKTOP_BACKEND",
+        "false",
     )
     service = AgentStudioService(_FakeStudioExecutionPort())
 

@@ -196,7 +196,11 @@ def test_studio_start_group_run_enriches_bare_port_payload_with_group_scoped_eve
     assert event_request["run_group_id"] == "group-run-1"
 
 
-def test_studio_start_group_run_scopes_media_desktop_fallback_requests() -> None:
+def test_studio_start_group_run_scopes_media_desktop_fallback_requests(
+    monkeypatch,
+) -> None:
+    _clear_desktop_provider_env(monkeypatch)
+    _install_fake_isolated_provider_session(monkeypatch)
     port = _BareStartPort()
     group_run = AgentStudioService(port).start_group_run(
         {
@@ -281,7 +285,11 @@ def test_studio_start_workflow_run_enriches_bare_port_payload_with_workflow_scop
     assert event_request["workflow_run_id"] == "workflow-run-1"
 
 
-def test_studio_start_workflow_run_scopes_media_desktop_fallback_requests() -> None:
+def test_studio_start_workflow_run_scopes_media_desktop_fallback_requests(
+    monkeypatch,
+) -> None:
+    _clear_desktop_provider_env(monkeypatch)
+    _install_fake_isolated_provider_session(monkeypatch)
     port = _BareStartPort()
     workflow_run = AgentStudioService(port).start_workflow_run(
         {
@@ -409,6 +417,11 @@ def _clear_desktop_provider_env(monkeypatch: Any) -> None:
         "OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_KIND",
         "OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_ISOLATED",
         "OHA_YACHIYO_DESKTOP_PROVIDER_FOREGROUND_TAKEOVER_REQUIRED",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_FOREGROUND_MUTATION_SUPPORTED",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_BACKEND_KIND",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_BACKEND_IS_LOOPBACK",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_BACKEND_READY_FOR_PUBLIC_RELEASE",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_REQUIRES_REAL_VIRTUAL_DESKTOP_BACKEND",
     ):
         monkeypatch.delenv(key, raising=False)
 
