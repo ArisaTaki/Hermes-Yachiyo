@@ -159,6 +159,8 @@ def click_target_hint(text: str) -> dict[str, Any] | None:
     value = str(text or "")
     if safe_click_hint(value) is not None:
         return None
+    if _looks_like_audio_level_request(value):
+        return None
     conditional_click_request = bool(
         re.search(
             r"(?:判断.{0,12}(?:点击|点按|点|按|操作)|"
@@ -394,6 +396,30 @@ def _looks_like_non_content_type_text(text: str) -> bool:
     return value in _NON_CONTENT_TYPE_TEXTS
 
 
+def _looks_like_audio_level_request(text: str) -> bool:
+    value = clean(text)
+    lowered = value.lower()
+    return bool(
+        re.search(
+            r"(?:音量|声音|volume|sound|大点声|大一点声|小点声|小一点声|"
+            r"别出声|静音|放大音量|缩小音量|调大|调小|调高|调低|"
+            r"volume\s+up|volume\s+down|sound\s+up|sound\s+down|louder|quieter)",
+            lowered,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _looks_like_type_field_opener_name(text: str) -> bool:
+    return bool(
+        re.fullmatch(
+            r"(?:打开|启动|开启|切到|聚焦|open|launch|focus|switch\s+to)",
+            clean(text),
+            flags=re.IGNORECASE,
+        )
+    )
+
+
 def _looks_like_keyboard_key_target(raw_target: str, clean_target_value: str) -> bool:
     raw = clean(raw_target).lower()
     target = clean(clean_target_value).lower()
@@ -430,12 +456,29 @@ def _looks_like_keyboard_key_target(raw_target: str, clean_target_value: str) ->
 def _looks_like_current_input_target(raw_target: str, clean_target_value: str) -> bool:
     raw = clean(raw_target)
     target = clean(clean_target_value)
-    if target in {"当前", "现在", "前台", "这个", "该"}:
+    if target.lower() in {
+        "当前",
+        "现在",
+        "前台",
+        "这个",
+        "该",
+        "current",
+        "active",
+        "foreground",
+        "frontmost",
+        "this",
+    }:
         return True
     return bool(
         re.fullmatch(
             r"(?:在|到|往|向)?\s*(?:当前|现在|前台|这个|该)\s*"
             r"(?:输入框|输入栏|文本框|消息框|聊天框|input|field|text\s*box)",
+            raw,
+            flags=re.IGNORECASE,
+        )
+        or re.fullmatch(
+            r"(?:the\s+)?(?:current|active|foreground|frontmost|this)\s*"
+            r"(?:input|field|text\s*box|message\s*field)",
             raw,
             flags=re.IGNORECASE,
         )
@@ -1955,7 +1998,11 @@ def clean_type_target(value: str, *, app_name: str = "") -> str:
             name,
             flags=re.IGNORECASE,
         ).strip(" .，,。")
-        if name and name not in {"把", "将", "在", "向", "到", "往"}:
+        if (
+            name
+            and name not in {"把", "将", "在", "向", "到", "往"}
+            and not _looks_like_type_field_opener_name(name)
+        ):
             return name
 
     raw_field_suffix = re.search(

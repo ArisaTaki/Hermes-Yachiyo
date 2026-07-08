@@ -3538,15 +3538,26 @@ class RuntimePlanner:
             submit_action = ""
         if hotkey and not _contains_any(intent.user_goal, ("发送", "提交", "send", "submit")):
             submit_action = ""
-        if click_target and not any((type_target, safe_type_text, app_search)):
+        if (
+            submit_action == "confirm"
+            and (type_target or safe_type_text)
+            and not _input_then_submit_hint(intent.user_goal)
+            and not _explicit_submit_hint(intent.user_goal)
+            and not _explicit_ui_observation_before_action_requested(intent.user_goal)
+        ):
             submit_action = ""
-        followup_return_hotkey = (
-            _return_hotkey_followup_hint(intent.user_goal)
-            if any((type_target, safe_type_text, hotkey))
-            else None
-        )
-        if not followup_return_hotkey and hotkey and safe_type_text:
-            followup_return_hotkey = _explicit_return_key_followup_hint(intent.user_goal)
+        if (
+            click_target
+            and not any((type_target, safe_type_text, app_search))
+            and not _click_then_submit_hint(intent.user_goal)
+        ):
+            submit_action = ""
+        followup_return_hotkey = None
+        if (type_target or safe_type_text) and not _input_then_submit_hint(intent.user_goal):
+            followup_return_hotkey = (
+                _return_hotkey_followup_hint(intent.user_goal)
+                or _explicit_return_key_followup_hint(intent.user_goal)
+            )
         if followup_return_hotkey:
             submit_action = ""
             if (
@@ -4145,9 +4156,13 @@ class RuntimePlanner:
                 if str(operation_tool or "").startswith("app.")
                 else dict(observe_create_shortcut)
             )
-            inspect_readonly = _inspect_app_can_remain_readonly_before_operation(
-                operation_tool,
-                operation_preview,
+            inspect_readonly = (
+                screen_capture is None
+                and creative_canvas is None
+                and _inspect_app_can_remain_readonly_before_operation(
+                    operation_tool,
+                    operation_preview,
+                )
             )
             if inspect_tool and not focus_step_added:
                 steps = [
@@ -4430,6 +4445,32 @@ class RuntimePlanner:
                 )
             )
             if action == "status":
+                verify_tool = _first_allowed(
+                    (
+                        "desktop.list_windows",
+                        "desktop.windows",
+                        "desktop.active_window",
+                        "desktop.verify",
+                    ),
+                    allowed,
+                )
+                if verify_tool:
+                    steps.append(
+                        _step(
+                            intent,
+                            "verify-desktop-result",
+                            "Verify desktop result",
+                            "desktop.app_discovery",
+                            verify_tool,
+                            input_preview=_desktop_verify_input_preview(
+                                verify_tool,
+                                app_name=app_name,
+                                operation_preview={},
+                            ),
+                            depends_on=["manage-app"],
+                            reason="Verify the app status with an observable desktop/window check.",
+                        )
+                    )
                 return steps
             verify_tool = _first_allowed(
                 (
@@ -4789,9 +4830,14 @@ class RuntimePlanner:
                             inspect_payload[key] = ui_inspection[key]
                 if screen_capture is not None or ui_inspection is not None:
                     inspect_payload.setdefault("limit", 80)
-                inspect_readonly = _inspect_app_can_remain_readonly_before_operation(
-                    operation_tool,
-                    operation_preview,
+                inspect_readonly = (
+                    screen_capture is None
+                    and creative_canvas is None
+                    and not safe_type_text
+                    and _inspect_app_can_remain_readonly_before_operation(
+                        operation_tool,
+                        operation_preview,
+                    )
                 )
                 inspect_step = _step(
                     intent,
@@ -10946,6 +10992,14 @@ def _append_selected_discovered_generic_action_steps(
         else hotkey_hint(pending_action)
     )
     submit_action = submit_action_hint(pending_action)
+    followup_return_hotkey = None
+    if (type_target or safe_type_text) and not _input_then_submit_hint(pending_action):
+        followup_return_hotkey = (
+            _explicit_return_key_followup_hint(pending_action)
+            or _return_hotkey_followup_hint(pending_action)
+        )
+    if followup_return_hotkey:
+        submit_action = ""
     if safe_shortcut and _selected_discovered_open_step_already_runs_shortcut(
         steps,
         safe_shortcut,
@@ -11275,6 +11329,33 @@ def _append_selected_discovered_generic_action_steps(
                 )
             )
             previous_step = "operate-selected-discovered-app-ui"
+            planned_action = True
+
+    if followup_return_hotkey and planned_action:
+        followup_return_tool = _return_followup_tool(followup_return_hotkey, allowed)
+        if followup_return_tool:
+            steps.append(
+                _step(
+                    intent,
+                    "return-selected-discovered-app-action",
+                    "Press Return in selected app",
+                    "desktop.ui_operation",
+                    followup_return_tool,
+                    input_preview=_return_followup_input_preview(
+                        followup_return_tool,
+                        followup_return_hotkey,
+                    ),
+                    depends_on=[previous_step],
+                    action="shortcut",
+                    risk_level="medium",
+                    approval_required=True,
+                    reason=(
+                        "Press Return only after the explicit selected-app foreground input "
+                        "sequence is planned."
+                    ),
+                )
+            )
+            previous_step = "return-selected-discovered-app-action"
             planned_action = True
 
     if submit_action and (planned_action or not click_target):
@@ -20157,8 +20238,10 @@ def _app_first_click_scope_hint(text: str) -> dict[str, Any]:
             or groups.get("app_en_post")
             or ""
         )
+        if _is_generic_foreground_app_label(raw_app):
+            continue
         app_name = _canonical_app_name_hint(raw_app)
-        if not app_name:
+        if not app_name or _is_generic_foreground_app_label(app_name):
             continue
         raw_target = (
             groups.get("target")
@@ -20697,6 +20780,55 @@ def _safe_shortcut_requires_finder_scope_for_text(
 
 def _is_finder_app_name(value: str) -> bool:
     return str(value or "").strip().lower() in {"finder", "访达"}
+
+
+def _click_then_submit_hint(text: str) -> bool:
+    value = _clean_prompt(text)
+    if re.search(
+        r"(?:确认|验证|检查|查看|看看|判断|verify|confirm|check).{0,16}"
+        r"(?:是否|有没有|成功|结果|状态|whether|if|success|result|state|status)",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        return False
+    return bool(
+        re.search(
+            r"(?:点击|点一下|点按|单击|按一下|click|press|tap).{0,60}"
+            r"(?:然后|并|再|接着|之后|后|and\s+then|then|and).{0,16}"
+            r"(?:确认|提交|confirm|submit)",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _input_then_submit_hint(text: str) -> bool:
+    value = _clean_prompt(text)
+    return bool(
+        re.search(
+            r"(?:输入|键入|填写|填入|写入|写|type|enter|fill).{0,80}"
+            r"(?:并|然后|再|接着|之后|后|and\s+then|then|and).{0,16}"
+            r"(?:搜索|查找|确认|提交|search|find|confirm|submit)",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _explicit_submit_hint(text: str) -> bool:
+    value = _clean_prompt(text)
+    return bool(
+        re.search(
+            r"(?:回车键?|enter|return).{0,12}(?:确认|提交|confirm|submit)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:确认|提交|confirm|submit).{0,12}(?:回车键?|enter|return)",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _foreground_submit_action_hint(text: str) -> str:
@@ -22126,9 +22258,15 @@ def _is_generic_foreground_app_label(value: str) -> bool:
         "适合的",
         "推荐",
         "推荐的",
+        "可见",
+        "可见的",
+        "当前可见",
+        "当前可见的",
         "available",
         "anyavailable",
         "someavailable",
+        "visible",
+        "currentlyvisible",
         "default",
         "suitable",
         "best",
@@ -22167,6 +22305,10 @@ def _is_generic_foreground_app_label(value: str) -> bool:
         "任何当前",
         "在当前",
         "在任何当前",
+        "可见",
+        "可见的",
+        "当前可见",
+        "当前可见的",
         "前台",
         "在前台",
         "可用",
@@ -26442,6 +26584,7 @@ def _spotlight_search_query_hint(text: str) -> str:
     value = _clean_prompt(text)
     patterns = (
         r"^(?:Spotlight|spotlight|聚焦搜索|系统搜索)\s*(?:搜索|查找|检索)?\s*(?P<query>[^。！？!?，,]+)$",
+        r"^(?:用|通过)\s*(?:Spotlight|spotlight|聚焦搜索|系统搜索)\s*(?:搜索|查找|检索)?\s*(?P<query>[^。！？!?，,]+)$",
         r"^(?:打开|启动|显示|呼出|唤起)\s*(?:Spotlight|spotlight|聚焦搜索|系统搜索)\s*(?:搜索|查找|检索)?\s*(?P<query>[^。！？!?，,]+)$",
         r"\b(?:open|launch|start|show)\s+(?:spotlight|system\s+search)\s+(?:and\s+)?(?:search|find|look\s+up)\s+(?:for\s+)?(?P<query>[^.!?,]+)$",
         r"\b(?:use\s+)?(?:spotlight|system\s+search)\s+(?:to\s+)?(?:search|find|look\s+up)\s+(?:for\s+)?(?P<query>[^.!?,]+)$",
@@ -26451,6 +26594,12 @@ def _spotlight_search_query_hint(text: str) -> str:
         if not match:
             continue
         query = _clean_app_search_query(match.group("query"))
+        query = re.sub(
+            r"^(?:search|find|look\s+up)\s+(?:for\s+)?",
+            "",
+            query,
+            flags=re.IGNORECASE,
+        ).strip(" .，,。")
         if query and query.lower() not in {"search", "spotlight", "spotlight search"}:
             return query
     return ""

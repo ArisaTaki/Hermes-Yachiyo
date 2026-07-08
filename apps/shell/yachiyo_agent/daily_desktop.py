@@ -395,6 +395,12 @@ def _planner_owned_legacy_compatible_entrypoint_requests(
     )
     if search_box_requests:
         return search_box_requests
+    browser_click_requests = _legacy_compatible_browser_click_entrypoint_requests(
+        planner_requests,
+        text=text,
+    )
+    if browser_click_requests:
+        return browser_click_requests
     semantic_ui_requests = _legacy_compatible_semantic_ui_entrypoint_requests(
         planner_requests,
         text=text,
@@ -591,6 +597,54 @@ def _legacy_compatible_context_transfer_search_box_requests(
     return compatible if found_click else []
 
 
+def _legacy_compatible_browser_click_entrypoint_requests(
+    requests: Sequence[Mapping[str, Any]] | None,
+    *,
+    text: str,
+) -> list[dict[str, Any]]:
+    if not requests:
+        return []
+    visible = _visible_entrypoint_plan_requests(
+        [dict(request) for request in requests if isinstance(request, Mapping)]
+    )
+    if len(visible) != 1:
+        return []
+    request = visible[0]
+    tool_name = str(request.get("tool") or "").strip()
+    if tool_name not in {
+        "app.focus_and_click_ui_element",
+        "app.open_and_click_ui_element",
+    }:
+        return []
+    payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+    app_name = str(payload.get("app_name") or "").strip()
+    target = str(payload.get("target") or "").strip()
+    if not app_name or not target or not _browser_app_name(app_name):
+        return []
+    if not re.search(
+        r"(?:点|点击|点按|单击|click|press|tap)",
+        str(text or ""),
+        flags=re.IGNORECASE,
+    ):
+        return []
+    focus_tool = "app.open" if tool_name == "app.open_and_click_ui_element" else "app.focus"
+    return [
+        {
+            "protocol": str(request.get("protocol") or "json_fallback"),
+            "tool": focus_tool,
+            "input": {"app_name": app_name},
+        },
+        {
+            "protocol": str(request.get("protocol") or "json_fallback"),
+            "tool": "browser.click",
+            "input": {
+                "selector": f"text={target}",
+                "click_count": int(payload.get("click_count") or 1),
+            },
+        },
+    ]
+
+
 def _legacy_compatible_semantic_ui_entrypoint_requests(
     requests: Sequence[Mapping[str, Any]] | None,
     *,
@@ -624,7 +678,126 @@ def _legacy_compatible_semantic_ui_entrypoint_requests(
     payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
     if not _semantic_ui_payload(payload):
         return []
-    return [_legacy_shape_request(request)]
+    non_semantic = [
+        request
+        for request in visible
+        if request not in semantic
+    ]
+    if non_semantic and any(
+        str(request.get("tool") or "").strip() != "desktop.submit_foreground"
+        for request in non_semantic
+    ):
+        return []
+    return [
+        _legacy_shape_request(request)
+        for request in _legacy_semantic_ui_shape_requests(
+            request,
+            non_semantic,
+            text=text,
+        )
+    ]
+
+
+def _legacy_semantic_ui_shape_requests(
+    semantic_request: Mapping[str, Any],
+    suffix_requests: Sequence[Mapping[str, Any]],
+    *,
+    text: str,
+) -> list[Mapping[str, Any]]:
+    tool_name = str(semantic_request.get("tool") or "").strip()
+    if (
+        tool_name
+        in {
+            "app.focus_and_type_into_ui_element",
+            "app.open_and_type_into_ui_element",
+        }
+        and _looks_like_click_then_type_prompt(text)
+    ):
+        payload = (
+            semantic_request.get("input")
+            if isinstance(semantic_request.get("input"), Mapping)
+            else {}
+        )
+        typed_text = str(payload.get("text") or "").strip()
+        app_name = str(payload.get("app_name") or "").strip()
+        target = _legacy_semantic_click_target(payload)
+        if typed_text and app_name and target:
+            click_tool = (
+                "app.open_and_click_ui_element"
+                if tool_name == "app.open_and_type_into_ui_element"
+                else "app.focus_and_click_ui_element"
+            )
+            click_payload = {
+                "app_name": app_name,
+                "target": target,
+                "role_filter": str(payload.get("role_filter") or "").strip(),
+                "limit": payload.get("limit") or 80,
+                "click_count": int(payload.get("click_count") or 1),
+            }
+            return [
+                {
+                    **dict(semantic_request),
+                    "tool": click_tool,
+                    "input": click_payload,
+                },
+                {
+                    **dict(semantic_request),
+                    "tool": "desktop.safe_type_text",
+                    "input": {"text": typed_text},
+                },
+                *suffix_requests,
+            ]
+    return [_legacy_normalized_semantic_ui_request(semantic_request), *suffix_requests]
+
+
+def _legacy_normalized_semantic_ui_request(
+    request: Mapping[str, Any],
+) -> Mapping[str, Any]:
+    payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+    target = _legacy_semantic_click_target(payload)
+    if not target or target == str(payload.get("target") or "").strip():
+        return request
+    return {
+        **dict(request),
+        "input": {
+            **dict(payload),
+            "target": target,
+        },
+    }
+
+
+def _legacy_semantic_click_target(payload: Mapping[str, Any]) -> str:
+    target = str(payload.get("target") or "").strip()
+    replacements = {
+        "消息框": "消息",
+        "聊天框": "消息",
+        "搜索框": "搜索",
+        "搜索栏": "搜索",
+        "地址栏": "地址",
+    }
+    target = replacements.get(target, target)
+    return re.sub(
+        r"\s*(?:按钮|button)$",
+        "",
+        target,
+        flags=re.IGNORECASE,
+    ).strip(" .，,。")
+
+
+def _looks_like_click_then_type_prompt(text: str) -> bool:
+    value = str(text or "")
+    return bool(
+        re.search(
+            r"(?:点击|点一下|点按|单击|点).{0,40}(?:输入|填写|填入|键入|写入|写)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:click|press|tap).{0,80}\b(?:type|enter|fill|write)\b",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _legacy_compatible_simple_entrypoint_requests(
@@ -658,7 +831,28 @@ def _legacy_compatible_simple_entrypoint_requests(
         return []
     if not _legacy_compatible_simple_request(text, request):
         return []
-    return [_legacy_shape_request(request)]
+    return [_legacy_finder_action_shape(text, _legacy_shape_request(request))]
+
+
+def _legacy_finder_action_shape(text: str, request: dict[str, Any]) -> dict[str, Any]:
+    payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+    if str(payload.get("app_name") or "").strip() != "Finder":
+        return request
+    if str(payload.get("action") or "").strip() not in _LEGACY_COMPATIBLE_FINDER_ACTIONS:
+        return request
+    if str(request.get("tool") or "").strip() != "app.open_and_safe_shortcut":
+        return request
+    if _explicit_open_finder_action_prompt(text):
+        return request
+    return {**request, "tool": "app.focus_and_safe_shortcut"}
+
+
+def _explicit_open_finder_action_prompt(text: str) -> bool:
+    value = str(text or "").strip()
+    return bool(
+        re.match(r"^(?:打开|启动|开启)\s*Finder\b", value, flags=re.IGNORECASE)
+        or re.match(r"^(?:open|launch|start)\s+finder\b", value, flags=re.IGNORECASE)
+    )
 
 
 _LEGACY_COMPATIBLE_SIMPLE_PLANNER_TOOLS = frozenset(
@@ -1146,17 +1340,8 @@ def entrypoint_plan_user_metadata(
     tool = str(metadata.get("daily_desktop_tool") or "").strip()
     tools = metadata.get("daily_desktop_tools")
     tool_list = [str(item or "").strip() for item in tools or [] if str(item or "").strip()]
-    planner_metadata = (
-        {
-            "yachiyo_runtime_planner": True,
-            "yachiyo_plan_source": "runtime_planner",
-        }
-        if source == "runtime_planner"
-        else {}
-    )
     return {
         **metadata,
-        **planner_metadata,
         "entrypoint_plan": True,
         "entrypoint_plan_source": source,
         "entrypoint_plan_reason": reason,
