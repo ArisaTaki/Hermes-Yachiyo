@@ -24,6 +24,10 @@ from apps.shell.agent.runtime.desktop_execution_providers import (
 from apps.shell.agent.runtime.isolated_desktop_provider import (
     DEFAULT_ISOLATED_PROVIDER_ID,
 )
+from apps.shell.yachiyo_agent.desktop_provider_contract import (
+    OHA_DESKTOP_AGENT_RELEASE_PROVIDER_TOOLS,
+    virtual_desktop_provider_contract_evidence,
+)
 from apps.shell.yachiyo_agent.desktop_execution_policy import (
     is_user_foreground_takeover_tool,
     user_foreground_takeover_allowed,
@@ -116,6 +120,9 @@ class IsolatedDesktopProviderSessionManager:
                 if self._env
                 else {}
             )
+            provider_contract = _provider_contract_evidence_for_status(
+                provider_status,
+            )
             return {
                 "ok": True,
                 "status": "running" if running else "stopped",
@@ -152,6 +159,7 @@ class IsolatedDesktopProviderSessionManager:
                     provider_status.get("requires_real_virtual_desktop_backend")
                 ),
                 "supported_tools": _string_list(provider_status.get("supported_tools")),
+                "provider_contract": provider_contract,
                 "source": self._source,
             }
 
@@ -789,6 +797,7 @@ def _external_isolated_desktop_provider_session_status() -> dict[str, Any]:
     running = bool(provider_status.get("available")) and bool(
         provider_status.get("adapter_ready")
     )
+    provider_contract = _provider_contract_evidence_for_status(provider_status)
     return {
         "ok": bool(provider_status.get("available", True)),
         "status": str(
@@ -829,6 +838,7 @@ def _external_isolated_desktop_provider_session_status() -> dict[str, Any]:
             provider_status.get("requires_real_virtual_desktop_backend")
         ),
         "supported_tools": _string_list(provider_status.get("supported_tools")),
+        "provider_contract": provider_contract,
         "source": source,
         "external_provider_configured": True,
     }
@@ -1175,8 +1185,52 @@ def _session_status_with_base(
     return payload
 
 
+def _provider_contract_evidence_for_status(status: dict[str, Any]) -> dict[str, Any]:
+    provider_status = _mapping(status.get("provider_status"))
+    source = dict(provider_status or status)
+    for key in (
+        "provider_id",
+        "desktop_session_kind",
+        "desktop_session_isolated",
+        "foreground_takeover_required",
+        "desktop_backend_kind",
+        "desktop_backend_is_loopback",
+        "desktop_backend_ready_for_public_release",
+        "requires_real_virtual_desktop_backend",
+        "supported_tools",
+    ):
+        if source.get(key) in (None, "", [], {}) and status.get(key) not in (
+            None,
+            "",
+            [],
+            {},
+        ):
+            source[key] = status.get(key)
+    source.setdefault(
+        "configured",
+        bool(source.get("configured"))
+        or bool(source.get("provider_id"))
+        or bool(status.get("provider_id")),
+    )
+    source.setdefault(
+        "available",
+        bool(source.get("available")) or bool(status.get("running")),
+    )
+    source.setdefault(
+        "adapter_ready",
+        bool(source.get("adapter_ready")) or bool(status.get("running")),
+    )
+    return virtual_desktop_provider_contract_evidence(
+        source,
+        required_tools=OHA_DESKTOP_AGENT_RELEASE_PROVIDER_TOOLS,
+    )
+
+
 def _public_session_status(status: dict[str, Any]) -> dict[str, Any]:
     provider_status = _mapping(status.get("provider_status"))
+    provider_contract = _mapping(
+        status.get("provider_contract") or provider_status.get("provider_contract")
+    ) or _provider_contract_evidence_for_status(status)
     return {
         "ok": bool(status.get("ok", True)),
         "status": str(status.get("status") or ""),
@@ -1225,6 +1279,7 @@ def _public_session_status(status: dict[str, Any]) -> dict[str, Any]:
         "supported_tools": _string_list(
             status.get("supported_tools") or provider_status.get("supported_tools")
         ),
+        "provider_contract": provider_contract,
         "command": _string_list(status.get("command")),
         "env": {
             str(key): str(value)
@@ -1239,6 +1294,9 @@ def _public_session_status(status: dict[str, Any]) -> dict[str, Any]:
 
 def _session_status_uses_real_virtual_backend(status: dict[str, Any]) -> bool:
     provider_status = _mapping(status.get("provider_status"))
+    provider_contract = _mapping(
+        status.get("provider_contract") or provider_status.get("provider_contract")
+    ) or _provider_contract_evidence_for_status(status)
     backend_kind = str(
         status.get("desktop_backend_kind")
         or provider_status.get("desktop_backend_kind")
@@ -1266,7 +1324,8 @@ def _session_status_uses_real_virtual_backend(status: dict[str, Any]) -> bool:
         provider_status.get("desktop_session_isolated"),
     )
     return bool(
-        backend_kind
+        provider_contract.get("ok") is True
+        and backend_kind
         and backend_is_loopback is False
         and backend_release_ready is True
         and requires_real_backend is False
@@ -1299,6 +1358,9 @@ def _real_virtual_desktop_provider_required_status(
         status.get("desktop_backend_ready_for_public_release"),
         provider_status.get("desktop_backend_ready_for_public_release"),
     )
+    provider_contract = _mapping(
+        status.get("provider_contract") or provider_status.get("provider_contract")
+    ) or _provider_contract_evidence_for_status(status)
     if backend_is_loopback is True and "loopback_desktop_backend" not in blockers:
         blockers.append("loopback_desktop_backend")
     if (
@@ -1306,6 +1368,9 @@ def _real_virtual_desktop_provider_required_status(
         and "desktop_backend_not_release_ready" not in blockers
     ):
         blockers.append("desktop_backend_not_release_ready")
+    for blocker in _string_list(provider_contract.get("blocking_conditions")):
+        if blocker not in blockers:
+            blockers.append(blocker)
     for blocker in (
         "configured_virtual_desktop_provider_required",
         "real_virtual_desktop_backend_required",
@@ -1332,6 +1397,7 @@ def _real_virtual_desktop_provider_required_status(
         "desktop_backend_is_loopback": backend_is_loopback,
         "desktop_backend_ready_for_public_release": backend_release_ready,
         "requires_real_virtual_desktop_backend": True,
+        "provider_contract": provider_contract,
         "source": str(status.get("source") or "isolated_provider_session_manager"),
     }
 
