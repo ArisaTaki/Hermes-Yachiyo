@@ -14,6 +14,10 @@ from apps.shell.agent.runtime.desktop_execution_providers import (
     desktop_execution_provider_status_from_env,
     local_desktop_execution_provider_status,
 )
+from apps.shell.yachiyo_agent.desktop_provider_contract import (
+    OHA_DESKTOP_AGENT_RELEASE_PROVIDER_TOOLS,
+    virtual_desktop_provider_contract_evidence,
+)
 
 
 _SANDBOX_DESKTOP_PROVIDER_DEFAULT: dict[str, Any] = {
@@ -379,6 +383,7 @@ def sandbox_desktop_provider_status(
         payload["supported_tools"] = _string_list(payload.get("supported_tools"))
         payload["recommended_for"] = _string_list(payload.get("recommended_for"))
         payload["health"] = _health_payload(provider.get("health"))
+        payload["provider_contract"] = _provider_contract_payload(payload)
         return _sandbox_provider_public_payload(payload)
     return dict(_SANDBOX_DESKTOP_PROVIDER_DEFAULT)
 
@@ -825,6 +830,16 @@ def _sandbox_provider_payload_from_desktop_provider_session(
         )
         if "foreground_takeover_required" in session
         else False,
+        "desktop_backend_kind": str(session.get("desktop_backend_kind") or ""),
+        "desktop_backend_is_loopback": _optional_bool_value(
+            session.get("desktop_backend_is_loopback")
+        ),
+        "desktop_backend_ready_for_public_release": _optional_bool_value(
+            session.get("desktop_backend_ready_for_public_release")
+        ),
+        "requires_real_virtual_desktop_backend": _optional_bool_value(
+            session.get("requires_real_virtual_desktop_backend")
+        ),
         "keyboard_mouse_capture_supported": True,
     }
 
@@ -877,6 +892,11 @@ def _sandbox_provider_public_payload(payload: Mapping[str, Any]) -> dict[str, An
         "desktop_session_kind",
         "desktop_session_isolated",
         "foreground_takeover_required",
+        "desktop_backend_kind",
+        "desktop_backend_is_loopback",
+        "desktop_backend_ready_for_public_release",
+        "requires_real_virtual_desktop_backend",
+        "provider_contract",
         "requires_real_sandbox_for",
     }
     return {
@@ -948,6 +968,16 @@ def _sandbox_provider_payload_from_env(
         ),
         "foreground_takeover_required": _optional_bool_value(
             provider_status.get("foreground_takeover_required")
+        ),
+        "desktop_backend_kind": str(provider_status.get("desktop_backend_kind") or ""),
+        "desktop_backend_is_loopback": _optional_bool_value(
+            provider_status.get("desktop_backend_is_loopback")
+        ),
+        "desktop_backend_ready_for_public_release": _optional_bool_value(
+            provider_status.get("desktop_backend_ready_for_public_release")
+        ),
+        "requires_real_virtual_desktop_backend": _optional_bool_value(
+            provider_status.get("requires_real_virtual_desktop_backend")
         ),
     }
 
@@ -1255,10 +1285,35 @@ def _health_payload(value: Any) -> dict[str, Any]:
         payload["foreground_takeover_required"] = _optional_bool_value(
             payload.get("foreground_takeover_required")
         )
+    payload["desktop_backend_kind"] = str(payload.get("desktop_backend_kind") or "")
+    if "desktop_backend_is_loopback" in payload:
+        payload["desktop_backend_is_loopback"] = _optional_bool_value(
+            payload.get("desktop_backend_is_loopback")
+        )
+    if "desktop_backend_ready_for_public_release" in payload:
+        payload["desktop_backend_ready_for_public_release"] = _optional_bool_value(
+            payload.get("desktop_backend_ready_for_public_release")
+        )
+    if "requires_real_virtual_desktop_backend" in payload:
+        payload["requires_real_virtual_desktop_backend"] = _optional_bool_value(
+            payload.get("requires_real_virtual_desktop_backend")
+        )
     payload["requires_real_sandbox_for"] = _string_list(
         payload.get("requires_real_sandbox_for")
     )
     return payload
+
+
+def _provider_contract_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
+    status = dict(payload)
+    status.setdefault(
+        "configured",
+        bool(status.get("provider_id")) or bool(status.get("available")),
+    )
+    return virtual_desktop_provider_contract_evidence(
+        status,
+        required_tools=OHA_DESKTOP_AGENT_RELEASE_PROVIDER_TOOLS,
+    )
 
 
 def _optional_bool_value(value: Any) -> bool | None:

@@ -26,6 +26,7 @@ from apps.shell.agent.runtime.desktop_execution_providers import (
 from apps.shell.yachiyo_agent.runtime_debug_snapshots import (
     runtime_debug_summary_from_runtime_objects,
 )
+import apps.shell.yachiyo_agent.desktop_execution_policy as desktop_policy_module
 from apps.shell.yachiyo_agent import (
     AgentDefinitionSnapshot,
     AgentDeskFileEventRequest,
@@ -5280,6 +5281,11 @@ def test_sandbox_desktop_provider_snapshot_json_shape_is_stable() -> None:
         "desktop_session_kind",
         "desktop_session_isolated",
         "foreground_takeover_required",
+        "desktop_backend_kind",
+        "desktop_backend_is_loopback",
+        "desktop_backend_ready_for_public_release",
+        "requires_real_virtual_desktop_backend",
+        "provider_contract",
         "requires_real_sandbox_for",
     ]
     assert payload["available"] is False
@@ -5288,6 +5294,11 @@ def test_sandbox_desktop_provider_snapshot_json_shape_is_stable() -> None:
     assert payload["desktop_session_kind"] == ""
     assert payload["desktop_session_isolated"] is None
     assert payload["foreground_takeover_required"] is None
+    assert payload["desktop_backend_kind"] == ""
+    assert payload["desktop_backend_is_loopback"] is None
+    assert payload["desktop_backend_ready_for_public_release"] is None
+    assert payload["requires_real_virtual_desktop_backend"] is None
+    assert payload["provider_contract"] == {}
     assert payload["requires_real_sandbox_for"] == []
     assert payload["blocking_conditions"] == ["sandbox_desktop_provider_required"]
     assert payload["health"]["status"] == "not_configured"
@@ -5298,6 +5309,10 @@ def test_sandbox_desktop_provider_snapshot_json_shape_is_stable() -> None:
     assert default_status["blocking_conditions"] == ["sandbox_desktop_provider_required"]
     assert default_status["health"]["status"] == "not_configured"
     assert default_status["launch_hint"]["provider_id"] == "local-headless-desktop"
+    assert explicit_status["provider_contract"]["ok"] is False
+    assert "desktop_provider_missing_required_tools" in explicit_status[
+        "provider_contract"
+    ]["blocking_conditions"]
     assert default_status["launch_hint"]["env"]["OHA_YACHIYO_DESKTOP_PROVIDER_URL"] == (
         "http://127.0.0.1:19091"
     )
@@ -5769,6 +5784,55 @@ def test_sandbox_desktop_provider_status_probes_health_when_metadata_requests_it
     assert probed["health"]["status"] == "ready"
     assert probed["health"]["provider_version"] == "0.1.0"
     assert probed["health"]["supported_tools"] == ["desktop.permission_preflight"]
+
+
+def test_sandbox_desktop_provider_status_exposes_virtual_provider_contract(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_URL", "http://127.0.0.1:29093")
+
+    monkeypatch.setattr(
+        desktop_policy_module,
+        "desktop_execution_provider_status_from_env",
+        lambda probe_health=False: {
+            "configured": True,
+            "available": True,
+            "adapter_ready": True,
+            "provider_kind": "sandbox_desktop",
+            "provider_id": "real-virtual-desktop",
+            "status": "available",
+            "desktop_session_kind": "virtual_desktop",
+            "desktop_session_isolated": True,
+            "foreground_takeover_required": False,
+            "desktop_backend_kind": "virtual_desktop_backend",
+            "desktop_backend_is_loopback": False,
+            "desktop_backend_ready_for_public_release": True,
+            "requires_real_virtual_desktop_backend": False,
+            "supported_tools": [
+                "desktop.list_apps",
+                "app.open",
+                "desktop.inspect_app",
+                "media.music_app_open_and_play",
+                "media.music_app_control",
+                "desktop.read_ui",
+                "desktop.click_ui_element",
+                "desktop.safe_type_text",
+                "desktop.safe_shortcut",
+                "desktop.verify",
+            ],
+        },
+    )
+
+    status = sandbox_desktop_provider_status({"desktop_provider_health_probe": True})
+
+    assert status["desktop_backend_kind"] == "virtual_desktop_backend"
+    assert status["desktop_backend_is_loopback"] is False
+    assert status["desktop_backend_ready_for_public_release"] is True
+    assert status["requires_real_virtual_desktop_backend"] is False
+    assert status["provider_contract"]["ok"] is True
+    assert status["provider_contract"]["contract_version"] == (
+        "oha-yachiyo.desktop-provider.v1"
+    )
 
 
 def test_desktop_recovery_action_metadata_snapshot_json_shape_is_stable() -> None:

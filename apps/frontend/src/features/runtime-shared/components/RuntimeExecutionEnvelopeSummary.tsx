@@ -95,6 +95,27 @@ export function RuntimeExecutionEnvelopeSummary({
       data-sandbox-provider-status={sandboxProvider.status}
       data-sandbox-provider-blockers={sandboxProvider.blockers.join(',')}
       data-sandbox-provider-health-status={sandboxProvider.healthStatus}
+      data-sandbox-provider-backend-kind={sandboxProvider.desktopBackendKind}
+      data-sandbox-provider-backend-is-loopback={
+        sandboxProvider.desktopBackendIsLoopback === null
+          ? ''
+          : String(sandboxProvider.desktopBackendIsLoopback)
+      }
+      data-sandbox-provider-backend-release-ready={
+        sandboxProvider.desktopBackendReadyForPublicRelease === null
+          ? ''
+          : String(sandboxProvider.desktopBackendReadyForPublicRelease)
+      }
+      data-sandbox-provider-real-virtual-backend-required={
+        sandboxProvider.requiresRealVirtualDesktopBackend === null
+          ? ''
+          : String(sandboxProvider.requiresRealVirtualDesktopBackend)
+      }
+      data-sandbox-provider-contract-ok={
+        sandboxProvider.providerContractOk === null ? '' : String(sandboxProvider.providerContractOk)
+      }
+      data-sandbox-provider-contract-version={sandboxProvider.providerContractVersion}
+      data-sandbox-provider-contract-blockers={sandboxProvider.providerContractBlockers.join(',')}
       data-sandbox-provider-launch-command={sandboxProvider.launchCommand.join(' ')}
       data-sandbox-provider-launch-provider-id={sandboxProvider.launchProviderId}
       data-sandbox-provider-controlled-command={sandboxProvider.controlledCommand.join(' ')}
@@ -300,6 +321,8 @@ function RuntimeExecutionEnvelopePills({
     && !executionRoute.status
     && !sandboxProvider.status
     && !sandboxProvider.healthStatus
+    && !sandboxProvider.desktopBackendKind
+    && !sandboxProvider.providerContractVersion
     && !sandboxProvider.launchCommand.length
     && !sandboxProvider.controlledCommand.length
     && !executionSession.mode
@@ -385,6 +408,20 @@ function RuntimeExecutionEnvelopePills({
           title={sandboxProvider.healthEndpoint || sandboxProvider.healthBlockers[0] || undefined}
         >
           health · {sandboxProvider.healthLabel}
+        </span>
+      ) : null}
+      {sandboxProvider.providerContractVersion ? (
+        <span
+          className={sandboxProvider.providerContractOk === false ? missingClassName : pillClassName}
+          data-sandbox-provider-contract-ok={
+            sandboxProvider.providerContractOk === null ? '' : String(sandboxProvider.providerContractOk)
+          }
+          data-sandbox-provider-contract-version={sandboxProvider.providerContractVersion}
+          data-sandbox-provider-contract-blockers={sandboxProvider.providerContractBlockers.join(',')}
+          data-sandbox-provider-backend-kind={sandboxProvider.desktopBackendKind}
+          title={sandboxProvider.providerContractBlockers.join(', ') || undefined}
+        >
+          provider contract · {sandboxProvider.providerContractOk === true ? 'ready' : 'blocked'}
         </span>
       ) : null}
       {sandboxProvider.launchCommand.length ? (
@@ -693,6 +730,9 @@ type RuntimeSandboxProviderSummary = {
   controlledLabel: string;
   controlledProviderId: string;
   controlledSmokeCommand: string[];
+  desktopBackendIsLoopback: boolean | null;
+  desktopBackendKind: string;
+  desktopBackendReadyForPublicRelease: boolean | null;
   desktopSessionIsolated: boolean | null;
   desktopSessionKind: string;
   foregroundMutationSupported: boolean | null;
@@ -711,7 +751,11 @@ type RuntimeSandboxProviderSummary = {
   label: string;
   providerId: string;
   providerKind: string;
+  providerContractBlockers: string[];
+  providerContractOk: boolean | null;
+  providerContractVersion: string;
   reason: string;
+  requiresRealVirtualDesktopBackend: boolean | null;
   requiresRealSandboxFor: string[];
   status: string;
 };
@@ -944,6 +988,7 @@ function runtimeSandboxProviderSummary(
   const reason = stringValue(record.reason);
   const blockers = stringArray(record.blocking_conditions);
   const health = objectRecord(record.health);
+  const providerContract = objectRecord(record.provider_contract);
   const healthStatus = stringValue(health.status);
   const healthOk = booleanValue(health.ok);
   const healthChecked = booleanValue(health.checked);
@@ -975,6 +1020,25 @@ function runtimeSandboxProviderSummary(
   const foregroundMutationSupported = booleanValue(record.foreground_mutation_supported)
     ?? booleanValue(launchHint.foreground_mutation_supported);
   const keyboardMouseCaptureSupported = booleanValue(record.keyboard_mouse_capture_supported);
+  const desktopBackendKind = stringValue(record.desktop_backend_kind)
+    || stringValue(health.desktop_backend_kind)
+    || stringValue(providerContract.desktop_backend_kind);
+  const desktopBackendIsLoopback = booleanValue(record.desktop_backend_is_loopback)
+    ?? booleanValue(health.desktop_backend_is_loopback)
+    ?? booleanValue(providerContract.desktop_backend_is_loopback);
+  const desktopBackendReadyForPublicRelease = booleanValue(
+    record.desktop_backend_ready_for_public_release,
+  )
+    ?? booleanValue(health.desktop_backend_ready_for_public_release)
+    ?? booleanValue(providerContract.desktop_backend_ready_for_public_release);
+  const requiresRealVirtualDesktopBackend = booleanValue(
+    record.requires_real_virtual_desktop_backend,
+  )
+    ?? booleanValue(health.requires_real_virtual_desktop_backend)
+    ?? booleanValue(providerContract.requires_real_virtual_desktop_backend);
+  const providerContractOk = booleanValue(providerContract.ok);
+  const providerContractVersion = stringValue(providerContract.contract_version);
+  const providerContractBlockers = stringArray(providerContract.blocking_conditions);
   const requiresRealSandboxFor = uniqueStrings([
     ...stringArray(record.requires_real_sandbox_for),
     ...stringArray(launchHint.requires_real_sandbox_for),
@@ -992,6 +1056,9 @@ function runtimeSandboxProviderSummary(
     }),
     controlledProviderId,
     controlledSmokeCommand,
+    desktopBackendIsLoopback,
+    desktopBackendKind,
+    desktopBackendReadyForPublicRelease,
     desktopSessionIsolated,
     desktopSessionKind,
     foregroundMutationSupported,
@@ -1020,7 +1087,11 @@ function runtimeSandboxProviderSummary(
     label: sandboxProviderLabel({ available, blockers, providerId, providerKind, status }),
     providerId,
     providerKind,
+    providerContractBlockers,
+    providerContractOk,
+    providerContractVersion,
     reason,
+    requiresRealVirtualDesktopBackend,
     requiresRealSandboxFor,
     status,
   };
