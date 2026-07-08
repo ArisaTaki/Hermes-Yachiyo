@@ -469,23 +469,6 @@ def _desktop_execution_policy_skip_result(
         policy,
         execution_payload,
     )
-    if policy_mode == "allow" and not sandbox_required_by_policy:
-        return None
-    if (
-        policy_mode == "preview_input"
-        and not _desktop_execution_policy_blocks_input_tool(
-            tool_name,
-            policy,
-            execution_payload,
-            input_preview if isinstance(input_preview, Mapping) else {},
-        )
-    ):
-        return None
-    if not (
-        bool(execution_mode.foreground_control)
-        or bool(execution_mode.keyboard_mouse_capture)
-    ):
-        return None
 
     sandbox_provider = sandbox_desktop_provider_status(tool_request)
     route_decision = (
@@ -497,6 +480,26 @@ def _desktop_execution_policy_skip_result(
             metadata=tool_request,
         )
     )
+    route_blocks_execution = _desktop_execution_route_blocks_execution(route_decision)
+    if policy_mode == "allow" and not sandbox_required_by_policy and not route_blocks_execution:
+        return None
+    if (
+        policy_mode == "preview_input"
+        and not route_blocks_execution
+        and not _desktop_execution_policy_blocks_input_tool(
+            tool_name,
+            policy,
+            execution_payload,
+            input_preview if isinstance(input_preview, Mapping) else {},
+        )
+    ):
+        return None
+    if not (
+        bool(execution_mode.foreground_control)
+        or bool(execution_mode.keyboard_mouse_capture)
+        or route_blocks_execution
+    ):
+        return None
     if desktop_execution_route_allows_provider_execution(route_decision):
         return None
     route_blockers = [
@@ -504,7 +507,14 @@ def _desktop_execution_policy_skip_result(
         for item in route_decision.get("blocking_conditions", [])
         if str(item or "").strip()
     ]
-    if policy_mode == "allow" and sandbox_required_by_policy:
+    if route_blocks_execution:
+        blocking_condition = (
+            route_blockers[0]
+            if route_blockers
+            else "desktop_execution_provider_required"
+        )
+        status = str(route_decision.get("status") or "provider_required")
+    elif policy_mode == "allow" and sandbox_required_by_policy:
         blocking_condition = (
             route_blockers[0]
             if route_blockers
@@ -654,6 +664,34 @@ def _desktop_execution_policy_requires_sandbox(
         or bool(execution_payload.get("keyboard_mouse_capture"))
     )
     return requires_keyboard_mouse_sandbox or avoids_foreground_takeover
+
+
+def _desktop_execution_route_blocks_execution(route_decision: Mapping[str, Any]) -> bool:
+    if not isinstance(route_decision, Mapping) or not route_decision:
+        return False
+    if bool(route_decision.get("can_execute")):
+        return False
+    status = str(route_decision.get("status") or "").strip()
+    if status in {
+        "provider_required",
+        "sandbox_adapter_required",
+        "sandbox_desktop_session_required",
+        "sandbox_keyboard_mouse_provider_required",
+        "sandbox_tool_not_supported",
+    }:
+        return True
+    provider_blockers = {
+        "desktop_execution_provider_unavailable",
+        "sandbox_desktop_provider_required",
+        "sandbox_desktop_adapter_required",
+        "sandbox_desktop_session_required",
+        "sandbox_keyboard_mouse_provider_required",
+        "isolated_desktop_provider_required",
+    }
+    return any(
+        str(item or "").strip() in provider_blockers
+        for item in route_decision.get("blocking_conditions", [])
+    )
 
 
 def _tool_request_with_desktop_execution_route(

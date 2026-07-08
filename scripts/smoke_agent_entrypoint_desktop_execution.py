@@ -21,6 +21,12 @@ from apps.shell.agent_runtime import AgentRuntimeService
 from apps.shell.credential_store import MemoryCredentialStore
 
 
+_SUPERVISED_FOREGROUND_SMOKE_METADATA = {
+    "allow_user_foreground_takeover": True,
+    "source": "agent_entrypoint_desktop_execution_smoke",
+}
+
+
 class _FakeDefaultProfileService:
     def get_defaults(self) -> dict[str, str]:
         return {"chat": "profile_default"}
@@ -351,10 +357,12 @@ def _generic_app_open_case(
             task_id="smoke-main-chat-pixelforge",
             session_id="smoke-main-chat-generic-app-session",
             user_goal=prompt,
+            metadata=dict(_SUPERVISED_FOREGROUND_SMOKE_METADATA),
         )
         loop_result = service.execute_main_chat_model_loop(
             str(run["run_id"]),
             [{"role": "user", "content": prompt}],
+            runtime_execution_metadata=dict(_SUPERVISED_FOREGROUND_SMOKE_METADATA),
         )
         updated = service.complete_main_chat_run(
             str(run["run_id"]),
@@ -383,6 +391,7 @@ def _generic_app_open_case(
                 "agent_id": agent["agent_id"],
                 "user_goal": prompt,
                 "daily_desktop_policy_overlay": True,
+                "metadata": dict(_SUPERVISED_FOREGROUND_SMOKE_METADATA),
             }
         )
         run_id = str(updated.get("run_id") or "")
@@ -466,10 +475,12 @@ def _generic_app_inspect_case(
             task_id="smoke-main-chat-pixelforge-inspect",
             session_id="smoke-main-chat-generic-app-inspect-session",
             user_goal=prompt,
+            metadata=dict(_SUPERVISED_FOREGROUND_SMOKE_METADATA),
         )
         loop_result = service.execute_main_chat_model_loop(
             str(run["run_id"]),
             [{"role": "user", "content": prompt}],
+            runtime_execution_metadata=dict(_SUPERVISED_FOREGROUND_SMOKE_METADATA),
         )
         updated = service.complete_main_chat_run(
             str(run["run_id"]),
@@ -498,6 +509,7 @@ def _generic_app_inspect_case(
                 "agent_id": agent["agent_id"],
                 "user_goal": prompt,
                 "daily_desktop_policy_overlay": True,
+                "metadata": dict(_SUPERVISED_FOREGROUND_SMOKE_METADATA),
             }
         )
         run_id = str(updated.get("run_id") or "")
@@ -590,16 +602,15 @@ def _generic_app_inspect_case(
             and inspect_planned_payload.get("foreground_control") is True
             and inspect_planned_payload.get("sandbox_recommended") is True
         ),
-        "inspect_tool_route_prefers_isolated_provider": (
-            inspect_route.get("status") == "provider_required"
-            and inspect_route.get("requested_mode") == "preview_input"
-            and inspect_route.get("selected_provider_kind") == "sandbox_desktop"
-            and inspect_route.get("isolated_desktop_preferred") is True
-            and inspect_route.get("foreground_takeover_allowed") is False
+        "inspect_tool_route_uses_explicit_foreground_provider": (
+            inspect_route.get("status") == "provider_ready"
+            and inspect_route.get("requested_mode") == "allow"
+            and inspect_route.get("selected_provider_kind") == "local_desktop"
+            and inspect_route.get("isolated_desktop_preferred") is False
+            and inspect_route.get("foreground_takeover_allowed") is True
             and inspect_route.get("desktop_execution_session_policy")
-            == "isolated_preferred"
-            and "sandbox_desktop_provider_required"
-            in list(inspect_route.get("blocking_conditions") or [])
+            == "explicit_user_foreground"
+            and not list(inspect_route.get("blocking_conditions") or [])
         ),
         "completed_from_runtime_planner": completed_payload.get("source") == "runtime_planner",
         "completed_tools_match": completed_payload.get("tools") == expected_execution_tools,
@@ -627,10 +638,12 @@ def _capability_discovered_app_open_case(service: AgentRuntimeService) -> dict[s
         task_id="smoke-main-chat-capability-discovered-app",
         session_id="smoke-main-chat-capability-discovery-session",
         user_goal=prompt,
+        metadata=dict(_SUPERVISED_FOREGROUND_SMOKE_METADATA),
     )
     loop_result = service.execute_main_chat_model_loop(
         str(run["run_id"]),
         [{"role": "user", "content": prompt}],
+        runtime_execution_metadata=dict(_SUPERVISED_FOREGROUND_SMOKE_METADATA),
     )
     updated = service.complete_main_chat_run(
         str(run["run_id"]),
@@ -750,10 +763,12 @@ def _capability_discovered_app_open_path_case(service: AgentRuntimeService) -> d
         task_id="smoke-main-chat-capability-discovered-app-open-path",
         session_id="smoke-main-chat-capability-discovered-app-open-path-session",
         user_goal=prompt,
+        metadata=dict(_SUPERVISED_FOREGROUND_SMOKE_METADATA),
     )
     loop_result = service.execute_main_chat_model_loop(
         str(run["run_id"]),
         [{"role": "user", "content": prompt}],
+        runtime_execution_metadata=dict(_SUPERVISED_FOREGROUND_SMOKE_METADATA),
     )
     updated = service.complete_main_chat_run(
         str(run["run_id"]),
@@ -887,10 +902,12 @@ def _main_chat_loop_case(service: AgentRuntimeService) -> dict[str, Any]:
         task_id="smoke-main-chat-apple-music",
         session_id="smoke-main-chat-session",
         user_goal="能否帮我播放 Apple Music?",
+        metadata=dict(_SUPERVISED_FOREGROUND_SMOKE_METADATA),
     )
     loop_result = service.execute_main_chat_model_loop(
         str(run["run_id"]),
         [{"role": "user", "content": "能否帮我播放 Apple Music?"}],
+        runtime_execution_metadata=dict(_SUPERVISED_FOREGROUND_SMOKE_METADATA),
     )
     updated = service.complete_main_chat_run(str(run["run_id"]), str(loop_result.get("result") or ""))
     events = service.list_run_events(str(run["run_id"]))["events"]
@@ -950,6 +967,7 @@ def _agent_run_overlay_case(service: AgentRuntimeService) -> dict[str, Any]:
             "agent_id": agent["agent_id"],
             "user_goal": "能否帮我播放apple Music?",
             "daily_desktop_policy_overlay": True,
+            "metadata": dict(_SUPERVISED_FOREGROUND_SMOKE_METADATA),
         }
     )
     events = service.list_run_events(str(run["run_id"]))["events"]

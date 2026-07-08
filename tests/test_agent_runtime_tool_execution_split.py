@@ -2374,6 +2374,70 @@ def test_runtime_tool_call_executor_blocks_policy_required_sandbox_before_broker
     assert [call[0] for call in events.calls] == ["requested", "result"]
 
 
+def test_runtime_tool_call_executor_blocks_provider_required_app_activation_before_broker() -> None:
+    events = FakeToolCallEvents()
+    run_events: list[tuple[str, str, dict[str, Any]]] = []
+    executor = _executor(
+        tool_call_events=events,
+        run_events=run_events,
+        desktop_provider_registry=DesktopExecutionProviderRegistry(),
+    )
+    timeline: list[dict[str, Any]] = []
+    broker = FakeBroker({"ok": True, "action": "app.open"})
+
+    result = executor.execute(
+        {
+            "tool": "app.open",
+            "input": {"app_name": "PixelForge"},
+            "desktop_execution_policy": {
+                "mode": "preview_input",
+                "prefer_isolated_desktop": True,
+                "avoid_user_foreground_takeover": True,
+                "require_sandbox_for_keyboard_mouse": True,
+            },
+            "desktop_execution_route": {
+                "route_id": "desktop-route:app.open",
+                "tool_name": "app.open",
+                "requested_mode": "preview_input",
+                "selected_provider_kind": "sandbox_desktop",
+                "selected_provider_id": "",
+                "status": "provider_required",
+                "can_execute": False,
+                "can_auto_start": False,
+                "sandbox_required": True,
+                "isolated_desktop_preferred": True,
+                "foreground_takeover_allowed": False,
+                "desktop_execution_session_policy": "isolated_preferred",
+                "blocking_conditions": ["sandbox_desktop_provider_required"],
+            },
+            "sandbox_provider": {
+                "available": False,
+                "adapter_ready": False,
+                "provider_kind": "sandbox_desktop",
+                "status": "provider_required",
+                "blocking_conditions": ["sandbox_desktop_provider_required"],
+            },
+        },
+        ["app.open"],
+        broker,
+        timeline,
+        run_id="run-1",
+        budget=FakeBudget(),
+    )
+
+    assert result["ok"] is False
+    assert result["blocked_by_desktop_execution_policy"] is True
+    assert result["blocking_condition"] == "sandbox_desktop_provider_required"
+    assert result["desktop_execution_route"]["status"] == "provider_required"
+    assert result["desktop_execution_route"]["can_execute"] is False
+    assert result["desktop_execution_route"]["isolated_desktop_preferred"] is True
+    assert result["recommended_tools"][0] == "desktop.provider_session.start"
+    assert result["recovery_actions"][0]["tool"] == "desktop.provider_session.start"
+    assert broker.calls == []
+    assert [event["event"] for event in timeline] == ["agent.tool.skipped"]
+    assert run_events[0][1] == "agent.tool.skipped"
+
+
 def test_runtime_tool_call_executor_preserves_planner_trace_on_tool_call_events() -> None:
     events = FakeToolCallEvents()
     executor = _executor(tool_call_events=events)
@@ -2977,7 +3041,7 @@ def test_runtime_tool_request_runner_previews_live_foreground_tools_by_policy() 
     assert calls == []
     assert budget.claims == [("desktop.safe_type_text", False)]
     assert result["blocked_by_desktop_execution_policy"] is True
-    assert result["status"] == "preview_required"
+    assert result["status"] == "provider_required"
     assert result["execution_mode"] == "supervised_live"
     assert result["keyboard_mouse_capture"] is True
     assert result["desktop_execution_policy"] == {"mode": "preview"}
@@ -2988,7 +3052,7 @@ def test_runtime_tool_request_runner_previews_live_foreground_tools_by_policy() 
     assert result["desktop_execution_route"]["status"] == "provider_required"
     assert result["desktop_execution_route"]["can_execute"] is False
     assert result["desktop_execution_route"]["fallback_mode"] == "supervised_live"
-    assert result["blocking_conditions"] == ["desktop_execution_preview_required"]
+    assert result["blocking_conditions"] == ["sandbox_desktop_provider_required"]
     assert [action["tool"] for action in result["recovery_actions"]] == [
         "desktop.provider_session.start",
         "desktop.active_window",
@@ -3367,8 +3431,13 @@ def test_runtime_tool_request_runner_preview_input_policy_allows_safe_creation_s
         budget=budget,
     )
 
-    assert calls == [("desktop.safe_shortcut", {"action": "new_note"})]
-    assert not [event for event in timeline if event["event"] == "agent.tool.skipped"]
+    assert calls == []
+    skipped = next(event for event in timeline if event["event"] == "agent.tool.skipped")
+    result = skipped["result"]
+    assert result["status"] == "provider_required"
+    assert result["blocking_conditions"] == ["sandbox_desktop_provider_required"]
+    assert result["desktop_execution_route"]["can_execute"] is False
+    assert result["recovery_actions"][0]["tool"] == "desktop.provider_session.start"
 
 
 def test_runtime_tool_request_runner_allow_policy_still_requires_sandbox_for_keyboard_mouse() -> None:
