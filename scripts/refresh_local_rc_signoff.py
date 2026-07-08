@@ -1010,9 +1010,40 @@ def _print_release_smoke_status(*, label: str) -> None:
         missing = ", ".join(str(item) for item in missing_ids if str(item))
         if missing:
             print(f"- missing user paths: {missing}")
+    _print_release_smoke_blockers(report)
     public_demo_details = _public_demo_details_from_release_smoke(report)
     if public_demo_details:
         _print_public_demo_detail_lines(public_demo_details, prefix="public demo")
+
+
+def _print_release_smoke_blockers(report: dict[str, object]) -> None:
+    for item in _dict_items(report.get("items")):
+        item_id = str(item.get("id") or "")
+        if not item_id:
+            continue
+        for blocker in _dict_items(item.get("release_blockers")):
+            blocker_id = str(blocker.get("id") or "")
+            if not blocker_id:
+                continue
+            reason = str(blocker.get("reason") or "").strip()
+            evidence = blocker.get("evidence_summary")
+            evidence = evidence if isinstance(evidence, dict) else {}
+            suffix_parts = [reason] if reason else []
+            provider_contract_ok = evidence.get("provider_contract_ok")
+            if isinstance(provider_contract_ok, bool):
+                suffix_parts.append(
+                    f"provider_contract_ok={str(provider_contract_ok).lower()}"
+                )
+            provider_contract_blockers = _string_items(
+                evidence.get("provider_contract_blocking_conditions")
+            )
+            if provider_contract_blockers:
+                suffix_parts.append(
+                    "provider_contract_blocking_conditions="
+                    + ",".join(provider_contract_blockers)
+                )
+            suffix = f" ({'; '.join(suffix_parts)})" if suffix_parts else ""
+            print(f"- release blocker {item_id}: {blocker_id}{suffix}")
 
 
 def _print_public_demo_status(*, label: str) -> None:

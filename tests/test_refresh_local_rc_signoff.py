@@ -1010,8 +1010,30 @@ def test_refresh_local_rc_signoff_print_status_uses_current_draft(
                 "status": "incomplete",
                 "passed_count": 6,
                 "item_count": 10,
-                "missing_item_ids": ["chat_desktop_task", "workflow", "public_demo"],
+                "missing_item_ids": [
+                    "oha_desktop_agent_product",
+                    "chat_desktop_task",
+                    "workflow",
+                    "public_demo",
+                ],
                 "items": [
+                    {
+                        "id": "oha_desktop_agent_product",
+                        "status": "missing",
+                        "release_blockers": [
+                            {
+                                "id": "oha_real_virtual_desktop_backend",
+                                "status": "missing",
+                                "reason": "real_virtual_desktop_backend_required",
+                                "evidence_summary": {
+                                    "provider_contract_ok": False,
+                                    "provider_contract_blocking_conditions": [
+                                        "virtual_desktop_provider_contract_not_ready"
+                                    ],
+                                },
+                            }
+                        ],
+                    },
                     {
                         "id": "public_demo",
                         "status": "missing",
@@ -1114,9 +1136,19 @@ def test_refresh_local_rc_signoff_print_status_uses_current_draft(
     assert "blocker provider_credentials_missing:oha_yachiyo_smoke_credentials" in output
     assert "local RC release smoke:" in output
     assert "- user paths: 6/10 passed" in output
+    assert "oha_desktop_agent_product" in output
     assert "chat_desktop_task" in output
     assert "workflow" in output
     assert "public_demo" in output
+    assert (
+        "release blocker oha_desktop_agent_product: "
+        "oha_real_virtual_desktop_backend"
+    ) in output
+    assert "provider_contract_ok=false" in output
+    assert (
+        "provider_contract_blocking_conditions="
+        "virtual_desktop_provider_contract_not_ready"
+    ) in output
     assert "- public demo level: partial_demo_ready" in output
     assert "- missing public demo flows: real_desktop_interaction, workflow_provider" in output
     assert "public demo blocker workflow_provider: skipped" in output
