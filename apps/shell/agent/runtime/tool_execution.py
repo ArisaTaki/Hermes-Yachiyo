@@ -3318,6 +3318,7 @@ class RuntimeToolRequestRunner:
                     )
             if tool_name == "desktop.active_window":
                 active_window_verification_target = None
+                next_active_window_target = None
             else:
                 next_active_window_target = _active_window_target_from_tool_result(
                     tool_name,
@@ -3326,6 +3327,33 @@ class RuntimeToolRequestRunner:
                 )
                 if next_active_window_target is not None:
                     active_window_verification_target = next_active_window_target
+            auto_verify_request = _post_action_verification_request(
+                tool_name,
+                tool_request,
+                tool_result,
+                allowed_tools=allowed_tools,
+                remaining_requests=tool_requests[index + 1 :],
+                active_window_target=next_active_window_target,
+            )
+            if auto_verify_request:
+                tool_requests[index + 1 : index + 1] = [auto_verify_request]
+                enqueued_payload = _post_action_verification_enqueued_payload(
+                    tool_name,
+                    auto_verify_request,
+                )
+                timeline.append(
+                    self._timeline(
+                        "agent.post_action_verification.enqueued",
+                        tool_name,
+                        **enqueued_payload,
+                    )
+                )
+                if run_id:
+                    self._append_run_event(
+                        run_id,
+                        "agent.post_action_verification.enqueued",
+                        enqueued_payload,
+                    )
 
     def _append_tool_result_progress(
         self,
@@ -3421,6 +3449,268 @@ def _provider_session_deferred_continuation_requests(
         existing_signatures.add(signature)
         requests.append(request)
     return requests
+
+
+def _post_action_verification_request(
+    tool_name: str,
+    tool_request: Mapping[str, Any],
+    tool_result: Mapping[str, Any],
+    *,
+    allowed_tools: list[str],
+    remaining_requests: list[dict[str, Any]],
+    active_window_target: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    if tool_result.get("ok") is not True or tool_result.get("approval_required"):
+        return {}
+    if bool(tool_request.get("requires_post_action_verification")) is not True:
+        return {}
+    if str(tool_request.get("runtime_stage") or "").strip() == "verify":
+        return {}
+    source_step_id = str(
+        tool_request.get("step_id") or tool_request.get("planner_step_id") or ""
+    ).strip()
+    if _remaining_requests_include_post_action_verification(
+        remaining_requests,
+        source_step_id=source_step_id,
+    ):
+        return {}
+    verification_tool = _post_action_verification_tool(
+        tool_name,
+        allowed_tools=allowed_tools,
+    )
+    if not verification_tool:
+        return {}
+    app_name = _post_action_verification_app_name(
+        tool_request,
+        tool_result,
+        active_window_target=active_window_target,
+    )
+    request: dict[str, Any] = {
+        "tool": verification_tool,
+        "input": _post_action_verification_input(verification_tool, app_name),
+        "source": "runtime_post_action_auto_verify",
+        "planning_reason": "runtime_post_action_auto_verify",
+        "runtime_stage": "verify",
+        "runtime_role": "verify_result",
+        "requires_observation": True,
+        "requires_post_action_verification": False,
+        "observation_retry": {
+            "from_tool": verification_tool,
+            "tool": verification_tool,
+            "reason": "verification_failed",
+        },
+    }
+    if source_step_id:
+        request["step_id"] = f"{source_step_id}:runtime-verify"
+        request["planner_step_id"] = request["step_id"]
+        request["depends_on"] = [source_step_id]
+    verification_target = _post_action_verification_target(
+        tool_request,
+        source_step_id=source_step_id,
+    )
+    if verification_target:
+        request["verification_targets"] = [verification_target]
+        request["task_verification_targets"] = [verification_target]
+    if app_name:
+        request["verification_target"] = {"app_name": app_name, "source_tool": tool_name}
+    desktop_loop = _post_action_verification_desktop_loop(
+        tool_request,
+        verification_tool=verification_tool,
+        app_name=app_name,
+        source_step_id=source_step_id,
+    )
+    if desktop_loop:
+        request["desktop_loop"] = desktop_loop
+    _copy_post_action_verification_context(tool_request, request)
+    return request
+
+
+def _post_action_verification_tool(tool_name: str, *, allowed_tools: list[str]) -> str:
+    allowed = {str(tool or "").strip() for tool in allowed_tools}
+    if _tool_can_change_active_app(tool_name) and "desktop.active_window" in allowed:
+        return "desktop.active_window"
+    for candidate in ("desktop.ui_elements", "desktop.read_ui", "desktop.verify"):
+        if candidate in allowed:
+            return candidate
+    return ""
+
+
+def _remaining_requests_include_post_action_verification(
+    remaining_requests: list[dict[str, Any]],
+    *,
+    source_step_id: str,
+) -> bool:
+    for request in remaining_requests:
+        if not isinstance(request, Mapping):
+            continue
+        is_verify_request = (
+            str(request.get("runtime_stage") or "").strip() == "verify"
+            or str(request.get("tool") or request.get("tool_name") or "").strip()
+            in {"desktop.active_window", "desktop.verify"}
+            or bool(_mapping_list(request.get("verification_targets")))
+            or bool(_mapping_list(request.get("task_verification_targets")))
+        )
+        if not is_verify_request:
+            continue
+        if not source_step_id:
+            return True
+        depends_on = _string_list(request.get("depends_on"))
+        if source_step_id in depends_on:
+            return True
+        for key in ("verification_targets", "task_verification_targets"):
+            for target in _mapping_list(request.get(key)):
+                if str(target.get("step_id") or "").strip() == source_step_id:
+                    return True
+        action_target = _first_mapping(request.get("action_target"))
+        if source_step_id in _string_list(action_target.get("verified_step_ids")):
+            return True
+    return False
+
+
+def _post_action_verification_app_name(
+    tool_request: Mapping[str, Any],
+    tool_result: Mapping[str, Any],
+    *,
+    active_window_target: Mapping[str, Any] | None,
+) -> str:
+    data = tool_result.get("data") if isinstance(tool_result.get("data"), Mapping) else {}
+    raw_input = (
+        tool_request.get("input") if isinstance(tool_request.get("input"), Mapping) else {}
+    )
+    action_target = _first_mapping(tool_request.get("action_target"))
+    target = active_window_target if isinstance(active_window_target, Mapping) else {}
+    return _first_text(
+        target.get("app_name"),
+        data.get("app_name"),
+        data.get("discovered_app_name"),
+        raw_input.get("app_name"),
+        action_target.get("app_name"),
+        action_target.get("resolved_app_name"),
+    )
+
+
+def _post_action_verification_input(
+    verification_tool: str,
+    app_name: str,
+) -> dict[str, Any]:
+    if verification_tool == "desktop.active_window":
+        return {}
+    return {"app_name": app_name} if app_name else {}
+
+
+def _post_action_verification_target(
+    tool_request: Mapping[str, Any],
+    *,
+    source_step_id: str,
+) -> dict[str, Any]:
+    existing_targets = [
+        *_mapping_list(tool_request.get("verification_targets")),
+        *_mapping_list(tool_request.get("task_verification_targets")),
+    ]
+    if existing_targets:
+        return dict(existing_targets[0])
+    if not source_step_id:
+        return {}
+    target: dict[str, Any] = {"step_id": source_step_id}
+    todo = _first_mapping(tool_request.get("task_todo"))
+    if todo:
+        target["todo"] = dict(todo)
+    checkpoints = _mapping_list(tool_request.get("task_checkpoints"))
+    if checkpoints:
+        target["checkpoints"] = [dict(item) for item in checkpoints]
+    workspace_items = _mapping_list(tool_request.get("task_workspace_items"))
+    if workspace_items:
+        target["workspace_items"] = [dict(item) for item in workspace_items]
+    return target
+
+
+def _post_action_verification_desktop_loop(
+    tool_request: Mapping[str, Any],
+    *,
+    verification_tool: str,
+    app_name: str,
+    source_step_id: str,
+) -> dict[str, Any]:
+    if not verification_tool:
+        return {}
+    action_target = _first_mapping(tool_request.get("action_target"))
+    target_ids = [source_step_id] if source_step_id else []
+    return {
+        "stage": "verify",
+        "role": "verify_result",
+        "action": "verify_after_action",
+        "target_kind": str(action_target.get("kind") or "desktop_app").strip(),
+        "selection_source": str(action_target.get("selection_source") or "").strip(),
+        "app_name": app_name,
+        "query": str(action_target.get("query") or "").strip(),
+        "source_tool": verification_tool,
+        "retry_tool": verification_tool,
+        "retry_reason": "verification_failed",
+        "retry_input": _post_action_verification_input(verification_tool, app_name),
+        "verification_target_step_ids": target_ids,
+        "requires_observation": True,
+        "requires_post_action_verification": True,
+        "can_auto_retry": verification_tool
+        in {"desktop.active_window", "desktop.ui_elements", "desktop.read_ui"},
+        "source": "runtime_post_action_auto_verify",
+    }
+
+
+def _copy_post_action_verification_context(
+    tool_request: Mapping[str, Any],
+    request: dict[str, Any],
+) -> None:
+    for key in (
+        "decision_id",
+        "plan_id",
+        "tool_plan_id",
+        "intent_kind",
+        "core_id",
+        "workspace_id",
+        "task_id",
+        "run_group_id",
+        "group_run_id",
+        "group_id",
+        "workflow_id",
+        "workflow_run_id",
+        "workflow_node_id",
+        "workflow_node_label",
+        "desktop_execution_policy",
+        "desktop_provider_session",
+        "sandbox_provider",
+        "sandbox_desktop_provider",
+    ):
+        value = tool_request.get(key)
+        if value not in (None, "", [], {}):
+            request[key] = dict(value) if isinstance(value, Mapping) else value
+
+
+def _post_action_verification_enqueued_payload(
+    tool_name: str,
+    request: Mapping[str, Any],
+) -> dict[str, Any]:
+    payload = {
+        "source_tool": tool_name,
+        "verification_tool": str(request.get("tool") or "").strip(),
+        "planning_reason": str(request.get("planning_reason") or "").strip(),
+    }
+    for key in (
+        "step_id",
+        "planner_step_id",
+        "depends_on",
+        "verification_target",
+        "verification_targets",
+        "task_verification_targets",
+        "desktop_loop",
+        "desktop_provider_session",
+    ):
+        value = request.get(key)
+        if value not in (None, "", [], {}):
+            if key == "desktop_provider_session" and isinstance(value, Mapping):
+                payload[key] = _public_desktop_provider_session(value)
+            else:
+                payload[key] = dict(value) if isinstance(value, Mapping) else value
+    return payload
 
 
 def _deferred_request_signature(request: Mapping[str, Any]) -> tuple[str, str]:
@@ -4627,6 +4917,14 @@ def _first_mapping(*values: Any) -> dict[str, Any]:
         if isinstance(value, Mapping) and value:
             return dict(value)
     return {}
+
+
+def _first_text(*values: Any) -> str:
+    for value in values:
+        text = str(value or "").strip()
+        if text:
+            return text
+    return ""
 
 
 def _mapping_list(value: Any) -> list[Mapping[str, Any]]:

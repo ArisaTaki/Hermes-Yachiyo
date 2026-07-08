@@ -3262,6 +3262,168 @@ def test_runtime_tool_request_runner_executes_sandbox_route_through_provider() -
     assert "env" not in tool_call["result"]["desktop_provider_session"]
 
 
+def test_runtime_tool_request_runner_enqueues_post_action_verification() -> None:
+    budget = FakeBudget()
+    messages = [{"role": "user", "content": "在隔离桌面打开 PixelForge"}]
+    timeline: list[dict[str, Any]] = []
+    captured_requests: list[dict[str, Any]] = []
+
+    def call_agent_tool(
+        tool_request: dict[str, Any],
+        *_args: Any,
+        **_kwargs: Any,
+    ) -> dict[str, Any]:
+        captured_requests.append(tool_request)
+        if tool_request.get("tool") == "app.open":
+            return {
+                "ok": True,
+                "tool": "app.open",
+                "data": {"app_name": "PixelForge"},
+            }
+        return {
+            "ok": True,
+            "tool": tool_request.get("tool"),
+            "data": {"app_name": "PixelForge"},
+        }
+
+    runner = _runner(call_agent_tool=call_agent_tool)
+
+    runner.run(
+        [
+            {
+                "tool": "app.open",
+                "input": {"app_name": "PixelForge"},
+                "step_id": "open-app",
+                "planner_step_id": "open-app",
+                "runtime_stage": "operate",
+                "runtime_role": "prepare_target_app",
+                "requires_post_action_verification": True,
+                "task_todo": {
+                    "todo_id": "todo-open-app",
+                    "title": "Open PixelForge",
+                    "status": "pending",
+                    "step_id": "open-app",
+                },
+                "task_checkpoints": [
+                    {
+                        "checkpoint_id": "checkpoint-open-app",
+                        "title": "Verify PixelForge opened",
+                        "status": "planned",
+                        "after_step_id": "open-app",
+                    }
+                ],
+                "action_target": {
+                    "kind": "desktop_app",
+                    "action": "open_app",
+                    "app_name": "PixelForge",
+                },
+                "desktop_execution_policy": {
+                    "mode": "preview_input",
+                    "prefer_isolated_desktop": True,
+                    "avoid_user_foreground_takeover": True,
+                },
+                "desktop_provider_session": {
+                    "running": True,
+                    "started": True,
+                    "status": "running",
+                    "provider_id": "sandbox-1",
+                    "url": "http://127.0.0.1:19093",
+                    "tool_names": ["app.open", "desktop.active_window"],
+                    "command": ["python", "scripts/run_isolated_desktop_provider.py"],
+                    "env": {"OHA_YACHIYO_DESKTOP_PROVIDER_TOKEN": "secret"},
+                },
+            }
+        ],
+        ["app.open", "desktop.active_window"],
+        FakeBroker({"ok": True}),
+        messages,
+        timeline,
+        [],
+        next_iteration=3,
+        run_id="run-1",
+        budget=budget,
+    )
+
+    assert [request["tool"] for request in captured_requests] == [
+        "app.open",
+        "desktop.active_window",
+    ]
+    verify_request = captured_requests[1]
+    assert verify_request["source"] == "runtime_post_action_auto_verify"
+    assert verify_request["planning_reason"] == "runtime_post_action_auto_verify"
+    assert verify_request["runtime_stage"] == "verify"
+    assert verify_request["depends_on"] == ["open-app"]
+    assert verify_request["verification_target"] == {
+        "app_name": "PixelForge",
+        "source_tool": "app.open",
+    }
+    assert verify_request["task_verification_targets"][0]["step_id"] == "open-app"
+    assert verify_request["task_verification_targets"][0]["todo"]["todo_id"] == (
+        "todo-open-app"
+    )
+    assert verify_request["desktop_provider_session"]["provider_id"] == "sandbox-1"
+    enqueued = next(
+        event
+        for event in timeline
+        if event["event"] == "agent.post_action_verification.enqueued"
+    )
+    assert enqueued["verification_tool"] == "desktop.active_window"
+    assert enqueued["desktop_provider_session"]["provider_id"] == "sandbox-1"
+    assert "command" not in enqueued["desktop_provider_session"]
+    assert "env" not in enqueued["desktop_provider_session"]
+
+
+def test_runtime_tool_request_runner_does_not_duplicate_planned_verification() -> None:
+    budget = FakeBudget()
+    messages = [{"role": "user", "content": "打开 PixelForge 并验证"}]
+    timeline: list[dict[str, Any]] = []
+    captured_requests: list[dict[str, Any]] = []
+    runner = _runner(
+        call_agent_tool=lambda tool_request, *_args, **_kwargs: captured_requests.append(
+            tool_request
+        )
+        or {"ok": True, "tool": tool_request.get("tool"), "data": {"app_name": "PixelForge"}},
+    )
+
+    runner.run(
+        [
+            {
+                "tool": "app.open",
+                "input": {"app_name": "PixelForge"},
+                "step_id": "open-app",
+                "runtime_stage": "operate",
+                "requires_post_action_verification": True,
+                "desktop_execution_policy": {"mode": "allow"},
+            },
+            {
+                "tool": "desktop.active_window",
+                "input": {},
+                "runtime_stage": "verify",
+                "depends_on": ["open-app"],
+                "task_verification_targets": [{"step_id": "open-app"}],
+            },
+        ],
+        ["app.open", "desktop.active_window"],
+        FakeBroker({"ok": True}),
+        messages,
+        timeline,
+        [],
+        next_iteration=3,
+        run_id="run-1",
+        budget=budget,
+    )
+
+    assert [request["tool"] for request in captured_requests] == [
+        "app.open",
+        "desktop.active_window",
+    ]
+    assert not [
+        event
+        for event in timeline
+        if event["event"] == "agent.post_action_verification.enqueued"
+    ]
+
+
 def test_runtime_tool_request_runner_routes_running_provider_session() -> None:
     budget = FakeBudget()
     messages = [{"role": "user", "content": "在隔离桌面里输入 hello"}]
