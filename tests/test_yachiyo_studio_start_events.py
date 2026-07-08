@@ -424,6 +424,7 @@ def _assert_start_payload_uses_isolated_session(
     assert session["desktop_session_kind"] == "isolated_desktop"
     assert session["desktop_session_isolated"] is True
     assert session["foreground_takeover_required"] is False
+    assert session["keyboard_mouse_capture_supported"] is True
     assert session["tool_names"] == [
         "app.open",
         "desktop.active_window",
@@ -486,6 +487,10 @@ def _assert_provider_session_event(
     assert session["needed"] is True
     assert session["desktop_execution_session_mode"] == "isolated_desktop"
     assert session["desktop_execution_session_label"] == "isolated desktop provider"
+    assert session["desktop_session_kind"] == "isolated_desktop"
+    assert session["desktop_session_isolated"] is True
+    assert session["foreground_takeover_required"] is False
+    assert session["keyboard_mouse_capture_supported"] is True
     assert session["tool_names"] == [
         "app.open",
         "desktop.active_window",

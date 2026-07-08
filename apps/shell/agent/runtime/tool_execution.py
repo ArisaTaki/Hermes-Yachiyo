@@ -281,6 +281,10 @@ def _public_desktop_provider_session(session: Mapping[str, Any]) -> dict[str, An
         "source",
         "needed",
         "reason",
+        "desktop_session_kind",
+        "desktop_session_isolated",
+        "foreground_takeover_required",
+        "keyboard_mouse_capture_supported",
     ):
         value = session.get(key)
         if value not in (None, "", [], {}):

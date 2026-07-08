@@ -327,6 +327,10 @@ def test_runtime_tool_call_executor_starts_provider_session_control_action(
             "url": "http://127.0.0.1:19093",
             "command": ["python", "scripts/run_isolated_desktop_provider.py"],
             "env": {"OHA_YACHIYO_DESKTOP_PROVIDER_URL": "http://127.0.0.1:19093"},
+            "desktop_session_kind": "isolated_desktop",
+            "desktop_session_isolated": True,
+            "foreground_takeover_required": False,
+            "keyboard_mouse_capture_supported": True,
             "source": "isolated_provider_session_manager",
         }
 
@@ -371,6 +375,15 @@ def test_runtime_tool_call_executor_starts_provider_session_control_action(
     assert result["desktop_provider_session"]["provider_id"] == "local-isolated-desktop"
     assert result["desktop_provider_session"]["running"] is True
     assert result["desktop_provider_session"]["started"] is True
+    assert result["desktop_provider_session"]["desktop_session_kind"] == (
+        "isolated_desktop"
+    )
+    assert result["desktop_provider_session"]["desktop_session_isolated"] is True
+    assert result["desktop_provider_session"]["foreground_takeover_required"] is False
+    assert (
+        result["desktop_provider_session"]["keyboard_mouse_capture_supported"]
+        is True
+    )
     assert "command" not in result["desktop_provider_session"]
     assert "env" not in result["desktop_provider_session"]
     assert any(event["event"] == "desktop.provider_session.started" for event in timeline)
@@ -380,6 +393,11 @@ def test_runtime_tool_call_executor_starts_provider_session_control_action(
     assert len(provider_events) == 1
     assert provider_events[0][2]["control_action"] == "desktop_provider_session.start"
     assert provider_events[0][2]["replan_request_id"] == "replan-1"
+    event_session = provider_events[0][2]["desktop_provider_session"]
+    assert event_session["desktop_session_kind"] == "isolated_desktop"
+    assert event_session["desktop_session_isolated"] is True
+    assert event_session["foreground_takeover_required"] is False
+    assert event_session["keyboard_mouse_capture_supported"] is True
 
 
 def test_runtime_tool_request_runner_continues_after_provider_session_start(

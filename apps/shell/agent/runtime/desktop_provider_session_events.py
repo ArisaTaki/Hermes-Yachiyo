@@ -118,6 +118,10 @@ def desktop_provider_session_event_payload(
         "tool_names",
         "error",
         "source",
+        "desktop_session_kind",
+        "desktop_session_isolated",
+        "foreground_takeover_required",
+        "keyboard_mouse_capture_supported",
     ):
         value = session.get(key)
         if value not in (None, "", [], {}):

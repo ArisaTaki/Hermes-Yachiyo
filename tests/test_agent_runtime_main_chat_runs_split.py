@@ -175,6 +175,7 @@ def test_main_chat_run_lifecycle_records_desktop_provider_session_event() -> Non
             "desktop_session_kind": "isolated_desktop",
             "desktop_session_isolated": True,
             "foreground_takeover_required": False,
+            "keyboard_mouse_capture_supported": True,
             "env": {"SECRET": "not-for-timeline"},
             "command": ["python", "scripts/run_isolated_desktop_provider.py"],
             "request_ids": ["request-click"],
@@ -209,6 +210,15 @@ def test_main_chat_run_lifecycle_records_desktop_provider_session_event() -> Non
     assert provider_event["desktop_provider_session"][
         "desktop_execution_session_label"
     ] == "isolated desktop provider"
+    assert provider_event["desktop_provider_session"]["desktop_session_kind"] == (
+        "isolated_desktop"
+    )
+    assert provider_event["desktop_provider_session"]["desktop_session_isolated"] is True
+    assert provider_event["desktop_provider_session"]["foreground_takeover_required"] is False
+    assert (
+        provider_event["desktop_provider_session"]["keyboard_mouse_capture_supported"]
+        is True
+    )
     assert provider_event["desktop_provider_session"]["request_ids"] == [
         "request-click"
     ]
@@ -227,6 +237,15 @@ def test_main_chat_run_lifecycle_records_desktop_provider_session_event() -> Non
     assert projected_event.payload["desktop_provider_session"][
         "desktop_execution_session_mode"
     ] == "isolated_desktop"
+    assert projected_event.payload["desktop_provider_session"][
+        "desktop_session_isolated"
+    ] is True
+    assert projected_event.payload["desktop_provider_session"][
+        "foreground_takeover_required"
+    ] is False
+    assert projected_event.payload["desktop_provider_session"][
+        "keyboard_mouse_capture_supported"
+    ] is True
     assert "env" not in projected_event.payload["desktop_provider_session"]
 
 
