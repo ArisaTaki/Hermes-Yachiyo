@@ -466,6 +466,9 @@ def desktop_execution_route_decision(
     mode_payload = _execution_mode_payload(execution_mode)
     decision_context = _route_policy_metadata_context(policy_payload, metadata)
     sandbox_provider = sandbox_desktop_provider_status(metadata)
+    foreground_takeover_allowed = user_foreground_takeover_allowed(
+        decision_context
+    ) or policy_payload.get("allow_live_foreground") is True
     readonly_provider_requested = (
         desktop_readonly_provider_route_requested(metadata)
         or _metadata_truthy(
@@ -485,6 +488,7 @@ def desktop_execution_route_decision(
             "desktop_provider_route_foreground",
             "provider_route_foreground",
         )
+        or foreground_takeover_allowed
     )
     foreground_control = bool(mode_payload.get("foreground_control"))
     keyboard_mouse_capture = bool(mode_payload.get("keyboard_mouse_capture"))
@@ -499,7 +503,6 @@ def desktop_execution_route_decision(
         "avoid_user_foreground_takeover",
         "require_sandbox_for_keyboard_mouse",
     )
-    foreground_takeover_allowed = user_foreground_takeover_allowed(decision_context)
     isolation = str(mode_payload.get("isolation") or "none").strip() or "none"
     execution_mode_name = str(mode_payload.get("mode") or "tool_native").strip()
     route = {
@@ -574,7 +577,7 @@ def desktop_execution_route_decision(
     if (
         foreground_provider_requested
         and (foreground_required or execution_mode_name == "supervised_live")
-        and _sandbox_provider_requires_isolated_keyboard_mouse_session(
+        and _sandbox_provider_requires_isolated_foreground_session(
             sandbox_provider,
             clean_tool,
             decision_context,
@@ -589,7 +592,7 @@ def desktop_execution_route_decision(
             "sandbox_required": True,
             "fallback_mode": "supervised_live",
             "reason": (
-                "Keyboard and mouse foreground actions must run inside an isolated "
+                "Foreground desktop actions must run inside an isolated "
                 "desktop session unless the user explicitly allows foreground takeover."
             ),
             "blocking_conditions": ["sandbox_desktop_session_required"],
@@ -678,6 +681,7 @@ def user_foreground_takeover_allowed(metadata: Mapping[str, Any] | None) -> bool
         "allow_user_foreground_takeover",
         "desktop_allow_user_foreground_takeover",
         "allow_nonisolated_desktop_provider",
+        "allow_live_foreground",
     )
 
 
@@ -1064,6 +1068,24 @@ def _sandbox_route_decision(
             "blocking_conditions": ["sandbox_tool_not_supported"],
             **provider_context,
         }
+    if _sandbox_route_requires_isolated_foreground_session(route, provider_context):
+        return {
+            **dict(route),
+            "selected_provider_kind": provider_kind,
+            "selected_provider_id": provider_id,
+            "status": "sandbox_desktop_session_required",
+            "can_execute": False,
+            "can_auto_start": False,
+            "sandbox_required": True,
+            "fallback_mode": "supervised_live",
+            "reason": (
+                "Current desktop provider uses the user's foreground session; "
+                "this foreground action must run inside an isolated desktop session "
+                "unless foreground takeover is explicitly allowed."
+            ),
+            "blocking_conditions": ["sandbox_desktop_session_required"],
+            **provider_context,
+        }
     if not bool(sandbox_provider.get("adapter_ready")):
         return {
             **dict(route),
@@ -1205,19 +1227,20 @@ def _sandbox_provider_requires_keyboard_mouse_sandbox(
     return not required or clean_tool in required or "keyboard_mouse_capture" in required
 
 
-def _sandbox_provider_requires_isolated_keyboard_mouse_session(
+def _sandbox_provider_requires_isolated_foreground_session(
     sandbox_provider: Mapping[str, Any],
     tool_name: str,
     metadata: Mapping[str, Any] | None,
 ) -> bool:
     clean_tool = str(tool_name or "").strip()
-    if clean_tool not in _KEYBOARD_MOUSE_CAPTURE_TOOLS:
+    if clean_tool not in _USER_FOREGROUND_TAKEOVER_TOOLS:
         return False
     if _metadata_truthy(
         metadata,
         "allow_user_foreground_takeover",
         "desktop_allow_user_foreground_takeover",
         "allow_nonisolated_desktop_provider",
+        "allow_live_foreground",
     ):
         return False
     if _optional_bool_value(sandbox_provider.get("foreground_takeover_required")) is True:
@@ -1229,9 +1252,25 @@ def _sandbox_provider_requires_isolated_keyboard_mouse_session(
         return False
     if _optional_bool_value(sandbox_provider.get("desktop_session_isolated")) is False:
         return True
+    if clean_tool not in _KEYBOARD_MOUSE_CAPTURE_TOOLS:
+        return False
     return _optional_bool_value(
         sandbox_provider.get("keyboard_mouse_capture_supported")
     ) is True and str(sandbox_provider.get("provider_kind") or "") != "sandbox_desktop"
+
+
+def _sandbox_route_requires_isolated_foreground_session(
+    route: Mapping[str, Any],
+    provider_context: Mapping[str, Any],
+) -> bool:
+    if not bool(provider_context.get("user_foreground_takeover_risk")):
+        return False
+    if bool(route.get("foreground_takeover_allowed")):
+        return False
+    requested_mode = (
+        str(route.get("requested_mode") or "").strip().lower().replace("-", "_")
+    )
+    return bool(route.get("isolated_desktop_preferred")) or requested_mode == "sandbox_preferred"
 
 
 def _execution_mode_payload(value: Mapping[str, Any] | Any | None) -> dict[str, Any]:

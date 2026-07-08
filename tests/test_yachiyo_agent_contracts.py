@@ -5612,6 +5612,52 @@ def test_desktop_policy_prefer_isolated_routes_keyboard_mouse_without_extra_meta
     assert route["blocking_conditions"] == ["sandbox_desktop_session_required"]
 
 
+def test_daily_policy_blocks_app_launch_through_user_foreground_provider() -> None:
+    provider = {
+        "available": True,
+        "adapter_ready": True,
+        "provider_id": "foreground-control",
+        "provider_kind": "sandbox_desktop",
+        "supported_tools": ["app.open"],
+        "keyboard_mouse_capture_supported": True,
+        "desktop_session_kind": "user_foreground",
+        "desktop_session_isolated": False,
+        "foreground_takeover_required": True,
+    }
+    route = desktop_execution_route_decision(
+        "app.open",
+        policy=daily_entrypoint_desktop_execution_policy(surface="chat"),
+        execution_mode=DesktopExecutionModeSnapshot(
+            mode="supervised_live",
+            foreground_control=True,
+            keyboard_mouse_capture=False,
+        ),
+        metadata={"sandbox_provider": provider},
+    )
+    explicit_route = desktop_execution_route_decision(
+        "app.open",
+        policy=daily_entrypoint_desktop_execution_policy(surface="chat"),
+        execution_mode=DesktopExecutionModeSnapshot(
+            mode="supervised_live",
+            foreground_control=True,
+            keyboard_mouse_capture=False,
+        ),
+        metadata={
+            "allow_user_foreground_takeover": True,
+            "sandbox_provider": provider,
+        },
+    )
+
+    assert route["status"] == "sandbox_desktop_session_required"
+    assert route["can_execute"] is False
+    assert route["selected_provider_id"] == "foreground-control"
+    assert route["user_foreground_takeover_risk"] is True
+    assert route["blocking_conditions"] == ["sandbox_desktop_session_required"]
+    assert explicit_route["status"] == "provider_ready"
+    assert explicit_route["can_execute"] is True
+    assert explicit_route["foreground_takeover_allowed"] is True
+
+
 def test_daily_entrypoint_desktop_execution_policy_defaults_to_input_preview() -> None:
     policy = daily_entrypoint_desktop_execution_policy(surface="bubble")
     metadata = with_daily_entrypoint_desktop_execution_policy(
