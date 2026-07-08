@@ -2843,7 +2843,7 @@ def test_legacy_chat_task_starter_writes_explicit_note_as_artifact_fallback() ->
     assert direct_requests[0]["planner_step_id"] == "create-note"
 
 
-def test_legacy_chat_task_starter_does_not_pass_full_plan_for_approval_tools() -> None:
+def test_legacy_chat_task_starter_passes_planner_approval_tools_to_chat_gate() -> None:
     app_runtime = _FakeAppRuntime()
     runtime = _MainChatPlannerEventRuntime()
     starter = LegacyChatTaskStarter(app_runtime, runtime)
@@ -2863,7 +2863,17 @@ def test_legacy_chat_task_starter_does_not_pass_full_plan_for_approval_tools() -
         call for call in runtime.calls if call[0] == "execute_main_chat_model_loop"
     ][0]
     assert model_loop_call[1]["direct_tool_request"] is None
-    assert model_loop_call[1]["direct_tool_requests"] == []
+    direct_requests = model_loop_call[1]["direct_tool_requests"]
+    assert [request["tool"] for request in direct_requests] == [
+        "desktop.list_apps",
+        "app.quit",
+        "desktop.running_apps",
+    ]
+    assert direct_requests[1]["approval_required"] is True
+    assert model_loop_call[1]["tool_policy"] == {
+        "allowed_tools": ["desktop.list_apps", "app.quit", "desktop.running_apps"],
+        "approval_required": {"app.quit": True},
+    }
     selection_events = [
         event for event in runtime.calls if event[0] == "append_run_event"
         and event[1]["event_type"] == "agent.plan.selection"
@@ -3009,7 +3019,17 @@ def test_legacy_chat_task_starter_uses_future_task_schedule_fallback() -> None:
     ][0]
     assert model_loop_call[1]["direct_tool_request"] is None
     direct_requests = model_loop_call[1]["direct_tool_requests"]
-    assert direct_requests == []
+    assert [request["tool"] for request in direct_requests] == ["reminders.create"]
+    assert direct_requests[0]["approval_required"] is True
+    assert direct_requests[0]["input"]["due_at"] == tomorrow_0900
+    assert model_loop_call[1]["tool_policy"] == {
+        "allowed_tools": ["reminders.create"],
+        "approval_required": {"reminders.create": True},
+    }
+    assistant_message = app_runtime.chat_session.assistant_messages[0]
+    assert assistant_message["metadata"]["run_status"] == "approval_required"
+    assert assistant_message["metadata"]["agent_run_id"] == "run-main"
+    assert assistant_message["metadata"]["pending_approval"]["tool"] == "reminders.create"
     selection_events = [
         event for event in runtime.calls
         if event[0] == "append_run_event"
@@ -4367,6 +4387,40 @@ class _MainChatFutureTaskRuntime(_MainChatPlannerEventRuntime):
         return {
             "allowed_tools": ["future_task.schedule"],
             "approval_required": {"future_task.schedule": True},
+        }
+
+    def execute_main_chat_model_loop(
+        self,
+        run_id: str,
+        messages: list[dict[str, Any]],
+        *,
+        direct_tool_request: dict[str, Any] | None = None,
+        direct_tool_requests: list[dict[str, Any]] | None = None,
+        runtime_execution_envelope: dict[str, Any] | None = None,
+        runtime_execution_metadata: dict[str, Any] | None = None,
+        tool_policy: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        super().execute_main_chat_model_loop(
+            run_id,
+            messages,
+            direct_tool_request=direct_tool_request,
+            direct_tool_requests=direct_tool_requests,
+            runtime_execution_envelope=runtime_execution_envelope,
+            runtime_execution_metadata=runtime_execution_metadata,
+            tool_policy=tool_policy,
+        )
+        request = (direct_tool_requests or [{}])[0]
+        return {
+            "run_id": run_id,
+            "status": "approval_required",
+            "result": "等待审批：reminders.create",
+            "pending_approval": {
+                "approval_id": "approval-reminder-1",
+                "tool": str(request.get("tool") or "reminders.create"),
+                "input_preview": request.get("input") if isinstance(request, dict) else {},
+                "tool_request": request,
+            },
+            "timeline": [],
         }
 
 

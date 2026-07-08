@@ -862,11 +862,22 @@ class LegacyChatTaskStarter:
             status = str(run.get("status") or "").strip()
             result_text = str(run.get("result") or "").strip()
             if status == "approval_required":
+                pending_approval = (
+                    run.get("pending_approval")
+                    if isinstance(run.get("pending_approval"), dict)
+                    else {}
+                )
                 self._sync_chat_assistant_message(
                     task_id,
                     conversation_id,
                     "等待你在 Agent Studio 中审批后继续。",
                     status="processing",
+                    metadata={
+                        "run_status": "approval_required",
+                        "agent_run_id": run_id,
+                        "run_id": run_id,
+                        "pending_approval": pending_approval,
+                    },
                 )
                 return self._projector.chat_task_payload(
                     {**run, "task_id": task_id, "session_id": conversation_id},
@@ -1095,6 +1106,7 @@ class LegacyChatTaskStarter:
         *,
         status: str,
         error: str | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         session = self._chat_session_for_conversation(conversation_id)
         upsert = getattr(session, "upsert_assistant_message", None)
@@ -1113,6 +1125,7 @@ class LegacyChatTaskStarter:
                 content=content,
                 status=message_status,
                 error=error,
+                metadata=metadata,
             )
         except Exception:
             return
@@ -1984,7 +1997,13 @@ def _runtime_planner_direct_approval_sequence_requests(
     app_ui_approval_plan = _runtime_planner_app_ui_approval_plan(selected_requests)
     app_submit_approval_plan = _runtime_planner_app_submit_approval_plan(selected_requests)
     communication_send_plan = _runtime_planner_communication_send_plan(selected_requests)
-    if not (communication_send_plan or app_ui_approval_plan or app_submit_approval_plan):
+    generic_approval_plan = _runtime_planner_generic_approval_plan(selected_requests)
+    if not (
+        communication_send_plan
+        or app_ui_approval_plan
+        or app_submit_approval_plan
+        or generic_approval_plan
+    ):
         return []
     allowed = {str(tool or "").strip() for tool in allowed_tools}
     executable = [
@@ -1995,7 +2014,10 @@ def _runtime_planner_direct_approval_sequence_requests(
     ]
     if not executable:
         return []
-    if any(str(request.get("tool") or "").strip() not in allowed for request in executable):
+    if any(
+        not _runtime_planner_direct_approval_tool_allowed(request, allowed)
+        for request in executable
+    ):
         return []
     if app_ui_approval_plan:
         return executable
@@ -2005,6 +2027,32 @@ def _runtime_planner_direct_approval_sequence_requests(
         for request in execution_requests
         if not _runtime_planner_model_followup_verification_request(request)
     ]
+
+
+def _runtime_planner_generic_approval_plan(
+    requests: list[dict[str, Any]],
+) -> bool:
+    return any(
+        isinstance(request, dict)
+        and bool(request.get("approval_required"))
+        and str(request.get("source") or "").strip() == "runtime_planner"
+        for request in requests
+    )
+
+
+def _runtime_planner_direct_approval_tool_allowed(
+    request: Mapping[str, Any],
+    allowed: set[str],
+) -> bool:
+    tool_name = str(request.get("tool") or "").strip()
+    if not tool_name:
+        return False
+    if not allowed or tool_name in allowed:
+        return True
+    return (
+        bool(request.get("approval_required"))
+        and str(request.get("source") or "").strip() == "runtime_planner"
+    )
 
 
 def _runtime_planner_deferred_ui_approval_sequence_requests(
