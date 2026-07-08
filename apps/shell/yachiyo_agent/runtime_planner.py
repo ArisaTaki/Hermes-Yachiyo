@@ -4762,9 +4762,12 @@ class RuntimePlanner:
             }
             and not focus_step_added
             and not app_search
-            and not _inspect_app_can_remain_readonly_before_operation(
-                operation_tool,
-                operation_preview,
+            and (
+                create_first_safe_shortcut
+                or not _inspect_app_can_remain_readonly_before_operation(
+                    operation_tool,
+                    operation_preview,
+                )
             )
             and _app_scoped_operation_should_inspect(
                 operation_tool,
