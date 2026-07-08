@@ -143,6 +143,34 @@ def direct_browser_entrypoint_requests(
     return [normalized]
 
 
+def daily_desktop_requests_can_complete_without_model(
+    requests: Sequence[Mapping[str, Any]] | None,
+) -> bool:
+    """Return true when deferred planner steps are only deterministic verification."""
+
+    items = [request for request in requests or [] if isinstance(request, Mapping)]
+    if not items:
+        return False
+    deferred = [request for request in items if bool(request.get("continue_to_model"))]
+    if not deferred:
+        return True
+    return all(_deferred_request_is_direct_verification(request) for request in deferred)
+
+
+def _deferred_request_is_direct_verification(request: Mapping[str, Any]) -> bool:
+    tool_name = str(request.get("tool") or "").strip()
+    if tool_name not in _ENTRYPOINT_VERIFY_TOOLS and tool_name != "desktop.verify":
+        return False
+    if bool(request.get("approval_required")):
+        return False
+    runtime_stage = str(request.get("runtime_stage") or "").strip()
+    runtime_role = str(request.get("runtime_role") or "").strip()
+    step_id = str(request.get("step_id") or "").strip()
+    if runtime_stage == "verify" or runtime_role == "verify_result":
+        return True
+    return step_id.startswith("verify-")
+
+
 def _looks_like_browser_artifact_request(text: str) -> bool:
     value = str(text or "").strip()
     if not value:

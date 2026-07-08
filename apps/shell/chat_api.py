@@ -47,6 +47,7 @@ from apps.shell.agent_runtime import AgentRuntimeError, get_agent_runtime_servic
 from apps.shell.native_capabilities import get_native_image_input_capability
 from apps.shell.yachiyo_agent.daily_desktop import (
     daily_desktop_allowed_tools,
+    daily_desktop_requests_can_complete_without_model,
     daily_desktop_runtime_execution_envelope,
     direct_browser_entrypoint_requests,
     entrypoint_plan_user_metadata,
@@ -4340,6 +4341,8 @@ class ChatAPI:
         ):
             return True
         if direct_browser_entrypoint_requests(requests, text):
+            return True
+        if daily_desktop_requests_can_complete_without_model(requests):
             return True
         if self._can_direct_execute_deferred_observed_ui(requests):
             return True

@@ -342,6 +342,40 @@ def _drop_nonblocking_trailing_verify_requests(
     return requests[: last_primary + 1]
 
 
+def _allow_nonblocking_trailing_verify_without_model(
+    requests: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if len(requests) <= 1:
+        return requests
+    last_primary = -1
+    for index, request in enumerate(requests):
+        tool_name = str(request.get("tool") or "").strip()
+        if (
+            tool_name
+            and tool_name not in _DAILY_DESKTOP_METADATA_DISCOVERY_TOOLS
+            and tool_name not in _DAILY_DESKTOP_METADATA_VERIFY_TOOLS
+        ):
+            last_primary = index
+    if last_primary < 0:
+        return requests
+    trailing = requests[last_primary + 1 :]
+    if not trailing:
+        return requests
+    if any(
+        str(request.get("tool") or "").strip()
+        not in _DAILY_DESKTOP_METADATA_VERIFY_TOOLS
+        for request in trailing
+    ):
+        return requests
+    updated: list[dict[str, Any]] = []
+    for index, request in enumerate(requests):
+        item = dict(request)
+        if index > last_primary:
+            item.pop("continue_to_model", None)
+        updated.append(item)
+    return updated
+
+
 def _task_message_metadata(chat_session: Any, task_id: str, *, role: str) -> dict[str, Any]:
     for message in getattr(chat_session, "messages", []) or []:
         if str(getattr(message, "task_id", "") or "").strip() != str(task_id or "").strip():
@@ -2308,7 +2342,7 @@ def _safe_runtime_execution_envelope_requests(
             continue
         requests = _split_redundant_app_safe_shortcut_requests(requests)
         requests = daily_desktop_executable_entrypoint_requests(requests)
-        return requests
+        return _allow_nonblocking_trailing_verify_without_model(requests)
     return []
 
 

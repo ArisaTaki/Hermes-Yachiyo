@@ -14,6 +14,9 @@ from apps.shell.yachiyo_agent.entrypoint_tool_selection import (
 from apps.shell.yachiyo_agent.discovered_app_followups import (
     planner_discovered_app_followup_can_direct_execute,
 )
+from apps.shell.yachiyo_agent.daily_desktop import (
+    daily_desktop_requests_can_complete_without_model,
+)
 from apps.shell.yachiyo_agent.runtime_execution import (
     runtime_execution_requests_from_envelope_payload,
     runtime_execution_requests_from_metadata,
@@ -312,6 +315,8 @@ class MainChatModelLoopRunner:
                 if isinstance(request, dict)
             ):
                 return True
+            if daily_desktop_requests_can_complete_without_model(requests):
+                return True
         intent_text = _latest_user_intent_text(messages)
         if not intent_text:
             return False
@@ -327,6 +332,8 @@ class MainChatModelLoopRunner:
                     for request in planned_requests
                     if isinstance(request, dict)
                 ):
+                    return True
+                if daily_desktop_requests_can_complete_without_model(planned_requests):
                     return True
                 return planner_discovered_app_followup_can_direct_execute(
                     selection.event_payload,

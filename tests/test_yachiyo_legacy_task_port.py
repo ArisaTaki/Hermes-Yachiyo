@@ -11,6 +11,7 @@ import pytest
 from apps.shell.agent.runtime.errors import AgentRuntimeError
 from apps.shell.yachiyo_agent.daily_desktop import (
     daily_desktop_allowed_tools,
+    daily_desktop_requests_can_complete_without_model,
     desktop_agent_entrypoint_allowed_tools,
     direct_browser_entrypoint_requests,
     main_chat_entrypoint_allowed_tools,
@@ -173,6 +174,35 @@ def test_direct_browser_entrypoint_ignores_artifact_followup_for_simple_open() -
         }
     ]
     assert direct_browser_entrypoint_requests(requests, "调研 GitHub 并输出报告") == []
+
+
+def test_daily_desktop_requests_can_complete_with_trailing_verification_without_model() -> None:
+    requests = [
+        {
+            "tool": "desktop.list_apps",
+            "input": {"query": "Microsoft Word"},
+            "runtime_stage": "discover",
+            "continue_to_model": False,
+        },
+        {
+            "tool": "app.open",
+            "input": {"app_name": "Microsoft Word"},
+            "runtime_stage": "operate",
+            "continue_to_model": False,
+        },
+        {
+            "tool": "desktop.active_window",
+            "input": {},
+            "runtime_stage": "verify",
+            "runtime_role": "verify_result",
+            "continue_to_model": True,
+        },
+    ]
+
+    assert daily_desktop_requests_can_complete_without_model(requests) is True
+    assert daily_desktop_requests_can_complete_without_model(
+        [{**requests[-1], "runtime_stage": "observe", "runtime_role": "read_state"}]
+    ) is False
 
 
 def _recording_legacy_requests(
