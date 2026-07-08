@@ -84,6 +84,8 @@ from .runtime_progress import (
 from .controlled_provider_diagnostics import controlled_desktop_provider_diagnostics_payload
 from .groups import group_run_snapshot_from_payload
 from .isolated_provider_session import (
+    annotate_envelope_with_desktop_provider_session,
+    ensure_isolated_desktop_provider_session_for_envelope,
     isolated_desktop_provider_session_status,
     start_isolated_desktop_provider_session,
     stop_isolated_desktop_provider_session,
@@ -738,6 +740,16 @@ class LegacyChatTaskStarter:
                     prompt or execution_prompt,
                     selected_requests,
                     allowed_entrypoint_tools,
+                )
+            if direct_tool_request:
+                annotated_request = _direct_tool_requests_with_existing_desktop_provider_session(
+                    [direct_tool_request]
+                )
+                if annotated_request:
+                    direct_tool_request = annotated_request[0]
+            if direct_tool_requests:
+                direct_tool_requests = _direct_tool_requests_with_existing_desktop_provider_session(
+                    direct_tool_requests
                 )
             if direct_tool_requests and direct_tool_selection_payload:
                 direct_tool_selection_payload = _selection_payload_with_selected_requests(
@@ -2447,6 +2459,67 @@ def _direct_tool_request_sequence(
         request.setdefault("run_id", run_id)
         request.setdefault("task_id", task_id)
     return requests
+
+
+def _direct_tool_requests_with_existing_desktop_provider_session(
+    direct_tool_requests: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if not direct_tool_requests:
+        return []
+    envelope_requests = []
+    for index, request in enumerate(direct_tool_requests, start=1):
+        if not isinstance(request, dict):
+            continue
+        tool_name = str(request.get("tool") or request.get("tool_name") or "").strip()
+        if not tool_name:
+            continue
+        envelope_request = dict(request)
+        envelope_request.setdefault("tool_name", tool_name)
+        envelope_request.setdefault("request_id", f"request:{index}:{tool_name}")
+        envelope_requests.append(envelope_request)
+    if not envelope_requests:
+        return [dict(request) for request in direct_tool_requests if isinstance(request, dict)]
+    envelope = {"requests": envelope_requests}
+    try:
+        session = ensure_isolated_desktop_provider_session_for_envelope(
+            envelope,
+            auto_start=False,
+        )
+    except Exception:
+        return [dict(request) for request in direct_tool_requests if isinstance(request, dict)]
+    if not (session.get("needed") and session.get("running")):
+        return [dict(request) for request in direct_tool_requests if isinstance(request, dict)]
+    annotated = annotate_envelope_with_desktop_provider_session(envelope, session)
+    annotated_requests = annotated.get("requests") if isinstance(annotated, dict) else None
+    if not isinstance(annotated_requests, list):
+        return [dict(request) for request in direct_tool_requests if isinstance(request, dict)]
+    by_request_id = {
+        str(request.get("request_id") or "").strip(): request
+        for request in annotated_requests
+        if isinstance(request, dict)
+    }
+    result: list[dict[str, Any]] = []
+    for index, request in enumerate(direct_tool_requests, start=1):
+        if not isinstance(request, dict):
+            continue
+        tool_name = str(request.get("tool") or request.get("tool_name") or "").strip()
+        request_id = str(request.get("request_id") or f"request:{index}:{tool_name}").strip()
+        annotated_request = by_request_id.get(request_id)
+        if isinstance(annotated_request, dict) and isinstance(
+            annotated_request.get("desktop_provider_session"),
+            dict,
+        ):
+            result.append(
+                {
+                    **dict(request),
+                    "desktop_provider_session": dict(
+                        annotated_request["desktop_provider_session"]
+                    ),
+                }
+            )
+        else:
+            result.append(dict(request))
+    return result
 
 
 def _explicit_direct_tool_request(
