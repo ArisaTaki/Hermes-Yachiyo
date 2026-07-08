@@ -72,7 +72,7 @@ def test_oha_desktop_agent_release_smoke_covers_product_readiness(tmp_path) -> N
             "remaining_fallback_contracts"
         ]
     } == {
-        "browser_search_and_app_scoped_search",
+        "context_transfer_search_box",
         "semantic_ui_targeting",
     }
     assert section_by_id["studio_tool_catalog"]["report"]["coverage"][

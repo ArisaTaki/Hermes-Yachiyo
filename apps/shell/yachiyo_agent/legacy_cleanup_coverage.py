@@ -270,18 +270,24 @@ PLANNER_OWNED_LEGACY_ENTRYPOINTS: tuple[dict[str, Any], ...] = (
         "tools": ["app.open_and_safe_shortcut", "app.focus_and_safe_shortcut"],
         "example_prompts": ["Finder 重命名选中文件", "Finder 上一级目录", "打开 Finder 复制选中文件"],
     },
+    {
+        "entrypoint_id": "browser_app_search_facade",
+        "title": "Legacy browser and app search facade",
+        "tools": ["app.focus", "app.focus_and_safe_shortcut", "browser.open_url"],
+        "example_prompts": ["Chrome 搜索 OpenAI", "Chrome 新建标签页搜索 OpenAI", "微信打开搜索"],
+    },
 )
 
 
 REMAINING_FALLBACK_CONTRACTS: tuple[dict[str, Any], ...] = (
     _fallback_contract(
-        "browser_search_and_app_scoped_search",
-        "Browser search and app-scoped search sequences",
-        "Browser and app-scoped search are now planner-covered; legacy facade callers still need response-shape cleanup.",
-        ["Chrome 搜索 OpenAI", "微信打开搜索", "把当前页面内容输入到搜索框"],
+        "context_transfer_search_box",
+        "Context-transfer search-box sequences",
+        "Context-transfer search-box prompts are planner-covered, but legacy facade callers still expect merged focus-and-click response shapes.",
+        ["把当前页面内容输入到搜索框", "把当前网页链接输入到 Slack 搜索框", "打开 Slack 搜索框输入选中的内容"],
         [
-            "Planner must preserve app focus before browser search when requested.",
             "Planner must keep context-transfer search-box prompts as inspectable UI plans.",
+            "Legacy response-shape callers must accept separate focus/click/paste steps before the old parser branch is deleted.",
         ],
     ),
     _fallback_contract(

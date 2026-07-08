@@ -5855,6 +5855,18 @@ def _browser_tool_result_can_feed_model(tool_name: str) -> bool:
 
 
 def _web_browser_prepare_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]:
+    step = _planned_step_by_id(decision, "open-or-focus-browser")
+    step_tool_name = str(getattr(step, "tool_name", "") or "").strip()
+    if step_tool_name and step_tool_name in allowed and _step_available(step):
+        input_preview = getattr(step, "input_preview", None)
+        payload = dict(input_preview) if isinstance(input_preview, Mapping) else {}
+        return [
+            _request(
+                step_tool_name,
+                _desktop_request_payload(step_tool_name, payload),
+                planning_reason="planner_fallback_web_research",
+            )
+        ]
     inputs = decision.selected_intent.inputs
     app_name = str(inputs.get("app_name") or "").strip()
     if not app_name:

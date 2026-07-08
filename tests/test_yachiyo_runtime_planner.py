@@ -9473,6 +9473,29 @@ def test_runtime_planner_routes_static_web_search_to_open_url() -> None:
         "query": "weather",
     }
 
+    browser_scoped = RuntimePlanner().decision(
+        "Chrome 新建标签页搜索 OpenAI",
+        allowed_tools=[
+            "browser.open_url",
+            "app.focus",
+            "app.focus_and_safe_shortcut",
+            "desktop.list_apps",
+        ],
+    )
+    assert browser_scoped.selected_intent.kind == "web_research"
+    assert [step.step_id for step in browser_scoped.plan.tool_plan.steps][:3] == [
+        "discover-browser-app",
+        "open-or-focus-browser",
+        "open-web-search",
+    ]
+    assert _step_by_id(browser_scoped, "open-or-focus-browser").tool_name == (
+        "app.focus_and_safe_shortcut"
+    )
+    assert _step_by_id(browser_scoped, "open-or-focus-browser").input_preview == {
+        "app_name": "Google Chrome",
+        "action": "new_tab",
+    }
+
     new_tab_search = RuntimePlanner().decision(
         "打开新标签并搜索 OpenAI",
         allowed_tools=["browser.open_url", "desktop.list_apps", "app.open"],
@@ -9661,20 +9684,13 @@ def test_runtime_planner_routes_static_web_search_to_open_url() -> None:
         "followup_action": "click_search_result",
         "selector": "search-result=1",
         "click_count": 1,
-        "app_name": "Chrome",
+        "app_name": "Google Chrome",
         "app_mode": "focus",
     }
     assert [step.step_id for step in first_result.plan.tool_plan.steps] == [
-        "discover-browser-app",
-        "open-or-focus-browser",
         "open-web-search",
         "click-web-search-result",
     ]
-    discover_browser = _step_by_id(first_result, "discover-browser-app")
-    assert discover_browser.tool_name is None
-    assert discover_browser.status == "unavailable"
-    browser_step = _step_by_id(first_result, "open-or-focus-browser")
-    assert browser_step.tool_name is None
 
     first_result_report = RuntimePlanner().decision(
         "打开 Chrome 搜索 OpenAI pricing，打开第一个结果并输出报告",
@@ -9699,8 +9715,6 @@ def test_runtime_planner_routes_static_web_search_to_open_url() -> None:
     assert _step_by_id(first_result_report, "write-research-artifact").depends_on == [
         "extract-clicked-web-result-text"
     ]
-    assert browser_step.status == "unavailable"
-    assert browser_step.depends_on == ["discover-browser-app"]
     assert _step_by_id(first_result, "open-web-search").input_preview == {
         "url": "https://www.google.com/search?q=OpenAI"
     }
@@ -32115,6 +32129,44 @@ def test_planner_tool_requests_maps_static_web_search() -> None:
             "protocol": "json_fallback",
             "tool": "browser.click",
             "input": {"selector": "search-result=1", "click_count": 1},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        },
+    ]
+    assert planner_tool_requests(
+        "Chrome 搜索 OpenAI",
+        allowed_tools=[*allowed, "app.focus"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "Google Chrome"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://www.google.com/search?q=OpenAI"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        },
+    ]
+    assert planner_tool_requests(
+        "Chrome 新建标签页搜索 OpenAI",
+        allowed_tools=[*allowed, "app.focus", "app.focus_and_safe_shortcut"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Google Chrome", "action": "new_tab"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://www.google.com/search?q=OpenAI"},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_web_research",
         },

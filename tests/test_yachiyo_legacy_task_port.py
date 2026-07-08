@@ -953,7 +953,7 @@ def test_runtime_planner_covers_migrated_desktop_samples_before_cleanup() -> Non
     assert {
         contract["fallback_id"] for contract in coverage["remaining_fallback_contracts"]
     } == {
-        "browser_search_and_app_scoped_search",
+        "context_transfer_search_box",
         "semantic_ui_targeting",
     }
     assert "context_transfer" in coverage["areas"]

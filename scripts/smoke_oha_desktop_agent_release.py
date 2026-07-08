@@ -269,6 +269,38 @@ def _legacy_facade_planner_ownership_case() -> dict[str, Any]:
                 },
             ],
         },
+        {
+            "id": "browser_app_search",
+            "prompt": "Chrome 搜索 OpenAI",
+            "expected": [
+                {
+                    "protocol": "json_fallback",
+                    "tool": "app.focus",
+                    "input": {"app_name": "Google Chrome"},
+                },
+                {
+                    "protocol": "json_fallback",
+                    "tool": "browser.open_url",
+                    "input": {"url": "https://www.google.com/search?q=OpenAI"},
+                },
+            ],
+        },
+        {
+            "id": "browser_app_new_tab_search",
+            "prompt": "Chrome 新建标签页搜索 OpenAI",
+            "expected": [
+                {
+                    "protocol": "json_fallback",
+                    "tool": "app.focus_and_safe_shortcut",
+                    "input": {"app_name": "Google Chrome", "action": "new_tab"},
+                },
+                {
+                    "protocol": "json_fallback",
+                    "tool": "browser.open_url",
+                    "input": {"url": "https://www.google.com/search?q=OpenAI"},
+                },
+            ],
+        },
     ]
     legacy_calls: list[dict[str, Any]] = []
     original_legacy_parser = daily_desktop_module.daily_desktop_entrypoint_tool_requests
@@ -326,6 +358,8 @@ def _legacy_facade_planner_ownership_case() -> dict[str, Any]:
             "safe_app_action",
             "spotlight_search",
             "finder_item_shortcut",
+            "browser_app_search",
+            "browser_app_new_tab_search",
         }.issubset({str(result["id"]) for result in results}),
     }
     return {

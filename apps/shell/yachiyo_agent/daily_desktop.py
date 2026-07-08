@@ -221,6 +221,12 @@ def _planner_owned_legacy_compatible_entrypoint_requests(
     )
     if search_requests:
         return search_requests
+    browser_search_requests = _legacy_compatible_browser_search_entrypoint_requests(
+        planner_requests,
+        text=text,
+    )
+    if browser_search_requests:
+        return browser_search_requests
     return _legacy_compatible_simple_entrypoint_requests(planner_requests, text=text)
 
 
@@ -293,6 +299,50 @@ def _legacy_compatible_search_entrypoint_requests(
         second_input = visible[1].get("input") if isinstance(visible[1].get("input"), Mapping) else {}
         if not str(second_input.get("text") or "").strip():
             return []
+    return [_legacy_shape_request(request) for request in visible]
+
+
+def _legacy_compatible_browser_search_entrypoint_requests(
+    requests: Sequence[Mapping[str, Any]] | None,
+    *,
+    text: str,
+) -> list[dict[str, Any]]:
+    if not requests:
+        return []
+    items = [dict(request) for request in requests if isinstance(request, Mapping)]
+    if not items:
+        return []
+    if not any(
+        str(request.get("planning_reason") or "").strip() == "planner_fallback_web_research"
+        for request in items
+    ):
+        return []
+    visible = _visible_entrypoint_plan_requests(items)
+    if not visible or any(request.get("continue_to_model") for request in visible):
+        return []
+    if any(_request_has_selected_app_placeholder(request) for request in visible):
+        return []
+    tools = [str(request.get("tool") or "").strip() for request in visible]
+    if tools == ["browser.open_url"]:
+        request = visible[0]
+        return [_legacy_shape_request(request)] if _browser_search_open_url_request(request) else []
+    if len(visible) != 2 or tools[1] != "browser.open_url":
+        return []
+    if tools[0] not in {
+        "app.focus",
+        "app.open",
+        "app.focus_and_safe_shortcut",
+        "app.open_and_safe_shortcut",
+    }:
+        return []
+    first_input = visible[0].get("input") if isinstance(visible[0].get("input"), Mapping) else {}
+    if not _browser_app_name(str(first_input.get("app_name") or "")):
+        return []
+    action = str(first_input.get("action") or "").strip()
+    if action and action != "new_tab":
+        return []
+    if not _browser_search_open_url_request(visible[1]):
+        return []
     return [_legacy_shape_request(request) for request in visible]
 
 
@@ -551,6 +601,25 @@ def _explicit_spotlight_prompt(text: str) -> bool:
             flags=re.IGNORECASE,
         )
     )
+
+
+def _browser_search_open_url_request(request: Mapping[str, Any]) -> bool:
+    payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+    url = str(payload.get("url") or "").strip().lower()
+    return bool(url and ("google.com/search" in url or "/search?" in url))
+
+
+def _browser_app_name(app_name: str) -> bool:
+    compact = re.sub(r"\s+", " ", str(app_name or "").strip().lower())
+    return compact in {
+        "chrome",
+        "google chrome",
+        "safari",
+        "firefox",
+        "edge",
+        "microsoft edge",
+        "brave",
+    }
 
 
 def _legacy_shape_request(request: Mapping[str, Any]) -> dict[str, Any]:

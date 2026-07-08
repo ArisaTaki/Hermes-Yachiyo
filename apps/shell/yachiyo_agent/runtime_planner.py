@@ -5854,31 +5854,57 @@ class RuntimePlanner:
         if browser_action:
             app_name = str(intent.inputs.get("app_name") or "").strip()
             app_mode = str(intent.inputs.get("app_mode") or "focus").strip() or "focus"
+            app_prepare_action = str(intent.inputs.get("app_prepare_action") or "").strip()
+            if app_name and browser_action == "open_search" and not app_prepare_action:
+                app_prepare_action = _browser_search_prepare_action_hint(intent.user_goal)
+            if not app_name and browser_action == "open_search":
+                inferred_app_name = _browser_search_prepare_app_name_hint(intent.user_goal)
+                inferred_action = _browser_search_prepare_action_hint(intent.user_goal)
+                inferred_mode = _browser_app_prepare_mode(intent.user_goal)
+                if inferred_app_name and _first_allowed(
+                    _browser_app_prepare_tool_candidates(inferred_mode, inferred_action),
+                    allowed,
+                ):
+                    app_name = inferred_app_name
+                    app_mode = inferred_mode
+                    app_prepare_action = inferred_action
             prepare_step_id = ""
             prepare_step: ToolPlanStepSnapshot | None = None
             discover_step: ToolPlanStepSnapshot | None = None
             if app_name and browser_action != "find_current_page":
-                discover_step = _step(
-                    intent,
-                    "discover-browser-app",
-                    "Discover browser app",
-                    "desktop.app_discovery",
-                    _first_allowed(
-                        ("desktop.list_apps", "desktop.running_apps", "desktop.active_window"),
-                        allowed,
-                    ),
-                    input_preview={"query": app_name, "limit": 20},
-                    reason="Resolve the requested browser app before opening or focusing it.",
+                prepare_tool = _first_allowed(
+                    _browser_app_prepare_tool_candidates(app_mode, app_prepare_action),
+                    allowed,
                 )
+            else:
+                prepare_tool = ""
+            if app_name and prepare_tool and browser_action != "find_current_page":
+                discover_tool = _first_allowed(
+                    ("desktop.list_apps", "desktop.running_apps", "desktop.active_window"),
+                    allowed,
+                )
+                if discover_tool:
+                    discover_step = _step(
+                        intent,
+                        "discover-browser-app",
+                        "Discover browser app",
+                        "desktop.app_discovery",
+                        discover_tool,
+                        input_preview={"query": app_name, "limit": 20},
+                        reason="Resolve the requested browser app before opening or focusing it.",
+                    )
                 prepare_step_id = "open-or-focus-browser"
+                prepare_input = {"app_name": app_name}
+                if app_prepare_action:
+                    prepare_input["action"] = app_prepare_action
                 prepare_step = _step(
                     intent,
                     prepare_step_id,
                     "Open or focus browser",
                     "desktop.app_control",
-                    _first_allowed(app_control_tool_candidates(app_mode), allowed),
-                    input_preview={"app_name": app_name},
-                    depends_on=["discover-browser-app"],
+                    prepare_tool,
+                    input_preview=prepare_input,
+                    depends_on=["discover-browser-app"] if discover_step is not None else [],
                     reason="Prepare the requested browser before running the browser tool.",
                 )
             tool_name = _first_allowed(
@@ -27745,6 +27771,50 @@ def _browser_action_app_name_hint(text: str, browser_action: str) -> str:
     return ""
 
 
+def _browser_search_prepare_app_name_hint(text: str) -> str:
+    explicit_browser_app = _explicit_browser_app_name_hint(text)
+    if explicit_browser_app:
+        return explicit_browser_app
+    app_name = _app_name_hint(text)
+    if (
+        app_name
+        and _is_browser_or_search_app_name(app_name)
+        and not _is_generic_browser_app_label(app_name)
+        and _browser_app_prepare_needed(text, "open_search")
+    ):
+        return app_name
+    search_surface = _web_search_surface_hint(text)
+    if (
+        search_surface
+        and _is_browser_or_search_app_name(search_surface)
+        and not _is_generic_browser_app_label(search_surface)
+        and _browser_app_prepare_needed(text, "open_search")
+    ):
+        return legacy_app_name_hint(search_surface) or search_surface
+    return ""
+
+
+def _browser_search_prepare_action_hint(text: str) -> str:
+    value = str(text or "")
+    return (
+        "new_tab"
+        if re.search(
+            r"(?:新建标签页|新标签页|new\s+tab)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        else ""
+    )
+
+
+def _browser_app_prepare_tool_candidates(app_mode: str, action: str = "") -> tuple[str, ...]:
+    if not action:
+        return tuple(app_control_tool_candidates(app_mode))
+    if app_mode == "open":
+        return ("app.open_and_safe_shortcut", "app.focus_and_safe_shortcut")
+    return ("app.focus_and_safe_shortcut", "app.open_and_safe_shortcut")
+
+
 def _explicit_browser_app_name_hint(text: str) -> str:
     value = str(text or "")
     patterns = (
@@ -27756,11 +27826,11 @@ def _explicit_browser_app_name_hint(text: str) -> str:
         r"(?:打开|启动|开启|切到|聚焦)\s*"
         r"(?P<app>Chrome|Google\s*Chrome|谷歌浏览器|Safari|Firefox|Edge|Brave)\b",
         r"^(?P<app>Chrome|Google\s*Chrome|谷歌浏览器|Safari|Firefox|Edge|Brave)\s*"
-        r"(?:点击|点一下|点按|单击|点|输入|填写|键入)",
+        r"(?:点击|点一下|点按|单击|点|输入|填写|键入|搜索|查找|检索|新建标签页|新标签页)",
         r"\b(?:open|launch|start|focus|switch\s+to|activate)\s+"
         r"(?P<app>google\s+chrome|chrome|safari|firefox|edge|microsoft\s+edge|brave)\b",
         r"^(?P<app>google\s+chrome|chrome|safari|firefox|edge|microsoft\s+edge|brave)\s+"
-        r"(?:click|press|tap|type|enter|fill)\b",
+        r"(?:click|press|tap|type|enter|fill|search|find|look\s+up|new\s+tab)\b",
     )
     for pattern in patterns:
         match = re.search(pattern, value, flags=re.IGNORECASE)
@@ -27777,7 +27847,7 @@ def _browser_app_prepare_needed(text: str, browser_action: str) -> bool:
         return True
     if browser_action in {"open_search", "open_url", "open_url_extract", "open_url_screenshot"}:
         if browser_action == "open_search" and not _web_search_followup_hint(text):
-            return False
+            return _browser_search_app_prepare_requested(text)
         if browser_action in {"open_url_extract", "open_url_screenshot"} and _explicit_browser_app_name_hint(text):
             return True
         if browser_action != "open_search":
@@ -27828,6 +27898,50 @@ def _browser_app_prepare_needed(text: str, browser_action: str) -> bool:
         re.search(
             r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:打开|启动|开启|切到|聚焦)\s*"
             r"(?:Chrome|Google\s*Chrome|谷歌浏览器|浏览器|Safari|Firefox|Edge|Brave)\b",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:open|launch|start|focus|switch\s+to|activate)\s+"
+            r"(?:google\s+chrome|chrome|safari|firefox|edge|microsoft\s+edge|brave|browser)\b",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _browser_search_app_prepare_requested(text: str) -> bool:
+    value = str(text or "")
+    return bool(
+        re.search(
+            r"(?:在|用|通过)\s*"
+            r"(?:Chrome|Google\s*Chrome|谷歌浏览器|Safari|Firefox|Edge|Brave)"
+            r"(?:里|中|上|内)?",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:打开|启动|开启|切到|聚焦)\s*"
+            r"(?:Chrome|Google\s*Chrome|谷歌浏览器|浏览器|Safari|Firefox|Edge|Brave)\b",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"^(?:Chrome|Google\s*Chrome|谷歌浏览器|浏览器|Safari|Firefox|Edge|Brave)\s*"
+            r"(?:搜索|查找|检索|新建标签页|新标签页)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:in|with|using)\s+"
+            r"(?:google\s+chrome|chrome|safari|firefox|edge|microsoft\s+edge|brave)\b",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"^(?:google\s+chrome|chrome|safari|firefox|edge|microsoft\s+edge|brave|browser)\s+"
+            r"(?:search|find|look\s+up|new\s+tab)\b",
             value,
             flags=re.IGNORECASE,
         )
