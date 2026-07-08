@@ -685,6 +685,33 @@ class _ReplanRecoveryActionPort(_FakeStudioPort):
                 "source_tool_name": "desktop.open_app",
                 "target_capability_id": "desktop.app_discovery",
                 "planning_reason": "planner_replan_runtime_recovery_action",
+                "desktop_execution_policy": {
+                    "mode": "sandbox_preferred",
+                    "prefer_isolated_desktop": True,
+                    "avoid_user_foreground_takeover": True,
+                },
+                "desktop_execution_route": {
+                    "status": "sandbox_ready",
+                    "selected_provider_id": "sandbox-1",
+                    "can_execute": True,
+                },
+                "sandbox_provider": {
+                    "provider_id": "sandbox-1",
+                    "status": "running",
+                    "available": True,
+                },
+                "desktop_provider_session": {
+                    "provider_id": "sandbox-1",
+                    "status": "running",
+                    "running": True,
+                    "command": ["/bin/launch-sandbox"],
+                    "env": {"SECRET_TOKEN": "hidden"},
+                },
+                "desktop_loop": {
+                    "stage": "verify",
+                    "retry_tool": "desktop.list_apps",
+                    "can_auto_retry": True,
+                },
                 "verification_targets": [
                     {
                         "step_id": "open-app",
@@ -704,6 +731,33 @@ class _ReplanRecoveryActionPort(_FakeStudioPort):
                             "input": {"query": "Apple Music"},
                             "permission_target": "app_discovery",
                             "risk_level": "low",
+                            "desktop_execution_policy": {
+                                "mode": "sandbox_preferred",
+                                "prefer_isolated_desktop": True,
+                                "avoid_user_foreground_takeover": True,
+                            },
+                            "desktop_execution_route": {
+                                "status": "sandbox_ready",
+                                "selected_provider_id": "sandbox-1",
+                                "can_execute": True,
+                            },
+                            "sandbox_provider": {
+                                "provider_id": "sandbox-1",
+                                "status": "running",
+                                "available": True,
+                            },
+                            "desktop_provider_session": {
+                                "provider_id": "sandbox-1",
+                                "status": "running",
+                                "running": True,
+                                "command": ["/bin/launch-sandbox"],
+                                "env": {"SECRET_TOKEN": "hidden"},
+                            },
+                            "desktop_loop": {
+                                "stage": "verify",
+                                "retry_tool": "desktop.list_apps",
+                                "can_auto_retry": True,
+                            },
                             "metadata": {
                                 "replan_signal_ids": ["signal-1"],
                                 "replan_triggers": ["verification_failed"],
@@ -780,6 +834,32 @@ class _ReplanRecoveryActionPort(_FakeStudioPort):
                     "planning_reason": "planner_desktop_app_control",
                     "runtime_stage": "operate",
                     "status": "blocked",
+                    "desktop_execution_policy": {
+                        "mode": "sandbox_required",
+                        "prefer_isolated_desktop": True,
+                        "avoid_user_foreground_takeover": True,
+                    },
+                    "desktop_execution_route": {
+                        "status": "provider_required",
+                        "can_execute": False,
+                        "blocking_conditions": ["isolated_provider_required"],
+                    },
+                    "sandbox_provider": {
+                        "provider_id": "sandbox-1",
+                        "status": "provider_required",
+                        "available": False,
+                    },
+                    "desktop_provider_session": {
+                        "provider_id": "sandbox-1",
+                        "status": "provider_required",
+                        "needed": True,
+                        "running": False,
+                        "command": ["/bin/launch-sandbox"],
+                    },
+                    "desktop_loop": {
+                        "stage": "operate",
+                        "retry_tool": "desktop.open_app",
+                    },
                     "action_target": {
                         "action": "open_app",
                         "app_name": "Apple Music",
@@ -1750,7 +1830,15 @@ def test_agent_studio_start_agent_run_auto_starts_isolated_provider_for_input(
         event for event in started.events if event.event_type == "agent.plan.created"
     )
 
-    assert start_calls == [{"tools": ["app.focus_and_click_ui_element"]}]
+    assert start_calls == [
+        {
+            "tools": [
+                "app.focus_and_click_ui_element",
+                "desktop.list_apps",
+                "desktop.ui_elements",
+            ]
+        }
+    ]
     assert probe_calls
     assert envelope["desktop_provider_session"]["needed"] is True
     assert envelope["desktop_provider_session"]["started"] is True
@@ -1805,7 +1893,9 @@ def test_agent_studio_start_agent_run_auto_starts_isolated_provider_for_app_open
         event for event in started.events if event.event_type == "agent.plan.created"
     )
 
-    assert start_calls == [{"tools": ["app.open"]}]
+    assert start_calls == [
+        {"tools": ["app.open", "desktop.active_window", "desktop.list_apps"]}
+    ]
     assert probe_calls
     assert envelope["desktop_provider_session"]["needed"] is True
     assert envelope["desktop_provider_session"]["started"] is True
@@ -1868,7 +1958,9 @@ def test_agent_studio_start_workflow_run_auto_starts_isolated_provider_for_app_o
     )
 
     assert workflow_run.workflow_run_id == "workflow-run-1"
-    assert start_calls == [{"tools": ["app.open"]}]
+    assert start_calls == [
+        {"tools": ["app.open", "desktop.active_window", "desktop.list_apps"]}
+    ]
     assert probe_calls
     assert start_payload["runtime_execution_envelope"] == envelope
     assert envelope["desktop_provider_session"]["needed"] is True
@@ -2505,6 +2597,13 @@ def test_agent_studio_service_starts_replan_recovery_action_direct_run() -> None
     assert request["metadata"]["target_capability_id"] == "desktop.app_discovery"
     assert request["metadata"]["replan_triggers"] == ["verification_failed", "tool_failure"]
     assert request["metadata"]["replan_signal_ids"] == ["signal-1"]
+    assert request["metadata"]["desktop_execution_policy"]["mode"] == "sandbox_preferred"
+    assert request["metadata"]["desktop_execution_route"]["selected_provider_id"] == "sandbox-1"
+    assert request["metadata"]["sandbox_provider"]["status"] == "running"
+    assert request["metadata"]["desktop_provider_session"]["provider_id"] == "sandbox-1"
+    assert "command" not in request["metadata"]["desktop_provider_session"]
+    assert "env" not in request["metadata"]["desktop_provider_session"]
+    assert request["metadata"]["desktop_loop"]["retry_tool"] == "desktop.list_apps"
     assert request["metadata"]["task_core_context"]["core_id"] == "task-core-1"
     assert request["metadata"]["task_core_context"]["workspace_id"] == "task-workspace-1"
     assert request["metadata"]["task_core_context"]["todos"][0]["todo_id"] == "todo-open-app"
@@ -2529,6 +2628,13 @@ def test_agent_studio_service_starts_replan_recovery_action_direct_run() -> None
     assert direct_request["target_capability_id"] == "desktop.app_discovery"
     assert direct_request["replan_triggers"] == ["verification_failed", "tool_failure"]
     assert direct_request["replan_signal_ids"] == ["signal-1"]
+    assert direct_request["desktop_execution_policy"]["avoid_user_foreground_takeover"] is True
+    assert direct_request["desktop_execution_route"]["status"] == "sandbox_ready"
+    assert direct_request["sandbox_provider"]["provider_id"] == "sandbox-1"
+    assert direct_request["desktop_provider_session"]["running"] is True
+    assert "command" not in direct_request["desktop_provider_session"]
+    assert "env" not in direct_request["desktop_provider_session"]
+    assert direct_request["desktop_loop"]["stage"] == "verify"
     assert direct_request["core_id"] == "task-core-1"
     assert direct_request["workspace_id"] == "task-workspace-1"
     assert direct_request["task_todo"]["todo_id"] == "todo-open-app"
@@ -2641,6 +2747,12 @@ def test_agent_studio_service_starts_runtime_envelope_retry_action_direct_run() 
     assert direct_request["input"] == {"app_name": "Music"}
     assert direct_request["planning_reason"] == "runtime_execution_observation_retry"
     assert direct_request["permission_target"] == "foreground_focus"
+    assert direct_request["desktop_execution_policy"]["mode"] == "sandbox_required"
+    assert direct_request["desktop_execution_route"]["status"] == "provider_required"
+    assert direct_request["sandbox_provider"]["available"] is False
+    assert direct_request["desktop_provider_session"]["needed"] is True
+    assert "command" not in direct_request["desktop_provider_session"]
+    assert direct_request["desktop_loop"]["retry_tool"] == "desktop.open_app"
     assert direct_request["observation_evidence"]["blocking_condition"] == (
         "foreground_focus_unavailable"
     )

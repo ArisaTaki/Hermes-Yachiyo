@@ -214,7 +214,7 @@ def _studio_runtime_execution_envelope_for_start(
         if isinstance(payload.get("desktop_provider_session"), Mapping)
         else {}
     )
-    if existing_session.get("needed"):
+    if existing_session.get("needed") and existing_session.get("running"):
         return annotate_envelope_with_desktop_provider_session(payload, existing_session)
     session = ensure_isolated_desktop_provider_session_for_envelope(payload)
     if session.get("needed") and session.get("running"):
@@ -2202,6 +2202,16 @@ def _replan_recovery_action_direct_request(
         value = getattr(action, key) or getattr(recovery, key)
         if isinstance(value, Mapping) and value:
             request[key] = dict(value)
+    for key in (
+        "desktop_execution_policy",
+        "desktop_execution_route",
+        "sandbox_provider",
+        "desktop_provider_session",
+        "desktop_loop",
+    ):
+        value = getattr(action, key) or getattr(recovery, key)
+        if isinstance(value, Mapping) and value:
+            request[key] = dict(value)
     if _replan_recovery_action_is_provider_session_start(action):
         request["control_action"] = "desktop_provider_session.start"
         for key in ("api_route", "diagnostic_route"):
@@ -2227,9 +2237,18 @@ def _replan_recovery_action_direct_request(
             source=source,
         )
     action_metadata = _mapping(action.metadata)
-    desktop_loop = _mapping(action_metadata.get("desktop_loop"))
-    if desktop_loop:
-        request["desktop_loop"] = desktop_loop
+    for key in (
+        "desktop_execution_policy",
+        "desktop_execution_route",
+        "sandbox_provider",
+        "desktop_provider_session",
+        "desktop_loop",
+    ):
+        if key in request:
+            continue
+        value = _mapping(action_metadata.get(key))
+        if value:
+            request[key] = value
     for key in ("runtime_stage", "runtime_role"):
         value = _first_text(action_metadata.get(key))
         if value:
@@ -2716,9 +2735,20 @@ def _replan_recovery_action_metadata(
             value = _first_text(action.input.get(key))
             if value:
                 metadata[key] = value
-    desktop_loop = _mapping(action_metadata.get("desktop_loop"))
-    if desktop_loop:
-        metadata["desktop_loop"] = desktop_loop
+    for key in (
+        "desktop_execution_policy",
+        "desktop_execution_route",
+        "sandbox_provider",
+        "desktop_provider_session",
+        "desktop_loop",
+    ):
+        value = getattr(action, key) or getattr(recovery, key)
+        if isinstance(value, Mapping) and value:
+            metadata[key] = dict(value)
+            continue
+        metadata_value = _mapping(action_metadata.get(key))
+        if metadata_value:
+            metadata[key] = metadata_value
     for key in ("runtime_stage", "runtime_role"):
         value = _first_text(action_metadata.get(key))
         if value:

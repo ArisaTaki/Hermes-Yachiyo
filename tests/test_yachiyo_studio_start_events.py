@@ -47,7 +47,11 @@ def test_studio_start_agent_run_enriches_bare_port_payload_with_planner_events()
     ]
 
 
-def test_studio_start_agent_run_routes_media_query_through_desktop_fallback() -> None:
+def test_studio_start_agent_run_routes_media_query_through_desktop_fallback(
+    monkeypatch,
+) -> None:
+    _clear_desktop_provider_env(monkeypatch)
+    _install_fake_isolated_provider_session(monkeypatch)
     port = _BareStartPort()
     run = AgentStudioService(port).start_agent_run(
         {

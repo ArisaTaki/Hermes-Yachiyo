@@ -1454,7 +1454,23 @@ def test_agent_studio_service_auto_starts_next_safe_replan_continuation() -> Non
     assert request["direct_tool_requests"][0]["tool"] == "desktop.list_apps"
 
 
-def test_yachiyo_agent_service_attaches_runtime_planner_metadata_to_chat_task() -> None:
+def test_yachiyo_agent_service_attaches_runtime_planner_metadata_to_chat_task(
+    monkeypatch,
+) -> None:
+    for key in (
+        "OHA_YACHIYO_DESKTOP_PROVIDER_URL",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_ID",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_KEYBOARD_MOUSE_CAPTURE_SUPPORTED",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_KIND",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_ISOLATED",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_FOREGROUND_TAKEOVER_REQUIRED",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_EXECUTE_URL",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_STATUS_URL",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_KIND",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    _install_fake_isolated_provider_session(monkeypatch)
     port = _FakeRuntimePort()
     service = YachiyoAgentService(port)
 
@@ -2472,6 +2488,9 @@ def test_yachiyo_chat_entrypoint_auto_starts_isolated_provider_for_input(
         "OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_KIND",
         "OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_ISOLATED",
         "OHA_YACHIYO_DESKTOP_PROVIDER_FOREGROUND_TAKEOVER_REQUIRED",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_EXECUTE_URL",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_STATUS_URL",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_KIND",
     ):
         monkeypatch.delenv(key, raising=False)
     start_calls = _install_fake_isolated_provider_session(monkeypatch)
@@ -2591,6 +2610,9 @@ def test_yachiyo_chat_entrypoint_starts_isolated_session_for_app_open(
         "OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_KIND",
         "OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_ISOLATED",
         "OHA_YACHIYO_DESKTOP_PROVIDER_FOREGROUND_TAKEOVER_REQUIRED",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_EXECUTE_URL",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_STATUS_URL",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_KIND",
     ):
         monkeypatch.delenv(key, raising=False)
     start_calls = _install_fake_isolated_provider_session(monkeypatch)
@@ -2668,6 +2690,9 @@ def test_yachiyo_chat_entrypoint_allows_explicit_user_foreground_app_open(
         "OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_KIND",
         "OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_ISOLATED",
         "OHA_YACHIYO_DESKTOP_PROVIDER_FOREGROUND_TAKEOVER_REQUIRED",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_EXECUTE_URL",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_STATUS_URL",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_KIND",
     ):
         monkeypatch.delenv(key, raising=False)
     start_calls = _install_fake_isolated_provider_session(monkeypatch)
@@ -2724,6 +2749,9 @@ def test_yachiyo_chat_entrypoint_starts_isolated_session_for_music_playback(
         "OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_KIND",
         "OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_ISOLATED",
         "OHA_YACHIYO_DESKTOP_PROVIDER_FOREGROUND_TAKEOVER_REQUIRED",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_EXECUTE_URL",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_STATUS_URL",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_KIND",
     ):
         monkeypatch.delenv(key, raising=False)
     start_calls = _install_fake_isolated_provider_session(monkeypatch)

@@ -679,6 +679,11 @@ class ReplanRecoveryActionSnapshot(_PublicSnapshot):
     observation_evidence: dict[str, Any] = Field(default_factory=dict)
     observation_retry: dict[str, Any] = Field(default_factory=dict)
     verification_targets: list[dict[str, Any]] = Field(default_factory=list)
+    desktop_execution_policy: dict[str, Any] = Field(default_factory=dict)
+    desktop_execution_route: dict[str, Any] = Field(default_factory=dict)
+    sandbox_provider: dict[str, Any] = Field(default_factory=dict)
+    desktop_provider_session: dict[str, Any] = Field(default_factory=dict)
+    desktop_loop: dict[str, Any] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)
     source: str = "replan_recovery_projection"
 
@@ -716,6 +721,11 @@ class ReplanRecoverySnapshot(_PublicSnapshot):
     action_target: dict[str, Any] = Field(default_factory=dict)
     observation_evidence: dict[str, Any] = Field(default_factory=dict)
     observation_retry: dict[str, Any] = Field(default_factory=dict)
+    desktop_execution_policy: dict[str, Any] = Field(default_factory=dict)
+    desktop_execution_route: dict[str, Any] = Field(default_factory=dict)
+    sandbox_provider: dict[str, Any] = Field(default_factory=dict)
+    desktop_provider_session: dict[str, Any] = Field(default_factory=dict)
+    desktop_loop: dict[str, Any] = Field(default_factory=dict)
     tool_call_id: str | None = None
     tool_call_ids: list[str] = Field(default_factory=list)
     artifact_ids: list[str] = Field(default_factory=list)

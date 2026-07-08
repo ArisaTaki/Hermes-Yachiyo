@@ -56,6 +56,11 @@ class _RecoveryRecord:
     action_target: dict[str, Any] = field(default_factory=dict)
     observation_evidence: dict[str, Any] = field(default_factory=dict)
     observation_retry: dict[str, Any] = field(default_factory=dict)
+    desktop_execution_policy: dict[str, Any] = field(default_factory=dict)
+    desktop_execution_route: dict[str, Any] = field(default_factory=dict)
+    sandbox_provider: dict[str, Any] = field(default_factory=dict)
+    desktop_provider_session: dict[str, Any] = field(default_factory=dict)
+    desktop_loop: dict[str, Any] = field(default_factory=dict)
     tool_call_id: str | None = None
     tool_call_ids: list[str] = field(default_factory=list)
     artifact_ids: list[str] = field(default_factory=list)
@@ -169,6 +174,11 @@ def replan_recovery_snapshots_from_events(
             action_target=dict(record.action_target),
             observation_evidence=dict(record.observation_evidence),
             observation_retry=dict(record.observation_retry),
+            desktop_execution_policy=dict(record.desktop_execution_policy),
+            desktop_execution_route=dict(record.desktop_execution_route),
+            sandbox_provider=dict(record.sandbox_provider),
+            desktop_provider_session=dict(record.desktop_provider_session),
+            desktop_loop=dict(record.desktop_loop),
             tool_call_id=record.tool_call_id or None,
             tool_call_ids=list(record.tool_call_ids),
             artifact_ids=list(record.artifact_ids),
@@ -373,6 +383,7 @@ def _apply_request_event(
     _apply_recovery_action_metadata(record, request)
     _apply_deferred_approval_metadata(record, request)
     _apply_observed_action_metadata(record, request)
+    _apply_desktop_execution_context(record, request)
     _apply_evidence_links(record, request)
     record.failure_detail = _first_text(
         record.failure_detail,
@@ -442,6 +453,7 @@ def _apply_planned_event(
     _apply_recovery_action_metadata(record, payload, selected_tool=selected_tool)
     _apply_deferred_approval_metadata(record, payload)
     _apply_observed_action_metadata(record, payload)
+    _apply_desktop_execution_context(record, payload)
     _apply_evidence_links(record, payload)
     _mark_event(record, event)
 
@@ -498,6 +510,7 @@ def _apply_approval_event(
         payload.get("target_capability_id"),
     )
     _apply_deferred_approval_metadata(record, payload)
+    _apply_desktop_execution_context(record, payload)
     _apply_evidence_links(record, payload)
     _mark_event(record, event)
 
@@ -556,6 +569,7 @@ def _apply_tool_event(
         )
         _apply_deferred_approval_metadata(record, payload, call=call)
         _apply_observed_action_metadata(record, payload, call=call)
+        _apply_desktop_execution_context(record, payload, call=call)
         _apply_evidence_links(record, payload, call=call)
         record.result_preview = _mapping(call.output_preview)
         _mark_event(record, event)
@@ -665,6 +679,7 @@ def _apply_recovery_update_event(
     _apply_recovery_action_metadata(record, payload, selected_tool=selected_tool)
     _apply_deferred_approval_metadata(record, payload)
     _apply_observed_action_metadata(record, payload)
+    _apply_desktop_execution_context(record, payload)
     _apply_evidence_links(record, payload)
     _mark_event(record, event)
 
@@ -730,6 +745,21 @@ def _merge_recovery_snapshots(
     observation_retry = dict(current.observation_retry or {})
     if incoming.observation_retry:
         observation_retry.update(incoming.observation_retry)
+    desktop_execution_policy = dict(current.desktop_execution_policy or {})
+    if incoming.desktop_execution_policy:
+        desktop_execution_policy.update(incoming.desktop_execution_policy)
+    desktop_execution_route = dict(current.desktop_execution_route or {})
+    if incoming.desktop_execution_route:
+        desktop_execution_route.update(incoming.desktop_execution_route)
+    sandbox_provider = dict(current.sandbox_provider or {})
+    if incoming.sandbox_provider:
+        sandbox_provider.update(incoming.sandbox_provider)
+    desktop_provider_session = dict(current.desktop_provider_session or {})
+    if incoming.desktop_provider_session:
+        desktop_provider_session.update(incoming.desktop_provider_session)
+    desktop_loop = dict(current.desktop_loop or {})
+    if incoming.desktop_loop:
+        desktop_loop.update(incoming.desktop_loop)
     deferred_input = dict(current.deferred_input or {})
     if incoming.deferred_input:
         deferred_input.update(incoming.deferred_input)
@@ -786,6 +816,11 @@ def _merge_recovery_snapshots(
             "action_target": action_target,
             "observation_evidence": observation_evidence,
             "observation_retry": observation_retry,
+            "desktop_execution_policy": desktop_execution_policy,
+            "desktop_execution_route": desktop_execution_route,
+            "sandbox_provider": sandbox_provider,
+            "desktop_provider_session": desktop_provider_session,
+            "desktop_loop": desktop_loop,
             "tool_call_id": current.tool_call_id or incoming.tool_call_id,
             "tool_call_ids": tool_call_ids,
             "artifact_ids": artifact_ids,
@@ -1040,6 +1075,30 @@ def _recovery_action_snapshots(
             if not observation_retry:
                 observation_retry = dict(record.observation_retry)
             _extend_unique_mappings(verification_targets, record.verification_targets)
+        desktop_execution_policy = _context_mapping(
+            action,
+            "desktop_execution_policy",
+            fallback=record.desktop_execution_policy if selected else {},
+        )
+        desktop_execution_route = _context_mapping(
+            action,
+            "desktop_execution_route",
+            fallback=record.desktop_execution_route if selected else {},
+        )
+        sandbox_provider = _context_mapping(
+            action,
+            "sandbox_provider",
+            fallback=record.sandbox_provider if selected else {},
+        )
+        desktop_provider_session = _desktop_provider_session_context_mapping(
+            action,
+            fallback=record.desktop_provider_session if selected else {},
+        )
+        desktop_loop = _context_mapping(
+            action,
+            "desktop_loop",
+            fallback=record.desktop_loop if selected else {},
+        )
         deferred_input = _mapping(action.get("deferred_input"))
         deferred_context = _mapping(action.get("deferred_context"))
         deferred_continuation = _mapping_list(action.get("deferred_continuation"))
@@ -1096,6 +1155,11 @@ def _recovery_action_snapshots(
                 observation_evidence=observation_evidence,
                 observation_retry=observation_retry,
                 verification_targets=verification_targets,
+                desktop_execution_policy=desktop_execution_policy,
+                desktop_execution_route=desktop_execution_route,
+                sandbox_provider=sandbox_provider,
+                desktop_provider_session=desktop_provider_session,
+                desktop_loop=desktop_loop,
                 metadata=_recovery_action_metadata(action, index=index),
             )
         )
@@ -1211,6 +1275,12 @@ def _merged_recovery_action_record(
         "action_target",
         "observation_evidence",
         "observation_retry",
+        "desktop_execution_policy",
+        "desktop_execution_route",
+        "sandbox_provider",
+        "sandbox_desktop_provider",
+        "desktop_provider_session",
+        "desktop_loop",
     ):
         merged_mapping = _mapping(merged.get(key))
         incoming_mapping = _mapping(incoming.get(key))
@@ -1264,6 +1334,33 @@ def _apply_observed_action_metadata(
         record.observation_evidence.update(observation_evidence)
     if observation_retry:
         record.observation_retry.update(observation_retry)
+
+
+def _apply_desktop_execution_context(
+    record: _RecoveryRecord,
+    payload: Mapping[str, Any],
+    *,
+    call: ToolCallSnapshot | None = None,
+) -> None:
+    sources = _metadata_sources(payload)
+    if call is not None:
+        sources.extend((call.input_preview, call.output_preview, call.metadata))
+
+    for source in sources:
+        _merge_context(
+            record.desktop_execution_policy,
+            _context_mapping(source, "desktop_execution_policy"),
+        )
+        _merge_context(
+            record.desktop_execution_route,
+            _context_mapping(source, "desktop_execution_route"),
+        )
+        _merge_context(record.sandbox_provider, _context_mapping(source, "sandbox_provider"))
+        _merge_context(
+            record.desktop_provider_session,
+            _desktop_provider_session_context_mapping(source),
+        )
+        _merge_context(record.desktop_loop, _context_mapping(source, "desktop_loop"))
 
 
 def _apply_deferred_approval_metadata(
@@ -1340,6 +1437,50 @@ def _metadata_sources(payload: Mapping[str, Any]) -> list[Mapping[str, Any]]:
     if isinstance(approval, Mapping):
         sources.append(approval)
     return sources
+
+
+def _context_mapping(
+    source: Mapping[str, Any],
+    key: str,
+    *,
+    fallback: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    merged = _mapping(fallback) if fallback else {}
+    keys = ("sandbox_provider", "sandbox_desktop_provider") if key == "sandbox_provider" else (key,)
+    for candidate in _context_sources(source):
+        for candidate_key in keys:
+            value = _mapping(candidate.get(candidate_key))
+            if value:
+                merged.update(value)
+    return merged
+
+
+def _desktop_provider_session_context_mapping(
+    source: Mapping[str, Any],
+    *,
+    fallback: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    merged = _desktop_provider_session_public_payload(_mapping(fallback)) if fallback else {}
+    for candidate in _context_sources(source):
+        value = _desktop_provider_session_public_payload(
+            _mapping(candidate.get("desktop_provider_session"))
+        )
+        if value:
+            merged.update(value)
+    return merged
+
+
+def _context_sources(source: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    sources: list[Mapping[str, Any]] = [source] if isinstance(source, Mapping) else []
+    metadata = source.get("metadata") if isinstance(source, Mapping) else None
+    if isinstance(metadata, Mapping):
+        sources.append(metadata)
+    return sources
+
+
+def _merge_context(target: dict[str, Any], value: Mapping[str, Any]) -> None:
+    if value:
+        target.update(value)
 
 
 def _approval_status_value(value: Any) -> str:
@@ -1576,6 +1717,7 @@ def _runtime_execution_request_recovery_snapshot(
         source_request_id=source_request_id,
         verification_targets=verification_targets,
     )
+    execution_context = _runtime_execution_context(request, retry, envelope=envelope)
     deferred_tool = _first_text(_runtime_request_value(request, "deferred_tool"))
     deferred_input = _mapping(_runtime_request_value(request, "deferred_input"))
     deferred_context = _mapping(_runtime_request_value(request, "deferred_context"))
@@ -1608,6 +1750,11 @@ def _runtime_execution_request_recovery_snapshot(
         observation_evidence=evidence,
         observation_retry=retry,
         verification_targets=verification_targets,
+        desktop_execution_policy=execution_context.get("desktop_execution_policy", {}),
+        desktop_execution_route=execution_context.get("desktop_execution_route", {}),
+        sandbox_provider=execution_context.get("sandbox_provider", {}),
+        desktop_provider_session=execution_context.get("desktop_provider_session", {}),
+        desktop_loop=execution_context.get("desktop_loop", {}),
         metadata=action_metadata,
     )
     return ReplanRecoverySnapshot(
@@ -1642,6 +1789,11 @@ def _runtime_execution_request_recovery_snapshot(
         action_target=action_target,
         observation_evidence=evidence,
         observation_retry=retry,
+        desktop_execution_policy=execution_context.get("desktop_execution_policy", {}),
+        desktop_execution_route=execution_context.get("desktop_execution_route", {}),
+        sandbox_provider=execution_context.get("sandbox_provider", {}),
+        desktop_provider_session=execution_context.get("desktop_provider_session", {}),
+        desktop_loop=execution_context.get("desktop_loop", {}),
         failure_detail=_first_text(
             evidence.get("failure_detail"),
             evidence.get("message"),
@@ -1725,6 +1877,7 @@ def _desktop_provider_session_recovery_snapshot(
             "reason": trigger,
             "input": action_input,
         },
+        desktop_provider_session=session_payload,
         metadata=metadata,
     )
     source_group_run_id = _first_text(
@@ -1788,6 +1941,7 @@ def _desktop_provider_session_recovery_snapshot(
         deferred_continuation=deferred_continuation,
         observation_evidence=action.observation_evidence,
         observation_retry=action.observation_retry,
+        desktop_provider_session=session_payload,
         failure_detail=_first_text(session.get("error"), session.get("reason"), trigger),
         created_at=created_at,
         updated_at=updated_at or created_at,
@@ -2126,6 +2280,51 @@ def _runtime_execution_action_target(
     return action_target
 
 
+def _runtime_execution_context(
+    request: RuntimeExecutionRequestSnapshot | Mapping[str, Any],
+    retry: Mapping[str, Any],
+    *,
+    envelope: RuntimeExecutionEnvelopeSnapshot,
+) -> dict[str, dict[str, Any]]:
+    context: dict[str, dict[str, Any]] = {}
+    for key in (
+        "desktop_execution_policy",
+        "desktop_execution_route",
+        "sandbox_provider",
+        "desktop_loop",
+    ):
+        merged: dict[str, Any] = {}
+        source_keys = (
+            ("sandbox_provider", "sandbox_desktop_provider")
+            if key == "sandbox_provider"
+            else (key,)
+        )
+        for source_key in source_keys:
+            for value in (
+                _runtime_request_value(request, source_key),
+                retry.get(source_key),
+                _runtime_envelope_value(envelope, source_key),
+            ):
+                mapped = _mapping(value)
+                if mapped:
+                    merged.update(mapped)
+        if merged:
+            context[key] = merged
+
+    session: dict[str, Any] = {}
+    for value in (
+        _runtime_request_value(request, "desktop_provider_session"),
+        retry.get("desktop_provider_session"),
+        _runtime_envelope_value(envelope, "desktop_provider_session"),
+    ):
+        payload = _desktop_provider_session_public_payload(_mapping(value))
+        if payload:
+            session.update(payload)
+    if session:
+        context["desktop_provider_session"] = session
+    return context
+
+
 def _runtime_execution_verification_targets(
     request: RuntimeExecutionRequestSnapshot | Mapping[str, Any],
     retry: Mapping[str, Any],
@@ -2143,6 +2342,12 @@ def _payload(event: PublicRunEvent) -> Mapping[str, Any]:
 
 
 def _mapping(value: Any) -> dict[str, Any]:
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        try:
+            value = model_dump(mode="json", exclude_none=True)
+        except TypeError:
+            value = model_dump()
     if not isinstance(value, Mapping):
         return {}
     redacted = redact_json_value(dict(value))

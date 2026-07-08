@@ -863,6 +863,8 @@ def _request_needs_isolated_session(tool_name: str, request: dict[str, Any]) -> 
     mode = _mapping(request.get("execution_mode"))
     if _request_allows_user_foreground_session(request):
         return False
+    if _route_or_provider_already_supplies_isolated_session(route, provider):
+        return False
     if _route_or_provider_requires_isolated_session(route, provider):
         return True
     if _request_prefers_isolated_foreground_session(
@@ -938,6 +940,33 @@ def _policy_prefers_isolated_foreground(policy: dict[str, Any]) -> bool:
             "require_sandbox_for_keyboard_mouse",
         )
     )
+
+
+def _route_or_provider_already_supplies_isolated_session(
+    route: dict[str, Any],
+    provider: dict[str, Any],
+) -> bool:
+    provider_kind = str(
+        route.get("selected_provider_kind")
+        or route.get("provider_kind")
+        or provider.get("provider_kind")
+        or ""
+    ).strip()
+    if provider_kind != "sandbox_desktop":
+        return False
+    route_status = str(route.get("status") or "").strip()
+    provider_status = str(provider.get("status") or "").strip()
+    if route_status not in {"sandbox_ready", "provider_ready"} and provider_status not in {
+        "available",
+        "ready",
+        "running",
+    }:
+        return False
+    if _optional_bool(route.get("foreground_takeover_required")) is True:
+        return False
+    if _optional_bool(provider.get("foreground_takeover_required")) is True:
+        return False
+    return True
 
 
 def _route_or_provider_requires_isolated_session(
