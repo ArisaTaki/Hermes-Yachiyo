@@ -1253,9 +1253,11 @@ function ReplanRecoveryActionPill({
   const recommendedTools = uniqueStrings(action.recommended_tools || []);
   const deferredInputPreview = plannerValuePreview(action.deferred_input || {});
   const deferredContextPreview = plannerValuePreview(action.deferred_context || {});
+  const deferredContinuation = arrayRecords(action.deferred_continuation);
   const deferredContinuationPreview = replanRecoveryDeferredContinuationPreview(
-    arrayRecords(action.deferred_continuation),
+    deferredContinuation,
   );
+  const deferredContinuationCount = deferredContinuation.length;
   const verificationTargetsPreview = replanRecoveryVerificationTargetsPreview(
     arrayRecords(action.verification_targets),
   );
@@ -1270,6 +1272,7 @@ function ReplanRecoveryActionPill({
       data-replan-recovery-action-approval-status={action.approval_status || ''}
       data-replan-recovery-action-deferred-context={deferredContextPreview}
       data-replan-recovery-action-deferred-continuation={deferredContinuationPreview}
+      data-replan-recovery-action-deferred-continuation-count={deferredContinuationCount}
       data-replan-recovery-action-deferred-input={deferredInputPreview}
       data-replan-recovery-action-deferred-tool={action.deferred_tool || ''}
       data-replan-recovery-action-id={action.action_id || ''}
@@ -1291,6 +1294,7 @@ function ReplanRecoveryActionPill({
         action.deferred_tool ? `deferred: ${action.deferred_tool}` : '',
         inputPreview ? `input: ${inputPreview}` : '',
         deferredInputPreview ? `deferred input: ${deferredInputPreview}` : '',
+        deferredContinuationPreview ? `continues: ${deferredContinuationPreview}` : '',
         verificationTargetsPreview ? `verification: ${verificationTargetsPreview}` : '',
       ].filter(Boolean).join(' · ')}
     >
@@ -1298,6 +1302,8 @@ function ReplanRecoveryActionPill({
       {action.tool ? ` · ${action.tool}` : ''}
       {action.approval_status ? ` · approval: ${action.approval_status}` : ''}
       {action.deferred_tool ? ` · deferred: ${action.deferred_tool}` : ''}
+      {deferredContinuationCount ? ` · continues ${deferredContinuationCount}` : ''}
+      {deferredContinuationPreview ? ` · next: ${deferredContinuationPreview}` : ''}
       {inputPreview ? ` · input: ${inputPreview}` : ''}
       {verificationTargetsPreview ? ` · verifies: ${verificationTargetsPreview}` : ''}
     </button>

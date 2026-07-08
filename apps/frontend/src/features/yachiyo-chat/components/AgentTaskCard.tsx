@@ -614,11 +614,17 @@ function TaskReplanRecoverySummary({
           {actionItems.map(({ action, index, recovery }) => {
             const inputPreview = taskRecoveryValuePreview(action.input);
             const verificationTargetsPreview = taskRecoveryValuePreview(action.verification_targets || []);
+            const deferredContinuationCount = action.deferred_continuation?.length || 0;
+            const deferredContinuationPreview = taskRecoveryDeferredContinuationPreview(
+              action.deferred_continuation || [],
+            );
             return (
               <button
                 type="button"
                 className={`yachiyo-agent-task-planner-chip yachiyo-agent-task-replan-action ${action.approval_required ? 'approval' : ''}`}
                 data-replan-recovery-action-approval-required={String(action.approval_required === true)}
+                data-replan-recovery-action-deferred-continuation={deferredContinuationPreview}
+                data-replan-recovery-action-deferred-continuation-count={deferredContinuationCount}
                 data-replan-recovery-action-id={action.action_id || ''}
                 data-replan-recovery-input={inputPreview}
                 data-replan-recovery-label={action.label || action.prompt || action.tool}
@@ -636,11 +642,16 @@ function TaskReplanRecoverySummary({
                 title={[
                   action.prompt,
                   inputPreview ? `input: ${inputPreview}` : '',
+                  deferredContinuationPreview ? `continues: ${deferredContinuationPreview}` : '',
                   verificationTargetsPreview ? `verification: ${verificationTargetsPreview}` : '',
                 ].filter(Boolean).join(' · ')}
               >
                 <UiIcon name="retry" />
-                <span>执行 · {action.label || action.tool}</span>
+                <span>
+                  执行 · {action.label || action.tool}
+                  {deferredContinuationCount ? ` · continues ${deferredContinuationCount}` : ''}
+                  {deferredContinuationPreview ? ` · next: ${deferredContinuationPreview}` : ''}
+                </span>
               </button>
             );
           })}
@@ -752,6 +763,22 @@ function taskRecoveryValuePreview(value: unknown): string {
   } catch {
     return truncateTaskRecoveryPreview(String(value));
   }
+}
+
+function taskRecoveryDeferredContinuationPreview(items: Array<Record<string, unknown>>): string {
+  const parts = items.slice(0, 3).map((item) => (
+    taskRecoveryString(item.tool_name)
+    || taskRecoveryString(item.tool)
+    || taskRecoveryString(item.step_id)
+    || taskRecoveryString(item.request_id)
+  )).filter(Boolean);
+  if (!parts.length) return '';
+  const suffix = items.length > parts.length ? ` +${items.length - parts.length}` : '';
+  return truncateTaskRecoveryPreview(`${parts.join(' -> ')}${suffix}`);
+}
+
+function taskRecoveryString(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
 }
 
 function truncateTaskRecoveryPreview(value: string): string {
