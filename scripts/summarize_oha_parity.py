@@ -107,6 +107,7 @@ OHA_DESKTOP_AGENT_REQUIRED_SECTIONS: tuple[str, ...] = (
     "deepagent_core",
     "shared_daily_surfaces",
     "desktop_executor_before_model",
+    "desktop_provider_execution_loop",
     "legacy_facade_planner_ownership",
     "capability_planner_tool_parity",
     "data_analysis_artifacts",

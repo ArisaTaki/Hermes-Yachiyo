@@ -41,6 +41,7 @@ from scripts import smoke_agent_entrypoint_desktop_execution
 from scripts import smoke_agent_studio_planner_orchestration
 from scripts import smoke_approval_policy_gate
 from scripts import smoke_data_analysis_artifacts
+from scripts import smoke_desktop_provider_execution_loop
 from scripts import smoke_group_run_timeline
 from scripts import smoke_isolated_desktop_provider
 from scripts import smoke_planner_runtime_tool_parity
@@ -78,7 +79,7 @@ def _deepagent_core_case() -> dict[str, Any]:
         "tool_plan_has_discover_operate_verify": [
             step.tool_name for step in tool_plan.steps
         ]
-        == ["desktop.list_apps", "app.open", "desktop.active_window"],
+        == ["desktop.list_apps", "app.open", "desktop.verify"],
         "task_core_exists": bool(task_core.core_id),
         "workspace_exists": bool(task_core.workspace.workspace_id),
         "todos_cover_steps": [todo.step_id for todo in task_core.todos]
@@ -148,7 +149,7 @@ def _shared_surface_case() -> dict[str, Any]:
             for case in cases
         ),
         "all_share_discover_operate_verify_tools": all(
-            case["tools"] == ["desktop.list_apps", "app.open", "desktop.active_window"]
+            case["tools"] == ["desktop.list_apps", "app.open", "desktop.verify"]
             for case in cases
         ),
         "no_legacy_surface_fallback": all(
@@ -674,6 +675,11 @@ def _build_sections(
             ),
         ),
         _run_section(
+            "desktop_provider_execution_loop",
+            "Planner-selected sandbox desktop routes execute through a provider and request replan when the provider is unavailable.",
+            smoke_desktop_provider_execution_loop.run_smoke,
+        ),
+        _run_section(
             "legacy_facade_planner_ownership",
             "Legacy-compatible Chat facade entrypoints are owned by Runtime Planner.",
             _legacy_facade_planner_ownership_case,
@@ -768,6 +774,10 @@ def run_smoke(
         "covers_deepagent_core": any(section["id"] == "deepagent_core" for section in sections),
         "covers_desktop_executor": any(
             section["id"] == "desktop_executor_before_model" for section in sections
+        ),
+        "covers_desktop_provider_execution_loop": any(
+            section["id"] == "desktop_provider_execution_loop"
+            for section in sections
         ),
         "covers_legacy_facade_planner_ownership": any(
             section["id"] == "legacy_facade_planner_ownership" for section in sections

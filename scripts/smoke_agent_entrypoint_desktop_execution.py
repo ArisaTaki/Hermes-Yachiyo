@@ -1208,13 +1208,13 @@ def run_smoke(*, workdir: Path | None = None) -> dict[str, Any]:
     checks = {
         "all_cases_passed": all(case.get("ok") is True for case in cases),
         "model_never_called": model_call_count == 0,
-        "daily_app_open_uses_local_foreground_fallback": (
+        "daily_app_open_recommends_provider_session": (
             desktop_provider_session_auto_start_recommended_for_requests(
                 [{"tool": "app.open", "input": {"app_name": "PixelForge"}}]
             )
-            is False
+            is True
         ),
-        "daily_media_playback_uses_local_foreground_fallback": (
+        "daily_media_playback_recommends_provider_session": (
             desktop_provider_session_auto_start_recommended_for_requests(
                 [
                     {
@@ -1223,7 +1223,7 @@ def run_smoke(*, workdir: Path | None = None) -> dict[str, Any]:
                     }
                 ]
             )
-            is False
+            is True
         ),
         "daily_keyboard_mouse_recommends_provider": (
             desktop_provider_session_auto_start_recommended_for_requests(
