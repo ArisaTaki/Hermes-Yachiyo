@@ -1,5 +1,6 @@
 from apps.shell.yachiyo_agent.daily_desktop import (
     daily_desktop_approval_or_submit_entrypoint_requests,
+    daily_desktop_safe_direct_entrypoint_requests,
 )
 
 
@@ -77,3 +78,57 @@ def test_submit_foreground_entrypoint_requires_approval() -> None:
             "risk_level": "high",
         }
     ]
+
+
+def test_safe_direct_entrypoint_allows_discover_open_verify_app_chain() -> None:
+    requests = [
+        {
+            "tool": "desktop.list_apps",
+            "input": {"query": "Linear", "limit": 20},
+            "approval_required": False,
+            "risk_level": "low",
+        },
+        {
+            "tool": "app.open",
+            "input": {"app_name": "Linear"},
+            "approval_required": False,
+            "risk_level": "low",
+        },
+        {
+            "tool": "desktop.active_window",
+            "input": {},
+            "approval_required": False,
+            "risk_level": "low",
+            "continue_to_model": True,
+            "runtime_stage": "verify",
+        },
+    ]
+
+    selected = daily_desktop_safe_direct_entrypoint_requests(requests)
+
+    assert [request["tool"] for request in selected] == [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.active_window",
+    ]
+
+
+def test_safe_direct_entrypoint_blocks_keyboard_mouse_capture_tools() -> None:
+    for tool_name, payload in (
+        ("desktop.safe_type_text", {"text": "hello"}),
+        ("desktop.safe_click", {"x": 10, "y": 10}),
+        ("desktop.safe_shortcut", {"action": "new_tab"}),
+        ("app.open_and_safe_type_text", {"app_name": "Notes", "text": "hello"}),
+    ):
+        selected = daily_desktop_safe_direct_entrypoint_requests(
+            [
+                {
+                    "tool": tool_name,
+                    "input": payload,
+                    "approval_required": False,
+                    "risk_level": "low",
+                }
+            ]
+        )
+
+        assert selected == []
