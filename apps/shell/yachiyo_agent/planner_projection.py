@@ -7,7 +7,10 @@ from typing import Any
 
 from .contracts import PlannerDecisionSnapshot, TaskCoreSnapshot
 from .capability_registry import runtime_execution_tool_names
-from .desktop_execution_policy import with_daily_entrypoint_desktop_execution_policy
+from .desktop_execution_policy import (
+    desktop_provider_session_auto_start_recommended_for_requests,
+    with_daily_entrypoint_desktop_execution_policy,
+)
 from .desktop_plan_hints import (
     discovered_app_open_needs_model_followup,
     discovered_app_pending_user_action,
@@ -35,6 +38,12 @@ from .task_core_event_projection import (
 from .task_progress_snapshots import task_progress_summary_from_task_core
 
 _MAIN_CHAT_AGENT_ID = "builtin:yachiyo-main"
+_DESKTOP_PROVIDER_AUTO_START_KEYS = {
+    "desktop_provider_session_auto_start",
+    "desktop_provider_auto_start",
+    "auto_start_desktop_provider_session",
+    "auto_start_isolated_desktop_provider",
+}
 
 
 def runtime_planner_decision(
@@ -169,6 +178,14 @@ def planner_enriched_chat_request(
         **planner_metadata,
         **orchestration_metadata,
     }
+    if (
+        runtime_execution_envelope
+        and desktop_provider_session_auto_start_recommended_for_requests(
+            runtime_execution_envelope
+        )
+        and not _metadata_declares_desktop_provider_auto_start(payload_metadata)
+    ):
+        payload_metadata["desktop_provider_session_auto_start"] = True
     payload["metadata"] = payload_metadata
     if runtime_execution_envelope:
         payload["runtime_execution_envelope"] = runtime_execution_envelope
@@ -379,6 +396,21 @@ def _normalized_entrypoint_metadata(metadata: Mapping[str, Any]) -> dict[str, An
     normalized.setdefault("entrypoint_source", "chat_window")
     normalized.setdefault("planner_entrypoint", "chat_window")
     return with_daily_entrypoint_desktop_execution_policy(normalized, surface="chat")
+
+
+def _metadata_declares_desktop_provider_auto_start(
+    metadata: Mapping[str, Any] | None,
+) -> bool:
+    if not isinstance(metadata, Mapping):
+        return False
+    if any(key in metadata for key in _DESKTOP_PROVIDER_AUTO_START_KEYS):
+        return True
+    for key in ("metadata", "desktop_execution_policy", "yachiyo_desktop_execution_policy"):
+        value = metadata.get(key)
+        if isinstance(value, Mapping) and value is not metadata:
+            if _metadata_declares_desktop_provider_auto_start(value):
+                return True
+    return False
 
 
 def _metadata_text(metadata: Mapping[str, Any], key: str) -> str:

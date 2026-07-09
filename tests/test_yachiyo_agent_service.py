@@ -3229,6 +3229,7 @@ def test_yachiyo_chat_entrypoint_surfaces_partial_blocked_desktop_plan(
     assert "media.music_app_open_and_play" in direct_tools
     assert "desktop.safe_type_text" in blocked_tools
     assert request_payload["metadata"]["yachiyo_runtime_blocked"] is True
+    assert request_payload["metadata"]["desktop_provider_session_auto_start"] is True
     assert request_payload["metadata"]["yachiyo_blocked_execution_requests"] == (
         blocked_tools
     )
@@ -4154,6 +4155,22 @@ def test_yachiyo_agent_service_preserves_explicit_chat_entrypoint_metadata() -> 
     assert task.metadata["source"] == "chat"
     assert task.metadata["entrypoint_source"] == "chat_window"
     assert task.metadata["planner_entrypoint"] == "chat_default"
+
+
+def test_yachiyo_agent_service_preserves_provider_auto_start_override() -> None:
+    port = _FakeRuntimePort()
+    service = YachiyoAgentService(port)
+
+    service.start_chat_task(
+        StartChatTaskRequest(
+            prompt="打开 PixelForge 并点击导出",
+            conversation_id="chat-1",
+            metadata={"desktop_provider_session_auto_start": False},
+        )
+    )
+
+    metadata = port.calls[0][1]["metadata"]
+    assert metadata["desktop_provider_session_auto_start"] is False
 
 
 def test_yachiyo_agent_service_preserves_launcher_entrypoint_for_data_analysis() -> None:
