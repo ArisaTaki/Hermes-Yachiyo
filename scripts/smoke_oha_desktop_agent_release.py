@@ -18,6 +18,7 @@ from apps.shell.yachiyo_agent import RuntimePlanner
 from apps.shell.yachiyo_agent import daily_desktop as daily_desktop_module
 from apps.shell.yachiyo_agent.desktop_provider_contract import (
     VIRTUAL_DESKTOP_PROVIDER_TEMPLATE_BASE_URL,
+    virtual_desktop_provider_conformance_summary,
     virtual_desktop_provider_manifest_contract_evidence,
     virtual_desktop_provider_manifest_template,
 )
@@ -700,6 +701,20 @@ def _isolated_provider_backend_summary(
         if isinstance(report.get("provider_contract"), dict)
         else {}
     )
+    provider_conformance = (
+        report.get("provider_conformance")
+        if isinstance(report.get("provider_conformance"), dict)
+        else {}
+    ) or virtual_desktop_provider_conformance_summary(
+        provider_contract,
+        status=report,
+        mode="release_smoke_backend_summary",
+        runtime_checked=True,
+        public_release_ready=provider_contract.get("ok") is True,
+        release_candidate=provider_contract.get("ok") is True,
+        smoke_ok=section.get("ok") is True,
+        supported_tools=report.get("supported_tools") or report.get("covered_tools"),
+    )
     return {
         "desktop_session_kind": str(report.get("desktop_session_kind") or ""),
         "desktop_session_isolated": report.get("desktop_session_isolated"),
@@ -724,6 +739,30 @@ def _isolated_provider_backend_summary(
             for item in provider_contract.get("blocking_conditions") or []
             if str(item or "").strip()
         ],
+        "provider_conformance_ok": provider_conformance.get("ok"),
+        "provider_conformance_mode": str(provider_conformance.get("mode") or ""),
+        "provider_conformance_smoke_ok": provider_conformance.get("smoke_ok"),
+        "provider_conformance_public_release_ready": provider_conformance.get(
+            "public_release_ready"
+        ),
+        "provider_conformance_release_candidate": provider_conformance.get(
+            "release_candidate"
+        ),
+        "provider_conformance_release_blocking_conditions": [
+            str(item)
+            for item in provider_conformance.get("release_blocking_conditions") or []
+            if str(item or "").strip()
+        ],
+        "provider_conformance_missing_required_tools": [
+            str(item)
+            for item in provider_conformance.get("missing_required_tools") or []
+            if str(item or "").strip()
+        ],
+        "provider_conformance_failed_tools": [
+            str(item)
+            for item in provider_conformance.get("failed_tools") or []
+            if str(item or "").strip()
+        ],
     }
 
 
@@ -738,7 +777,21 @@ def _isolated_provider_release_blockers(
     blockers: list[str] = []
     if not configured_virtual_desktop_provider_requested:
         blockers.append("configured_virtual_desktop_provider_required")
-    if isolated_provider_backend.get("provider_contract_ok") is not True:
+    conformance_ready = isolated_provider_backend.get(
+        "provider_conformance_public_release_ready"
+    )
+    if conformance_ready is False:
+        blockers.extend(
+            str(item)
+            for item in isolated_provider_backend.get(
+                "provider_conformance_release_blocking_conditions",
+                [],
+            )
+            if str(item or "").strip()
+        )
+        if not blockers:
+            blockers.append("virtual_desktop_provider_contract_not_ready")
+    elif isolated_provider_backend.get("provider_contract_ok") is not True:
         blockers.extend(
             str(item)
             for item in isolated_provider_backend.get(

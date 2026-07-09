@@ -154,6 +154,16 @@ def test_oha_desktop_agent_release_smoke_can_include_isolated_provider(
         "provider_contract_ok": False,
         "provider_contract_version": "oha-yachiyo.desktop-provider.v1",
         "provider_contract_blocking_conditions": ["loopback_desktop_backend"],
+        "provider_conformance_ok": False,
+        "provider_conformance_mode": "release_smoke_backend_summary",
+        "provider_conformance_smoke_ok": True,
+        "provider_conformance_public_release_ready": False,
+        "provider_conformance_release_candidate": False,
+        "provider_conformance_release_blocking_conditions": [
+            "loopback_desktop_backend"
+        ],
+        "provider_conformance_missing_required_tools": [],
+        "provider_conformance_failed_tools": [],
     }
 
 
@@ -198,6 +208,9 @@ def test_oha_desktop_agent_release_smoke_accepts_configured_virtual_provider(
     assert report["isolated_provider_release_ready"] is True
     assert report["isolated_provider_release_blockers"] == []
     assert report["checks"]["isolated_provider_release_backend_verified"] is True
+    backend = report["isolated_provider_backend"]
+    assert backend["provider_conformance_public_release_ready"] is True
+    assert backend["provider_conformance_release_blocking_conditions"] == []
 
 
 def test_oha_desktop_agent_release_smoke_cli_writes_report(
