@@ -30,6 +30,7 @@ def task_progress_summary_from_task_core(
     latest_replan = _latest_unresolved_replan_event(event_list)
     provider_progress = _desktop_provider_progress(desktop_provider_session)
     blocked_step_ids = _blocked_step_ids(todos)
+    blocked_replan_step_ids = _blocked_replan_step_ids(task_core)
     approval_step_ids = _approval_step_ids(todos, checkpoints, event_list)
     effective_needs_user_action = bool(
         needs_user_action
@@ -39,6 +40,7 @@ def task_progress_summary_from_task_core(
     effective_needs_replan = bool(
         latest_replan is not None
         or provider_progress["needs_replan"]
+        or any(step_id in blocked_replan_step_ids for step_id in blocked_step_ids)
     )
     status = _summary_status(
         todos,
@@ -162,6 +164,16 @@ def _blocked_step_ids(todos: list[TaskTodoItemSnapshot]) -> list[str]:
         for todo in todos
         if _status(todo) == "blocked"
     )
+
+
+def _blocked_replan_step_ids(task_core: TaskCoreSnapshot) -> set[str]:
+    return {
+        _text(getattr(signal, "source_step_id", ""))
+        for signal in list(task_core.replan_signals or [])
+        if _text(getattr(signal, "source_step_id", ""))
+        and _text(getattr(signal, "trigger", "")).lower()
+        in {"runtime_blocked", "tool_unavailable", "tool_failure", "verification_failed"}
+    }
 
 
 def _approval_step_ids(

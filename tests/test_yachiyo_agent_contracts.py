@@ -1152,6 +1152,14 @@ def test_task_progress_summary_public_snapshot_exposes_replay_state() -> None:
         "latest_replan_step_id",
         "needs_replan",
         "needs_user_action",
+        "desktop_provider_session_status",
+        "desktop_provider_session_needed",
+        "desktop_provider_session_running",
+        "desktop_provider_session_started",
+        "desktop_provider_session_provider_id",
+        "desktop_provider_session_tool_names",
+        "desktop_provider_session_needs_user_action",
+        "desktop_provider_session_needs_replan",
         "blocked_step_ids",
         "approval_step_ids",
         "progress_text",
@@ -4634,6 +4642,89 @@ def test_runtime_debug_summary_projects_metadata_blocked_direct_requests() -> No
     assert summary.needs_user_action is True
     assert summary.needs_replan is True
     assert "runtime_blockers" in summary.debug_surfaces
+
+
+def test_agent_task_snapshot_projects_blocked_direct_requests_into_task_core_replan() -> None:
+    snapshot = agent_task_snapshot_from_payload(
+        {
+            "task_id": "task-1",
+            "run_id": "run-1",
+            "status": "running",
+            "task_core": {
+                "core_id": "task-core-1",
+                "workspace": {
+                    "workspace_id": "workspace-1",
+                    "title": "Desktop workspace",
+                    "items": [
+                        {
+                            "item_id": "type-input",
+                            "title": "type-text.input.json",
+                            "kind": "scratch",
+                            "source_step_id": "type-text",
+                            "status": "planned",
+                            "metadata": {"tool_name": "desktop.safe_type_text"},
+                        }
+                    ],
+                },
+                "todos": [
+                    {
+                        "todo_id": "todo-type",
+                        "title": "Type search text",
+                        "status": "pending",
+                        "capability_id": "desktop.ui_operation",
+                        "step_id": "type-text",
+                        "tool_name": "desktop.safe_type_text",
+                    }
+                ],
+                "checkpoints": [
+                    {
+                        "checkpoint_id": "checkpoint-type",
+                        "title": "Verify typed text",
+                        "status": "planned",
+                        "after_step_id": "type-text",
+                        "depends_on": ["type-text"],
+                        "verifies": ["desktop.safe_type_text"],
+                    }
+                ],
+                "replan_signals": [],
+            },
+            "metadata": {
+                "yachiyo_blocked_direct_tool_requests": [
+                    {
+                        "request_id": "request-type",
+                        "tool": "desktop.safe_type_text",
+                        "step_id": "type-text",
+                        "capability_id": "desktop.ui_operation",
+                        "status": "blocked",
+                        "blocked_by": "real_virtual_desktop_provider_required",
+                        "policy_reason": "Real virtual desktop provider required.",
+                        "desktop_execution_route": {
+                            "status": "real_virtual_desktop_provider_required",
+                            "can_execute": False,
+                            "blocking_conditions": [
+                                "real_virtual_desktop_provider_required"
+                            ],
+                        },
+                    }
+                ]
+            },
+        }
+    )
+
+    assert snapshot.task_core is not None
+    assert snapshot.task_core.todos[0].status == "blocked"
+    assert snapshot.task_core.todos[0].metadata["runtime_blocked"] is True
+    assert snapshot.task_core.checkpoints[0].status == "blocked"
+    assert snapshot.task_core.workspace.items[0].status == "blocked"
+    assert snapshot.task_core.replan_signals[0].trigger == "runtime_blocked"
+    assert snapshot.task_core.replan_signals[0].source_step_id == "type-text"
+    assert snapshot.task_progress is not None
+    assert snapshot.task_progress.status == "replan_requested"
+    assert snapshot.task_progress.needs_replan is True
+    assert snapshot.task_progress.blocked_step_ids == ["type-text"]
+    assert snapshot.runtime_debug is not None
+    assert snapshot.runtime_debug.needs_replan is True
+    assert snapshot.runtime_debug.blocked_runtime_request_count == 1
 
 
 def test_runtime_debug_summary_projects_task_workspace_progress() -> None:

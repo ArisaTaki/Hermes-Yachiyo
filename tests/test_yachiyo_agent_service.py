@@ -3146,6 +3146,23 @@ def test_yachiyo_chat_entrypoint_surfaces_partial_blocked_desktop_plan(
     assert task.runtime_debug.needs_user_action is True
     assert task.runtime_debug.needs_replan is True
     assert "runtime_blockers" in task.runtime_debug.debug_surfaces
+    assert task.task_core is not None
+    blocked_todos = [
+        todo
+        for todo in task.task_core.todos
+        if todo.tool_name in set(blocked_tools)
+    ]
+    assert blocked_todos
+    assert all(todo.status == "blocked" for todo in blocked_todos)
+    blocked_step_ids = {todo.step_id for todo in blocked_todos}
+    assert any(
+        signal.trigger == "runtime_blocked"
+        and signal.source_step_id in blocked_step_ids
+        for signal in task.task_core.replan_signals
+    )
+    assert task.task_progress is not None
+    assert task.task_progress.needs_replan is True
+    assert set(task.task_progress.blocked_step_ids).issuperset(blocked_step_ids)
 
 
 def test_yachiyo_chat_entrypoint_does_not_direct_execute_blocked_provider_route(

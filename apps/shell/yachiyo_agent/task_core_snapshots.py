@@ -26,14 +26,21 @@ def task_core_snapshot_from_payload(
 ) -> TaskCoreSnapshot | None:
     """Project the DeepAgent-style task core from planner metadata or events."""
     event_list = list(events or [])
+    blocked_requests = _blocked_runtime_requests_from_payload(payload)
     for candidate in _task_core_candidates(payload, event_list):
         snapshot = _task_core_snapshot_from_candidate(candidate)
         if snapshot is not None:
-            return _task_core_with_event_progress(snapshot, event_list)
+            return _task_core_with_blocked_runtime_requests(
+                _task_core_with_event_progress(snapshot, event_list),
+                blocked_requests,
+            )
     fallback = _task_core_from_public_events(payload, event_list)
     if fallback is None:
         return None
-    return _task_core_with_event_progress(fallback, event_list)
+    return _task_core_with_blocked_runtime_requests(
+        _task_core_with_event_progress(fallback, event_list),
+        blocked_requests,
+    )
 
 
 def _task_core_candidates(
@@ -581,6 +588,410 @@ def _task_core_with_event_progress(
             "checkpoints": updated_checkpoints,
         }
     )
+
+
+def _task_core_with_blocked_runtime_requests(
+    snapshot: TaskCoreSnapshot,
+    blocked_requests: Iterable[Mapping[str, Any]],
+) -> TaskCoreSnapshot:
+    blocked = [
+        request
+        for request in blocked_requests
+        if isinstance(request, Mapping) and _runtime_request_is_blocked(request)
+    ]
+    if not blocked:
+        return snapshot
+
+    snapshot = _task_core_with_event_progress(
+        snapshot,
+        _blocked_runtime_request_events(blocked),
+    )
+    return snapshot.model_copy(
+        update={
+            "replan_signals": _replan_signals_with_blocked_requests(
+                snapshot.replan_signals,
+                blocked,
+            )
+        }
+    )
+
+
+def _blocked_runtime_request_events(
+    blocked_requests: list[Mapping[str, Any]],
+) -> list[PublicRunEvent]:
+    events: list[PublicRunEvent] = []
+    sequence = 1
+    for request in blocked_requests:
+        base_payload = _blocked_request_event_payload(request)
+        events.append(
+            _blocked_request_event(
+                "agent.tool.failed",
+                base_payload,
+                sequence=sequence,
+            )
+        )
+        sequence += 1
+        for event_type, payload in _blocked_request_task_update_payloads(
+            request,
+            base_payload,
+        ):
+            events.append(_blocked_request_event(event_type, payload, sequence=sequence))
+            sequence += 1
+    return events
+
+
+def _blocked_request_event(
+    event_type: str,
+    payload: Mapping[str, Any],
+    *,
+    sequence: int,
+) -> PublicRunEvent:
+    return PublicRunEvent(
+        run_id="",
+        sequence=sequence,
+        event_type=event_type,
+        payload=dict(payload),
+    )
+
+
+def _blocked_request_event_payload(request: Mapping[str, Any]) -> dict[str, Any]:
+    tool_name = _blocked_request_tool_name(request)
+    step_id = _blocked_request_step_id(request)
+    payload = {
+        "source": "runtime_blocked_direct_request",
+        "status": "blocked",
+        "tool": tool_name,
+        "tool_name": tool_name,
+        "step_id": step_id,
+        "planner_step_id": step_id,
+        "request_id": _text(request.get("request_id")),
+        "capability_id": _text(request.get("capability_id")),
+        "reason": _blocked_request_reason(request),
+        "blocking_conditions": _blocked_request_blocking_conditions(request),
+        "result": {"ok": False},
+    }
+    return {key: value for key, value in payload.items() if value not in ("", [], None)}
+
+
+def _blocked_request_task_update_payloads(
+    request: Mapping[str, Any],
+    base_payload: Mapping[str, Any],
+) -> list[tuple[str, dict[str, Any]]]:
+    step_id = _blocked_request_step_id(request)
+    if not step_id:
+        return []
+    tool_name = _blocked_request_tool_name(request)
+    capability_id = _text(request.get("capability_id"))
+    payloads: list[tuple[str, dict[str, Any]]] = []
+    for item in _blocked_request_workspace_update_records(request, step_id):
+        payloads.append(
+            (
+                "agent.task.workspace_item.updated",
+                {
+                    **dict(base_payload),
+                    "workspace_item_id": _text(item.get("item_id")),
+                    "step_id": _text(item.get("source_step_id") or step_id),
+                    "workspace_item": item,
+                },
+            )
+        )
+    todo = _blocked_request_update_record(
+        request.get("task_todo"),
+        "metadata",
+        request,
+        defaults={
+            "step_id": step_id,
+            "tool_name": tool_name,
+            "capability_id": capability_id,
+        },
+    )
+    payloads.append(
+        (
+            "agent.task.todo.updated",
+            {
+                **dict(base_payload),
+                "todo_id": _text(todo.get("todo_id")),
+                "step_id": step_id,
+                "todo": todo,
+            },
+        )
+    )
+    for checkpoint in _blocked_request_checkpoint_update_records(request, step_id):
+        payloads.append(
+            (
+                "agent.task.checkpoint.updated",
+                {
+                    **dict(base_payload),
+                    "checkpoint_id": _text(checkpoint.get("checkpoint_id")),
+                    "step_id": step_id,
+                    "checkpoint": checkpoint,
+                },
+            )
+        )
+    return payloads
+
+
+def _blocked_request_workspace_update_records(
+    request: Mapping[str, Any],
+    step_id: str,
+) -> list[dict[str, Any]]:
+    raw_items = request.get("task_workspace_items")
+    items = [item for item in raw_items if isinstance(item, Mapping)] if isinstance(raw_items, list) else []
+    if not items:
+        items = [{"source_step_id": step_id}]
+    return [
+        _blocked_request_update_record(
+            item,
+            "metadata",
+            request,
+            defaults={"source_step_id": step_id},
+        )
+        for item in items
+    ]
+
+
+def _blocked_request_checkpoint_update_records(
+    request: Mapping[str, Any],
+    step_id: str,
+) -> list[dict[str, Any]]:
+    raw_checkpoints = request.get("task_checkpoints")
+    checkpoints = [
+        checkpoint
+        for checkpoint in raw_checkpoints
+        if isinstance(checkpoint, Mapping)
+    ] if isinstance(raw_checkpoints, list) else []
+    if not checkpoints:
+        checkpoints = [{"after_step_id": step_id}]
+    return [
+        _blocked_request_update_record(
+            checkpoint,
+            "payload",
+            request,
+            defaults={"after_step_id": step_id},
+        )
+        for checkpoint in checkpoints
+    ]
+
+
+def _blocked_request_update_record(
+    value: Any,
+    metadata_key: str,
+    request: Mapping[str, Any],
+    *,
+    defaults: Mapping[str, Any],
+) -> dict[str, Any]:
+    raw = dict(value) if isinstance(value, Mapping) else {}
+    metadata = _mapping(raw.get(metadata_key))
+    return {
+        **dict(defaults),
+        **raw,
+        "status": "blocked",
+        metadata_key: {
+            **metadata,
+            **_blocked_request_metadata(request),
+        },
+    }
+
+
+def _replan_signals_with_blocked_requests(
+    signals: Iterable[ReplanSignalSnapshot],
+    blocked_requests: list[Mapping[str, Any]],
+) -> list[ReplanSignalSnapshot]:
+    updated = list(signals)
+    seen_ids = {_text(signal.signal_id) for signal in updated if _text(signal.signal_id)}
+    seen_pairs = {
+        (_text(signal.trigger), _text(signal.source_step_id))
+        for signal in updated
+        if _text(signal.trigger) and _text(signal.source_step_id)
+    }
+    for request in blocked_requests:
+        signal = _blocked_request_replan_signal(request)
+        if signal is None:
+            continue
+        signal_id = _text(signal.signal_id)
+        pair = (_text(signal.trigger), _text(signal.source_step_id))
+        if (signal_id and signal_id in seen_ids) or (
+            pair[0] and pair[1] and pair in seen_pairs
+        ):
+            continue
+        if signal_id:
+            seen_ids.add(signal_id)
+        if pair[0] and pair[1]:
+            seen_pairs.add(pair)
+        updated.append(signal)
+    return updated
+
+
+def _blocked_runtime_requests_from_payload(
+    payload: Mapping[str, Any],
+) -> list[Mapping[str, Any]]:
+    requests: list[Mapping[str, Any]] = []
+    _extend_blocked_runtime_requests(requests, payload)
+    metadata = payload.get("metadata")
+    if isinstance(metadata, Mapping):
+        _extend_blocked_runtime_requests(requests, metadata)
+        tool_names = _string_list(metadata.get("yachiyo_blocked_execution_requests"))
+        reasons = _string_list(metadata.get("yachiyo_blocked_execution_reasons"))
+        reason = reasons[0] if reasons else ""
+        for tool_name in tool_names:
+            if any(_blocked_request_tool_name(request) == tool_name for request in requests):
+                continue
+            requests.append(
+                {
+                    "tool": tool_name,
+                    "tool_name": tool_name,
+                    "status": "blocked",
+                    "blocked_by": "runtime_blocked",
+                    "policy_reason": reason,
+                }
+            )
+    return _unique_blocked_runtime_requests(requests)
+
+
+def _extend_blocked_runtime_requests(
+    requests: list[Mapping[str, Any]],
+    payload: Mapping[str, Any],
+) -> None:
+    for key in ("yachiyo_blocked_direct_tool_requests", "blocked_direct_tool_requests"):
+        raw_requests = payload.get(key)
+        if not isinstance(raw_requests, list):
+            continue
+        for request in raw_requests:
+            if isinstance(request, Mapping):
+                requests.append(request)
+
+
+def _unique_blocked_runtime_requests(
+    requests: Iterable[Mapping[str, Any]],
+) -> list[Mapping[str, Any]]:
+    unique: list[Mapping[str, Any]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for request in requests:
+        key = (
+            _text(request.get("request_id")),
+            _blocked_request_step_id(request),
+            _blocked_request_tool_name(request),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(request)
+    return unique
+
+
+def _blocked_request_replan_signal(
+    request: Mapping[str, Any],
+) -> ReplanSignalSnapshot | None:
+    step_id = _blocked_request_step_id(request)
+    tool_name = _blocked_request_tool_name(request)
+    if not step_id and not tool_name:
+        return None
+    signal_ids = _string_list(request.get("replan_signal_ids"))
+    signal_id = (
+        f"{signal_ids[0]}:runtime-blocked"
+        if signal_ids
+        else f"replan:runtime-blocked:{step_id or tool_name}"
+    )
+    condition = _blocked_request_reason(request) or _blocked_request_status(request)
+    return ReplanSignalSnapshot(
+        signal_id=signal_id,
+        trigger="runtime_blocked",
+        source_step_id=_optional_text(step_id),
+        condition=condition,
+        target=_text(request.get("capability_id")),
+        fallback_tools=_blocked_request_fallback_tools(request),
+        reason="Runtime route blocked this planned tool request; replan from the task workspace.",
+    )
+
+
+def _blocked_request_fallback_tools(request: Mapping[str, Any]) -> list[str]:
+    values = _string_list(request.get("fallback_tools"))
+    if values:
+        return values
+    task_todo = request.get("task_todo")
+    if isinstance(task_todo, Mapping):
+        metadata = task_todo.get("metadata")
+        if isinstance(metadata, Mapping):
+            return _string_list(metadata.get("fallback_tools"))
+    return []
+
+
+def _runtime_request_is_blocked(request: Mapping[str, Any]) -> bool:
+    status = _text(request.get("status")).lower()
+    if status == "blocked" or _text(request.get("blocked_by")):
+        return True
+    route = request.get("desktop_execution_route")
+    if isinstance(route, Mapping) and route.get("can_execute") is False:
+        return True
+    return bool(_string_list(request.get("blocking_conditions")))
+
+
+def _blocked_request_step_id(request: Mapping[str, Any]) -> str:
+    task_todo = request.get("task_todo")
+    task_todo_step_id = (
+        task_todo.get("step_id")
+        if isinstance(task_todo, Mapping)
+        else ""
+    )
+    return _text(
+        request.get("step_id")
+        or request.get("planner_step_id")
+        or request.get("source_step_id")
+        or task_todo_step_id
+    )
+
+
+def _blocked_request_tool_name(request: Mapping[str, Any]) -> str:
+    task_todo = request.get("task_todo")
+    task_todo_tool_name = (
+        task_todo.get("tool_name")
+        if isinstance(task_todo, Mapping)
+        else ""
+    )
+    return _text(
+        request.get("tool_name")
+        or request.get("tool")
+        or request.get("name")
+        or task_todo_tool_name
+    )
+
+
+def _blocked_request_status(request: Mapping[str, Any]) -> str:
+    route = request.get("desktop_execution_route")
+    route_status = route.get("status") if isinstance(route, Mapping) else ""
+    return _text(request.get("blocked_by") or route_status or request.get("status"))
+
+
+def _blocked_request_reason(request: Mapping[str, Any]) -> str:
+    route = request.get("desktop_execution_route")
+    route_reason = route.get("reason") if isinstance(route, Mapping) else ""
+    return _text(
+        request.get("policy_reason")
+        or route_reason
+        or request.get("reason")
+        or request.get("blocked_by")
+    )
+
+
+def _blocked_request_blocking_conditions(request: Mapping[str, Any]) -> list[str]:
+    conditions = _string_list(request.get("blocking_conditions"))
+    route = request.get("desktop_execution_route")
+    if isinstance(route, Mapping):
+        conditions.extend(_string_list(route.get("blocking_conditions")))
+    return list(dict.fromkeys(conditions))
+
+
+def _blocked_request_metadata(request: Mapping[str, Any]) -> dict[str, Any]:
+    metadata = {
+        "runtime_status": _blocked_request_status(request),
+        "runtime_event_type": "runtime.blocked_direct_request",
+        "runtime_blocked": True,
+        "runtime_blocked_request_id": _text(request.get("request_id")),
+        "runtime_blocked_tool_name": _blocked_request_tool_name(request),
+        "runtime_blocked_reason": _blocked_request_reason(request),
+        "runtime_blocking_conditions": _blocked_request_blocking_conditions(request),
+    }
+    return {key: value for key, value in metadata.items() if value not in ("", [], None)}
 
 
 def _explicit_task_update_maps(
