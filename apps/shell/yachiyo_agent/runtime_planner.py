@@ -15893,18 +15893,93 @@ def _runtime_dov_plan_metadata(steps: list[ToolPlanStepSnapshot]) -> dict[str, A
     }
 
 
+_RUNTIME_DOV_DESKTOP_POST_ACTION_TOOLS = frozenset(
+    {
+        "app.open",
+        "app.focus",
+        "app.focus_window",
+        "app.show",
+        "app.hide",
+        "app.minimize",
+        "app.quit",
+        "app.open_path_with_app",
+        "desktop.open_app",
+        "desktop.focus_app",
+        "desktop.open_path",
+        "desktop.open_path_with_app",
+        "desktop.reveal_path",
+        "desktop.safe_shortcut",
+        "desktop.safe_key",
+        "desktop.safe_scroll",
+        "desktop.safe_click",
+        "desktop.safe_type_text",
+        "desktop.hotkey",
+        "desktop.click",
+        "desktop.type",
+        "desktop.type_text",
+        "desktop.click_ui_element",
+        "desktop.type_into_ui_element",
+        "desktop.search_submit",
+        "desktop.submit_foreground",
+        "desktop.hide_app",
+        "desktop.show_all_apps",
+        "desktop.minimize_window",
+        "desktop.close_window",
+        "desktop.quit_app",
+    }
+)
+
+_RUNTIME_DOV_DESKTOP_POST_ACTION_ACTIONS = frozenset(
+    {
+        "click",
+        "focus_app",
+        "hotkey",
+        "key",
+        "open_app",
+        "safe_click",
+        "safe_key",
+        "safe_scroll",
+        "safe_shortcut",
+        "scroll",
+        "shortcut",
+        "submit",
+        "submit_search",
+        "type",
+    }
+)
+
+
 def _runtime_dov_step_metadata(step: ToolPlanStepSnapshot) -> dict[str, Any]:
     if not _runtime_dov_step_applies(step):
         return {}
     stage = _runtime_dov_stage(step)
     role = _runtime_dov_role(step, stage)
+    requires_post_action_verification = (
+        _runtime_dov_step_requires_post_action_verification(step, stage=stage)
+    )
     return {
         "runtime_doctrine": "discover_operate_verify",
         "runtime_stage": stage,
         "runtime_role": role,
         "requires_observation": stage in {"discover", "verify"},
-        "requires_post_action_verification": stage == "operate",
+        "requires_post_action_verification": requires_post_action_verification,
     }
+
+
+def _runtime_dov_step_requires_post_action_verification(
+    step: ToolPlanStepSnapshot,
+    *,
+    stage: str,
+) -> bool:
+    if stage != "operate":
+        return False
+    tool_name = str(step.tool_name or "").strip()
+    action = str(step.action or "").strip()
+    if tool_name.startswith(("app.open_and_", "app.focus_and_")):
+        return True
+    if tool_name in _RUNTIME_DOV_DESKTOP_POST_ACTION_TOOLS:
+        return True
+    return action in _RUNTIME_DOV_DESKTOP_POST_ACTION_ACTIONS
 
 
 def _runtime_dov_step_applies(step: ToolPlanStepSnapshot) -> bool:

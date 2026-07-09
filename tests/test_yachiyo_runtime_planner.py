@@ -823,6 +823,26 @@ def test_runtime_planner_prefers_builtin_data_analysis_for_simple_reports() -> N
     assert step.depends_on == ["read-data-source"]
 
 
+def test_runtime_planner_does_not_require_desktop_post_action_verification_for_data_analysis() -> None:
+    allowed_tools = ["data.analyze", "workspace.read", "artifact.write", "terminal.run"]
+    decision = RuntimePlanner().decision(
+        "请分析 sales.csv 并输出一份数据分析报告",
+        allowed_tools=allowed_tools,
+    )
+    envelope = runtime_execution_envelope_from_decision(
+        decision,
+        allowed_tools=allowed_tools,
+        full_plan=True,
+    )
+
+    analyze_request = next(
+        request for request in envelope.requests if request.tool_name == "data.analyze"
+    )
+    assert analyze_request.runtime_stage == "operate"
+    assert analyze_request.runtime_role == "analyze_data"
+    assert analyze_request.requires_post_action_verification is False
+
+
 def test_runtime_planner_prefers_builtin_data_analysis_for_explicit_local_paths() -> None:
     decision = RuntimePlanner().decision(
         "分析 ~/Downloads/sales.csv 并输出报告",

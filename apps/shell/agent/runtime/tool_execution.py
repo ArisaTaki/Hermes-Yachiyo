@@ -3629,12 +3629,23 @@ def _post_action_verification_request(
 
 def _post_action_verification_tool(tool_name: str, *, allowed_tools: list[str]) -> str:
     allowed = {str(tool or "").strip() for tool in allowed_tools}
+    if not _tool_needs_desktop_post_action_verification(tool_name):
+        return ""
     if _tool_can_change_active_app(tool_name) and "desktop.active_window" in allowed:
         return "desktop.active_window"
     for candidate in ("desktop.ui_elements", "desktop.read_ui", "desktop.verify"):
         if candidate in allowed:
             return candidate
     return ""
+
+
+def _tool_needs_desktop_post_action_verification(tool_name: str) -> bool:
+    clean_tool = str(tool_name or "").strip()
+    return bool(
+        _tool_can_change_active_app(clean_tool)
+        or clean_tool in _FOREGROUND_READINESS_GATED_TOOLS
+        or clean_tool in _DESKTOP_POST_ACTION_VERIFICATION_TOOLS
+    )
 
 
 def _remaining_requests_include_post_action_verification(
@@ -5176,6 +5187,20 @@ _FOREGROUND_READINESS_GATED_TOOLS = {
     "desktop.submit_foreground",
     "desktop.click",
     "desktop.type_text",
+}
+
+_DESKTOP_POST_ACTION_VERIFICATION_TOOLS = {
+    "app.show",
+    "app.hide",
+    "app.minimize",
+    "app.quit",
+    "desktop.open_path",
+    "desktop.reveal_path",
+    "desktop.hide_app",
+    "desktop.show_all_apps",
+    "desktop.minimize_window",
+    "desktop.close_window",
+    "desktop.quit_app",
 }
 
 _FOREGROUND_READINESS_RESET_TOOLS = {

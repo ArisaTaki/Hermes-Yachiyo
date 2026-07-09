@@ -49,6 +49,9 @@ from scripts.smoke_electron_native_bridge import (
 from scripts.smoke_group_run_timeline import (
     run_smoke as run_group_run_timeline_smoke,
 )
+from scripts.smoke_workflow_run_timeline import (
+    run_smoke as run_workflow_run_timeline_smoke,
+)
 from scripts.smoke_agent_entrypoint_desktop_execution import (
     run_smoke as run_agent_entrypoint_desktop_execution_smoke,
 )
@@ -576,6 +579,7 @@ def _payload_can_rebuild_native_agent_capability_matrix(payload: dict[str, Any])
         "runtime_approval_resume_smoke",
         "yachiyo_route_approval_smoke",
         "group_run_timeline_smoke",
+        "workflow_run_timeline_smoke",
         "packaged_backend_bridge_smoke",
         "dmg_app_smoke",
     )
@@ -2801,6 +2805,43 @@ def verify_group_run_timeline_smoke(root: Path) -> tuple[list[Finding], dict[str
     ], evidence
 
 
+def verify_workflow_run_timeline_smoke(root: Path) -> tuple[list[Finding], dict[str, Any]]:
+    try:
+        raw_evidence = run_workflow_run_timeline_smoke()
+    except Exception as exc:
+        return [
+            Finding(
+                root / "scripts/smoke_workflow_run_timeline.py",
+                f"WorkflowRun timeline smoke failed: {redact_api_error_text(str(exc))}",
+            )
+        ], {
+            "ok": False,
+            "mode": "workflow_run_timeline_smoke",
+            "error": redact_api_error_text(str(exc)),
+        }
+    evidence = sanitize_sensitive_value(raw_evidence, max_depth=8)
+    if not isinstance(evidence, dict):
+        return [
+            Finding(
+                root / "scripts/smoke_workflow_run_timeline.py",
+                "WorkflowRun timeline smoke returned non-object evidence",
+            )
+        ], {
+            "ok": False,
+            "mode": "workflow_run_timeline_smoke",
+            "error": "non-object evidence",
+        }
+    if evidence.get("ok") is True:
+        return [], evidence
+    message = str(evidence.get("error") or "WorkflowRun timeline smoke did not pass")
+    return [
+        Finding(
+            root / "scripts/smoke_workflow_run_timeline.py",
+            redact_api_error_text(message),
+        )
+    ], evidence
+
+
 def verify_native_provider_contract_smoke(root: Path) -> tuple[list[Finding], dict[str, Any]]:
     try:
         raw_evidence = run_native_provider_contract_smoke()
@@ -4972,6 +5013,12 @@ def verify_release_candidate(
             "findings": [],
             "run_requested": True,
         },
+        "workflow_run_timeline_smoke": {
+            "status": "pending",
+            "evidence": {},
+            "findings": [],
+            "run_requested": True,
+        },
         "runtime_approval_resume_smoke": {
             "status": "pending",
             "evidence": {},
@@ -5212,6 +5259,12 @@ def verify_release_candidate(
             "run_requested": True,
         }
         report["yachiyo_route_approval_smoke"] = {
+            "status": "skipped",
+            "evidence": {},
+            "findings": [],
+            "run_requested": True,
+        }
+        report["workflow_run_timeline_smoke"] = {
             "status": "skipped",
             "evidence": {},
             "findings": [],
@@ -5610,6 +5663,18 @@ def verify_release_candidate(
         "status": "failed" if group_run_timeline_findings else "passed",
         "evidence": group_run_timeline_evidence,
         "findings": _finding_report(group_run_timeline_findings),
+        "run_requested": True,
+    }
+
+    workflow_run_timeline_findings, workflow_run_timeline_evidence = (
+        verify_workflow_run_timeline_smoke(root)
+    )
+    _print_findings("workflow run timeline smoke", workflow_run_timeline_findings)
+    failed = failed or bool(workflow_run_timeline_findings)
+    report["workflow_run_timeline_smoke"] = {
+        "status": "failed" if workflow_run_timeline_findings else "passed",
+        "evidence": workflow_run_timeline_evidence,
+        "findings": _finding_report(workflow_run_timeline_findings),
         "run_requested": True,
     }
 

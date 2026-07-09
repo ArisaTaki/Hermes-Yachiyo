@@ -3614,6 +3614,60 @@ def test_runtime_tool_request_runner_enqueues_post_action_verification() -> None
     assert "env" not in enqueued["desktop_provider_session"]
 
 
+def test_runtime_tool_request_runner_does_not_enqueue_desktop_verification_for_structured_tools() -> None:
+    budget = FakeBudget()
+    messages = [{"role": "user", "content": "分析 sales.csv"}]
+    timeline: list[dict[str, Any]] = []
+    captured_requests: list[dict[str, Any]] = []
+
+    def call_agent_tool(
+        tool_request: dict[str, Any],
+        *_args: Any,
+        **_kwargs: Any,
+    ) -> dict[str, Any]:
+        captured_requests.append(tool_request)
+        return {
+            "ok": True,
+            "tool": tool_request.get("tool"),
+            "rows": 3,
+            "columns": 3,
+            "artifact_path": "analysis-report.md",
+        }
+
+    runner = _runner(call_agent_tool=call_agent_tool)
+
+    runner.run(
+        [
+            {
+                "tool": "data.analyze",
+                "input": {
+                    "path": "sales.csv",
+                    "artifact_path": "analysis-report.md",
+                },
+                "step_id": "analyze-data-file",
+                "planner_step_id": "analyze-data-file",
+                "runtime_stage": "operate",
+                "runtime_role": "analyze_data",
+                "requires_post_action_verification": True,
+            }
+        ],
+        ["data.analyze", "desktop.ui_elements"],
+        FakeBroker({"ok": True}),
+        messages,
+        timeline,
+        [],
+        next_iteration=3,
+        run_id="run-data-analysis",
+        budget=budget,
+    )
+
+    assert [request["tool"] for request in captured_requests] == ["data.analyze"]
+    assert not any(
+        event["event"] == "agent.post_action_verification.enqueued"
+        for event in timeline
+    )
+
+
 def test_runtime_tool_request_runner_does_not_duplicate_planned_verification() -> None:
     budget = FakeBudget()
     messages = [{"role": "user", "content": "打开 PixelForge 并验证"}]
