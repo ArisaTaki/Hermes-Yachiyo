@@ -283,6 +283,7 @@ export type ControlledDesktopProviderDiagnosticSnapshot = {
   desktop_backend_ready_for_public_release?: boolean | null;
   requires_real_virtual_desktop_backend?: boolean | null;
   provider_contract?: Record<string, unknown>;
+  provider_conformance?: DesktopProviderConformanceSnapshot | null;
   requires_real_sandbox_for?: string[];
   requires_runtime_approval?: boolean;
   approval_required_tools?: string[];

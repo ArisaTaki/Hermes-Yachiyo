@@ -14,6 +14,7 @@ import type {
   RestrictedToolPluginSnapshot,
   RunEventPageSnapshot,
   RerunRunRequest,
+  DesktopProviderConformanceSnapshot,
   RuntimeExecutionEnvelopeSnapshot,
   SaveAgentGroupRequest,
   SkillFolderSnapshot,
@@ -67,6 +68,7 @@ export type YachiyoStudioDesktopProviderSessionSnapshot = {
   env?: Record<string, string>;
   provider_status?: Record<string, unknown>;
   provider_contract?: Record<string, unknown>;
+  provider_conformance?: DesktopProviderConformanceSnapshot | null;
   source?: string;
   tool_names?: string[];
   desktop_session_kind?: string;

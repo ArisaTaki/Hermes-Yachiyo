@@ -1,4 +1,5 @@
 import type { RuntimeToolRecoveryAction } from './toolRecoveryActions';
+import type { DesktopProviderConformanceSnapshot } from './types';
 
 export type DesktopProviderSessionStartRequest = {
   host?: string;
@@ -28,6 +29,7 @@ export type DesktopProviderSessionSnapshot = {
   desktop_backend_ready_for_public_release?: boolean | null;
   requires_real_virtual_desktop_backend?: boolean | null;
   provider_contract?: Record<string, unknown>;
+  provider_conformance?: DesktopProviderConformanceSnapshot | null;
 };
 
 export function runtimeRecoveryActionIsDesktopProviderSessionStart(

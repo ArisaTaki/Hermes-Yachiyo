@@ -7780,6 +7780,15 @@ def test_controlled_provider_diagnostics_marks_configured_keyboard_provider_read
     assert diagnostics.desktop_backend_ready_for_public_release is True
     assert diagnostics.requires_real_virtual_desktop_backend is False
     assert diagnostics.provider_contract["ok"] is True
+    assert diagnostics.provider_conformance is not None
+    assert diagnostics.provider_conformance.ok is True
+    assert diagnostics.provider_conformance.mode == "provider_diagnostics_contract_check"
+    assert diagnostics.provider_conformance.runtime_checked is True
+    assert diagnostics.provider_conformance.public_release_ready is True
+    assert diagnostics.provider_conformance.release_candidate is True
+    assert diagnostics.provider_conformance.covered_tools == list(
+        OHA_DESKTOP_AGENT_RELEASE_PROVIDER_TOOLS
+    )
     assert diagnostics.blocking_conditions == []
     assert diagnostics.endpoint_origin == "http://127.0.0.1:19092"
     assert "desktop.safe_type_text" in diagnostics.supported_tools
@@ -7848,6 +7857,13 @@ def test_controlled_provider_diagnostics_reads_provider_manifest_before_start(
     assert diagnostics.desktop_backend_ready_for_public_release is True
     assert diagnostics.requires_real_virtual_desktop_backend is False
     assert diagnostics.provider_contract["blocking_conditions"] == [
+        "desktop_execution_provider_unavailable",
+        "desktop_execution_provider_adapter_unavailable",
+    ]
+    assert diagnostics.provider_conformance is not None
+    assert diagnostics.provider_conformance.public_release_ready is False
+    assert diagnostics.provider_conformance.release_candidate is False
+    assert diagnostics.provider_conformance.release_blocking_conditions == [
         "desktop_execution_provider_unavailable",
         "desktop_execution_provider_adapter_unavailable",
     ]
@@ -7928,6 +7944,11 @@ def test_controlled_provider_diagnostics_blocks_loopback_release_backend(
     assert diagnostics.status == "virtual_desktop_provider_contract_required"
     assert diagnostics.reason.startswith("Configured provider is not release-ready")
     assert diagnostics.provider_contract["ok"] is False
+    assert diagnostics.provider_conformance is not None
+    assert diagnostics.provider_conformance.public_release_ready is False
+    assert "loopback_desktop_backend" in (
+        diagnostics.provider_conformance.release_blocking_conditions
+    )
     assert "loopback_desktop_backend" in diagnostics.blocking_conditions
     assert "desktop_backend_not_release_ready" in diagnostics.blocking_conditions
     assert "real_virtual_desktop_backend_required" in diagnostics.blocking_conditions

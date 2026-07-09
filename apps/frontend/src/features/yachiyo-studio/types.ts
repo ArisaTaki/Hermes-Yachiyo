@@ -21,6 +21,7 @@ export type {
   CapabilitySnapshot,
   DesktopExecutionCapabilitySnapshot,
   DesktopExecutionRisk,
+  DesktopProviderConformanceSnapshot,
   FutureTaskSnapshot,
   FutureTaskTriggerResultSnapshot,
   GroupRunSnapshot,

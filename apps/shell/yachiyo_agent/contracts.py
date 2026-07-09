@@ -275,6 +275,7 @@ class ControlledDesktopProviderDiagnosticSnapshot(_PublicSnapshot):
     desktop_backend_ready_for_public_release: bool | None = None
     requires_real_virtual_desktop_backend: bool | None = None
     provider_contract: dict[str, Any] = Field(default_factory=dict)
+    provider_conformance: DesktopProviderConformanceSnapshot | None = None
     requires_real_sandbox_for: list[str] = Field(default_factory=list)
     requires_runtime_approval: bool = True
     approval_required_tools: list[str] = Field(default_factory=list)
