@@ -14327,6 +14327,10 @@ def _request_observability_metadata(request: Mapping[str, Any]) -> dict[str, Any
         "deferred_input",
         "deferred_context",
         "desktop_execution_policy",
+        "desktop_loop",
+        "desktop_provider_session",
+        "sandbox_desktop_provider",
+        "sandbox_provider",
     ):
         value = request.get(key)
         if isinstance(value, Mapping) and value:

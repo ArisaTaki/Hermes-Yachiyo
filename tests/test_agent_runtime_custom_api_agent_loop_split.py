@@ -1178,6 +1178,11 @@ def test_auto_replan_recovery_materializes_safe_deferred_tool_after_source_succe
             "deferred_tool": "desktop.active_window",
             "deferred_input": {"app_name": "PixelForge"},
             "deferred_context": {"step_id": "verify-active-window"},
+            "desktop_execution_policy": {"mode": "sandbox_preferred"},
+            "desktop_provider_session": {
+                "running": True,
+                "provider_id": "sandbox-1",
+            },
         }
     ]
     timeline = [
@@ -1206,6 +1211,11 @@ def test_auto_replan_recovery_materializes_safe_deferred_tool_after_source_succe
             "replan_request_id": "replan-observe",
             "replan_trigger": "verification_failed",
             "replan_recovery_action_id": "action-observe",
+            "desktop_execution_policy": {"mode": "sandbox_preferred"},
+            "desktop_provider_session": {
+                "running": True,
+                "provider_id": "sandbox-1",
+            },
             "source": "runtime_planner",
             "planning_reason": "planner_replan_deferred_continuation",
         }

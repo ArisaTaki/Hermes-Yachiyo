@@ -33,16 +33,21 @@ def materialized_deferred_items(source: Mapping[str, Any]) -> list[dict[str, Any
                 deferred_request.setdefault(key, value)
         for key in (
             "approval_required",
+            "desktop_execution_policy",
+            "desktop_loop",
+            "desktop_provider_session",
             "risk_level",
             "policy_reason",
             "runtime_stage",
             "runtime_role",
+            "sandbox_desktop_provider",
+            "sandbox_provider",
             "requires_observation",
             "requires_post_action_verification",
         ):
             value = source.get(key)
             if value not in (None, "", [], {}) and key not in deferred_request:
-                deferred_request[key] = value
+                deferred_request[key] = dict(value) if isinstance(value, Mapping) else value
         items.append(deferred_request)
     items.extend(_mapping_list(source.get("deferred_continuation")))
     return items

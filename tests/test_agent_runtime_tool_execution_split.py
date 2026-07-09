@@ -118,7 +118,11 @@ class FakeSandboxDesktopAdapter:
         route: dict[str, Any],
         tool_request: dict[str, Any],
     ) -> bool:
-        return tool_name == "desktop.safe_type_text"
+        return tool_name in {
+            "desktop.click_ui_element",
+            "desktop.safe_type_text",
+            "desktop.ui_elements",
+        }
 
     def execute(
         self,
@@ -1879,6 +1883,85 @@ def test_runtime_tool_request_runner_runs_approved_replan_deferred_tool() -> Non
         "desktop.click_ui_element",
         "desktop.ui_elements",
     ]
+
+
+def test_runtime_tool_request_runner_routes_deferred_tool_through_provider_session() -> None:
+    timeline: list[dict[str, Any]] = []
+    adapter = FakeSandboxDesktopAdapter()
+    broker = FakeBroker({"ok": True, "unexpected": True})
+    executor = _executor(
+        tool_call_events=FakeToolCallEvents(),
+        desktop_provider_registry=DesktopExecutionProviderRegistry([adapter]),
+    )
+    runner = _runner(call_agent_tool=executor.execute)
+
+    runner.run(
+        [
+            {
+                "tool": "desktop.ui_elements",
+                "input": {"target": "Export", "limit": 80},
+                "source": "agent_studio_replan_recovery",
+                "replan_request_id": "runtime-replan-provider",
+                "replan_recovery_action_id": (
+                    "runtime-replan-provider:action:1:desktop.ui_elements"
+                ),
+                "desktop_execution_policy": {
+                    "mode": "sandbox_preferred",
+                    "prefer_isolated_desktop": True,
+                    "avoid_user_foreground_takeover": True,
+                },
+                "sandbox_provider": {
+                    "available": True,
+                    "adapter_ready": True,
+                    "provider_kind": "sandbox_desktop",
+                    "provider_id": "sandbox-1",
+                    "status": "available",
+                    "supported_tools": ["desktop.ui_elements", "desktop.safe_type_text"],
+                },
+                "desktop_provider_session": {
+                    "running": True,
+                    "started": True,
+                    "status": "running",
+                    "provider_id": "sandbox-1",
+                    "url": "http://127.0.0.1:19093",
+                    "tool_names": ["desktop.ui_elements", "desktop.safe_type_text"],
+                    "command": ["python", "scripts/run_isolated_desktop_provider.py"],
+                    "env": {"OHA_YACHIYO_DESKTOP_PROVIDER_TOKEN": "secret"},
+                },
+                "deferred_tool": "desktop.safe_type_text",
+                "deferred_input": {"text": "hello"},
+                "deferred_context": {
+                    "step_id": "type-export-name",
+                    "runtime_stage": "operate",
+                    "runtime_role": "type_ui",
+                },
+            }
+        ],
+        ["desktop.ui_elements", "desktop.safe_type_text"],
+        broker,
+        [{"role": "user", "content": "Type hello in the sandbox provider"}],
+        timeline,
+        [],
+        next_iteration=1,
+        run_id="run-provider-deferred-tool",
+        budget=FakeBudget(),
+    )
+
+    assert [call["tool"] for call in adapter.calls] == [
+        "desktop.ui_elements",
+        "desktop.safe_type_text",
+    ]
+    assert broker.calls == []
+    typed_call = adapter.calls[1]
+    assert typed_call["payload"] == {"text": "hello"}
+    assert typed_call["route"]["status"] == "sandbox_ready"
+    assert typed_call["route"]["selected_provider_id"] == "sandbox-1"
+    enqueued = next(
+        event
+        for event in timeline
+        if event["event"] == "agent.deferred_continuation.enqueued"
+    )
+    assert enqueued["deferred_tools"] == ["desktop.safe_type_text"]
 
 
 def test_runtime_tool_request_runner_does_not_auto_start_partial_deferred_recovery() -> None:

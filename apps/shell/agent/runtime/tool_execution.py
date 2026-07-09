@@ -4060,6 +4060,11 @@ def _runtime_replan_deferred_continuation_requests(
             "workflow_run_id",
             "workflow_node_id",
             "workflow_node_label",
+            "desktop_execution_policy",
+            "desktop_loop",
+            "desktop_provider_session",
+            "sandbox_desktop_provider",
+            "sandbox_provider",
         ):
             value = tool_request.get(key)
             if key not in request and value not in (None, "", [], {}):
@@ -4150,6 +4155,25 @@ def _copy_runtime_replan_context(
         if isinstance(request.get(key), Mapping) and request.get(key):
             continue
         value = replan_payload.get(key)
+        if isinstance(value, Mapping) and value:
+            request[key] = dict(value)
+    metadata = (
+        replan_payload.get("metadata")
+        if isinstance(replan_payload.get("metadata"), Mapping)
+        else {}
+    )
+    for key in (
+        "desktop_execution_policy",
+        "desktop_loop",
+        "desktop_provider_session",
+        "sandbox_desktop_provider",
+        "sandbox_provider",
+    ):
+        if isinstance(request.get(key), Mapping) and request.get(key):
+            continue
+        value = replan_payload.get(key)
+        if not isinstance(value, Mapping):
+            value = metadata.get(key)
         if isinstance(value, Mapping) and value:
             request[key] = dict(value)
 
