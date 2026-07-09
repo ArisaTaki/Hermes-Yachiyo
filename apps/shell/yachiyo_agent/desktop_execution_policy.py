@@ -22,6 +22,18 @@ from apps.shell.yachiyo_agent.desktop_provider_contract import (
 )
 
 _PROVIDER_MANIFEST_ENV = "OHA_YACHIYO_DESKTOP_PROVIDER_MANIFEST"
+_PROVIDER_MANIFEST_METADATA_KEYS = (
+    "provider_manifest",
+    "provider_manifest_path",
+    "desktop_provider_manifest",
+    "desktop_provider_manifest_path",
+)
+_PROVIDER_MANIFEST_METADATA_CONTAINERS = (
+    "desktop_provider_session",
+    "desktop_execution_policy",
+    "desktop_execution_route",
+    "sandbox_provider",
+)
 
 _SANDBOX_DESKTOP_PROVIDER_DEFAULT: dict[str, Any] = {
     "available": False,
@@ -324,6 +336,26 @@ def desktop_provider_session_auto_start_default() -> bool:
             "OHA_YACHIYO_DESKTOP_PROVIDER_MANIFEST",
         )
     )
+
+
+def desktop_provider_manifest_path_from_metadata(
+    metadata: Mapping[str, Any] | None,
+) -> str:
+    if not isinstance(metadata, Mapping):
+        return ""
+    for key in _PROVIDER_MANIFEST_METADATA_KEYS:
+        value = str(metadata.get(key) or "").strip()
+        if value:
+            return value
+    for key in _PROVIDER_MANIFEST_METADATA_CONTAINERS:
+        nested = metadata.get(key)
+        if not isinstance(nested, Mapping):
+            continue
+        for manifest_key in _PROVIDER_MANIFEST_METADATA_KEYS:
+            value = str(nested.get(manifest_key) or "").strip()
+            if value:
+                return value
+    return ""
 
 
 def desktop_provider_session_strict_foreground_default(

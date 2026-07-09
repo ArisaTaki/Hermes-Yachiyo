@@ -766,6 +766,19 @@ def test_start_isolated_provider_session_accepts_request_provider_manifest(
     manager.stop()
 
 
+def test_envelope_provider_manifest_prefers_explicit_session_over_wrapped_metadata() -> None:
+    envelope = {
+        "metadata": {"provider_manifest": "tmp/wrapped-provider.json"},
+        "desktop_provider_session": {
+            "provider_manifest": "tmp/session-provider.json"
+        },
+    }
+
+    assert session_module._envelope_provider_manifest_path(envelope) == (
+        "tmp/session-provider.json"
+    )
+
+
 def test_start_manifest_provider_satisfies_real_virtual_backend_contract(
     monkeypatch,
     tmp_path,

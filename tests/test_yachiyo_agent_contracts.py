@@ -6951,6 +6951,43 @@ def test_desktop_provider_session_auto_start_default_uses_provider_config(
     assert desktop_provider_session_auto_start_default() is True
 
 
+def test_provider_manifest_resolution_keeps_env_runtime_local_and_prefers_session_metadata(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    configured_manifest = str(tmp_path / "configured-provider.json")
+    explicit_manifest = str(tmp_path / "explicit-provider.json")
+    nested_manifest = str(tmp_path / "nested-provider.json")
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_MANIFEST", configured_manifest)
+
+    daily = with_daily_entrypoint_desktop_execution_policy(
+        {"source": "launcher"},
+        surface="live2d",
+    )
+    studio = with_agent_studio_desktop_execution_policy({"source": "studio"})
+    explicit = with_daily_entrypoint_desktop_execution_policy(
+        {"provider_manifest_path": explicit_manifest},
+        surface="chat",
+    )
+    nested = with_agent_studio_desktop_execution_policy(
+        {
+            "metadata": {"provider_manifest": configured_manifest},
+            "desktop_provider_session": {"provider_manifest": nested_manifest},
+        }
+    )
+
+    assert "provider_manifest" not in daily
+    assert "provider_manifest" not in studio
+    assert explicit["provider_manifest_path"] == explicit_manifest
+    assert "provider_manifest" not in explicit
+    assert nested["desktop_provider_session"]["provider_manifest"] == nested_manifest
+    assert "provider_manifest" not in nested
+    assert (
+        desktop_policy_module.desktop_provider_manifest_path_from_metadata(nested)
+        == nested_manifest
+    )
+
+
 def test_desktop_provider_session_strict_foreground_default_uses_provider_readiness(
     monkeypatch,
 ) -> None:

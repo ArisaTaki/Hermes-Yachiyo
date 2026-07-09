@@ -31,6 +31,7 @@ from apps.shell.yachiyo_agent.desktop_provider_contract import (
     virtual_desktop_provider_manifest_contract_evidence,
 )
 from apps.shell.yachiyo_agent.desktop_execution_policy import (
+    desktop_provider_manifest_path_from_metadata,
     desktop_execution_route_decision,
     is_local_low_risk_foreground_tool,
     is_readonly_desktop_provider_tool,
@@ -68,12 +69,6 @@ _PROVIDER_START_COMMAND_ENV = "OHA_YACHIYO_DESKTOP_PROVIDER_START_COMMAND"
 _PROVIDER_START_CWD_ENV = "OHA_YACHIYO_DESKTOP_PROVIDER_START_CWD"
 _PROVIDER_MANIFEST_ENV = "OHA_YACHIYO_DESKTOP_PROVIDER_MANIFEST"
 _PROVIDER_REQUESTED_TOOLS_ENV = "OHA_YACHIYO_DESKTOP_PROVIDER_REQUESTED_TOOLS"
-_PROVIDER_MANIFEST_PAYLOAD_KEYS = (
-    "provider_manifest",
-    "provider_manifest_path",
-    "desktop_provider_manifest",
-    "desktop_provider_manifest_path",
-)
 
 _PROVIDER_START_STATUSES = {
     "provider_required",
@@ -442,53 +437,34 @@ def start_isolated_desktop_provider_session(
 
 
 def _request_provider_manifest_path(payload: dict[str, Any]) -> str:
-    return _provider_manifest_path_from_payload(payload)
-
-
-def _provider_manifest_path_from_payload(payload: Any) -> str:
-    if not isinstance(payload, dict):
-        return ""
-    for key in _PROVIDER_MANIFEST_PAYLOAD_KEYS:
-        value = str(payload.get(key) or "").strip()
-        if value:
-            return value
-    return ""
+    return desktop_provider_manifest_path_from_metadata(payload)
 
 
 def _envelope_provider_manifest_path(envelope: Any) -> str:
-    direct = _provider_manifest_path_from_payload(envelope)
+    direct = desktop_provider_manifest_path_from_metadata(envelope)
     if direct:
         return direct
     if not isinstance(envelope, dict):
         return ""
-    for key in (
-        "metadata",
-        "desktop_provider_session",
-        "desktop_execution_policy",
-        "sandbox_provider",
-    ):
-        nested = _provider_manifest_path_from_payload(envelope.get(key))
-        if nested:
-            return nested
+    nested_metadata = desktop_provider_manifest_path_from_metadata(
+        envelope.get("metadata")
+    )
+    if nested_metadata:
+        return nested_metadata
     requests = envelope.get("requests")
     if not isinstance(requests, list):
         return ""
     for request in requests:
-        direct = _provider_manifest_path_from_payload(request)
+        direct = desktop_provider_manifest_path_from_metadata(request)
         if direct:
             return direct
         if not isinstance(request, dict):
             continue
-        for key in (
-            "metadata",
-            "desktop_provider_session",
-            "desktop_execution_policy",
-            "desktop_execution_route",
-            "sandbox_provider",
-        ):
-            nested = _provider_manifest_path_from_payload(request.get(key))
-            if nested:
-                return nested
+        nested_metadata = desktop_provider_manifest_path_from_metadata(
+            request.get("metadata")
+        )
+        if nested_metadata:
+            return nested_metadata
     return ""
 
 
