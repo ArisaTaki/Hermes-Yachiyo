@@ -296,13 +296,10 @@ _LOW_RISK_CREATION_SHORTCUT_ACTIONS = frozenset(
 
 _APPROVAL_FIRST_KEYBOARD_MOUSE_TOOLS = frozenset(
     {
-        "app.open_and_safe_click",
-        "app.focus_and_safe_click",
         "app.open_and_click_ui_element",
         "app.focus_and_click_ui_element",
         "app.open_and_type_into_ui_element",
         "app.focus_and_type_into_ui_element",
-        "desktop.safe_click",
         "desktop.click_ui_element",
         "desktop.type_into_ui_element",
         "desktop.click",
@@ -347,7 +344,7 @@ def desktop_provider_session_auto_start_recommended_for_requests(
         if tool_name in _APPROVAL_FIRST_KEYBOARD_MOUSE_TOOLS:
             continue
         if _low_risk_creation_shortcut_request(tool_name, request):
-            continue
+            return True
         if tool_name in _USER_FOREGROUND_TAKEOVER_TOOLS:
             return True
     return False

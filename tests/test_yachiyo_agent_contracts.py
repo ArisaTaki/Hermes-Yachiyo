@@ -6108,12 +6108,29 @@ def test_desktop_provider_session_auto_start_recommended_for_input_tasks() -> No
         desktop_provider_session_auto_start_recommended_for_requests(
             [
                 {
+                    "tool": "app.open_and_safe_click",
+                    "input": {"app_name": "Notes", "x": 32, "y": 48},
+                }
+            ],
+        )
+        is True
+    )
+    assert (
+        desktop_provider_session_auto_start_recommended_for_requests(
+            [{"tool": "desktop.safe_click", "input": {"x": 32, "y": 48}}],
+        )
+        is True
+    )
+    assert (
+        desktop_provider_session_auto_start_recommended_for_requests(
+            [
+                {
                     "tool": "app.open_and_safe_shortcut",
                     "input": {"app_name": "Notes", "action": "new_note"},
                 }
             ],
         )
-        is False
+        is True
     )
     assert (
         desktop_provider_session_auto_start_recommended_for_requests(
