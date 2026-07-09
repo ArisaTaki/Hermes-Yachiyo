@@ -30,6 +30,7 @@ from apps.shell.yachiyo_agent.isolated_provider_session import (
 from apps.shell.yachiyo_agent.desktop_provider_contract import (
     OHA_DESKTOP_AGENT_RELEASE_PROVIDER_TOOLS,
     virtual_desktop_provider_contract_evidence,
+    virtual_desktop_provider_manifest_contract_evidence,
 )
 
 SMOKE_TOOLS = OHA_DESKTOP_AGENT_RELEASE_PROVIDER_TOOLS
@@ -94,6 +95,17 @@ def run_smoke(
 
 def _run_configured_provider_smoke() -> dict[str, Any]:
     status = desktop_execution_provider_status_from_env(probe_health=True)
+    provider_manifest_evidence = _provider_manifest_evidence_from_env()
+    if (
+        provider_manifest_evidence
+        and provider_manifest_evidence.get("ok") is not True
+    ):
+        return _provider_status_only_report(
+            status,
+            reason="provider_manifest_contract_failed",
+            use_configured_provider=True,
+            provider_manifest_evidence=provider_manifest_evidence,
+        )
     managed_session: dict[str, Any] = {}
     stop_managed_session = False
     if _configured_provider_needs_start(status) and _managed_provider_start_configured():
@@ -111,6 +123,7 @@ def _run_configured_provider_smoke() -> dict[str, Any]:
                     ),
                     use_configured_provider=True,
                     managed_provider_session=managed_session,
+                    provider_manifest_evidence=provider_manifest_evidence,
                 )
             status = desktop_execution_provider_status_from_env(probe_health=True)
         except Exception as exc:
@@ -119,6 +132,7 @@ def _run_configured_provider_smoke() -> dict[str, Any]:
                 reason="managed_external_provider_start_failed",
                 use_configured_provider=True,
                 managed_provider_session={"ok": False, "error": str(exc)},
+                provider_manifest_evidence=provider_manifest_evidence,
             )
     provider_id = str(status.get("provider_id") or "").strip()
     base_url = str(status.get("endpoint_origin") or "").strip()
@@ -128,6 +142,7 @@ def _run_configured_provider_smoke() -> dict[str, Any]:
             reason="desktop_execution_provider_not_configured",
             use_configured_provider=True,
             managed_provider_session=managed_session,
+            provider_manifest_evidence=provider_manifest_evidence,
         )
     if not provider_id:
         return _provider_status_only_report(
@@ -135,6 +150,7 @@ def _run_configured_provider_smoke() -> dict[str, Any]:
             reason="desktop_execution_provider_missing_provider_id",
             use_configured_provider=True,
             managed_provider_session=managed_session,
+            provider_manifest_evidence=provider_manifest_evidence,
         )
     registry = desktop_execution_provider_registry_from_env()
     try:
@@ -144,6 +160,7 @@ def _run_configured_provider_smoke() -> dict[str, Any]:
             status=status,
             base_url=base_url,
             use_configured_provider=True,
+            provider_manifest_evidence=provider_manifest_evidence,
         )
         report["managed_provider_session"] = dict(managed_session)
         report["managed_provider_started"] = bool(managed_session.get("started"))
@@ -166,6 +183,33 @@ def _managed_provider_start_configured() -> bool:
     )
 
 
+def _provider_manifest_evidence_from_env() -> dict[str, Any]:
+    manifest_path = str(os.environ.get(_PROVIDER_MANIFEST_ENV) or "").strip()
+    if not manifest_path:
+        return {}
+    path = Path(manifest_path)
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return {
+            "ok": False,
+            "runtime_checked": False,
+            "manifest_path": str(path),
+            "blocking_conditions": ["desktop_provider_manifest_unreadable"],
+            "error": str(exc),
+        }
+    if not isinstance(payload, Mapping):
+        return {
+            "ok": False,
+            "runtime_checked": False,
+            "manifest_path": str(path),
+            "blocking_conditions": ["desktop_provider_manifest_not_object"],
+        }
+    evidence = virtual_desktop_provider_manifest_contract_evidence(payload)
+    evidence["manifest_path"] = str(path)
+    return evidence
+
+
 def _run_provider_smoke(
     *,
     registry: Any,
@@ -173,6 +217,7 @@ def _run_provider_smoke(
     status: Mapping[str, Any],
     base_url: str,
     use_configured_provider: bool,
+    provider_manifest_evidence: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     status_payload = dict(status)
     allow_simulated_provider = not use_configured_provider
@@ -294,12 +339,16 @@ def _run_provider_smoke(
     )
     if use_configured_provider:
         checks["provider_contract_ready"] = provider_contract["ok"] is True
+    manifest_evidence = dict(provider_manifest_evidence or {})
+    if manifest_evidence:
+        checks["provider_manifest_ready"] = manifest_evidence.get("ok") is True
     provider_conformance = _provider_conformance_summary(
         checks=checks,
         provider_contract=provider_contract,
         tool_results=tool_results,
         use_configured_provider=use_configured_provider,
         status=status_payload,
+        provider_manifest_evidence=manifest_evidence,
     )
     return {
         "ok": all(checks.values()),
@@ -313,6 +362,7 @@ def _run_provider_smoke(
         "checks": checks,
         "provider_contract": provider_contract,
         "provider_conformance": provider_conformance,
+        "provider_manifest_evidence": manifest_evidence,
         **_provider_status_summary(status_payload),
         "covered_tools": list(SMOKE_TOOLS),
     }
@@ -459,6 +509,7 @@ def _provider_status_only_report(
     reason: str,
     use_configured_provider: bool,
     managed_provider_session: Mapping[str, Any] | None = None,
+    provider_manifest_evidence: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     status_payload = dict(status)
     session_payload = dict(managed_provider_session or {})
@@ -486,6 +537,18 @@ def _provider_status_only_report(
         )
     )
     session_conformance = session_payload.get("provider_conformance")
+    manifest_evidence = dict(provider_manifest_evidence or {})
+    if manifest_evidence and manifest_evidence.get("ok") is not True:
+        provider_contract = {
+            **provider_contract,
+            "ok": False,
+            "blocking_conditions": _unique_strings(
+                [
+                    *provider_contract.get("blocking_conditions", []),
+                    *manifest_evidence.get("blocking_conditions", []),
+                ]
+            ),
+        }
     provider_conformance = (
         dict(session_conformance)
         if isinstance(session_conformance, Mapping)
@@ -495,6 +558,7 @@ def _provider_status_only_report(
             tool_results=[],
             use_configured_provider=use_configured_provider,
             status=status_payload,
+            provider_manifest_evidence=manifest_evidence,
         )
     )
     return {
@@ -509,6 +573,7 @@ def _provider_status_only_report(
         "reason": reason,
         "provider_contract": provider_contract,
         "provider_conformance": provider_conformance,
+        "provider_manifest_evidence": manifest_evidence,
         "managed_provider_session": session_payload,
         "managed_provider_started": bool(session_payload.get("started")),
         **_provider_status_summary(status_payload),
@@ -543,6 +608,7 @@ def _provider_conformance_summary(
     tool_results: Sequence[Mapping[str, Any]],
     use_configured_provider: bool,
     status: Mapping[str, Any],
+    provider_manifest_evidence: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     tool_sequence = [
         str(item.get("tool") or item.get("action") or "").strip()
@@ -568,14 +634,25 @@ def _provider_conformance_summary(
     provider_contract_blocking_conditions = _string_list(
         provider_contract.get("blocking_conditions")
     )
+    provider_manifest_blocking_conditions = _string_list(
+        (provider_manifest_evidence or {}).get("blocking_conditions")
+    )
     release_blocking_conditions = _unique_strings(
-        [*smoke_blocking_conditions, *provider_contract_blocking_conditions]
+        [
+            *smoke_blocking_conditions,
+            *provider_contract_blocking_conditions,
+            *provider_manifest_blocking_conditions,
+        ]
     )
     smoke_ok = bool(checks) and all(checks.values())
     public_release_ready = (
         bool(use_configured_provider)
         and smoke_ok
         and provider_contract.get("ok") is True
+        and (
+            not provider_manifest_evidence
+            or provider_manifest_evidence.get("ok") is True
+        )
     )
     return {
         "ok": (
@@ -611,6 +688,7 @@ def _provider_conformance_summary(
         "provider_contract_blocking_conditions": (
             provider_contract_blocking_conditions
         ),
+        "provider_manifest_blocking_conditions": provider_manifest_blocking_conditions,
         "desktop_session_kind": str(status.get("desktop_session_kind") or ""),
         "desktop_session_isolated": status.get("desktop_session_isolated"),
         "foreground_takeover_required": status.get("foreground_takeover_required"),

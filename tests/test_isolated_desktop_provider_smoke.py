@@ -1,5 +1,10 @@
 from __future__ import annotations
 
+import json
+
+from apps.shell.yachiyo_agent.desktop_provider_contract import (
+    virtual_desktop_provider_manifest_template,
+)
 from scripts import smoke_isolated_desktop_provider as smoke
 
 
@@ -101,6 +106,48 @@ def test_isolated_desktop_provider_smoke_can_use_configured_provider(monkeypatch
     assert [item["action"] for item in evidence["tool_results"]] == list(
         smoke.SMOKE_TOOLS
     )
+
+
+def test_isolated_desktop_provider_smoke_rejects_remote_manifest_before_start(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    manifest_path = tmp_path / "remote-provider-manifest.json"
+    template = virtual_desktop_provider_manifest_template(
+        provider_id="remote-provider",
+        base_url="https://provider.example.com",
+    )
+    manifest_path.write_text(
+        json.dumps(template, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        smoke,
+        "desktop_execution_provider_status_from_env",
+        lambda *args, **kwargs: {
+            "configured": False,
+            "available": False,
+            "adapter_ready": False,
+            "status": "not_configured",
+        },
+    )
+
+    evidence = smoke.run_smoke(provider_manifest=manifest_path)
+
+    assert evidence["ok"] is False
+    assert evidence["reason"] == "provider_manifest_contract_failed"
+    assert evidence["provider_manifest_evidence"]["ok"] is False
+    assert "desktop_provider_manifest_remote_endpoint_not_allowed" in evidence[
+        "provider_manifest_evidence"
+    ]["blocking_conditions"]
+    assert "desktop_provider_manifest_remote_endpoint_not_allowed" in evidence[
+        "provider_contract"
+    ]["blocking_conditions"]
+    assert "desktop_provider_manifest_remote_endpoint_not_allowed" in evidence[
+        "provider_conformance"
+    ]["release_blocking_conditions"]
+    assert evidence["provider_conformance"]["public_release_ready"] is False
+    assert evidence["tool_results"] == []
 
 
 def test_isolated_desktop_provider_smoke_can_start_managed_configured_provider(
