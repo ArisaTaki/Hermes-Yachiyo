@@ -802,6 +802,27 @@ class RuntimeCustomApiAgentLoop:
                     )
                 ):
                     replan_payloads = []
+                if (
+                    replan_payloads
+                    and _legacy_chat_direct_local_completed_with_verification_replan(
+                        execution_tool_requests,
+                        replan_payloads,
+                        timeline,
+                        tool_timeline_start=tool_timeline_start,
+                    )
+                ):
+                    replan_payloads = []
+                    explicit_model_followup = False
+                    direct_result = self._direct_daily_desktop_sequence_result(
+                        _legacy_chat_direct_local_result_requests(
+                            execution_tool_requests
+                        ),
+                        timeline,
+                        tool_timeline_start=tool_timeline_start,
+                        run_id=run_id,
+                    )
+                    if direct_result:
+                        return direct_result
                 continue_to_model = bool(replan_payloads) or explicit_model_followup
                 if continue_to_model:
                     followup_selection_payload = _selection_payload_with_timeline_fallback(
@@ -4606,6 +4627,11 @@ class RuntimeCustomApiAgentLoop:
                 if isinstance(tool_event.get("input_preview"), dict)
                 else planned_input
             )
+            if planned_tool in {
+                "app.open_and_safe_type_text",
+                "app.focus_and_safe_type_text",
+            }:
+                executed_input = {**planned_input, **executed_input}
             if _daily_desktop_step_has_placeholder_app(
                 planned_input,
                 executed_input,
@@ -5811,9 +5837,10 @@ def _desktop_permission_preflight_event_payload(
             *_string_list(data.get("affected_tools")),
         ]
     )
-    impacted_tools = [
-        tool for tool in planned_tools if not affected_tools or tool in affected_tools
-    ]
+    impacted_tools = _permission_preflight_impacted_tools(
+        planned_tools,
+        affected_tools,
+    )
     if affected_tools and not impacted_tools:
         return {}
     recovery_hints = _ordered_text_list(
@@ -5841,6 +5868,37 @@ def _desktop_permission_preflight_event_payload(
             or "/yachiyo/readiness"
         ),
     }
+
+
+def _permission_preflight_impacted_tools(
+    planned_tools: list[str],
+    affected_tools: list[str],
+) -> list[str]:
+    if not affected_tools:
+        return planned_tools
+    planned = {tool for tool in planned_tools if tool}
+    impacted: list[str] = []
+    for tool in affected_tools:
+        if tool in planned or _affected_tool_matches_split_desktop_plan(tool, planned):
+            impacted.append(tool)
+    return _ordered_text_list(impacted)
+
+
+def _affected_tool_matches_split_desktop_plan(
+    affected_tool: str,
+    planned_tools: set[str],
+) -> bool:
+    open_tools = {"app.open", "desktop.open_app"}
+    focus_tools = {"app.focus", "desktop.focus_app"}
+    if affected_tool == "app.open_and_safe_type_text":
+        return bool(planned_tools & open_tools) and "desktop.safe_type_text" in planned_tools
+    if affected_tool == "app.focus_and_safe_type_text":
+        return bool(planned_tools & focus_tools) and "desktop.safe_type_text" in planned_tools
+    if affected_tool == "app.open_and_safe_shortcut":
+        return bool(planned_tools & open_tools) and "desktop.safe_shortcut" in planned_tools
+    if affected_tool == "app.focus_and_safe_shortcut":
+        return bool(planned_tools & focus_tools) and "desktop.safe_shortcut" in planned_tools
+    return False
 
 
 def _append_recovery_action_summary(text: str, result: dict[str, Any]) -> str:
@@ -9540,6 +9598,127 @@ def _runtime_planner_completed_direct_requests_with_verification_replan(
     if any(_runtime_replan_payload_requires_continuation(payload) for payload in payloads):
         return False
     return False
+
+
+def _legacy_chat_direct_local_completed_with_verification_replan(
+    planned_tool_requests: Iterable[Mapping[str, Any]],
+    replan_payloads: Iterable[Mapping[str, Any]],
+    timeline: list[dict[str, Any]],
+    *,
+    tool_timeline_start: int,
+) -> bool:
+    requests = [request for request in planned_tool_requests if isinstance(request, Mapping)]
+    if not any(_request_uses_legacy_chat_direct_local_policy(request) for request in requests):
+        return False
+    primary_requests = [
+        request
+        for request in requests
+        if str(request.get("tool") or "").strip() in _DIRECT_DAILY_DESKTOP_TOOLS
+        and str(request.get("tool") or "").strip() not in _DAILY_DESKTOP_DISCOVERY_TOOLS
+        and str(request.get("tool") or "").strip() not in _DAILY_DESKTOP_VERIFY_TOOLS
+    ]
+    if not primary_requests:
+        return False
+    if not all(
+        _runtime_planner_tool_request_completed(
+            request,
+            timeline,
+            tool_timeline_start=tool_timeline_start,
+        )
+        for request in primary_requests
+    ):
+        return False
+    payloads = _flatten_runtime_replan_payloads(replan_payloads)
+    if not payloads:
+        return False
+    return all(
+        str(payload.get("trigger") or "").strip() == "verification_failed"
+        for payload in payloads
+    )
+
+
+def _legacy_chat_direct_local_result_requests(
+    planned_tool_requests: Iterable[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    for request in planned_tool_requests:
+        if not isinstance(request, Mapping):
+            continue
+        if not _request_uses_legacy_chat_direct_local_policy(request):
+            continue
+        tool_name = str(request.get("tool") or "").strip()
+        if tool_name in _DAILY_DESKTOP_DISCOVERY_TOOLS:
+            continue
+        if tool_name in _DAILY_DESKTOP_VERIFY_TOOLS:
+            continue
+        result.append(dict(request))
+    return _coalesced_legacy_chat_direct_local_result_requests(result)
+
+
+def _coalesced_legacy_chat_direct_local_result_requests(
+    planned_tool_requests: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    coalesced: list[dict[str, Any]] = []
+    index = 0
+    while index < len(planned_tool_requests):
+        if index + 2 >= len(planned_tool_requests):
+            coalesced.append(planned_tool_requests[index])
+            index += 1
+            continue
+        open_request = planned_tool_requests[index]
+        focus_request = planned_tool_requests[index + 1]
+        type_request = planned_tool_requests[index + 2]
+        open_input = open_request.get("input") if isinstance(open_request.get("input"), Mapping) else {}
+        focus_input = focus_request.get("input") if isinstance(focus_request.get("input"), Mapping) else {}
+        type_input = type_request.get("input") if isinstance(type_request.get("input"), Mapping) else {}
+        app_name = str(open_input.get("app_name") or "").strip()
+        text = str(type_input.get("text") or "").strip()
+        if (
+            str(open_request.get("tool") or "") in {"app.open", "desktop.open_app"}
+            and str(focus_request.get("tool") or "") in {"app.focus", "desktop.focus_app"}
+            and str(type_request.get("tool") or "") == "desktop.safe_type_text"
+            and app_name
+            and str(focus_input.get("app_name") or "").strip() == app_name
+            and text
+        ):
+            coalesced.append(
+                {
+                    **type_request,
+                    "tool": "app.open_and_safe_type_text",
+                    "input": {"app_name": app_name, "text": text},
+                }
+            )
+            index += 3
+            continue
+        coalesced.append(planned_tool_requests[index])
+        index += 1
+    return coalesced
+
+
+def _request_uses_legacy_chat_direct_local_policy(request: Mapping[str, Any]) -> bool:
+    policy = request.get("desktop_execution_policy")
+    return (
+        isinstance(policy, Mapping)
+        and str(policy.get("source") or "").strip() == "legacy_chat_direct_local"
+    )
+
+
+def _flatten_runtime_replan_payloads(
+    replan_payloads: Iterable[Mapping[str, Any]],
+) -> list[Mapping[str, Any]]:
+    payloads: list[Mapping[str, Any]] = []
+    for payload in replan_payloads:
+        if not isinstance(payload, Mapping):
+            continue
+        nested_requests = (
+            payload.get("replan_requests")
+            if isinstance(payload.get("replan_requests"), list)
+            else []
+        )
+        payloads.extend(item for item in nested_requests if isinstance(item, Mapping))
+        if _runtime_replan_payload_tool_candidates(payload):
+            payloads.append(payload)
+    return payloads
 
 
 def _runtime_planner_completed_terminal_direct_requests_with_trailing_verification(
@@ -18736,6 +18915,8 @@ _FOLLOWUP_PLAN_TOOL_EQUIVALENCE_GROUPS = (
         "desktop.safe_type_text",
         "desktop.type_text",
         "desktop.type",
+        "app.focus_and_safe_type_text",
+        "app.open_and_safe_type_text",
         "app.focus_and_type_into_ui_element",
         "app.open_and_type_into_ui_element",
     },
@@ -23598,6 +23779,7 @@ def _daily_desktop_sequence_summary_steps(
 ) -> list[dict[str, Any]]:
     if not visible_steps:
         return []
+    visible_steps = _coalesced_open_focus_type_summary_steps(visible_steps)
     visible_steps = _coalesced_open_focus_find_summary_steps(visible_steps)
     if (
         str(visible_steps[-1].get("tool") or "") == "desktop.active_window"
@@ -23610,6 +23792,51 @@ def _daily_desktop_sequence_summary_steps(
         ]
         return primary_steps or visible_steps
     return visible_steps
+
+
+def _coalesced_open_focus_type_summary_steps(
+    visible_steps: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if len(visible_steps) < 3:
+        return visible_steps
+    coalesced: list[dict[str, Any]] = []
+    index = 0
+    while index < len(visible_steps):
+        if index + 2 >= len(visible_steps):
+            coalesced.append(visible_steps[index])
+            index += 1
+            continue
+        open_step = visible_steps[index]
+        focus_step = visible_steps[index + 1]
+        type_step = visible_steps[index + 2]
+        app_name = _summary_step_app_name(open_step)
+        text = _summary_step_text(type_step)
+        if (
+            str(open_step.get("tool") or "") in {"app.open", "desktop.open_app"}
+            and str(focus_step.get("tool") or "") in {"app.focus", "desktop.focus_app"}
+            and str(type_step.get("tool") or "") == "desktop.safe_type_text"
+            and app_name
+            and _summary_step_app_name(focus_step) == app_name
+            and text
+        ):
+            target = _display_target_name(
+                app_name,
+                f"并输入文字（{len(text)} 个字符）",
+            )
+            summary = f"已打开{target}。"
+            coalesced.append(
+                {
+                    **type_step,
+                    "tool": "app.open_and_safe_type_text",
+                    "input_preview": {"app_name": app_name, "text": text},
+                    "summary": summary,
+                }
+            )
+            index += 3
+            continue
+        coalesced.append(visible_steps[index])
+        index += 1
+    return coalesced
 
 
 def _coalesced_open_focus_find_summary_steps(
@@ -23676,6 +23903,18 @@ def _summary_step_shortcut_action(step: Mapping[str, Any]) -> str:
         or data.get("shortcut_action")
         or ""
     ).strip()
+
+
+def _summary_step_text(step: Mapping[str, Any]) -> str:
+    input_preview = step.get("input_preview") if isinstance(step.get("input_preview"), Mapping) else {}
+    result = step.get("result") if isinstance(step.get("result"), Mapping) else {}
+    data = result.get("data") if isinstance(result.get("data"), Mapping) else {}
+    return str(
+        input_preview.get("text")
+        or data.get("text")
+        or data.get("typed_text")
+        or ""
+    )
 
 
 def _is_requested_ui_readback(

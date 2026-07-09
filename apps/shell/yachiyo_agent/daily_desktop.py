@@ -1214,7 +1214,9 @@ def planner_first_daily_desktop_entrypoint_requests(
                 allowed,
                 metadata=metadata,
             )
-            if runtime_requests:
+            if runtime_requests and _entrypoint_requests_have_primary_action(
+                runtime_requests,
+            ):
                 return [dict(request) for request in runtime_requests]
 
         planner_requests = planner_tool_requests(
@@ -1473,6 +1475,18 @@ def _runtime_execution_context_entrypoint_requests(
     except Exception:
         logger.debug("Runtime execution context entrypoint unavailable", exc_info=True)
         return []
+
+
+def _entrypoint_requests_have_primary_action(
+    requests: Sequence[Mapping[str, Any]] | None,
+) -> bool:
+    for request in requests or ():
+        if not isinstance(request, Mapping):
+            continue
+        tool_name = str(request.get("tool") or "").strip()
+        if tool_name and tool_name not in _ENTRYPOINT_NON_PRIMARY_TOOLS:
+            return True
+    return False
 
 
 def _runtime_main_chat_tool_policies(runtime: Any | None) -> list[Mapping[str, Any]]:

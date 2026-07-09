@@ -108,6 +108,45 @@ _DAILY_DESKTOP_METADATA_VERIFY_TOOLS = {
     "desktop.inspect_app",
     "screen.capture",
 }
+_LEGACY_CHAT_DIRECT_LOCAL_POLICY = {
+    "mode": "allow",
+    "source": "legacy_chat_direct_local",
+    "reason": (
+        "Legacy Chat direct requests should keep the existing local tool path "
+        "until an isolated desktop provider is available."
+    ),
+}
+_LEGACY_CHAT_DIRECT_LOCAL_POLICY_TOOLS = {
+    *_DAILY_DESKTOP_METADATA_DISCOVERY_TOOLS,
+    *_DAILY_DESKTOP_METADATA_VERIFY_TOOLS,
+    "app.open",
+    "app.focus",
+    "app.show",
+    "desktop.open_app",
+    "desktop.focus_app",
+    "app.open_and_safe_shortcut",
+    "app.focus_and_safe_shortcut",
+    "app.open_and_safe_type_text",
+    "app.focus_and_safe_type_text",
+    "desktop.hotkey",
+    "desktop.safe_shortcut",
+    "desktop.safe_type_text",
+    "desktop.search_submit",
+}
+_LEGACY_CHAT_DIRECT_APPROVAL_FLAG_COMPAT_TOOLS = {
+    *_DAILY_DESKTOP_METADATA_DISCOVERY_TOOLS,
+    *_DAILY_DESKTOP_METADATA_VERIFY_TOOLS,
+    "app.open",
+    "app.focus",
+    "app.show",
+    "app.open_and_safe_shortcut",
+    "app.focus_and_safe_shortcut",
+    "app.open_and_safe_type_text",
+    "app.focus_and_safe_type_text",
+    "desktop.safe_shortcut",
+    "desktop.safe_type_text",
+    "desktop.search_submit",
+}
 
 
 def _rejection_reason(decision: dict[str, Any] | str | None) -> str:
@@ -268,6 +307,109 @@ def _visible_daily_desktop_metadata_requests(
         and str(request.get("tool") or "").strip() not in _DAILY_DESKTOP_METADATA_VERIFY_TOOLS
     ]
     return primary or requests
+
+
+def _entrypoint_metadata_preserving_primary_source(
+    entrypoint_metadata: dict[str, Any],
+    existing_user_metadata: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if str(entrypoint_metadata.get("daily_desktop_source") or "").strip() != (
+        "runtime_verification"
+    ):
+        return entrypoint_metadata
+    existing = existing_user_metadata if isinstance(existing_user_metadata, dict) else {}
+    existing_source = str(existing.get("daily_desktop_source") or "").strip()
+    existing_tool = str(existing.get("daily_desktop_tool") or "").strip()
+    if existing_source and existing_source != "runtime_verification" and existing_tool:
+        return {}
+    return entrypoint_metadata
+
+
+def _direct_tool_requests_with_legacy_chat_direct_local_policy(
+    direct_tool_requests: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    for request in direct_tool_requests:
+        if not isinstance(request, dict):
+            continue
+        tool_name = str(request.get("tool") or request.get("tool_name") or "").strip()
+        next_request = dict(request)
+        if (
+            tool_name in _LEGACY_CHAT_DIRECT_LOCAL_POLICY_TOOLS
+            and _can_apply_legacy_chat_direct_local_policy(next_request)
+        ):
+            next_request["desktop_execution_policy"] = dict(
+                _LEGACY_CHAT_DIRECT_LOCAL_POLICY
+            )
+            if tool_name in _LEGACY_CHAT_DIRECT_APPROVAL_FLAG_COMPAT_TOOLS:
+                next_request["approval_required"] = False
+                next_request.pop("requires_approval", None)
+                next_request.pop("approvalRequired", None)
+            _strip_desktop_provider_route_context(next_request)
+        result.append(next_request)
+    return result
+
+
+def _strip_desktop_provider_route_context(payload: dict[str, Any]) -> None:
+    for key in (
+        "desktop_provider_session",
+        "sandbox_provider",
+        "sandbox_desktop_provider",
+        "desktop_sandbox_provider",
+        "desktop_execution_route",
+        "desktop_provider_route_foreground",
+        "desktop_provider_route_readonly",
+    ):
+        payload.pop(key, None)
+
+
+def _can_apply_legacy_chat_direct_local_policy(request: Mapping[str, Any]) -> bool:
+    existing = request.get("desktop_execution_policy")
+    if not isinstance(existing, Mapping):
+        return True
+    source = str(existing.get("source") or "").strip()
+    mode = str(existing.get("mode") or "").strip()
+    return source.startswith("daily_") or mode == "preview_input"
+
+
+def _runtime_execution_envelope_with_legacy_chat_direct_local_policy(
+    runtime_execution_envelope: Any | None,
+) -> dict[str, Any] | None:
+    if not isinstance(runtime_execution_envelope, Mapping):
+        return None
+    requests = runtime_execution_envelope.get("requests")
+    if not isinstance(requests, list):
+        return dict(runtime_execution_envelope)
+    payload = dict(runtime_execution_envelope)
+    payload["requests"] = _direct_tool_requests_with_legacy_chat_direct_local_policy(
+        [dict(request) for request in requests if isinstance(request, dict)]
+    )
+    if _direct_tool_requests_are_legacy_chat_direct_local(payload["requests"]):
+        for key in (
+            "desktop_provider_session",
+            "sandbox_provider",
+            "sandbox_desktop_provider",
+            "desktop_sandbox_provider",
+            "desktop_execution_route",
+        ):
+            payload.pop(key, None)
+    return payload
+
+
+def _direct_tool_requests_are_legacy_chat_direct_local(
+    direct_tool_requests: list[dict[str, Any]],
+) -> bool:
+    if not direct_tool_requests:
+        return False
+    for request in direct_tool_requests:
+        if not isinstance(request, Mapping):
+            return False
+        policy = request.get("desktop_execution_policy")
+        if not isinstance(policy, Mapping):
+            return False
+        if str(policy.get("source") or "").strip() != "legacy_chat_direct_local":
+            return False
+    return True
 
 
 def _metadata_requests_with_split_app_shortcuts(
@@ -688,10 +830,16 @@ class LegacyChatTaskStarter:
             direct_tool_requests,
             allowed_entrypoint_tools,
         )
-        direct_tool_request = explicit_direct_tool_request or daily_desktop_direct_metadata_request(
+        explicit_runtime_execution_envelope = _has_explicit_runtime_execution_envelope(
+            runtime_execution_envelope,
             metadata,
-            allowed_tools=allowed_daily_desktop_tools,
         )
+        direct_tool_request = explicit_direct_tool_request
+        if direct_tool_request is None and not explicit_runtime_execution_envelope:
+            direct_tool_request = daily_desktop_direct_metadata_request(
+                metadata,
+                allowed_tools=allowed_daily_desktop_tools,
+            )
         planner_decision, selected_requests = (None, [])
         direct_tool_requests: list[dict[str, Any]] = []
         direct_tool_selection_payload: dict[str, Any] = {}
@@ -748,10 +896,6 @@ class LegacyChatTaskStarter:
                     "runtime_execution_envelope",
                     dict(runtime_execution_envelope),
                 )
-            explicit_runtime_execution_envelope = _has_explicit_runtime_execution_envelope(
-                runtime_execution_envelope,
-                metadata,
-            )
             envelope_tool_requests = _safe_runtime_execution_envelope_requests(
                 prompt or execution_prompt,
                 metadata,
@@ -780,12 +924,17 @@ class LegacyChatTaskStarter:
                 )
             if direct_tool_request:
                 annotated_request = _direct_tool_requests_with_desktop_provider_session(
-                    [direct_tool_request],
+                    _direct_tool_requests_with_legacy_chat_direct_local_policy(
+                        [direct_tool_request],
+                    ),
                     metadata=metadata,
                 )
                 if annotated_request:
                     direct_tool_request = annotated_request[0]
             if direct_tool_requests:
+                direct_tool_requests = _direct_tool_requests_with_legacy_chat_direct_local_policy(
+                    direct_tool_requests,
+                )
                 direct_tool_requests = _direct_tool_requests_with_desktop_provider_session(
                     direct_tool_requests,
                     metadata=metadata,
@@ -841,6 +990,11 @@ class LegacyChatTaskStarter:
                 runtime_execution_envelope,
                 metadata,
                 direct_tool_selection_payload,
+            )
+            effective_runtime_execution_envelope = (
+                _runtime_execution_envelope_with_legacy_chat_direct_local_policy(
+                    effective_runtime_execution_envelope,
+                )
             )
             start_kwargs: dict[str, Any] = {
                 "task_id": task_id,
@@ -1022,7 +1176,10 @@ class LegacyChatTaskStarter:
             return
         visible_requests = _visible_daily_desktop_metadata_requests(desktop_requests)
         existing_user_metadata = _task_message_metadata(chat_session, task_id, role="user")
-        entrypoint_metadata = entrypoint_plan_user_metadata(visible_requests)
+        entrypoint_metadata = _entrypoint_metadata_preserving_primary_source(
+            entrypoint_plan_user_metadata(visible_requests),
+            existing_user_metadata,
+        )
         planner_metadata = (
             runtime_planner_metadata(planner_decision)
             if _expose_runtime_planner_user_metadata(visible_requests, existing_user_metadata)
@@ -2395,12 +2552,19 @@ def _runtime_execution_envelope_request_candidates(
     allowed_tools: list[str],
 ) -> list[list[dict[str, Any]]]:
     candidates: list[list[dict[str, Any]]] = []
+    runtime_execution_envelope = (
+        _runtime_execution_envelope_with_legacy_chat_direct_local_policy(
+            runtime_execution_envelope,
+        )
+        or runtime_execution_envelope
+    )
     top_level_requests = runtime_execution_requests_from_envelope_payload(
         runtime_execution_envelope,
         allowed_tools=allowed_tools,
     )
     if top_level_requests:
         candidates.append(top_level_requests)
+    metadata = _metadata_with_legacy_chat_direct_local_envelopes(metadata)
     metadata_requests = runtime_execution_requests_from_metadata(
         metadata,
         allowed_tools=allowed_tools,
@@ -2408,6 +2572,21 @@ def _runtime_execution_envelope_request_candidates(
     if metadata_requests:
         candidates.append(metadata_requests)
     return candidates
+
+
+def _metadata_with_legacy_chat_direct_local_envelopes(
+    metadata: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if not isinstance(metadata, dict):
+        return metadata
+    result = dict(metadata)
+    for key in ("runtime_execution_envelope", "yachiyo_execution_envelope"):
+        envelope = _runtime_execution_envelope_with_legacy_chat_direct_local_policy(
+            result.get(key),
+        )
+        if envelope is not None:
+            result[key] = envelope
+    return result
 
 
 def _studio_workflow_run_payload(
@@ -2546,6 +2725,8 @@ def _direct_tool_requests_with_desktop_provider_session(
 ) -> list[dict[str, Any]]:
     if not direct_tool_requests:
         return []
+    if _direct_tool_requests_are_legacy_chat_direct_local(direct_tool_requests):
+        return [dict(request) for request in direct_tool_requests if isinstance(request, dict)]
     envelope_requests = []
     for index, request in enumerate(direct_tool_requests, start=1):
         if not isinstance(request, dict):
@@ -3619,14 +3800,18 @@ def _legacy_direct_verify_request(request: dict[str, Any]) -> bool:
 
 
 def _has_approval_plan_tool(tool_requests: list[dict[str, Any]]) -> bool:
-    return any(
-        isinstance(request, dict)
-        and (
-            str(request.get("tool") or "").strip() in _APPROVAL_PLAN_TOOLS
-            or request.get("approval_required") is True
-        )
-        for request in tool_requests
-    )
+    for request in tool_requests:
+        if not isinstance(request, dict):
+            continue
+        tool_name = str(request.get("tool") or "").strip()
+        if tool_name in _APPROVAL_PLAN_TOOLS:
+            return True
+        if (
+            request.get("approval_required") is True
+            and tool_name not in _LEGACY_CHAT_DIRECT_APPROVAL_FLAG_COMPAT_TOOLS
+        ):
+            return True
+    return False
 
 
 def _has_explicit_hotkey_safe_shortcut(
