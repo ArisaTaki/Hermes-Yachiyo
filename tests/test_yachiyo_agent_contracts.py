@@ -136,6 +136,7 @@ from apps.shell.yachiyo_agent.controlled_provider_diagnostics import (
 from apps.shell.yachiyo_agent.desktop_provider_contract import (
     OHA_DESKTOP_AGENT_RELEASE_PROVIDER_TOOLS,
 )
+from apps.shell.yachiyo_agent.daily_desktop import daily_desktop_runtime_execution_envelope
 from apps.shell.yachiyo_agent.approvals import approval_card_from_payload
 from apps.shell.yachiyo_agent.capability_registry import runtime_execution_tool_names
 from apps.shell.yachiyo_agent.events import public_run_event_from_payload
@@ -6081,6 +6082,86 @@ def test_desktop_provider_session_auto_start_recommended_for_input_tasks() -> No
             ],
         )
         is False
+    )
+    assert (
+        desktop_provider_session_auto_start_recommended_for_requests(
+            {
+                "execution_strategy": {
+                    "preferred_environment": "isolated_desktop",
+                    "interaction_mode": "foreground",
+                    "keyboard_mouse_step_count": 1,
+                    "sandbox_required": True,
+                },
+                "requests": [
+                    {
+                        "tool_name": "desktop.safe_type_text",
+                        "input": {"text": "hello"},
+                    }
+                ],
+            }
+        )
+        is True
+    )
+    assert (
+        desktop_provider_session_auto_start_recommended_for_requests(
+            {
+                "execution_strategy": {
+                    "preferred_environment": "isolated_desktop",
+                    "interaction_mode": "foreground",
+                    "keyboard_mouse_step_count": 1,
+                    "sandbox_required": True,
+                },
+                "requests": [
+                    {
+                        "tool_name": "app.focus_and_click_ui_element",
+                        "input": {"app_name": "Slack", "target": "Send"},
+                    }
+                ],
+            }
+        )
+        is False
+    )
+    assert (
+        desktop_provider_session_auto_start_recommended_for_requests(
+            {
+                "execution_strategy": {
+                    "preferred_environment": "isolated_desktop",
+                    "interaction_mode": "foreground",
+                    "approval_step_count": 1,
+                    "keyboard_mouse_step_count": 1,
+                },
+                "requests": [
+                    {
+                        "tool_name": "desktop.safe_type_text",
+                        "approval_required": True,
+                    }
+                ],
+            }
+        )
+        is False
+    )
+
+
+def test_daily_desktop_runtime_execution_envelope_uses_daily_policy_for_strategy() -> None:
+    metadata = with_daily_entrypoint_desktop_execution_policy(
+        {"launcher_mode": "bubble"},
+        surface="bubble",
+    )
+    envelope = daily_desktop_runtime_execution_envelope(
+        "在当前应用输入 hello",
+        allowed_tools=["desktop.safe_type_text"],
+        metadata=metadata,
+    )
+
+    request_policy = envelope["requests"][0]["desktop_execution_policy"]
+    assert request_policy["mode"] == "preview_input"
+    assert request_policy["prefer_isolated_desktop"] is True
+    assert envelope["execution_strategy"]["preferred_environment"] == (
+        "isolated_desktop"
+    )
+    assert envelope["execution_strategy"]["keyboard_mouse_step_count"] >= 1
+    assert (
+        envelope["execution_strategy"]["foreground_takeover_allowed"] is False
     )
 
 

@@ -318,7 +318,16 @@ def desktop_provider_session_auto_start_recommended_for_requests(
     """
 
     if isinstance(requests, Mapping):
-        candidates = [requests]
+        envelope = requests
+        if _envelope_has_approval_first_request(envelope):
+            return False
+        if _execution_strategy_recommends_provider_auto_start(envelope):
+            return True
+        nested_requests = requests.get("requests")
+        if isinstance(nested_requests, list):
+            candidates = list(nested_requests)
+        else:
+            candidates = [requests]
     else:
         try:
             candidates = list(requests or [])
@@ -341,8 +350,61 @@ def desktop_provider_session_auto_start_recommended_for_requests(
     return False
 
 
+def _execution_strategy_recommends_provider_auto_start(
+    envelope: Mapping[str, Any],
+) -> bool:
+    strategy = envelope.get("execution_strategy")
+    if not isinstance(strategy, Mapping):
+        return False
+    if _envelope_has_approval_first_request(envelope):
+        return False
+    preferred_environment = str(
+        strategy.get("preferred_environment") or ""
+    ).strip()
+    if preferred_environment != "isolated_desktop":
+        return False
+    if bool(strategy.get("approval_required")):
+        return False
+    if _positive_int(strategy.get("approval_step_count")):
+        return False
+    if _positive_int(strategy.get("handoff_step_count")):
+        return False
+    if _positive_int(strategy.get("keyboard_mouse_step_count")):
+        return True
+    if _positive_int(strategy.get("foreground_control_step_count")):
+        return True
+    if bool(strategy.get("sandbox_required")):
+        return True
+    if _positive_int(strategy.get("sandbox_recommended_step_count")):
+        return True
+    return False
+
+
+def _envelope_has_approval_first_request(envelope: Mapping[str, Any]) -> bool:
+    requests = envelope.get("requests")
+    if not isinstance(requests, list):
+        return False
+    for request in requests:
+        if not isinstance(request, Mapping):
+            continue
+        if bool(request.get("approval_required")):
+            return True
+        if _request_tool_name(request) in _APPROVAL_FIRST_KEYBOARD_MOUSE_TOOLS:
+            return True
+    return False
+
+
 def _request_tool_name(request: Mapping[str, Any]) -> str:
     return str(request.get("tool") or request.get("tool_name") or "").strip()
+
+
+def _positive_int(value: Any) -> bool:
+    if isinstance(value, bool):
+        return False
+    try:
+        return int(value or 0) > 0
+    except (TypeError, ValueError):
+        return False
 
 
 def _low_risk_creation_shortcut_request(
