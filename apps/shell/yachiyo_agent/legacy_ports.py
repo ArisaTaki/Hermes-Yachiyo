@@ -38,7 +38,7 @@ from .desktop_permissions import (
 from .desktop_execution_policy import (
     daily_entrypoint_desktop_execution_policy,
     desktop_execution_policy_payload,
-    desktop_provider_session_auto_start_default,
+    desktop_provider_session_strict_foreground_default,
     sandbox_desktop_provider_status,
 )
 from .desktop_plan_hints import hotkey_hint
@@ -3011,7 +3011,7 @@ def _strict_legacy_direct_foreground_provider_requested(
         "require_isolated_desktop_for_foreground",
     ):
         return True
-    return desktop_provider_session_auto_start_default()
+    return desktop_provider_session_strict_foreground_default(metadata)
 
 
 def _direct_tool_request_with_provider_session_policy(

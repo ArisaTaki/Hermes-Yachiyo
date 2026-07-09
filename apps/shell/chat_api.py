@@ -63,6 +63,7 @@ from apps.shell.yachiyo_agent.desktop_permissions import desktop_permission_miss
 from apps.shell.yachiyo_agent.desktop_execution_policy import (
     desktop_provider_session_auto_start_default,
     desktop_provider_session_auto_start_recommended_for_requests,
+    desktop_provider_session_strict_foreground_default,
     with_daily_entrypoint_desktop_execution_policy,
 )
 from apps.shell.yachiyo_agent.planner_execution import planner_orchestration_requests
@@ -1914,6 +1915,8 @@ class ChatAPI:
                 user_metadata,
                 surface="chat",
             )
+            if desktop_provider_session_strict_foreground_default(user_metadata):
+                user_metadata.setdefault("desktop_provider_session_strict_foreground", True)
             if desktop_provider_session_auto_start_recommended_for_requests(
                 daily_desktop_requests,
             ):

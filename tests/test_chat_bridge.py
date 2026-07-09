@@ -207,6 +207,7 @@ def test_chat_bridge_quick_message_auto_starts_configured_provider_manifest(
 
         assert result["ok"] is True
         assert captured_metadata["metadata"]["desktop_provider_session_auto_start"] is True
+        assert captured_metadata["metadata"]["desktop_provider_session_strict_foreground"] is True
     finally:
         store.close()
 

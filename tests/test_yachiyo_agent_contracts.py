@@ -119,6 +119,7 @@ from apps.shell.yachiyo_agent import (
     daily_entrypoint_desktop_execution_policy,
     desktop_provider_session_auto_start_default,
     desktop_provider_session_auto_start_recommended_for_requests,
+    desktop_provider_session_strict_foreground_default,
     desktop_action_risk_level,
     desktop_action_risk_snapshots,
     desktop_tool_execution_mode,
@@ -6072,6 +6073,69 @@ def test_desktop_provider_session_auto_start_default_uses_provider_config(
     monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_AUTO_START", "true")
 
     assert desktop_provider_session_auto_start_default() is True
+
+
+def test_desktop_provider_session_strict_foreground_default_uses_provider_readiness(
+    monkeypatch,
+) -> None:
+    for key in (
+        "OHA_YACHIYO_DESKTOP_PROVIDER_AUTO_START",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_URL",
+        "OHA_YACHIYO_SANDBOX_DESKTOP_PROVIDER_URL",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_EXECUTE_URL",
+        "OHA_YACHIYO_SANDBOX_DESKTOP_PROVIDER_EXECUTE_URL",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_START_COMMAND",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_MANIFEST",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+    assert desktop_provider_session_strict_foreground_default() is False
+    assert (
+        desktop_provider_session_strict_foreground_default(
+            {
+                "sandbox_provider": {
+                    "available": True,
+                    "adapter_ready": True,
+                    "desktop_session_isolated": True,
+                    "foreground_takeover_required": False,
+                    "keyboard_mouse_capture_supported": True,
+                    "supported_tools": ["desktop.safe_click"],
+                }
+            }
+        )
+        is True
+    )
+    assert (
+        desktop_provider_session_strict_foreground_default(
+            {
+                "allow_user_foreground_takeover": True,
+                "sandbox_provider": {
+                    "available": True,
+                    "adapter_ready": True,
+                    "desktop_session_isolated": True,
+                    "foreground_takeover_required": False,
+                    "keyboard_mouse_capture_supported": True,
+                    "supported_tools": ["desktop.safe_click"],
+                },
+            }
+        )
+        is False
+    )
+    assert (
+        desktop_provider_session_strict_foreground_default(
+            {
+                "sandbox_provider": {
+                    "available": True,
+                    "adapter_ready": True,
+                    "desktop_session_isolated": True,
+                    "foreground_takeover_required": False,
+                    "keyboard_mouse_capture_supported": False,
+                    "supported_tools": ["desktop.ui_elements"],
+                }
+            }
+        )
+        is False
+    )
 
 
 def test_desktop_provider_session_auto_start_recommended_for_input_tasks() -> None:

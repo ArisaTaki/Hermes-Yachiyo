@@ -290,6 +290,60 @@ def desktop_provider_session_auto_start_default() -> bool:
     )
 
 
+def desktop_provider_session_strict_foreground_default(
+    metadata: Mapping[str, Any] | None = None,
+) -> bool:
+    """Prefer the provider path for foreground actions when it is configured."""
+
+    if user_foreground_takeover_allowed(metadata):
+        return False
+    if _metadata_truthy(
+        metadata,
+        "desktop_provider_session_strict_foreground",
+        "desktop_provider_session_enforce_foreground",
+        "require_desktop_provider_for_foreground",
+        "require_isolated_desktop_for_foreground",
+    ):
+        return True
+    provider = sandbox_desktop_provider_status(
+        _metadata_without_desktop_provider_health_probe(metadata),
+        probe_health=False,
+    )
+    if _sandbox_provider_supports_strict_foreground(provider):
+        return True
+    return desktop_provider_session_auto_start_default()
+
+
+def _metadata_without_desktop_provider_health_probe(
+    metadata: Mapping[str, Any] | None,
+) -> dict[str, Any] | None:
+    if not isinstance(metadata, Mapping):
+        return None
+    payload = dict(metadata)
+    for key in (
+        "desktop_provider_health_probe",
+        "probe_desktop_provider_health",
+        "sandbox_provider_health_probe",
+    ):
+        payload[key] = False
+    return payload
+
+
+def _sandbox_provider_supports_strict_foreground(
+    provider: Mapping[str, Any] | None,
+) -> bool:
+    if not isinstance(provider, Mapping):
+        return False
+    if _optional_bool_value(provider.get("foreground_takeover_required")) is True:
+        return False
+    if _optional_bool_value(provider.get("keyboard_mouse_capture_supported")) is True:
+        return True
+    if _optional_bool_value(provider.get("foreground_mutation_supported")) is True:
+        return True
+    supported_tools = set(_string_list(provider.get("supported_tools")))
+    return bool(supported_tools & _USER_FOREGROUND_TAKEOVER_TOOLS)
+
+
 _LOW_RISK_CREATION_SHORTCUT_ACTIONS = frozenset(
     {"new_document", "new_note", "new_task"}
 )
