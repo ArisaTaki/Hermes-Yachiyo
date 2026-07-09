@@ -1,6 +1,7 @@
 from apps.shell.yachiyo_agent.desktop_provider_contract import (
     OHA_DESKTOP_AGENT_RELEASE_PROVIDER_TOOLS,
     virtual_desktop_provider_contract_evidence,
+    virtual_desktop_provider_manifest_contract_evidence,
     virtual_desktop_provider_manifest_template,
 )
 
@@ -134,3 +135,48 @@ def test_virtual_desktop_provider_manifest_template_matches_release_contract() -
 
     assert evidence["ok"] is True
     assert evidence["blocking_conditions"] == []
+
+    manifest_evidence = virtual_desktop_provider_manifest_contract_evidence(template)
+
+    assert manifest_evidence["ok"] is True
+    assert manifest_evidence["runtime_checked"] is False
+    assert manifest_evidence["provider_id"] == "real-provider"
+    assert manifest_evidence["status_url"] == "http://127.0.0.1:39097/status"
+    assert manifest_evidence["execute_url"] == (
+        "http://127.0.0.1:39097/tools/execute"
+    )
+    assert manifest_evidence["blocking_conditions"] == []
+
+
+def test_virtual_desktop_provider_manifest_contract_reports_static_blockers() -> None:
+    template = virtual_desktop_provider_manifest_template()
+    bad_manifest = {
+        **template,
+        "contract_version": "old",
+        "provider_id": "",
+        "provider_kind": "local_desktop",
+        "supported_tools": ["desktop.list_apps"],
+        "desktop_backend_is_loopback": True,
+        "desktop_backend_ready_for_public_release": False,
+        "requires_real_virtual_desktop_backend": True,
+    }
+
+    evidence = virtual_desktop_provider_manifest_contract_evidence(bad_manifest)
+
+    assert evidence["ok"] is False
+    assert "desktop_provider_manifest_contract_version_mismatch" in evidence[
+        "blocking_conditions"
+    ]
+    assert "desktop_provider_manifest_provider_id_missing" in evidence[
+        "blocking_conditions"
+    ]
+    assert "desktop_provider_manifest_wrong_provider_kind" in evidence[
+        "blocking_conditions"
+    ]
+    assert "desktop_provider_missing_required_tools" in evidence[
+        "blocking_conditions"
+    ]
+    assert "loopback_desktop_backend" in evidence["blocking_conditions"]
+    assert "desktop_backend_not_release_ready" in evidence["blocking_conditions"]
+    assert "real_virtual_desktop_backend_required" in evidence["blocking_conditions"]
+    assert "desktop.verify" in evidence["missing_required_tools"]

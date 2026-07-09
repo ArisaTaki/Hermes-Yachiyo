@@ -249,6 +249,8 @@ def test_oha_parity_summary_marks_missing_oha_product_smoke(tmp_path):
     assert oha_product["status"] == "missing"
     assert "DeepAgent Core" in oha_product["required_evidence"]
     assert "scripts/smoke_oha_desktop_agent_release.py" in oha_product["next_action"]
+    assert "--write-provider-manifest-template" in oha_product["next_action"]
+    assert "--validate-provider-manifest" in oha_product["next_action"]
     assert "--run-isolated-provider-smoke" in oha_product["next_action"]
     assert "oha_desktop_agent_product" in summary["incomplete_area_ids"]
 

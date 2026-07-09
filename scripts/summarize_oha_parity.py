@@ -119,7 +119,14 @@ OHA_DESKTOP_AGENT_REQUIRED_SECTIONS: tuple[str, ...] = (
 )
 OHA_DESKTOP_AGENT_NEXT_ACTION = (
     "python scripts/smoke_oha_desktop_agent_release.py "
+    "--write-provider-manifest-template "
+    "tmp/virtual-desktop-provider-manifest.template.json && "
+    "python scripts/smoke_oha_desktop_agent_release.py "
+    "--validate-provider-manifest /path/to/provider-manifest.json && "
+    "python scripts/smoke_oha_desktop_agent_release.py "
     "--run-isolated-provider-smoke "
+    "--use-configured-virtual-desktop-provider "
+    "--provider-manifest /path/to/provider-manifest.json "
     "--report-json tmp/oha-desktop-agent-release-smoke.json"
 )
 

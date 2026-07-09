@@ -421,3 +421,63 @@ def test_oha_desktop_agent_release_smoke_cli_writes_provider_manifest_template(
     captured = capsys.readouterr()
     assert "oha virtual desktop provider manifest template:" in captured.err
     assert json.loads(captured.out)["provider_id"] == "release-provider"
+
+
+def test_oha_desktop_agent_release_smoke_cli_validates_provider_manifest(
+    tmp_path,
+    capsys,
+) -> None:
+    manifest_path = tmp_path / "provider-manifest.json"
+    report_path = tmp_path / "provider-manifest-validation.json"
+
+    template = smoke.virtual_desktop_provider_manifest_template(
+        provider_id="release-provider",
+        base_url="http://127.0.0.1:39097",
+    )
+    manifest_path.write_text(
+        json.dumps(template, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    exit_code = smoke.main(
+        [
+            "--validate-provider-manifest",
+            str(manifest_path),
+            "--report-json",
+            str(report_path),
+        ]
+    )
+
+    assert exit_code == 0
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["ok"] is True
+    assert report["mode"] == "virtual_desktop_provider_manifest_validation"
+    assert report["runtime_checked"] is False
+    assert report["provider_id"] == "release-provider"
+    assert report["manifest_path"] == str(manifest_path)
+    captured = capsys.readouterr()
+    assert "oha virtual desktop provider manifest validation report:" in captured.err
+    assert json.loads(captured.out)["ok"] is True
+
+
+def test_oha_desktop_agent_release_smoke_cli_rejects_bad_provider_manifest(
+    tmp_path,
+    capsys,
+) -> None:
+    manifest_path = tmp_path / "bad-provider-manifest.json"
+    manifest_path.write_text(
+        json.dumps({"provider_kind": "local_desktop"}),
+        encoding="utf-8",
+    )
+
+    exit_code = smoke.main(["--validate-provider-manifest", str(manifest_path)])
+
+    assert exit_code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is False
+    assert "desktop_provider_manifest_provider_id_missing" in payload[
+        "blocking_conditions"
+    ]
+    assert "desktop_provider_manifest_wrong_provider_kind" in payload[
+        "blocking_conditions"
+    ]

@@ -18,6 +18,7 @@ from apps.shell.yachiyo_agent import RuntimePlanner
 from apps.shell.yachiyo_agent import daily_desktop as daily_desktop_module
 from apps.shell.yachiyo_agent.desktop_provider_contract import (
     VIRTUAL_DESKTOP_PROVIDER_TEMPLATE_BASE_URL,
+    virtual_desktop_provider_manifest_contract_evidence,
     virtual_desktop_provider_manifest_template,
 )
 from apps.shell.yachiyo_agent.daily_desktop import (
@@ -771,6 +772,32 @@ def _write_report(path: Path, payload: dict[str, Any]) -> None:
     )
 
 
+def _provider_manifest_validation_evidence(path: Path) -> dict[str, Any]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return {
+            "ok": False,
+            "mode": "virtual_desktop_provider_manifest_validation",
+            "manifest_path": str(path),
+            "runtime_checked": False,
+            "blocking_conditions": ["desktop_provider_manifest_unreadable"],
+            "error": str(exc),
+        }
+    if not isinstance(payload, dict):
+        return {
+            "ok": False,
+            "mode": "virtual_desktop_provider_manifest_validation",
+            "manifest_path": str(path),
+            "runtime_checked": False,
+            "blocking_conditions": ["desktop_provider_manifest_not_object"],
+        }
+    evidence = virtual_desktop_provider_manifest_contract_evidence(payload)
+    evidence["mode"] = "virtual_desktop_provider_manifest_validation"
+    evidence["manifest_path"] = str(path)
+    return evidence
+
+
 def _compact_stdout_summary(payload: dict[str, Any]) -> dict[str, Any]:
     sections = [
         {
@@ -854,6 +881,15 @@ def _parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--validate-provider-manifest",
+        type=Path,
+        help=(
+            "Validate a virtual desktop provider manifest statically and exit. "
+            "This checks the provider contract fields before running the real "
+            "provider smoke."
+        ),
+    )
+    parser.add_argument(
         "--write-provider-manifest-template",
         type=Path,
         help=(
@@ -890,6 +926,19 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         print(json.dumps(template, ensure_ascii=False, indent=2, sort_keys=True))
         return 0
+    if args.validate_provider_manifest is not None:
+        evidence = _provider_manifest_validation_evidence(
+            args.validate_provider_manifest,
+        )
+        if args.report_json is not None:
+            _write_report(args.report_json, evidence)
+            print(
+                "oha virtual desktop provider manifest validation report: "
+                f"{args.report_json}",
+                file=sys.stderr,
+            )
+        print(json.dumps(evidence, ensure_ascii=False, indent=2, sort_keys=True))
+        return 0 if evidence.get("ok") is True else 1
     evidence = run_smoke(
         workdir=args.workdir,
         run_isolated_provider_smoke=bool(args.run_isolated_provider_smoke),

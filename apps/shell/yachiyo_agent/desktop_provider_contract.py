@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any, Mapping, Sequence
+from urllib.parse import urlparse
 
 DESKTOP_PROVIDER_CONTRACT_VERSION = "oha-yachiyo.desktop-provider.v1"
 
@@ -37,6 +38,19 @@ _CHECK_BLOCKERS = {
     "all_tool_results_ok": "desktop_provider_tool_result_failed",
     "all_tool_results_isolated": "desktop_provider_tool_result_not_isolated",
     "tool_sequence_covers_required_tools": "desktop_provider_smoke_incomplete",
+}
+
+_MANIFEST_CHECK_BLOCKERS = {
+    "manifest_present": "desktop_provider_manifest_missing",
+    "contract_version_current": "desktop_provider_manifest_contract_version_mismatch",
+    "provider_id_present": "desktop_provider_manifest_provider_id_missing",
+    "provider_kind_sandbox_desktop": "desktop_provider_manifest_wrong_provider_kind",
+    "runtime_endpoint_or_entrypoint_configured": (
+        "desktop_provider_manifest_endpoint_or_entrypoint_missing"
+    ),
+    "status_endpoint_configured": "desktop_provider_manifest_status_endpoint_missing",
+    "execute_endpoint_configured": "desktop_provider_manifest_execute_endpoint_missing",
+    "release_contract_fields_ready": "virtual_desktop_provider_contract_not_ready",
 }
 
 
@@ -117,6 +131,12 @@ def virtual_desktop_provider_manifest_template(
             "--report-json",
             "tmp/oha-desktop-agent-release-smoke.json",
         ],
+        "validate_command": [
+            "python",
+            "scripts/smoke_oha_desktop_agent_release.py",
+            "--validate-provider-manifest",
+            "/absolute/path/to/provider-manifest.json",
+        ],
         "safety": {
             "loopback_default": False,
             "remote_default_allowed": False,
@@ -136,6 +156,84 @@ def virtual_desktop_provider_manifest_template(
                 "desktop.safe_type_text",
             ],
         },
+    }
+
+
+def virtual_desktop_provider_manifest_contract_evidence(
+    manifest: Mapping[str, Any] | None,
+    *,
+    required_tools: Sequence[str] | None = None,
+) -> dict[str, Any]:
+    """Return static release-readiness evidence for a provider manifest."""
+
+    manifest_payload = dict(manifest or {})
+    required = _string_list(required_tools) or list(
+        OHA_DESKTOP_AGENT_RELEASE_PROVIDER_TOOLS
+    )
+    provider_kind = str(
+        manifest_payload.get("provider_kind") or "sandbox_desktop"
+    ).strip()
+    status_url = _manifest_endpoint_url(manifest_payload, "status")
+    execute_url = _manifest_endpoint_url(manifest_payload, "execute")
+    has_entrypoint = _manifest_entrypoint_configured(manifest_payload)
+    contract_status = {
+        **_manifest_release_status_payload(manifest_payload),
+        "configured": bool(manifest_payload),
+        "available": True,
+        "adapter_ready": True,
+    }
+    release_contract = virtual_desktop_provider_contract_evidence(
+        contract_status,
+        required_tools=required,
+    )
+    checks = {
+        "manifest_present": bool(manifest_payload),
+        "contract_version_current": (
+            str(
+                manifest_payload.get("contract_version")
+                or manifest_payload.get("version")
+                or ""
+            ).strip()
+            == DESKTOP_PROVIDER_CONTRACT_VERSION
+        ),
+        "provider_id_present": bool(
+            str(manifest_payload.get("provider_id") or "").strip()
+        ),
+        "provider_kind_sandbox_desktop": (
+            provider_kind.lower().replace("-", "_") == "sandbox_desktop"
+        ),
+        "runtime_endpoint_or_entrypoint_configured": bool(
+            status_url or execute_url or has_entrypoint
+        ),
+        "status_endpoint_configured": bool(status_url or has_entrypoint),
+        "execute_endpoint_configured": bool(execute_url or has_entrypoint),
+        "release_contract_fields_ready": release_contract.get("ok") is True,
+    }
+    manifest_blockers = [
+        _MANIFEST_CHECK_BLOCKERS[key]
+        for key, passed in checks.items()
+        if not passed and key in _MANIFEST_CHECK_BLOCKERS
+    ]
+    return {
+        "ok": all(checks.values()),
+        "contract_version": DESKTOP_PROVIDER_CONTRACT_VERSION,
+        "runtime_checked": False,
+        "checks": checks,
+        "blocking_conditions": _unique_strings(
+            [
+                *manifest_blockers,
+                *release_contract.get("blocking_conditions", []),
+            ]
+        ),
+        "manifest_blocking_conditions": manifest_blockers,
+        "release_contract": release_contract,
+        "missing_required_tools": release_contract.get("missing_required_tools", []),
+        "required_tools": required,
+        "provider_id": str(manifest_payload.get("provider_id") or "").strip(),
+        "provider_kind": provider_kind,
+        "status_url": status_url,
+        "execute_url": execute_url,
+        "entrypoint_configured": has_entrypoint,
     }
 
 
@@ -296,3 +394,106 @@ def _join_url(base_url: str, path: str) -> str:
     clean_base = str(base_url or "").rstrip("/")
     clean_path = "/" + str(path or "").lstrip("/")
     return f"{clean_base}{clean_path}" if clean_base else clean_path
+
+
+def _mapping(value: Any) -> Mapping[str, Any]:
+    return value if isinstance(value, Mapping) else {}
+
+
+def _manifest_release_status_payload(manifest: Mapping[str, Any]) -> dict[str, Any]:
+    safety = _mapping(manifest.get("safety"))
+    payload: dict[str, Any] = {}
+    for key in (
+        "supported_tools",
+        "desktop_session_kind",
+        "desktop_session_isolated",
+        "foreground_takeover_required",
+        "keyboard_mouse_capture_supported",
+        "desktop_backend_kind",
+        "desktop_backend_is_loopback",
+        "desktop_backend_ready_for_public_release",
+        "requires_real_virtual_desktop_backend",
+    ):
+        payload[key] = manifest.get(key) if key in manifest else safety.get(key)
+    return payload
+
+
+def _manifest_endpoint_url(manifest: Mapping[str, Any], purpose: str) -> str:
+    base_url = _manifest_base_url(manifest)
+    endpoint_urls = _mapping(manifest.get("endpoint_urls"))
+    endpoints = _mapping(manifest.get("endpoints"))
+    if purpose == "execute":
+        candidates = (
+            "execute",
+            "tools_execute",
+            "tools.execute",
+            "tools/execute",
+            "execute_url",
+        )
+        default_path = "/tools/execute"
+    else:
+        candidates = ("status", "health", "status_url")
+        default_path = "/status"
+    raw = _first_mapping_value(endpoint_urls, *candidates) or _first_mapping_value(
+        endpoints,
+        *candidates,
+    )
+    if raw:
+        value = str(raw or "").strip()
+        if value.startswith(("http://", "https://")):
+            return value
+        return _join_url(base_url, value) if base_url else value
+    return _join_url(base_url, default_path) if base_url else ""
+
+
+def _manifest_base_url(manifest: Mapping[str, Any]) -> str:
+    endpoint_urls = _mapping(manifest.get("endpoint_urls"))
+    direct = _first_mapping_value(manifest, "url", "endpoint_origin", "base_url")
+    nested = _first_mapping_value(endpoint_urls, "url", "base_url", "base", "origin")
+    if direct or nested:
+        return str(direct or nested or "").strip().rstrip("/")
+    for key in ("execute", "status", "health", "execute_url", "status_url"):
+        origin = _url_origin(str(endpoint_urls.get(key) or ""))
+        if origin:
+            return origin
+    return ""
+
+
+def _manifest_entrypoint_configured(manifest: Mapping[str, Any]) -> bool:
+    entrypoint = _mapping(manifest.get("entrypoint"))
+    command = entrypoint.get("command") or entrypoint.get("argv")
+    if isinstance(command, str) and command.strip():
+        return True
+    if isinstance(command, Sequence) and not isinstance(command, (str, bytes, bytearray)):
+        return any(str(item or "").strip() for item in command)
+    return bool(
+        str(entrypoint.get("script") or "").strip()
+        or str(entrypoint.get("module") or "").strip()
+    )
+
+
+def _first_mapping_value(mapping: Mapping[str, Any], *keys: str) -> Any:
+    for key in keys:
+        value = mapping.get(key)
+        if value not in (None, "", [], {}):
+            return value
+    return None
+
+
+def _url_origin(value: str) -> str:
+    parsed = urlparse(str(value or ""))
+    if parsed.scheme and parsed.netloc:
+        return f"{parsed.scheme}://{parsed.netloc}"
+    return ""
+
+
+def _unique_strings(values: Sequence[Any]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        item = str(value or "").strip()
+        if not item or item in seen:
+            continue
+        result.append(item)
+        seen.add(item)
+    return result

@@ -105,6 +105,11 @@ SMOKE_ITEMS: tuple[dict[str, Any], ...] = (
         ),
         "next_action": (
             "python scripts/smoke_oha_desktop_agent_release.py "
+            "--write-provider-manifest-template "
+            "tmp/virtual-desktop-provider-manifest.template.json && "
+            "python scripts/smoke_oha_desktop_agent_release.py "
+            "--validate-provider-manifest /path/to/provider-manifest.json && "
+            "python scripts/smoke_oha_desktop_agent_release.py "
             "--run-isolated-provider-smoke "
             "--use-configured-virtual-desktop-provider "
             "--provider-manifest /path/to/provider-manifest.json "

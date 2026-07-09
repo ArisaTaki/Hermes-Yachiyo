@@ -331,6 +331,8 @@ def test_release_smoke_summary_requires_isolated_desktop_provider_section(
     )
     assert "--run-isolated-provider-smoke" in action["command"]
     assert "--use-configured-virtual-desktop-provider" in action["command"]
+    assert "--write-provider-manifest-template" in action["command"]
+    assert "--validate-provider-manifest" in action["command"]
 
 
 def test_release_smoke_summary_requires_real_virtual_desktop_backend(
