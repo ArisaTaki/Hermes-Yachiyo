@@ -129,6 +129,107 @@ def test_chat_bridge_quick_candidates_use_execution_context() -> None:
     assert requests[3]["runtime_stage"] == "verify"
 
 
+def test_chat_bridge_quick_message_executes_polite_app_launch_direct_chain(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _runtime_with_chat_store(store)
+    runtime.agent_runtime_service = object()
+    bridge = ChatBridge(runtime)
+    captured: dict[str, Any] = {}
+    monkeypatch.setattr(chat_bridge_mod, "_QUICK_DESKTOP_SNAPSHOT_ATTEMPTS", 1)
+    monkeypatch.setattr(chat_bridge_mod, "_QUICK_DESKTOP_SNAPSHOT_DELAY_SECONDS", 0)
+
+    class FakeStarter:
+        def __init__(self, app_runtime, service):
+            captured["app_runtime"] = app_runtime
+            captured["service"] = service
+
+        def execute_existing_main_chat_task(
+            self,
+            *,
+            task_id,
+            conversation_id,
+            prompt,
+            metadata=None,
+            runtime_execution_envelope=None,
+            direct_tool_requests=None,
+        ):
+            captured["task_id"] = task_id
+            captured["conversation_id"] = conversation_id
+            captured["prompt"] = prompt
+            captured["metadata"] = metadata
+            captured["runtime_execution_envelope"] = runtime_execution_envelope
+            captured["direct_tool_requests"] = direct_tool_requests
+            return {
+                "task_id": task_id,
+                "conversation_id": conversation_id,
+                "status": "completed",
+                "summary": "done",
+                "timeline": [],
+            }
+
+    monkeypatch.setattr(
+        "apps.shell.yachiyo_agent.legacy_ports.LegacyChatTaskStarter",
+        FakeStarter,
+    )
+    bridge._chat_api = SimpleNamespace(
+        send_message=lambda text, **_kwargs: {
+            "ok": True,
+            "message_id": "message-politeness-open",
+            "task_id": "task-politeness-open",
+            "status": "pending",
+            "echo": text,
+        }
+    )
+
+    try:
+        result = bridge.send_quick_message(
+            "帮我开一下 PixelForge",
+            metadata={
+                "source": "launcher",
+                "launcher_mode": "bubble",
+                "launcher_surface": "quick_message",
+            },
+        )
+
+        direct_requests = captured["direct_tool_requests"]
+        envelope = captured["runtime_execution_envelope"]
+        assert result["ok"] is True
+        assert result["agent_task"]["status"] == "completed"
+        assert captured["prompt"] == "帮我开一下 PixelForge"
+        assert captured["metadata"]["desktop_provider_session_auto_start"] is True
+        assert [request["tool"] for request in direct_requests] == [
+            "desktop.list_apps",
+            "app.open",
+            "desktop.verify",
+        ]
+        assert direct_requests[0]["input"] == {"query": "PixelForge", "limit": 20}
+        assert direct_requests[1]["input"] == {
+            "app_name": "PixelForge",
+            "selection_source": "desktop.list_apps",
+            "query": "PixelForge",
+        }
+        assert direct_requests[2]["input"] == {
+            "app_name": "PixelForge",
+            "selection_source": "desktop.list_apps",
+            "query": "PixelForge",
+        }
+        assert [request["tool_name"] for request in envelope["requests"]] == [
+            "desktop.list_apps",
+            "app.open",
+            "desktop.verify",
+        ]
+        assert [request["runtime_stage"] for request in envelope["requests"]] == [
+            "discover",
+            "operate",
+            "verify",
+        ]
+    finally:
+        store.close()
+
+
 def test_chat_bridge_quick_message_adds_daily_desktop_execution_policy(
     tmp_path,
     monkeypatch,
