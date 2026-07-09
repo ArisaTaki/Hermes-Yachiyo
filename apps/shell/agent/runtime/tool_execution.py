@@ -2301,6 +2301,8 @@ def _tool_request_with_foreground_app_context(
 ) -> dict[str, Any]:
     if not target:
         return tool_request
+    if str(tool_request.get("foreground_app_context") or "").strip() == "current_app":
+        return tool_request
     tool_name = str(tool_request.get("tool") or "").strip()
     if tool_name not in _FOREGROUND_APP_CONTEXT_TOOLS:
         return tool_request

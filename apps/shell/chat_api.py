@@ -665,10 +665,57 @@ def _direct_input_entrypoint_requests(
     requests: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     executable = daily_desktop_executable_entrypoint_requests(requests)
+    if len(executable) == 2:
+        first_tool = str(executable[0].get("tool") or "").strip()
+        second_tool = str(executable[1].get("tool") or "").strip()
+        if first_tool in {"desktop.list_apps", "desktop.running_apps"} and second_tool == "desktop.inspect_app":
+            return _direct_app_ui_read_entrypoint_requests(executable[1])
     if len(executable) != 1:
         return []
-    tool_name = str(executable[0].get("tool") or "").strip()
-    return executable if tool_name in {"desktop.safe_type_text"} else []
+    request = executable[0]
+    tool_name = str(request.get("tool") or "").strip()
+    if tool_name in {"desktop.safe_type_text"}:
+        return executable
+    return _direct_app_ui_read_entrypoint_requests(request)
+
+
+def _direct_app_ui_read_entrypoint_requests(
+    request: dict[str, Any],
+) -> list[dict[str, Any]]:
+    if str(request.get("tool") or "").strip() != "desktop.inspect_app":
+        return []
+    if bool(request.get("approval_required")) or bool(request.get("requires_approval")):
+        return []
+    risk_level = str(request.get("risk_level") or "").strip().lower()
+    if risk_level in {"high", "critical"}:
+        return []
+    payload = request.get("input") if isinstance(request.get("input"), dict) else {}
+    app_name = str(payload.get("app_name") or "").strip()
+    if not app_name:
+        return []
+    role_filter = str(payload.get("role_filter") or "").strip()
+    limit = payload.get("limit", 80)
+    base = {
+        "protocol": str(request.get("protocol") or "json_fallback").strip() or "json_fallback",
+        "source": str(request.get("source") or "runtime_planner").strip() or "runtime_planner",
+        "planning_reason": "explicit_full_plan",
+    }
+    ui_input: dict[str, Any] = {"limit": limit}
+    if role_filter:
+        ui_input["role_filter"] = role_filter
+    return [
+        {
+            **base,
+            "tool": "app.focus",
+            "input": {"app_name": app_name},
+        },
+        {
+            **base,
+            "tool": "desktop.ui_elements",
+            "input": ui_input,
+            "foreground_app_context": "current_app",
+        },
+    ]
 
 
 class ChatAPI:
