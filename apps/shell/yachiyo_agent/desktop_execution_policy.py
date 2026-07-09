@@ -397,6 +397,8 @@ def desktop_provider_session_auto_start_recommended_for_requests(
             continue
         if tool_name in _APPROVAL_FIRST_KEYBOARD_MOUSE_TOOLS:
             continue
+        if _request_policy_recommends_provider_auto_start(request, tool_name):
+            return True
         if _low_risk_creation_shortcut_request(tool_name, request):
             return True
         if tool_name in _USER_FOREGROUND_TAKEOVER_TOOLS:
@@ -478,6 +480,43 @@ def _low_risk_creation_shortcut_request(
         return False
     action = str(payload.get("action") or "").strip()
     return action in _LOW_RISK_CREATION_SHORTCUT_ACTIONS
+
+
+def _request_policy_recommends_provider_auto_start(
+    request: Mapping[str, Any],
+    tool_name: str,
+) -> bool:
+    if not _desktop_provider_session_candidate_tool(tool_name):
+        return False
+    if is_readonly_desktop_provider_tool(tool_name):
+        return False
+    policy = desktop_execution_policy_payload(request.get("desktop_execution_policy"))
+    if not policy:
+        policy = desktop_execution_policy_payload(
+            request.get("yachiyo_desktop_execution_policy")
+        )
+    if not policy:
+        return False
+    if policy.get("allow_live_foreground") is True:
+        return False
+    return any(
+        bool(policy.get(key))
+        for key in (
+            "prefer_isolated_desktop",
+            "avoid_user_foreground_takeover",
+            "require_sandbox_for_keyboard_mouse",
+        )
+    )
+
+
+def _desktop_provider_session_candidate_tool(tool_name: str) -> bool:
+    clean_tool = str(tool_name or "").strip()
+    return (
+        clean_tool in _USER_FOREGROUND_TAKEOVER_TOOLS
+        or clean_tool.startswith("app.")
+        or clean_tool.startswith("desktop.")
+        or clean_tool.startswith("media.")
+    )
 
 
 def agent_studio_desktop_execution_policy() -> dict[str, Any]:

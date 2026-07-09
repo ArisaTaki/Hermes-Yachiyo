@@ -22,6 +22,9 @@ from apps.shell.yachiyo_agent.desktop_provider_contract import (
     virtual_desktop_provider_manifest_contract_evidence,
     virtual_desktop_provider_manifest_template,
 )
+from apps.shell.yachiyo_agent.desktop_execution_policy import (
+    desktop_provider_session_auto_start_recommended_for_requests,
+)
 from apps.shell.yachiyo_agent.daily_desktop import (
     daily_desktop_direct_metadata_request,
     daily_desktop_allowed_tools,
@@ -174,6 +177,13 @@ def _shared_surface_case() -> dict[str, Any]:
         and direct_policy.get("prefer_isolated_desktop") is True
         and direct_policy.get("avoid_user_foreground_takeover") is True
         and direct_policy.get("require_sandbox_for_keyboard_mouse") is True
+    )
+    checks["direct_recovery_recommends_provider_session"] = (
+        bool(direct_recovery_request)
+        and desktop_provider_session_auto_start_recommended_for_requests(
+            [direct_recovery_request]
+        )
+        is True
     )
     return {
         "id": "chat_bubble_live2d_shared_runtime",

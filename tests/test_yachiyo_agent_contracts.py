@@ -6033,6 +6033,10 @@ def test_daily_entrypoint_desktop_execution_policy_defaults_to_input_preview() -
     assert policy["prefer_isolated_desktop"] is True
     assert policy["avoid_user_foreground_takeover"] is True
     assert policy["require_sandbox_for_keyboard_mouse"] is True
+    assert (
+        desktop_provider_session_auto_start_recommended_for_requests([request])
+        is True
+    )
     assert policy["allow_media_control"] is True
     assert metadata["desktop_execution_policy"]["mode"] == "preview_input"
     assert metadata["desktop_execution_policy"]["source"] == "daily_bubble"
@@ -6210,6 +6214,38 @@ def test_desktop_provider_session_auto_start_recommended_for_input_tasks() -> No
             [{"tool": "media.music_app_open_and_play", "input": {"app_name": "Music"}}],
         )
         is True
+    )
+    assert (
+        desktop_provider_session_auto_start_recommended_for_requests(
+            [
+                {
+                    "tool": "desktop.open_path",
+                    "input": {"path": "/tmp/report.pdf"},
+                    "desktop_execution_policy": {
+                        "mode": "preview_input",
+                        "prefer_isolated_desktop": True,
+                        "avoid_user_foreground_takeover": True,
+                        "require_sandbox_for_keyboard_mouse": True,
+                    },
+                }
+            ],
+        )
+        is True
+    )
+    assert (
+        desktop_provider_session_auto_start_recommended_for_requests(
+            [
+                {
+                    "tool": "desktop.open_path",
+                    "input": {"path": "/tmp/report.pdf"},
+                    "desktop_execution_policy": {
+                        "mode": "allow",
+                        "allow_live_foreground": True,
+                    },
+                }
+            ],
+        )
+        is False
     )
     assert (
         desktop_provider_session_auto_start_recommended_for_requests(
