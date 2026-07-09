@@ -3300,6 +3300,11 @@ class RuntimeToolRequestRunner:
                     {**tool_request, "tool": tool_name},
                     runtime_skip,
                 )
+                if (
+                    _runtime_replan_payload_reports_recovery_failure(replan_payload)
+                    and not auto_recovery_enqueued
+                ):
+                    break
                 if _tool_result_requests_user_recovery(runtime_skip) and not auto_recovery_enqueued:
                     break
                 continue
@@ -3344,7 +3349,7 @@ class RuntimeToolRequestRunner:
                     timeline=timeline,
                     run_id=run_id,
                 )
-                self._enqueue_runtime_replan_recovery_requests(
+                auto_recovery_enqueued = self._enqueue_runtime_replan_recovery_requests(
                     replan_payload,
                     source_tool_name=tool_name,
                     tool_requests=tool_requests,
@@ -3359,6 +3364,11 @@ class RuntimeToolRequestRunner:
                     {**tool_request, "tool": tool_name},
                     tool_result,
                 )
+                if (
+                    _runtime_replan_payload_reports_recovery_failure(replan_payload)
+                    and not auto_recovery_enqueued
+                ):
+                    break
                 continue
             self._append_tool_start_progress(
                 tool_request,
@@ -3478,6 +3488,11 @@ class RuntimeToolRequestRunner:
                 timeline=timeline,
                 run_id=run_id,
             )
+            if (
+                _runtime_replan_payload_reports_recovery_failure(replan_payload)
+                and not auto_recovery_enqueued
+            ):
+                break
             if _tool_result_failed_verification(tool_result) and not auto_recovery_enqueued:
                 break
             if _tool_result_requests_user_recovery(tool_result) and not auto_recovery_enqueued:
@@ -3780,6 +3795,19 @@ def _runtime_replan_auto_recovery_action_requests(
         existing_signatures.add(signature)
         requests.append(request)
     return _dedupe_runtime_replan_recovery_requests(requests)
+
+
+def _runtime_replan_payload_reports_recovery_failure(
+    replan_payload: Mapping[str, Any] | None,
+) -> bool:
+    if not isinstance(replan_payload, Mapping):
+        return False
+    metadata = (
+        replan_payload.get("metadata")
+        if isinstance(replan_payload.get("metadata"), Mapping)
+        else {}
+    )
+    return bool(metadata.get("replan_recovery_failed") is True)
 
 
 def _runtime_replan_payload_recovery_actions(

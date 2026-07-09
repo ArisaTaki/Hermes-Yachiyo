@@ -4851,6 +4851,68 @@ def test_runtime_tool_request_runner_replans_failed_recovery_with_parent_context
     assert run_replan_event[2]["metadata"]["parent_replan_request_id"] == "replan-parent-1"
 
 
+def test_runtime_tool_request_runner_stops_after_failed_nonfatal_replan_recovery() -> None:
+    timeline: list[dict[str, Any]] = []
+    run_events: list[tuple[str, str, dict[str, Any]]] = []
+    calls: list[str] = []
+
+    def call_agent_tool(
+        tool_request: dict[str, Any],
+        *_args: Any,
+        **_kwargs: Any,
+    ) -> dict[str, Any]:
+        calls.append(str(tool_request.get("tool") or ""))
+        if tool_request["tool"] == "app.open":
+            return {
+                "ok": False,
+                "error": "app not found",
+                "status": "failed",
+            }
+        return {"ok": True, "content": "should not run"}
+
+    runner = _runner(call_agent_tool=call_agent_tool, run_events=run_events)
+    recovery_request = {
+        "tool": "app.open",
+        "input": {"app_name": "PixelForge"},
+        "source": "agent_studio_replan_recovery",
+        "step_id": "open-pixelforge",
+        "task_id": "task-1",
+        "replan_request_id": "replan-parent-1",
+        "replan_recovery_action_id": "replan-parent-1:action:1:app.open",
+        "replan_trigger": "verification_failed",
+        "replan_triggers": ["verification_failed"],
+        "recovery_action_label": "Open target app",
+        "source_step_id": "verify-pixelforge",
+        "source_tool_name": "desktop.verify",
+        "target_capability_id": "desktop.app",
+    }
+
+    runner.run(
+        [
+            recovery_request,
+            {"tool": "workspace.read", "input": {"path": "README.md"}},
+        ],
+        ["app.open", "workspace.read"],
+        FakeBroker({"ok": True}),
+        [{"role": "user", "content": "Recover PixelForge launch"}],
+        timeline,
+        [],
+        next_iteration=1,
+        run_id="run-recovery-failed",
+        budget=FakeBudget(),
+    )
+
+    assert calls == ["app.open"]
+    replan_event = next(event for event in timeline if event["event"] == "agent.replan.requested")
+    payload = replan_event["payload"]
+    assert payload["trigger"] == "verification_failed"
+    assert payload["source_tool_name"] == "app.open"
+    assert payload["metadata"]["replan_recovery_failed"] is True
+    assert payload["metadata"]["parent_replan_request_id"] == "replan-parent-1"
+    assert payload["metadata"]["failed_recovery_tool"] == "app.open"
+    assert any(event_type == "agent.replan.requested" for _run_id, event_type, _payload in run_events)
+
+
 def test_runtime_tool_request_runner_clears_app_not_found_blocker_after_discovery() -> None:
     calls: list[str] = []
     run_events: list[tuple[str, str, dict[str, Any]]] = []
