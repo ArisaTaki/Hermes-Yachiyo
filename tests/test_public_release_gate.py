@@ -992,6 +992,19 @@ def test_public_release_gate_forwards_provider_manifest_to_oha_smoke(tmp_path):
     ] == str(provider_manifest)
 
 
+def test_public_release_gate_can_reuse_public_demo_evidence(tmp_path):
+    checks = gate.public_release_gate_checks(
+        tmp_dir=tmp_path / "gate",
+        include_public_demo=True,
+        reuse_public_demo_evidence=True,
+    )
+
+    public_demo_command = next(
+        check.command for check in checks if check.id == "public_demo"
+    )
+    assert "--reuse-existing-evidence" in public_demo_command
+
+
 def test_public_release_gate_classifies_isolated_provider_loopback_failure(
     tmp_path,
     monkeypatch,

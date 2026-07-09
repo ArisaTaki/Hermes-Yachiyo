@@ -206,6 +206,77 @@ def test_public_demo_smokes_default_runs_source_flows_only(tmp_path, monkeypatch
     assert diagnostic["release_required"] is False
 
 
+def test_public_demo_smokes_can_reuse_existing_ui_evidence(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(demo, "ROOT", tmp_path)
+    evidence_dir = tmp_path / "tmp" / "demo"
+    evidence_dir.mkdir(parents=True)
+    (evidence_dir / "studio-replay-ui.json").write_text(
+        json.dumps(
+            {
+                "ok": True,
+                "mode": "agent_run_detail_ui_smoke",
+                "stage": "completed",
+                "checks": {"electron_smoke_completed": True},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (evidence_dir / "workflow-ui.json").write_text(
+        json.dumps(
+            {
+                "ok": True,
+                "mode": "workflow_save_run_ui_smoke",
+                "stage": "completed",
+                "checks": {"bridge_contract_verified": True},
+            }
+        ),
+        encoding="utf-8",
+    )
+    commands: list[list[str]] = []
+
+    def fake_run(command):
+        command = list(command)
+        commands.append(command)
+        if "--report-json" in command:
+            report = tmp_path / command[command.index("--report-json") + 1]
+            if not report.is_absolute():
+                report = tmp_path / report
+            report.parent.mkdir(parents=True, exist_ok=True)
+            report.write_text(
+                json.dumps({"ok": True, "mode": report.stem}),
+                encoding="utf-8",
+            )
+        return _fake_completed(command)
+
+    monkeypatch.setattr(demo, "_run_command", fake_run)
+
+    summary = demo.run_public_demo_smokes(
+        tmp_dir="tmp/demo",
+        reuse_existing_evidence=True,
+    )
+
+    studio = next(flow for flow in summary["flows"] if flow["id"] == "studio_replay_ui")
+    workflow = next(flow for flow in summary["flows"] if flow["id"] == "workflow_ui")
+    assert summary["complete"] is True
+    assert summary["release_level"] == "full_public_demo_ready"
+    assert summary["passed_required_flow_count"] == 16
+    assert summary["reused_evidence_count"] == 2
+    assert studio["selected"] is False
+    assert workflow["selected"] is False
+    assert studio["status"] == "passed"
+    assert workflow["status"] == "passed"
+    assert studio["evidence_reused"] is True
+    assert workflow["evidence_reused"] is True
+    assert studio["evidence_mode"] == "agent_run_detail_ui_smoke"
+    assert workflow["evidence_mode"] == "workflow_save_run_ui_smoke"
+    assert "studio_replay_ui" not in summary["missing_required_flow_ids"]
+    assert "workflow_ui" not in summary["missing_required_flow_ids"]
+    assert len(commands) == 14
+
+
 def test_public_demo_smokes_plan_only_does_not_run_commands(tmp_path, monkeypatch):
     monkeypatch.setattr(demo, "ROOT", tmp_path)
 

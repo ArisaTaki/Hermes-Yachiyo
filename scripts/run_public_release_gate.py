@@ -43,6 +43,7 @@ def public_release_gate_checks(
     allow_existing_real_desktop_app: bool = False,
     include_provider_workflow: bool = False,
     include_ui: bool = False,
+    reuse_public_demo_evidence: bool = False,
 ) -> list[GateCheck]:
     oha_release_smoke_command = [
         sys.executable,
@@ -146,6 +147,8 @@ def public_release_gate_checks(
             command.append("--include-provider-workflow")
         if include_ui:
             command.append("--include-ui")
+        if reuse_public_demo_evidence:
+            command.append("--reuse-existing-evidence")
         checks.append(
             GateCheck(
                 id="public_demo",
@@ -175,6 +178,7 @@ def run_public_release_gate(
     allow_existing_real_desktop_app: bool = False,
     include_provider_workflow: bool = False,
     include_ui: bool = False,
+    reuse_public_demo_evidence: bool = False,
     require_release_ready: bool = False,
     plan_only: bool = False,
 ) -> dict[str, Any]:
@@ -202,6 +206,7 @@ def run_public_release_gate(
         allow_existing_real_desktop_app=allow_existing_real_desktop_app,
         include_provider_workflow=include_provider_workflow,
         include_ui=include_ui,
+        reuse_public_demo_evidence=reuse_public_demo_evidence,
     )
     check_results = [
         _check_result(check, plan_only=plan_only)
@@ -1709,6 +1714,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--allow-existing-real-desktop-app", action="store_true")
     parser.add_argument("--include-provider-workflow", action="store_true")
     parser.add_argument("--include-ui", action="store_true")
+    parser.add_argument("--reuse-public-demo-evidence", action="store_true")
     parser.add_argument("--require-release-ready", action="store_true")
     parser.add_argument("--plan-only", action="store_true")
     parser.add_argument("--output-json", type=Path)
@@ -1732,6 +1738,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         allow_existing_real_desktop_app=bool(args.allow_existing_real_desktop_app),
         include_provider_workflow=bool(args.include_provider_workflow),
         include_ui=bool(args.include_ui),
+        reuse_public_demo_evidence=bool(args.reuse_public_demo_evidence),
         require_release_ready=bool(args.require_release_ready),
         plan_only=bool(args.plan_only),
     )

@@ -342,6 +342,7 @@ def run_public_demo_smokes(
     allow_existing_real_desktop_app: bool = False,
     include_provider_workflow: bool = False,
     include_ui: bool = False,
+    reuse_existing_evidence: bool = False,
     plan_only: bool = False,
 ) -> dict[str, Any]:
     resolved_tmp_dir = _resolve_path(Path(tmp_dir))
@@ -366,11 +367,13 @@ def run_public_demo_smokes(
         _flow_result(
             flow,
             selected=_flow_selected(flow, selected_flags),
+            reuse_existing_evidence=bool(reuse_existing_evidence),
             plan_only=plan_only,
         )
         for flow in flows
     ]
     selected = [flow for flow in flow_results if flow.get("selected") is True]
+    reused = [flow for flow in flow_results if flow.get("evidence_reused") is True]
     skipped = [flow for flow in flow_results if flow.get("status") == "skipped"]
     failed = [flow for flow in selected if flow.get("status") == "failed"]
     passed = [flow for flow in selected if flow.get("status") == "passed"]
@@ -399,10 +402,12 @@ def run_public_demo_smokes(
         "status": status,
         **assessment,
         "plan_only": plan_only,
+        "reuse_existing_evidence": bool(reuse_existing_evidence),
         "generated_at": started_at,
         "tmp_dir": _display_path(resolved_tmp_dir),
         "flow_count": len(flow_results),
         "selected_count": len(selected),
+        "reused_evidence_count": len(reused),
         "passed_count": len(passed),
         "failed_count": len(failed),
         "skipped_count": len(skipped),
@@ -415,6 +420,7 @@ def _flow_result(
     flow: DemoFlow,
     *,
     selected: bool,
+    reuse_existing_evidence: bool,
     plan_only: bool,
 ) -> dict[str, Any]:
     command = list(flow.command)
@@ -431,6 +437,18 @@ def _flow_result(
         "diagnostic_reason": flow.diagnostic_reason,
     }
     if not selected:
+        if reuse_existing_evidence and not plan_only:
+            evidence = _load_evidence(flow.report_json) if flow.report_json else {}
+            if evidence.get("ok") is True:
+                return {
+                    **base,
+                    "status": "passed",
+                    "evidence_reused": True,
+                    "evidence_ok": True,
+                    "evidence_mode": str(evidence.get("mode") or ""),
+                    "evidence_reason": str(evidence.get("reason") or ""),
+                    "evidence_summary": _evidence_summary(evidence),
+                }
         return {**base, "status": "skipped"}
     if plan_only:
         return {**base, "status": "planned"}
@@ -450,6 +468,7 @@ def _flow_result(
     return {
         **base,
         "status": status,
+        "evidence_reused": False,
         "returncode": result.returncode,
         "evidence_ok": evidence_ok,
         "evidence_skipped": evidence_skipped,
@@ -934,6 +953,8 @@ def render_markdown(summary: Mapping[str, Any]) -> str:
     for flow in _dict_list(summary.get("flows")):
         marker = "x" if flow.get("status") == "passed" else " "
         lines.append(f"- [{marker}] `{flow.get('id')}` - {flow.get('status')} - {flow.get('label')}")
+        if flow.get("evidence_reused") is True:
+            lines.append("  Evidence: reused existing report")
         reason = str(flow.get("opt_in_reason") or "")
         if flow.get("status") == "skipped" and reason:
             lines.append(f"  Opt-in: `{flow.get('opt_in_flag')}` ({reason})")
@@ -1039,6 +1060,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--allow-existing-real-desktop-app", action="store_true")
     parser.add_argument("--include-provider-workflow", action="store_true")
     parser.add_argument("--include-ui", action="store_true")
+    parser.add_argument("--reuse-existing-evidence", action="store_true")
     parser.add_argument("--plan-only", action="store_true")
     parser.add_argument("--output-json", type=Path)
     parser.add_argument("--output-markdown", type=Path)
@@ -1053,6 +1075,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         allow_existing_real_desktop_app=bool(args.allow_existing_real_desktop_app),
         include_provider_workflow=bool(args.include_provider_workflow),
         include_ui=bool(args.include_ui),
+        reuse_existing_evidence=bool(args.reuse_existing_evidence),
         plan_only=bool(args.plan_only),
     )
     if args.output_json is not None:
