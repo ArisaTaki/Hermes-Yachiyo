@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from typing import Any, get_args
 
 import pytest
@@ -7618,6 +7619,89 @@ def test_controlled_provider_diagnostics_marks_configured_keyboard_provider_read
     assert diagnostics.blocking_conditions == []
     assert diagnostics.endpoint_origin == "http://127.0.0.1:19092"
     assert "desktop.safe_type_text" in diagnostics.supported_tools
+
+
+def test_controlled_provider_diagnostics_reads_provider_manifest_before_start(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    for key in list(os.environ):
+        if key.startswith(
+            (
+                "OHA_YACHIYO_DESKTOP_PROVIDER_",
+                "OHA_YACHIYO_SANDBOX_DESKTOP_PROVIDER_",
+            )
+        ):
+            monkeypatch.delenv(key, raising=False)
+    for key in isolated_session_module._ENV_KEYS:
+        monkeypatch.delenv(key, raising=False)
+    manifest_path = tmp_path / "release-provider-manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "provider_id": "release-virtual-desktop",
+                "provider_kind": "sandbox_desktop",
+                "endpoint_urls": {
+                    "status": "http://127.0.0.1:29097/status",
+                    "execute": "http://127.0.0.1:29097/tools/execute",
+                },
+                "supported_tools": list(OHA_DESKTOP_AGENT_RELEASE_PROVIDER_TOOLS),
+                "keyboard_mouse_capture_supported": True,
+                "foreground_mutation_supported": True,
+                "desktop_session_kind": "virtual_desktop",
+                "desktop_session_isolated": True,
+                "foreground_takeover_required": False,
+                "desktop_backend_kind": "vnc_virtual_desktop",
+                "desktop_backend_is_loopback": False,
+                "desktop_backend_ready_for_public_release": True,
+                "requires_real_virtual_desktop_backend": False,
+                "entrypoint": {
+                    "command": "python provider.py --host 127.0.0.1 --port 0",
+                },
+                "smoke_command": [
+                    "python",
+                    "scripts/smoke_isolated_desktop_provider.py",
+                    "--use-configured-provider",
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_MANIFEST", str(manifest_path))
+
+    diagnostics = controlled_desktop_provider_diagnostics_snapshot()
+
+    assert diagnostics.configured is True
+    assert diagnostics.source == "provider_manifest"
+    assert diagnostics.status == "virtual_desktop_provider_contract_required"
+    assert diagnostics.provider_id == "release-virtual-desktop"
+    assert diagnostics.keyboard_mouse_capture_supported is True
+    assert diagnostics.desktop_session_kind == "virtual_desktop"
+    assert diagnostics.desktop_session_isolated is True
+    assert diagnostics.foreground_takeover_required is False
+    assert diagnostics.desktop_backend_kind == "vnc_virtual_desktop"
+    assert diagnostics.desktop_backend_is_loopback is False
+    assert diagnostics.desktop_backend_ready_for_public_release is True
+    assert diagnostics.requires_real_virtual_desktop_backend is False
+    assert diagnostics.provider_contract["blocking_conditions"] == [
+        "desktop_execution_provider_unavailable",
+        "desktop_execution_provider_adapter_unavailable",
+    ]
+    assert "desktop_execution_provider_unreachable" in diagnostics.blocking_conditions
+    assert diagnostics.launch_command == [
+        "python",
+        "provider.py",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "0",
+    ]
+    assert diagnostics.endpoint_origin == "http://127.0.0.1:29097"
+    assert diagnostics.smoke_command == [
+        "python",
+        "scripts/smoke_isolated_desktop_provider.py",
+        "--use-configured-provider",
+    ]
 
 
 def test_controlled_provider_diagnostics_blocks_loopback_release_backend(
