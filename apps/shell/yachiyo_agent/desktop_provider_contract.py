@@ -227,6 +227,12 @@ def virtual_desktop_provider_manifest_contract_evidence(
         ),
         "manifest_blocking_conditions": manifest_blockers,
         "release_contract": release_contract,
+        "provider_conformance": virtual_desktop_provider_conformance_summary(
+            release_contract,
+            status=contract_status,
+            mode="manifest_contract_check",
+            runtime_checked=False,
+        ),
         "missing_required_tools": release_contract.get("missing_required_tools", []),
         "required_tools": required,
         "provider_id": str(manifest_payload.get("provider_id") or "").strip(),

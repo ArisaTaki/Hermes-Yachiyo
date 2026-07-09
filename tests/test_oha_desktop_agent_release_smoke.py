@@ -468,6 +468,9 @@ def test_oha_desktop_agent_release_smoke_cli_validates_provider_manifest(
     assert report["runtime_checked"] is False
     assert report["provider_id"] == "release-provider"
     assert report["manifest_path"] == str(manifest_path)
+    assert report["provider_conformance"]["mode"] == "manifest_contract_check"
+    assert report["provider_conformance"]["runtime_checked"] is False
+    assert report["provider_conformance"]["public_release_ready"] is True
     captured = capsys.readouterr()
     assert "oha virtual desktop provider manifest validation report:" in captured.err
     assert json.loads(captured.out)["ok"] is True
@@ -494,3 +497,4 @@ def test_oha_desktop_agent_release_smoke_cli_rejects_bad_provider_manifest(
     assert "desktop_provider_manifest_wrong_provider_kind" in payload[
         "blocking_conditions"
     ]
+    assert payload["provider_conformance"]["public_release_ready"] is False

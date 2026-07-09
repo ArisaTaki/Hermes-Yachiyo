@@ -173,6 +173,12 @@ def test_virtual_desktop_provider_manifest_template_matches_release_contract() -
         "http://127.0.0.1:39097/tools/execute"
     )
     assert manifest_evidence["blocking_conditions"] == []
+    assert manifest_evidence["provider_conformance"]["mode"] == (
+        "manifest_contract_check"
+    )
+    assert manifest_evidence["provider_conformance"]["runtime_checked"] is False
+    assert manifest_evidence["provider_conformance"]["public_release_ready"] is True
+    assert manifest_evidence["provider_conformance"]["release_blocking_conditions"] == []
 
 
 def test_virtual_desktop_provider_manifest_contract_reports_static_blockers() -> None:
@@ -207,3 +213,7 @@ def test_virtual_desktop_provider_manifest_contract_reports_static_blockers() ->
     assert "desktop_backend_not_release_ready" in evidence["blocking_conditions"]
     assert "real_virtual_desktop_backend_required" in evidence["blocking_conditions"]
     assert "desktop.verify" in evidence["missing_required_tools"]
+    assert evidence["provider_conformance"]["public_release_ready"] is False
+    assert "desktop_provider_missing_required_tools" in evidence[
+        "provider_conformance"
+    ]["release_blocking_conditions"]
