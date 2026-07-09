@@ -451,10 +451,10 @@ def _check_result(check: GateCheck, *, plan_only: bool) -> dict[str, Any]:
         "stderr_tail": _tail(result.stderr),
     }
     if check.id == "oha_desktop_agent_release_smoke" and status == "failed":
-        blockers = _oha_desktop_agent_loopback_release_blockers(check.report_json)
+        blockers = _oha_desktop_agent_release_gate_blockers(check.report_json)
         if blockers:
             payload["status"] = "blocked"
-            payload["failure_category"] = "local_loopback_permission"
+            payload["failure_category"] = _oha_desktop_agent_failure_category(blockers)
             payload["release_blockers"] = blockers
     if check.id == "public_demo":
         payload.update(_public_demo_gate_fields(check.report_json, command=check.command))
@@ -1124,7 +1124,10 @@ def _external_requirements(actions: Sequence[Mapping[str, Any]]) -> list[dict[st
                 kind="local_permission",
                 action=action,
             )
-        elif action_id == "oha_desktop_agent_product" and _action_has_blocking_condition(
+        elif action_id in {
+            "oha_desktop_agent_product",
+            "oha_desktop_agent_release_smoke",
+        } and _action_has_blocking_condition(
             action,
             "real_virtual_desktop_backend_required",
         ):
@@ -1248,10 +1251,13 @@ def _action_has_blocking_condition(
     return False
 
 
-def _oha_desktop_agent_loopback_release_blockers(
+def _oha_desktop_agent_release_gate_blockers(
     report_json: Path | None,
 ) -> list[dict[str, Any]]:
     report = _load_json(report_json)
+    provider_blockers = _oha_desktop_agent_provider_release_blockers(report)
+    if provider_blockers:
+        return provider_blockers
     for section in _dict_list(report.get("sections")):
         if str(section.get("id") or "").strip() != "isolated_desktop_provider":
             continue
@@ -1276,6 +1282,114 @@ def _oha_desktop_agent_loopback_release_blockers(
             }
         ]
     return []
+
+
+def _oha_desktop_agent_provider_release_blockers(
+    report: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    if report.get("isolated_provider_smoke_requested") is not True:
+        return []
+    if report.get("isolated_provider_release_ready") is True:
+        return []
+    blockers: list[str] = []
+    _append_unique(
+        blockers,
+        _string_list(report.get("isolated_provider_release_blockers")),
+    )
+    backend = _dict(report.get("isolated_provider_backend"))
+    _append_unique(
+        blockers,
+        _string_list(backend.get("provider_contract_blocking_conditions")),
+    )
+    _append_unique(
+        blockers,
+        _string_list(backend.get("provider_conformance_release_blocking_conditions")),
+    )
+    if not blockers:
+        return []
+    release_provider_conditions = {
+        "configured_virtual_desktop_provider_required",
+        "loopback_desktop_backend",
+        "desktop_backend_not_release_ready",
+        "real_virtual_desktop_backend_required",
+        "virtual_desktop_provider_contract_not_ready",
+    }
+    if not any(condition in release_provider_conditions for condition in blockers):
+        return []
+    requires_real_backend = (
+        "real_virtual_desktop_backend_required" in blockers
+        or backend.get("requires_real_virtual_desktop_backend") is True
+        or backend.get("desktop_backend_is_loopback") is True
+    )
+    reason = (
+        "real_virtual_desktop_backend_required"
+        if requires_real_backend
+        else "virtual_desktop_provider_contract_not_ready"
+    )
+    blocker_id = (
+        "oha_real_virtual_desktop_backend"
+        if requires_real_backend
+        else "oha_virtual_desktop_provider_contract"
+    )
+    evidence_summary: dict[str, Any] = {
+        "blocking_condition": reason,
+        "blocking_conditions": blockers,
+        "recovery_hints": [
+            "write and validate a virtual desktop provider manifest",
+            (
+                "rerun the smoke with --use-configured-virtual-desktop-provider "
+                "and --provider-manifest"
+            ),
+        ],
+    }
+    for key in (
+        "desktop_session_kind",
+        "desktop_session_isolated",
+        "foreground_takeover_required",
+        "keyboard_mouse_capture_supported",
+        "desktop_backend_kind",
+        "desktop_backend_is_loopback",
+        "desktop_backend_ready_for_public_release",
+        "requires_real_virtual_desktop_backend",
+        "provider_contract_ok",
+        "provider_contract_version",
+        "provider_contract_blocking_conditions",
+        "provider_conformance_ok",
+        "provider_conformance_mode",
+        "provider_conformance_smoke_ok",
+        "provider_conformance_public_release_ready",
+        "provider_conformance_release_candidate",
+        "provider_conformance_release_blocking_conditions",
+        "provider_conformance_missing_required_tools",
+        "provider_conformance_failed_tools",
+    ):
+        if backend.get(key) not in (None, "", [], {}):
+            evidence_summary[key] = backend.get(key)
+    return [
+        {
+            "id": blocker_id,
+            "status": "missing" if requires_real_backend else "blocked",
+            "reason": reason,
+            "evidence_summary": evidence_summary,
+        }
+    ]
+
+
+def _oha_desktop_agent_failure_category(
+    blockers: Sequence[Mapping[str, Any]],
+) -> str:
+    for blocker in blockers:
+        summary = _dict(blocker.get("evidence_summary"))
+        conditions = [
+            str(blocker.get("reason") or "").strip(),
+            *_string_list(summary.get("blocking_condition")),
+            *_string_list(summary.get("blocking_conditions")),
+        ]
+        if "real_virtual_desktop_backend_required" in conditions:
+            return "real_virtual_desktop_backend"
+        if "local_loopback_permission_required" in conditions:
+            return "local_loopback_permission"
+    return "external_requirement"
 
 
 def _append_unique(target: list[Any], values: Sequence[Any]) -> None:

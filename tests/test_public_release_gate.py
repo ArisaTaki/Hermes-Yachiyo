@@ -1071,6 +1071,94 @@ def test_public_release_gate_classifies_isolated_provider_loopback_failure(
     ]
 
 
+def test_public_release_gate_classifies_virtual_provider_external_requirement(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+
+    def fake_run(command):
+        command = list(command)
+        if "scripts/smoke_oha_desktop_agent_release.py" in command:
+            output_json = command[command.index("--report-json") + 1]
+            output_path = gate._resolve_path(Path(output_json))
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_text(
+                json.dumps(
+                    {
+                        "ok": False,
+                        "mode": "oha_desktop_agent_release_smoke",
+                        "isolated_provider_smoke_requested": True,
+                        "isolated_provider_release_ready": False,
+                        "isolated_provider_release_blockers": [
+                            "configured_virtual_desktop_provider_required",
+                            "loopback_desktop_backend",
+                            "desktop_backend_not_release_ready",
+                            "real_virtual_desktop_backend_required",
+                        ],
+                        "isolated_provider_backend": {
+                            "desktop_session_kind": "isolated_desktop",
+                            "desktop_session_isolated": True,
+                            "foreground_takeover_required": False,
+                            "keyboard_mouse_capture_supported": True,
+                            "desktop_backend_kind": "loopback_session_harness",
+                            "desktop_backend_is_loopback": True,
+                            "desktop_backend_ready_for_public_release": False,
+                            "requires_real_virtual_desktop_backend": True,
+                            "provider_contract_ok": False,
+                            "provider_contract_version": (
+                                "oha-yachiyo.desktop-provider.v1"
+                            ),
+                            "provider_contract_blocking_conditions": [
+                                "loopback_desktop_backend",
+                                "desktop_backend_not_release_ready",
+                                "real_virtual_desktop_backend_required",
+                            ],
+                        },
+                        "sections": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            return _completed(command, returncode=1)
+        return _completed(command)
+
+    monkeypatch.setattr(gate, "_run_command", fake_run)
+
+    summary = gate.run_public_release_gate(
+        tmp_dir="tmp/gate",
+        include_public_demo=False,
+        include_release_smoke=False,
+        include_diagnostics_bundle=False,
+        include_isolated_provider_smoke=True,
+    )
+
+    assert summary["ok"] is True
+    assert summary["failed_count"] == 0
+    check = next(
+        item
+        for item in summary["checks"]
+        if item["id"] == "oha_desktop_agent_release_smoke"
+    )
+    assert check["status"] == "blocked"
+    assert check["failure_category"] == "real_virtual_desktop_backend"
+    assert check["release_blockers"][0]["reason"] == (
+        "real_virtual_desktop_backend_required"
+    )
+    requirement = next(
+        item
+        for item in summary["external_requirements"]
+        if item["id"] == "real_virtual_desktop_backend"
+    )
+    assert requirement["kind"] == "desktop_backend"
+    assert requirement["blocking_conditions"] == [
+        "configured_virtual_desktop_provider_required",
+        "loopback_desktop_backend",
+        "desktop_backend_not_release_ready",
+        "real_virtual_desktop_backend_required",
+    ]
+
+
 def test_public_release_gate_passes_allow_existing_real_desktop_app_flag(
     tmp_path,
     monkeypatch,
