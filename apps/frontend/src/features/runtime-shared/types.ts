@@ -299,6 +299,28 @@ export type ControlledDesktopProviderDiagnosticSnapshot = {
   health?: DesktopProviderHealthSnapshot | null;
   manifest?: Record<string, unknown>;
   session_manager?: Record<string, unknown>;
+  public_release_readiness?: PublicReleaseReadinessSnapshot | null;
+};
+
+export type PublicReleaseReadinessSnapshot = {
+  ready?: boolean;
+  backend_ready?: boolean;
+  provider_manifest?: string;
+  configured_virtual_desktop_provider_requested?: boolean;
+  blocking_conditions?: string[];
+  backend?: Record<string, unknown>;
+  next_actions?: PublicReleaseNextActionSnapshot[];
+  required_commands?: Record<string, string>;
+};
+
+export type PublicReleaseNextActionSnapshot = {
+  id?: string;
+  title?: string;
+  reason?: string;
+  command?: string;
+  required_environment?: string[];
+  required_contract_fields?: Record<string, unknown>;
+  required_tools?: string[];
 };
 
 export type DesktopExecutionRouteSnapshot = {

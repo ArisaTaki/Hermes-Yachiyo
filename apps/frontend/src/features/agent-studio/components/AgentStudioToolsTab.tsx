@@ -953,6 +953,10 @@ function ToolDetail({
         data-controlled-provider-release-ready={String(providerState.controlledReleaseReady)}
         data-controlled-provider-requires-approval={String(providerState.controlledRequiresApproval)}
         data-controlled-provider-requires-real-virtual-backend={String(providerState.controlledRequiresRealVirtualDesktopBackend ?? '')}
+        data-controlled-provider-public-release-ready={String(providerState.controlledPublicReleaseReady)}
+        data-controlled-provider-public-release-blockers={providerState.controlledPublicReleaseBlockers.join(',')}
+        data-controlled-provider-public-release-actions={providerState.controlledPublicReleaseActions.map((action) => action.id).join(',')}
+        data-controlled-provider-public-release-smoke-command={providerState.controlledPublicReleaseSmokeCommand}
         data-controlled-provider-session-isolated={String(providerState.controlledSessionIsolated)}
         data-controlled-provider-session-kind={providerState.controlledSessionKind}
         data-controlled-provider-session-manager-running={String(providerState.controlledSessionManagerRunning)}
@@ -1042,6 +1046,12 @@ function ToolDetail({
           >
             {providerState.controlledReleaseReady ? 'release provider ready' : 'release provider blocked'}
           </span>
+          <span
+            className={providerState.controlledPublicReleaseReady ? 'studio-tool-permission' : 'studio-tool-permission missing'}
+            data-controlled-provider-public-release-ready={String(providerState.controlledPublicReleaseReady)}
+          >
+            {providerState.controlledPublicReleaseReady ? 'public release ready' : 'public release blocked'}
+          </span>
           {providerState.controlledProviderContractVersion ? (
             <span
               className="studio-tool-permission"
@@ -1103,6 +1113,28 @@ function ToolDetail({
                 {runtimeBlockingLabel(condition)}
               </span>
             ))}
+          {providerState.controlledPublicReleaseBlockers
+            .filter((condition) => !providerState.controlledBlockingConditions.includes(condition))
+            .map((condition) => (
+              <span
+                className="studio-tool-permission missing"
+                data-controlled-provider-public-release-blocker={condition}
+                key={`provider-public-release-${condition}`}
+              >
+                {runtimeBlockingLabel(condition)}
+              </span>
+            ))}
+          {providerState.controlledPublicReleaseActions.map((action) => (
+            <span
+              className="studio-tool-permission missing"
+              data-controlled-provider-public-release-action={action.id}
+              data-controlled-provider-public-release-command={action.command}
+              key={`provider-public-release-action-${action.id}`}
+              title={action.command || action.reason}
+            >
+              {action.title || action.id}
+            </span>
+          ))}
           {providerState.blockingConditions.map((condition) => (
             <span
               className="studio-tool-permission missing"
@@ -1230,11 +1262,23 @@ type ToolProviderState = {
   controlledRequiresRealVirtualDesktopBackend: boolean | null;
   controlledEndpointOrigin: string;
   controlledEndpointPath: string;
+  controlledPublicReleaseReady: boolean;
+  controlledPublicReleaseBlockers: string[];
+  controlledPublicReleaseActions: ProviderReadinessAction[];
+  controlledPublicReleaseSmokeCommand: string;
+};
+
+type ProviderReadinessAction = {
+  id: string;
+  title: string;
+  reason: string;
+  command: string;
 };
 
 function toolProviderState(tool: ToolCatalogItemSnapshot, catalog: ToolCatalogSnapshot): ToolProviderState {
   const provider = catalog.sandbox_provider || null;
   const controlledDiagnostics = objectRecord(catalog.controlled_provider_diagnostics);
+  const publicReleaseReadiness = objectRecord(controlledDiagnostics.public_release_readiness);
   const ready = tool.provider_ready === true;
   const supported = tool.provider_supported === true;
   const providerId = stringValue(tool.provider_id) || stringValue(provider?.provider_id);
@@ -1296,6 +1340,18 @@ function toolProviderState(tool: ToolCatalogItemSnapshot, catalog: ToolCatalogSn
   );
   const controlledEndpointOrigin = stringValue(controlledDiagnostics.endpoint_origin);
   const controlledEndpointPath = stringValue(controlledDiagnostics.endpoint_path);
+  const controlledPublicReleaseReady = publicReleaseReadiness.ready === true;
+  const controlledPublicReleaseBlockers = stringArray(publicReleaseReadiness.blocking_conditions);
+  const controlledPublicReleaseActions = recordArray(publicReleaseReadiness.next_actions)
+    .map((action) => ({
+      id: stringValue(action.id),
+      title: stringValue(action.title),
+      reason: stringValue(action.reason),
+      command: stringValue(action.command),
+    }))
+    .filter((action) => action.id || action.title || action.command);
+  const controlledPublicReleaseCommands = objectRecord(publicReleaseReadiness.required_commands);
+  const controlledPublicReleaseSmokeCommand = stringValue(controlledPublicReleaseCommands.public_release_smoke);
   const requiresRealSandbox = Boolean(tool.tool_name && requiresRealSandboxFor.includes(tool.tool_name));
   const baseState = {
     providerId,
@@ -1333,6 +1389,10 @@ function toolProviderState(tool: ToolCatalogItemSnapshot, catalog: ToolCatalogSn
     controlledRequiresRealVirtualDesktopBackend,
     controlledEndpointOrigin,
     controlledEndpointPath,
+    controlledPublicReleaseReady,
+    controlledPublicReleaseBlockers,
+    controlledPublicReleaseActions,
+    controlledPublicReleaseSmokeCommand,
   };
   if (ready) {
     return {
@@ -1462,6 +1522,11 @@ function objectRecord(value: unknown): Record<string, unknown> {
 function stringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.map((item) => String(item || '').trim()).filter(Boolean);
+}
+
+function recordArray(value: unknown): Record<string, unknown>[] {
+  if (!Array.isArray(value)) return [];
+  return value.map(objectRecord).filter((item) => Object.keys(item).length > 0);
 }
 
 function stringValue(value: unknown): string {

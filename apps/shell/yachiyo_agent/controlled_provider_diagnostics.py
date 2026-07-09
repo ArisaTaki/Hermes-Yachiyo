@@ -26,6 +26,7 @@ from .desktop_provider_contract import (
     virtual_desktop_provider_conformance_summary,
     virtual_desktop_provider_contract_evidence,
 )
+from .desktop_provider_release_readiness import public_release_readiness_snapshot
 from .desktop_execution_policy import sandbox_desktop_provider_status
 from .isolated_provider_session import isolated_desktop_provider_session_status
 
@@ -48,6 +49,7 @@ def controlled_desktop_provider_diagnostics_snapshot(
         launch_hint.get("isolated_provider") or launch_hint.get("controlled_provider")
     )
     controlled_env = _string_mapping(controlled_launch.get("env"))
+    provider_manifest_path = str(os.environ.get(_PROVIDER_MANIFEST_ENV) or "").strip()
     configured_manifest = _configured_provider_manifest()
     manifest_provider = (
         IsolatedDesktopProvider()
@@ -245,6 +247,27 @@ def controlled_desktop_provider_diagnostics_snapshot(
         public_release_ready=release_ready,
         supported_tools=supported_tools,
     )
+    public_release_readiness = public_release_readiness_snapshot(
+        run_isolated_provider_smoke=False,
+        configured_virtual_desktop_provider_requested=(
+            configured or bool(provider_manifest_path)
+        ),
+        provider_manifest=provider_manifest_path,
+        release_ready=ready,
+        release_blockers=blocking_conditions,
+        backend=_public_release_backend_evidence(
+            provider_contract=provider_contract,
+            provider_conformance=provider_conformance,
+            desktop_backend_kind=desktop_backend_kind,
+            desktop_backend_is_loopback=desktop_backend_is_loopback,
+            desktop_backend_ready_for_public_release=(
+                desktop_backend_ready_for_public_release
+            ),
+            requires_real_virtual_desktop_backend=(
+                requires_real_virtual_desktop_backend
+            ),
+        ),
+    )
     return ControlledDesktopProviderDiagnosticSnapshot(
         ready=ready,
         release_ready=release_ready,
@@ -322,6 +345,7 @@ def controlled_desktop_provider_diagnostics_snapshot(
         health=provider.health,
         manifest=manifest,
         session_manager=session_manager,
+        public_release_readiness=public_release_readiness,
     )
 
 
@@ -499,6 +523,43 @@ def _configured_provider_manifest() -> dict[str, Any]:
     except (OSError, json.JSONDecodeError):
         return {}
     return dict(payload) if isinstance(payload, Mapping) else {}
+
+
+def _public_release_backend_evidence(
+    *,
+    provider_contract: Mapping[str, Any],
+    provider_conformance: Mapping[str, Any],
+    desktop_backend_kind: str,
+    desktop_backend_is_loopback: bool | None,
+    desktop_backend_ready_for_public_release: bool | None,
+    requires_real_virtual_desktop_backend: bool | None,
+) -> dict[str, Any]:
+    return {
+        "desktop_backend_kind": desktop_backend_kind,
+        "desktop_backend_is_loopback": desktop_backend_is_loopback,
+        "desktop_backend_ready_for_public_release": (
+            desktop_backend_ready_for_public_release
+        ),
+        "requires_real_virtual_desktop_backend": (
+            requires_real_virtual_desktop_backend
+        ),
+        "provider_contract_ok": provider_contract.get("ok"),
+        "provider_contract_blocking_conditions": _string_list(
+            provider_contract.get("blocking_conditions")
+        ),
+        "provider_conformance_public_release_ready": provider_conformance.get(
+            "public_release_ready"
+        ),
+        "provider_conformance_release_blocking_conditions": _string_list(
+            provider_conformance.get("release_blocking_conditions")
+        ),
+        "provider_conformance_missing_required_tools": _string_list(
+            provider_conformance.get("missing_required_tools")
+        ),
+        "provider_conformance_failed_tools": _string_list(
+            provider_conformance.get("failed_tools")
+        ),
+    }
 
 
 def _manifest_endpoint_origin(manifest: Mapping[str, Any]) -> str:

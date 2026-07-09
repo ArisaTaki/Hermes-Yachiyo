@@ -22,6 +22,9 @@ from apps.shell.yachiyo_agent.desktop_provider_contract import (
     virtual_desktop_provider_manifest_contract_evidence,
     virtual_desktop_provider_manifest_template,
 )
+from apps.shell.yachiyo_agent.desktop_provider_release_readiness import (
+    public_release_readiness_snapshot,
+)
 from apps.shell.yachiyo_agent.desktop_execution_policy import (
     desktop_provider_session_auto_start_recommended_for_requests,
 )
@@ -832,15 +835,15 @@ def run_smoke(
         and configured_virtual_desktop_provider_requested
         and not isolated_provider_release_blockers
     )
-    public_release_readiness = _public_release_readiness(
+    public_release_readiness = public_release_readiness_snapshot(
         run_isolated_provider_smoke=run_isolated_provider_smoke,
         configured_virtual_desktop_provider_requested=(
             configured_virtual_desktop_provider_requested
         ),
         provider_manifest=provider_manifest,
-        isolated_provider_release_ready=isolated_provider_release_ready,
-        isolated_provider_release_blockers=isolated_provider_release_blockers,
-        isolated_provider_backend=isolated_provider_backend,
+        release_ready=isolated_provider_release_ready,
+        release_blockers=isolated_provider_release_blockers,
+        backend=isolated_provider_backend,
     )
     public_release_ready = (
         all(checks.values())
@@ -1018,189 +1021,6 @@ def _isolated_provider_backend_release_blockers(
         if not blockers:
             blockers.append("virtual_desktop_provider_contract_not_ready")
     return blockers
-
-
-def _public_release_readiness(
-    *,
-    run_isolated_provider_smoke: bool,
-    configured_virtual_desktop_provider_requested: bool,
-    provider_manifest: Path | None,
-    isolated_provider_release_ready: bool,
-    isolated_provider_release_blockers: Sequence[str],
-    isolated_provider_backend: Mapping[str, Any],
-) -> dict[str, Any]:
-    blockers = _unique_strings(list(isolated_provider_release_blockers))
-    if not isolated_provider_release_ready and not blockers:
-        blockers = _public_release_advisory_blockers(
-            configured_virtual_desktop_provider_requested=(
-                configured_virtual_desktop_provider_requested
-            ),
-            isolated_provider_backend=isolated_provider_backend,
-        )
-    next_actions = _public_release_next_actions(
-        run_isolated_provider_smoke=run_isolated_provider_smoke,
-        configured_virtual_desktop_provider_requested=(
-            configured_virtual_desktop_provider_requested
-        ),
-        provider_manifest=provider_manifest,
-        blockers=blockers,
-    )
-    return {
-        "ready": bool(isolated_provider_release_ready),
-        "backend_ready": bool(isolated_provider_release_ready),
-        "provider_manifest": str(provider_manifest or ""),
-        "configured_virtual_desktop_provider_requested": bool(
-            configured_virtual_desktop_provider_requested
-        ),
-        "blocking_conditions": blockers,
-        "backend": dict(isolated_provider_backend),
-        "next_actions": next_actions,
-        "required_commands": _public_release_required_commands(provider_manifest),
-    }
-
-
-def _public_release_advisory_blockers(
-    *,
-    configured_virtual_desktop_provider_requested: bool,
-    isolated_provider_backend: Mapping[str, Any],
-) -> list[str]:
-    blockers = _isolated_provider_backend_release_blockers(
-        dict(isolated_provider_backend)
-    )
-    if not configured_virtual_desktop_provider_requested:
-        blockers.append("virtual_desktop_provider_not_configured")
-    if not blockers:
-        blockers.append("virtual_desktop_provider_contract_not_ready")
-    return _unique_strings(blockers)
-
-
-def _public_release_next_actions(
-    *,
-    run_isolated_provider_smoke: bool,
-    configured_virtual_desktop_provider_requested: bool,
-    provider_manifest: Path | None,
-    blockers: Sequence[str],
-) -> list[dict[str, Any]]:
-    actions: list[dict[str, Any]] = []
-    blocker_set = set(blockers)
-    if not run_isolated_provider_smoke:
-        actions.append(
-            {
-                "id": "run_isolated_provider_smoke",
-                "title": "Run isolated provider smoke",
-                "reason": "Public release requires provider runtime evidence.",
-                "command": _public_release_smoke_command(provider_manifest),
-            }
-        )
-    if not configured_virtual_desktop_provider_requested:
-        actions.extend(
-            [
-                {
-                    "id": "write_provider_manifest_template",
-                    "title": "Create virtual desktop provider manifest",
-                    "reason": "No release virtual desktop provider is configured.",
-                    "command": (
-                        "python scripts/smoke_oha_desktop_agent_release.py "
-                        "--write-provider-manifest-template "
-                        "tmp/oha-virtual-desktop-provider.manifest.json"
-                    ),
-                },
-                {
-                    "id": "configure_virtual_desktop_provider",
-                    "title": "Configure a real virtual desktop provider",
-                    "reason": (
-                        "The current loopback provider is for development only and "
-                        "cannot prove Hermes/Hanako-style desktop execution."
-                    ),
-                    "required_environment": [
-                        "OHA_YACHIYO_DESKTOP_PROVIDER_MANIFEST",
-                        "OHA_YACHIYO_DESKTOP_PROVIDER_URL",
-                        "OHA_YACHIYO_DESKTOP_PROVIDER_ID",
-                    ],
-                },
-            ]
-        )
-    if blocker_set & {
-        "loopback_desktop_backend",
-        "desktop_backend_not_release_ready",
-        "real_virtual_desktop_backend_required",
-        "virtual_desktop_provider_not_configured",
-    }:
-        actions.append(
-            {
-                "id": "attach_real_virtual_desktop_backend",
-                "title": "Attach real isolated desktop backend",
-                "reason": (
-                    "Public release requires a non-loopback desktop backend that "
-                    "can open apps, inspect UI, input text, click, and verify state "
-                    "without taking over the user's foreground session."
-                ),
-                "required_contract_fields": {
-                    "desktop_session_kind": "virtual_desktop",
-                    "desktop_session_isolated": True,
-                    "foreground_takeover_required": False,
-                    "desktop_backend_is_loopback": False,
-                    "desktop_backend_ready_for_public_release": True,
-                    "requires_real_virtual_desktop_backend": False,
-                },
-            }
-        )
-    if "desktop_provider_missing_required_tools" in blocker_set:
-        actions.append(
-            {
-                "id": "implement_required_provider_tools",
-                "title": "Implement required desktop provider tools",
-                "reason": "The provider must cover the release desktop-agent tool sequence.",
-                "required_tools": list(OHA_DESKTOP_AGENT_RELEASE_PROVIDER_TOOLS),
-            }
-        )
-    if provider_manifest is not None:
-        actions.append(
-            {
-                "id": "validate_provider_manifest",
-                "title": "Validate provider manifest",
-                "reason": "Static manifest validation should pass before runtime smoke.",
-                "command": (
-                    "python scripts/smoke_oha_desktop_agent_release.py "
-                    f"--validate-provider-manifest {provider_manifest}"
-                ),
-            }
-        )
-    actions.append(
-        {
-            "id": "run_public_release_smoke",
-            "title": "Run public release smoke",
-            "reason": "This is the release gate for desktop-agent provider readiness.",
-            "command": _public_release_smoke_command(provider_manifest),
-        }
-    )
-    return actions
-
-
-def _public_release_required_commands(provider_manifest: Path | None) -> dict[str, str]:
-    manifest = str(provider_manifest or "tmp/oha-virtual-desktop-provider.manifest.json")
-    return {
-        "write_manifest_template": (
-            "python scripts/smoke_oha_desktop_agent_release.py "
-            f"--write-provider-manifest-template {manifest}"
-        ),
-        "validate_manifest": (
-            "python scripts/smoke_oha_desktop_agent_release.py "
-            f"--validate-provider-manifest {manifest}"
-        ),
-        "public_release_smoke": _public_release_smoke_command(provider_manifest),
-    }
-
-
-def _public_release_smoke_command(provider_manifest: Path | None) -> str:
-    manifest_part = (
-        f" --provider-manifest {provider_manifest}" if provider_manifest is not None else ""
-    )
-    return (
-        "python scripts/smoke_oha_desktop_agent_release.py "
-        f"--public-release{manifest_part} "
-        "--report-json tmp/oha-desktop-agent-public-release-smoke.json"
-    )
 
 
 def _unique_strings(values: Sequence[str]) -> list[str]:

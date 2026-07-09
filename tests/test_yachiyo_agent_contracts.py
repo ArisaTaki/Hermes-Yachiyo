@@ -8813,6 +8813,11 @@ def test_controlled_provider_diagnostics_marks_configured_keyboard_provider_read
     assert diagnostics.provider_conformance.covered_tools == list(
         OHA_DESKTOP_AGENT_RELEASE_PROVIDER_TOOLS
     )
+    assert diagnostics.public_release_readiness.ready is True
+    assert diagnostics.public_release_readiness.blocking_conditions == []
+    assert [
+        action.id for action in diagnostics.public_release_readiness.next_actions
+    ] == ["run_isolated_provider_smoke", "run_public_release_smoke"]
     assert diagnostics.blocking_conditions == []
     assert diagnostics.endpoint_origin == "http://127.0.0.1:19092"
     assert "desktop.safe_type_text" in diagnostics.supported_tools
@@ -8976,6 +8981,20 @@ def test_controlled_provider_diagnostics_blocks_loopback_release_backend(
     assert "loopback_desktop_backend" in diagnostics.blocking_conditions
     assert "desktop_backend_not_release_ready" in diagnostics.blocking_conditions
     assert "real_virtual_desktop_backend_required" in diagnostics.blocking_conditions
+    assert diagnostics.public_release_readiness.ready is False
+    assert "loopback_desktop_backend" in (
+        diagnostics.public_release_readiness.blocking_conditions
+    )
+    assert "desktop_backend_not_release_ready" in (
+        diagnostics.public_release_readiness.blocking_conditions
+    )
+    assert [
+        action.id for action in diagnostics.public_release_readiness.next_actions
+    ] == [
+        "run_isolated_provider_smoke",
+        "attach_real_virtual_desktop_backend",
+        "run_public_release_smoke",
+    ]
 
 
 def test_controlled_provider_diagnostics_requires_isolated_desktop_session(

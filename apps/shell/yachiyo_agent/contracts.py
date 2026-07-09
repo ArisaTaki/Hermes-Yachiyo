@@ -252,6 +252,27 @@ class SandboxDesktopProviderSnapshot(_PublicSnapshot):
     requires_real_sandbox_for: list[str] = Field(default_factory=list)
 
 
+class PublicReleaseNextActionSnapshot(_PublicSnapshot):
+    id: str = ""
+    title: str = ""
+    reason: str = ""
+    command: str = ""
+    required_environment: list[str] = Field(default_factory=list)
+    required_contract_fields: dict[str, Any] = Field(default_factory=dict)
+    required_tools: list[str] = Field(default_factory=list)
+
+
+class PublicReleaseReadinessSnapshot(_PublicSnapshot):
+    ready: bool = False
+    backend_ready: bool = False
+    provider_manifest: str = ""
+    configured_virtual_desktop_provider_requested: bool = False
+    blocking_conditions: list[str] = Field(default_factory=list)
+    backend: dict[str, Any] = Field(default_factory=dict)
+    next_actions: list[PublicReleaseNextActionSnapshot] = Field(default_factory=list)
+    required_commands: dict[str, str] = Field(default_factory=dict)
+
+
 class ControlledDesktopProviderDiagnosticSnapshot(_PublicSnapshot):
     ready: bool = False
     release_ready: bool = False
@@ -288,6 +309,9 @@ class ControlledDesktopProviderDiagnosticSnapshot(_PublicSnapshot):
     health: DesktopProviderHealthSnapshot | None = None
     manifest: dict[str, Any] = Field(default_factory=dict)
     session_manager: dict[str, Any] = Field(default_factory=dict)
+    public_release_readiness: PublicReleaseReadinessSnapshot = Field(
+        default_factory=PublicReleaseReadinessSnapshot
+    )
 
 
 class DesktopExecutionRouteSnapshot(_PublicSnapshot):

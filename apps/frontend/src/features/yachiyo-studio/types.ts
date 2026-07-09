@@ -36,6 +36,8 @@ export type {
   PlannerDecisionSnapshot,
   PlannerOrchestrationStartSnapshot,
   PlannerTraceSummarySnapshot,
+  PublicReleaseNextActionSnapshot,
+  PublicReleaseReadinessSnapshot,
   PublicRunEvent,
   RecoveryRunProvenanceSnapshot,
   RerunRunRequest,
