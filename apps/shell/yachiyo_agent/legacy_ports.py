@@ -38,6 +38,7 @@ from .desktop_permissions import (
 from .desktop_execution_policy import (
     daily_entrypoint_desktop_execution_policy,
     desktop_execution_policy_payload,
+    desktop_provider_session_auto_start_default,
     sandbox_desktop_provider_status,
 )
 from .desktop_plan_hints import hotkey_hint
@@ -197,6 +198,20 @@ _LEGACY_CHAT_DIRECT_PROVIDER_PROTECTED_TOOLS = {
     "desktop.submit_foreground",
     "desktop.type",
     "desktop.type_text",
+}
+_LEGACY_CHAT_DIRECT_STRICT_PROVIDER_TOOLS = {
+    *_LEGACY_CHAT_DIRECT_PROVIDER_PROTECTED_TOOLS,
+    "app.open",
+    "app.focus",
+    "app.show",
+    "desktop.open_app",
+    "desktop.focus_app",
+    "app.open_and_safe_click",
+    "app.focus_and_safe_click",
+    "app.open_and_safe_scroll",
+    "app.focus_and_safe_scroll",
+    "desktop.safe_click",
+    "desktop.safe_scroll",
 }
 
 
@@ -2898,6 +2913,7 @@ def _direct_tool_requests_with_desktop_provider_session(
             metadata=metadata,
             enable=_legacy_direct_request_needs_provider_session_policy(
                 tool_name,
+                metadata=metadata,
                 legacy_chat_direct_local=legacy_chat_direct_local,
             ),
         )
@@ -2947,6 +2963,7 @@ def _direct_tool_requests_with_desktop_provider_session(
             metadata=metadata,
             enable=_legacy_direct_request_needs_provider_session_policy(
                 tool_name,
+                metadata=metadata,
                 legacy_chat_direct_local=legacy_chat_direct_local,
             ),
         )
@@ -2970,12 +2987,31 @@ def _direct_tool_requests_with_desktop_provider_session(
 def _legacy_direct_request_needs_provider_session_policy(
     tool_name: str,
     *,
+    metadata: Mapping[str, Any] | None,
     legacy_chat_direct_local: bool,
 ) -> bool:
-    return (
-        legacy_chat_direct_local
-        and str(tool_name or "").strip() in _LEGACY_CHAT_DIRECT_PROVIDER_PROTECTED_TOOLS
-    )
+    if not legacy_chat_direct_local:
+        return False
+    clean_tool = str(tool_name or "").strip()
+    if clean_tool in _LEGACY_CHAT_DIRECT_PROVIDER_PROTECTED_TOOLS:
+        return True
+    if clean_tool not in _LEGACY_CHAT_DIRECT_STRICT_PROVIDER_TOOLS:
+        return False
+    return _strict_legacy_direct_foreground_provider_requested(metadata)
+
+
+def _strict_legacy_direct_foreground_provider_requested(
+    metadata: Mapping[str, Any] | None,
+) -> bool:
+    if _metadata_truthy(
+        metadata,
+        "desktop_provider_session_strict_foreground",
+        "desktop_provider_session_enforce_foreground",
+        "require_desktop_provider_for_foreground",
+        "require_isolated_desktop_for_foreground",
+    ):
+        return True
+    return desktop_provider_session_auto_start_default()
 
 
 def _direct_tool_request_with_provider_session_policy(

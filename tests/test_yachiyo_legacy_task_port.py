@@ -3122,6 +3122,65 @@ def test_legacy_chat_task_starter_auto_starts_isolated_provider_session(
     )
 
 
+def test_legacy_chat_direct_strict_foreground_routes_safe_click_to_provider(
+    monkeypatch,
+) -> None:
+    captured_envelopes: list[dict[str, Any]] = []
+
+    def fake_ensure(envelope: dict[str, Any], *, auto_start: bool = True) -> dict[str, Any]:
+        captured_envelopes.append(envelope)
+        request = envelope["requests"][0]
+        return {
+            "ok": True,
+            "needed": True,
+            "auto_start": auto_start,
+            "started": True,
+            "running": True,
+            "status": "running",
+            "provider_id": "local-isolated-desktop",
+            "url": "http://127.0.0.1:19093",
+            "desktop_session_kind": "isolated_desktop",
+            "desktop_session_isolated": True,
+            "foreground_takeover_required": False,
+            "keyboard_mouse_capture_supported": True,
+            "request_ids": [request["request_id"]],
+            "tool_names": [request["tool_name"]],
+        }
+
+    monkeypatch.setattr(
+        legacy_ports_module,
+        "ensure_isolated_desktop_provider_session_for_envelope",
+        fake_ensure,
+    )
+
+    result = legacy_ports_module._direct_tool_requests_with_desktop_provider_session(
+        [
+            {
+                "tool": "desktop.safe_click",
+                "input": {"x": 120, "y": 240},
+                "desktop_execution_policy": {
+                    "mode": "allow",
+                    "source": "legacy_chat_direct_local",
+                },
+            }
+        ],
+        metadata={
+            "desktop_provider_session_auto_start": True,
+            "desktop_provider_session_strict_foreground": True,
+        },
+    )
+
+    assert captured_envelopes[0]["requests"][0]["desktop_execution_policy"]["mode"] == (
+        "preview_input"
+    )
+    assert captured_envelopes[0]["requests"][0]["tool_name"] == "desktop.safe_click"
+    assert result[0]["desktop_execution_policy"]["mode"] == "preview_input"
+    assert result[0]["desktop_provider_session"]["provider_id"] == (
+        "local-isolated-desktop"
+    )
+    assert result[0]["desktop_provider_session"]["foreground_takeover_required"] is False
+
+
 def test_legacy_chat_task_starter_surfaces_isolated_provider_start_failure(
     monkeypatch,
 ) -> None:
