@@ -887,12 +887,21 @@ def desktop_execution_route_decision(
         and foreground_required
         and not bool(sandbox_provider.get("available"))
     ):
-        return _sandbox_route_decision(
+        sandbox_route = _sandbox_route_decision(
             route,
             sandbox_provider,
             clean_tool,
             decision_context,
         )
+        if _desktop_provider_session_auto_start_requested(decision_context):
+            return _route_with_provider_auto_start(
+                sandbox_route,
+                reason=(
+                    "Foreground desktop action should auto-start the isolated "
+                    "desktop provider instead of taking over the user's session."
+                ),
+            )
+        return sandbox_route
     if (
         readonly_provider_requested
         and is_readonly_desktop_provider_tool(clean_tool)

@@ -6852,6 +6852,29 @@ def test_daily_policy_routes_app_launch_through_isolated_provider_without_foregr
     assert route["foreground_takeover_required"] is False
 
 
+def test_daily_policy_can_auto_start_provider_for_keyboard_mouse(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_AUTO_START", "true")
+    route = desktop_execution_route_decision(
+        "desktop.safe_type_text",
+        policy=daily_entrypoint_desktop_execution_policy(surface="chat"),
+        execution_mode=DesktopExecutionModeSnapshot(
+            mode="supervised_live",
+            foreground_control=True,
+            keyboard_mouse_capture=True,
+        ),
+        metadata={},
+    )
+
+    assert route["status"] == "provider_required"
+    assert route["can_execute"] is False
+    assert route["can_auto_start"] is True
+    assert route["sandbox_required"] is True
+    assert route["blocking_conditions"] == ["sandbox_desktop_provider_required"]
+    assert "auto-start the isolated desktop provider" in route["reason"]
+
+
 def test_daily_entrypoint_desktop_execution_policy_defaults_to_input_preview() -> None:
     policy = daily_entrypoint_desktop_execution_policy(surface="bubble")
     metadata = with_daily_entrypoint_desktop_execution_policy(
