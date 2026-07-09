@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from apps.shell.yachiyo_agent.runtime_planner import RuntimePlanner
 from apps.shell.yachiyo_agent.runtime_progress import (
+    public_task_progress_events_for_tool_start,
     public_task_replan_events_for_tool_result,
     public_task_progress_events_for_tool_result,
+    task_progress_event_payloads_for_tool_start,
     task_replan_event_payloads_for_tool_result,
     task_progress_event_payloads_for_tool_result,
 )
@@ -37,6 +39,40 @@ def test_public_task_progress_events_preserve_task_group_workflow_context() -> N
         assert event.group_run_id == "group-run-1"
         assert event.workflow_run_id == "workflow-run-1"
         assert event.payload["status"] == "completed"
+
+
+def test_public_task_progress_events_mark_tool_start_active() -> None:
+    events = public_task_progress_events_for_tool_start(
+        tool_request=_tool_request(),
+        run_id="run-1",
+        after_sequence=10,
+    )
+
+    assert [event.event_type for event in events] == [
+        "agent.task.workspace_item.updated",
+        "agent.task.todo.updated",
+        "agent.task.checkpoint.updated",
+    ]
+    assert [event.sequence for event in events] == [11, 12, 13]
+    assert [event.payload["status"] for event in events] == [
+        "in_progress",
+        "in_progress",
+        "ready",
+    ]
+    assert all(event.payload["runtime_status"] == "running" for event in events)
+    assert events[1].payload["todo"]["status"] == "in_progress"
+    assert events[2].payload["checkpoint"]["status"] == "ready"
+
+
+def test_task_progress_start_events_do_not_duplicate_existing_active_step() -> None:
+    timeline = task_progress_event_payloads_for_tool_start(tool_request=_tool_request())
+
+    events = task_progress_event_payloads_for_tool_start(
+        tool_request=_tool_request(),
+        existing_timeline=timeline,
+    )
+
+    assert events == []
 
 
 def test_public_task_progress_events_block_explicit_verification_failure() -> None:

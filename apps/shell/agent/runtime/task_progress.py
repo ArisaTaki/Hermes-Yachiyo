@@ -207,6 +207,143 @@ def append_task_progress_events_for_tool_result(
         )
 
 
+def append_task_progress_events_for_tool_start(
+    *,
+    tool_request: Mapping[str, Any],
+    timeline: list[dict[str, Any]],
+    timeline_factory: Callable[..., dict[str, Any]],
+    append_run_event: Callable[[str, str, dict[str, Any]], Any] | None = None,
+    run_id: str = "",
+) -> None:
+    """Mark planner task-core records active when a tool begins execution."""
+
+    step_id = str(
+        tool_request.get("step_id") or tool_request.get("planner_step_id") or ""
+    ).strip()
+    tool_name = str(tool_request.get("tool") or tool_request.get("tool_name") or "").strip()
+    if not step_id or not tool_name:
+        return
+    todo = tool_request.get("task_todo") if isinstance(tool_request.get("task_todo"), Mapping) else {}
+    checkpoints = _mapping_items(tool_request.get("task_checkpoints"))
+    workspace_items = _mapping_items(tool_request.get("task_workspace_items"))
+    if not todo and not checkpoints and not workspace_items:
+        return
+    decision_id = str(tool_request.get("decision_id") or "").strip()
+    if _runtime_planner_step_has_status(
+        timeline,
+        decision_id=decision_id,
+        step_id=step_id,
+        statuses={"in_progress", "completed", "blocked", "skipped"},
+    ):
+        return
+    source_event = {"event": "agent.tool.started", "detail": tool_name}
+    base_payload = {
+        "source": str(tool_request.get("source") or "runtime_planner"),
+        "core_id": str(tool_request.get("core_id") or ""),
+        "workspace_id": str(tool_request.get("workspace_id") or ""),
+        "decision_id": decision_id,
+        "plan_id": str(tool_request.get("plan_id") or ""),
+        "step_id": step_id,
+        "tool": tool_name,
+        "source_event": source_event,
+        "runtime_status": "running",
+    }
+    for key in (
+        "task_id",
+        "run_group_id",
+        "group_run_id",
+        "group_id",
+        "workflow_run_id",
+        "workflow_id",
+        "workflow_node_id",
+    ):
+        value = str(tool_request.get(key) or "").strip()
+        if value:
+            base_payload[key] = value
+
+    for workspace_item in workspace_items:
+        item_payload = dict(workspace_item)
+        item_payload["status"] = "in_progress"
+        payload = {
+            **base_payload,
+            "workspace_item_id": str(workspace_item.get("item_id") or "").strip(),
+            "status": "in_progress",
+            "previous_status": _latest_task_update_status(
+                timeline,
+                "agent.task.workspace_item.updated",
+                "workspace_item_id",
+                str(workspace_item.get("item_id") or "").strip(),
+                decision_id=decision_id,
+            )
+            or str(workspace_item.get("status") or "planned"),
+            "workspace_item": item_payload,
+        }
+        _append_task_progress_event(
+            "agent.task.workspace_item.updated",
+            str(workspace_item.get("title") or step_id),
+            payload,
+            timeline=timeline,
+            timeline_factory=timeline_factory,
+            append_run_event=append_run_event,
+            run_id=run_id,
+        )
+
+    if todo:
+        todo_payload = dict(todo)
+        todo_payload["status"] = "in_progress"
+        payload = {
+            **base_payload,
+            "todo_id": str(todo.get("todo_id") or "").strip(),
+            "status": "in_progress",
+            "previous_status": _latest_task_update_status(
+                timeline,
+                "agent.task.todo.updated",
+                "todo_id",
+                str(todo.get("todo_id") or "").strip(),
+                decision_id=decision_id,
+            )
+            or str(todo.get("status") or "pending"),
+            "todo": todo_payload,
+        }
+        _append_task_progress_event(
+            "agent.task.todo.updated",
+            str(todo.get("title") or step_id),
+            payload,
+            timeline=timeline,
+            timeline_factory=timeline_factory,
+            append_run_event=append_run_event,
+            run_id=run_id,
+        )
+
+    for checkpoint in checkpoints:
+        checkpoint_payload = dict(checkpoint)
+        checkpoint_payload["status"] = "ready"
+        checkpoint_id = str(checkpoint.get("checkpoint_id") or "").strip()
+        payload = {
+            **base_payload,
+            "checkpoint_id": checkpoint_id,
+            "status": "ready",
+            "previous_status": _latest_task_update_status(
+                timeline,
+                "agent.task.checkpoint.updated",
+                "checkpoint_id",
+                checkpoint_id,
+                decision_id=decision_id,
+            )
+            or str(checkpoint.get("status") or "planned"),
+            "checkpoint": checkpoint_payload,
+        }
+        _append_task_progress_event(
+            "agent.task.checkpoint.updated",
+            str(checkpoint.get("title") or step_id),
+            payload,
+            timeline=timeline,
+            timeline_factory=timeline_factory,
+            append_run_event=append_run_event,
+            run_id=run_id,
+        )
+
+
 def _append_verification_target_progress_events(
     tool_request: Mapping[str, Any],
     verification_targets: list[Mapping[str, Any]],

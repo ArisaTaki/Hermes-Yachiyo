@@ -8,6 +8,9 @@ from typing import Any, Literal
 from apps.shell.agent.runtime.task_progress import (
     append_task_progress_events_for_tool_result as _append_task_progress_events,
 )
+from apps.shell.agent.runtime.task_progress import (
+    append_task_progress_events_for_tool_start as _append_task_start_events,
+)
 from apps.shell.agent.runtime.event_scopes import (
     runtime_progress_base_event_type as _runtime_progress_base_event_type,
 )
@@ -67,6 +70,31 @@ def task_progress_event_payloads_for_tool_result(
     ]
 
 
+def task_progress_event_payloads_for_tool_start(
+    *,
+    tool_request: Mapping[str, Any],
+    event_scope: ProgressEventScope = "agent",
+    existing_timeline: list[Mapping[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    """Return task workspace/todo/checkpoint events for a tool start."""
+    effective_scope = _effective_progress_event_scope(
+        event_scope,
+        tool_request,
+        None,
+    )
+    timeline = [dict(item) for item in existing_timeline or []]
+    start_index = len(timeline)
+    _append_task_start_events(
+        tool_request=tool_request,
+        timeline=timeline,
+        timeline_factory=_timeline_event,
+    )
+    return [
+        _scoped_progress_event(event, effective_scope)
+        for event in timeline[start_index:]
+    ]
+
+
 def public_task_progress_events_for_tool_result(
     *,
     tool_request: Mapping[str, Any],
@@ -80,6 +108,30 @@ def public_task_progress_events_for_tool_result(
     payloads = task_progress_event_payloads_for_tool_result(
         tool_request=tool_request,
         tool_event=tool_event,
+        event_scope=event_scope,
+        existing_timeline=existing_timeline,
+    )
+    return [
+        public_run_event_from_payload(
+            payload,
+            run_id=run_id,
+            sequence=after_sequence + index,
+        )
+        for index, payload in enumerate(payloads, start=1)
+    ]
+
+
+def public_task_progress_events_for_tool_start(
+    *,
+    tool_request: Mapping[str, Any],
+    event_scope: ProgressEventScope = "agent",
+    run_id: str = "",
+    after_sequence: int = 0,
+    existing_timeline: list[Mapping[str, Any]] | None = None,
+) -> list[PublicRunEvent]:
+    """Return redacted PublicRunEvent task progress updates for a tool start."""
+    payloads = task_progress_event_payloads_for_tool_start(
+        tool_request=tool_request,
         event_scope=event_scope,
         existing_timeline=existing_timeline,
     )

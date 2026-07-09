@@ -22,6 +22,7 @@ from apps.shell.agent.runtime.event_scopes import (
     runtime_replan_request_event_type as _runtime_replan_event_type,
 )
 from apps.shell.agent.runtime.task_progress import append_task_progress_events_for_tool_result
+from apps.shell.agent.runtime.task_progress import append_task_progress_events_for_tool_start
 from apps.shell.yachiyo_agent.capability_registry import capability_recovery_tools
 from apps.shell.yachiyo_agent.desktop_execution_policy import (
     desktop_execution_policy_mode as _public_desktop_execution_policy_mode,
@@ -2894,6 +2895,13 @@ class RuntimeToolCallExecutor:
                 **trace_payload,
             )
         )
+        append_task_progress_events_for_tool_start(
+            tool_request={**tool_request, "tool": tool_name},
+            timeline=timeline,
+            timeline_factory=self._timeline,
+            append_run_event=self._append_run_event,
+            run_id=run_id,
+        )
         try:
             tool_result = _pre_execution_approval_required_result(
                 tool_name,
@@ -3285,6 +3293,12 @@ class RuntimeToolRequestRunner:
                     tool_result,
                 )
                 continue
+            self._append_tool_start_progress(
+                tool_request,
+                tool_name=tool_name,
+                timeline=timeline,
+                run_id=run_id,
+            )
             tool_result = self._call_agent_tool(
                 tool_request,
                 allowed_tools,
@@ -3484,6 +3498,22 @@ class RuntimeToolRequestRunner:
         append_replan_request_event_for_tool_result(
             tool_request=traced_request,
             tool_event=tool_event,
+            timeline=timeline,
+            timeline_factory=self._timeline,
+            append_run_event=self._append_run_event,
+            run_id=run_id,
+        )
+
+    def _append_tool_start_progress(
+        self,
+        tool_request: dict[str, Any],
+        *,
+        tool_name: str,
+        timeline: list[dict[str, Any]],
+        run_id: str,
+    ) -> None:
+        append_task_progress_events_for_tool_start(
+            tool_request={**tool_request, "tool": tool_name},
             timeline=timeline,
             timeline_factory=self._timeline,
             append_run_event=self._append_run_event,

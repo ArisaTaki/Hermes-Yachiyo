@@ -592,6 +592,100 @@ def test_runtime_tool_request_runner_continues_after_provider_session_start(
     )
 
 
+def test_runtime_tool_request_runner_marks_task_todo_active_before_tool_call() -> None:
+    timeline: list[dict[str, Any]] = []
+    run_events: list[tuple[str, str, dict[str, Any]]] = []
+    observed_statuses_before_call: list[str] = []
+
+    def call_agent_tool(
+        tool_request: dict[str, Any],
+        _allowed_tools: list[str],
+        _broker: Any,
+        current_timeline: list[dict[str, Any]],
+        **_kwargs: Any,
+    ) -> dict[str, Any]:
+        observed_statuses_before_call.extend(
+            event["status"]
+            for event in current_timeline
+            if event["event"] == "agent.task.todo.updated"
+        )
+        assert tool_request["step_id"] == "write-report"
+        return {"ok": True, "summary": "Report artifact written."}
+
+    runner = _runner(call_agent_tool=call_agent_tool, run_events=run_events)
+
+    runner.run(
+        [
+            {
+                "tool": "artifact.write",
+                "input": {"path": "report.md"},
+                "source": "runtime_planner",
+                "step_id": "write-report",
+                "core_id": "task-core-1",
+                "workspace_id": "task-workspace-1",
+                "decision_id": "decision-1",
+                "plan_id": "plan-1",
+                "task_workspace_items": [
+                    {
+                        "item_id": "workspace-report",
+                        "title": "report.md",
+                        "status": "planned",
+                        "source_step_id": "write-report",
+                    }
+                ],
+                "task_todo": {
+                    "todo_id": "todo-write-report",
+                    "title": "Write report",
+                    "status": "pending",
+                    "step_id": "write-report",
+                    "tool_name": "artifact.write",
+                },
+                "task_checkpoints": [
+                    {
+                        "checkpoint_id": "checkpoint-write-report",
+                        "title": "Verify report",
+                        "status": "planned",
+                        "after_step_id": "write-report",
+                    }
+                ],
+            }
+        ],
+        ["artifact.write"],
+        FakeBroker({"ok": True}),
+        [{"role": "user", "content": "写报告"}],
+        timeline,
+        [],
+        next_iteration=1,
+        run_id="run-progress-start",
+    )
+
+    todo_updates = [
+        event
+        for event in timeline
+        if event["event"] == "agent.task.todo.updated"
+    ]
+    checkpoint_updates = [
+        event
+        for event in timeline
+        if event["event"] == "agent.task.checkpoint.updated"
+    ]
+
+    assert observed_statuses_before_call == ["in_progress"]
+    assert [event["status"] for event in todo_updates] == [
+        "in_progress",
+        "completed",
+    ]
+    assert [event["status"] for event in checkpoint_updates] == [
+        "ready",
+        "completed",
+    ]
+    assert [
+        event_type
+        for _run_id, event_type, _payload in run_events
+        if event_type == "agent.task.todo.updated"
+    ] == ["agent.task.todo.updated", "agent.task.todo.updated"]
+
+
 def test_runtime_tool_request_runner_resolves_analysis_artifact_body(tmp_path) -> None:
     artifact_text = "Data analysis result for sales.csv.\nEast revenue: 10."
     artifact_path = tmp_path / "analysis-report.md"
@@ -798,12 +892,24 @@ def test_runtime_tool_request_runner_preserves_scope_on_task_progress_events() -
         budget=FakeBudget(),
     )
 
-    todo_event = next(
+    todo_events = [
         event for event in timeline if event["event"] == "workflow.run.task.todo.updated"
-    )
-    checkpoint_event = next(
-        event for event in timeline if event["event"] == "workflow.run.task.checkpoint.updated"
-    )
+    ]
+    checkpoint_events = [
+        event
+        for event in timeline
+        if event["event"] == "workflow.run.task.checkpoint.updated"
+    ]
+    assert [event["status"] for event in todo_events] == [
+        "in_progress",
+        "completed",
+    ]
+    assert [event["status"] for event in checkpoint_events] == [
+        "ready",
+        "completed",
+    ]
+    todo_event = todo_events[-1]
+    checkpoint_event = checkpoint_events[-1]
     for event in (todo_event, checkpoint_event):
         assert event["task_id"] == "task-1"
         assert event["group_run_id"] == "group-run-1"
@@ -1652,18 +1758,22 @@ def test_runtime_tool_request_runner_records_explicit_verification_failure_repla
         replan_event["payload"]["failure_detail"]
         == "The generated report did not include the requested chart."
     )
-    todo_event = next(
+    todo_events = [
         event
         for event in timeline
         if event["event"] == "agent.task.todo.updated"
         and event["todo_id"] == "todo-analyze-data"
-    )
-    checkpoint_event = next(
+    ]
+    checkpoint_events = [
         event
         for event in timeline
         if event["event"] == "agent.task.checkpoint.updated"
         and event["checkpoint_id"] == "checkpoint-analyze-data"
-    )
+    ]
+    assert [event["status"] for event in todo_events] == ["in_progress", "blocked"]
+    assert [event["status"] for event in checkpoint_events] == ["ready", "blocked"]
+    todo_event = todo_events[-1]
+    checkpoint_event = checkpoint_events[-1]
     assert todo_event["status"] == "blocked"
     assert todo_event["todo"]["status"] == "blocked"
     assert checkpoint_event["status"] == "blocked"
