@@ -132,6 +132,70 @@ def test_chat_api_direct_daily_desktop_task_forwards_runtime_execution_envelope(
         store.close()
 
 
+def test_chat_api_direct_generic_app_open_forwards_safe_direct_requests(
+    tmp_path,
+    monkeypatch,
+):
+    api, runtime, store = _make_api(tmp_path)
+    runtime.agent_runtime_service = object()
+    captured: dict[str, Any] = {}
+
+    class FakeStarter:
+        def __init__(self, app_runtime, service):
+            captured["app_runtime"] = app_runtime
+            captured["service"] = service
+
+        def execute_existing_main_chat_task(
+            self,
+            *,
+            task_id,
+            conversation_id,
+            prompt,
+            metadata=None,
+            runtime_execution_envelope=None,
+            direct_tool_requests=None,
+        ):
+            captured["task_id"] = task_id
+            captured["conversation_id"] = conversation_id
+            captured["prompt"] = prompt
+            captured["metadata"] = metadata
+            captured["runtime_execution_envelope"] = runtime_execution_envelope
+            captured["direct_tool_requests"] = direct_tool_requests
+            return {
+                "task_id": task_id,
+                "conversation_id": conversation_id,
+                "status": "completed",
+                "summary": "opened",
+                "timeline": [],
+            }
+
+    monkeypatch.setattr(
+        "apps.shell.yachiyo_agent.legacy_ports.LegacyChatTaskStarter",
+        FakeStarter,
+    )
+
+    try:
+        result = api.send_message("打开 Linear")
+
+        assert result["ok"] is True
+        assert result["status"] == "completed"
+        assert captured["prompt"] == "打开 Linear"
+        assert [request["tool"] for request in captured["direct_tool_requests"]] == [
+            "desktop.list_apps",
+            "app.open",
+            "desktop.active_window",
+        ]
+        assert captured["direct_tool_requests"][0]["input"] == {
+            "query": "Linear",
+            "limit": 20,
+        }
+        assert captured["direct_tool_requests"][1]["input"]["app_name"] == "Linear"
+        assert captured["direct_tool_requests"][2]["continue_to_model"] is True
+        assert captured["runtime_execution_envelope"]["requests"]
+    finally:
+        store.close()
+
+
 def test_chat_api_daily_desktop_requests_use_execution_context(tmp_path):
     api, runtime, store = _make_api(tmp_path)
     runtime.agent_runtime_service = object()

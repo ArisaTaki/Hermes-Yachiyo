@@ -328,6 +328,7 @@ _SAFE_DIRECT_ENTRYPOINT_TOOLS = frozenset(
         "app.show",
         "desktop.active_window",
         "desktop.focus_app",
+        "desktop.list_apps",
         "desktop.list_windows",
         "desktop.open_app",
         "desktop.open_path_with_app",

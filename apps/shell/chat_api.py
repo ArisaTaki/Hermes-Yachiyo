@@ -51,6 +51,7 @@ from apps.shell.yachiyo_agent.daily_desktop import (
     daily_desktop_executable_entrypoint_requests,
     daily_desktop_requests_can_complete_without_model,
     daily_desktop_runtime_execution_envelope,
+    daily_desktop_safe_direct_entrypoint_requests,
     direct_browser_entrypoint_requests,
     entrypoint_plan_user_metadata,
     main_chat_entrypoint_allowed_tools,
@@ -1844,6 +1845,7 @@ class ChatAPI:
             )
             direct_daily_desktop_tool_requests = (
                 direct_browser_entrypoint_requests(daily_desktop_requests, task_text)
+                or daily_desktop_safe_direct_entrypoint_requests(daily_desktop_requests)
                 or _direct_input_entrypoint_requests(
                     daily_desktop_requests,
                     text=task_text,

@@ -599,6 +599,18 @@ class TaskIntentRouter:
         if foreground_paste and safe_shortcut is None:
             safe_shortcut = {"action": "paste"}
         desktop_discovery = _desktop_discovery_hint(text)
+        concrete_app_hint = _app_name_hint(text)
+        if (
+            desktop_discovery is not None
+            and str((desktop_discovery or {}).get("action") or "").strip() == "discover_apps"
+            and concrete_app_hint
+            and not _is_generic_foreground_app_label(concrete_app_hint)
+            and (
+                not _is_generic_communication_app_label(concrete_app_hint)
+                or supports_new_message_app_hint(concrete_app_hint)
+            )
+        ):
+            desktop_discovery = None
         if generic_browser_search:
             desktop_discovery = {
                 "action": "discover_apps",
@@ -956,8 +968,14 @@ class TaskIntentRouter:
         generic_communication_app_discovery = False
         generic_communication_query = ""
         if desktop_discovery is None and safe_shortcut is None and (
-            _is_generic_communication_app_label(app_name_hint)
-            or _generic_communication_app_target_requested(text)
+            (
+                _is_generic_communication_app_label(app_name_hint)
+                and not supports_new_message_app_hint(app_name_hint)
+            )
+            or (
+                not app_name_hint
+                and _generic_communication_app_target_requested(text)
+            )
         ):
             generic_communication_query = _generic_communication_app_discovery_query(
                 text,
