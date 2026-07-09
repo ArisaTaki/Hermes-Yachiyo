@@ -6032,6 +6032,137 @@ def test_isolated_provider_session_auto_start_passes_real_backend_requirement(
     ]
 
 
+def test_isolated_provider_session_annotation_readies_readonly_discovery_loop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    start_calls: list[dict[str, Any]] = []
+
+    def fake_status() -> dict[str, Any]:
+        return {
+            "ok": True,
+            "status": "stopped",
+            "running": False,
+            "provider_id": "",
+            "supported_tools": [],
+        }
+
+    def fake_start(request: dict[str, Any] | None = None) -> dict[str, Any]:
+        start_calls.append(dict(request or {}))
+        return {
+            "ok": True,
+            "status": "running",
+            "running": True,
+            "started": True,
+            "provider_id": "local-isolated-desktop",
+            "url": "http://127.0.0.1:19093",
+            "desktop_session_kind": "isolated_desktop",
+            "desktop_session_isolated": True,
+            "foreground_takeover_required": False,
+            "keyboard_mouse_capture_supported": True,
+            "supported_tools": [
+                "desktop.list_apps",
+                "app.open",
+                "desktop.verify",
+            ],
+            "provider_status": {
+                "desktop_session_kind": "isolated_desktop",
+                "desktop_session_isolated": True,
+                "foreground_takeover_required": False,
+                "keyboard_mouse_capture_supported": True,
+                "supported_tools": [
+                    "desktop.list_apps",
+                    "app.open",
+                    "desktop.verify",
+                ],
+            },
+        }
+
+    monkeypatch.setattr(
+        isolated_session_module,
+        "isolated_desktop_provider_session_status",
+        fake_status,
+    )
+    monkeypatch.setattr(
+        isolated_session_module,
+        "start_isolated_desktop_provider_session",
+        fake_start,
+    )
+
+    provider_required_route = {
+        "selected_provider_kind": "sandbox_desktop",
+        "status": "provider_required",
+        "can_execute": False,
+        "can_auto_start": True,
+        "sandbox_required": True,
+        "blocking_conditions": ["sandbox_desktop_provider_required"],
+    }
+    envelope = {
+        "requests": [
+            {
+                "request_id": "request:1:desktop.list_apps",
+                "tool_name": "desktop.list_apps",
+                "desktop_execution_route": dict(provider_required_route),
+                "desktop_execution_policy": {
+                    "mode": "preview_input",
+                    "prefer_isolated_desktop": True,
+                },
+                "execution_mode": {"mode": "tool_native"},
+            },
+            {
+                "request_id": "request:2:app.open",
+                "tool_name": "app.open",
+                "desktop_execution_route": dict(provider_required_route),
+                "desktop_execution_policy": {
+                    "mode": "preview_input",
+                    "prefer_isolated_desktop": True,
+                    "avoid_user_foreground_takeover": True,
+                },
+                "execution_mode": {
+                    "mode": "supervised_live",
+                    "foreground_control": True,
+                },
+            },
+            {
+                "request_id": "request:3:desktop.verify",
+                "tool_name": "desktop.verify",
+                "desktop_execution_route": dict(provider_required_route),
+                "desktop_execution_policy": {
+                    "mode": "preview_input",
+                    "prefer_isolated_desktop": True,
+                },
+                "execution_mode": {"mode": "tool_native"},
+            },
+        ]
+    }
+
+    session = isolated_session_module.ensure_isolated_desktop_provider_session_for_envelope(
+        envelope,
+        auto_start=True,
+    )
+    annotated = isolated_session_module.annotate_envelope_with_desktop_provider_session(
+        envelope,
+        session,
+    )
+
+    assert start_calls == [
+        {"tools": ["app.open", "desktop.list_apps", "desktop.verify"]}
+    ]
+    assert session["needed"] is True
+    assert session["running"] is True
+    assert session["request_ids"] == [
+        "request:1:desktop.list_apps",
+        "request:2:app.open",
+        "request:3:desktop.verify",
+    ]
+    for request in annotated["requests"]:
+        assert request["desktop_provider_session"]["provider_id"] == (
+            "local-isolated-desktop"
+        )
+        assert request["sandbox_provider"]["provider_id"] == "local-isolated-desktop"
+        assert request["desktop_execution_route"]["status"] == "sandbox_ready"
+        assert request["desktop_execution_route"]["can_execute"] is True
+
+
 def test_agent_studio_route_blocks_keyboard_mouse_without_controlled_provider(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -31,9 +31,11 @@ from apps.shell.yachiyo_agent.desktop_provider_contract import (
     virtual_desktop_provider_manifest_contract_evidence,
 )
 from apps.shell.yachiyo_agent.desktop_execution_policy import (
+    desktop_execution_route_decision,
     is_local_low_risk_foreground_tool,
     is_user_foreground_takeover_tool,
     local_low_risk_foreground_tool_allowed,
+    sandbox_desktop_provider_status,
     user_foreground_takeover_allowed,
 )
 from apps.shell.yachiyo_agent.contracts import TaskCoreSnapshot
@@ -1362,7 +1364,50 @@ def _request_with_desktop_provider_session(
         request,
     ):
         return request
-    return {**request, "desktop_provider_session": dict(session)}
+    return _request_with_ready_desktop_provider_route(
+        {**request, "desktop_provider_session": dict(session)},
+        session,
+    )
+
+
+def _request_with_ready_desktop_provider_route(
+    request: dict[str, Any],
+    session: dict[str, Any],
+) -> dict[str, Any]:
+    if not bool(session.get("running")):
+        return request
+    tool_name = _request_tool_name(request)
+    if not tool_name:
+        return request
+    route = _mapping(request.get("desktop_execution_route"))
+    provider = _mapping(request.get("sandbox_provider"))
+    if route and not _route_or_provider_requires_isolated_session(route, provider):
+        return request
+    session_metadata = {
+        "desktop_provider_session": dict(session),
+        "desktop_provider_route_readonly": True,
+        "desktop_provider_route_foreground": True,
+    }
+    sandbox_provider = sandbox_desktop_provider_status(
+        session_metadata,
+        probe_health=False,
+    )
+    if not sandbox_provider:
+        return request
+    projected_route = desktop_execution_route_decision(
+        tool_name,
+        policy=_mapping(request.get("desktop_execution_policy")),
+        execution_mode=_mapping(request.get("execution_mode")),
+        metadata={
+            **session_metadata,
+            "sandbox_provider": sandbox_provider,
+        },
+    )
+    return {
+        **request,
+        "sandbox_provider": sandbox_provider,
+        "desktop_execution_route": projected_route,
+    }
 
 
 def _session_status_with_base(
