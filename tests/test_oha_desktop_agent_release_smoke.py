@@ -37,6 +37,12 @@ def test_oha_desktop_agent_release_smoke_covers_product_readiness(tmp_path) -> N
     assert section_by_id["shared_daily_surfaces"]["report"]["checks"][
         "all_use_runtime_planner"
     ] is True
+    assert section_by_id["shared_daily_surfaces"]["report"]["checks"][
+        "direct_recovery_keeps_daily_sandbox_policy"
+    ] is True
+    assert section_by_id["shared_daily_surfaces"]["report"]["direct_recovery_request"][
+        "desktop_execution_policy"
+    ]["avoid_user_foreground_takeover"] is True
     assert section_by_id["desktop_executor_before_model"]["report"]["checks"][
         "model_never_called"
     ] is True

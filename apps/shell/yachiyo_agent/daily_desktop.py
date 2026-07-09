@@ -14,6 +14,11 @@ from apps.shell.agent.runtime.desktop_intents import (
 )
 from apps.shell.agent.tools.policy import DAILY_DESKTOP_TOOL_NAMES
 
+from .desktop_execution_policy import (
+    daily_entrypoint_desktop_execution_policy,
+    desktop_execution_policy_payload,
+)
+
 logger = logging.getLogger(__name__)
 
 _ENTRYPOINT_DISCOVERY_TOOLS = {
@@ -1370,10 +1375,54 @@ def daily_desktop_direct_metadata_request(
     *,
     allowed_tools: Sequence[str] | None = None,
 ) -> dict[str, Any] | None:
-    return daily_desktop_metadata_tool_request(
+    request = daily_desktop_metadata_tool_request(
         metadata,
         daily_desktop_allowed_tools(allowed_tools),
     )
+    if request is None:
+        return None
+    return _daily_desktop_request_with_execution_policy(request, metadata)
+
+
+def _daily_desktop_request_with_execution_policy(
+    request: Mapping[str, Any],
+    metadata: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    payload = dict(request)
+    if desktop_execution_policy_payload(payload.get("desktop_execution_policy")):
+        return payload
+    metadata_policy = (
+        desktop_execution_policy_payload(metadata.get("desktop_execution_policy"))
+        if isinstance(metadata, Mapping)
+        else {}
+    )
+    if not metadata_policy and isinstance(metadata, Mapping):
+        metadata_policy = desktop_execution_policy_payload(
+            metadata.get("yachiyo_desktop_execution_policy")
+        )
+    payload["desktop_execution_policy"] = metadata_policy or (
+        daily_entrypoint_desktop_execution_policy(
+            surface=_daily_desktop_surface_from_metadata(metadata),
+        )
+    )
+    return payload
+
+
+def _daily_desktop_surface_from_metadata(metadata: Mapping[str, Any] | None) -> str:
+    if not isinstance(metadata, Mapping):
+        return "chat"
+    launcher_mode = str(metadata.get("launcher_mode") or "").strip()
+    if launcher_mode in {"bubble", "live2d"}:
+        return launcher_mode
+    source = str(
+        metadata.get("entrypoint_source")
+        or metadata.get("source")
+        or metadata.get("surface")
+        or ""
+    ).strip()
+    if source in {"bubble", "live2d"}:
+        return source
+    return "chat"
 
 
 def daily_desktop_recovery_execution_prompt(

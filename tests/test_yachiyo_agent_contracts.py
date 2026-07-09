@@ -139,7 +139,10 @@ from apps.shell.yachiyo_agent.controlled_provider_diagnostics import (
 from apps.shell.yachiyo_agent.desktop_provider_contract import (
     OHA_DESKTOP_AGENT_RELEASE_PROVIDER_TOOLS,
 )
-from apps.shell.yachiyo_agent.daily_desktop import daily_desktop_runtime_execution_envelope
+from apps.shell.yachiyo_agent.daily_desktop import (
+    daily_desktop_direct_metadata_request,
+    daily_desktop_runtime_execution_envelope,
+)
 from apps.shell.yachiyo_agent.approvals import approval_card_from_payload
 from apps.shell.yachiyo_agent.capability_registry import runtime_execution_tool_names
 from apps.shell.yachiyo_agent.events import public_run_event_from_payload
@@ -6303,6 +6306,50 @@ def test_daily_desktop_runtime_execution_envelope_uses_daily_policy_for_strategy
     assert (
         envelope["execution_strategy"]["foreground_takeover_allowed"] is False
     )
+
+
+def test_daily_desktop_direct_metadata_request_carries_daily_policy() -> None:
+    request = daily_desktop_direct_metadata_request(
+        {
+            "desktop_permission_recovery": True,
+            "recovery_risk_level": "low",
+            "recovery_tool": "app.focus_and_safe_shortcut",
+            "recovery_input": {"app_name": "Finder", "action": "rename_selected"},
+            "launcher_mode": "live2d",
+        },
+        allowed_tools=["app.focus_and_safe_shortcut"],
+    )
+
+    assert request is not None
+    policy = request["desktop_execution_policy"]
+    assert request["tool"] == "app.focus_and_safe_shortcut"
+    assert policy["mode"] == "preview_input"
+    assert policy["source"] == "daily_live2d"
+    assert policy["prefer_isolated_desktop"] is True
+    assert policy["avoid_user_foreground_takeover"] is True
+    assert policy["require_sandbox_for_keyboard_mouse"] is True
+
+
+def test_daily_desktop_direct_metadata_request_preserves_explicit_policy() -> None:
+    request = daily_desktop_direct_metadata_request(
+        {
+            "desktop_permission_recovery": True,
+            "recovery_risk_level": "low",
+            "recovery_tool": "app.focus",
+            "recovery_input": {"app_name": "Music"},
+            "desktop_execution_policy": {
+                "mode": "supervised_live",
+                "source": "explicit_test",
+            },
+        },
+        allowed_tools=["app.focus"],
+    )
+
+    assert request is not None
+    assert request["desktop_execution_policy"] == {
+        "mode": "supervised_live",
+        "source": "explicit_test",
+    }
 
 
 def test_agent_studio_desktop_execution_policy_requests_provider_health_probe() -> None:

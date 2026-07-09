@@ -23,6 +23,7 @@ from apps.shell.yachiyo_agent.desktop_provider_contract import (
     virtual_desktop_provider_manifest_template,
 )
 from apps.shell.yachiyo_agent.daily_desktop import (
+    daily_desktop_direct_metadata_request,
     daily_desktop_allowed_tools,
     planner_first_daily_desktop_entrypoint_requests,
 )
@@ -151,10 +152,34 @@ def _shared_surface_case() -> dict[str, Any]:
             "daily_desktop_intent" not in case["sources"] for case in cases
         ),
     }
+    direct_recovery_request = daily_desktop_direct_metadata_request(
+        {
+            "desktop_permission_recovery": True,
+            "recovery_risk_level": "low",
+            "recovery_tool": "app.focus_and_safe_shortcut",
+            "recovery_input": {"app_name": "Finder", "action": "rename_selected"},
+            "launcher_mode": "bubble",
+        },
+        allowed_tools=["app.focus_and_safe_shortcut"],
+    )
+    direct_policy = (
+        direct_recovery_request.get("desktop_execution_policy")
+        if isinstance(direct_recovery_request, dict)
+        and isinstance(direct_recovery_request.get("desktop_execution_policy"), dict)
+        else {}
+    )
+    checks["direct_recovery_keeps_daily_sandbox_policy"] = (
+        bool(direct_recovery_request)
+        and direct_policy.get("mode") == "preview_input"
+        and direct_policy.get("prefer_isolated_desktop") is True
+        and direct_policy.get("avoid_user_foreground_takeover") is True
+        and direct_policy.get("require_sandbox_for_keyboard_mouse") is True
+    )
     return {
         "id": "chat_bubble_live2d_shared_runtime",
         "ok": all(checks.values()),
         "cases": cases,
+        "direct_recovery_request": direct_recovery_request,
         "checks": checks,
     }
 
