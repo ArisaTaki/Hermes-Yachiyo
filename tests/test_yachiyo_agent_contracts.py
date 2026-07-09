@@ -54,6 +54,7 @@ from apps.shell.yachiyo_agent import (
     DesktopExecutionRouteSnapshot,
     DesktopExecutionModeSnapshot,
     DesktopExecutionPolicySnapshot,
+    DesktopProviderConformanceSnapshot,
     DesktopProviderHealthSnapshot,
     DesktopRecoveryActionMetadataSnapshot,
     FutureTaskSnapshot,
@@ -5358,6 +5359,7 @@ def test_sandbox_desktop_provider_snapshot_json_shape_is_stable() -> None:
         "desktop_backend_ready_for_public_release",
         "requires_real_virtual_desktop_backend",
         "provider_contract",
+        "provider_conformance",
         "requires_real_sandbox_for",
     ]
     assert payload["available"] is False
@@ -5371,6 +5373,7 @@ def test_sandbox_desktop_provider_snapshot_json_shape_is_stable() -> None:
     assert payload["desktop_backend_ready_for_public_release"] is None
     assert payload["requires_real_virtual_desktop_backend"] is None
     assert payload["provider_contract"] == {}
+    assert payload["provider_conformance"] is None
     assert payload["requires_real_sandbox_for"] == []
     assert payload["blocking_conditions"] == ["sandbox_desktop_provider_required"]
     assert payload["health"]["status"] == "not_configured"
@@ -5436,6 +5439,33 @@ def test_sandbox_desktop_provider_snapshot_json_shape_is_stable() -> None:
     assert explicit_status["blocking_conditions"] == []
     assert explicit_status["health"]["status"] == "not_checked"
     assert explicit_status["launch_hint"]["provider_id"] == "local-headless-desktop"
+    conformance_status = sandbox_desktop_provider_status(
+        {
+            "sandbox_provider": {
+                "available": True,
+                "provider_id": "sandbox-1",
+                "adapter_ready": True,
+                "provider_conformance": {
+                    "ok": True,
+                    "mode": "release_virtual_desktop_provider_conformance",
+                    "runtime_checked": True,
+                    "public_release_ready": True,
+                    "covered_tools": ["desktop.list_apps"],
+                },
+            }
+        }
+    )
+    conformance_snapshot = SandboxDesktopProviderSnapshot.model_validate(
+        conformance_status
+    )
+    assert isinstance(
+        conformance_snapshot.provider_conformance,
+        DesktopProviderConformanceSnapshot,
+    )
+    assert conformance_snapshot.provider_conformance.public_release_ready is True
+    assert conformance_snapshot.provider_conformance.covered_tools == [
+        "desktop.list_apps"
+    ]
     with pytest.raises(ValidationError):
         SandboxDesktopProviderSnapshot(unknown=True)
     with pytest.raises(ValidationError):

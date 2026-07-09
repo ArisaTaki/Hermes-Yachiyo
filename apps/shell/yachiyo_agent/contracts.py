@@ -200,6 +200,30 @@ class DesktopProviderHealthSnapshot(_PublicSnapshot):
     error: str = ""
 
 
+class DesktopProviderConformanceSnapshot(_PublicSnapshot):
+    ok: bool = False
+    mode: str = ""
+    runtime_checked: bool = False
+    release_candidate: bool = False
+    public_release_ready: bool = False
+    smoke_ok: bool | None = None
+    provider_contract_ok: bool | None = None
+    required_tools: list[str] = Field(default_factory=list)
+    covered_tools: list[str] = Field(default_factory=list)
+    missing_required_tools: list[str] = Field(default_factory=list)
+    failed_tools: list[str] = Field(default_factory=list)
+    blocking_conditions: list[str] = Field(default_factory=list)
+    release_blocking_conditions: list[str] = Field(default_factory=list)
+    provider_contract_blocking_conditions: list[str] = Field(default_factory=list)
+    desktop_session_kind: str = ""
+    desktop_session_isolated: bool | None = None
+    foreground_takeover_required: bool | None = None
+    desktop_backend_kind: str = ""
+    desktop_backend_is_loopback: bool | None = None
+    desktop_backend_ready_for_public_release: bool | None = None
+    requires_real_virtual_desktop_backend: bool | None = None
+
+
 class SandboxDesktopProviderSnapshot(_PublicSnapshot):
     available: bool = False
     provider_id: str = ""
@@ -224,6 +248,7 @@ class SandboxDesktopProviderSnapshot(_PublicSnapshot):
     desktop_backend_ready_for_public_release: bool | None = None
     requires_real_virtual_desktop_backend: bool | None = None
     provider_contract: dict[str, Any] = Field(default_factory=dict)
+    provider_conformance: DesktopProviderConformanceSnapshot | None = None
     requires_real_sandbox_for: list[str] = Field(default_factory=list)
 
 

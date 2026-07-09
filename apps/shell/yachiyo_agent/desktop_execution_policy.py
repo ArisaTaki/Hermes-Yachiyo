@@ -1030,6 +1030,7 @@ def _sandbox_provider_public_payload(payload: Mapping[str, Any]) -> dict[str, An
         "desktop_backend_ready_for_public_release",
         "requires_real_virtual_desktop_backend",
         "provider_contract",
+        "provider_conformance",
         "requires_real_sandbox_for",
     }
     return {
