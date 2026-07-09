@@ -748,6 +748,7 @@ def run_smoke(
     run_isolated_provider_smoke: bool = True,
     use_configured_virtual_desktop_provider: bool = False,
     provider_manifest: Path | None = None,
+    require_public_release_backend: bool = False,
 ) -> dict[str, Any]:
     with tempfile.TemporaryDirectory(prefix="oha-desktop-agent-release-smoke-") as temp_dir:
         root = Path(workdir) if workdir is not None else Path(temp_dir)
@@ -771,6 +772,7 @@ def run_smoke(
             configured_virtual_desktop_provider_requested
         ),
         isolated_provider_backend=isolated_provider_backend,
+        require_public_release_backend=require_public_release_backend,
     )
     isolated_provider_smoke_collected = any(
         section.get("id") == "isolated_desktop_provider"
@@ -821,13 +823,24 @@ def run_smoke(
         checks["isolated_provider_dev_smoke_verified"] = (
             isolated_provider_smoke_collected
         )
-        if configured_virtual_desktop_provider_requested:
+        if configured_virtual_desktop_provider_requested or require_public_release_backend:
             checks["isolated_provider_release_backend_verified"] = (
                 not isolated_provider_release_blockers
             )
+    isolated_provider_release_ready = (
+        run_isolated_provider_smoke
+        and configured_virtual_desktop_provider_requested
+        and not isolated_provider_release_blockers
+    )
+    public_release_ready = (
+        all(checks.values())
+        and (isolated_provider_release_ready if require_public_release_backend else False)
+    )
     return {
         "ok": all(checks.values()),
         "mode": "oha_desktop_agent_release_smoke",
+        "public_release_required": bool(require_public_release_backend),
+        "public_release_ready": public_release_ready,
         "section_count": len(sections),
         "failed_sections": [str(section["id"]) for section in failed],
         "checks": checks,
@@ -850,11 +863,7 @@ def run_smoke(
         "isolated_provider_dev_smoke_ready": (
             run_isolated_provider_smoke and isolated_provider_smoke_collected
         ),
-        "isolated_provider_release_ready": (
-            run_isolated_provider_smoke
-            and configured_virtual_desktop_provider_requested
-            and not isolated_provider_release_blockers
-        ),
+        "isolated_provider_release_ready": isolated_provider_release_ready,
         "isolated_provider_release_blockers": isolated_provider_release_blockers,
         "isolated_provider_backend": isolated_provider_backend,
         "sections": sections,
@@ -950,9 +959,27 @@ def _isolated_provider_release_blockers(
     run_isolated_provider_smoke: bool,
     configured_virtual_desktop_provider_requested: bool,
     isolated_provider_backend: dict[str, Any],
+    require_public_release_backend: bool = False,
 ) -> list[str]:
-    if not run_isolated_provider_smoke or not configured_virtual_desktop_provider_requested:
+    if not run_isolated_provider_smoke:
+        if require_public_release_backend:
+            return ["isolated_desktop_provider_smoke_required"]
         return []
+    if not configured_virtual_desktop_provider_requested:
+        if require_public_release_backend:
+            blockers = _isolated_provider_backend_release_blockers(
+                isolated_provider_backend
+            )
+            blockers.append("virtual_desktop_provider_not_configured")
+            return _unique_strings(blockers)
+        return []
+    blockers = _isolated_provider_backend_release_blockers(isolated_provider_backend)
+    return _unique_strings(blockers)
+
+
+def _isolated_provider_backend_release_blockers(
+    isolated_provider_backend: dict[str, Any],
+) -> list[str]:
     blockers: list[str] = []
     conformance_ready = isolated_provider_backend.get(
         "provider_conformance_public_release_ready"
@@ -979,7 +1006,7 @@ def _isolated_provider_release_blockers(
         )
         if not blockers:
             blockers.append("virtual_desktop_provider_contract_not_ready")
-    return _unique_strings(blockers)
+    return blockers
 
 
 def _unique_strings(values: Sequence[str]) -> list[str]:
@@ -1041,6 +1068,8 @@ def _compact_stdout_summary(payload: dict[str, Any]) -> dict[str, Any]:
     return {
         "ok": payload.get("ok") is True,
         "mode": str(payload.get("mode") or ""),
+        "public_release_required": bool(payload.get("public_release_required") is True),
+        "public_release_ready": bool(payload.get("public_release_ready") is True),
         "section_count": int(payload.get("section_count") or len(sections)),
         "failed_sections": [
             str(section)
@@ -1125,6 +1154,16 @@ def _parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--public-release",
+        "--require-public-release-backend",
+        dest="require_public_release_backend",
+        action="store_true",
+        help=(
+            "Fail unless the isolated desktop provider smoke uses a real, "
+            "public-release-ready virtual desktop backend."
+        ),
+    )
+    parser.add_argument(
         "--validate-provider-manifest",
         type=Path,
         help=(
@@ -1188,6 +1227,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         or not bool(args.skip_isolated_provider_smoke)
         or bool(args.use_configured_virtual_desktop_provider)
         or args.provider_manifest is not None
+        or bool(args.require_public_release_backend)
     )
     evidence = run_smoke(
         workdir=args.workdir,
@@ -1196,6 +1236,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.use_configured_virtual_desktop_provider
         ),
         provider_manifest=args.provider_manifest,
+        require_public_release_backend=bool(args.require_public_release_backend),
     )
     if args.report_json is not None:
         _write_report(args.report_json, evidence)
