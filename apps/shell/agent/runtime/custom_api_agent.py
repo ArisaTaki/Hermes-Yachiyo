@@ -582,6 +582,153 @@ class RuntimeCustomApiAgentLoop:
                     execution_tool_requests,
                     allowed_tools,
                 )
+                first_approval_index = next(
+                    (
+                        index
+                        for index, request in enumerate(execution_tool_requests)
+                        if isinstance(request, dict)
+                        and bool(request.get("approval_required"))
+                    ),
+                    -1,
+                )
+                if first_approval_index == 0:
+                    approval_request = execution_tool_requests[0]
+                    approval_tool = str(approval_request.get("tool") or "").strip()
+                    approval_input = (
+                        approval_request.get("input")
+                        if isinstance(approval_request.get("input"), dict)
+                        else {}
+                    )
+                    approval_id_source = (
+                        f"{run_id}:{approval_tool}:{repr(sorted(approval_input.items()))}"
+                    )
+                    approval_preview = dict(approval_input)
+                    if approval_preview.get("app_name"):
+                        approval_preview.pop("query", None)
+                        approval_preview.pop("selection_source", None)
+                    pending_approval = {
+                        "approval_id": (
+                            "approval-"
+                            + hashlib.sha1(approval_id_source.encode("utf-8")).hexdigest()[:12]
+                        ),
+                        "tool": approval_tool,
+                        "input": dict(approval_input),
+                        "input_preview": approval_preview,
+                        "messages": list(messages),
+                        "tool_request": dict(approval_request),
+                        "remaining_tool_requests": [
+                            dict(item)
+                            for item in execution_tool_requests[1:]
+                            if isinstance(item, dict)
+                        ],
+                        "next_iteration": self._normalize_tool_iteration(
+                            start_iteration + 1
+                        ),
+                    }
+                    self._record_desktop_intent_approval_required(
+                        approval_tool,
+                        dict(approval_input),
+                        pending_approval=pending_approval,
+                        timeline=timeline,
+                        run_id=run_id,
+                        planned_request=approval_request,
+                        source=self._approval_event_source(
+                            approval_request,
+                            approval_tool,
+                        ),
+                        planning_reason=self._approval_event_planning_reason(
+                            approval_request,
+                            approval_tool,
+                        ),
+                    )
+                    raise AgentApprovalRequired(pending_approval)
+                if first_approval_index > 0:
+                    preapproval_requests = execution_tool_requests[:first_approval_index]
+                    approval_request = execution_tool_requests[first_approval_index]
+                    self._record_desktop_permission_preflight(
+                        preapproval_requests,
+                        broker,
+                        timeline=timeline,
+                        run_id=run_id,
+                    )
+                    self._record_desktop_tool_policy_decisions(
+                        preapproval_requests,
+                        allowed_tools=allowed_tools,
+                        agent=agent,
+                        run_id=run_id,
+                    )
+                    preapproval_timeline_start = len(timeline)
+                    self._run_tool_requests(
+                        preapproval_requests,
+                        allowed_tools,
+                        broker,
+                        messages,
+                        timeline,
+                        artifacts,
+                        next_iteration=start_iteration,
+                        run_id=run_id,
+                        budget=budget,
+                    )
+                    self._record_runtime_planner_task_progress_events(
+                        runtime_planner_decision,
+                        timeline=timeline,
+                        tool_timeline_start=preapproval_timeline_start,
+                        run_id=run_id,
+                    )
+                    approval_tool = str(approval_request.get("tool") or "").strip()
+                    approval_input = (
+                        approval_request.get("input")
+                        if isinstance(approval_request.get("input"), dict)
+                        else {}
+                    )
+                    approval_id_source = (
+                        f"{run_id}:{approval_tool}:{repr(sorted(approval_input.items()))}"
+                    )
+                    approval_preview = dict(approval_input)
+                    if approval_preview.get("app_name"):
+                        approval_preview.pop("query", None)
+                        approval_preview.pop("selection_source", None)
+                    pending_approval = {
+                        "approval_id": (
+                            "approval-"
+                            + hashlib.sha1(approval_id_source.encode("utf-8")).hexdigest()[:12]
+                        ),
+                        "tool": approval_tool,
+                        "input": dict(approval_input),
+                        "input_preview": approval_preview,
+                        "messages": list(messages),
+                        "tool_request": dict(approval_request),
+                        "completed_tool_requests": [
+                            dict(item)
+                            for item in preapproval_requests
+                            if isinstance(item, dict)
+                        ],
+                        "remaining_tool_requests": [
+                            dict(item)
+                            for item in execution_tool_requests[first_approval_index + 1 :]
+                            if isinstance(item, dict)
+                        ],
+                        "next_iteration": self._normalize_tool_iteration(
+                            start_iteration + 1
+                        ),
+                    }
+                    self._record_desktop_intent_approval_required(
+                        approval_tool,
+                        dict(approval_input),
+                        pending_approval=pending_approval,
+                        timeline=timeline,
+                        run_id=run_id,
+                        planned_request=approval_request,
+                        source=self._approval_event_source(
+                            approval_request,
+                            approval_tool,
+                        ),
+                        planning_reason=self._approval_event_planning_reason(
+                            approval_request,
+                            approval_tool,
+                        ),
+                    )
+                    raise AgentApprovalRequired(pending_approval)
                 self._record_desktop_permission_preflight(
                     execution_tool_requests,
                     broker,
@@ -6065,6 +6212,11 @@ def _preserve_direct_daily_desktop_tool_requests(
         "app.focus_and_type_into_ui_element",
     }
     if tools & app_ui_approval_tools:
+        return True
+    if any(
+        isinstance(request, dict) and bool(request.get("approval_required"))
+        for request in requests
+    ):
         return True
     if tools & _DAILY_DESKTOP_DISCOVERY_PREFIX_TOOLS:
         return False

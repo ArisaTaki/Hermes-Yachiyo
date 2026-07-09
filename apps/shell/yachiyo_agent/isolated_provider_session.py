@@ -31,7 +31,9 @@ from apps.shell.yachiyo_agent.desktop_provider_contract import (
     virtual_desktop_provider_manifest_contract_evidence,
 )
 from apps.shell.yachiyo_agent.desktop_execution_policy import (
+    is_local_low_risk_foreground_tool,
     is_user_foreground_takeover_tool,
+    local_low_risk_foreground_tool_allowed,
     user_foreground_takeover_allowed,
 )
 from packages.security import redact_api_error_text
@@ -439,7 +441,7 @@ def ensure_isolated_desktop_provider_session_for_envelope(
         "source": "isolated_provider_session_manager",
     }
     if not targets:
-        return _session_status_with_base(base, status)
+        return _session_not_needed_status(base, status)
     if bool(status.get("running")) and _session_status_supports_targets(
         status,
         scoped_targets,
@@ -1008,6 +1010,9 @@ def _envelope_requires_real_virtual_backend(
 
 
 def _request_requires_real_virtual_backend(request: dict[str, Any]) -> bool:
+    policy = _mapping(request.get("desktop_execution_policy"))
+    if str(policy.get("source") or "").strip() == "agent_studio":
+        return True
     sources = (
         request,
         _mapping(request.get("desktop_execution_route")),
@@ -1169,6 +1174,19 @@ def _request_prefers_isolated_foreground_session(
         return False
     if _optional_bool(route.get("desktop_session_isolated")) is True:
         return False
+    if _request_uses_ready_local_low_risk_foreground_route(
+        tool_name,
+        request=request,
+        route=route,
+        provider=provider,
+    ):
+        return False
+    policy = _mapping(request.get("desktop_execution_policy"))
+    if (
+        is_local_low_risk_foreground_tool(tool_name)
+        and _policy_prefers_isolated_foreground(policy)
+    ):
+        return True
     if not (
         is_user_foreground_takeover_tool(tool_name)
         or bool(mode.get("foreground_control"))
@@ -1179,10 +1197,35 @@ def _request_prefers_isolated_foreground_session(
         return True
     if _optional_bool(route.get("user_foreground_takeover_risk")) is True:
         return True
-    policy = _mapping(request.get("desktop_execution_policy"))
     if _policy_prefers_isolated_foreground(policy):
         return True
     return False
+
+
+def _request_uses_ready_local_low_risk_foreground_route(
+    tool_name: str,
+    *,
+    request: dict[str, Any],
+    route: dict[str, Any],
+    provider: dict[str, Any],
+) -> bool:
+    if not local_low_risk_foreground_tool_allowed(tool_name, request):
+        return False
+    provider_kind = str(
+        route.get("selected_provider_kind")
+        or route.get("provider_kind")
+        or provider.get("provider_kind")
+        or ""
+    ).strip()
+    if provider_kind != "local_desktop":
+        return False
+    if str(route.get("status") or "").strip() not in {
+        "provider_ready",
+        "ready",
+        "supervised_live",
+    }:
+        return False
+    return bool(route.get("can_execute", True))
 
 
 def _policy_prefers_isolated_foreground(policy: dict[str, Any]) -> bool:
@@ -1273,6 +1316,30 @@ def _session_status_with_base(
     payload = {**base, **_public_session_status(status)}
     if base.get("requires_real_virtual_desktop_backend") is True:
         payload["requires_real_virtual_desktop_backend"] = True
+    return payload
+
+
+def _session_not_needed_status(
+    base: dict[str, Any],
+    status: dict[str, Any],
+) -> dict[str, Any]:
+    payload = _session_status_with_base(base, status)
+    payload.update(
+        {
+            "ok": True,
+            "needed": False,
+            "status": "not_needed",
+            "running": False,
+            "started": False,
+            "requires_real_virtual_desktop_backend": False,
+            "reason": "",
+            "request_ids": [],
+            "tool_names": [],
+            "blocking_conditions": [],
+            "provider_contract": {},
+            "provider_conformance": {},
+        }
+    )
     return payload
 
 
@@ -1466,15 +1533,20 @@ def _managed_external_provider_start_failed_status(
 
 def _public_session_status(status: dict[str, Any]) -> dict[str, Any]:
     provider_status = _mapping(status.get("provider_status"))
-    provider_contract = _mapping(
-        status.get("provider_contract") or provider_status.get("provider_contract")
-    ) or _provider_contract_evidence_for_status(status)
-    provider_conformance = _mapping(
-        status.get("provider_conformance")
-        or provider_status.get("provider_conformance")
-    ) or _provider_conformance_for_status(
-        status,
-        provider_contract=provider_contract,
+    provider_contract = (
+        _mapping(status.get("provider_contract"))
+        if "provider_contract" in status
+        else _mapping(provider_status.get("provider_contract"))
+        or _provider_contract_evidence_for_status(status)
+    )
+    provider_conformance = (
+        _mapping(status.get("provider_conformance"))
+        if "provider_conformance" in status
+        else _mapping(provider_status.get("provider_conformance"))
+        or _provider_conformance_for_status(
+            status,
+            provider_contract=provider_contract,
+        )
     )
     provider_manifest_evidence = _mapping(
         status.get("provider_manifest_evidence")

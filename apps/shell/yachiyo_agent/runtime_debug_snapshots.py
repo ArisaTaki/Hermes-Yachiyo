@@ -724,21 +724,40 @@ def _desktop_provider_session(
     requests: list[Any],
     events: list[Any] | None = None,
 ) -> Any | None:
+    candidates: list[Any] = []
     session = _field(envelope, "desktop_provider_session")
     if session is not None:
-        return session
+        candidates.append(session)
     for request in requests:
         session = _field(request, "desktop_provider_session")
         if session is not None:
-            return session
+            candidates.append(session)
     for event in reversed(events or []):
         event_type = _text(_field(event, "event_type") or _field(event, "event"))
         if not event_type.startswith("desktop.provider_session."):
             continue
         session = _field(_event_payload(event), "desktop_provider_session")
         if session is not None:
-            return session
-    return None
+            candidates.append(session)
+    if not candidates:
+        return None
+    return max(candidates, key=_desktop_provider_session_priority)
+
+
+def _desktop_provider_session_priority(session: Any) -> int:
+    status = _text(_field(session, "status")).lower()
+    if _field(session, "ok") is False or status in {
+        "start_failed",
+        "failed",
+        "real_virtual_desktop_provider_required",
+        "virtual_desktop_provider_contract_required",
+    }:
+        return 3
+    if bool(_field(session, "needed")):
+        return 2
+    if status and status != "not_needed":
+        return 1
+    return 0
 
 
 def _desktop_provider_context_items(

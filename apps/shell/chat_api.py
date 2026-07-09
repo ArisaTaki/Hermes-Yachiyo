@@ -25,7 +25,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List
+from typing import TYPE_CHECKING, Any, Dict, List, Mapping
 from uuid import uuid4
 
 from apps.core.activity_store import get_activity_store
@@ -664,7 +664,15 @@ def _remove_attachment_session_dir(session_id: str) -> None:
 
 def _direct_input_entrypoint_requests(
     requests: list[dict[str, Any]],
+    *,
+    text: str = "",
 ) -> list[dict[str, Any]]:
+    approval_requests = _approval_entrypoint_requests(requests)
+    if approval_requests:
+        return approval_requests
+    submit_request = _submit_foreground_entrypoint_request(text)
+    if submit_request:
+        return submit_request
     executable = daily_desktop_executable_entrypoint_requests(requests)
     if len(executable) == 2:
         first_tool = str(executable[0].get("tool") or "").strip()
@@ -678,6 +686,98 @@ def _direct_input_entrypoint_requests(
     if tool_name in {"desktop.safe_type_text"}:
         return executable
     return _direct_app_ui_read_entrypoint_requests(request)
+
+
+_APPROVAL_ENTRYPOINT_PREREQUISITE_TOOLS = frozenset(
+    {
+        "app.open",
+        "app.focus",
+        "app.focus_window",
+        "desktop.open_app",
+        "desktop.focus_app",
+    }
+)
+
+
+def _approval_entrypoint_requests(
+    requests: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    selected: list[dict[str, Any]] = []
+    for request in requests:
+        if not isinstance(request, Mapping):
+            continue
+        tool_name = str(request.get("tool") or request.get("tool_name") or "").strip()
+        if not tool_name:
+            continue
+        if bool(request.get("approval_required")) or bool(request.get("requires_approval")):
+            if _system_ui_open_confirm_is_redundant(selected, request):
+                return selected
+            selected.append(_entrypoint_request_copy(request))
+            return selected
+        if tool_name in _APPROVAL_ENTRYPOINT_PREREQUISITE_TOOLS:
+            selected.append(_entrypoint_request_copy(request))
+    return []
+
+
+def _system_ui_open_confirm_is_redundant(
+    selected: list[dict[str, Any]],
+    approval_request: Mapping[str, Any],
+) -> bool:
+    tool_name = str(approval_request.get("tool") or approval_request.get("tool_name") or "").strip()
+    payload = approval_request.get("input") if isinstance(approval_request.get("input"), Mapping) else {}
+    if tool_name != "desktop.submit_foreground" or str(payload.get("action") or "").strip() != "confirm":
+        return False
+    if len(selected) != 1:
+        return False
+    open_request = selected[0]
+    open_tool = str(open_request.get("tool") or open_request.get("tool_name") or "").strip()
+    if open_tool not in {"app.open", "desktop.open_app"}:
+        return False
+    open_input = open_request.get("input") if isinstance(open_request.get("input"), Mapping) else {}
+    app_name = str(open_input.get("app_name") or "").strip().lower()
+    return app_name in {"control center", "notification center", "launchpad"}
+
+
+def _entrypoint_request_copy(request: Mapping[str, Any]) -> dict[str, Any]:
+    payload = dict(request)
+    tool_name = str(payload.get("tool") or payload.get("tool_name") or "").strip()
+    tool_input = payload.get("input")
+    if isinstance(tool_input, Mapping) and tool_input.get("app_name"):
+        clean_input = dict(tool_input)
+        clean_input.pop("query", None)
+        clean_input.pop("selection_source", None)
+        payload["input"] = clean_input
+    if tool_name in _APPROVAL_ENTRYPOINT_PREREQUISITE_TOOLS:
+        payload["requires_post_action_verification"] = False
+    return payload
+
+
+def _submit_foreground_entrypoint_request(text: str) -> list[dict[str, Any]]:
+    value = str(text or "").strip().lower()
+    action = ""
+    if re.fullmatch(
+        r"(?:send)\s+(?:the\s+)?current\s+(?:message|content|input|text)",
+        value,
+    ):
+        action = "send"
+    elif re.fullmatch(
+        r"(?:submit)\s+(?:the\s+)?current\s+(?:message|content|input|text|form)",
+        value,
+    ):
+        action = "submit"
+    if not action:
+        return []
+    return [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": action},
+            "source": "runtime_planner",
+            "planning_reason": "planner_submit_foreground_entrypoint",
+            "approval_required": True,
+            "risk_level": "high",
+        }
+    ]
 
 
 def _direct_app_ui_read_entrypoint_requests(
@@ -1835,7 +1935,10 @@ class ChatAPI:
             )
             direct_daily_desktop_tool_requests = (
                 direct_browser_entrypoint_requests(daily_desktop_requests, task_text)
-                or _direct_input_entrypoint_requests(daily_desktop_requests)
+                or _direct_input_entrypoint_requests(
+                    daily_desktop_requests,
+                    text=task_text,
+                )
                 if direct_daily_desktop_intent
                 else []
             )

@@ -224,19 +224,30 @@ _KEYBOARD_MOUSE_CAPTURE_TOOLS = frozenset(
         "desktop.type",
         "desktop.type_text",
         "desktop.click",
+        "desktop.close_window",
+        "desktop.quit_app",
     }
 )
 
-_USER_FOREGROUND_TAKEOVER_TOOLS = frozenset(
+_LOCAL_LOW_RISK_FOREGROUND_TOOLS = frozenset(
     {
-        *_KEYBOARD_MOUSE_CAPTURE_TOOLS,
         "app.open",
         "app.focus",
         "app.show",
         "app.focus_window",
         "desktop.open_app",
         "desktop.focus_app",
+        "media.apple_music_play",
+        "media.apple_music_open_and_play",
+        "media.apple_music_control",
         "media.music_app_open_and_play",
+        "media.music_app_control",
+    }
+)
+
+_USER_FOREGROUND_TAKEOVER_TOOLS = frozenset(
+    {
+        *_KEYBOARD_MOUSE_CAPTURE_TOOLS,
     }
 )
 
@@ -264,8 +275,8 @@ def daily_entrypoint_desktop_execution_policy(
         "allow_media_control": True,
         "source": f"daily_{clean_surface}",
         "reason": (
-            "Daily entrypoints should execute through structured tools and isolated "
-            "desktop providers instead of taking over the user's keyboard/mouse."
+            "Daily entrypoints should use structured desktop tools by default; "
+            "keyboard and mouse capture still requires an isolated desktop provider."
         ),
     }
 
@@ -414,6 +425,8 @@ def _execution_strategy_recommends_provider_auto_start(
         return False
     if _envelope_has_approval_first_request(envelope):
         return False
+    if _envelope_only_uses_local_low_risk_foreground(envelope):
+        return False
     preferred_environment = str(
         strategy.get("preferred_environment") or ""
     ).strip()
@@ -448,6 +461,28 @@ def _envelope_has_approval_first_request(envelope: Mapping[str, Any]) -> bool:
         if _request_tool_name(request) in _APPROVAL_FIRST_KEYBOARD_MOUSE_TOOLS:
             return True
     return False
+
+
+def _envelope_only_uses_local_low_risk_foreground(
+    envelope: Mapping[str, Any],
+) -> bool:
+    requests = envelope.get("requests")
+    if not isinstance(requests, list):
+        return False
+    saw_low_risk_foreground = False
+    for request in requests:
+        if not isinstance(request, Mapping):
+            continue
+        tool_name = _request_tool_name(request)
+        if not tool_name:
+            continue
+        if is_readonly_desktop_provider_tool(tool_name):
+            continue
+        if _local_low_risk_foreground_tool_allowed(tool_name, request):
+            saw_low_risk_foreground = True
+            continue
+        return False
+    return saw_low_risk_foreground
 
 
 def _request_tool_name(request: Mapping[str, Any]) -> str:
@@ -490,6 +525,8 @@ def _request_policy_recommends_provider_auto_start(
         return False
     if is_readonly_desktop_provider_tool(tool_name):
         return False
+    if _local_low_risk_foreground_tool_allowed(tool_name, request):
+        return False
     policy = desktop_execution_policy_payload(request.get("desktop_execution_policy"))
     if not policy:
         policy = desktop_execution_policy_payload(
@@ -507,6 +544,31 @@ def _request_policy_recommends_provider_auto_start(
             "require_sandbox_for_keyboard_mouse",
         )
     )
+
+
+def _local_low_risk_foreground_tool_allowed(
+    tool_name: str,
+    request: Mapping[str, Any],
+) -> bool:
+    if str(tool_name or "").strip() not in _LOCAL_LOW_RISK_FOREGROUND_TOOLS:
+        return False
+    policy = desktop_execution_policy_payload(request.get("desktop_execution_policy"))
+    if not policy:
+        policy = desktop_execution_policy_payload(
+            request.get("yachiyo_desktop_execution_policy")
+        )
+    source = str(policy.get("source") or request.get("source") or "").strip()
+    if source and not source.startswith("daily_"):
+        return False
+    if _metadata_truthy(
+        request,
+        "desktop_provider_session_strict_foreground",
+        "desktop_provider_session_enforce_foreground",
+        "require_desktop_provider_for_foreground",
+        "require_isolated_desktop_for_foreground",
+    ):
+        return False
+    return True
 
 
 def _desktop_provider_session_candidate_tool(tool_name: str) -> bool:
@@ -875,6 +937,17 @@ def is_user_foreground_takeover_tool(tool_name: str) -> bool:
     return str(tool_name or "").strip() in _USER_FOREGROUND_TAKEOVER_TOOLS
 
 
+def is_local_low_risk_foreground_tool(tool_name: str) -> bool:
+    return str(tool_name or "").strip() in _LOCAL_LOW_RISK_FOREGROUND_TOOLS
+
+
+def local_low_risk_foreground_tool_allowed(
+    tool_name: str,
+    request: Mapping[str, Any],
+) -> bool:
+    return _local_low_risk_foreground_tool_allowed(tool_name, request)
+
+
 def user_foreground_takeover_allowed(metadata: Mapping[str, Any] | None) -> bool:
     return _metadata_truthy(
         metadata,
@@ -906,8 +979,8 @@ def with_daily_entrypoint_desktop_execution_policy(
     payload.setdefault("desktop_provider_health_probe", True)
     payload.setdefault("desktop_provider_route_readonly", True)
     payload.setdefault("desktop_provider_route_foreground", True)
+    payload.setdefault("desktop_provider_local_native", True)
     if user_foreground_takeover_allowed(payload):
-        payload.setdefault("desktop_provider_local_native", True)
         payload["desktop_execution_policy"] = {
             **daily_entrypoint_desktop_execution_policy(surface=surface),
             "mode": "allow",
@@ -1438,6 +1511,8 @@ def _sandbox_route_decision(
     provider_kind = str(sandbox_provider.get("provider_kind") or "sandbox_desktop")
     provider_id = str(sandbox_provider.get("provider_id") or "")
     provider_context = _desktop_provider_route_context(sandbox_provider, tool_name)
+    if _desktop_route_requires_real_virtual_backend(metadata):
+        provider_context["requires_real_virtual_desktop_backend"] = True
     if not bool(sandbox_provider.get("available")):
         return {
             **dict(route),
@@ -1620,6 +1695,21 @@ def _desktop_provider_route_context(
         and str(tool_name or "").strip() in _USER_FOREGROUND_TAKEOVER_TOOLS
     )
     return payload
+
+
+def _desktop_route_requires_real_virtual_backend(
+    metadata: Mapping[str, Any] | None,
+) -> bool:
+    if _metadata_truthy(
+        metadata,
+        "requires_real_virtual_desktop_backend",
+        "require_real_virtual_desktop_backend",
+        "real_virtual_desktop_backend_required",
+    ):
+        return True
+    if not isinstance(metadata, Mapping):
+        return False
+    return str(metadata.get("source") or "").strip() == "agent_studio"
 
 
 def _desktop_provider_ready_status(sandbox_provider: Mapping[str, Any]) -> str:
@@ -1892,6 +1982,8 @@ def _health_payload(value: Any) -> dict[str, Any]:
 
 
 def _provider_contract_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
+    if str(payload.get("provider_kind") or "").strip() != "sandbox_desktop":
+        return {}
     status = dict(payload)
     status.setdefault(
         "configured",

@@ -211,13 +211,12 @@ def _pending_approval_input_preview(
     input_preview: Any,
     context: dict[str, Any],
 ) -> Any:
-    if not isinstance(input_preview, dict) or not context:
-        return input_preview
-    preview = dict(input_preview)
-    for key, value in context.items():
-        preview_value = _tool_input_preview(value) if isinstance(value, dict) else value
-        preview.setdefault(key, deepcopy(preview_value))
-    return preview
+    if isinstance(input_preview, dict) and input_preview.get("app_name"):
+        preview = dict(input_preview)
+        preview.pop("query", None)
+        preview.pop("selection_source", None)
+        return preview
+    return input_preview
 
 
 def _pending_approval_resume_input_preview(

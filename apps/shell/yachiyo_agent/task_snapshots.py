@@ -135,6 +135,17 @@ _CHAT_TOOL_INPUT_TRACE_KEYS = {
     "requested_app_name",
     "resolved_app_name",
     "resolved_app_path",
+    "runtime_execution_envelope",
+    "runtime_execution_metadata",
+    "tool_request",
+    "completed_tool_requests",
+    "remaining_tool_requests",
+    "messages",
+    "next_iteration",
+    "resume_kind",
+    "model_profile_id",
+    "tool_policy",
+    "workspace_policy",
 }
 _CHAT_TASK_EVENT_PAYLOAD_TRACE_KEYS = {
     "core_id",
@@ -467,7 +478,27 @@ def _same_chat_tool_call_input(
 def _chat_sanitized_tool_calls(
     tool_calls: list[ToolCallSnapshot],
 ) -> list[ToolCallSnapshot]:
-    return [_chat_sanitized_tool_call(tool_call) for tool_call in tool_calls]
+    return _deduped_chat_tool_calls(
+        [_chat_sanitized_tool_call(tool_call) for tool_call in tool_calls]
+    )
+
+
+def _deduped_chat_tool_calls(
+    tool_calls: list[ToolCallSnapshot],
+) -> list[ToolCallSnapshot]:
+    visible: list[ToolCallSnapshot] = []
+    seen: set[tuple[str, str, str]] = set()
+    for tool_call in tool_calls:
+        key = (
+            tool_call.tool_name,
+            tool_call.status,
+            repr(redact_json_value(tool_call.input_preview)),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        visible.append(tool_call)
+    return visible
 
 
 def _chat_sanitized_approvals(

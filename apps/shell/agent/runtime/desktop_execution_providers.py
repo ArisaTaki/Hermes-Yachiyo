@@ -180,6 +180,8 @@ KEYBOARD_MOUSE_CAPTURE_TOOL_NAMES = (
     "desktop.type",
     "desktop.type_text",
     "desktop.click",
+    "desktop.close_window",
+    "desktop.quit_app",
 )
 LOCAL_DESKTOP_PROVIDER_REQUIRES_SANDBOX_TOOLS = KEYBOARD_MOUSE_CAPTURE_TOOL_NAMES
 
@@ -1173,6 +1175,10 @@ def desktop_execution_route_requires_provider(route: Mapping[str, Any] | Any) ->
         return False
     provider_kind = _route_provider_kind(route)
     if not provider_kind or provider_kind in _DEFAULT_PROVIDER_KINDS:
+        return False
+    if provider_kind == LOCAL_DESKTOP_PROVIDER_KIND and not bool(
+        route.get("sandbox_required")
+    ):
         return False
     if bool(route.get("provider_execution_required")):
         return True

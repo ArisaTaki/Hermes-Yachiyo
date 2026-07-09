@@ -2036,7 +2036,7 @@ def test_yachiyo_agent_service_plans_shared_chat_execution_envelope() -> None:
     assert envelope.replan_signal_count == len(envelope.task_core.replan_signals)
 
 
-def test_yachiyo_chat_execution_requires_isolated_provider_for_app_open(
+def test_yachiyo_chat_execution_uses_local_provider_for_app_open(
     monkeypatch,
 ) -> None:
     monkeypatch.delenv("OHA_YACHIYO_DESKTOP_PROVIDER_URL", raising=False)
@@ -2052,29 +2052,32 @@ def test_yachiyo_chat_execution_requires_isolated_provider_for_app_open(
     requests = {request.tool_name: request for request in envelope.requests}
 
     assert requests["app.open"].sandbox_provider is not None
-    assert requests["app.open"].sandbox_provider.provider_kind == "sandbox_desktop"
-    assert requests["app.open"].sandbox_provider.status == "provider_required"
-    assert requests["app.open"].sandbox_provider.available is False
-    assert requests["app.open"].desktop_execution_route is not None
-    assert requests["app.open"].desktop_execution_route.status == "provider_required"
-    assert requests["app.open"].desktop_execution_route.selected_provider_kind == (
-        "sandbox_desktop"
+    assert requests["app.open"].sandbox_provider.provider_kind == (
+        LOCAL_DESKTOP_PROVIDER_KIND
     )
-    assert requests["app.open"].desktop_execution_route.can_execute is False
-    assert requests["app.open"].desktop_execution_route.sandbox_required is True
+    assert requests["app.open"].sandbox_provider.provider_id == (
+        LOCAL_DESKTOP_PROVIDER_ID
+    )
+    assert requests["app.open"].sandbox_provider.status == "available"
+    assert requests["app.open"].sandbox_provider.available is True
+    assert requests["app.open"].desktop_execution_route is not None
+    assert requests["app.open"].desktop_execution_route.status == "provider_ready"
+    assert requests["app.open"].desktop_execution_route.selected_provider_kind == (
+        LOCAL_DESKTOP_PROVIDER_KIND
+    )
+    assert requests["app.open"].desktop_execution_route.can_execute is True
+    assert requests["app.open"].desktop_execution_route.sandbox_required is False
     assert requests["app.open"].desktop_execution_route.isolated_desktop_preferred is True
     assert requests["app.open"].desktop_execution_route.foreground_takeover_allowed is False
-    assert (
-        requests["app.open"].desktop_execution_route.desktop_execution_session_policy
-        == "isolated_preferred"
-    )
-    assert requests["app.open"].desktop_execution_route.blocking_conditions == [
-        "sandbox_desktop_provider_required"
-    ]
+    assert requests["app.open"].desktop_execution_route.blocking_conditions == []
     assert requests["desktop.list_apps"].desktop_execution_route is not None
-    assert requests["desktop.list_apps"].desktop_execution_route.status == "ready"
+    assert requests["desktop.list_apps"].desktop_execution_route.status == (
+        "provider_ready"
+    )
     assert requests["desktop.active_window"].desktop_execution_route is not None
-    assert requests["desktop.active_window"].desktop_execution_route.status == "ready"
+    assert requests["desktop.active_window"].desktop_execution_route.status == (
+        "provider_ready"
+    )
 
 
 def test_yachiyo_chat_execution_routes_running_isolated_provider_session() -> None:
@@ -2154,7 +2157,7 @@ def test_yachiyo_chat_execution_blocks_provider_session_without_keyboard_capture
     assert request.desktop_execution_route.can_execute is False
 
 
-def test_yachiyo_chat_execution_requires_isolated_provider_for_music_playback(
+def test_yachiyo_chat_execution_uses_local_provider_for_music_playback(
     monkeypatch,
 ) -> None:
     monkeypatch.delenv("OHA_YACHIYO_DESKTOP_PROVIDER_URL", raising=False)
@@ -2178,23 +2181,25 @@ def test_yachiyo_chat_execution_requires_isolated_provider_for_music_playback(
     assert envelope.intent_kind == "media_playback"
     assert playback_request.input == {"app_name": "Music"}
     assert playback_request.sandbox_provider is not None
-    assert playback_request.sandbox_provider.provider_kind == "sandbox_desktop"
-    assert playback_request.sandbox_provider.status == "provider_required"
-    assert playback_request.desktop_execution_route is not None
-    assert playback_request.desktop_execution_route.status == "provider_required"
-    assert playback_request.desktop_execution_route.selected_provider_kind == (
-        "sandbox_desktop"
+    assert playback_request.sandbox_provider.provider_kind == (
+        LOCAL_DESKTOP_PROVIDER_KIND
     )
-    assert playback_request.desktop_execution_route.can_execute is False
-    assert playback_request.desktop_execution_route.sandbox_required is True
+    assert playback_request.sandbox_provider.provider_id == LOCAL_DESKTOP_PROVIDER_ID
+    assert playback_request.sandbox_provider.status == "available"
+    assert playback_request.desktop_execution_route is not None
+    assert playback_request.desktop_execution_route.status == "provider_ready"
+    assert playback_request.desktop_execution_route.selected_provider_kind == (
+        LOCAL_DESKTOP_PROVIDER_KIND
+    )
+    assert playback_request.desktop_execution_route.can_execute is True
+    assert playback_request.desktop_execution_route.sandbox_required is False
     assert playback_request.desktop_execution_route.isolated_desktop_preferred is True
     assert playback_request.desktop_execution_route.foreground_takeover_allowed is False
-    assert (
-        playback_request.desktop_execution_route.desktop_execution_session_policy
-        == "isolated_preferred"
-    )
+    assert playback_request.desktop_execution_route.blocking_conditions == []
     assert requests["desktop.active_window"].desktop_execution_route is not None
-    assert requests["desktop.active_window"].desktop_execution_route.status == "ready"
+    assert requests["desktop.active_window"].desktop_execution_route.status == (
+        "provider_ready"
+    )
 
 
 def test_yachiyo_agent_service_can_project_full_chat_execution_plan() -> None:
@@ -2784,7 +2789,7 @@ def test_yachiyo_chat_entrypoint_auto_starts_isolated_provider_for_input(
     assert "desktop_provider" in task.runtime_debug.debug_surfaces
 
 
-def test_yachiyo_chat_entrypoint_starts_isolated_session_for_app_open(
+def test_yachiyo_chat_entrypoint_uses_local_provider_for_app_open(
     monkeypatch,
 ) -> None:
     for key in (
@@ -2826,41 +2831,35 @@ def test_yachiyo_chat_entrypoint_starts_isolated_session_for_app_open(
         if request["tool"] == "app.open"
     )
 
-    assert start_calls == [
-        {"tools": ["app.open", "desktop.active_window", "desktop.list_apps"]}
-    ]
-    assert session["needed"] is True
-    assert session["started"] is True
-    assert session["running"] is True
-    assert session["provider_id"] == "local-isolated-desktop"
-    assert session["desktop_session_kind"] == "isolated_desktop"
-    assert session["desktop_session_isolated"] is True
-    assert session["foreground_takeover_required"] is False
+    assert start_calls == []
+    assert session["needed"] is False
+    assert session["status"] == "not_needed"
+    assert session["started"] is False
+    assert session["running"] is False
     assert open_request["input"] == {
         "app_name": "PixelForge",
         "query": "PixelForge",
         "selection_source": "desktop.list_apps",
     }
-    assert open_request["sandbox_provider"]["provider_kind"] == "sandbox_desktop"
-    assert open_request["sandbox_provider"]["provider_id"] == "local-isolated-desktop"
-    assert open_request["desktop_execution_route"]["status"] == "sandbox_ready"
+    assert open_request["sandbox_provider"]["provider_kind"] == (
+        LOCAL_DESKTOP_PROVIDER_KIND
+    )
+    assert open_request["sandbox_provider"]["provider_id"] == (
+        LOCAL_DESKTOP_PROVIDER_ID
+    )
+    assert open_request["desktop_execution_route"]["status"] == "provider_ready"
     assert open_request["desktop_execution_route"]["selected_provider_kind"] == (
-        "sandbox_desktop"
+        LOCAL_DESKTOP_PROVIDER_KIND
     )
-    assert open_request["desktop_execution_route"]["sandbox_required"] is True
-    assert open_request["desktop_provider_session"]["provider_id"] == (
-        "local-isolated-desktop"
-    )
+    assert open_request["desktop_execution_route"]["sandbox_required"] is False
+    assert "desktop_provider_session" not in open_request
     assert task.runtime_debug is not None
-    assert task.runtime_debug.desktop_provider_session_needed is True
-    assert task.runtime_debug.desktop_provider_session_tool_names == [
-        "app.open",
-        "desktop.active_window",
-        "desktop.list_apps",
-    ]
-    assert task.runtime_debug.desktop_execution_session_mode == "isolated_desktop"
+    assert task.runtime_debug.desktop_provider_session_needed is False
+    assert task.runtime_debug.desktop_provider_session_tool_names == []
+    assert task.runtime_debug.desktop_provider_requires_real_virtual_backend is False
+    assert task.runtime_debug.desktop_execution_session_mode == "user_foreground"
     assert task.runtime_debug.desktop_execution_session_label == (
-        "isolated desktop provider"
+        "real desktop foreground"
     )
 
 
@@ -2923,7 +2922,7 @@ def test_yachiyo_chat_entrypoint_allows_explicit_user_foreground_app_open(
     assert task.runtime_debug.desktop_execution_session_mode == "user_foreground"
 
 
-def test_yachiyo_chat_entrypoint_starts_isolated_session_for_music_playback(
+def test_yachiyo_chat_entrypoint_uses_local_provider_for_music_playback(
     monkeypatch,
 ) -> None:
     for key in (
@@ -2964,40 +2963,31 @@ def test_yachiyo_chat_entrypoint_starts_isolated_session_for_music_playback(
         if request["tool"] == "media.music_app_open_and_play"
     )
 
-    assert start_calls == [
-        {"tools": ["desktop.ui_elements", "media.music_app_open_and_play"]}
-    ]
-    assert session["needed"] is True
-    assert session["started"] is True
-    assert session["running"] is True
-    assert session["provider_id"] == "local-isolated-desktop"
-    assert session["desktop_session_kind"] == "isolated_desktop"
-    assert session["desktop_session_isolated"] is True
-    assert session["foreground_takeover_required"] is False
+    assert start_calls == []
+    assert session["needed"] is False
+    assert session["status"] == "not_needed"
+    assert session["started"] is False
+    assert session["running"] is False
     assert playback_request["input"] == {"app_name": "Music"}
     assert playback_request["sandbox_provider"]["provider_kind"] == (
-        "sandbox_desktop"
+        LOCAL_DESKTOP_PROVIDER_KIND
     )
     assert playback_request["sandbox_provider"]["provider_id"] == (
-        "local-isolated-desktop"
+        LOCAL_DESKTOP_PROVIDER_ID
     )
-    assert playback_request["desktop_execution_route"]["status"] == "sandbox_ready"
+    assert playback_request["desktop_execution_route"]["status"] == "provider_ready"
     assert playback_request["desktop_execution_route"]["selected_provider_kind"] == (
-        "sandbox_desktop"
+        LOCAL_DESKTOP_PROVIDER_KIND
     )
-    assert playback_request["desktop_execution_route"]["sandbox_required"] is True
-    assert playback_request["desktop_provider_session"]["provider_id"] == (
-        "local-isolated-desktop"
-    )
+    assert playback_request["desktop_execution_route"]["sandbox_required"] is False
+    assert "desktop_provider_session" not in playback_request
     assert task.runtime_debug is not None
-    assert task.runtime_debug.desktop_provider_session_needed is True
-    assert task.runtime_debug.desktop_provider_session_tool_names == [
-        "desktop.ui_elements",
-        "media.music_app_open_and_play",
-    ]
-    assert task.runtime_debug.desktop_execution_session_mode == "isolated_desktop"
+    assert task.runtime_debug.desktop_provider_session_needed is False
+    assert task.runtime_debug.desktop_provider_session_tool_names == []
+    assert task.runtime_debug.desktop_provider_requires_real_virtual_backend is False
+    assert task.runtime_debug.desktop_execution_session_mode == "user_foreground"
     assert task.runtime_debug.desktop_execution_session_label == (
-        "isolated desktop provider"
+        "real desktop foreground"
     )
 
 
@@ -3061,11 +3051,11 @@ def test_yachiyo_chat_entrypoint_does_not_direct_execute_blocked_provider_route(
 
     task = service.start_chat_task(
         StartChatTaskRequest(
-            prompt="播放 Apple Music",
+            prompt="在 PixelForge 点击 Export",
             conversation_id="chat-1",
             metadata={"launcher_mode": "bubble"},
             allowed_tools=[
-                "media.music_app_open_and_play",
+                "app.focus_and_click_ui_element",
                 "desktop.ui_elements",
             ],
         )
@@ -3078,9 +3068,9 @@ def test_yachiyo_chat_entrypoint_does_not_direct_execute_blocked_provider_route(
     ]
 
     assert start_calls == [
-        {"tools": ["desktop.ui_elements", "media.music_app_open_and_play"]}
+        {"tools": ["app.focus_and_click_ui_element", "desktop.ui_elements"]}
     ]
-    assert "media.music_app_open_and_play" not in direct_tools
+    assert "app.focus_and_click_ui_element" not in direct_tools
     session = envelope["desktop_provider_session"]
     assert session["status"] == "real_virtual_desktop_provider_required"
     assert session["running"] is False
@@ -3737,8 +3727,8 @@ def test_yachiyo_agent_service_keeps_provider_session_event_with_existing_planne
                     "envelope_id": "envelope-provider-session",
                     "requests": [
                         {
-                            "request_id": "request-open-app",
-                            "tool_name": "app.open",
+                            "request_id": "request-click-ui",
+                            "tool_name": "app.focus_and_click_ui_element",
                         }
                     ],
                     "desktop_provider_session": {
@@ -3748,7 +3738,7 @@ def test_yachiyo_agent_service_keeps_provider_session_event_with_existing_planne
                         "running": False,
                         "provider_id": "local-isolated-desktop",
                         "reason": "sandbox_desktop_provider_required",
-                        "tool_names": ["app.open"],
+                        "tool_names": ["app.focus_and_click_ui_element"],
                         "desktop_session_kind": "isolated_desktop",
                         "desktop_session_isolated": True,
                         "foreground_takeover_required": False,
@@ -3760,8 +3750,9 @@ def test_yachiyo_agent_service_keeps_provider_session_event_with_existing_planne
 
     task = service.start_chat_task(
         StartChatTaskRequest(
-            prompt="打开 Apple Music",
+            prompt="在 PixelForge 点击 Export",
             conversation_id="chat-1",
+            allowed_tools=["app.focus_and_click_ui_element", "desktop.ui_elements"],
         )
     )
 

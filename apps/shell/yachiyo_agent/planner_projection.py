@@ -170,9 +170,21 @@ def planner_enriched_chat_request(
                 runtime_execution_envelope,
                 allowed_tools=execution_allowed_tools,
             )
+            direct_tool_requests = [
+                request
+                for request in direct_tool_requests
+                if not _direct_request_route_blocked(request)
+            ]
             if direct_tool_requests:
                 payload["direct_tool_requests"] = direct_tool_requests
     return payload
+
+
+def _direct_request_route_blocked(request: Mapping[str, Any]) -> bool:
+    route = request.get("desktop_execution_route")
+    if not isinstance(route, Mapping):
+        return False
+    return route.get("can_execute") is False
 
 
 def _runtime_execution_envelope_payload_for_chat_start(

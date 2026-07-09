@@ -972,7 +972,13 @@ class LegacyChatTaskStarter:
                 ),
             )
             if explicit_direct_tool_requests:
-                direct_tool_requests = explicit_direct_tool_requests
+                direct_tool_requests = (
+                    _runtime_planner_direct_approval_sequence_requests(
+                        explicit_direct_tool_requests,
+                        allowed_entrypoint_tools,
+                    )
+                    or explicit_direct_tool_requests
+                )
             elif envelope_tool_requests:
                 direct_tool_requests = envelope_tool_requests
             elif selected_source == "runtime_planner":
@@ -2320,6 +2326,8 @@ def _runtime_planner_direct_approval_sequence_requests(
     ):
         return []
     if app_ui_approval_plan:
+        return _approval_sequence_with_preflight_policy(executable)
+    if generic_approval_plan and not (app_submit_approval_plan or communication_send_plan):
         return _approval_sequence_with_preflight_policy(executable)
     execution_requests = planner_execution_tool_requests(executable, allowed_tools) or executable
     return _approval_sequence_with_preflight_policy([

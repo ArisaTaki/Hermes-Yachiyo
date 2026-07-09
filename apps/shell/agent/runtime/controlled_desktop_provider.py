@@ -72,6 +72,8 @@ CONTROLLED_DESKTOP_PROVIDER_TOOLS = (
     "desktop.type",
     "desktop.type_text",
     "desktop.click",
+    "desktop.close_window",
+    "desktop.quit_app",
     "media.music_app_open_and_play",
     "media.music_app_control",
 )
@@ -98,6 +100,8 @@ KEYBOARD_MOUSE_CONTROL_TOOLS = frozenset(
         "desktop.type",
         "desktop.type_text",
         "desktop.click",
+        "desktop.close_window",
+        "desktop.quit_app",
     }
 )
 
@@ -316,6 +320,8 @@ class ControlledDesktopProvider(HeadlessDesktopProvider):
             "desktop.submit_foreground": lambda value: desktop.desktop_submit_foreground(
                 str(value.get("action") or "submit")
             ),
+            "desktop.close_window": lambda _value: desktop.desktop_close_window(),
+            "desktop.quit_app": lambda _value: desktop.desktop_quit_app(),
             "desktop.search_submit": lambda _value: desktop.desktop_search_submit(),
             "desktop.click_ui_element": lambda value: desktop.click_ui_element(
                 str(value.get("target") or ""),

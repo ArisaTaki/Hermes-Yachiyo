@@ -198,7 +198,8 @@ def _full_plan_tool_requests_from_decision(
         if not tool_name or tool_name not in allowed_tools:
             continue
         status = _text(getattr(step, "status", None)) or "planned"
-        if status in {"unavailable", "skipped"}:
+        approval_required = bool(getattr(step, "approval_required", False))
+        if status in {"unavailable", "skipped"} and not approval_required:
             continue
         input_preview = getattr(step, "input_preview", None)
         raw_request_input = (
@@ -213,7 +214,7 @@ def _full_plan_tool_requests_from_decision(
             "input": request_input,
             "source": "runtime_planner",
             "planning_reason": f"planner_full_plan_{decision.selected_intent.kind}",
-            "approval_required": bool(getattr(step, "approval_required", False)),
+            "approval_required": approval_required,
             "status": status,
         }
         if step_id:
@@ -585,10 +586,14 @@ def runtime_execution_requests_from_envelope_payload(
 
 
 def _request_status_is_non_executable(request: Mapping[str, Any]) -> bool:
+    if bool(request.get("approval_required")):
+        return False
     return str(request.get("status") or "").strip() in _NON_EXECUTABLE_REQUEST_STATUSES
 
 
 def _request_desktop_route_is_non_executable(request: Mapping[str, Any]) -> bool:
+    if bool(request.get("approval_required")):
+        return False
     route = request.get("desktop_execution_route")
     if not isinstance(route, Mapping):
         return False
