@@ -3718,6 +3718,70 @@ def test_yachiyo_agent_service_does_not_duplicate_existing_chat_planner_events()
     assert [event.event_type for event in task.recent_events].count("agent.intent.selected") == 1
 
 
+def test_yachiyo_agent_service_keeps_provider_session_event_with_existing_planner_events(
+) -> None:
+    class ProviderSessionRuntimePort(_BareStartTaskRuntimePort):
+        def start_chat_task(self, request: dict[str, Any]) -> dict[str, Any]:
+            self.calls.append(("start_chat_task", request))
+            return _task_payload(
+                status="running",
+                title=request.get("title") or "Chat task",
+                session_id=str(request.get("conversation_id") or ""),
+                events=[
+                    {
+                        "event_type": "agent.intent.selected",
+                        "payload": {"intent": {"kind": "desktop_operation"}},
+                    }
+                ],
+                runtime_execution_envelope={
+                    "envelope_id": "envelope-provider-session",
+                    "requests": [
+                        {
+                            "request_id": "request-open-app",
+                            "tool_name": "app.open",
+                        }
+                    ],
+                    "desktop_provider_session": {
+                        "ok": False,
+                        "status": "start_failed",
+                        "needed": True,
+                        "running": False,
+                        "provider_id": "local-isolated-desktop",
+                        "reason": "sandbox_desktop_provider_required",
+                        "tool_names": ["app.open"],
+                        "desktop_session_kind": "isolated_desktop",
+                        "desktop_session_isolated": True,
+                        "foreground_takeover_required": False,
+                    },
+                },
+            )
+
+    service = YachiyoAgentService(ProviderSessionRuntimePort(existing_planner_events=True))
+
+    task = service.start_chat_task(
+        StartChatTaskRequest(
+            prompt="打开 Apple Music",
+            conversation_id="chat-1",
+        )
+    )
+
+    event_types = [event.event_type for event in task.recent_events]
+    assert event_types.count("agent.intent.selected") == 1
+    assert "desktop.provider_session.failed" in event_types
+    provider_event = next(
+        event
+        for event in task.recent_events
+        if event.event_type == "desktop.provider_session.failed"
+    )
+    assert provider_event.sequence == 2
+    assert provider_event.payload["desktop_provider_session"]["provider_id"] == (
+        "local-isolated-desktop"
+    )
+    assert task.runtime_debug is not None
+    assert task.runtime_debug.desktop_provider_session_status == "start_failed"
+    assert task.runtime_debug.needs_replan is True
+
+
 def test_yachiyo_agent_service_treats_scoped_recovery_events_as_planner_events() -> None:
     class ScopedRecoveryRuntimePort(_BareStartTaskRuntimePort):
         def start_chat_task(self, request: dict[str, Any]) -> dict[str, Any]:

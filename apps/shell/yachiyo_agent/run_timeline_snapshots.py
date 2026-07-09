@@ -5,6 +5,9 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
+from apps.shell.agent.runtime.desktop_provider_session_events import (
+    desktop_provider_session_public_event,
+)
 from apps.shell.agent.runtime.events import redact_secrets
 
 from .approval_event_snapshots import (
@@ -23,6 +26,7 @@ from .contracts import (
     PublicRunEvent,
     RunTimelineSnapshot,
 )
+from .events import public_run_event_from_payload
 from .task_snapshots import (
     run_events_from_payload,
     runtime_execution_envelope_from_payload,
@@ -101,6 +105,11 @@ def run_timeline_snapshot_from_payload(
     runtime_execution_envelope = runtime_execution_envelope_from_payload(
         payload,
         events=events,
+    )
+    events = _events_with_desktop_provider_session(
+        payload,
+        events,
+        run_id=run_id,
     )
     if task_core is None and runtime_execution_envelope is not None:
         task_core = runtime_execution_envelope.task_core
@@ -298,6 +307,78 @@ def artifact_snapshots_from_payloads(
     run_id: str = "",
 ) -> list[ArtifactSnapshot]:
     return _artifact_snapshots_from_payloads(payloads, run_id=run_id)
+
+
+def _events_with_desktop_provider_session(
+    payload: Mapping[str, Any],
+    events: list[PublicRunEvent],
+    *,
+    run_id: str,
+) -> list[PublicRunEvent]:
+    if any(
+        event.event_type.startswith("desktop.provider_session.")
+        for event in events
+    ):
+        return events
+    session = _desktop_provider_session_from_payload(payload)
+    if not isinstance(session, Mapping):
+        return events
+    event = desktop_provider_session_public_event(
+        session,
+        run_id=run_id,
+        payload_context=_desktop_provider_event_context(payload),
+        redact=redact_secrets,
+    )
+    if event is None:
+        return events
+    return [
+        *events,
+        public_run_event_from_payload(
+            event,
+            run_id=run_id,
+            sequence=_next_timeline_event_sequence(events),
+        ),
+    ]
+
+
+def _desktop_provider_session_from_payload(
+    payload: Mapping[str, Any],
+) -> Mapping[str, Any] | None:
+    envelope = payload.get("runtime_execution_envelope")
+    if isinstance(envelope, Mapping):
+        session = envelope.get("desktop_provider_session")
+        if isinstance(session, Mapping):
+            return session
+    metadata = payload.get("metadata")
+    if isinstance(metadata, Mapping):
+        envelope = metadata.get("yachiyo_execution_envelope")
+        if isinstance(envelope, Mapping):
+            session = envelope.get("desktop_provider_session")
+            if isinstance(session, Mapping):
+                return session
+    return None
+
+
+def _desktop_provider_event_context(payload: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        key: payload.get(key)
+        for key in (
+            "task_id",
+            "session_id",
+            "agent_id",
+            "workflow_id",
+            "workflow_run_id",
+            "group_id",
+            "group_run_id",
+            "run_group_id",
+        )
+        if payload.get(key) not in (None, "", [], {})
+    }
+
+
+def _next_timeline_event_sequence(events: list[PublicRunEvent]) -> int:
+    sequences = [int(event.sequence or 0) for event in events]
+    return max([*sequences, len(events)]) + 1
 
 
 def _pending_timeline_approval(

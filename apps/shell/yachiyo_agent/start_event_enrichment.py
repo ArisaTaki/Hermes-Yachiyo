@@ -42,11 +42,17 @@ def start_payload_with_planner_events(
         event_context=event_context,
     )
     if _payload_has_planner_events(payload):
-        return payload
+        return _payload_with_desktop_provider_session_event(
+            payload,
+            event_context=event_context,
+        )
 
     prompt = _start_prompt(request_payload, payload)
     if not prompt:
-        return payload
+        return _payload_with_desktop_provider_session_event(
+            payload,
+            event_context=event_context,
+        )
 
     decision = plan_task(
         prompt,
@@ -56,16 +62,22 @@ def start_payload_with_planner_events(
     planner_events = _planner_public_events_for_start_payload(
         decision,
         run_id=_started_run_id(payload),
-        after_sequence=_max_event_sequence(payload),
+        after_sequence=_last_event_sequence(payload),
         event_context=event_context,
         source_payload=payload,
     )
     if not planner_events:
-        return payload
+        return _payload_with_desktop_provider_session_event(
+            payload,
+            event_context=event_context,
+        )
 
     key = _event_list_key(payload)
     payload[key] = [*list(payload.get(key) or []), *planner_events]
-    return payload
+    return _payload_with_desktop_provider_session_event(
+        payload,
+        event_context=event_context,
+    )
 
 
 def start_payload_with_planner_decision_events(
@@ -85,21 +97,30 @@ def start_payload_with_planner_decision_events(
         else dict(raw_payload)
     )
     if decision is None or _payload_has_planner_events(payload):
-        return payload
+        return _payload_with_desktop_provider_session_event(
+            payload,
+            event_context=event_context,
+        )
 
     planner_events = _planner_public_events_for_start_payload(
         decision,
         run_id=_started_run_id(payload),
-        after_sequence=_max_event_sequence(payload),
+        after_sequence=_last_event_sequence(payload),
         event_context=event_context,
         source_payload=payload,
     )
     if not planner_events:
-        return payload
+        return _payload_with_desktop_provider_session_event(
+            payload,
+            event_context=event_context,
+        )
 
     key = _event_list_key(payload)
     payload[key] = [*list(payload.get(key) or []), *planner_events]
-    return payload
+    return _payload_with_desktop_provider_session_event(
+        payload,
+        event_context=event_context,
+    )
 
 
 def _optional_string_list(value: Any) -> list[str] | None:
@@ -281,6 +302,30 @@ def _desktop_provider_session_event_for_start_payload(
     )
 
 
+def _payload_with_desktop_provider_session_event(
+    payload: Mapping[str, Any],
+    *,
+    event_context: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    enriched = dict(payload)
+    if _payload_has_desktop_provider_session_event(enriched):
+        return enriched
+    provider_event = _desktop_provider_session_event_for_start_payload(
+        enriched,
+        run_id=_started_run_id(enriched),
+        event_context=event_context,
+    )
+    if provider_event is None:
+        return enriched
+
+    key = _event_list_key(enriched)
+    enriched[key] = [
+        *list(enriched.get(key) or []),
+        {**provider_event, "sequence": _last_event_sequence(enriched) + 1},
+    ]
+    return enriched
+
+
 def _planner_events_with_execution_task_core(
     events: list[dict[str, Any]],
     source_payload: Mapping[str, Any] | None,
@@ -445,6 +490,14 @@ def _payload_has_planner_events(payload: Mapping[str, Any]) -> bool:
     return False
 
 
+def _payload_has_desktop_provider_session_event(payload: Mapping[str, Any]) -> bool:
+    for event in _raw_start_events(payload):
+        event_type = str(event.get("event_type") or event.get("event") or "").strip()
+        if event_type.startswith("desktop.provider_session."):
+            return True
+    return False
+
+
 def _raw_start_events(payload: Mapping[str, Any]) -> list[Mapping[str, Any]]:
     for key in ("events", "run_events", "recent_events", "timeline"):
         value = payload.get(key)
@@ -468,6 +521,10 @@ def _max_event_sequence(payload: Mapping[str, Any]) -> int:
         except (TypeError, ValueError):
             continue
     return sequence
+
+
+def _last_event_sequence(payload: Mapping[str, Any]) -> int:
+    return max(_max_event_sequence(payload), len(_raw_start_events(payload)))
 
 
 def _started_run_id(payload: Mapping[str, Any]) -> str:

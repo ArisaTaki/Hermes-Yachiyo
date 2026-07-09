@@ -249,6 +249,74 @@ def test_run_timeline_runtime_debug_reconstructs_planner_from_events() -> None:
     assert "timeline" in timeline.runtime_debug.debug_surfaces
 
 
+def test_run_timeline_projects_provider_session_from_execution_envelope() -> None:
+    timeline = run_timeline_snapshot_from_payload(
+        {
+            "run_id": "run-provider-session",
+            "task_id": "task-provider-session",
+            "session_id": "chat-1",
+            "status": "running",
+            "events": [
+                {
+                    "event_type": "run.started",
+                    "sequence": 1,
+                    "payload": {"task_id": "task-provider-session"},
+                }
+            ],
+            "runtime_execution_envelope": {
+                "envelope_id": "envelope-provider-session",
+                "requests": [
+                    {
+                        "request_id": "request-focus-app",
+                        "tool_name": "app.focus",
+                    }
+                ],
+                "desktop_provider_session": {
+                    "ok": False,
+                    "status": "start_failed",
+                    "needed": True,
+                    "running": False,
+                    "provider_id": "local-isolated-desktop",
+                    "reason": "sandbox_desktop_provider_required",
+                    "tool_names": ["app.focus"],
+                    "desktop_session_kind": "isolated_desktop",
+                    "desktop_session_isolated": True,
+                    "foreground_takeover_required": False,
+                    "keyboard_mouse_capture_supported": True,
+                    "supported_tools": ["app.focus", "desktop.ui_elements"],
+                },
+            },
+        }
+    )
+
+    assert [event.event_type for event in timeline.events] == [
+        "run.started",
+        "desktop.provider_session.failed",
+    ]
+    provider_event = timeline.events[1]
+    assert provider_event.sequence == 2
+    assert provider_event.task_id == "task-provider-session"
+    assert provider_event.payload["desktop_provider_session"]["provider_id"] == (
+        "local-isolated-desktop"
+    )
+    assert timeline.runtime_debug is not None
+    assert timeline.runtime_debug.desktop_provider_session_status == "start_failed"
+    assert timeline.runtime_debug.desktop_provider_session_needed is True
+    assert timeline.runtime_debug.desktop_provider_session_provider_id == (
+        "local-isolated-desktop"
+    )
+    assert timeline.runtime_debug.desktop_provider_session_tool_names == ["app.focus"]
+    assert timeline.runtime_debug.desktop_provider_session_kind == "isolated_desktop"
+    assert timeline.runtime_debug.desktop_provider_session_isolated is True
+    assert timeline.runtime_debug.desktop_provider_session_supported_tools == [
+        "app.focus",
+        "desktop.ui_elements",
+    ]
+    assert "desktop_provider" in timeline.runtime_debug.debug_surfaces
+    assert timeline.runtime_debug.needs_user_action is True
+    assert timeline.runtime_debug.needs_replan is True
+
+
 def test_run_timeline_projects_failed_runtime_request_into_replan_event() -> None:
     timeline = run_timeline_snapshot_from_payload(
         {
