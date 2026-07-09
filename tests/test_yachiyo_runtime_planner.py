@@ -36,6 +36,7 @@ from apps.shell.yachiyo_agent.planner_execution import (
     planner_tool_requests,
 )
 from apps.shell.yachiyo_agent.runtime_execution import (
+    runtime_execution_blocked_requests_from_envelope_payload,
     runtime_execution_envelope_from_decision,
     runtime_execution_requests_from_envelope_payload,
 )
@@ -77,6 +78,49 @@ from apps.shell.yachiyo_agent.web_destination_hints import (
 
 def _step_by_id(decision: PlannerDecisionSnapshot, step_id: str):
     return {step.step_id: step for step in decision.plan.tool_plan.steps}[step_id]
+
+
+def test_runtime_execution_projects_blocked_desktop_requests_for_chat_debug() -> None:
+    blocked = runtime_execution_blocked_requests_from_envelope_payload(
+        {
+            "execution_id": "runtime-plan-1",
+            "requests": [
+                {
+                    "request_id": "request-1",
+                    "tool_name": "desktop.list_apps",
+                    "input": {"query": "Apple Music", "limit": 20},
+                    "desktop_execution_route": {
+                        "status": "real_virtual_desktop_provider_required",
+                        "can_execute": False,
+                        "reason": "A real isolated desktop provider is required.",
+                        "blocking_conditions": ["real_virtual_desktop_provider_required"],
+                    },
+                }
+            ],
+        },
+        allowed_tools=["desktop.list_apps"],
+    )
+
+    assert blocked == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "Apple Music", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "",
+            "request_id": "request-1",
+            "desktop_execution_route": {
+                "status": "real_virtual_desktop_provider_required",
+                "can_execute": False,
+                "reason": "A real isolated desktop provider is required.",
+                "blocking_conditions": ["real_virtual_desktop_provider_required"],
+            },
+            "status": "blocked",
+            "blocked_by_runtime_readiness": True,
+            "blocked_by": "real_virtual_desktop_provider_required",
+            "policy_reason": "A real isolated desktop provider is required.",
+        }
+    ]
 
 
 def _capability_by_id(decision: PlannerDecisionSnapshot, capability_id: str):
@@ -2995,6 +3039,26 @@ def test_planner_selection_payload_surfaces_discovered_app_followup_target() -> 
         request["tool"]
         for request in restricted_enriched["direct_tool_requests"]
     ] == ["artifact.write"]
+
+    daily_enriched = planner_enriched_chat_request(
+        {
+            "prompt": "能否帮我播放 Apple Music?",
+            "agent_id": "builtin:yachiyo-main",
+            "metadata": {},
+        }
+    )
+    assert "media.music_app_open_and_play" in daily_enriched["allowed_tools"]
+    assert "desktop.list_apps" in daily_enriched["allowed_tools"]
+    assert daily_enriched["metadata"]["yachiyo_entrypoint_allowed_tools"] == (
+        daily_enriched["allowed_tools"]
+    )
+    daily_requests = daily_enriched.get("direct_tool_requests") or daily_enriched.get(
+        "blocked_direct_tool_requests"
+    )
+    assert daily_requests
+    assert "media.music_app_open_and_play" in [
+        request["tool"] for request in daily_requests
+    ]
 
     image_prompt = "打开一个能编辑图片的应用，新建一张 1024x1024 图片"
     image_decision = RuntimePlanner().decision(image_prompt, allowed_tools=allowed_tools)

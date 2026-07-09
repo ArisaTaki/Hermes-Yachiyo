@@ -24,6 +24,7 @@ from .replans import (
 )
 from .runtime_planner import RuntimePlanner
 from .runtime_execution import (
+    runtime_execution_blocked_requests_from_envelope_payload,
     runtime_execution_envelope_payload,
     runtime_execution_requests_from_envelope_payload,
 )
@@ -155,14 +156,20 @@ def planner_enriched_chat_request(
             planner_metadata,
             runtime_execution_envelope,
         )
+    if "allowed_tools" not in payload and execution_allowed_tools:
+        payload["allowed_tools"] = execution_allowed_tools
+        planner_metadata["yachiyo_entrypoint_allowed_tools"] = list(
+            execution_allowed_tools
+        )
     compatible_plan_tools = _daily_desktop_compatible_plan_tools(decision, metadata)
     if compatible_plan_tools:
         planner_metadata["yachiyo_plan_tools"] = compatible_plan_tools
-    payload["metadata"] = {
+    payload_metadata = {
         **dict(metadata),
         **planner_metadata,
         **orchestration_metadata,
     }
+    payload["metadata"] = payload_metadata
     if runtime_execution_envelope:
         payload["runtime_execution_envelope"] = runtime_execution_envelope
         if "direct_tool_requests" not in payload:
@@ -177,6 +184,23 @@ def planner_enriched_chat_request(
             ]
             if direct_tool_requests:
                 payload["direct_tool_requests"] = direct_tool_requests
+            else:
+                blocked_requests = runtime_execution_blocked_requests_from_envelope_payload(
+                    runtime_execution_envelope,
+                    allowed_tools=execution_allowed_tools,
+                )
+                if blocked_requests:
+                    payload["blocked_direct_tool_requests"] = blocked_requests
+                    payload_metadata["yachiyo_runtime_blocked"] = True
+                    payload_metadata["yachiyo_blocked_execution_requests"] = [
+                        request.get("tool")
+                        for request in blocked_requests
+                        if request.get("tool")
+                    ]
+                    payload_metadata["yachiyo_blocked_execution_reasons"] = _unique_strings(
+                        request.get("policy_reason") or request.get("blocked_by")
+                        for request in blocked_requests
+                    )
     return payload
 
 

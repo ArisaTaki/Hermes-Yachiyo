@@ -1583,6 +1583,11 @@ def test_yachiyo_agent_service_attaches_runtime_planner_metadata_to_chat_task(
     )
 
     metadata = port.calls[0][1]["metadata"]
+    assert "desktop.inspect_app" in port.calls[0][1]["allowed_tools"]
+    assert "app.open_and_click_ui_element" in port.calls[0][1]["allowed_tools"]
+    assert metadata["yachiyo_entrypoint_allowed_tools"] == port.calls[0][1][
+        "allowed_tools"
+    ]
     assert metadata["yachiyo_runtime_planner"] is True
     assert metadata["yachiyo_intent_kind"] == "desktop_operation"
     assert metadata["yachiyo_candidate_intents"] == [

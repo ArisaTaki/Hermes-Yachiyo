@@ -588,6 +588,59 @@ def runtime_execution_requests_from_envelope_payload(
     return projected
 
 
+def runtime_execution_blocked_requests_from_envelope_payload(
+    envelope_payload: Any,
+    *,
+    allowed_tools: Iterable[str] | None = None,
+) -> list[dict[str, Any]]:
+    if isinstance(envelope_payload, RuntimeExecutionEnvelopeSnapshot):
+        envelope = envelope_payload.model_dump(mode="json")
+    elif isinstance(envelope_payload, Mapping):
+        envelope = dict(envelope_payload)
+    else:
+        return []
+
+    allowed = {
+        str(tool or "").strip()
+        for tool in (allowed_tools or [])
+        if str(tool or "").strip()
+    }
+    requests = envelope.get("requests")
+    if not isinstance(requests, list):
+        return []
+    projected: list[dict[str, Any]] = []
+    for request in requests:
+        if not isinstance(request, Mapping):
+            continue
+        if not _request_desktop_route_is_non_executable(request):
+            continue
+        projected_request = _tool_request_from_execution_request(request, envelope=envelope)
+        tool_name = str(projected_request.get("tool") or "").strip()
+        if not tool_name:
+            continue
+        if allowed and tool_name not in allowed:
+            continue
+        route = (
+            projected_request.get("desktop_execution_route")
+            if isinstance(projected_request.get("desktop_execution_route"), Mapping)
+            else {}
+        )
+        projected.append(
+            {
+                **projected_request,
+                "status": "blocked",
+                "blocked_by_runtime_readiness": True,
+                "blocked_by": str(route.get("status") or "desktop_provider_unavailable"),
+                "policy_reason": str(
+                    route.get("reason")
+                    or projected_request.get("policy_reason")
+                    or "Desktop execution route is not currently executable."
+                ),
+            }
+        )
+    return projected
+
+
 def _request_status_is_non_executable(request: Mapping[str, Any]) -> bool:
     if bool(request.get("approval_required")):
         return False
