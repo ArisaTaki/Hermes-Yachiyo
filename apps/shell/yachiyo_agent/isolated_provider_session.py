@@ -33,6 +33,7 @@ from apps.shell.yachiyo_agent.desktop_provider_contract import (
 from apps.shell.yachiyo_agent.desktop_execution_policy import (
     desktop_execution_route_decision,
     is_local_low_risk_foreground_tool,
+    is_readonly_desktop_provider_tool,
     is_user_foreground_takeover_tool,
     local_low_risk_foreground_tool_allowed,
     sandbox_desktop_provider_status,
@@ -1274,6 +1275,35 @@ def _request_prefers_isolated_foreground_session(
     return False
 
 
+def _session_requires_real_virtual_backend(session: dict[str, Any]) -> bool:
+    if _optional_bool(session.get("requires_real_virtual_desktop_backend")) is True:
+        return True
+    if _optional_bool(session.get("desktop_backend_is_loopback")) is True:
+        return True
+    return str(session.get("desktop_backend_kind") or "").strip() == (
+        "loopback_session_harness"
+    )
+
+
+def _request_uses_ready_local_readonly_route(
+    tool_name: str,
+    *,
+    route: dict[str, Any],
+    provider: dict[str, Any],
+) -> bool:
+    if not is_readonly_desktop_provider_tool(tool_name):
+        return False
+    if _route_provider_kind(route, provider) != "local_desktop":
+        return False
+    if str(route.get("status") or "").strip() not in {
+        "provider_ready",
+        "ready",
+        "supervised_live",
+    }:
+        return False
+    return bool(route.get("can_execute", True))
+
+
 def _request_uses_ready_local_low_risk_foreground_route(
     tool_name: str,
     *,
@@ -1283,13 +1313,7 @@ def _request_uses_ready_local_low_risk_foreground_route(
 ) -> bool:
     if not local_low_risk_foreground_tool_allowed(tool_name, request):
         return False
-    provider_kind = str(
-        route.get("selected_provider_kind")
-        or route.get("provider_kind")
-        or provider.get("provider_kind")
-        or ""
-    ).strip()
-    if provider_kind != "local_desktop":
+    if _route_provider_kind(route, provider) != "local_desktop":
         return False
     if str(route.get("status") or "").strip() not in {
         "provider_ready",
@@ -1298,6 +1322,15 @@ def _request_uses_ready_local_low_risk_foreground_route(
     }:
         return False
     return bool(route.get("can_execute", True))
+
+
+def _route_provider_kind(route: dict[str, Any], provider: dict[str, Any]) -> str:
+    return str(
+        route.get("selected_provider_kind")
+        or route.get("provider_kind")
+        or provider.get("provider_kind")
+        or ""
+    ).strip()
 
 
 def _policy_prefers_isolated_foreground(policy: dict[str, Any]) -> bool:
@@ -1371,7 +1404,23 @@ def _request_should_replace_route_with_ready_isolated_provider(
     *,
     route: dict[str, Any],
     provider: dict[str, Any],
+    session: dict[str, Any],
 ) -> bool:
+    tool_name = _request_tool_name(request)
+    if _session_requires_real_virtual_backend(session) and (
+        _request_uses_ready_local_readonly_route(
+            tool_name,
+            route=route,
+            provider=provider,
+        )
+        or _request_uses_ready_local_low_risk_foreground_route(
+            tool_name,
+            request=request,
+            route=route,
+            provider=provider,
+        )
+    ):
+        return False
     if _route_or_provider_requires_isolated_session(route, provider):
         return True
     if _request_allows_user_foreground_session(request):
@@ -1441,6 +1490,7 @@ def _request_with_ready_desktop_provider_route(
         request,
         route=route,
         provider=provider,
+        session=session,
     ):
         return request
     session_metadata = {
