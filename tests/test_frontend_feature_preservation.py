@@ -117,6 +117,14 @@ def test_frontend_runtime_debug_summary_exposes_runtime_trace_facts() -> None:
             "data-desktop-provider-contract-version={summary?.desktop_provider_contract_version || ''}",
             "data-desktop-provider-contract-blockers="
             "{(summary?.desktop_provider_contract_blocking_conditions || []).join(',')}",
+            "data-desktop-provider-conformance-ok="
+            "{String(summary?.desktop_provider_conformance_ok ?? '')}",
+            "data-desktop-provider-conformance-mode="
+            "{summary?.desktop_provider_conformance_mode || ''}",
+            "data-desktop-provider-conformance-public-release-ready="
+            "{String(summary?.desktop_provider_conformance_public_release_ready ?? '')}",
+            "data-desktop-provider-conformance-release-blockers="
+            "{(summary?.desktop_provider_conformance_release_blocking_conditions || []).join(',')}",
             "addProviderSessionMetric(metrics, summary);",
             "metrics.push({ key: 'desktop_provider_session', label: 'desktop env', tone: 'warning', value: 'needed' });",
             "data-desktop-execution-session-label={summary?.desktop_execution_session_label || ''}",
@@ -132,6 +140,8 @@ def test_frontend_runtime_debug_summary_exposes_runtime_trace_facts() -> None:
             "data-testid={`${testId}-desktop-provider`}",
             "data-provider-contract-blockers="
             "{(summary?.desktop_provider_contract_blocking_conditions || []).join(',')}",
+            "data-provider-conformance-release-blockers="
+            "{(summary?.desktop_provider_conformance_release_blocking_conditions || []).join(',')}",
             "className=\"runtime-debug-recovery\"",
             "data-testid={`${testId}-recovery`}",
             "summary.desktop_provider_session_needed ? 'provider needed' : ''",
@@ -155,6 +165,13 @@ def test_frontend_runtime_debug_summary_exposes_runtime_trace_facts() -> None:
             "summary.desktop_provider_backend_kind ? "
             "`desktop backend ${summary.desktop_provider_backend_kind}` : ''",
             "summary.desktop_provider_contract_ok === false ? 'provider contract blocked' : ''",
+            "typeof summary.desktop_provider_conformance_public_release_ready === 'boolean'",
+            "summary.desktop_provider_conformance_public_release_ready === false ? "
+            "'provider public release blocked' : ''",
+            "summary.desktop_provider_conformance_mode ? "
+            "`provider conformance ${summary.desktop_provider_conformance_mode}` : ''",
+            "conformanceBlockers.length ? "
+            "`release blockers ${conformanceBlockers.join(', ')}` : ''",
             "summary.latest_approval_tool_name ? "
             "`approval tool ${summary.latest_approval_tool_name}` : ''",
             "summary.latest_deferred_continuation_tool ? "

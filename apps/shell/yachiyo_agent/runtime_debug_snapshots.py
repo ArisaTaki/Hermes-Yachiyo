@@ -118,6 +118,9 @@ def runtime_debug_summary_from_runtime_objects(
     desktop_provider_contract = _desktop_provider_contract(
         desktop_provider_context_items
     )
+    desktop_provider_conformance = _desktop_provider_conformance(
+        desktop_provider_context_items
+    )
     desktop_execution_session_mode = _desktop_execution_session_mode(
         runtime_execution_envelope,
         request_items,
@@ -316,6 +319,30 @@ def runtime_debug_summary_from_runtime_objects(
         ),
         desktop_provider_contract_blocking_conditions=_string_list(
             _field(desktop_provider_contract, "blocking_conditions")
+        ),
+        desktop_provider_conformance_ok=_optional_bool(
+            _field(desktop_provider_conformance, "ok")
+        ),
+        desktop_provider_conformance_mode=_optional_text(
+            _field(desktop_provider_conformance, "mode")
+        ),
+        desktop_provider_conformance_smoke_ok=_optional_bool(
+            _field(desktop_provider_conformance, "smoke_ok")
+        ),
+        desktop_provider_conformance_public_release_ready=_optional_bool(
+            _field(desktop_provider_conformance, "public_release_ready")
+        ),
+        desktop_provider_conformance_release_candidate=_optional_bool(
+            _field(desktop_provider_conformance, "release_candidate")
+        ),
+        desktop_provider_conformance_release_blocking_conditions=_string_list(
+            _field(desktop_provider_conformance, "release_blocking_conditions")
+        ),
+        desktop_provider_conformance_missing_required_tools=_string_list(
+            _field(desktop_provider_conformance, "missing_required_tools")
+        ),
+        desktop_provider_conformance_failed_tools=_string_list(
+            _field(desktop_provider_conformance, "failed_tools")
         ),
         desktop_execution_session_mode=desktop_execution_session_mode,
         desktop_execution_session_label=_desktop_execution_session_label(
@@ -708,8 +735,12 @@ def _desktop_provider_context_items(
         session,
         _field(session, "provider_status"),
         _field(session, "health"),
+        _field(session, "provider_conformance"),
+        _field(session, "sandbox_provider"),
+        _field(_field(session, "sandbox_provider"), "health"),
         _field(envelope, "sandbox_provider"),
         _field(_field(envelope, "sandbox_provider"), "health"),
+        _field(envelope, "provider_conformance"),
     ):
         if item is not None:
             items.append(item)
@@ -719,6 +750,8 @@ def _desktop_provider_context_items(
             _field(request, "desktop_provider_session"),
             provider,
             _field(provider, "health"),
+            _field(provider, "provider_conformance"),
+            _field(request, "provider_conformance"),
             _field(request, "desktop_execution_route"),
         ):
             if item is not None:
@@ -731,6 +764,20 @@ def _desktop_provider_contract(items: list[Any]) -> Any | None:
         contract = _field(item, "provider_contract")
         if isinstance(contract, dict):
             return contract
+    return None
+
+
+def _desktop_provider_conformance(items: list[Any]) -> Any | None:
+    for item in items:
+        conformance = _field(item, "provider_conformance")
+        if isinstance(conformance, dict):
+            return conformance
+        if isinstance(item, dict) and (
+            "public_release_ready" in item
+            or "release_blocking_conditions" in item
+            or "missing_required_tools" in item
+        ):
+            return item
     return None
 
 

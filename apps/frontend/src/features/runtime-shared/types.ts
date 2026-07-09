@@ -165,6 +165,30 @@ export type DesktopProviderHealthSnapshot = {
   error?: string;
 };
 
+export type DesktopProviderConformanceSnapshot = {
+  ok?: boolean;
+  mode?: string;
+  runtime_checked?: boolean;
+  release_candidate?: boolean;
+  public_release_ready?: boolean;
+  smoke_ok?: boolean | null;
+  provider_contract_ok?: boolean | null;
+  required_tools?: string[];
+  covered_tools?: string[];
+  missing_required_tools?: string[];
+  failed_tools?: string[];
+  blocking_conditions?: string[];
+  release_blocking_conditions?: string[];
+  provider_contract_blocking_conditions?: string[];
+  desktop_session_kind?: string;
+  desktop_session_isolated?: boolean | null;
+  foreground_takeover_required?: boolean | null;
+  desktop_backend_kind?: string;
+  desktop_backend_is_loopback?: boolean | null;
+  desktop_backend_ready_for_public_release?: boolean | null;
+  requires_real_virtual_desktop_backend?: boolean | null;
+};
+
 export type SandboxDesktopProviderLaunchHint = {
   provider_id?: string;
   provider_kind?: DesktopIsolationKind | string;
@@ -232,6 +256,7 @@ export type SandboxDesktopProviderSnapshot = {
   desktop_backend_ready_for_public_release?: boolean | null;
   requires_real_virtual_desktop_backend?: boolean | null;
   provider_contract?: Record<string, unknown>;
+  provider_conformance?: DesktopProviderConformanceSnapshot | null;
   requires_real_sandbox_for?: string[];
 };
 
@@ -995,6 +1020,14 @@ export type RuntimeDebugSummarySnapshot = {
   desktop_provider_contract_ok?: boolean | null;
   desktop_provider_contract_version?: string | null;
   desktop_provider_contract_blocking_conditions?: string[];
+  desktop_provider_conformance_ok?: boolean | null;
+  desktop_provider_conformance_mode?: string | null;
+  desktop_provider_conformance_smoke_ok?: boolean | null;
+  desktop_provider_conformance_public_release_ready?: boolean | null;
+  desktop_provider_conformance_release_candidate?: boolean | null;
+  desktop_provider_conformance_release_blocking_conditions?: string[];
+  desktop_provider_conformance_missing_required_tools?: string[];
+  desktop_provider_conformance_failed_tools?: string[];
   desktop_execution_session_mode?: string | null;
   desktop_execution_session_label?: string | null;
   event_count?: number;

@@ -4361,6 +4361,19 @@ def test_runtime_debug_summary_projects_provider_session_from_replay_events() ->
                                 "desktop_backend_not_release_ready",
                             ],
                         },
+                        "provider_conformance": {
+                            "ok": False,
+                            "mode": "dev_loopback_provider_conformance",
+                            "smoke_ok": True,
+                            "public_release_ready": False,
+                            "release_candidate": False,
+                            "release_blocking_conditions": [
+                                "loopback_desktop_backend",
+                                "real_virtual_desktop_backend_required",
+                            ],
+                            "missing_required_tools": ["desktop.verify"],
+                            "failed_tools": ["desktop.click_ui_element"],
+                        },
                     }
                 },
             )
@@ -4388,6 +4401,21 @@ def test_runtime_debug_summary_projects_provider_session_from_replay_events() ->
     assert summary.desktop_provider_contract_blocking_conditions == [
         "loopback_desktop_backend",
         "desktop_backend_not_release_ready",
+    ]
+    assert summary.desktop_provider_conformance_ok is False
+    assert summary.desktop_provider_conformance_mode == "dev_loopback_provider_conformance"
+    assert summary.desktop_provider_conformance_smoke_ok is True
+    assert summary.desktop_provider_conformance_public_release_ready is False
+    assert summary.desktop_provider_conformance_release_candidate is False
+    assert summary.desktop_provider_conformance_release_blocking_conditions == [
+        "loopback_desktop_backend",
+        "real_virtual_desktop_backend_required",
+    ]
+    assert summary.desktop_provider_conformance_missing_required_tools == [
+        "desktop.verify"
+    ]
+    assert summary.desktop_provider_conformance_failed_tools == [
+        "desktop.click_ui_element"
     ]
     assert summary.needs_user_action is True
     assert summary.needs_replan is True

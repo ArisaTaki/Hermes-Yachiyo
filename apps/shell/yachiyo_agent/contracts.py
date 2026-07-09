@@ -1079,6 +1079,18 @@ class RuntimeDebugSummarySnapshot(_PublicSnapshot):
     desktop_provider_contract_blocking_conditions: list[str] = Field(
         default_factory=list
     )
+    desktop_provider_conformance_ok: bool | None = None
+    desktop_provider_conformance_mode: str | None = None
+    desktop_provider_conformance_smoke_ok: bool | None = None
+    desktop_provider_conformance_public_release_ready: bool | None = None
+    desktop_provider_conformance_release_candidate: bool | None = None
+    desktop_provider_conformance_release_blocking_conditions: list[str] = Field(
+        default_factory=list
+    )
+    desktop_provider_conformance_missing_required_tools: list[str] = Field(
+        default_factory=list
+    )
+    desktop_provider_conformance_failed_tools: list[str] = Field(default_factory=list)
     desktop_execution_session_mode: str | None = None
     desktop_execution_session_label: str | None = None
     event_count: int = 0

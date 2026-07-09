@@ -71,6 +71,14 @@ export function RuntimeDebugSummary({
       data-desktop-provider-contract-ok={String(summary?.desktop_provider_contract_ok ?? '')}
       data-desktop-provider-contract-version={summary?.desktop_provider_contract_version || ''}
       data-desktop-provider-contract-blockers={(summary?.desktop_provider_contract_blocking_conditions || []).join(',')}
+      data-desktop-provider-conformance-ok={String(summary?.desktop_provider_conformance_ok ?? '')}
+      data-desktop-provider-conformance-mode={summary?.desktop_provider_conformance_mode || ''}
+      data-desktop-provider-conformance-smoke-ok={String(summary?.desktop_provider_conformance_smoke_ok ?? '')}
+      data-desktop-provider-conformance-public-release-ready={String(summary?.desktop_provider_conformance_public_release_ready ?? '')}
+      data-desktop-provider-conformance-release-candidate={String(summary?.desktop_provider_conformance_release_candidate ?? '')}
+      data-desktop-provider-conformance-release-blockers={(summary?.desktop_provider_conformance_release_blocking_conditions || []).join(',')}
+      data-desktop-provider-conformance-missing-tools={(summary?.desktop_provider_conformance_missing_required_tools || []).join(',')}
+      data-desktop-provider-conformance-failed-tools={(summary?.desktop_provider_conformance_failed_tools || []).join(',')}
       data-desktop-execution-session-label={summary?.desktop_execution_session_label || ''}
       data-desktop-execution-session-mode={summary?.desktop_execution_session_mode || ''}
       data-current-request-id={summary?.current_request_id || ''}
@@ -117,6 +125,7 @@ export function RuntimeDebugSummary({
         <div
           className="runtime-debug-provider"
           data-provider-contract-blockers={(summary?.desktop_provider_contract_blocking_conditions || []).join(',')}
+          data-provider-conformance-release-blockers={(summary?.desktop_provider_conformance_release_blocking_conditions || []).join(',')}
           data-provider-session-tools={(summary?.desktop_provider_session_tool_names || []).join(',')}
           data-testid={`${testId}-desktop-provider`}
         >
@@ -184,6 +193,7 @@ export function runtimeDebugSummaryHasContent(summary?: RuntimeDebugSummarySnaps
     || summary.desktop_provider_session_kind
     || summary.desktop_provider_backend_kind
     || summary.desktop_provider_contract_version
+    || summary.desktop_provider_conformance_mode
     || summary.desktop_execution_session_label
     || summary.desktop_execution_session_mode
     || summary.runtime_doctrine
@@ -208,6 +218,17 @@ export function runtimeDebugSummaryHasContent(summary?: RuntimeDebugSummarySnaps
     || summary.latest_artifact_id
     || summary.latest_artifact_kind
     || summary.latest_artifact_path
+  ) return true;
+  if (
+    typeof summary.desktop_provider_conformance_ok === 'boolean'
+    || typeof summary.desktop_provider_conformance_smoke_ok === 'boolean'
+    || typeof summary.desktop_provider_conformance_public_release_ready === 'boolean'
+    || typeof summary.desktop_provider_conformance_release_candidate === 'boolean'
+  ) return true;
+  if (
+    (summary.desktop_provider_conformance_release_blocking_conditions || []).length
+    || (summary.desktop_provider_conformance_missing_required_tools || []).length
+    || (summary.desktop_provider_conformance_failed_tools || []).length
   ) return true;
   return runtimeDebugMetrics(summary).length > 0;
 }
@@ -349,8 +370,17 @@ function runtimeDebugLatestFacts(summary?: RuntimeDebugSummarySnapshot | null): 
     summary.desktop_provider_contract_ok === true ? 'provider contract ready' : '',
     summary.desktop_provider_contract_ok === false ? 'provider contract blocked' : '',
     summary.desktop_provider_contract_version ? `provider contract ${summary.desktop_provider_contract_version}` : '',
+    summary.desktop_provider_conformance_ok === true ? 'provider conformance ready' : '',
+    summary.desktop_provider_conformance_ok === false ? 'provider conformance blocked' : '',
+    summary.desktop_provider_conformance_public_release_ready === true ? 'provider public release ready' : '',
+    summary.desktop_provider_conformance_public_release_ready === false ? 'provider public release blocked' : '',
+    summary.desktop_provider_conformance_release_candidate === true ? 'provider release candidate' : '',
+    summary.desktop_provider_conformance_mode ? `provider conformance ${summary.desktop_provider_conformance_mode}` : '',
     (summary.desktop_provider_contract_blocking_conditions || []).length
       ? `provider blockers ${(summary.desktop_provider_contract_blocking_conditions || []).slice(0, 3).join(', ')}`
+      : '',
+    (summary.desktop_provider_conformance_release_blocking_conditions || []).length
+      ? `provider release blockers ${(summary.desktop_provider_conformance_release_blocking_conditions || []).slice(0, 3).join(', ')}`
       : '',
     (summary.desktop_provider_session_tool_names || []).length
       ? `provider tools ${(summary.desktop_provider_session_tool_names || []).slice(0, 3).join(', ')}`
@@ -386,6 +416,15 @@ function runtimeDebugProviderFacts(
   const blockers = (summary.desktop_provider_contract_blocking_conditions || [])
     .filter(Boolean)
     .slice(0, compact ? 2 : 4);
+  const conformanceBlockers = (summary.desktop_provider_conformance_release_blocking_conditions || [])
+    .filter(Boolean)
+    .slice(0, compact ? 2 : 4);
+  const missingTools = (summary.desktop_provider_conformance_missing_required_tools || [])
+    .filter(Boolean)
+    .slice(0, compact ? 2 : 3);
+  const failedTools = (summary.desktop_provider_conformance_failed_tools || [])
+    .filter(Boolean)
+    .slice(0, compact ? 2 : 3);
   const tools = (summary.desktop_provider_session_tool_names || [])
     .filter(Boolean)
     .slice(0, compact ? 3 : 5);
@@ -405,8 +444,15 @@ function runtimeDebugProviderFacts(
     summary.desktop_provider_requires_real_virtual_backend === true ? 'real virtual backend required' : '',
     summary.desktop_provider_contract_ok === true ? 'contract ready' : '',
     summary.desktop_provider_contract_ok === false ? 'contract blocked' : '',
+    summary.desktop_provider_conformance_public_release_ready === true ? 'provider release ready' : '',
+    summary.desktop_provider_conformance_public_release_ready === false ? 'provider release blocked' : '',
+    summary.desktop_provider_conformance_ok === false ? 'conformance blocked' : '',
+    summary.desktop_provider_conformance_mode ? `conformance ${summary.desktop_provider_conformance_mode}` : '',
     tools.length ? `tools ${tools.join(', ')}` : '',
     blockers.length ? `blockers ${blockers.join(', ')}` : '',
+    conformanceBlockers.length ? `release blockers ${conformanceBlockers.join(', ')}` : '',
+    missingTools.length ? `missing ${missingTools.join(', ')}` : '',
+    failedTools.length ? `failed ${failedTools.join(', ')}` : '',
   ].filter(Boolean);
   return facts.slice(0, compact ? 6 : 10);
 }
