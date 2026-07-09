@@ -122,6 +122,18 @@ def _oha_desktop_agent_release_smoke_report() -> dict[str, object]:
                                 "contract_version": "oha-yachiyo.desktop-provider.v1",
                                 "blocking_conditions": [],
                             },
+                            "provider_conformance": {
+                                "ok": True,
+                                "mode": "release_virtual_desktop_provider_conformance",
+                                "smoke_ok": True,
+                                "public_release_ready": True,
+                                "release_candidate": True,
+                                "release_blocking_conditions": [],
+                                "missing_required_tools": [],
+                                "failed_tools": [],
+                                "provider_contract_ok": True,
+                                "provider_contract_blocking_conditions": [],
+                            },
                         }
                         if section_id == "isolated_desktop_provider"
                         else {}
@@ -142,6 +154,14 @@ def _oha_desktop_agent_release_smoke_report() -> dict[str, object]:
             "provider_contract_ok": True,
             "provider_contract_version": "oha-yachiyo.desktop-provider.v1",
             "provider_contract_blocking_conditions": [],
+            "provider_conformance_ok": True,
+            "provider_conformance_mode": "release_virtual_desktop_provider_conformance",
+            "provider_conformance_smoke_ok": True,
+            "provider_conformance_public_release_ready": True,
+            "provider_conformance_release_candidate": True,
+            "provider_conformance_release_blocking_conditions": [],
+            "provider_conformance_missing_required_tools": [],
+            "provider_conformance_failed_tools": [],
         },
     }
 
@@ -428,6 +448,63 @@ def test_release_smoke_summary_requires_verified_desktop_provider_contract(
     assert evidence_summary["provider_contract_ok"] is None
     assert evidence_summary["provider_contract_blocking_conditions"] == [
         "virtual_desktop_provider_contract_not_ready"
+    ]
+
+
+def test_release_smoke_summary_requires_provider_conformance_public_release_ready(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(release_smoke, "ROOT", tmp_path)
+    report_path = tmp_path / "tmp" / "oha-provider-conformance-not-ready.json"
+    payload = _oha_desktop_agent_release_smoke_report()
+    backend_without_conformance = {
+        "desktop_session_kind": "virtual_desktop",
+        "desktop_session_isolated": True,
+        "foreground_takeover_required": False,
+        "keyboard_mouse_capture_supported": True,
+        "desktop_backend_kind": "virtual_desktop_backend",
+        "desktop_backend_is_loopback": False,
+        "desktop_backend_ready_for_public_release": True,
+        "requires_real_virtual_desktop_backend": False,
+        "provider_contract": {
+            "ok": True,
+            "contract_version": "oha-yachiyo.desktop-provider.v1",
+            "blocking_conditions": [],
+        },
+        "provider_conformance": {
+            "ok": False,
+            "mode": "release_virtual_desktop_provider_conformance",
+            "smoke_ok": True,
+            "public_release_ready": False,
+            "release_candidate": True,
+            "release_blocking_conditions": ["real_virtual_desktop_backend_required"],
+            "missing_required_tools": [],
+            "failed_tools": [],
+            "provider_contract_ok": True,
+            "provider_contract_blocking_conditions": [],
+        },
+    }
+    payload["isolated_provider_backend"] = dict(backend_without_conformance)
+    for section in payload["sections"]:
+        if section["id"] == "isolated_desktop_provider":
+            section["report"] = {"ok": True, **backend_without_conformance}
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    summary = release_smoke.summarize_release_smoke([report_path])
+
+    oha_item = next(
+        item for item in summary["items"] if item["id"] == "oha_desktop_agent_product"
+    )
+    assert oha_item["status"] == "missing"
+    assert oha_item["missing_evidence_ids"] == ["oha_real_virtual_desktop_backend"]
+    evidence_summary = oha_item["release_blockers"][0]["evidence_summary"]
+    assert evidence_summary["provider_contract_ok"] is True
+    assert evidence_summary["provider_conformance_ok"] is False
+    assert evidence_summary["provider_conformance_public_release_ready"] is False
+    assert evidence_summary["provider_conformance_release_blocking_conditions"] == [
+        "real_virtual_desktop_backend_required"
     ]
 
 

@@ -1234,10 +1234,17 @@ def _collect_oha_desktop_backend_evidence(
         if isinstance(report.get("provider_contract"), dict)
         else {}
     )
+    provider_conformance = (
+        report.get("provider_conformance")
+        if isinstance(report.get("provider_conformance"), dict)
+        else {}
+    )
     provider_contract_ok = (
         report.get("provider_contract_ok")
         if "provider_contract_ok" in report
         else provider_contract.get("ok")
+        if provider_contract
+        else provider_conformance.get("provider_contract_ok")
     )
     provider_contract_version = str(
         report.get("provider_contract_version")
@@ -1247,6 +1254,7 @@ def _collect_oha_desktop_backend_evidence(
     provider_contract_blockers = _string_list(
         report.get("provider_contract_blocking_conditions")
         or provider_contract.get("blocking_conditions")
+        or provider_conformance.get("provider_contract_blocking_conditions")
     )
     if provider_contract_ok is not True and not provider_contract_blockers:
         provider_contract_blockers = ["virtual_desktop_provider_contract_not_ready"]
@@ -1266,6 +1274,24 @@ def _collect_oha_desktop_backend_evidence(
         "provider_contract_ok": provider_contract_ok,
         "provider_contract_version": provider_contract_version,
         "provider_contract_blocking_conditions": provider_contract_blockers,
+        "provider_conformance_ok": provider_conformance.get("ok"),
+        "provider_conformance_mode": str(provider_conformance.get("mode") or ""),
+        "provider_conformance_smoke_ok": provider_conformance.get("smoke_ok"),
+        "provider_conformance_public_release_ready": provider_conformance.get(
+            "public_release_ready"
+        ),
+        "provider_conformance_release_candidate": provider_conformance.get(
+            "release_candidate"
+        ),
+        "provider_conformance_release_blocking_conditions": _string_list(
+            provider_conformance.get("release_blocking_conditions")
+        ),
+        "provider_conformance_missing_required_tools": _string_list(
+            provider_conformance.get("missing_required_tools")
+        ),
+        "provider_conformance_failed_tools": _string_list(
+            provider_conformance.get("failed_tools")
+        ),
     }
     _add_evidence(
         evidence,
@@ -1279,6 +1305,7 @@ def _collect_oha_desktop_backend_evidence(
         backend_ready is True
         and backend_is_loopback is not True
         and provider_contract_ok is True
+        and provider_conformance.get("public_release_ready") is not False
     ):
         _add_evidence(
             evidence,
@@ -1334,6 +1361,28 @@ def _item_release_blockers(
                 "provider_contract_version": latest.get("provider_contract_version"),
                 "provider_contract_blocking_conditions": _string_list(
                     latest.get("provider_contract_blocking_conditions")
+                ),
+                "provider_conformance_ok": latest.get("provider_conformance_ok"),
+                "provider_conformance_mode": str(
+                    latest.get("provider_conformance_mode") or ""
+                ),
+                "provider_conformance_smoke_ok": latest.get(
+                    "provider_conformance_smoke_ok"
+                ),
+                "provider_conformance_public_release_ready": latest.get(
+                    "provider_conformance_public_release_ready"
+                ),
+                "provider_conformance_release_candidate": latest.get(
+                    "provider_conformance_release_candidate"
+                ),
+                "provider_conformance_release_blocking_conditions": _string_list(
+                    latest.get("provider_conformance_release_blocking_conditions")
+                ),
+                "provider_conformance_missing_required_tools": _string_list(
+                    latest.get("provider_conformance_missing_required_tools")
+                ),
+                "provider_conformance_failed_tools": _string_list(
+                    latest.get("provider_conformance_failed_tools")
                 ),
             },
         }
