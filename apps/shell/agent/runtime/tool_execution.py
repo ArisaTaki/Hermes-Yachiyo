@@ -60,6 +60,7 @@ _TOOL_REQUEST_TRACE_TEXT_KEYS = (
     "workflow_node_id",
     "workflow_node_label",
     "replan_request_id",
+    "replan_recovery_action_id",
     "replan_trigger",
     "risk_level",
     "policy_reason",
@@ -3230,11 +3231,21 @@ class RuntimeToolRequestRunner:
                             **trace_payload,
                         },
                     )
-                self._append_tool_result_progress(
+                replan_payload = self._append_tool_result_progress(
                     tool_request,
                     tool_name=tool_name,
                     tool_event_type="agent.tool.skipped",
                     tool_result=runtime_skip,
+                    timeline=timeline,
+                    run_id=run_id,
+                )
+                auto_recovery_enqueued = self._enqueue_runtime_replan_recovery_requests(
+                    replan_payload,
+                    source_tool_name=tool_name,
+                    tool_requests=tool_requests,
+                    insert_index=index + 1,
+                    allowed_tools=allowed_tools,
+                    remaining_requests=tool_requests[index + 1 :],
                     timeline=timeline,
                     run_id=run_id,
                 )
@@ -3243,7 +3254,7 @@ class RuntimeToolRequestRunner:
                     {**tool_request, "tool": tool_name},
                     runtime_skip,
                 )
-                if _tool_result_requests_user_recovery(runtime_skip):
+                if _tool_result_requests_user_recovery(runtime_skip) and not auto_recovery_enqueued:
                     break
                 continue
             goal_block_reason = self._goal_disallows_tool(user_goal, tool_name)
@@ -3279,11 +3290,21 @@ class RuntimeToolRequestRunner:
                             **trace_payload,
                         },
                     )
-                self._append_tool_result_progress(
+                replan_payload = self._append_tool_result_progress(
                     tool_request,
                     tool_name=tool_name,
                     tool_event_type="agent.tool.skipped",
                     tool_result=tool_result,
+                    timeline=timeline,
+                    run_id=run_id,
+                )
+                self._enqueue_runtime_replan_recovery_requests(
+                    replan_payload,
+                    source_tool_name=tool_name,
+                    tool_requests=tool_requests,
+                    insert_index=index + 1,
+                    allowed_tools=allowed_tools,
+                    remaining_requests=tool_requests[index + 1 :],
                     timeline=timeline,
                     run_id=run_id,
                 )
@@ -3364,7 +3385,7 @@ class RuntimeToolRequestRunner:
                 tool_request,
                 tool_result,
             )
-            self._append_tool_result_progress(
+            replan_payload = self._append_tool_result_progress(
                 tool_request,
                 tool_name=tool_name,
                 tool_event_type="agent.tool.call",
@@ -3400,7 +3421,17 @@ class RuntimeToolRequestRunner:
                         recovered_payload,
                     )
             foreground_readiness_blocker = next_readiness_blocker
-            if _tool_result_requests_user_recovery(tool_result):
+            auto_recovery_enqueued = self._enqueue_runtime_replan_recovery_requests(
+                replan_payload,
+                source_tool_name=tool_name,
+                tool_requests=tool_requests,
+                insert_index=index + 1,
+                allowed_tools=allowed_tools,
+                remaining_requests=tool_requests[index + 1 :],
+                timeline=timeline,
+                run_id=run_id,
+            )
+            if _tool_result_requests_user_recovery(tool_result) and not auto_recovery_enqueued:
                 if _remaining_request_can_handle_foreground_readiness(
                     foreground_readiness_blocker,
                     tool_requests[index + 1 :],
@@ -3413,11 +3444,27 @@ class RuntimeToolRequestRunner:
                 tool_result,
                 remaining_requests=tool_requests[index + 1 :],
             )
+            if not deferred_continuation:
+                deferred_continuation = _runtime_replan_deferred_continuation_requests(
+                    tool_name,
+                    tool_request,
+                    tool_result,
+                    allowed_tools=allowed_tools,
+                    remaining_requests=tool_requests[index + 1 :],
+                )
             if deferred_continuation:
                 tool_requests[index + 1 : index + 1] = deferred_continuation
                 enqueued_payload = _deferred_continuation_enqueued_payload(
                     tool_name,
                     deferred_continuation,
+                    retry_source=(
+                        "desktop_provider_session"
+                        if _is_desktop_provider_session_start_control(
+                            tool_name,
+                            tool_request,
+                        )
+                        else "runtime_replan_recovery"
+                    ),
                 )
                 timeline.append(
                     self._timeline(
@@ -3480,7 +3527,7 @@ class RuntimeToolRequestRunner:
         tool_result: dict[str, Any],
         timeline: list[dict[str, Any]],
         run_id: str,
-    ) -> None:
+    ) -> dict[str, Any]:
         traced_request = {**tool_request, "tool": tool_name}
         tool_event = {
             "event": tool_event_type,
@@ -3495,7 +3542,7 @@ class RuntimeToolRequestRunner:
             append_run_event=self._append_run_event,
             run_id=run_id,
         )
-        append_replan_request_event_for_tool_result(
+        return append_replan_request_event_for_tool_result(
             tool_request=traced_request,
             tool_event=tool_event,
             timeline=timeline,
@@ -3503,6 +3550,47 @@ class RuntimeToolRequestRunner:
             append_run_event=self._append_run_event,
             run_id=run_id,
         )
+
+    def _enqueue_runtime_replan_recovery_requests(
+        self,
+        replan_payload: Mapping[str, Any] | None,
+        *,
+        source_tool_name: str,
+        tool_requests: list[dict[str, Any]],
+        insert_index: int,
+        allowed_tools: list[str],
+        remaining_requests: list[dict[str, Any]],
+        timeline: list[dict[str, Any]],
+        run_id: str,
+    ) -> bool:
+        recovery_requests = _runtime_replan_auto_recovery_action_requests(
+            replan_payload,
+            allowed_tools=allowed_tools,
+            remaining_requests=remaining_requests,
+        )
+        if not recovery_requests:
+            return False
+        tool_requests[insert_index:insert_index] = recovery_requests
+        enqueued_payload = _deferred_continuation_enqueued_payload(
+            source_tool_name,
+            recovery_requests,
+            retry_source="runtime_replan_recovery",
+            replan_payload=replan_payload,
+        )
+        timeline.append(
+            self._timeline(
+                "agent.deferred_continuation.enqueued",
+                source_tool_name,
+                **enqueued_payload,
+            )
+        )
+        if run_id:
+            self._append_run_event(
+                run_id,
+                "agent.deferred_continuation.enqueued",
+                enqueued_payload,
+            )
+        return True
 
     def _append_tool_start_progress(
         self,
@@ -3581,6 +3669,382 @@ def _provider_session_deferred_continuation_requests(
         existing_signatures.add(signature)
         requests.append(request)
     return requests
+
+
+def _runtime_replan_auto_recovery_action_requests(
+    replan_payload: Mapping[str, Any] | None,
+    *,
+    allowed_tools: list[str],
+    remaining_requests: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if not isinstance(replan_payload, Mapping) or not replan_payload:
+        return []
+    metadata = (
+        replan_payload.get("metadata")
+        if isinstance(replan_payload.get("metadata"), Mapping)
+        else {}
+    )
+    if metadata.get("replan_recovery_failed") is True:
+        return []
+    trigger = str(replan_payload.get("trigger") or "").strip()
+    if trigger not in {"tool_failure", "tool_unavailable", "verification_failed"}:
+        return []
+    allowed = {str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()}
+    if not allowed:
+        return []
+    existing_signatures = {
+        _deferred_request_signature(request)
+        for request in remaining_requests
+        if isinstance(request, Mapping)
+    }
+    source_tool_name = str(replan_payload.get("source_tool_name") or "").strip()
+    input_preview = (
+        replan_payload.get("input_preview")
+        if isinstance(replan_payload.get("input_preview"), Mapping)
+        else {}
+    )
+    if source_tool_name:
+        existing_signatures.add(
+            _deferred_request_signature(
+                {
+                    "tool": source_tool_name,
+                    "input": dict(input_preview),
+                }
+            )
+        )
+    requests: list[dict[str, Any]] = []
+    for index, action in enumerate(
+        _runtime_replan_payload_recovery_actions(replan_payload),
+        start=1,
+    ):
+        request = _runtime_replan_action_request(
+            action,
+            replan_payload,
+            allowed=allowed,
+            action_index=index,
+        )
+        if not request:
+            continue
+        signature = _deferred_request_signature(request)
+        if signature in existing_signatures:
+            continue
+        existing_signatures.add(signature)
+        requests.append(request)
+    return _dedupe_runtime_replan_recovery_requests(requests)
+
+
+def _runtime_replan_payload_recovery_actions(
+    replan_payload: Mapping[str, Any],
+) -> list[Mapping[str, Any]]:
+    metadata = (
+        replan_payload.get("metadata")
+        if isinstance(replan_payload.get("metadata"), Mapping)
+        else {}
+    )
+    actions = _mapping_list(metadata.get("recovery_actions"))
+    if actions:
+        return actions
+    return _mapping_list(replan_payload.get("recovery_actions"))
+
+
+def _runtime_replan_action_request(
+    action: Mapping[str, Any],
+    replan_payload: Mapping[str, Any],
+    *,
+    allowed: set[str],
+    action_index: int,
+) -> dict[str, Any]:
+    tool_name = str(action.get("tool") or action.get("tool_name") or "").strip()
+    if not tool_name or tool_name not in allowed:
+        return {}
+    if _runtime_replan_action_auto_start_blocked(action):
+        return {}
+    raw_input = action.get("input") if isinstance(action.get("input"), Mapping) else {}
+    request: dict[str, Any] = {
+        "protocol": "json_fallback",
+        "tool": tool_name,
+        "input": dict(raw_input),
+        "source": "runtime_replan_recovery",
+        "planning_reason": str(
+            action.get("planning_reason") or "planner_replan_runtime_recovery_action"
+        ).strip(),
+        "recovery_action_tool": tool_name,
+        "selected": True,
+    }
+    request_id = str(replan_payload.get("request_id") or "").strip()
+    trigger = str(replan_payload.get("trigger") or "").strip()
+    if request_id:
+        request["replan_request_id"] = request_id
+    if trigger:
+        request["replan_trigger"] = trigger
+    for key, payload_key in (
+        ("step_id", "source_step_id"),
+        ("planner_step_id", "source_step_id"),
+        ("source_step_id", "source_step_id"),
+        ("source_tool_name", "source_tool_name"),
+        ("capability_id", "target_capability_id"),
+        ("target_capability_id", "target_capability_id"),
+    ):
+        value = str(replan_payload.get(payload_key) or "").strip()
+        if value:
+            request[key] = value
+    action_id = str(action.get("action_id") or action.get("id") or "").strip()
+    if not action_id and request_id:
+        action_id = f"{request_id}:action:{action_index}:{tool_name}"
+    if action_id:
+        request["action_id"] = action_id
+        request["replan_recovery_action_id"] = action_id
+    for key in (
+        "label",
+        "permission_target",
+        "risk_level",
+    ):
+        value = str(action.get(key) or "").strip()
+        if value:
+            request["recovery_action_label" if key == "label" else key] = value
+    if bool(action.get("approval_required")):
+        request["approval_required"] = True
+    action_metadata = (
+        action.get("metadata") if isinstance(action.get("metadata"), Mapping) else {}
+    )
+    payload_metadata = (
+        replan_payload.get("metadata")
+        if isinstance(replan_payload.get("metadata"), Mapping)
+        else {}
+    )
+    for key in (
+        "decision_id",
+        "plan_id",
+        "core_id",
+        "workspace_id",
+        "task_id",
+        "run_group_id",
+        "group_run_id",
+        "group_id",
+        "workflow_id",
+        "workflow_run_id",
+        "workflow_node_id",
+        "workflow_node_label",
+    ):
+        value = str(replan_payload.get(key) or "").strip()
+        if value:
+            request[key] = value
+    for key in ("runtime_doctrine", "runtime_stage", "runtime_role"):
+        value = str(action_metadata.get(key) or payload_metadata.get(key) or "").strip()
+        if value:
+            request[key] = value
+    for key in ("replan_triggers", "replan_signal_ids"):
+        values = _string_list(action_metadata.get(key) or replan_payload.get(key))
+        if key == "replan_triggers" and trigger and trigger not in values:
+            values.append(trigger)
+        if values:
+            request[key] = values
+    for key in (
+        "action_target",
+        "observation_evidence",
+        "observation_retry",
+        "desktop_execution_policy",
+        "desktop_execution_route",
+        "sandbox_provider",
+        "desktop_provider_session",
+        "desktop_loop",
+    ):
+        value = action.get(key)
+        if not isinstance(value, Mapping):
+            value = payload_metadata.get(key)
+        if not isinstance(value, Mapping):
+            value = replan_payload.get(key)
+        if isinstance(value, Mapping) and value:
+            request[key] = dict(value)
+    verification_targets = _mapping_list(action.get("verification_targets"))
+    if not verification_targets:
+        verification_targets = _mapping_list(action.get("task_verification_targets"))
+    if not verification_targets:
+        verification_targets = _mapping_list(replan_payload.get("verification_targets"))
+    if verification_targets:
+        request["verification_targets"] = [dict(target) for target in verification_targets]
+        request["task_verification_targets"] = [
+            dict(target) for target in verification_targets
+        ]
+    deferred_continuation = _runtime_replan_action_deferred_continuation_requests(
+        action,
+        replan_payload,
+        allowed,
+    )
+    if deferred_continuation:
+        if action_id:
+            for deferred_request in deferred_continuation:
+                deferred_request.setdefault("action_id", action_id)
+                deferred_request.setdefault("replan_recovery_action_id", action_id)
+        request["deferred_continuation"] = deferred_continuation
+    return request
+
+
+def _runtime_replan_action_deferred_continuation_requests(
+    action: Mapping[str, Any],
+    replan_payload: Mapping[str, Any],
+    allowed: set[str],
+) -> list[dict[str, Any]]:
+    continuation = _mapping_list(action.get("deferred_continuation"))
+    if not continuation:
+        return []
+    request_id = str(replan_payload.get("request_id") or "").strip()
+    trigger = str(replan_payload.get("trigger") or "").strip()
+    action_id = str(action.get("action_id") or action.get("id") or "").strip()
+    requests: list[dict[str, Any]] = []
+    for item in continuation:
+        request = _runtime_replan_safe_deferred_continuation_request(item, allowed)
+        if not request:
+            continue
+        if request_id:
+            request.setdefault("replan_request_id", request_id)
+        if trigger:
+            request.setdefault("replan_trigger", trigger)
+        if action_id:
+            request.setdefault("action_id", action_id)
+            request.setdefault("replan_recovery_action_id", action_id)
+        request.setdefault("source", "runtime_replan_recovery")
+        request.setdefault("planning_reason", "planner_replan_deferred_continuation")
+        _copy_runtime_replan_context(request, replan_payload)
+        requests.append(request)
+    return _dedupe_runtime_replan_recovery_requests(requests)
+
+
+def _runtime_replan_deferred_continuation_requests(
+    tool_name: str,
+    tool_request: Mapping[str, Any],
+    tool_result: Mapping[str, Any],
+    *,
+    allowed_tools: list[str],
+    remaining_requests: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if _is_desktop_provider_session_start_control(tool_name, tool_request):
+        return []
+    if tool_result.get("ok") is not True or tool_result.get("approval_required"):
+        return []
+    request_id = str(tool_request.get("replan_request_id") or "").strip()
+    if not request_id:
+        return []
+    allowed = {str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()}
+    if not allowed:
+        return []
+    existing_signatures = {
+        _deferred_request_signature(request)
+        for request in remaining_requests
+        if isinstance(request, Mapping)
+    }
+    requests: list[dict[str, Any]] = []
+    for item in _mapping_list(tool_request.get("deferred_continuation")):
+        request = _runtime_replan_safe_deferred_continuation_request(item, allowed)
+        if not request:
+            continue
+        request.setdefault("replan_request_id", request_id)
+        for key in (
+            "replan_trigger",
+            "action_id",
+            "replan_recovery_action_id",
+            "source_step_id",
+            "source_tool_name",
+            "target_capability_id",
+            "capability_id",
+            "decision_id",
+            "plan_id",
+            "core_id",
+            "workspace_id",
+            "task_id",
+            "run_group_id",
+            "group_run_id",
+            "group_id",
+            "workflow_id",
+            "workflow_run_id",
+            "workflow_node_id",
+            "workflow_node_label",
+        ):
+            value = tool_request.get(key)
+            if key not in request and value not in (None, "", [], {}):
+                request[key] = dict(value) if isinstance(value, Mapping) else value
+        request.setdefault("source", "runtime_replan_recovery")
+        request.setdefault("planning_reason", "planner_replan_deferred_continuation")
+        signature = _deferred_request_signature(request)
+        if signature in existing_signatures:
+            continue
+        existing_signatures.add(signature)
+        requests.append(request)
+    return _dedupe_runtime_replan_recovery_requests(requests)
+
+
+def _runtime_replan_safe_deferred_continuation_request(
+    item: Mapping[str, Any],
+    allowed: set[str],
+) -> dict[str, Any]:
+    tool_name = str(item.get("tool") or item.get("tool_name") or "").strip()
+    if not tool_name or tool_name not in allowed:
+        return {}
+    if tool_name not in _RUNTIME_REPLAN_AUTO_SAFE_TOOLS:
+        return {}
+    risk_level = str(item.get("risk_level") or "").strip().lower()
+    if risk_level in {"high", "critical"} or bool(item.get("approval_required")):
+        return {}
+    request = dict(item)
+    request["tool"] = tool_name
+    raw_input = item.get("input") if isinstance(item.get("input"), Mapping) else {}
+    request["input"] = dict(raw_input)
+    request.pop("tool_name", None)
+    request.pop("continue_to_model", None)
+    return request
+
+
+def _runtime_replan_action_auto_start_blocked(action: Mapping[str, Any]) -> bool:
+    metadata = action.get("metadata") if isinstance(action.get("metadata"), Mapping) else {}
+    explicit = metadata.get("runtime_replan_auto_start_eligible")
+    if isinstance(explicit, bool):
+        return not explicit
+    explicit = metadata.get("auto_start_eligible")
+    if isinstance(explicit, bool):
+        return not explicit
+    blockers = metadata.get("runtime_replan_auto_start_blockers")
+    if isinstance(blockers, list) and blockers:
+        return True
+    blockers = metadata.get("auto_start_blockers")
+    if isinstance(blockers, list) and blockers:
+        return True
+    return bool(
+        _runtime_replan_recovery_action_auto_start_context(action).get("eligible")
+        is not True
+    )
+
+
+def _copy_runtime_replan_context(
+    request: dict[str, Any],
+    replan_payload: Mapping[str, Any],
+) -> None:
+    for key in (
+        "decision_id",
+        "plan_id",
+        "core_id",
+        "workspace_id",
+        "task_id",
+        "run_group_id",
+        "group_run_id",
+        "group_id",
+        "workflow_id",
+        "workflow_run_id",
+        "workflow_node_id",
+        "workflow_node_label",
+        "source_step_id",
+        "source_tool_name",
+        "target_capability_id",
+        "capability_id",
+    ):
+        value = replan_payload.get(key)
+        if key not in request and value not in (None, "", [], {}):
+            request[key] = dict(value) if isinstance(value, Mapping) else value
+    for key in ("action_target", "observation_evidence", "observation_retry"):
+        if isinstance(request.get(key), Mapping) and request.get(key):
+            continue
+        value = replan_payload.get(key)
+        if isinstance(value, Mapping) and value:
+            request[key] = dict(value)
 
 
 def _post_action_verification_request(
@@ -3865,8 +4329,11 @@ def _deferred_request_signature(request: Mapping[str, Any]) -> tuple[str, str]:
 def _deferred_continuation_enqueued_payload(
     source_tool_name: str,
     requests: list[dict[str, Any]],
+    *,
+    retry_source: str = "desktop_provider_session",
+    replan_payload: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    return {
+    payload: dict[str, Any] = {
         "tool": source_tool_name,
         "source_tool": source_tool_name,
         "status": "enqueued",
@@ -3876,8 +4343,40 @@ def _deferred_continuation_enqueued_payload(
             for request in requests
             if str(request.get("tool") or "").strip()
         ],
-        "runtime_retry_source": "desktop_provider_session",
+        "runtime_retry_source": retry_source,
     }
+    if isinstance(replan_payload, Mapping):
+        for key in (
+            "request_id",
+            "trigger",
+            "decision_id",
+            "plan_id",
+            "core_id",
+            "workspace_id",
+            "task_id",
+            "run_group_id",
+            "group_run_id",
+            "group_id",
+            "workflow_id",
+            "workflow_run_id",
+            "workflow_node_id",
+            "workflow_node_label",
+        ):
+            value = replan_payload.get(key)
+            if value not in (None, "", [], {}):
+                payload["replan_request_id" if key == "request_id" else key] = value
+        action_ids = [
+            str(
+                request.get("replan_recovery_action_id")
+                or request.get("action_id")
+                or ""
+            ).strip()
+            for request in requests
+        ]
+        action_ids = [action_id for action_id in action_ids if action_id]
+        if action_ids:
+            payload["replan_recovery_action_ids"] = action_ids
+    return payload
 
 
 def append_replan_request_event_for_tool_result(
@@ -3888,14 +4387,14 @@ def append_replan_request_event_for_tool_result(
     timeline_factory: Callable[..., dict[str, Any]],
     append_run_event: Callable[[str, str, dict[str, Any]], Any] | None = None,
     run_id: str = "",
-) -> None:
+) -> dict[str, Any]:
     payload = _runtime_replan_request_payload_for_tool_result(
         tool_request,
         tool_event,
         run_id=run_id,
     )
     if not payload or _runtime_replan_request_exists(timeline, payload):
-        return
+        return {}
     event_type = _runtime_replan_event_type(payload)
     event_payload = _runtime_replan_event_payload(payload, event_type)
     detail = (
@@ -3917,6 +4416,7 @@ def append_replan_request_event_for_tool_result(
     )
     if run_id and append_run_event is not None:
         append_run_event(run_id, event_type, event_payload)
+    return event_payload
 
 
 def _runtime_replan_request_payload_for_tool_result(
@@ -5036,6 +5536,27 @@ def _dedupe_runtime_replan_recovery_actions(
             continue
         seen.add(signature)
         deduped.append(dict(action))
+    return deduped
+
+
+def _dedupe_runtime_replan_recovery_requests(
+    requests: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    deduped: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for request in requests:
+        if not isinstance(request, dict):
+            continue
+        tool_name = str(request.get("tool") or "").strip()
+        if not tool_name:
+            continue
+        raw_input = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+        request_id = str(request.get("replan_request_id") or "").strip()
+        signature = (tool_name, repr(sorted(dict(raw_input).items())), request_id)
+        if signature in seen:
+            continue
+        seen.add(signature)
+        deduped.append(request)
     return deduped
 
 
