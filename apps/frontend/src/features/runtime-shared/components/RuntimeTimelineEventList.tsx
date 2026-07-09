@@ -143,6 +143,10 @@ export function RuntimeTimelineEventList({
               data-run-event-desktop-provider-session-kind={desktopProviderSession.desktopSessionKind}
               data-run-event-desktop-provider-session-foreground-takeover={desktopProviderSession.foregroundTakeoverRequired}
               data-run-event-desktop-provider-session-keyboard-mouse={desktopProviderSession.keyboardMouseCaptureSupported}
+              data-run-event-desktop-provider-manifest-ok={desktopProviderSession.providerManifestOk}
+              data-run-event-desktop-provider-manifest-remote-allowed={desktopProviderSession.providerManifestRemoteEndpointAllowed}
+              data-run-event-desktop-provider-manifest-remote-endpoints={desktopProviderSession.providerManifestRemoteEndpointUrls.join(',')}
+              data-run-event-desktop-provider-manifest-blockers={desktopProviderSession.providerManifestBlockers.join(',')}
               data-run-event-desktop-provider-conformance-mode={desktopProviderSession.providerConformanceMode}
               data-run-event-desktop-provider-conformance-ok={desktopProviderSession.providerConformanceOk}
               data-run-event-desktop-provider-conformance-public-release-ready={desktopProviderSession.providerConformancePublicReleaseReady}
@@ -286,6 +290,7 @@ function RuntimeDesktopProviderSessionBlock({
     ['Session', context.executionSessionLabel || context.desktopSessionKind || context.executionSessionMode],
     ['Backend', runtimeDesktopProviderBackendSummary(context)],
     ['Safety', runtimeDesktopProviderSafetySummary(context)],
+    ['Manifest', runtimeDesktopProviderManifestSummary(context)],
     ['Conformance', runtimeDesktopProviderConformanceSummary(context)],
     ['Tools', context.toolNames.join(', ') || context.supportedTools.join(', ')],
     ['Blockers', context.blockingConditions.join(', ')],
@@ -298,6 +303,10 @@ function RuntimeDesktopProviderSessionBlock({
       data-provider-backend-loopback={context.desktopBackendIsLoopback}
       data-provider-backend-release-ready={context.desktopBackendReadyForPublicRelease}
       data-provider-blockers={context.blockingConditions.join(',')}
+      data-provider-manifest-ok={context.providerManifestOk}
+      data-provider-manifest-remote-allowed={context.providerManifestRemoteEndpointAllowed}
+      data-provider-manifest-remote-endpoints={context.providerManifestRemoteEndpointUrls.join(',')}
+      data-provider-manifest-blockers={context.providerManifestBlockers.join(',')}
       data-provider-conformance-mode={context.providerConformanceMode}
       data-provider-conformance-public-release-ready={context.providerConformancePublicReleaseReady}
       data-provider-conformance-release-blockers={context.providerConformanceReleaseBlockers.join(',')}
@@ -423,6 +432,22 @@ function runtimeDesktopProviderConformanceSummary(
       : '',
     context.providerConformanceFailedTools.length
       ? `failed ${context.providerConformanceFailedTools.slice(0, 3).join(', ')}`
+      : '',
+  ].filter(Boolean).join(' · ');
+}
+
+function runtimeDesktopProviderManifestSummary(
+  context: RuntimeDesktopProviderSessionContext,
+): string {
+  return [
+    context.providerManifestOk === 'true' ? 'ready' : '',
+    context.providerManifestOk === 'false' ? 'blocked' : '',
+    context.providerManifestRemoteEndpointAllowed === 'false' ? 'local endpoint required' : '',
+    context.providerManifestBlockers.length
+      ? `blockers ${context.providerManifestBlockers.slice(0, 3).join(', ')}`
+      : '',
+    context.providerManifestRemoteEndpointUrls.length
+      ? `remote ${context.providerManifestRemoteEndpointUrls.slice(0, 2).join(', ')}`
       : '',
   ].filter(Boolean).join(' · ');
 }
@@ -670,6 +695,19 @@ function runtimeEventMetadata(
     { label: 'provider blockers', value: desktopProviderSession.blockingConditions.join(', ') },
     { label: 'provider foreground takeover', value: desktopProviderSession.foregroundTakeoverRequired },
     { label: 'provider keyboard/mouse', value: desktopProviderSession.keyboardMouseCaptureSupported },
+    { label: 'provider manifest', value: desktopProviderSession.providerManifestOk },
+    {
+      label: 'provider manifest remote allowed',
+      value: desktopProviderSession.providerManifestRemoteEndpointAllowed,
+    },
+    {
+      label: 'provider manifest blockers',
+      value: desktopProviderSession.providerManifestBlockers.join(', '),
+    },
+    {
+      label: 'provider manifest remote endpoints',
+      value: desktopProviderSession.providerManifestRemoteEndpointUrls.join(', '),
+    },
     { label: 'provider tools', value: desktopProviderSession.toolNames.join(', ') },
     { label: 'provider supported tools', value: desktopProviderSession.supportedTools.join(', ') },
     { label: 'provider error', value: desktopProviderSession.error },

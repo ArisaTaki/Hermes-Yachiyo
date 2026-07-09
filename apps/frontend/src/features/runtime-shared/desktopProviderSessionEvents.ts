@@ -17,6 +17,10 @@ export type RuntimeDesktopProviderSessionContext = {
   foregroundTakeoverRequired: string;
   keyboardMouseCaptureSupported: string;
   needed: string;
+  providerManifestBlockers: string[];
+  providerManifestOk: string;
+  providerManifestRemoteEndpointAllowed: string;
+  providerManifestRemoteEndpointUrls: string[];
   providerConformanceFailedTools: string[];
   providerConformanceMissingTools: string[];
   providerConformanceMode: string;
@@ -46,11 +50,13 @@ export function runtimeDesktopProviderSessionContext(
   const contextSourceRecords = [...baseRecords, ...resultRecords];
   const session = runtimeFirstNestedRecord(contextSourceRecords, 'desktop_provider_session');
   const providerConformance = runtimeFirstNestedRecord(contextSourceRecords, 'provider_conformance');
+  const providerManifest = runtimeFirstNestedRecord(contextSourceRecords, 'provider_manifest_evidence');
   const provider = runtimeFirstNestedRecord(contextSourceRecords, 'desktop_execution_provider');
   const sandboxProvider = runtimeFirstNestedRecord(contextSourceRecords, 'sandbox_provider');
   const route = runtimeFirstNestedRecord(contextSourceRecords, 'desktop_execution_route');
   const contextRecords = [session, provider, sandboxProvider, route, ...baseRecords, ...resultRecords];
   const conformanceRecords = [providerConformance, ...contextRecords];
+  const manifestRecords = [providerManifest, ...contextRecords];
   return {
     blockingConditions: runtimeUniqueStrings(contextRecords.flatMap((record) => runtimeStringList(record.blocking_conditions))),
     desktopBackendIsLoopback: runtimeFirstBoolLabel(contextRecords, 'desktop_backend_is_loopback'),
@@ -64,6 +70,13 @@ export function runtimeDesktopProviderSessionContext(
     foregroundTakeoverRequired: runtimeFirstBoolLabel(contextRecords, 'foreground_takeover_required'),
     keyboardMouseCaptureSupported: runtimeFirstBoolLabel(contextRecords, 'keyboard_mouse_capture_supported'),
     needed: runtimeFirstBoolLabel(contextRecords, 'needed'),
+    providerManifestBlockers: runtimeUniqueStrings([
+      ...manifestRecords.flatMap((record) => runtimeStringList(record.blocking_conditions)),
+      ...manifestRecords.flatMap((record) => runtimeStringList(record.manifest_blocking_conditions)),
+    ]),
+    providerManifestOk: runtimeFirstBoolLabel(manifestRecords, 'ok'),
+    providerManifestRemoteEndpointAllowed: runtimeFirstBoolLabel(manifestRecords, 'remote_endpoint_allowed'),
+    providerManifestRemoteEndpointUrls: runtimeUniqueStrings(manifestRecords.flatMap((record) => runtimeStringList(record.remote_endpoint_urls))),
     providerConformanceFailedTools: runtimeUniqueStrings(conformanceRecords.flatMap((record) => runtimeStringList(record.failed_tools))),
     providerConformanceMissingTools: runtimeUniqueStrings(conformanceRecords.flatMap((record) => runtimeStringList(record.missing_required_tools))),
     providerConformanceMode: runtimeFirstString(conformanceRecords, 'mode'),
@@ -131,6 +144,11 @@ export function runtimeDesktopProviderSessionDetail(
     context.desktopBackendReadyForPublicRelease === 'false' ? 'backend not release-ready' : '',
     context.providerConformancePublicReleaseReady === 'true' ? 'provider release-ready' : '',
     context.providerConformancePublicReleaseReady === 'false' ? 'provider release blocked' : '',
+    context.providerManifestOk === 'true' ? 'manifest ready' : '',
+    context.providerManifestOk === 'false' ? 'manifest blocked' : '',
+    context.providerManifestRemoteEndpointAllowed === 'false' ? 'local endpoint required' : '',
+    context.providerManifestBlockers.length ? `manifest blockers ${context.providerManifestBlockers.slice(0, 3).join(', ')}` : '',
+    context.providerManifestRemoteEndpointUrls.length ? `remote endpoints ${context.providerManifestRemoteEndpointUrls.slice(0, 2).join(', ')}` : '',
     context.providerConformanceMode ? `conformance ${context.providerConformanceMode}` : '',
     context.providerConformanceReleaseBlockers.length ? `release blockers ${context.providerConformanceReleaseBlockers.slice(0, 3).join(', ')}` : '',
     context.providerConformanceMissingTools.length ? `missing ${context.providerConformanceMissingTools.slice(0, 3).join(', ')}` : '',
