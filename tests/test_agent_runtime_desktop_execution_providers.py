@@ -7,6 +7,7 @@ from typing import Any
 
 from apps.shell.agent.runtime.desktop_execution_providers import (
     DesktopExecutionProviderRegistry,
+    LocalDesktopExecutionProviderAdapter,
     LOCAL_DESKTOP_PROVIDER_ID,
     LOCAL_DESKTOP_PROVIDER_KIND,
     desktop_execution_provider_status_from_env,
@@ -233,7 +234,65 @@ def test_default_desktop_provider_registry_routes_low_risk_tools_to_local_broker
     assert result["desktop_execution_provider"]["provider_kind"] == LOCAL_DESKTOP_PROVIDER_KIND
     assert result["desktop_execution_provider"]["provider_id"] == LOCAL_DESKTOP_PROVIDER_ID
     assert result["local_desktop_provider"]["provider_id"] == LOCAL_DESKTOP_PROVIDER_ID
+    assert result["local_desktop_provider"]["transport"] == "runtime_tool_broker"
+    assert result["desktop_execution_evidence"]["transport"] == "runtime_tool_broker"
+    assert result["desktop_execution_evidence"]["effect"] == "app_launch"
+    assert result["desktop_execution_evidence"]["keyboard_mouse_capture"] is False
     assert calls == [("app.open", {"app_name": "Music"}, False)]
+
+
+def test_local_provider_direct_fallback_executes_low_risk_discovery(
+    monkeypatch,
+) -> None:
+    calls: list[tuple[str, Any]] = []
+
+    def fake_list_apps(query: str = "", limit: Any = 200) -> dict[str, Any]:
+        calls.append((query, limit))
+        return {
+            "ok": True,
+            "action": "desktop.list_apps",
+            "summary": "Installed apps matching Music: Music",
+            "data": {
+                "query": query,
+                "apps": [{"name": "Music", "path": "/System/Applications/Music.app"}],
+                "count": 1,
+            },
+            "permission_error": False,
+            "fallback_used": False,
+        }
+
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.list_apps",
+        fake_list_apps,
+    )
+    registry = DesktopExecutionProviderRegistry([LocalDesktopExecutionProviderAdapter()])
+    tool_request = _local_tool_request("desktop.list_apps", {"query": "Music", "limit": 5})
+
+    result = registry.execute_if_routed(
+        "desktop.list_apps",
+        {"query": "Music", "limit": 5},
+        tool_request=tool_request,
+        broker=object(),
+    )
+
+    assert result is not None
+    assert result["ok"] is True
+    assert result["desktop_execution_provider_routed"] is True
+    assert result["local_desktop_provider"]["transport"] == "direct_local_tools"
+    assert result["desktop_execution_evidence"] == {
+        "provider_id": LOCAL_DESKTOP_PROVIDER_ID,
+        "provider_kind": LOCAL_DESKTOP_PROVIDER_KIND,
+        "transport": "direct_local_tools",
+        "tool": "desktop.list_apps",
+        "ok": True,
+        "effect": "desktop_app_discovery",
+        "user_foreground_session": True,
+        "keyboard_mouse_capture": False,
+        "permission_error": False,
+        "fallback_used": False,
+        "query": "Music",
+    }
+    assert calls == [("Music", 5)]
 
 
 def test_desktop_provider_status_from_env_reports_unchecked_local_provider() -> None:

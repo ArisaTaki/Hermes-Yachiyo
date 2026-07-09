@@ -184,6 +184,43 @@ KEYBOARD_MOUSE_CAPTURE_TOOL_NAMES = (
     "desktop.quit_app",
 )
 LOCAL_DESKTOP_PROVIDER_REQUIRES_SANDBOX_TOOLS = KEYBOARD_MOUSE_CAPTURE_TOOL_NAMES
+LOCAL_DESKTOP_DIRECT_FALLBACK_TOOLS = frozenset(
+    {
+        "desktop.active_window",
+        "desktop.running_apps",
+        "desktop.list_apps",
+        "desktop.windows",
+        "desktop.list_windows",
+        "desktop.ui_elements",
+        "desktop.read_ui",
+        "desktop.inspect_app",
+        "desktop.verify",
+        "app.status",
+        "app.open",
+        "desktop.open_app",
+        "app.focus",
+        "desktop.focus_app",
+        "media.apple_music_play",
+        "media.apple_music_status",
+        "media.apple_music_open_and_play",
+        "media.apple_music_control",
+        "media.music_app_open_and_play",
+        "media.music_app_control",
+    }
+)
+LOCAL_DESKTOP_MUTATING_EFFECT_TOOLS = frozenset(
+    {
+        "app.open",
+        "desktop.open_app",
+        "app.focus",
+        "desktop.focus_app",
+        "media.apple_music_play",
+        "media.apple_music_open_and_play",
+        "media.apple_music_control",
+        "media.music_app_open_and_play",
+        "media.music_app_control",
+    }
+)
 
 
 class DesktopExecutionProviderRegistry:
@@ -924,21 +961,26 @@ class LocalDesktopExecutionProviderAdapter:
         approved: bool = False,
     ) -> dict[str, Any]:
         call = getattr(broker, "call", None)
-        if not callable(call):
+        transport = "runtime_tool_broker"
+        if callable(call):
+            try:
+                result = call(tool_name, dict(payload), approved=approved)
+            except Exception as exc:
+                return self._failure(
+                    tool_name,
+                    "local_desktop_provider_tool_failed",
+                    "Local desktop provider tool execution failed.",
+                    error=redact_api_error_text(exc),
+                )
+        else:
+            result = self._execute_direct_fallback(tool_name, dict(payload))
+            transport = "direct_local_tools"
+        if result is None:
             return self._failure(
                 tool_name,
                 "local_desktop_provider_broker_unavailable",
                 "Local desktop provider could not access the runtime tool broker.",
                 retryable=False,
-            )
-        try:
-            result = call(tool_name, dict(payload), approved=approved)
-        except Exception as exc:
-            return self._failure(
-                tool_name,
-                "local_desktop_provider_tool_failed",
-                "Local desktop provider tool execution failed.",
-                error=redact_api_error_text(exc),
             )
         tool_result = (
             dict(result)
@@ -949,14 +991,149 @@ class LocalDesktopExecutionProviderAdapter:
         tool_result.setdefault("action", tool_name)
         tool_result.setdefault(
             "local_desktop_provider",
-            {
-                "provider_id": self.provider_id,
-                "provider_kind": self.provider_kind,
-                "approved": bool(approved),
-                "supported_tools": list(self.supported_tools),
-            },
+            self._provider_context(approved=approved, transport=transport),
+        )
+        tool_result.setdefault(
+            "desktop_execution_evidence",
+            self._execution_evidence(
+                tool_name,
+                payload,
+                tool_result,
+                transport=transport,
+            ),
         )
         return tool_result
+
+    def _execute_direct_fallback(
+        self,
+        tool_name: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        if tool_name not in LOCAL_DESKTOP_DIRECT_FALLBACK_TOOLS:
+            return None
+        try:
+            from apps.shell.agent.tools import desktop as desktop_tools
+
+            if tool_name == "desktop.active_window":
+                return desktop_tools.active_window()
+            if tool_name == "desktop.running_apps":
+                return desktop_tools.running_apps()
+            if tool_name == "desktop.list_apps":
+                return desktop_tools.list_apps(
+                    query=str(payload.get("query") or ""),
+                    limit=payload.get("limit", 200),
+                )
+            if tool_name in {"desktop.windows", "desktop.list_windows"}:
+                return desktop_tools.windows(str(payload.get("app_name") or ""))
+            if tool_name in {"desktop.ui_elements", "desktop.read_ui"}:
+                return desktop_tools.ui_elements(
+                    role_filter=str(payload.get("role_filter") or ""),
+                    limit=payload.get("limit", 80),
+                    app_name=str(payload.get("app_name") or ""),
+                )
+            if tool_name == "desktop.inspect_app":
+                return desktop_tools.inspect_app(
+                    str(payload.get("app_name") or ""),
+                    open_if_needed=payload.get("open_if_needed", True),
+                    focus=payload.get("focus", True),
+                    role_filter=str(payload.get("role_filter") or ""),
+                    limit=payload.get("limit", 80),
+                )
+            if tool_name == "desktop.verify":
+                app_name = str(payload.get("app_name") or "").strip()
+                if app_name:
+                    result = desktop_tools.inspect_app(
+                        app_name,
+                        open_if_needed=False,
+                        focus=False,
+                        role_filter=str(payload.get("role_filter") or ""),
+                        limit=payload.get("limit", 80),
+                    )
+                    return {
+                        **result,
+                        "action": "desktop.verify",
+                        "summary": result.get("summary")
+                        or f"Verified desktop app: {app_name}",
+                    }
+                result = desktop_tools.active_window()
+                return {
+                    **result,
+                    "action": "desktop.verify",
+                    "summary": result.get("summary")
+                    or "Verified active desktop window",
+                }
+            if tool_name == "app.status":
+                return desktop_tools.app_status(str(payload.get("app_name") or ""))
+            if tool_name in {"app.open", "desktop.open_app"}:
+                return desktop_tools.app_open(str(payload.get("app_name") or ""))
+            if tool_name in {"app.focus", "desktop.focus_app"}:
+                return desktop_tools.app_focus(str(payload.get("app_name") or ""))
+            if tool_name == "media.apple_music_play":
+                return desktop_tools.apple_music_play(str(payload.get("query") or ""))
+            if tool_name == "media.apple_music_status":
+                return desktop_tools.apple_music_status()
+            if tool_name == "media.apple_music_open_and_play":
+                return desktop_tools.apple_music_open_and_play()
+            if tool_name == "media.apple_music_control":
+                return desktop_tools.apple_music_control(str(payload.get("action") or ""))
+            if tool_name == "media.music_app_open_and_play":
+                return desktop_tools.music_app_open_and_play(
+                    str(payload.get("app_name") or "Music")
+                )
+            if tool_name == "media.music_app_control":
+                return desktop_tools.music_app_control(
+                    str(payload.get("app_name") or "Music"),
+                    str(payload.get("action") or "play"),
+                )
+        except Exception as exc:
+            return self._failure(
+                tool_name,
+                "local_desktop_provider_direct_tool_failed",
+                "Local desktop provider direct fallback failed.",
+                error=redact_api_error_text(exc),
+            )
+        return None
+
+    def _provider_context(self, *, approved: bool, transport: str) -> dict[str, Any]:
+        return {
+            "provider_id": self.provider_id,
+            "provider_kind": self.provider_kind,
+            "approved": bool(approved),
+            "supported_tools": list(self.supported_tools),
+            "transport": transport,
+            "desktop_session_kind": "user_foreground",
+            "desktop_session_isolated": False,
+            "keyboard_mouse_capture": False,
+        }
+
+    def _execution_evidence(
+        self,
+        tool_name: str,
+        payload: Mapping[str, Any],
+        result: Mapping[str, Any],
+        *,
+        transport: str,
+    ) -> dict[str, Any]:
+        data = result.get("data") if isinstance(result.get("data"), Mapping) else {}
+        evidence = {
+            "provider_id": self.provider_id,
+            "provider_kind": self.provider_kind,
+            "transport": transport,
+            "tool": tool_name,
+            "ok": result.get("ok") is True,
+            "effect": _local_desktop_effect(tool_name),
+            "user_foreground_session": True,
+            "keyboard_mouse_capture": False,
+            "permission_error": bool(result.get("permission_error")),
+            "fallback_used": bool(result.get("fallback_used")),
+        }
+        app_name = str(data.get("app_name") or payload.get("app_name") or "").strip()
+        if app_name:
+            evidence["app_name"] = app_name
+        query = str(data.get("query") or payload.get("query") or "").strip()
+        if query:
+            evidence["query"] = query
+        return evidence
 
     def _failure(
         self,
@@ -984,6 +1161,19 @@ class LocalDesktopExecutionProviderAdapter:
                 "transport": "local_broker",
             },
         }
+
+
+def _local_desktop_effect(tool_name: str) -> str:
+    clean_tool = str(tool_name or "").strip()
+    if clean_tool in LOCAL_DESKTOP_MUTATING_EFFECT_TOOLS:
+        if clean_tool.startswith("media."):
+            return "media_control"
+        if clean_tool in {"app.focus", "desktop.focus_app"}:
+            return "app_focus"
+        return "app_launch"
+    if clean_tool in {"desktop.list_apps", "desktop.running_apps"}:
+        return "desktop_app_discovery"
+    return "desktop_observation"
 
 
 def default_desktop_execution_provider_registry() -> DesktopExecutionProviderRegistry:
