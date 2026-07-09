@@ -228,6 +228,79 @@ def test_workflow_run_snapshot_projects_task_core_progress_from_workflow_events(
     assert workflow_run.runtime_debug.needs_replan is False
 
 
+def test_workflow_run_snapshot_rolls_up_child_runtime_provider_and_deferred_events() -> None:
+    workflow_run = workflow_run_snapshot_from_payload(
+        {
+            "run_id": "workflow-run-runtime-rollup",
+            "workflow_run_id": "workflow-run-runtime-rollup",
+            "workflow_id": "workflow-runtime",
+            "kind": "workflow_run",
+            "status": "running",
+            "objective": "Operate a desktop app",
+            "runs": [
+                {
+                    "run_id": "workflow-child-runtime",
+                    "status": "running",
+                    "workflow_node_id": "operate-app",
+                    "workflow_node_label": "Operate app",
+                    "runtime_execution_envelope": {
+                        "envelope_id": "workflow-child-envelope",
+                        "requests": [
+                            {
+                                "request_id": "request-click",
+                                "tool_name": "desktop.click_ui_element",
+                            }
+                        ],
+                        "desktop_provider_session": {
+                            "ok": False,
+                            "status": "start_failed",
+                            "needed": True,
+                            "provider_id": "isolated-vnc",
+                            "reason": "sandbox_desktop_provider_required",
+                            "tool_names": ["desktop.click_ui_element"],
+                        },
+                    },
+                    "events": [
+                        {
+                            "event_type": "agent.deferred_continuation.enqueued",
+                            "sequence": 11,
+                            "payload": {
+                                "deferred_continuation_count": 1,
+                                "deferred_tool": "desktop.click_ui_element",
+                            },
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+    provider_event = next(
+        event
+        for event in workflow_run.events
+        if event.event_type == "desktop.provider_session.failed"
+    )
+    deferred_event = next(
+        event
+        for event in workflow_run.events
+        if event.event_type == "workflow.run.deferred_continuation.enqueued"
+    )
+
+    assert provider_event.workflow_run_id == "workflow-run-runtime-rollup"
+    assert provider_event.payload["source_run_id"] == "workflow-child-runtime"
+    assert provider_event.payload["desktop_provider_session"]["provider_id"] == "isolated-vnc"
+    assert deferred_event.payload["source_sequence"] == 11
+    assert deferred_event.payload["workflow_id"] == "workflow-runtime"
+    assert workflow_run.runtime_debug is not None
+    assert workflow_run.runtime_debug.desktop_provider_session_status == "start_failed"
+    assert workflow_run.runtime_debug.desktop_provider_session_provider_id == "isolated-vnc"
+    assert workflow_run.runtime_debug.deferred_continuation_count == 1
+    assert (
+        workflow_run.runtime_debug.latest_deferred_continuation_tool
+        == "desktop.click_ui_element"
+    )
+
+
 def _completed_task_core_events() -> list[dict]:
     return [
         {

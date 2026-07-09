@@ -30,6 +30,10 @@ from .replan_recovery_snapshots import (
 )
 from .run_snapshots import RunSnapshotProjector
 from .runtime_debug_snapshots import runtime_debug_summary_from_runtime_objects
+from .runtime_event_rollups import (
+    runtime_events_with_desktop_provider_session_from_payload,
+    runtime_key_events_from_child_timelines,
+)
 from .runtime_execution_status import runtime_execution_envelope_with_status_overlay
 from .runtime_execution import runtime_execution_envelope_payload_with_request_context
 from .task_snapshots import runtime_execution_envelope_from_payload
@@ -114,6 +118,16 @@ def group_run_snapshot_from_payload(
         payload,
         events=events,
     )
+    events = runtime_events_with_desktop_provider_session_from_payload(
+        payload,
+        events,
+        run_id=group_run_id,
+        context={
+            "group_run_id": group_run_id,
+            "run_group_id": legacy_run_group_id or group_run_id,
+            "group_id": group_id,
+        },
+    )
     if task_core is None and runtime_execution_envelope is not None:
         task_core = runtime_execution_envelope.task_core
         task_progress = task_progress_summary_from_task_core(
@@ -135,6 +149,17 @@ def group_run_snapshot_from_payload(
         task_id=_text(payload.get("task_id")),
         group_run_id=group_run_id,
         created_at=_text(payload.get("updated_at") or payload.get("created_at")),
+    )
+    events = runtime_key_events_from_child_timelines(
+        events,
+        runs,
+        parent_run_id=group_run_id,
+        scope="group_run",
+        context={
+            "group_run_id": group_run_id,
+            "run_group_id": legacy_run_group_id or group_run_id,
+            "group_id": group_id,
+        },
     )
     task_progress = task_progress_summary_from_task_core(
         task_core,

@@ -160,6 +160,79 @@ def test_group_run_snapshot_rolls_up_blocked_foreground_tool_calls() -> None:
     assert operator.tool_calls[0].status == "blocked"
 
 
+def test_group_run_snapshot_rolls_up_child_runtime_provider_and_deferred_events() -> None:
+    group_run = group_run_snapshot_from_payload(
+        {
+            "group_run_id": "group-run-runtime-rollup",
+            "group_id": "group-runtime",
+            "title": "Desktop group task",
+            "status": "running",
+            "objective": "Type into an app",
+            "members": [{"agent_id": "agent-operator", "name": "Operator"}],
+            "runs": [
+                {
+                    "run_id": "run-operator-runtime",
+                    "agent_id": "agent-operator",
+                    "status": "running",
+                    "runtime_execution_envelope": {
+                        "envelope_id": "envelope-child-runtime",
+                        "requests": [
+                            {
+                                "request_id": "request-type",
+                                "tool_name": "desktop.safe_type_text",
+                            }
+                        ],
+                        "desktop_provider_session": {
+                            "ok": False,
+                            "status": "start_failed",
+                            "needed": True,
+                            "running": False,
+                            "provider_id": "isolated-vnc",
+                            "reason": "sandbox_desktop_provider_required",
+                            "tool_names": ["desktop.safe_type_text"],
+                        },
+                    },
+                    "events": [
+                        {
+                            "event_type": "agent.deferred_continuation.enqueued",
+                            "sequence": 7,
+                            "payload": {
+                                "deferred_continuation_count": 1,
+                                "deferred_tools": ["desktop.safe_type_text"],
+                            },
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+    provider_event = next(
+        event
+        for event in group_run.events
+        if event.event_type == "desktop.provider_session.failed"
+    )
+    deferred_event = next(
+        event
+        for event in group_run.events
+        if event.event_type == "group.run.deferred_continuation.enqueued"
+    )
+
+    assert provider_event.group_run_id == "group-run-runtime-rollup"
+    assert provider_event.payload["source_run_id"] == "run-operator-runtime"
+    assert provider_event.payload["desktop_provider_session"]["provider_id"] == "isolated-vnc"
+    assert deferred_event.payload["source_sequence"] == 7
+    assert deferred_event.payload["group_run_id"] == "group-run-runtime-rollup"
+    assert group_run.runtime_debug is not None
+    assert group_run.runtime_debug.desktop_provider_session_status == "start_failed"
+    assert group_run.runtime_debug.desktop_provider_session_provider_id == "isolated-vnc"
+    assert group_run.runtime_debug.deferred_continuation_count == 1
+    assert (
+        group_run.runtime_debug.latest_deferred_continuation_tool
+        == "desktop.safe_type_text"
+    )
+
+
 def _completed_task_core_events() -> list[dict]:
     return [
         {

@@ -17,6 +17,7 @@ from .contracts import (
 )
 from .run_snapshots import RunSnapshotProjector, run_timeline_snapshot_from_payload
 from .runtime_debug_snapshots import runtime_debug_summary_from_runtime_objects
+from .runtime_event_rollups import runtime_key_events_from_child_timelines
 from .timeline_metadata_snapshots import merge_timeline_child_snapshots
 
 _RUN_PROJECTOR = RunSnapshotProjector()
@@ -48,8 +49,19 @@ def workflow_run_snapshot_from_payload(
         for item in child_payloads
         if isinstance(item, Mapping)
     ]
+    timeline_events = runtime_key_events_from_child_timelines(
+        timeline.events,
+        child_runs,
+        parent_run_id=workflow_run_id,
+        scope="workflow_run",
+        context={
+            "workflow_id": workflow_id or "",
+            "workflow_run_id": workflow_run_id,
+        },
+    )
     child_approvals = _child_approvals(child_runs)
     timeline_payload = timeline.model_dump(mode="python")
+    timeline_payload["events"] = timeline_events
     timeline_payload.update(
         {
             "tool_calls": _unique_by(
