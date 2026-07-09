@@ -586,6 +586,48 @@ def _tool_result_requests_user_recovery(result: dict[str, Any]) -> bool:
     )
 
 
+def _tool_result_failed_verification(result: Mapping[str, Any]) -> bool:
+    if not isinstance(result, Mapping):
+        return False
+    if result.get("verification_failed") is True:
+        return True
+    if result.get("verification_passed") is False:
+        return True
+    status = str(
+        result.get("verification_status") or result.get("status") or result.get("reason") or ""
+    ).strip().lower()
+    if status == "verification_failed":
+        return True
+    data = result.get("data") if isinstance(result.get("data"), Mapping) else {}
+    if data.get("verification_failed") is True:
+        return True
+    if data.get("verification_passed") is False:
+        return True
+    data_status = str(
+        data.get("verification_status") or data.get("status") or data.get("reason") or ""
+    ).strip().lower()
+    return data_status == "verification_failed"
+
+
+def _tool_result_with_verification_failure_status(
+    tool_result: dict[str, Any],
+) -> dict[str, Any]:
+    if not isinstance(tool_result, dict):
+        return tool_result
+    if tool_result.get("approval_required"):
+        return tool_result
+    if not _tool_result_failed_verification(tool_result):
+        return tool_result
+    enriched = dict(tool_result)
+    enriched["verification_failed"] = True
+    enriched.setdefault("verification_passed", False)
+    data = enriched.get("data") if isinstance(enriched.get("data"), Mapping) else {}
+    if data:
+        enriched["data"] = {**data, "verification_failed": True}
+        enriched["data"].setdefault("verification_passed", False)
+    return enriched
+
+
 def _desktop_execution_policy_skip_result(
     tool_name: str,
     tool_request: Mapping[str, Any],
@@ -1289,7 +1331,7 @@ def _tool_result_with_runtime_recovery_defaults(
         return tool_result
     if _tool_request_has_runtime_recovery_metadata(tool_request):
         return tool_result
-    if tool_result.get("ok") is not False and tool_result.get("verification_failed") is not True:
+    if tool_result.get("ok") is not False and not _tool_result_failed_verification(tool_result):
         return tool_result
     fallback_tools = _runtime_default_replan_fallback_tools(tool_name)
     if not fallback_tools:
@@ -2975,6 +3017,7 @@ class RuntimeToolCallExecutor:
                 else {}
             ),
         )
+        tool_result = _tool_result_with_verification_failure_status(tool_result)
         self._tool_call_events.result(
             run_id,
             tool_name,
@@ -3332,6 +3375,7 @@ class RuntimeToolRequestRunner:
                 run_id=run_id,
                 budget=budget,
             )
+            tool_result = _tool_result_with_verification_failure_status(tool_result)
             if tool_result.get("approval_required"):
                 self._append_tool_result_progress(
                     tool_request,
@@ -3434,6 +3478,8 @@ class RuntimeToolRequestRunner:
                 timeline=timeline,
                 run_id=run_id,
             )
+            if _tool_result_failed_verification(tool_result) and not auto_recovery_enqueued:
+                break
             if _tool_result_requests_user_recovery(tool_result) and not auto_recovery_enqueued:
                 if _remaining_request_can_handle_foreground_readiness(
                     foreground_readiness_blocker,
@@ -4533,7 +4579,7 @@ def _tool_event_requests_runtime_replan(
 ) -> bool:
     if result.get("approval_required") or tool_event.get("approval_required"):
         return False
-    if result.get("verification_failed") is True or tool_event.get("verification_failed") is True:
+    if _tool_result_failed_verification(result) or _tool_result_failed_verification(tool_event):
         return True
     if result.get("ok") is False:
         return True
@@ -4549,6 +4595,7 @@ def _runtime_replan_tool_event_result(tool_event: Mapping[str, Any]) -> dict[str
     result = dict(raw_result)
     if tool_event.get("verification_failed") is True:
         result["verification_failed"] = True
+    result = _tool_result_with_verification_failure_status(result)
     return result
 
 
@@ -4557,7 +4604,7 @@ def _runtime_replan_trigger(
     result: Mapping[str, Any],
     replan_triggers: list[str],
 ) -> str:
-    if result.get("verification_failed"):
+    if _tool_result_failed_verification(result):
         return "verification_failed"
     if (
         result.get("blocked_by_desktop_execution_provider")
@@ -4877,7 +4924,16 @@ def _runtime_default_recovery_approval_required(tool_name: str) -> bool:
 
 def _runtime_replan_result_preview(result: Mapping[str, Any]) -> dict[str, Any]:
     preview: dict[str, Any] = {}
-    for key in ("ok", "error", "status", "summary", "hint", "blocking_condition"):
+    for key in (
+        "ok",
+        "error",
+        "status",
+        "summary",
+        "hint",
+        "blocking_condition",
+        "verification_failed",
+        "verification_passed",
+    ):
         value = result.get(key)
         if value not in (None, "", [], {}):
             preview[key] = value

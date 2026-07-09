@@ -1942,6 +1942,67 @@ def test_runtime_tool_request_runner_records_explicit_verification_failure_repla
     assert run_replan_event["replan_signal_ids"] == ["signal-analyze-verify-failed"]
 
 
+def test_runtime_tool_request_runner_stops_after_nested_verification_failure() -> None:
+    run_events: list[tuple[str, str, dict[str, Any]]] = []
+    timeline: list[dict[str, Any]] = []
+    calls: list[str] = []
+
+    def call_agent_tool(
+        tool_request: dict[str, Any],
+        *_args: Any,
+        **_kwargs: Any,
+    ) -> dict[str, Any]:
+        calls.append(str(tool_request.get("tool") or ""))
+        if tool_request["tool"] == "desktop.verify":
+            return {
+                "ok": True,
+                "summary": "Expected UI state was not present.",
+                "data": {
+                    "verification_passed": False,
+                    "expected_app_name": "Music",
+                    "active_app_name": "Music",
+                },
+            }
+        return {"ok": True, "content": "should not run"}
+
+    runner = _runner(
+        call_agent_tool=call_agent_tool,
+        run_events=run_events,
+    )
+    messages = [{"role": "user", "content": "open Music and verify it"}]
+
+    runner.run(
+        [
+            {
+                "tool": "desktop.verify",
+                "input": {"app_name": "Music", "expected_text": "Playing"},
+                "source": "runtime_post_action_auto_verify",
+                "runtime_stage": "verify",
+                "requires_observation": True,
+                "replan_triggers": ["verification_failed"],
+            },
+            {"tool": "workspace.read", "input": {"path": "README.md"}},
+        ],
+        ["desktop.verify", "workspace.read"],
+        FakeBroker({"ok": True}),
+        messages,
+        timeline,
+        [],
+        next_iteration=1,
+        run_id="run-nested-verify-failed",
+        budget=FakeBudget(),
+    )
+
+    assert calls == ["desktop.verify"]
+    replan_event = next(event for event in timeline if event["event"] == "agent.replan.requested")
+    assert replan_event["payload"]["trigger"] == "verification_failed"
+    assert replan_event["payload"]["source_tool_name"] == "desktop.verify"
+    assert replan_event["payload"]["metadata"]["result_preview"]["verification_failed"] is True
+    assert replan_event["payload"]["metadata"]["result_preview"]["verification_passed"] is False
+    assert "verification_failed" in messages[-1]["content"]
+    assert any(event_type == "agent.replan.requested" for _run_id, event_type, _payload in run_events)
+
+
 def test_runtime_tool_request_runner_synthesizes_observation_retry_recovery_action() -> None:
     run_events: list[tuple[str, str, dict[str, Any]]] = []
     timeline: list[dict[str, Any]] = []
