@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Iterable, Mapping
+from pathlib import Path
 from typing import Any, Protocol
 from urllib import error as urlerror
 from urllib.parse import urlparse
@@ -59,6 +60,10 @@ _PROVIDER_TOKEN_ENV_KEYS = (
 _PROVIDER_STATUS_URL_ENV_KEYS = (
     "OHA_YACHIYO_DESKTOP_PROVIDER_STATUS_URL",
     "OHA_YACHIYO_SANDBOX_DESKTOP_PROVIDER_STATUS_URL",
+)
+_PROVIDER_MANIFEST_ENV_KEYS = (
+    "OHA_YACHIYO_DESKTOP_PROVIDER_MANIFEST",
+    "OHA_YACHIYO_SANDBOX_DESKTOP_PROVIDER_MANIFEST",
 )
 _PROVIDER_FOREGROUND_MUTATION_ENV_KEYS = (
     "OHA_YACHIYO_DESKTOP_PROVIDER_FOREGROUND_MUTATION_SUPPORTED",
@@ -1247,10 +1252,18 @@ def desktop_execution_provider_status_from_env(
     probe_health: bool = False,
     urlopen: Any | None = None,
 ) -> dict[str, Any]:
-    env = os.environ if environ is None else environ
+    raw_env = os.environ if environ is None else environ
+    manifest = _provider_manifest_from_env(raw_env)
+    manifest_selected = bool(manifest) and not (
+        _first_env_value(raw_env, _PROVIDER_URL_ENV_KEYS)
+        or _first_env_value(raw_env, _PROVIDER_EXECUTE_URL_ENV_KEYS)
+    )
+    env = _env_with_provider_manifest(raw_env, manifest)
     provider_url = _first_env_value(env, _PROVIDER_URL_ENV_KEYS)
     execute_url = _first_env_value(env, _PROVIDER_EXECUTE_URL_ENV_KEYS)
     if not provider_url and not execute_url:
+        if manifest:
+            return _manifest_provider_required_status(manifest)
         return {
             "configured": False,
             "available": False,
@@ -1321,7 +1334,10 @@ def desktop_execution_provider_status_from_env(
             },
             "source": "runtime_env",
         }
-    return adapter.configured_status(probe_health=probe_health)
+    status = adapter.configured_status(probe_health=probe_health)
+    if manifest_selected:
+        status["source"] = "provider_manifest"
+    return status
 
 
 def desktop_execution_route_payload(tool_request: Mapping[str, Any] | Any) -> dict[str, Any]:
@@ -1738,7 +1754,8 @@ def _http_desktop_execution_provider_adapter_from_env(
     *,
     urlopen: Any | None = None,
 ) -> HttpDesktopExecutionProviderAdapter | None:
-    env = os.environ if environ is None else environ
+    raw_env = os.environ if environ is None else environ
+    env = _env_with_provider_manifest(raw_env, _provider_manifest_from_env(raw_env))
     provider_url = _first_env_value(env, _PROVIDER_URL_ENV_KEYS)
     execute_url = _first_env_value(env, _PROVIDER_EXECUTE_URL_ENV_KEYS)
     if not provider_url and not execute_url:
@@ -1812,6 +1829,189 @@ def _provider_execute_url(env: Mapping[str, str]) -> str:
         _clean_base_url(provider_url),
         _DEFAULT_EXECUTE_PATH,
     )
+
+
+def _provider_manifest_from_env(env: Mapping[str, str]) -> dict[str, Any]:
+    raw_path = _first_env_value(env, _PROVIDER_MANIFEST_ENV_KEYS)
+    if not raw_path:
+        return {}
+    path = Path(raw_path).expanduser()
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return dict(payload) if isinstance(payload, Mapping) else {}
+
+
+def _env_with_provider_manifest(
+    env: Mapping[str, str],
+    manifest: Mapping[str, Any] | None,
+) -> dict[str, str]:
+    payload = {str(key): str(value) for key, value in dict(env).items()}
+    if _first_env_value(payload, _PROVIDER_URL_ENV_KEYS) or _first_env_value(
+        payload,
+        _PROVIDER_EXECUTE_URL_ENV_KEYS,
+    ):
+        return payload
+    manifest_env = _provider_env_from_manifest(manifest or {})
+    return {**payload, **manifest_env}
+
+
+def _provider_env_from_manifest(manifest: Mapping[str, Any]) -> dict[str, str]:
+    if not manifest:
+        return {}
+    endpoint_urls = _mapping(manifest.get("endpoint_urls"))
+    if not endpoint_urls:
+        endpoint_urls = {
+            key: value
+            for key, value in _mapping(manifest.get("endpoints")).items()
+            if str(value or "").startswith(("http://", "https://"))
+        }
+    execute_url = _first_mapping_value(
+        endpoint_urls,
+        "execute",
+        "tools_execute",
+        "tools.execute",
+        "tools/execute",
+        "execute_url",
+    )
+    status_url = _first_mapping_value(endpoint_urls, "status", "health", "status_url")
+    base_url = (
+        _first_mapping_value(manifest, "url", "endpoint_origin", "base_url")
+        or _first_mapping_value(endpoint_urls, "url", "base_url", "base", "origin")
+        or _url_origin(urlparse(str(execute_url or status_url or "")))
+    )
+    env: dict[str, str] = {}
+    if base_url:
+        env["OHA_YACHIYO_DESKTOP_PROVIDER_URL"] = str(base_url)
+    if execute_url:
+        env["OHA_YACHIYO_DESKTOP_PROVIDER_EXECUTE_URL"] = str(execute_url)
+    if status_url:
+        env["OHA_YACHIYO_DESKTOP_PROVIDER_STATUS_URL"] = str(status_url)
+    provider_id = str(manifest.get("provider_id") or "").strip()
+    if provider_id:
+        env["OHA_YACHIYO_DESKTOP_PROVIDER_ID"] = provider_id
+    provider_kind = str(manifest.get("provider_kind") or "sandbox_desktop").strip()
+    if provider_kind:
+        env["OHA_YACHIYO_DESKTOP_PROVIDER_KIND"] = provider_kind
+    supported_tools = _string_list(manifest.get("supported_tools"))
+    if supported_tools:
+        env["OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS"] = ",".join(supported_tools)
+    for env_key, manifest_key in (
+        (
+            "OHA_YACHIYO_DESKTOP_PROVIDER_KEYBOARD_MOUSE_CAPTURE_SUPPORTED",
+            "keyboard_mouse_capture_supported",
+        ),
+        (
+            "OHA_YACHIYO_DESKTOP_PROVIDER_FOREGROUND_MUTATION_SUPPORTED",
+            "foreground_mutation_supported",
+        ),
+        ("OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_ISOLATED", "desktop_session_isolated"),
+        (
+            "OHA_YACHIYO_DESKTOP_PROVIDER_FOREGROUND_TAKEOVER_REQUIRED",
+            "foreground_takeover_required",
+        ),
+        (
+            "OHA_YACHIYO_DESKTOP_PROVIDER_BACKEND_IS_LOOPBACK",
+            "desktop_backend_is_loopback",
+        ),
+        (
+            "OHA_YACHIYO_DESKTOP_PROVIDER_BACKEND_READY_FOR_PUBLIC_RELEASE",
+            "desktop_backend_ready_for_public_release",
+        ),
+        (
+            "OHA_YACHIYO_DESKTOP_PROVIDER_REQUIRES_REAL_VIRTUAL_DESKTOP_BACKEND",
+            "requires_real_virtual_desktop_backend",
+        ),
+    ):
+        bool_value = _manifest_bool_env(manifest, manifest_key)
+        if bool_value:
+            env[env_key] = bool_value
+    for env_key, manifest_key in (
+        ("OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_KIND", "desktop_session_kind"),
+        ("OHA_YACHIYO_DESKTOP_PROVIDER_BACKEND_KIND", "desktop_backend_kind"),
+    ):
+        value = str(manifest.get(manifest_key) or "").strip()
+        if value:
+            env[env_key] = value
+    if _optional_bool_value(manifest.get("allow_remote")) is True:
+        env["OHA_YACHIYO_DESKTOP_PROVIDER_ALLOW_REMOTE"] = "true"
+    token = str(manifest.get("token") or "").strip()
+    if token:
+        env["OHA_YACHIYO_DESKTOP_PROVIDER_TOKEN"] = token
+    return env
+
+
+def _manifest_provider_required_status(manifest: Mapping[str, Any]) -> dict[str, Any]:
+    provider_id = str(manifest.get("provider_id") or "").strip()
+    supported_tools = _string_list(manifest.get("supported_tools"))
+    return {
+        "configured": True,
+        "available": False,
+        "adapter_ready": False,
+        "provider_kind": str(manifest.get("provider_kind") or "sandbox_desktop").strip()
+        or "sandbox_desktop",
+        "provider_id": provider_id,
+        "status": "provider_required",
+        "reason": (
+            "Desktop provider manifest is configured, but no provider execute "
+            "endpoint is available yet."
+        ),
+        "blocking_conditions": ["desktop_execution_provider_endpoint_missing"],
+        "supported_tools": supported_tools,
+        "health": {
+            "ok": False,
+            "checked": False,
+            "status": "endpoint_missing",
+            "blocking_conditions": ["desktop_execution_provider_endpoint_missing"],
+            "supported_tools": supported_tools,
+            "capabilities": [],
+        },
+        "source": "provider_manifest",
+        "foreground_mutation_supported": _manifest_optional_bool(
+            manifest,
+            "foreground_mutation_supported",
+        ),
+        "keyboard_mouse_capture_supported": _manifest_optional_bool(
+            manifest,
+            "keyboard_mouse_capture_supported",
+        ),
+        "desktop_session_kind": str(manifest.get("desktop_session_kind") or "").strip(),
+        "desktop_session_isolated": _manifest_optional_bool(
+            manifest,
+            "desktop_session_isolated",
+        ),
+        "foreground_takeover_required": _manifest_optional_bool(
+            manifest,
+            "foreground_takeover_required",
+        ),
+        "desktop_backend_kind": str(manifest.get("desktop_backend_kind") or "").strip(),
+        "desktop_backend_is_loopback": _manifest_optional_bool(
+            manifest,
+            "desktop_backend_is_loopback",
+        ),
+        "desktop_backend_ready_for_public_release": _manifest_optional_bool(
+            manifest,
+            "desktop_backend_ready_for_public_release",
+        ),
+        "requires_real_virtual_desktop_backend": _manifest_optional_bool(
+            manifest,
+            "requires_real_virtual_desktop_backend",
+        ),
+    }
+
+
+def _manifest_bool_env(manifest: Mapping[str, Any], key: str) -> str:
+    parsed = _manifest_optional_bool(manifest, key)
+    if parsed is None:
+        return ""
+    return "true" if parsed else "false"
+
+
+def _manifest_optional_bool(manifest: Mapping[str, Any], key: str) -> bool | None:
+    safety = _mapping(manifest.get("safety"))
+    raw = manifest.get(key) if key in manifest else safety.get(key)
+    return _optional_bool_value(raw)
 
 
 def _provider_kind_from_env(env: Mapping[str, str]) -> str:

@@ -22,6 +22,7 @@ from apps.shell.agent.runtime.main_chat_config import MAIN_CHAT_DESKTOP_AGENT_IN
 from apps.shell.agent.runtime.approval_snapshots import public_pending_approval
 from apps.shell.agent.runtime.desktop_execution_providers import (
     LOCAL_DESKTOP_PROVIDER_ID,
+    desktop_execution_provider_registry_from_env,
     desktop_execution_provider_status_from_env,
     local_desktop_execution_provider_status,
 )
@@ -7505,6 +7506,136 @@ def test_sandbox_desktop_provider_status_reads_provider_manifest(
     assert route["status"] == "sandbox_ready"
     assert route["selected_provider_id"] == "release-virtual-desktop"
     assert route["provider_execution_required"] is True
+
+
+def test_runtime_provider_registry_executes_manifest_backed_provider(
+    tmp_path,
+) -> None:
+    manifest_path = tmp_path / "release-provider-manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "provider_id": "release-virtual-desktop",
+                "provider_kind": "sandbox_desktop",
+                "endpoint_urls": {
+                    "status": "http://127.0.0.1:29097/status",
+                    "execute": "http://127.0.0.1:29097/tools/execute",
+                },
+                "supported_tools": ["desktop.safe_type_text"],
+                "keyboard_mouse_capture_supported": True,
+                "foreground_mutation_supported": True,
+                "desktop_session_kind": "virtual_desktop",
+                "desktop_session_isolated": True,
+                "foreground_takeover_required": False,
+                "desktop_backend_kind": "vnc_virtual_desktop",
+                "desktop_backend_is_loopback": False,
+                "desktop_backend_ready_for_public_release": True,
+                "requires_real_virtual_desktop_backend": False,
+            }
+        ),
+        encoding="utf-8",
+    )
+    calls: list[dict[str, Any]] = []
+
+    class FakeResponse:
+        status = 200
+
+        def __enter__(self) -> "FakeResponse":
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def getcode(self) -> int:
+            return self.status
+
+        def read(self) -> bytes:
+            return json.dumps(
+                {
+                    "ok": True,
+                    "result": {
+                        "ok": True,
+                        "tool": "desktop.safe_type_text",
+                        "data": {"character_count": 5},
+                    },
+                }
+            ).encode("utf-8")
+
+    def fake_urlopen(request: Any, timeout: float = 0) -> FakeResponse:
+        calls.append(
+            {
+                "url": request.full_url,
+                "timeout": timeout,
+                "payload": json.loads(request.data.decode("utf-8")),
+                "authorization": request.headers.get("Authorization", ""),
+            }
+        )
+        return FakeResponse()
+
+    env = {"OHA_YACHIYO_DESKTOP_PROVIDER_MANIFEST": str(manifest_path)}
+    status = desktop_execution_provider_status_from_env(env, probe_health=False)
+    registry = desktop_execution_provider_registry_from_env(env, urlopen=fake_urlopen)
+    route = {
+        "route_id": "desktop-route:desktop.safe_type_text",
+        "tool_name": "desktop.safe_type_text",
+        "selected_provider_kind": "sandbox_desktop",
+        "selected_provider_id": "release-virtual-desktop",
+        "status": "sandbox_ready",
+        "can_execute": True,
+        "provider_execution_required": True,
+        "sandbox_required": True,
+        "desktop_session_isolated": True,
+        "foreground_takeover_required": False,
+        "desktop_backend_is_loopback": False,
+        "desktop_backend_ready_for_public_release": True,
+        "requires_real_virtual_desktop_backend": False,
+    }
+
+    result = registry.execute_if_routed(
+        "desktop.safe_type_text",
+        {"text": "hello"},
+        tool_request={
+            "tool": "desktop.safe_type_text",
+            "desktop_execution_route": route,
+        },
+        broker=None,
+    )
+
+    assert status["configured"] is True
+    assert status["provider_id"] == "release-virtual-desktop"
+    assert status["endpoint_origin"] == "http://127.0.0.1:29097"
+    assert status["endpoint_path"] == "/tools/execute"
+    assert status["source"] == "provider_manifest"
+    assert result is not None
+    assert result["ok"] is True
+    assert result["desktop_execution_provider_routed"] is True
+    assert result["desktop_execution_provider"] == {
+        "provider_kind": "sandbox_desktop",
+        "provider_id": "release-virtual-desktop",
+        "adapter_registered": True,
+        "route_id": "desktop-route:desktop.safe_type_text",
+    }
+    assert calls == [
+        {
+            "url": "http://127.0.0.1:29097/tools/execute",
+            "timeout": 20.0,
+            "payload": {
+                "tool": "desktop.safe_type_text",
+                "input": {"text": "hello"},
+                "approved": False,
+                "route": route,
+                "tool_request": {
+                    "tool": "desktop.safe_type_text",
+                    "desktop_execution_route": route,
+                },
+                "provider": {
+                    "provider_kind": "sandbox_desktop",
+                    "provider_id": "release-virtual-desktop",
+                },
+            },
+            "authorization": "",
+        }
+    ]
 
 
 def test_desktop_recovery_action_metadata_snapshot_json_shape_is_stable() -> None:
