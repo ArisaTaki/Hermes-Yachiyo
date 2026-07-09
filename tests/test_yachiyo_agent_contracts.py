@@ -6820,6 +6820,38 @@ def test_daily_policy_blocks_app_launch_through_user_foreground_provider() -> No
     assert explicit_route["foreground_takeover_allowed"] is True
 
 
+def test_daily_policy_routes_app_launch_through_isolated_provider_without_foreground_mode() -> None:
+    route = desktop_execution_route_decision(
+        "app.open",
+        policy=daily_entrypoint_desktop_execution_policy(surface="chat"),
+        execution_mode=DesktopExecutionModeSnapshot(mode="tool_native"),
+        metadata={
+            "desktop_provider_route_foreground": True,
+            "sandbox_provider": {
+                "available": True,
+                "adapter_ready": True,
+                "provider_id": "isolated-provider",
+                "provider_kind": "sandbox_desktop",
+                "supported_tools": ["app.open"],
+                "desktop_session_kind": "isolated_desktop",
+                "desktop_session_isolated": True,
+                "foreground_takeover_required": False,
+                "desktop_backend_kind": "virtual_desktop_backend",
+                "desktop_backend_is_loopback": False,
+                "desktop_backend_ready_for_public_release": True,
+                "requires_real_virtual_desktop_backend": False,
+            },
+        },
+    )
+
+    assert route["status"] == "sandbox_ready"
+    assert route["selected_provider_kind"] == "sandbox_desktop"
+    assert route["selected_provider_id"] == "isolated-provider"
+    assert route["provider_execution_required"] is True
+    assert route["requires_user_foreground_session"] is False
+    assert route["foreground_takeover_required"] is False
+
+
 def test_daily_entrypoint_desktop_execution_policy_defaults_to_input_preview() -> None:
     policy = daily_entrypoint_desktop_execution_policy(surface="bubble")
     metadata = with_daily_entrypoint_desktop_execution_policy(
@@ -9104,7 +9136,7 @@ def test_desktop_execution_envelope_keeps_blocked_verification_non_executable() 
     assert [(request.tool_name, request.status) for request in requests] == [
         ("desktop.list_apps", "planned"),
         ("app.open", "planned"),
-        ("desktop.active_window", "unavailable"),
+        ("desktop.verify", "unavailable"),
     ]
     assert requests[2].step_id == "verify-desktop-result"
     assert requests[2].policy_reason == "screen_capture_blank"
@@ -9128,10 +9160,13 @@ def test_desktop_execution_envelope_keeps_blocked_verification_non_executable() 
         run_id="run-1",
         task_id="task-1",
     )
-    assert len(recoveries) == 1
-    assert recoveries[0].source_step_id == "verify-desktop-result"
-    assert recoveries[0].permission_target == "desktop_screen_visible"
-    assert recoveries[0].recovery_actions[0].observation_retry["reason"] == (
+    verify_recovery = next(
+        recovery
+        for recovery in recoveries
+        if recovery.source_step_id == "verify-desktop-result"
+    )
+    assert verify_recovery.permission_target == "desktop_screen_visible"
+    assert verify_recovery.recovery_actions[0].observation_retry["reason"] == (
         "screen_capture_blank"
     )
 

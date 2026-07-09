@@ -928,6 +928,21 @@ def desktop_execution_route_decision(
         )
     if (
         foreground_provider_requested
+        and is_local_low_risk_foreground_tool(clean_tool)
+        and sandbox_desktop_provider_can_execute_tool(sandbox_provider, clean_tool)
+    ):
+        sandbox_route = _sandbox_route_decision(
+            route,
+            sandbox_provider,
+            clean_tool,
+            decision_context,
+        )
+        return _route_with_ready_reason(
+            sandbox_route,
+            _foreground_desktop_provider_route_reason(sandbox_provider),
+        )
+    if (
+        foreground_provider_requested
         and (foreground_required or execution_mode_name == "supervised_live")
         and _sandbox_provider_requires_keyboard_mouse_sandbox(
             sandbox_provider,

@@ -1354,6 +1354,48 @@ def _route_or_provider_requires_isolated_session(
     return False
 
 
+def _request_should_replace_route_with_ready_isolated_provider(
+    request: dict[str, Any],
+    *,
+    route: dict[str, Any],
+    provider: dict[str, Any],
+) -> bool:
+    if _route_or_provider_requires_isolated_session(route, provider):
+        return True
+    if _request_allows_user_foreground_session(request):
+        return False
+    if _route_or_provider_already_supplies_isolated_session(route, provider):
+        return False
+    policy = _mapping(request.get("desktop_execution_policy"))
+    if _policy_prefers_isolated_foreground(policy):
+        return True
+    session_policy = str(
+        route.get("desktop_execution_session_policy")
+        or route.get("session_policy")
+        or ""
+    ).strip()
+    if session_policy in {
+        "isolated_desktop",
+        "isolated_preferred",
+        "sandbox_desktop",
+        "sandbox_preferred",
+    }:
+        return True
+    if _optional_bool(route.get("isolated_desktop_preferred")) is True:
+        return True
+    if _optional_bool(route.get("avoid_user_foreground_takeover")) is True:
+        return True
+    if _optional_bool(route.get("requires_user_foreground_session")) is True:
+        return True
+    if _optional_bool(route.get("user_foreground_takeover_risk")) is True:
+        return True
+    if _optional_bool(route.get("foreground_takeover_required")) is True:
+        return True
+    if _optional_bool(provider.get("foreground_takeover_required")) is True:
+        return True
+    return False
+
+
 def _request_with_desktop_provider_session(
     request: dict[str, Any],
     session: dict[str, Any],
@@ -1383,7 +1425,11 @@ def _request_with_ready_desktop_provider_route(
         return request
     route = _mapping(request.get("desktop_execution_route"))
     provider = _mapping(request.get("sandbox_provider"))
-    if route and not _route_or_provider_requires_isolated_session(route, provider):
+    if route and not _request_should_replace_route_with_ready_isolated_provider(
+        request,
+        route=route,
+        provider=provider,
+    ):
         return request
     session_metadata = {
         "desktop_provider_session": dict(session),

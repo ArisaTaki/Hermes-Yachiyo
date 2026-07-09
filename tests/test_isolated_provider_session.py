@@ -954,6 +954,84 @@ def test_ensure_isolated_provider_session_detects_keyboard_mouse_requests(
     )
 
 
+def test_annotate_envelope_routes_isolated_preferred_app_open_through_running_provider() -> None:
+    session = {
+        "ok": True,
+        "status": "running",
+        "running": True,
+        "started": True,
+        "needed": True,
+        "auto_start": True,
+        "provider_id": "local-isolated-desktop",
+        "url": "http://127.0.0.1:19093",
+        "desktop_session_kind": "isolated_desktop",
+        "desktop_session_isolated": True,
+        "foreground_takeover_required": False,
+        "keyboard_mouse_capture_supported": True,
+        "desktop_backend_kind": "virtual_desktop_backend",
+        "desktop_backend_is_loopback": False,
+        "desktop_backend_ready_for_public_release": True,
+        "requires_real_virtual_desktop_backend": False,
+        "supported_tools": ["app.open"],
+        "request_ids": ["request-open"],
+        "tool_names": ["app.open"],
+        "source": "test",
+    }
+    envelope = {
+        "requests": [
+            {
+                "request_id": "request-open",
+                "tool_name": "app.open",
+                "input": {"app_name": "PixelForge"},
+                "desktop_execution_policy": {
+                    "mode": "preview_input",
+                    "allow_live_foreground": False,
+                    "prefer_isolated_desktop": True,
+                    "avoid_user_foreground_takeover": True,
+                    "require_sandbox_for_keyboard_mouse": True,
+                },
+                "desktop_execution_route": {
+                    "selected_provider_kind": "local_desktop",
+                    "selected_provider_id": "local-native-desktop",
+                    "status": "provider_ready",
+                    "can_execute": True,
+                    "provider_execution_required": True,
+                    "sandbox_required": False,
+                    "isolated_desktop_preferred": True,
+                    "user_foreground_takeover_risk": True,
+                    "requires_user_foreground_session": True,
+                    "desktop_session_isolated": False,
+                    "foreground_takeover_required": True,
+                    "blocking_conditions": [],
+                },
+                "sandbox_provider": {
+                    "provider_kind": "local_desktop",
+                    "provider_id": "local-native-desktop",
+                    "desktop_session_isolated": False,
+                    "foreground_takeover_required": True,
+                },
+            }
+        ]
+    }
+
+    annotated = annotate_envelope_with_desktop_provider_session(envelope, session)
+    request = annotated["requests"][0]
+
+    assert request["desktop_provider_session"]["provider_id"] == "local-isolated-desktop"
+    assert request["sandbox_provider"]["provider_kind"] == "sandbox_desktop"
+    assert request["sandbox_provider"]["provider_id"] == "local-isolated-desktop"
+    assert request["sandbox_provider"]["desktop_session_isolated"] is True
+    assert request["sandbox_provider"]["foreground_takeover_required"] is False
+    assert request["desktop_execution_route"]["selected_provider_kind"] == "sandbox_desktop"
+    assert request["desktop_execution_route"]["selected_provider_id"] == (
+        "local-isolated-desktop"
+    )
+    assert request["desktop_execution_route"]["status"] == "sandbox_ready"
+    assert request["desktop_execution_route"]["provider_execution_required"] is True
+    assert request["desktop_execution_route"]["foreground_takeover_required"] is False
+    assert request["desktop_execution_route"]["requires_user_foreground_session"] is False
+
+
 def test_ensure_isolated_provider_session_uses_external_virtual_desktop_provider(
     monkeypatch,
 ) -> None:
