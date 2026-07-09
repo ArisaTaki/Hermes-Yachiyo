@@ -33,6 +33,7 @@ from apps.shell.yachiyo_agent.desktop_execution_policy import (
     is_user_foreground_takeover_tool,
     user_foreground_takeover_allowed,
 )
+from packages.security import redact_api_error_text
 
 _ENV_KEYS = {
     "OHA_YACHIYO_DESKTOP_PROVIDER_URL",
@@ -224,18 +225,15 @@ class IsolatedDesktopProviderSessionManager:
         *,
         tools: list[str] | None = None,
         timeout_seconds: float = 10.0,
+        requires_real_virtual_desktop_backend: bool = False,
     ) -> dict[str, Any]:
         with self._lock:
             current = self.status(probe_health=True)
             if current["running"]:
                 return {**current, "started": False}
-            manifest = _managed_external_provider_manifest(self._repo_root)
-            command = _managed_external_provider_start_command(
-                self._repo_root,
-                manifest=manifest,
-            )
-            if not command:
-                raise RuntimeError("desktop provider start command is not configured")
+            manifest: dict[str, Any] = {}
+            command: list[str] = []
+            start_cwd = self._repo_root
             start_env = dict(os.environ)
             requested_tools = sorted(
                 {
@@ -246,28 +244,61 @@ class IsolatedDesktopProviderSessionManager:
             )
             if requested_tools:
                 start_env[_PROVIDER_REQUESTED_TOOLS_ENV] = ",".join(requested_tools)
-            process = subprocess.Popen(
-                command,
-                cwd=str(
-                    _managed_external_provider_start_cwd(
-                        self._repo_root,
-                        manifest=manifest,
-                    )
+            failure_request = {
+                "tools": requested_tools,
+                "requires_real_virtual_desktop_backend": (
+                    requires_real_virtual_desktop_backend
                 ),
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                env=start_env,
-            )
+            }
+            try:
+                manifest = _managed_external_provider_manifest(self._repo_root)
+                command = _managed_external_provider_start_command(
+                    self._repo_root,
+                    manifest=manifest,
+                )
+                if not command:
+                    raise RuntimeError(
+                        "desktop provider start command is not configured"
+                    )
+                start_cwd = _managed_external_provider_start_cwd(
+                    self._repo_root,
+                    manifest=manifest,
+                )
+                process = subprocess.Popen(
+                    command,
+                    cwd=str(start_cwd),
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    env=start_env,
+                )
+            except Exception as exc:
+                return _managed_external_provider_start_failed_status(
+                    failure_request,
+                    exc,
+                    repo_root=self._repo_root,
+                    manifest=manifest,
+                    command=command,
+                    start_cwd=start_cwd,
+                    timeout_seconds=timeout_seconds,
+                )
             try:
                 launch = _read_launch_payload(
                     process,
                     timeout_seconds=timeout_seconds,
                     label="managed desktop provider",
                 )
-            except Exception:
+            except Exception as exc:
                 _terminate_process(process)
-                raise
+                return _managed_external_provider_start_failed_status(
+                    failure_request,
+                    exc,
+                    repo_root=self._repo_root,
+                    manifest=manifest,
+                    command=command,
+                    start_cwd=start_cwd,
+                    timeout_seconds=timeout_seconds,
+                )
             env = _runtime_env_from_launch(_merge_manifest_launch(manifest, launch))
             self._process = process
             self._command = command
@@ -337,7 +368,12 @@ def start_isolated_desktop_provider_session(
             )
         return {**external_status, "started": False}
     if _managed_external_provider_start_configured():
-        started = _SESSION_MANAGER.start_managed_external(tools=clean_tools)
+        started = _SESSION_MANAGER.start_managed_external(
+            tools=clean_tools,
+            requires_real_virtual_desktop_backend=requires_real_backend,
+        )
+        if bool(started.get("ok")) is False:
+            return started
         if requires_real_backend and not _session_status_uses_real_virtual_backend(
             started
         ):
@@ -445,7 +481,7 @@ def ensure_isolated_desktop_provider_session_for_envelope(
             "ok": False,
             "status": "start_failed",
             "running": False,
-            "error": str(exc),
+            "error": redact_api_error_text(exc),
         }
     return {
         **_session_status_with_base(base, started),
@@ -510,10 +546,21 @@ def _read_launch_payload(
         raise RuntimeError(f"{label} did not report launch status") from exc
     if process.poll() is not None and not line:
         stderr = process.stderr.read() if process.stderr is not None else ""
-        raise RuntimeError(f"{label} exited early: {stderr}")
-    payload = json.loads(str(line or "{}"))
+        detail = redact_api_error_text(stderr)
+        message = f"{label} exited early"
+        raise RuntimeError(f"{message}: {detail}" if detail else message)
+    try:
+        payload = json.loads(str(line or "{}"))
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"{label} reported invalid launch status JSON") from exc
     if not isinstance(payload, dict) or not payload.get("ok"):
-        raise RuntimeError(f"{label} launch failed")
+        detail = redact_api_error_text(
+            (payload.get("error") or payload.get("message"))
+            if isinstance(payload, dict)
+            else ""
+        )
+        message = f"{label} launch failed"
+        raise RuntimeError(f"{message}: {detail}" if detail else message)
     return payload
 
 
@@ -1265,6 +1312,111 @@ def _provider_conformance_for_status(
             status.get("supported_tools") or provider_status.get("supported_tools")
         ),
     )
+
+
+def _managed_external_provider_start_failed_status(
+    request: dict[str, Any],
+    exc: Exception,
+    *,
+    repo_root: Path,
+    manifest: dict[str, Any] | None = None,
+    command: list[str] | None = None,
+    start_cwd: Path | None = None,
+    timeout_seconds: float = 0.0,
+) -> dict[str, Any]:
+    manifest_payload = _provider_runtime_payload(manifest or {})
+    requires_real_backend = (
+        _optional_bool(
+            request.get("requires_real_virtual_desktop_backend"),
+            request.get("require_real_virtual_desktop_backend"),
+            request.get("real_virtual_desktop_backend_required"),
+        )
+        is True
+    )
+    source = {
+        **manifest_payload,
+        "configured": True,
+        "available": False,
+        "adapter_ready": False,
+        "status": "start_failed",
+    }
+    if requires_real_backend and source.get(
+        "requires_real_virtual_desktop_backend"
+    ) in (None, "", [], {}):
+        source["requires_real_virtual_desktop_backend"] = True
+    reported_requires_real_backend = (
+        requires_real_backend
+        or _optional_bool(source.get("requires_real_virtual_desktop_backend")) is True
+    )
+    provider_id = str(
+        source.get("provider_id")
+        or request.get("provider_id")
+        or "managed-external-desktop"
+    ).strip()
+    source["provider_id"] = provider_id
+    blockers = _string_list(source.get("blocking_conditions"))
+    for blocker in (
+        "managed_external_provider_start_failed",
+        "configured_virtual_desktop_provider_start_failed",
+    ):
+        if blocker not in blockers:
+            blockers.append(blocker)
+    source["blocking_conditions"] = blockers
+    provider_contract = dict(_provider_contract_evidence_for_status(source))
+    contract_blockers = _string_list(provider_contract.get("blocking_conditions"))
+    for blocker in blockers:
+        if blocker not in contract_blockers:
+            contract_blockers.append(blocker)
+    provider_contract["ok"] = False
+    provider_contract["blocking_conditions"] = contract_blockers
+    provider_conformance = _provider_conformance_for_status(
+        source,
+        provider_contract=provider_contract,
+        mode="managed_external_provider_start_check",
+        runtime_checked=False,
+        release_candidate=False,
+        public_release_ready=False,
+    )
+    manifest_path = _managed_external_provider_manifest_path(repo_root)
+    clean_command = [redact_api_error_text(item) for item in command or []]
+    return {
+        "ok": False,
+        "status": "start_failed",
+        "running": False,
+        "started": False,
+        "provider_id": provider_id,
+        "reason": "managed_external_provider_start_failed",
+        "error": redact_api_error_text(exc),
+        "blocking_conditions": contract_blockers,
+        "desktop_session_kind": str(source.get("desktop_session_kind") or ""),
+        "desktop_session_isolated": _optional_bool(
+            source.get("desktop_session_isolated")
+        ),
+        "foreground_takeover_required": _optional_bool(
+            source.get("foreground_takeover_required")
+        ),
+        "keyboard_mouse_capture_supported": _optional_bool(
+            source.get("keyboard_mouse_capture_supported")
+        ),
+        "desktop_backend_kind": str(source.get("desktop_backend_kind") or ""),
+        "desktop_backend_is_loopback": _optional_bool(
+            source.get("desktop_backend_is_loopback")
+        ),
+        "desktop_backend_ready_for_public_release": _optional_bool(
+            source.get("desktop_backend_ready_for_public_release")
+        ),
+        "requires_real_virtual_desktop_backend": reported_requires_real_backend,
+        "supported_tools": _string_list(source.get("supported_tools")),
+        "provider_status": source,
+        "provider_contract": provider_contract,
+        "provider_conformance": provider_conformance,
+        "command": clean_command,
+        "manifest_path": str(manifest_path or ""),
+        "start_cwd": str(start_cwd or ""),
+        "timeout_seconds": float(timeout_seconds or 0.0),
+        "source": "managed_external_provider_session",
+        "external_provider_configured": True,
+    }
 
 
 def _public_session_status(status: dict[str, Any]) -> dict[str, Any]:

@@ -212,6 +212,97 @@ def test_start_isolated_provider_session_can_start_managed_external_provider(
     manager.stop()
 
 
+def test_start_isolated_provider_session_surfaces_managed_external_start_failure(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    for key in session_module._ENV_KEYS:
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.delenv("OHA_YACHIYO_DESKTOP_PROVIDER_MANIFEST", raising=False)
+    monkeypatch.setenv(
+        "OHA_YACHIYO_DESKTOP_PROVIDER_START_COMMAND",
+        "python -m fake_virtual_desktop_provider",
+    )
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_START_CWD", str(tmp_path))
+    processes: list[Any] = []
+
+    class FakeProcess:
+        pid = 5353
+
+        def __init__(self) -> None:
+            payload = {
+                "ok": False,
+                "error": "provider refused api_key=sk-api-error-secret123456",
+            }
+            self.stdout = io.StringIO(json.dumps(payload) + "\n")
+            self.stderr = io.StringIO("")
+            self.terminated = False
+
+        def poll(self) -> int | None:
+            return 0 if self.terminated else None
+
+        def terminate(self) -> None:
+            self.terminated = True
+
+        def wait(self, timeout: float | None = None) -> int:
+            self.terminated = True
+            return 0
+
+        def kill(self) -> None:
+            self.terminated = True
+
+    def fake_popen(command: list[str], **_: Any) -> FakeProcess:
+        process = FakeProcess()
+        processes.append(process)
+        return process
+
+    monkeypatch.setattr(session_module.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(
+        session_module,
+        "desktop_execution_provider_status_from_env",
+        lambda *args, **kwargs: {
+            "configured": False,
+            "available": False,
+            "adapter_ready": False,
+            "status": "not_configured",
+        },
+    )
+    manager = IsolatedDesktopProviderSessionManager(repo_root=Path("/repo"))
+    monkeypatch.setattr(session_module, "_SESSION_MANAGER", manager)
+
+    started = session_module.start_isolated_desktop_provider_session(
+        {
+            "tools": ["app.open"],
+            "requires_real_virtual_desktop_backend": True,
+        }
+    )
+
+    assert processes[0].terminated is True
+    assert started["ok"] is False
+    assert started["status"] == "start_failed"
+    assert started["running"] is False
+    assert started["started"] is False
+    assert started["reason"] == "managed_external_provider_start_failed"
+    assert started["source"] == "managed_external_provider_session"
+    assert started["provider_id"] == "managed-external-desktop"
+    assert started["requires_real_virtual_desktop_backend"] is True
+    assert "managed_external_provider_start_failed" in started[
+        "blocking_conditions"
+    ]
+    assert "real_virtual_desktop_backend_required" in started[
+        "blocking_conditions"
+    ]
+    assert "sk-api-error-secret123456" not in started["error"]
+    assert started["provider_conformance"]["mode"] == (
+        "managed_external_provider_start_check"
+    )
+    assert started["provider_conformance"]["public_release_ready"] is False
+    assert "managed_external_provider_start_failed" in started[
+        "provider_conformance"
+    ]["release_blocking_conditions"]
+    assert "OHA_YACHIYO_DESKTOP_PROVIDER_URL" not in session_module.os.environ
+
+
 def test_start_isolated_provider_session_requires_real_virtual_backend(
     monkeypatch,
 ) -> None:

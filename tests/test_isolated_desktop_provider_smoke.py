@@ -193,3 +193,82 @@ def test_isolated_desktop_provider_smoke_can_start_managed_configured_provider(
     assert evidence["desktop_backend_ready_for_public_release"] is True
     assert evidence["provider_contract"]["ok"] is True
     assert evidence["provider_conformance"]["public_release_ready"] is True
+
+
+def test_isolated_desktop_provider_smoke_reports_managed_start_failure(
+    monkeypatch,
+) -> None:
+    provider_contract = {
+        "ok": False,
+        "blocking_conditions": [
+            "managed_external_provider_start_failed",
+            "provider_unavailable",
+        ],
+        "missing_required_tools": [],
+        "required_tools": list(smoke.SMOKE_TOOLS),
+        "supported_tools": list(smoke.SMOKE_TOOLS),
+    }
+    provider_conformance = {
+        "ok": False,
+        "mode": "managed_external_provider_start_check",
+        "runtime_checked": False,
+        "release_candidate": False,
+        "public_release_ready": False,
+        "smoke_ok": None,
+        "provider_contract_ok": False,
+        "required_tools": list(smoke.SMOKE_TOOLS),
+        "covered_tools": list(smoke.SMOKE_TOOLS),
+        "missing_required_tools": [],
+        "failed_tools": [],
+        "blocking_conditions": [
+            "managed_external_provider_start_failed",
+            "provider_unavailable",
+        ],
+        "release_blocking_conditions": [
+            "managed_external_provider_start_failed",
+            "provider_unavailable",
+        ],
+        "provider_contract_blocking_conditions": [
+            "managed_external_provider_start_failed",
+            "provider_unavailable",
+        ],
+    }
+
+    monkeypatch.setenv(
+        "OHA_YACHIYO_DESKTOP_PROVIDER_START_COMMAND",
+        "python -m fake_virtual_desktop_provider",
+    )
+    monkeypatch.setattr(
+        smoke,
+        "desktop_execution_provider_status_from_env",
+        lambda *args, **kwargs: {
+            "configured": False,
+            "available": False,
+            "adapter_ready": False,
+            "status": "not_configured",
+        },
+    )
+    monkeypatch.setattr(
+        smoke,
+        "start_isolated_desktop_provider_session",
+        lambda request=None: {
+            "ok": False,
+            "status": "start_failed",
+            "running": False,
+            "started": False,
+            "reason": "managed_external_provider_start_failed",
+            "error": "managed desktop provider launch failed",
+            "provider_id": "managed-external-desktop",
+            "provider_contract": provider_contract,
+            "provider_conformance": provider_conformance,
+        },
+    )
+
+    evidence = smoke.run_smoke(use_configured_provider=True)
+
+    assert evidence["ok"] is False
+    assert evidence["reason"] == "managed_external_provider_start_failed"
+    assert evidence["managed_provider_started"] is False
+    assert evidence["managed_provider_session"]["status"] == "start_failed"
+    assert evidence["provider_contract"] == provider_contract
+    assert evidence["provider_conformance"] == provider_conformance

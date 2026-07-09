@@ -102,6 +102,16 @@ def _run_configured_provider_smoke() -> dict[str, Any]:
                 {"tools": list(SMOKE_TOOLS)}
             )
             stop_managed_session = bool(managed_session.get("started"))
+            if managed_session.get("ok") is False:
+                return _provider_status_only_report(
+                    status,
+                    reason=str(
+                        managed_session.get("reason")
+                        or "managed_external_provider_start_failed"
+                    ),
+                    use_configured_provider=True,
+                    managed_provider_session=managed_session,
+                )
             status = desktop_execution_provider_status_from_env(probe_health=True)
         except Exception as exc:
             return _provider_status_only_report(
@@ -465,17 +475,27 @@ def _provider_status_only_report(
             status_payload.get("desktop_backend_ready_for_public_release") is True
         ),
     }
-    provider_contract = virtual_desktop_provider_contract_evidence(
-        status_payload,
-        required_tools=SMOKE_TOOLS,
-        tool_results=[],
+    session_contract = session_payload.get("provider_contract")
+    provider_contract = (
+        dict(session_contract)
+        if isinstance(session_contract, Mapping)
+        else virtual_desktop_provider_contract_evidence(
+            status_payload,
+            required_tools=SMOKE_TOOLS,
+            tool_results=[],
+        )
     )
-    provider_conformance = _provider_conformance_summary(
-        checks=checks,
-        provider_contract=provider_contract,
-        tool_results=[],
-        use_configured_provider=use_configured_provider,
-        status=status_payload,
+    session_conformance = session_payload.get("provider_conformance")
+    provider_conformance = (
+        dict(session_conformance)
+        if isinstance(session_conformance, Mapping)
+        else _provider_conformance_summary(
+            checks=checks,
+            provider_contract=provider_contract,
+            tool_results=[],
+            use_configured_provider=use_configured_provider,
+            status=status_payload,
+        )
     )
     return {
         "ok": False,
