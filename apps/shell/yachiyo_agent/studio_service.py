@@ -955,7 +955,9 @@ class AgentStudioService:
         run_id: str,
         request: Mapping[str, Any] | None = None,
     ) -> RunTimelineSnapshot | None:
-        continuation = self.plan_next_replan_continuation(run_id, request or {})
+        payload = _request_payload(request or {})
+        payload["auto_start_only"] = True
+        continuation = self.plan_next_replan_continuation(run_id, payload)
         if continuation is None:
             return None
         return self.start_agent_run(_agent_start_payload_from_replan_continuation(continuation))
@@ -972,6 +974,7 @@ class AgentStudioService:
             payload,
             source="agent_studio_replan_auto_continuation",
             client_run_id=str(payload.get("client_run_id") or "").strip(),
+            auto_start_only=not _payload_allows_manual_replan_continuation(payload),
         )
 
     def _start_replan_recovery_action_from_snapshot(
@@ -1936,6 +1939,7 @@ def _next_replan_recovery_action_continuation(
     source: str,
     conversation_id: str = "",
     client_run_id: str = "",
+    auto_start_only: bool = True,
 ) -> ReplanContinuationSnapshot | None:
     request_id_filter = str(payload.get("request_id") or "").strip()
     action_id_filter = str(payload.get("action_id") or "").strip()
@@ -1968,9 +1972,31 @@ def _next_replan_recovery_action_continuation(
                 if isinstance(payload.get("metadata"), Mapping)
                 else {},
             )
-            if continuation.auto_start_eligible:
+            if continuation.auto_start_eligible or not auto_start_only:
                 return continuation
     return None
+
+
+def _payload_allows_manual_replan_continuation(payload: Mapping[str, Any]) -> bool:
+    if _payload_truthy(payload.get("auto_start_only")):
+        return False
+    return any(
+        _payload_truthy(payload.get(key))
+        for key in (
+            "include_manual",
+            "allow_manual",
+            "manual_continuation",
+            "return_manual",
+        )
+    )
+
+
+def _payload_truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(value)
 
 
 def _ordered_replan_recovery_actions(
