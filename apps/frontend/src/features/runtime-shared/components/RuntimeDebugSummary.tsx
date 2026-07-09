@@ -50,6 +50,10 @@ export function RuntimeDebugSummary({
       data-latest-request-id={summary?.latest_request_id || ''}
       data-latest-request-tool-name={summary?.latest_request_tool_name || ''}
       data-latest-recovery-tool={summary?.latest_recovery_tool || ''}
+      data-latest-recovery-failed={String(Boolean(summary?.latest_recovery_failed))}
+      data-latest-failed-recovery-tool={summary?.latest_failed_recovery_tool || ''}
+      data-latest-failed-recovery-action-id={summary?.latest_failed_recovery_action_id || ''}
+      data-latest-failed-recovery-reason={summary?.latest_failed_recovery_reason || ''}
       data-latest-replan-request-id={summary?.latest_replan_request_id || ''}
       data-latest-replan-trigger={summary?.latest_replan_trigger || ''}
       data-needs-replan={String(Boolean(summary?.needs_replan))}
@@ -213,6 +217,10 @@ export function runtimeDebugSummaryHasContent(summary?: RuntimeDebugSummarySnaps
     || summary.latest_replan_request_id
     || summary.latest_replan_trigger
     || summary.latest_replan_status
+    || summary.latest_recovery_failed
+    || summary.latest_failed_recovery_tool
+    || summary.latest_failed_recovery_action_id
+    || summary.latest_failed_recovery_reason
     || summary.latest_recovery_action_id
     || summary.latest_recovery_tool
     || summary.latest_recovery_action_label
@@ -424,6 +432,9 @@ function runtimeDebugLatestFacts(summary?: RuntimeDebugSummarySnapshot | null): 
     summary.latest_replan_request_id ? `replan ${summary.latest_replan_request_id}` : '',
     summary.latest_replan_trigger ? `trigger ${summary.latest_replan_trigger}` : '',
     summary.latest_replan_status ? `replan status ${summary.latest_replan_status}` : '',
+    summary.latest_recovery_failed ? 'recovery failed' : '',
+    summary.latest_failed_recovery_tool ? `failed recovery ${summary.latest_failed_recovery_tool}` : '',
+    summary.latest_failed_recovery_reason ? `recovery failure ${summary.latest_failed_recovery_reason}` : '',
     summary.latest_recovery_tool ? `recovery ${summary.latest_recovery_tool}` : '',
     summary.latest_recovery_action_label ? `recovery action ${summary.latest_recovery_action_label}` : '',
     summary.latest_recovery_action_id ? `recovery id ${summary.latest_recovery_action_id}` : '',
@@ -514,6 +525,9 @@ function runtimeDebugRecoveryFacts(
     summary.latest_replan_request_id ? `replan ${summary.latest_replan_request_id}` : '',
     summary.latest_replan_trigger ? `trigger ${summary.latest_replan_trigger}` : '',
     summary.latest_replan_status ? `status ${summary.latest_replan_status}` : '',
+    summary.latest_recovery_failed ? 'recovery failed' : '',
+    summary.latest_failed_recovery_tool ? `failed ${summary.latest_failed_recovery_tool}` : '',
+    summary.latest_failed_recovery_reason ? `reason ${summary.latest_failed_recovery_reason}` : '',
     summary.latest_recovery_tool ? `recovery ${summary.latest_recovery_tool}` : '',
     summary.latest_recovery_action_label ? `action ${summary.latest_recovery_action_label}` : '',
     summary.latest_recovery_action_count ? `actions ${summary.latest_recovery_action_count}` : '',

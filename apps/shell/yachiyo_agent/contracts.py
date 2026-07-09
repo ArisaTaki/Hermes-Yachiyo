@@ -814,6 +814,7 @@ class ReplanRecoverySnapshot(_PublicSnapshot):
     checkpoint_status: str | None = None
     failure_detail: str = ""
     result_preview: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
     recovery_event_ids: list[str] = Field(default_factory=list)
     created_at: str = ""
     updated_at: str = ""
@@ -1141,6 +1142,10 @@ class RuntimeDebugSummarySnapshot(_PublicSnapshot):
     latest_replan_request_id: str | None = None
     latest_replan_trigger: str | None = None
     latest_replan_status: str | None = None
+    latest_recovery_failed: bool = False
+    latest_failed_recovery_tool: str | None = None
+    latest_failed_recovery_action_id: str | None = None
+    latest_failed_recovery_reason: str | None = None
     latest_recovery_action_id: str | None = None
     latest_recovery_tool: str | None = None
     latest_recovery_action_label: str | None = None

@@ -77,6 +77,7 @@ def runtime_debug_summary_from_runtime_objects(
     latest_replan = replan_items[-1] if replan_items else None
     latest_recovery_actions = _recovery_actions(latest_replan)
     latest_recovery_action = _preferred_recovery_action(latest_recovery_actions)
+    latest_replan_metadata = _replan_metadata(latest_replan)
     effective_task_core = _richer_task_core(
         task_core,
         _field(runtime_execution_envelope, "task_core"),
@@ -443,6 +444,18 @@ def runtime_debug_summary_from_runtime_objects(
             )
         ),
         latest_replan_status=_optional_text(_field(latest_replan, "status")),
+        latest_recovery_failed=bool(
+            latest_replan_metadata.get("replan_recovery_failed") is True
+        ),
+        latest_failed_recovery_tool=_optional_text(
+            latest_replan_metadata.get("failed_recovery_tool")
+        ),
+        latest_failed_recovery_action_id=_optional_text(
+            latest_replan_metadata.get("failed_recovery_action_id")
+        ),
+        latest_failed_recovery_reason=_optional_text(
+            _failed_recovery_reason(latest_replan_metadata)
+        ),
         latest_recovery_action_id=_optional_text(
             _field(latest_recovery_action, "action_id")
         ),
@@ -1178,6 +1191,23 @@ def _first_string_list_value(items: Iterable[Any], key: str) -> str | None:
 
 def _recovery_actions(replan_item: Any | None) -> list[Any]:
     return _items(_field(replan_item, "recovery_actions"))
+
+
+def _replan_metadata(replan_item: Any | None) -> dict[str, Any]:
+    metadata = _field(replan_item, "metadata")
+    return dict(metadata) if isinstance(metadata, dict) else {}
+
+
+def _failed_recovery_reason(metadata: dict[str, Any]) -> str:
+    preview = metadata.get("failed_recovery_result_preview")
+    preview = preview if isinstance(preview, dict) else {}
+    return _text(
+        preview.get("error")
+        or preview.get("summary")
+        or preview.get("hint")
+        or metadata.get("failed_recovery_action_label")
+        or metadata.get("failed_recovery_tool")
+    )
 
 
 def _preferred_recovery_action(actions: list[Any]) -> Any | None:

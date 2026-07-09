@@ -761,6 +761,7 @@ export type ReplanRecoverySnapshot = {
   checkpoint_status?: string | null;
   failure_detail?: string;
   result_preview?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
   recovery_event_ids?: string[];
   created_at?: string;
   updated_at?: string;
@@ -1074,6 +1075,10 @@ export type RuntimeDebugSummarySnapshot = {
   latest_replan_request_id?: string | null;
   latest_replan_trigger?: string | null;
   latest_replan_status?: string | null;
+  latest_recovery_failed?: boolean;
+  latest_failed_recovery_tool?: string | null;
+  latest_failed_recovery_action_id?: string | null;
+  latest_failed_recovery_reason?: string | null;
   latest_recovery_action_id?: string | null;
   latest_recovery_tool?: string | null;
   latest_recovery_action_label?: string | null;

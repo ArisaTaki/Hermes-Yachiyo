@@ -70,6 +70,7 @@ class _RecoveryRecord:
     checkpoint_status: str | None = None
     failure_detail: str = ""
     result_preview: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
     recovery_event_ids: list[str] = field(default_factory=list)
     created_at: str = ""
     updated_at: str = ""
@@ -188,6 +189,7 @@ def replan_recovery_snapshots_from_events(
             checkpoint_status=record.checkpoint_status or None,
             failure_detail=record.failure_detail,
             result_preview=dict(record.result_preview),
+            metadata=dict(record.metadata),
             recovery_event_ids=list(record.recovery_event_ids),
             created_at=record.created_at,
             updated_at=record.updated_at,
@@ -385,6 +387,7 @@ def _apply_request_event(
     _apply_observed_action_metadata(record, request)
     _apply_desktop_execution_context(record, request)
     _apply_evidence_links(record, request)
+    _apply_replan_recovery_metadata(record, request)
     record.failure_detail = _first_text(
         record.failure_detail,
         request.get("failure_detail"),
@@ -455,6 +458,7 @@ def _apply_planned_event(
     _apply_observed_action_metadata(record, payload)
     _apply_desktop_execution_context(record, payload)
     _apply_evidence_links(record, payload)
+    _apply_replan_recovery_metadata(record, payload)
     _mark_event(record, event)
 
 
@@ -571,6 +575,7 @@ def _apply_tool_event(
         _apply_observed_action_metadata(record, payload, call=call)
         _apply_desktop_execution_context(record, payload, call=call)
         _apply_evidence_links(record, payload, call=call)
+        _apply_replan_recovery_metadata(record, payload, call=call)
         record.result_preview = _mapping(call.output_preview)
         _mark_event(record, event)
 
@@ -681,6 +686,7 @@ def _apply_recovery_update_event(
     _apply_observed_action_metadata(record, payload)
     _apply_desktop_execution_context(record, payload)
     _apply_evidence_links(record, payload)
+    _apply_replan_recovery_metadata(record, payload)
     _mark_event(record, event)
 
 
@@ -760,6 +766,9 @@ def _merge_recovery_snapshots(
     desktop_loop = dict(current.desktop_loop or {})
     if incoming.desktop_loop:
         desktop_loop.update(incoming.desktop_loop)
+    metadata = dict(current.metadata or {})
+    if incoming.metadata:
+        metadata.update(incoming.metadata)
     deferred_input = dict(current.deferred_input or {})
     if incoming.deferred_input:
         deferred_input.update(incoming.deferred_input)
@@ -830,6 +839,7 @@ def _merge_recovery_snapshots(
             "checkpoint_status": current.checkpoint_status or incoming.checkpoint_status,
             "failure_detail": current.failure_detail or incoming.failure_detail,
             "result_preview": result_preview,
+            "metadata": metadata,
             "recovery_event_ids": event_ids,
             "created_at": current.created_at or incoming.created_at,
             "updated_at": incoming.updated_at or current.updated_at,
@@ -990,6 +1000,87 @@ def _mark_event(record: _RecoveryRecord, event: PublicRunEvent) -> None:
     if event_id and event_id not in record.recovery_event_ids:
         record.recovery_event_ids.append(event_id)
     record.updated_at = _first_text(event.created_at, record.updated_at)
+
+
+_REPLAN_RECOVERY_METADATA_KEYS = (
+    "replan_recovery_failed",
+    "parent_replan_request_id",
+    "parent_replan_trigger",
+    "failed_recovery_action_id",
+    "failed_recovery_action_label",
+    "failed_recovery_tool",
+    "failed_recovery_input",
+    "failed_recovery_step_id",
+    "failed_recovery_source",
+    "failed_recovery_target_capability_id",
+    "failed_recovery_verification_targets",
+    "failed_recovery_result_preview",
+    "original_source_step_id",
+    "original_source_tool_name",
+    "replan_signal_ids",
+    "replan_triggers",
+)
+
+
+def _apply_replan_recovery_metadata(
+    record: _RecoveryRecord,
+    payload: Mapping[str, Any],
+    *,
+    call: ToolCallSnapshot | None = None,
+) -> None:
+    sources: list[Mapping[str, Any]] = [payload]
+    sources.extend(_metadata_sources(payload))
+    if call is not None:
+        for source in (call.input_preview, call.output_preview, call.metadata):
+            if isinstance(source, Mapping):
+                sources.append(source)
+                sources.extend(_metadata_sources(source))
+
+    metadata: dict[str, Any] = {}
+    for source in sources:
+        for key in _REPLAN_RECOVERY_METADATA_KEYS:
+            if key not in source:
+                continue
+            value = _public_metadata_value(source.get(key))
+            if value not in (None, "", [], {}):
+                metadata[key] = value
+    if not metadata:
+        return
+
+    record.metadata.update(metadata)
+    failed_preview = _mapping(metadata.get("failed_recovery_result_preview"))
+    if failed_preview:
+        record.result_preview.update(failed_preview)
+    failure_detail = _failed_recovery_failure_detail(metadata)
+    if failure_detail:
+        record.failure_detail = _first_text(record.failure_detail, failure_detail)
+    if metadata.get("replan_recovery_failed") is True:
+        record.tool_status = _first_text(record.tool_status, "blocked")
+
+
+def _public_metadata_value(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return _mapping(value)
+    if isinstance(value, list):
+        items: list[Any] = []
+        for item in value:
+            if isinstance(item, Mapping):
+                items.append(_mapping(item))
+            elif item not in (None, "", [], {}):
+                items.append(item)
+        return items
+    return value
+
+
+def _failed_recovery_failure_detail(metadata: Mapping[str, Any]) -> str:
+    preview = _mapping(metadata.get("failed_recovery_result_preview"))
+    return _first_text(
+        preview.get("error"),
+        preview.get("summary"),
+        preview.get("hint"),
+        metadata.get("failed_recovery_action_label"),
+        metadata.get("failed_recovery_tool"),
+    )
 
 
 def _apply_recovery_action_metadata(

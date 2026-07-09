@@ -1222,6 +1222,10 @@ def test_replan_recovery_contract_links_request_fallback_and_checkpoint() -> Non
         checkpoint_status="completed",
         failure_detail="data.analyze failed",
         result_preview={"ok": True},
+        metadata={
+            "replan_recovery_failed": True,
+            "failed_recovery_tool": "terminal.run",
+        },
         recovery_event_ids=["event-1", "event-2"],
         created_at="2026-06-27T00:00:00Z",
         updated_at="2026-06-27T00:00:01Z",
@@ -1276,6 +1280,7 @@ def test_replan_recovery_contract_links_request_fallback_and_checkpoint() -> Non
         "checkpoint_status",
         "failure_detail",
         "result_preview",
+        "metadata",
         "recovery_event_ids",
         "created_at",
         "updated_at",
@@ -1300,6 +1305,8 @@ def test_replan_recovery_contract_links_request_fallback_and_checkpoint() -> Non
     assert payload["approval_ids"] == ["approval-1"]
     assert payload["deferred_tool"] == "terminal.run"
     assert payload["deferred_input"] == {"command": "python analyze.py sales.csv"}
+    assert payload["metadata"]["replan_recovery_failed"] is True
+    assert payload["metadata"]["failed_recovery_tool"] == "terminal.run"
     assert payload["deferred_continuation"] == [{"tool": "desktop.active_window"}]
     assert payload["verification_targets"] == [
         {
@@ -4313,6 +4320,68 @@ def test_agent_task_snapshot_marks_recovered_runtime_request_after_recovery_succ
     assert snapshot.runtime_debug.failed_runtime_request_count == 0
     assert snapshot.runtime_debug.pending_runtime_request_count == 0
     assert snapshot.replan_recoveries[0].status == "completed"
+
+
+def test_agent_task_snapshot_exposes_failed_replan_recovery_metadata() -> None:
+    snapshot = agent_task_snapshot_from_payload(
+        {
+            "run_id": "run-recovery-failed",
+            "task_id": "task-recovery-failed",
+            "status": "running",
+            "events": [
+                {
+                    "event_type": "agent.replan.requested",
+                    "sequence": 1,
+                    "run_id": "run-recovery-failed",
+                    "payload": {
+                        "request_id": "runtime-replan:failed-recovery",
+                        "trigger": "verification_failed",
+                        "source_step_id": "open-pixelforge",
+                        "source_tool_name": "app.open",
+                        "target_capability_id": "desktop.app",
+                        "failure_detail": "app not found",
+                        "metadata": {
+                            "replan_recovery_failed": True,
+                            "parent_replan_request_id": "runtime-replan:verify-pixelforge",
+                            "parent_replan_trigger": "verification_failed",
+                            "failed_recovery_action_id": (
+                                "runtime-replan:verify-pixelforge:action:1:app.open"
+                            ),
+                            "failed_recovery_action_label": "Open target app",
+                            "failed_recovery_tool": "app.open",
+                            "failed_recovery_input": {"app_name": "PixelForge"},
+                            "failed_recovery_result_preview": {
+                                "ok": False,
+                                "error": "app not found",
+                            },
+                            "original_source_step_id": "verify-pixelforge",
+                            "original_source_tool_name": "desktop.verify",
+                        },
+                    },
+                }
+            ],
+            "created_at": "2026-06-16T00:00:00Z",
+            "updated_at": "2026-06-16T00:00:01Z",
+        }
+    )
+
+    recovery = snapshot.replan_recoveries[0]
+    assert recovery.metadata["replan_recovery_failed"] is True
+    assert recovery.metadata["parent_replan_request_id"] == (
+        "runtime-replan:verify-pixelforge"
+    )
+    assert recovery.metadata["failed_recovery_tool"] == "app.open"
+    assert recovery.metadata["failed_recovery_input"] == {"app_name": "PixelForge"}
+    assert recovery.result_preview["error"] == "app not found"
+    assert recovery.failure_detail == "app not found"
+    assert snapshot.runtime_debug is not None
+    assert snapshot.runtime_debug.needs_replan is True
+    assert snapshot.runtime_debug.latest_recovery_failed is True
+    assert snapshot.runtime_debug.latest_failed_recovery_tool == "app.open"
+    assert snapshot.runtime_debug.latest_failed_recovery_action_id == (
+        "runtime-replan:verify-pixelforge:action:1:app.open"
+    )
+    assert snapshot.runtime_debug.latest_failed_recovery_reason == "app not found"
 
 
 def test_agent_task_snapshot_projects_runtime_execution_envelope_from_events() -> None:

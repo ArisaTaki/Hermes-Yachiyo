@@ -852,6 +852,7 @@ function ReplanRecoverySnapshotPill({
   const actionTarget = objectRecord(recovery.action_target);
   const observationEvidence = objectRecord(recovery.observation_evidence);
   const observationRetry = objectRecord(recovery.observation_retry);
+  const metadata = objectRecord(recovery.metadata);
   const deferredInput = objectRecord(recovery.deferred_input);
   const deferredContext = objectRecord(recovery.deferred_context);
   const deferredContinuation = arrayRecords(recovery.deferred_continuation);
@@ -882,8 +883,15 @@ function ReplanRecoverySnapshotPill({
     recovery as unknown as Record<string, unknown>,
   ]);
   const recoveryApprovalRequired = recoveryActions.some((action) => action.approval_required === true);
+  const failedRecoveryTool = stringValue(metadata.failed_recovery_tool);
+  const failedRecoveryActionId = stringValue(metadata.failed_recovery_action_id);
+  const failedRecoveryReason = replanRecoveryFailureReason(metadata);
+  const recoveryFailed = metadata.replan_recovery_failed === true;
   const title = [
     recovery.failure_detail,
+    recoveryFailed ? 'recovery failed' : '',
+    failedRecoveryTool ? `failed recovery: ${failedRecoveryTool}` : '',
+    failedRecoveryReason ? `failure: ${failedRecoveryReason}` : '',
     planningReasonLabel ? `reason: ${planningReasonLabel}` : '',
     recovery.permission_target ? `permission: ${recovery.permission_target}` : '',
     recovery.risk_level ? `risk: ${recovery.risk_level}` : '',
@@ -908,6 +916,10 @@ function ReplanRecoverySnapshotPill({
         data-replan-recovery-action={label}
         data-replan-recovery-action-count={recoveryActions.length}
         data-replan-recovery-action-target={actionTargetPreview}
+        data-replan-recovery-failed={String(recoveryFailed)}
+        data-replan-recovery-failed-tool={failedRecoveryTool}
+        data-replan-recovery-failed-action-id={failedRecoveryActionId}
+        data-replan-recovery-failed-reason={failedRecoveryReason}
         data-replan-recovery-approval-ids={approvalIdsPreview}
         data-replan-recovery-approval-id={recovery.approval_id || ''}
         data-replan-recovery-approval-status={recovery.approval_status || ''}
@@ -932,6 +944,8 @@ function ReplanRecoverySnapshotPill({
         title={title}
       >
         recovery · {label || recovery.trigger} · {recovery.status || 'requested'}
+        {recoveryFailed ? ' · failed' : ''}
+        {failedRecoveryTool ? ` · failed: ${failedRecoveryTool}` : ''}
         {planningReasonLabel ? ` · ${planningReasonLabel}` : ''}
         {recovery.approval_status ? ` · approval: ${recovery.approval_status}` : ''}
         {toolCallIdsPreview ? ` · tool calls: ${toolCallIdsPreview}` : ''}
@@ -993,6 +1007,17 @@ function replanRecoveryObservedCenterPreview(evidence: Record<string, unknown>):
   const x = coordinateValue(center.x ?? fallbackPoint.x);
   const y = coordinateValue(center.y ?? fallbackPoint.y);
   return x && y ? `${x},${y}` : '';
+}
+
+function replanRecoveryFailureReason(metadata: Record<string, unknown>): string {
+  const preview = objectRecord(metadata.failed_recovery_result_preview);
+  return (
+    stringValue(preview.error)
+    || stringValue(preview.summary)
+    || stringValue(preview.hint)
+    || stringValue(metadata.failed_recovery_action_label)
+    || stringValue(metadata.failed_recovery_tool)
+  );
 }
 
 function replanRecoveryVerificationTargetsPreview(targets: Array<Record<string, unknown>>): string {
