@@ -7,10 +7,12 @@ from pathlib import Path
 from typing import Any
 
 from apps.shell.agent.runtime.desktop_execution_providers import (
+    LOCAL_DESKTOP_PROVIDER_KIND,
     default_desktop_execution_provider_registry,
     desktop_execution_route_allows_provider_execution,
     desktop_execution_route_payload,
     desktop_execution_route_requires_provider,
+    sandbox_provider_payload,
 )
 from apps.shell.agent.runtime.desktop_provider_session_events import (
     desktop_provider_session_public_event,
@@ -944,6 +946,8 @@ def _sandbox_provider_with_session_context(
     session: Mapping[str, Any],
 ) -> dict[str, Any]:
     payload = dict(sandbox_provider)
+    if str(payload.get("provider_kind") or "").strip() == LOCAL_DESKTOP_PROVIDER_KIND:
+        return payload
     for key in (
         "desktop_session_kind",
         "desktop_session_isolated",
@@ -970,6 +974,8 @@ def _desktop_execution_route_safety_override(
 ) -> dict[str, Any]:
     if not desktop_execution_route_allows_provider_execution(route):
         return {}
+    if _ready_local_desktop_route_with_local_provider(tool_request, route):
+        return {}
     policy = _desktop_execution_policy_from_request(tool_request)
     if not policy:
         return {}
@@ -992,6 +998,25 @@ def _desktop_execution_route_safety_override(
     if not desktop_execution_route_allows_provider_execution(route_decision):
         return route_decision
     return {}
+
+
+def _ready_local_desktop_route_with_local_provider(
+    tool_request: Mapping[str, Any],
+    route: Mapping[str, Any],
+) -> bool:
+    provider_kind = str(
+        route.get("selected_provider_kind") or route.get("provider_kind") or ""
+    ).strip()
+    if provider_kind != LOCAL_DESKTOP_PROVIDER_KIND:
+        return False
+    provider = sandbox_provider_payload(tool_request)
+    if str(provider.get("provider_kind") or "").strip() != LOCAL_DESKTOP_PROVIDER_KIND:
+        return False
+    return str(route.get("status") or "").strip() in {
+        "provider_ready",
+        "ready",
+        "sandbox_ready",
+    }
 
 
 def _tool_request_has_desktop_provider_state(tool_request: Mapping[str, Any]) -> bool:

@@ -4112,6 +4112,95 @@ def test_runtime_tool_request_runner_executes_sandbox_route_through_provider() -
     assert "env" not in tool_call["result"]["desktop_provider_session"]
 
 
+def test_runtime_tool_request_runner_executes_local_route_with_loopback_session() -> None:
+    events = FakeToolCallEvents()
+    registry = DesktopExecutionProviderRegistry([LocalDesktopExecutionProviderAdapter()])
+    executor = _executor(
+        tool_call_events=events,
+        desktop_provider_registry=registry,
+    )
+    runner = _runner(call_agent_tool=executor.execute)
+    broker = FakeBroker(
+        {
+            "ok": True,
+            "action": "media.music_app_open_and_play",
+            "summary": "Playing Music",
+            "data": {"app_name": "Music"},
+        }
+    )
+    messages = [{"role": "user", "content": "播放 Apple Music"}]
+    timeline: list[dict[str, Any]] = []
+
+    runner.run(
+        [
+            {
+                "tool": "media.music_app_open_and_play",
+                "input": {"app_name": "Music"},
+                "desktop_execution_policy": {
+                    "mode": "preview_input",
+                    "source": "daily_chat",
+                },
+                "desktop_execution_route": {
+                    "route_id": "desktop-route:media.music_app_open_and_play",
+                    "tool_name": "media.music_app_open_and_play",
+                    "requested_mode": "preview_input",
+                    "selected_provider_kind": LOCAL_DESKTOP_PROVIDER_KIND,
+                    "selected_provider_id": LOCAL_DESKTOP_PROVIDER_ID,
+                    "status": "provider_ready",
+                    "can_execute": True,
+                    "can_auto_start": True,
+                    "provider_execution_required": True,
+                    "sandbox_required": False,
+                    "blocking_conditions": [],
+                },
+                "sandbox_provider": {
+                    "available": True,
+                    "adapter_ready": True,
+                    "provider_kind": LOCAL_DESKTOP_PROVIDER_KIND,
+                    "provider_id": LOCAL_DESKTOP_PROVIDER_ID,
+                    "status": "available",
+                    "supported_tools": ["media.music_app_open_and_play"],
+                    "desktop_backend_is_loopback": False,
+                    "requires_real_virtual_desktop_backend": False,
+                },
+                "desktop_provider_session": {
+                    "provider_id": "local-isolated-desktop",
+                    "running": True,
+                    "desktop_session_kind": "isolated_desktop",
+                    "desktop_session_isolated": True,
+                    "foreground_takeover_required": False,
+                    "desktop_backend_kind": "loopback_session_harness",
+                    "desktop_backend_is_loopback": True,
+                    "requires_real_virtual_desktop_backend": True,
+                },
+            }
+        ],
+        ["media.music_app_open_and_play"],
+        broker,
+        messages,
+        timeline,
+        [],
+        next_iteration=2,
+        run_id="run-1",
+        budget=FakeBudget(),
+    )
+
+    assert broker.calls == [
+        ("media.music_app_open_and_play", {"app_name": "Music"}, False)
+    ]
+    assert not [event for event in timeline if event["event"] == "agent.tool.skipped"]
+    tool_call = _last_event(timeline, "agent.tool.call")
+    assert tool_call["result"]["ok"] is True
+    assert tool_call["result"]["desktop_execution_provider_routed"] is True
+    assert tool_call["result"]["desktop_execution_provider"]["provider_kind"] == (
+        LOCAL_DESKTOP_PROVIDER_KIND
+    )
+    assert tool_call["result"]["local_desktop_provider"]["provider_id"] == (
+        LOCAL_DESKTOP_PROVIDER_ID
+    )
+    assert "simulated_desktop_provider" not in tool_call["result"]
+
+
 def test_runtime_tool_request_runner_enqueues_post_action_verification() -> None:
     budget = FakeBudget()
     messages = [{"role": "user", "content": "在隔离桌面打开 PixelForge"}]
