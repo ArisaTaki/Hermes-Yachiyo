@@ -116,6 +116,14 @@ _LEGACY_CHAT_DIRECT_LOCAL_POLICY = {
         "until an isolated desktop provider is available."
     ),
 }
+_LEGACY_CHAT_DIRECT_APPROVAL_PREFLIGHT_POLICY = {
+    "mode": "allow",
+    "source": "legacy_chat_direct_approval_preflight",
+    "reason": (
+        "Pause at the approval gate before applying desktop execution policy to "
+        "this foreground operation."
+    ),
+}
 _LEGACY_CHAT_DIRECT_LOCAL_POLICY_TOOLS = {
     *_DAILY_DESKTOP_METADATA_DISCOVERY_TOOLS,
     *_DAILY_DESKTOP_METADATA_VERIFY_TOOLS,
@@ -124,14 +132,24 @@ _LEGACY_CHAT_DIRECT_LOCAL_POLICY_TOOLS = {
     "app.show",
     "desktop.open_app",
     "desktop.focus_app",
+    "app.open_and_safe_click",
+    "app.focus_and_safe_click",
+    "app.open_and_safe_key",
+    "app.focus_and_safe_key",
+    "app.open_and_safe_scroll",
+    "app.focus_and_safe_scroll",
     "app.open_and_safe_shortcut",
     "app.focus_and_safe_shortcut",
     "app.open_and_safe_type_text",
     "app.focus_and_safe_type_text",
     "desktop.hotkey",
+    "desktop.safe_click",
+    "desktop.safe_key",
+    "desktop.safe_scroll",
     "desktop.safe_shortcut",
     "desktop.safe_type_text",
     "desktop.search_submit",
+    "system.settings_open",
 }
 _LEGACY_CHAT_DIRECT_APPROVAL_FLAG_COMPAT_TOOLS = {
     *_DAILY_DESKTOP_METADATA_DISCOVERY_TOOLS,
@@ -139,13 +157,23 @@ _LEGACY_CHAT_DIRECT_APPROVAL_FLAG_COMPAT_TOOLS = {
     "app.open",
     "app.focus",
     "app.show",
+    "app.open_and_safe_click",
+    "app.focus_and_safe_click",
+    "app.open_and_safe_key",
+    "app.focus_and_safe_key",
+    "app.open_and_safe_scroll",
+    "app.focus_and_safe_scroll",
     "app.open_and_safe_shortcut",
     "app.focus_and_safe_shortcut",
     "app.open_and_safe_type_text",
     "app.focus_and_safe_type_text",
+    "desktop.safe_click",
+    "desktop.safe_key",
+    "desktop.safe_scroll",
     "desktop.safe_shortcut",
     "desktop.safe_type_text",
     "desktop.search_submit",
+    "system.settings_open",
 }
 
 
@@ -2254,13 +2282,13 @@ def _runtime_planner_direct_approval_sequence_requests(
     ):
         return []
     if app_ui_approval_plan:
-        return executable
+        return _approval_sequence_with_preflight_policy(executable)
     execution_requests = planner_execution_tool_requests(executable, allowed_tools) or executable
-    return [
+    return _approval_sequence_with_preflight_policy([
         request
         for request in execution_requests
         if not _runtime_planner_model_followup_verification_request(request)
-    ]
+    ])
 
 
 def _runtime_planner_generic_approval_plan(
@@ -2332,7 +2360,111 @@ def _runtime_planner_deferred_ui_approval_sequence_requests(
                     return []
     if not has_deferred_approval:
         return []
-    return [dict(request) for request in selected_requests if isinstance(request, dict)]
+    return _materialize_deferred_ui_approval_requests(selected_requests)
+
+
+def _materialize_deferred_ui_approval_requests(
+    selected_requests: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    requests: list[dict[str, Any]] = []
+    for request in selected_requests:
+        if not isinstance(request, dict):
+            continue
+        deferred_tool = str(request.get("deferred_tool") or "").strip()
+        if not deferred_tool:
+            requests.append(dict(request))
+            continue
+        observation = dict(request)
+        for key in (
+            "continue_to_model",
+            "deferred_tool",
+            "deferred_input",
+            "deferred_context",
+        ):
+            observation.pop(key, None)
+        requests.append(observation)
+        deferred_input = (
+            request.get("deferred_input")
+            if isinstance(request.get("deferred_input"), dict)
+            else {}
+        )
+        approval_request: dict[str, Any] = {
+            "protocol": str(request.get("protocol") or "json_fallback"),
+            "tool": deferred_tool,
+            "input": _clean_deferred_approval_input(deferred_input),
+            "source": str(request.get("source") or "runtime_planner"),
+            "planning_reason": str(
+                request.get("planning_reason") or "planner_deferred_ui_approval"
+            ),
+            "approval_required": True,
+            "risk_level": str(request.get("risk_level") or "medium"),
+            "desktop_execution_policy": dict(_LEGACY_CHAT_DIRECT_APPROVAL_PREFLIGHT_POLICY),
+        }
+        for key in (
+            "decision_id",
+            "plan_id",
+            "tool_plan_id",
+            "intent_kind",
+            "core_id",
+            "workspace_id",
+            "task_id",
+            "run_group_id",
+            "group_run_id",
+            "group_id",
+            "workflow_id",
+            "workflow_run_id",
+            "workflow_node_id",
+            "workflow_node_label",
+            "runtime_doctrine",
+            "runtime_stage",
+            "runtime_role",
+            "capability_id",
+            "capability_title",
+            "capability_status",
+            "capability_reason",
+        ):
+            value = request.get(key)
+            if value not in (None, "", [], {}):
+                approval_request[key] = value
+        for key in ("action_target", "observation_evidence", "observation_retry"):
+            value = request.get(key)
+            if isinstance(value, dict) and value:
+                approval_request[key] = dict(value)
+        requests.append(approval_request)
+    return _approval_sequence_with_preflight_policy(requests)
+
+
+def _clean_deferred_approval_input(value: Mapping[str, Any]) -> dict[str, Any]:
+    payload = dict(value)
+    for key in (
+        "approval_required",
+        "requires_approval",
+        "approvalRequired",
+        "desktop_execution_policy",
+        "desktop_execution_route",
+        "sandbox_provider",
+        "desktop_provider_session",
+    ):
+        payload.pop(key, None)
+    return payload
+
+
+def _approval_sequence_with_preflight_policy(
+    requests: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    for request in requests:
+        if not isinstance(request, dict):
+            continue
+        next_request = dict(request)
+        if bool(next_request.get("approval_required")):
+            next_request.setdefault(
+                "desktop_execution_policy",
+                dict(_LEGACY_CHAT_DIRECT_APPROVAL_PREFLIGHT_POLICY),
+            )
+            _strip_desktop_provider_route_context(next_request)
+        result.append(next_request)
+    return result
 
 
 def _runtime_planner_communication_send_plan(

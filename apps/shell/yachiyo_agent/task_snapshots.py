@@ -83,6 +83,8 @@ _DAILY_DESKTOP_VERIFY_TOOLS = {
 }
 _CHAT_TOOL_INPUT_TRACE_KEYS = {
     "approval_id",
+    "approval_required",
+    "desktop_execution_policy",
     "risk_level",
     "policy_reason",
     "source",

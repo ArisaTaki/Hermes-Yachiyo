@@ -133,6 +133,7 @@ _DAILY_DESKTOP_VERIFY_TOOLS = {
     "desktop.active_window",
     "desktop.list_windows",
     "desktop.read_ui",
+    "screen.capture",
     "desktop.windows",
     "desktop.ui_elements",
 }
@@ -6055,7 +6056,7 @@ def _preserve_direct_daily_desktop_tool_requests(
         for request in requests
         if isinstance(request, dict)
     }
-    if not tools or tools & _DAILY_DESKTOP_DISCOVERY_PREFIX_TOOLS:
+    if not tools:
         return False
     app_ui_approval_tools = {
         "app.open_and_click_ui_element",
@@ -6063,12 +6064,14 @@ def _preserve_direct_daily_desktop_tool_requests(
         "app.open_and_type_into_ui_element",
         "app.focus_and_type_into_ui_element",
     }
+    if tools & app_ui_approval_tools:
+        return True
+    if tools & _DAILY_DESKTOP_DISCOVERY_PREFIX_TOOLS:
+        return False
     app_shortcut_tools = {
         "app.open_and_safe_shortcut",
         "app.focus_and_safe_shortcut",
     }
-    if tools & app_ui_approval_tools:
-        return True
     return "desktop.submit_foreground" in tools and bool(tools & app_shortcut_tools)
 
 

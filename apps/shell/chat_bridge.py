@@ -25,9 +25,9 @@ from apps.core.activity_store import get_activity_store
 from apps.shell.chat_api import ChatAPI
 from apps.shell.yachiyo_agent.daily_desktop import (
     daily_desktop_allowed_tools,
-    daily_desktop_executable_entrypoint_requests,
     daily_desktop_planned_timeline,
     daily_desktop_runtime_execution_envelope,
+    daily_desktop_safe_direct_entrypoint_requests,
     direct_browser_entrypoint_requests,
     main_chat_entrypoint_allowed_tools,
     planner_first_daily_desktop_entrypoint_requests,
@@ -253,11 +253,7 @@ def _desktop_candidates_for_quick_message(
 def _direct_input_entrypoint_requests(
     requests: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    executable = daily_desktop_executable_entrypoint_requests(requests)
-    if len(executable) != 1:
-        return []
-    tool_name = str(executable[0].get("tool") or "").strip()
-    return executable if tool_name in {"desktop.safe_type_text"} else []
+    return daily_desktop_safe_direct_entrypoint_requests(requests)
 
 
 def agent_task_snapshot_for_task(

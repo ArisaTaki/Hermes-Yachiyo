@@ -302,6 +302,90 @@ def _deferred_request_is_direct_verification(request: Mapping[str, Any]) -> bool
     return step_id.startswith("verify-")
 
 
+_SAFE_DIRECT_ENTRYPOINT_TOOLS = frozenset(
+    {
+        "app.focus",
+        "app.focus_and_safe_click",
+        "app.focus_and_safe_key",
+        "app.focus_and_safe_scroll",
+        "app.focus_and_safe_shortcut",
+        "app.focus_and_safe_type_text",
+        "app.focus_window",
+        "app.hide",
+        "app.minimize",
+        "app.open",
+        "app.open_and_safe_click",
+        "app.open_and_safe_key",
+        "app.open_and_safe_scroll",
+        "app.open_and_safe_shortcut",
+        "app.open_and_safe_type_text",
+        "app.open_path_with_app",
+        "app.show",
+        "desktop.active_window",
+        "desktop.focus_app",
+        "desktop.list_windows",
+        "desktop.open_app",
+        "desktop.open_path_with_app",
+        "desktop.read_ui",
+        "desktop.running_apps",
+        "desktop.safe_click",
+        "desktop.safe_key",
+        "desktop.safe_scroll",
+        "desktop.safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.ui_elements",
+        "desktop.windows",
+        "media.music_app_control",
+        "media.music_app_open_and_play",
+        "media.system_control",
+        "screen.capture",
+        "system.settings_open",
+    }
+)
+_BLOCKED_DIRECT_ENTRYPOINT_TOOLS = frozenset(
+    {
+        "app.focus_and_click_ui_element",
+        "app.focus_and_type_into_ui_element",
+        "app.open_and_click_ui_element",
+        "app.open_and_type_into_ui_element",
+        "browser.click",
+        "browser.type_text",
+        "desktop.click",
+        "desktop.click_ui_element",
+        "desktop.type",
+        "desktop.type_into_ui_element",
+        "desktop.type_text",
+    }
+)
+
+
+def daily_desktop_safe_direct_entrypoint_requests(
+    requests: Sequence[Mapping[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    executable = daily_desktop_executable_entrypoint_requests(requests or [])
+    if not executable:
+        return []
+    if not daily_desktop_requests_can_complete_without_model(executable):
+        return []
+    for request in executable:
+        if not _daily_desktop_safe_direct_entrypoint_request(request):
+            return []
+    return executable
+
+
+def _daily_desktop_safe_direct_entrypoint_request(request: Mapping[str, Any]) -> bool:
+    tool_name = str(request.get("tool") or request.get("tool_name") or "").strip()
+    if not tool_name or tool_name in _BLOCKED_DIRECT_ENTRYPOINT_TOOLS:
+        return False
+    if tool_name not in _SAFE_DIRECT_ENTRYPOINT_TOOLS:
+        return False
+    if bool(request.get("approval_required")) or bool(request.get("requires_approval")):
+        return False
+    risk_level = str(request.get("risk_level") or "").strip().lower()
+    return risk_level not in {"high", "critical"}
+
+
 def _looks_like_browser_artifact_request(text: str) -> bool:
     value = str(text or "").strip()
     if not value:

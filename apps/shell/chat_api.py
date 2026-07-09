@@ -1791,6 +1791,16 @@ class ChatAPI:
                 if direct_daily_desktop_intent
                 else []
             )
+            direct_daily_desktop_runtime_envelope = (
+                daily_desktop_runtime_envelope
+                if (
+                    direct_daily_desktop_tool_requests
+                    or daily_desktop_requests_can_complete_without_model(
+                        daily_desktop_requests,
+                    )
+                )
+                else {}
+            )
             direct_planner_orchestration_intent = (
                 not raw_attachments
                 and current_context.get("conversation_kind") != "group"
@@ -1900,7 +1910,7 @@ class ChatAPI:
                     task_id=task_id,
                     prompt=task_text,
                     metadata=user_metadata,
-                    runtime_execution_envelope=daily_desktop_runtime_envelope,
+                    runtime_execution_envelope=direct_daily_desktop_runtime_envelope,
                     direct_tool_requests=direct_daily_desktop_tool_requests or None,
                 )
             direct_planner_orchestration_task: dict[str, Any] | None = None
