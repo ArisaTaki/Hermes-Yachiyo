@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import threading
 
 from apps.shell.yachiyo_agent.desktop_provider_contract import (
     virtual_desktop_provider_manifest_template,
@@ -106,6 +107,92 @@ def test_isolated_desktop_provider_smoke_can_use_configured_provider(monkeypatch
     assert [item["action"] for item in evidence["tool_results"]] == list(
         smoke.SMOKE_TOOLS
     )
+
+
+def test_isolated_desktop_provider_smoke_executes_manifest_backed_provider(
+    tmp_path,
+) -> None:
+    class ReleaseReadyIsolatedProvider(smoke.IsolatedDesktopProvider):
+        def status(self) -> dict[str, object]:
+            payload = super().status()
+            payload.update(
+                {
+                    "contract_version": "oha-yachiyo.desktop-provider.v1",
+                    "desktop_session_kind": "virtual_desktop",
+                    "desktop_backend_kind": "vnc_virtual_desktop",
+                    "desktop_backend_is_loopback": False,
+                    "desktop_backend_ready_for_public_release": True,
+                    "requires_real_virtual_desktop_backend": False,
+                }
+            )
+            return payload
+
+        def manifest(self, *, base_url: str = "") -> dict[str, object]:
+            payload = super().manifest(base_url=base_url)
+            payload.update(
+                {
+                    "contract_version": "oha-yachiyo.desktop-provider.v1",
+                    "desktop_session_kind": "virtual_desktop",
+                    "desktop_backend_kind": "vnc_virtual_desktop",
+                    "desktop_backend_is_loopback": False,
+                    "desktop_backend_ready_for_public_release": True,
+                    "requires_real_virtual_desktop_backend": False,
+                }
+            )
+            safety = dict(payload.get("safety") or {})
+            safety.update(
+                {
+                    "desktop_session_kind": "virtual_desktop",
+                    "desktop_backend_kind": "vnc_virtual_desktop",
+                    "desktop_backend_is_loopback": False,
+                    "desktop_backend_ready_for_public_release": True,
+                    "requires_real_virtual_desktop_backend": False,
+                }
+            )
+            payload["safety"] = safety
+            return payload
+
+    provider = ReleaseReadyIsolatedProvider(
+        provider_id="manifest-virtual-desktop",
+        supported_tools=smoke.SMOKE_TOOLS,
+    )
+    server = smoke.build_isolated_desktop_provider_server(
+        host="127.0.0.1",
+        port=0,
+        provider=provider,
+        quiet=True,
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        base_url = f"http://127.0.0.1:{server.server_address[1]}"
+        manifest_path = tmp_path / "manifest-virtual-provider.json"
+        manifest_path.write_text(
+            json.dumps(provider.manifest(base_url=base_url), ensure_ascii=False),
+            encoding="utf-8",
+        )
+
+        evidence = smoke.run_smoke(provider_manifest=manifest_path)
+
+        assert evidence["ok"] is True
+        assert evidence["use_configured_provider"] is True
+        assert evidence["provider_manifest_evidence"]["ok"] is True
+        assert evidence["status"]["source"] == "provider_manifest"
+        assert evidence["status"]["provider_id"] == "manifest-virtual-desktop"
+        assert evidence["desktop_session_kind"] == "virtual_desktop"
+        assert evidence["desktop_backend_kind"] == "vnc_virtual_desktop"
+        assert evidence["desktop_backend_is_loopback"] is False
+        assert evidence["desktop_backend_ready_for_public_release"] is True
+        assert evidence["provider_conformance"]["public_release_ready"] is True
+        assert evidence["provider_conformance"]["release_candidate"] is True
+        assert evidence["checks"]["all_tools_routed"] is True
+        assert [item["action"] for item in evidence["tool_results"]] == list(
+            smoke.SMOKE_TOOLS
+        )
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
 
 
 def test_isolated_desktop_provider_smoke_rejects_remote_manifest_before_start(
