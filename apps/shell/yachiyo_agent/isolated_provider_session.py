@@ -892,6 +892,7 @@ def _external_isolated_desktop_provider_session_status() -> dict[str, Any]:
     env_snapshot = _provider_env_snapshot()
     provider_manifest_evidence: dict[str, Any] = {}
     manifest_payload: dict[str, Any] = {}
+    manifest_env: dict[str, str] = {}
     if str(os.environ.get(_PROVIDER_MANIFEST_ENV) or "").strip():
         try:
             manifest_payload = _managed_external_provider_manifest(
@@ -900,13 +901,23 @@ def _external_isolated_desktop_provider_session_status() -> dict[str, Any]:
             provider_manifest_evidence = _provider_manifest_evidence_for_manifest(
                 manifest_payload
             )
+            manifest_env = _runtime_env_from_launch(manifest_payload)
         except Exception:
             manifest_payload = {}
+            manifest_env = {}
     source = "runtime_env"
     is_candidate = _external_status_is_isolated_provider_candidate(provider_status)
     running = bool(provider_status.get("available")) and bool(
         provider_status.get("adapter_ready")
     )
+    if (
+        manifest_env
+        and is_candidate
+        and str(provider_status.get("source") or "").strip() == "provider_manifest"
+    ):
+        _apply_runtime_env(manifest_env)
+        env_snapshot = dict(manifest_env)
+        source = "provider_manifest"
     if (
         not is_candidate
         or (
@@ -922,7 +933,8 @@ def _external_isolated_desktop_provider_session_status() -> dict[str, Any]:
                 provider_manifest_evidence = _provider_manifest_evidence_for_manifest(
                     manifest
                 )
-            manifest_env = _runtime_env_from_launch(manifest)
+            if not manifest_env:
+                manifest_env = _runtime_env_from_launch(manifest)
         except Exception:
             manifest_env = {}
         if manifest_env:

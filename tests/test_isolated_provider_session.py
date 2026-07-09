@@ -886,6 +886,93 @@ def test_isolated_provider_session_status_can_use_manifest_endpoint(
             session_module.os.environ.pop(key, None)
 
 
+def test_isolated_provider_session_status_keeps_manifest_selected_env(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    for key in session_module._ENV_KEYS:
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.delenv("OHA_YACHIYO_DESKTOP_PROVIDER_START_COMMAND", raising=False)
+    manifest_path = tmp_path / "provider-manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "provider_id": "manifest-selected-desktop",
+                "provider_kind": "sandbox_desktop",
+                "endpoint_urls": {
+                    "status": "http://127.0.0.1:29101/status",
+                    "execute": "http://127.0.0.1:29101/tools/execute",
+                },
+                "supported_tools": ["app.open", "desktop.verify"],
+                "keyboard_mouse_capture_supported": True,
+                "desktop_session_kind": "virtual_desktop",
+                "desktop_session_isolated": True,
+                "foreground_takeover_required": False,
+                "desktop_backend_kind": "vnc_virtual_desktop",
+                "desktop_backend_is_loopback": False,
+                "desktop_backend_ready_for_public_release": True,
+                "requires_real_virtual_desktop_backend": False,
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_MANIFEST", str(manifest_path))
+
+    manager = IsolatedDesktopProviderSessionManager(repo_root=Path("/repo"))
+    monkeypatch.setattr(session_module, "_SESSION_MANAGER", manager)
+    monkeypatch.setattr(
+        manager,
+        "status",
+        lambda probe_health=True: {"ok": True, "status": "stopped", "running": False},
+    )
+
+    def fake_provider_status(env=None, probe_health=False):
+        assert env is None
+        return {
+            "configured": True,
+            "available": True,
+            "adapter_ready": True,
+            "provider_id": "manifest-selected-desktop",
+            "endpoint_origin": "http://127.0.0.1:29101",
+            "status": "available",
+            "source": "provider_manifest",
+            "probe_health": probe_health,
+            "desktop_session_kind": "virtual_desktop",
+            "desktop_session_isolated": True,
+            "foreground_takeover_required": False,
+            "keyboard_mouse_capture_supported": True,
+            "desktop_backend_kind": "vnc_virtual_desktop",
+            "desktop_backend_is_loopback": False,
+            "desktop_backend_ready_for_public_release": True,
+            "requires_real_virtual_desktop_backend": False,
+            "supported_tools": ["app.open", "desktop.verify"],
+        }
+
+    monkeypatch.setattr(
+        session_module,
+        "desktop_execution_provider_status_from_env",
+        fake_provider_status,
+    )
+
+    try:
+        status = session_module.isolated_desktop_provider_session_status()
+
+        assert status["running"] is True
+        assert status["source"] == "provider_manifest"
+        assert status["env"]["OHA_YACHIYO_DESKTOP_PROVIDER_EXECUTE_URL"] == (
+            "http://127.0.0.1:29101/tools/execute"
+        )
+        assert status["env"]["OHA_YACHIYO_DESKTOP_PROVIDER_BACKEND_KIND"] == (
+            "vnc_virtual_desktop"
+        )
+        assert session_module.os.environ[
+            "OHA_YACHIYO_DESKTOP_PROVIDER_EXECUTE_URL"
+        ] == "http://127.0.0.1:29101/tools/execute"
+    finally:
+        for key in session_module._ENV_KEYS:
+            session_module.os.environ.pop(key, None)
+
+
 def test_ensure_isolated_provider_session_detects_keyboard_mouse_requests(
     monkeypatch,
 ) -> None:
