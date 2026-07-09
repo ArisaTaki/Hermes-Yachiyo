@@ -652,7 +652,7 @@ def _run_section(
 def _build_sections(
     workdir: Path,
     *,
-    run_isolated_provider_smoke: bool = False,
+    run_isolated_provider_smoke: bool = True,
     use_configured_virtual_desktop_provider: bool = False,
     provider_manifest: Path | None = None,
 ) -> list[dict[str, Any]]:
@@ -745,7 +745,7 @@ def _build_sections(
 def run_smoke(
     *,
     workdir: Path | None = None,
-    run_isolated_provider_smoke: bool = False,
+    run_isolated_provider_smoke: bool = True,
     use_configured_virtual_desktop_provider: bool = False,
     provider_manifest: Path | None = None,
 ) -> dict[str, Any]:
@@ -762,12 +762,20 @@ def run_smoke(
         )
     failed = [section for section in sections if section.get("ok") is not True]
     isolated_provider_backend = _isolated_provider_backend_summary(sections)
+    configured_virtual_desktop_provider_requested = bool(
+        use_configured_virtual_desktop_provider or provider_manifest is not None
+    )
     isolated_provider_release_blockers = _isolated_provider_release_blockers(
         run_isolated_provider_smoke=run_isolated_provider_smoke,
-        configured_virtual_desktop_provider_requested=bool(
-            use_configured_virtual_desktop_provider or provider_manifest is not None
+        configured_virtual_desktop_provider_requested=(
+            configured_virtual_desktop_provider_requested
         ),
         isolated_provider_backend=isolated_provider_backend,
+    )
+    isolated_provider_smoke_collected = any(
+        section.get("id") == "isolated_desktop_provider"
+        and section.get("ok") is True
+        for section in sections
     )
     checks = {
         "all_sections_passed": not failed,
@@ -810,9 +818,13 @@ def run_smoke(
         checks["covers_isolated_desktop_provider"] = any(
             section["id"] == "isolated_desktop_provider" for section in sections
         )
-        checks["isolated_provider_release_backend_verified"] = (
-            not isolated_provider_release_blockers
+        checks["isolated_provider_dev_smoke_verified"] = (
+            isolated_provider_smoke_collected
         )
+        if configured_virtual_desktop_provider_requested:
+            checks["isolated_provider_release_backend_verified"] = (
+                not isolated_provider_release_blockers
+            )
     return {
         "ok": all(checks.values()),
         "mode": "oha_desktop_agent_release_smoke",
@@ -820,30 +832,28 @@ def run_smoke(
         "failed_sections": [str(section["id"]) for section in failed],
         "checks": checks,
         "isolated_provider_smoke_requested": run_isolated_provider_smoke,
-        "configured_virtual_desktop_provider_requested": bool(
-            use_configured_virtual_desktop_provider or provider_manifest is not None
+        "configured_virtual_desktop_provider_requested": (
+            configured_virtual_desktop_provider_requested
         ),
         "provider_manifest": str(provider_manifest or ""),
         "isolated_provider_smoke_mode": (
             "release_virtual_desktop_provider_smoke"
             if run_isolated_provider_smoke
-            and (
-                use_configured_virtual_desktop_provider
-                or provider_manifest is not None
-            )
+            and configured_virtual_desktop_provider_requested
             else (
                 "dev_loopback_provider_smoke"
                 if run_isolated_provider_smoke
                 else ""
             )
         ),
-        "isolated_provider_smoke_collected": any(
-            section.get("id") == "isolated_desktop_provider"
-            and section.get("ok") is True
-            for section in sections
+        "isolated_provider_smoke_collected": isolated_provider_smoke_collected,
+        "isolated_provider_dev_smoke_ready": (
+            run_isolated_provider_smoke and isolated_provider_smoke_collected
         ),
         "isolated_provider_release_ready": (
-            run_isolated_provider_smoke and not isolated_provider_release_blockers
+            run_isolated_provider_smoke
+            and configured_virtual_desktop_provider_requested
+            and not isolated_provider_release_blockers
         ),
         "isolated_provider_release_blockers": isolated_provider_release_blockers,
         "isolated_provider_backend": isolated_provider_backend,
@@ -941,11 +951,9 @@ def _isolated_provider_release_blockers(
     configured_virtual_desktop_provider_requested: bool,
     isolated_provider_backend: dict[str, Any],
 ) -> list[str]:
-    if not run_isolated_provider_smoke:
+    if not run_isolated_provider_smoke or not configured_virtual_desktop_provider_requested:
         return []
     blockers: list[str] = []
-    if not configured_virtual_desktop_provider_requested:
-        blockers.append("configured_virtual_desktop_provider_required")
     conformance_ready = isolated_provider_backend.get(
         "provider_conformance_public_release_ready"
     )
@@ -1052,6 +1060,9 @@ def _compact_stdout_summary(payload: dict[str, Any]) -> dict[str, Any]:
         "isolated_provider_smoke_mode": str(
             payload.get("isolated_provider_smoke_mode") or ""
         ),
+        "isolated_provider_dev_smoke_ready": bool(
+            payload.get("isolated_provider_dev_smoke_ready") is True
+        ),
         "isolated_provider_release_ready": bool(
             payload.get("isolated_provider_release_ready") is True
         ),
@@ -1083,7 +1094,18 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--run-isolated-provider-smoke",
         action="store_true",
-        help="Also run the isolated desktop provider smoke; this binds a local test server and proves no foreground mouse/keyboard takeover is required.",
+        help=(
+            "Run the isolated desktop provider smoke. This is now the default; "
+            "the flag is kept for older release scripts."
+        ),
+    )
+    parser.add_argument(
+        "--skip-isolated-provider-smoke",
+        action="store_true",
+        help=(
+            "Skip the default local isolated provider smoke. Cannot skip when a "
+            "provider manifest or configured virtual provider smoke is requested."
+        ),
     )
     parser.add_argument(
         "--use-configured-virtual-desktop-provider",
@@ -1161,9 +1183,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         print(json.dumps(evidence, ensure_ascii=False, indent=2, sort_keys=True))
         return 0 if evidence.get("ok") is True else 1
+    run_isolated_provider_smoke = (
+        bool(args.run_isolated_provider_smoke)
+        or not bool(args.skip_isolated_provider_smoke)
+        or bool(args.use_configured_virtual_desktop_provider)
+        or args.provider_manifest is not None
+    )
     evidence = run_smoke(
         workdir=args.workdir,
-        run_isolated_provider_smoke=bool(args.run_isolated_provider_smoke),
+        run_isolated_provider_smoke=run_isolated_provider_smoke,
         use_configured_virtual_desktop_provider=bool(
             args.use_configured_virtual_desktop_provider
         ),

@@ -1289,6 +1289,8 @@ def _oha_desktop_agent_provider_release_blockers(
 ) -> list[dict[str, Any]]:
     if report.get("isolated_provider_smoke_requested") is not True:
         return []
+    if report.get("configured_virtual_desktop_provider_requested") is not True:
+        return []
     if report.get("isolated_provider_release_ready") is True:
         return []
     blockers: list[str] = []

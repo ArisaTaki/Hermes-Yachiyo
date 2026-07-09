@@ -1089,6 +1089,7 @@ def test_public_release_gate_classifies_virtual_provider_external_requirement(
                         "ok": False,
                         "mode": "oha_desktop_agent_release_smoke",
                         "isolated_provider_smoke_requested": True,
+                        "configured_virtual_desktop_provider_requested": True,
                         "isolated_provider_release_ready": False,
                         "isolated_provider_release_blockers": [
                             "configured_virtual_desktop_provider_required",
