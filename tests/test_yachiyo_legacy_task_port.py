@@ -3181,6 +3181,73 @@ def test_legacy_chat_direct_strict_foreground_routes_safe_click_to_provider(
     assert result[0]["desktop_provider_session"]["foreground_takeover_required"] is False
 
 
+def test_legacy_chat_direct_provider_annotation_preserves_ready_route(
+    monkeypatch,
+) -> None:
+    captured_envelopes: list[dict[str, Any]] = []
+
+    def fake_ensure(envelope: dict[str, Any], *, auto_start: bool = True) -> dict[str, Any]:
+        captured_envelopes.append(envelope)
+        request = envelope["requests"][0]
+        return {
+            "ok": True,
+            "needed": True,
+            "auto_start": auto_start,
+            "started": True,
+            "running": True,
+            "status": "running",
+            "provider_id": "local-isolated-desktop",
+            "url": "http://127.0.0.1:19093",
+            "desktop_session_kind": "isolated_desktop",
+            "desktop_session_isolated": True,
+            "foreground_takeover_required": False,
+            "keyboard_mouse_capture_supported": True,
+            "request_ids": [request["request_id"]],
+            "tool_names": [request["tool_name"]],
+            "supported_tools": [request["tool_name"]],
+        }
+
+    monkeypatch.setattr(
+        legacy_ports_module,
+        "ensure_isolated_desktop_provider_session_for_envelope",
+        fake_ensure,
+    )
+
+    result = legacy_ports_module._direct_tool_requests_with_desktop_provider_session(
+        [
+            {
+                "tool": "desktop.list_apps",
+                "input": {"query": "PixelForge"},
+                "desktop_execution_policy": {
+                    "mode": "preview_input",
+                    "prefer_isolated_desktop": True,
+                },
+                "execution_mode": {"mode": "tool_native"},
+                "desktop_execution_route": {
+                    "selected_provider_kind": "sandbox_desktop",
+                    "status": "provider_required",
+                    "can_execute": False,
+                    "can_auto_start": True,
+                    "sandbox_required": True,
+                    "blocking_conditions": ["sandbox_desktop_provider_required"],
+                },
+            }
+        ],
+        metadata={"desktop_provider_session_auto_start": True},
+    )
+
+    assert captured_envelopes[0]["requests"][0]["tool_name"] == "desktop.list_apps"
+    assert result[0]["desktop_provider_session"]["provider_id"] == (
+        "local-isolated-desktop"
+    )
+    assert result[0]["sandbox_provider"]["provider_id"] == "local-isolated-desktop"
+    assert result[0]["desktop_execution_route"]["status"] == "sandbox_ready"
+    assert result[0]["desktop_execution_route"]["can_execute"] is True
+    assert result[0]["desktop_execution_route"]["selected_provider_id"] == (
+        "local-isolated-desktop"
+    )
+
+
 def test_legacy_chat_task_starter_surfaces_isolated_provider_start_failure(
     monkeypatch,
 ) -> None:

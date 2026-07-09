@@ -2980,16 +2980,30 @@ def _direct_tool_requests_with_desktop_provider_session(
             dict,
         ):
             result.append(
-                {
-                    **next_request,
-                    "desktop_provider_session": dict(
-                        annotated_request["desktop_provider_session"]
-                    ),
-                }
+                _direct_tool_request_with_provider_execution_context(
+                    next_request,
+                    annotated_request,
+                )
             )
         else:
             result.append(next_request)
     return result
+
+
+def _direct_tool_request_with_provider_execution_context(
+    request: Mapping[str, Any],
+    annotated_request: Mapping[str, Any],
+) -> dict[str, Any]:
+    payload = dict(request)
+    for key in (
+        "desktop_provider_session",
+        "sandbox_provider",
+        "desktop_execution_route",
+    ):
+        value = annotated_request.get(key)
+        if isinstance(value, Mapping):
+            payload[key] = dict(value)
+    return payload
 
 
 def _legacy_direct_request_needs_provider_session_policy(
