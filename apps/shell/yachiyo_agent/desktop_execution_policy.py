@@ -851,6 +851,37 @@ def desktop_execution_route_decision(
             "reason": "No executable tool was selected.",
             "blocking_conditions": ["missing_tool"],
         }
+    local_provider = _local_desktop_provider_payload(decision_context)
+    if (
+        local_provider
+        and is_readonly_desktop_provider_tool(clean_tool)
+        and sandbox_desktop_provider_can_execute_tool(local_provider, clean_tool)
+    ):
+        local_route = _sandbox_route_decision(
+            route,
+            local_provider,
+            clean_tool,
+            decision_context,
+        )
+        return _route_with_ready_reason(
+            local_route,
+            _readonly_desktop_provider_route_reason(local_provider),
+        )
+    if (
+        local_provider
+        and _local_low_risk_foreground_tool_allowed(clean_tool, decision_context)
+        and sandbox_desktop_provider_can_execute_tool(local_provider, clean_tool)
+    ):
+        local_route = _sandbox_route_decision(
+            route,
+            local_provider,
+            clean_tool,
+            decision_context,
+        )
+        return _route_with_ready_reason(
+            local_route,
+            _foreground_desktop_provider_route_reason(local_provider),
+        )
     if (
         foreground_provider_requested
         and foreground_required

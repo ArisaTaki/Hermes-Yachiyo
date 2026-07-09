@@ -589,3 +589,74 @@ def test_local_desktop_provider_status_routes_safe_app_activation(monkeypatch) -
     assert unsupported_input_route["blocking_conditions"] == [
         "sandbox_keyboard_mouse_provider_required"
     ]
+
+
+def test_local_low_risk_routes_win_over_running_loopback_provider(monkeypatch) -> None:
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_URL", "http://127.0.0.1:19093")
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_ID", "local-isolated-desktop")
+    monkeypatch.setenv(
+        "OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS",
+        "desktop.list_apps,app.open,media.music_app_open_and_play,desktop.safe_type_text",
+    )
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_KIND", "sandbox_desktop")
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_KIND", "isolated_desktop")
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_ISOLATED", "true")
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_FOREGROUND_TAKEOVER_REQUIRED", "false")
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_BACKEND_KIND", "loopback_session_harness")
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_BACKEND_IS_LOOPBACK", "true")
+    monkeypatch.setenv(
+        "OHA_YACHIYO_DESKTOP_PROVIDER_REQUIRES_REAL_VIRTUAL_DESKTOP_BACKEND",
+        "true",
+    )
+
+    common_metadata = {
+        "desktop_provider_route_foreground": True,
+        "desktop_provider_route_readonly": True,
+        "desktop_provider_local_native": True,
+    }
+    list_apps_route = desktop_execution_route_decision(
+        "desktop.list_apps",
+        policy={"mode": "preview_input", "source": "daily_chat"},
+        execution_mode={
+            "mode": "tool_native",
+            "foreground_control": False,
+            "keyboard_mouse_capture": False,
+            "sandbox_recommended": False,
+            "isolation": "none",
+        },
+        metadata=common_metadata,
+    )
+    open_route = desktop_execution_route_decision(
+        "app.open",
+        policy={"mode": "preview_input", "source": "daily_chat"},
+        execution_mode={
+            "mode": "supervised_live",
+            "foreground_control": True,
+            "keyboard_mouse_capture": False,
+            "sandbox_recommended": True,
+            "isolation": "none",
+        },
+        metadata=common_metadata,
+    )
+    input_route = desktop_execution_route_decision(
+        "desktop.safe_type_text",
+        policy={"mode": "preview_input", "source": "daily_chat"},
+        execution_mode={
+            "mode": "supervised_live",
+            "foreground_control": True,
+            "keyboard_mouse_capture": True,
+            "sandbox_recommended": True,
+            "isolation": "sandbox_desktop",
+        },
+        metadata=common_metadata,
+    )
+
+    assert list_apps_route["status"] == "provider_ready"
+    assert list_apps_route["selected_provider_kind"] == LOCAL_DESKTOP_PROVIDER_KIND
+    assert list_apps_route["selected_provider_id"] == LOCAL_DESKTOP_PROVIDER_ID
+    assert list_apps_route.get("desktop_backend_kind") != "loopback_session_harness"
+    assert open_route["status"] == "provider_ready"
+    assert open_route["selected_provider_kind"] == LOCAL_DESKTOP_PROVIDER_KIND
+    assert open_route["selected_provider_id"] == LOCAL_DESKTOP_PROVIDER_ID
+    assert input_route["status"] == "real_virtual_desktop_provider_required"
+    assert input_route["selected_provider_id"] == "local-isolated-desktop"

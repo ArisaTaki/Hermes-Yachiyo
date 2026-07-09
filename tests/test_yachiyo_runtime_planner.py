@@ -123,6 +123,57 @@ def test_runtime_execution_projects_blocked_desktop_requests_for_chat_debug() ->
     ]
 
 
+def test_planner_enriched_chat_request_keeps_partial_blocked_desktop_requests(
+    monkeypatch: Any,
+) -> None:
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_URL", "http://127.0.0.1:19093")
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_ID", "local-isolated-desktop")
+    monkeypatch.setenv(
+        "OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS",
+        (
+            "desktop.list_apps,app.open_and_safe_shortcut,desktop.safe_type_text,"
+            "desktop.search_submit,media.music_app_open_and_play,desktop.ui_elements"
+        ),
+    )
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_KIND", "sandbox_desktop")
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_KIND", "isolated_desktop")
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_ISOLATED", "true")
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_FOREGROUND_TAKEOVER_REQUIRED", "false")
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_BACKEND_KIND", "loopback_session_harness")
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_BACKEND_IS_LOOPBACK", "true")
+    monkeypatch.setenv(
+        "OHA_YACHIYO_DESKTOP_PROVIDER_REQUIRES_REAL_VIRTUAL_DESKTOP_BACKEND",
+        "true",
+    )
+
+    enriched = planner_enriched_chat_request(
+        {
+            "prompt": "帮我打开 Apple Music 播放超时空辉夜姬",
+            "agent_id": "builtin:yachiyo-main",
+            "metadata": {},
+        }
+    )
+
+    direct_routes = {
+        request["tool"]: request["desktop_execution_route"]
+        for request in enriched["direct_tool_requests"]
+    }
+    blocked_tools = [
+        request["tool"] for request in enriched["blocked_direct_tool_requests"]
+    ]
+    assert direct_routes["desktop.list_apps"]["selected_provider_kind"] == (
+        "local_desktop"
+    )
+    assert direct_routes["media.music_app_open_and_play"]["selected_provider_kind"] == (
+        "local_desktop"
+    )
+    assert "desktop.safe_type_text" in blocked_tools
+    assert enriched["metadata"]["yachiyo_runtime_blocked"] is True
+    assert "desktop.safe_type_text" in enriched["metadata"][
+        "yachiyo_blocked_execution_requests"
+    ]
+
+
 def _capability_by_id(decision: PlannerDecisionSnapshot, capability_id: str):
     return {capability.capability_id: capability for capability in decision.plan.capabilities}[capability_id]
 

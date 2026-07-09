@@ -184,23 +184,22 @@ def planner_enriched_chat_request(
             ]
             if direct_tool_requests:
                 payload["direct_tool_requests"] = direct_tool_requests
-            else:
-                blocked_requests = runtime_execution_blocked_requests_from_envelope_payload(
-                    runtime_execution_envelope,
-                    allowed_tools=execution_allowed_tools,
+            blocked_requests = runtime_execution_blocked_requests_from_envelope_payload(
+                runtime_execution_envelope,
+                allowed_tools=execution_allowed_tools,
+            )
+            if blocked_requests:
+                payload["blocked_direct_tool_requests"] = blocked_requests
+                payload_metadata["yachiyo_runtime_blocked"] = True
+                payload_metadata["yachiyo_blocked_execution_requests"] = [
+                    request.get("tool")
+                    for request in blocked_requests
+                    if request.get("tool")
+                ]
+                payload_metadata["yachiyo_blocked_execution_reasons"] = _unique_strings(
+                    request.get("policy_reason") or request.get("blocked_by")
+                    for request in blocked_requests
                 )
-                if blocked_requests:
-                    payload["blocked_direct_tool_requests"] = blocked_requests
-                    payload_metadata["yachiyo_runtime_blocked"] = True
-                    payload_metadata["yachiyo_blocked_execution_requests"] = [
-                        request.get("tool")
-                        for request in blocked_requests
-                        if request.get("tool")
-                    ]
-                    payload_metadata["yachiyo_blocked_execution_reasons"] = _unique_strings(
-                        request.get("policy_reason") or request.get("blocked_by")
-                        for request in blocked_requests
-                    )
     return payload
 
 
