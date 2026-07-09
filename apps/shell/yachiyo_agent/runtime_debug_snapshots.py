@@ -47,6 +47,7 @@ def runtime_debug_summary_from_runtime_objects(
     replan_recoveries: Iterable[Any] | None = None,
     planner_summary: Any | None = None,
     runtime_execution_envelope: Any | None = None,
+    runtime_metadata: Any | None = None,
     task_core: Any | None = None,
     task_progress: Any | None = None,
     needs_user_action: bool = False,
@@ -73,7 +74,13 @@ def runtime_debug_summary_from_runtime_objects(
     )
     latest_artifact = artifact_items[-1] if artifact_items else None
     request_items = _items(_field(runtime_execution_envelope, "requests"))
+    metadata_blocked_request_items = _metadata_blocked_runtime_requests(runtime_metadata)
+    blocked_request_items = _blocked_runtime_requests(
+        request_items,
+        metadata_blocked_request_items,
+    )
     latest_request = request_items[-1] if request_items else None
+    latest_blocked_request = blocked_request_items[-1] if blocked_request_items else None
     latest_replan = replan_items[-1] if replan_items else None
     latest_recovery_actions = _recovery_actions(latest_replan)
     latest_recovery_action = _preferred_recovery_action(latest_recovery_actions)
@@ -158,6 +165,7 @@ def runtime_debug_summary_from_runtime_objects(
         skill_items=skill_items,
         child_items=child_items,
         replan_items=replan_items,
+        blocked_request_items=blocked_request_items,
         deferred_continuation_items=deferred_continuation_events,
         planner_items=[
             item
@@ -173,6 +181,7 @@ def runtime_debug_summary_from_runtime_objects(
     )
     replan_needed = (
         needs_replan
+        or bool(blocked_request_items)
         or _desktop_provider_session_needs_replan(desktop_provider_session)
         or any(_replan_item_needs_replan(item) for item in replan_items)
         or _events_have_unresolved_replan(event_items)
@@ -273,8 +282,10 @@ def runtime_debug_summary_from_runtime_objects(
         failed_runtime_request_count=sum(
             status == "failed" for status in request_statuses
         ),
-        blocked_runtime_request_count=sum(
-            status == "blocked" for status in request_statuses
+        blocked_runtime_request_count=len(blocked_request_items),
+        blocked_direct_request_count=len(metadata_blocked_request_items),
+        blocked_runtime_request_tools=_unique_strings(
+            _request_tool_name(request) for request in blocked_request_items
         ),
         waiting_runtime_request_count=sum(
             _is_waiting_runtime_request(request) for request in request_items
@@ -285,6 +296,19 @@ def runtime_debug_summary_from_runtime_objects(
         latest_request_id=_optional_text(_field(latest_request, "request_id")),
         latest_request_tool_name=_optional_text(_field(latest_request, "tool_name")),
         latest_request_status=_optional_text(_field(latest_request, "status")),
+        latest_blocked_request_tool_name=_optional_text(
+            _request_tool_name(latest_blocked_request)
+        ),
+        latest_blocked_request_status=_optional_text(
+            _field(latest_blocked_request, "blocked_by")
+            or _field(_field(latest_blocked_request, "desktop_execution_route"), "status")
+            or _field(latest_blocked_request, "status")
+        ),
+        latest_blocked_request_reason=_optional_text(
+            _field(latest_blocked_request, "policy_reason")
+            or _field(_field(latest_blocked_request, "desktop_execution_route"), "reason")
+            or _field(latest_blocked_request, "blocked_by")
+        ),
         desktop_provider_session_status=_optional_text(
             _field(desktop_provider_session, "status")
         ),
@@ -410,6 +434,7 @@ def runtime_debug_summary_from_runtime_objects(
         needs_user_action=bool(
             needs_user_action
             or pending_approvals
+            or blocked_request_items
             or _desktop_provider_session_needs_user_action(desktop_provider_session)
         ),
         needs_replan=bool(replan_needed),
@@ -525,6 +550,7 @@ def _debug_surfaces(
     skill_items: list[Any],
     child_items: list[Any],
     replan_items: list[Any],
+    blocked_request_items: list[Any],
     deferred_continuation_items: list[Any],
     planner_items: list[Any],
     task_items: list[Any],
@@ -542,6 +568,7 @@ def _debug_surfaces(
         ("skills", skill_items),
         ("children", child_items),
         ("replan", replan_items),
+        ("runtime_blockers", blocked_request_items),
         ("deferred_continuation", deferred_continuation_items),
         ("desktop_provider", [provider_session] if provider_session is not None else []),
     ):
@@ -1256,6 +1283,75 @@ def _is_waiting_runtime_request(request: Any) -> bool:
         return False
     return status in _WAITING_RUNTIME_REQUEST_STATUSES or (
         _field(request, "approval_required") is True
+    )
+
+
+def _metadata_blocked_runtime_requests(runtime_metadata: Any | None) -> list[Any]:
+    requests = _items(_field(runtime_metadata, "yachiyo_blocked_direct_tool_requests"))
+    if requests:
+        return requests
+    requests = _items(_field(runtime_metadata, "blocked_direct_tool_requests"))
+    if requests:
+        return requests
+    tool_names = _string_list(_field(runtime_metadata, "yachiyo_blocked_execution_requests"))
+    reasons = _string_list(_field(runtime_metadata, "yachiyo_blocked_execution_reasons"))
+    reason = reasons[0] if reasons else ""
+    return [
+        {
+            "tool": tool_name,
+            "tool_name": tool_name,
+            "status": "blocked",
+            "blocked_by": "runtime_blocked",
+            "policy_reason": reason,
+        }
+        for tool_name in tool_names
+    ]
+
+
+def _blocked_runtime_requests(
+    request_items: list[Any],
+    metadata_blocked_items: list[Any],
+) -> list[Any]:
+    blocked = [
+        request
+        for request in request_items
+        if _runtime_request_is_blocked(request)
+    ]
+    return _unique_request_items([*blocked, *metadata_blocked_items])
+
+
+def _runtime_request_is_blocked(request: Any) -> bool:
+    status = _text(_field(request, "status")).lower()
+    if status == "blocked":
+        return True
+    route = _field(request, "desktop_execution_route")
+    if isinstance(route, dict):
+        return route.get("can_execute") is False
+    return _field(route, "can_execute") is False
+
+
+def _unique_request_items(items: list[Any]) -> list[Any]:
+    seen: set[tuple[str, str, str]] = set()
+    unique: list[Any] = []
+    for item in items:
+        tool_name = _request_tool_name(item)
+        key = (
+            _text(_field(item, "request_id")),
+            tool_name,
+            _text(_field(item, "step_id") or _field(item, "planner_step_id")),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(item)
+    return unique
+
+
+def _request_tool_name(request: Any | None) -> str:
+    return _text(
+        _field(request, "tool_name")
+        or _field(request, "tool")
+        or _field(request, "name")
     )
 
 

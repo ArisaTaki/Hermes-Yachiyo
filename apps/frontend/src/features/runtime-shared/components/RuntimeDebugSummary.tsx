@@ -265,6 +265,7 @@ function runtimeDebugMetrics(summary: RuntimeDebugSummarySnapshot): RuntimeDebug
   addMetric(metrics, 'recovered_runtime_requests', 'recovered reqs', summary.recovered_runtime_request_count, 'ready');
   addMetric(metrics, 'failed_runtime_requests', 'failed reqs', summary.failed_runtime_request_count, 'danger');
   addMetric(metrics, 'blocked_runtime_requests', 'blocked reqs', summary.blocked_runtime_request_count, 'warning');
+  addMetric(metrics, 'blocked_direct_requests', 'blocked direct', summary.blocked_direct_request_count, 'warning');
   addMetric(metrics, 'waiting_runtime_requests', 'waiting reqs', summary.waiting_runtime_request_count, 'warning');
   addProviderSessionMetric(metrics, summary);
   addMetric(metrics, 'tools', 'tools', summary.tool_call_count);
@@ -389,6 +390,12 @@ function runtimeDebugLatestFacts(summary?: RuntimeDebugSummarySnapshot | null): 
     summary.latest_request_id ? `latest request ${summary.latest_request_id}` : '',
     summary.latest_request_tool_name ? `latest request tool ${summary.latest_request_tool_name}` : '',
     summary.latest_request_status ? `latest request status ${summary.latest_request_status}` : '',
+    summary.latest_blocked_request_tool_name ? `blocked tool ${summary.latest_blocked_request_tool_name}` : '',
+    summary.latest_blocked_request_status ? `blocked status ${summary.latest_blocked_request_status}` : '',
+    summary.latest_blocked_request_reason ? `blocked reason ${summary.latest_blocked_request_reason}` : '',
+    (summary.blocked_runtime_request_tools || []).length
+      ? `blocked tools ${(summary.blocked_runtime_request_tools || []).slice(0, 3).join(', ')}`
+      : '',
     summary.desktop_provider_session_provider_id ? `desktop provider ${summary.desktop_provider_session_provider_id}` : '',
     summary.desktop_provider_session_status ? `desktop provider status ${summary.desktop_provider_session_status}` : '',
     summary.desktop_provider_session_kind ? `desktop session ${summary.desktop_provider_session_kind}` : '',

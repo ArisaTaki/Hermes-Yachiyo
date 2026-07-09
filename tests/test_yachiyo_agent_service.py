@@ -3089,6 +3089,65 @@ def test_yachiyo_chat_entrypoint_uses_local_provider_for_music_playback(
     )
 
 
+def test_yachiyo_chat_entrypoint_surfaces_partial_blocked_desktop_plan(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_URL", "http://127.0.0.1:19093")
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_ID", "local-isolated-desktop")
+    monkeypatch.setenv(
+        "OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS",
+        (
+            "desktop.list_apps,app.open_and_safe_shortcut,desktop.safe_type_text,"
+            "desktop.search_submit,media.music_app_open_and_play,desktop.ui_elements"
+        ),
+    )
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_KIND", "sandbox_desktop")
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_KIND", "isolated_desktop")
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_ISOLATED", "true")
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_FOREGROUND_TAKEOVER_REQUIRED", "false")
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_BACKEND_KIND", "loopback_session_harness")
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_BACKEND_IS_LOOPBACK", "true")
+    monkeypatch.setenv(
+        "OHA_YACHIYO_DESKTOP_PROVIDER_REQUIRES_REAL_VIRTUAL_DESKTOP_BACKEND",
+        "true",
+    )
+    port = _FakeRuntimePort()
+    service = YachiyoAgentService(port)
+
+    task = service.start_chat_task(
+        StartChatTaskRequest(
+            prompt="帮我打开 Apple Music 播放超时空辉夜姬",
+            conversation_id="chat-1",
+            metadata={"launcher_mode": "bubble"},
+        )
+    )
+
+    request_payload = port.calls[0][1]
+    direct_tools = [request["tool"] for request in request_payload["direct_tool_requests"]]
+    blocked_tools = [
+        request["tool"] for request in request_payload["blocked_direct_tool_requests"]
+    ]
+
+    assert "media.music_app_open_and_play" in direct_tools
+    assert "desktop.safe_type_text" in blocked_tools
+    assert request_payload["metadata"]["yachiyo_runtime_blocked"] is True
+    assert request_payload["metadata"]["yachiyo_blocked_execution_requests"] == (
+        blocked_tools
+    )
+    assert task.runtime_debug is not None
+    assert task.runtime_debug.blocked_runtime_request_count >= 1
+    assert task.runtime_debug.blocked_direct_request_count == len(blocked_tools)
+    assert "desktop.safe_type_text" in task.runtime_debug.blocked_runtime_request_tools
+    assert task.runtime_debug.latest_blocked_request_tool_name in blocked_tools
+    assert task.runtime_debug.latest_blocked_request_status in {
+        "provider_required",
+        "real_virtual_desktop_provider_required",
+    }
+    assert task.runtime_debug.needs_user_action is True
+    assert task.runtime_debug.needs_replan is True
+    assert "runtime_blockers" in task.runtime_debug.debug_surfaces
+
+
 def test_yachiyo_chat_entrypoint_does_not_direct_execute_blocked_provider_route(
     monkeypatch,
 ) -> None:

@@ -4593,6 +4593,49 @@ def test_runtime_debug_summary_counts_deferred_continuation_events() -> None:
     assert "deferred_continuation" in summary.debug_surfaces
 
 
+def test_runtime_debug_summary_projects_metadata_blocked_direct_requests() -> None:
+    summary = runtime_debug_summary_from_runtime_objects(
+        runtime_execution_envelope={
+            "requests": [
+                {
+                    "request_id": "request-open",
+                    "tool_name": "app.open",
+                    "status": "planned",
+                }
+            ]
+        },
+        runtime_metadata={
+            "yachiyo_blocked_direct_tool_requests": [
+                {
+                    "request_id": "request-type",
+                    "tool": "desktop.safe_type_text",
+                    "status": "blocked",
+                    "blocked_by": "real_virtual_desktop_provider_required",
+                    "policy_reason": "Real virtual desktop provider required.",
+                    "desktop_execution_route": {
+                        "status": "real_virtual_desktop_provider_required",
+                        "can_execute": False,
+                    },
+                }
+            ]
+        },
+    )
+
+    assert summary.blocked_runtime_request_count == 1
+    assert summary.blocked_direct_request_count == 1
+    assert summary.blocked_runtime_request_tools == ["desktop.safe_type_text"]
+    assert summary.latest_blocked_request_tool_name == "desktop.safe_type_text"
+    assert summary.latest_blocked_request_status == (
+        "real_virtual_desktop_provider_required"
+    )
+    assert summary.latest_blocked_request_reason == (
+        "Real virtual desktop provider required."
+    )
+    assert summary.needs_user_action is True
+    assert summary.needs_replan is True
+    assert "runtime_blockers" in summary.debug_surfaces
+
+
 def test_runtime_debug_summary_projects_task_workspace_progress() -> None:
     task_core = TaskCoreSnapshot(
         core_id="task-core-1",

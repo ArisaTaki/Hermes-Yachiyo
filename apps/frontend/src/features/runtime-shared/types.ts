@@ -1015,6 +1015,8 @@ export type RuntimeDebugSummarySnapshot = {
   recovered_runtime_request_count?: number;
   failed_runtime_request_count?: number;
   blocked_runtime_request_count?: number;
+  blocked_direct_request_count?: number;
+  blocked_runtime_request_tools?: string[];
   waiting_runtime_request_count?: number;
   current_request_id?: string | null;
   current_request_tool_name?: string | null;
@@ -1022,6 +1024,9 @@ export type RuntimeDebugSummarySnapshot = {
   latest_request_id?: string | null;
   latest_request_tool_name?: string | null;
   latest_request_status?: string | null;
+  latest_blocked_request_tool_name?: string | null;
+  latest_blocked_request_status?: string | null;
+  latest_blocked_request_reason?: string | null;
   desktop_provider_session_status?: string | null;
   desktop_provider_session_needed?: boolean;
   desktop_provider_session_running?: boolean;

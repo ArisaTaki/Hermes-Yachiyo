@@ -191,6 +191,7 @@ def planner_enriched_chat_request(
             if blocked_requests:
                 payload["blocked_direct_tool_requests"] = blocked_requests
                 payload_metadata["yachiyo_runtime_blocked"] = True
+                payload_metadata["yachiyo_blocked_direct_tool_requests"] = blocked_requests
                 payload_metadata["yachiyo_blocked_execution_requests"] = [
                     request.get("tool")
                     for request in blocked_requests

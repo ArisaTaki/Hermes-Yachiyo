@@ -1072,6 +1072,8 @@ class RuntimeDebugSummarySnapshot(_PublicSnapshot):
     recovered_runtime_request_count: int = 0
     failed_runtime_request_count: int = 0
     blocked_runtime_request_count: int = 0
+    blocked_direct_request_count: int = 0
+    blocked_runtime_request_tools: list[str] = Field(default_factory=list)
     waiting_runtime_request_count: int = 0
     current_request_id: str | None = None
     current_request_tool_name: str | None = None
@@ -1079,6 +1081,9 @@ class RuntimeDebugSummarySnapshot(_PublicSnapshot):
     latest_request_id: str | None = None
     latest_request_tool_name: str | None = None
     latest_request_status: str | None = None
+    latest_blocked_request_tool_name: str | None = None
+    latest_blocked_request_status: str | None = None
+    latest_blocked_request_reason: str | None = None
     desktop_provider_session_status: str | None = None
     desktop_provider_session_needed: bool = False
     desktop_provider_session_running: bool = False
