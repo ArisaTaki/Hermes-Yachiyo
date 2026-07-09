@@ -1938,6 +1938,17 @@ def _metadata_truthy(
     return False
 
 
+def _string_list(values: Any) -> list[str]:
+    if not isinstance(values, Iterable) or isinstance(values, (str, bytes, Mapping)):
+        return []
+    result: list[str] = []
+    for value in values:
+        clean = str(value or "").strip()
+        if clean and clean not in result:
+            result.append(clean)
+    return result
+
+
 def _matching_trace_step(
     request: Mapping[str, Any],
     steps: list[Any],
@@ -1988,6 +1999,12 @@ def _annotate_request_trace(
         request["intent_kind"] = intent_kind
     if bool(getattr(step, "approval_required", False)):
         request["approval_required"] = True
+    depends_on = _string_list(getattr(step, "depends_on", []))
+    if depends_on:
+        request.setdefault("depends_on", depends_on)
+    fallback_tools = _string_list(getattr(step, "fallback_tools", []))
+    if fallback_tools:
+        request.setdefault("fallback_tools", fallback_tools)
     risk_level = str(getattr(step, "risk_level", "") or "").strip()
     if risk_level:
         request.setdefault("risk_level", risk_level)

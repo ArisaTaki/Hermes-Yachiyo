@@ -35302,6 +35302,7 @@ def test_planner_first_direct_selection_can_include_task_execution_context() -> 
         "verify-desktop-result",
     ]
     operation_request = selection.requests[1]
+    assert operation_request["depends_on"] == ["inspect-app"]
     assert operation_request["capability_id"] == "desktop.ui_operation"
     assert operation_request["runtime_stage"] == "operate"
     assert operation_request["runtime_role"] == "click_ui"
@@ -35315,6 +35316,7 @@ def test_planner_first_direct_selection_can_include_task_execution_context() -> 
     assert operation_request["replan_signal_ids"]
     assert operation_request["replan_triggers"] == ["verification_failed"]
     verify_request = selection.requests[2]
+    assert verify_request["depends_on"] == ["operate-foreground-ui"]
     assert verify_request["runtime_stage"] == "verify"
     assert verify_request["task_verification_targets"][0]["step_id"] == "operate-foreground-ui"
     assert (
