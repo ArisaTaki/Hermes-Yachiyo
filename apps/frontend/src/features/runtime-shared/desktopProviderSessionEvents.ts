@@ -17,6 +17,13 @@ export type RuntimeDesktopProviderSessionContext = {
   foregroundTakeoverRequired: string;
   keyboardMouseCaptureSupported: string;
   needed: string;
+  providerConformanceFailedTools: string[];
+  providerConformanceMissingTools: string[];
+  providerConformanceMode: string;
+  providerConformanceOk: string;
+  providerConformancePublicReleaseReady: string;
+  providerConformanceReleaseBlockers: string[];
+  providerConformanceReleaseCandidate: string;
   providerId: string;
   reason: string;
   requiresRealVirtualDesktopBackend: string;
@@ -38,10 +45,12 @@ export function runtimeDesktopProviderSessionContext(
     .filter((record) => Object.keys(record).length > 0);
   const contextSourceRecords = [...baseRecords, ...resultRecords];
   const session = runtimeFirstNestedRecord(contextSourceRecords, 'desktop_provider_session');
+  const providerConformance = runtimeFirstNestedRecord(contextSourceRecords, 'provider_conformance');
   const provider = runtimeFirstNestedRecord(contextSourceRecords, 'desktop_execution_provider');
   const sandboxProvider = runtimeFirstNestedRecord(contextSourceRecords, 'sandbox_provider');
   const route = runtimeFirstNestedRecord(contextSourceRecords, 'desktop_execution_route');
   const contextRecords = [session, provider, sandboxProvider, route, ...baseRecords, ...resultRecords];
+  const conformanceRecords = [providerConformance, ...contextRecords];
   return {
     blockingConditions: runtimeUniqueStrings(contextRecords.flatMap((record) => runtimeStringList(record.blocking_conditions))),
     desktopBackendIsLoopback: runtimeFirstBoolLabel(contextRecords, 'desktop_backend_is_loopback'),
@@ -55,6 +64,13 @@ export function runtimeDesktopProviderSessionContext(
     foregroundTakeoverRequired: runtimeFirstBoolLabel(contextRecords, 'foreground_takeover_required'),
     keyboardMouseCaptureSupported: runtimeFirstBoolLabel(contextRecords, 'keyboard_mouse_capture_supported'),
     needed: runtimeFirstBoolLabel(contextRecords, 'needed'),
+    providerConformanceFailedTools: runtimeUniqueStrings(conformanceRecords.flatMap((record) => runtimeStringList(record.failed_tools))),
+    providerConformanceMissingTools: runtimeUniqueStrings(conformanceRecords.flatMap((record) => runtimeStringList(record.missing_required_tools))),
+    providerConformanceMode: runtimeFirstString(conformanceRecords, 'mode'),
+    providerConformanceOk: runtimeFirstBoolLabel(conformanceRecords, 'ok'),
+    providerConformancePublicReleaseReady: runtimeFirstBoolLabel(conformanceRecords, 'public_release_ready'),
+    providerConformanceReleaseBlockers: runtimeUniqueStrings(conformanceRecords.flatMap((record) => runtimeStringList(record.release_blocking_conditions))),
+    providerConformanceReleaseCandidate: runtimeFirstBoolLabel(conformanceRecords, 'release_candidate'),
     providerId: runtimeFirstString(contextRecords, 'provider_id') || runtimeFirstString(contextRecords, 'selected_provider_id'),
     reason: runtimeFirstString(contextRecords, 'reason'),
     requiresRealVirtualDesktopBackend: runtimeFirstBoolLabel(contextRecords, 'requires_real_virtual_desktop_backend'),
@@ -113,6 +129,12 @@ export function runtimeDesktopProviderSessionDetail(
     context.desktopBackendIsLoopback === 'false' ? 'non-loopback backend' : '',
     context.desktopBackendReadyForPublicRelease === 'true' ? 'release-ready backend' : '',
     context.desktopBackendReadyForPublicRelease === 'false' ? 'backend not release-ready' : '',
+    context.providerConformancePublicReleaseReady === 'true' ? 'provider release-ready' : '',
+    context.providerConformancePublicReleaseReady === 'false' ? 'provider release blocked' : '',
+    context.providerConformanceMode ? `conformance ${context.providerConformanceMode}` : '',
+    context.providerConformanceReleaseBlockers.length ? `release blockers ${context.providerConformanceReleaseBlockers.slice(0, 3).join(', ')}` : '',
+    context.providerConformanceMissingTools.length ? `missing ${context.providerConformanceMissingTools.slice(0, 3).join(', ')}` : '',
+    context.providerConformanceFailedTools.length ? `failed ${context.providerConformanceFailedTools.slice(0, 3).join(', ')}` : '',
     context.requiresRealVirtualDesktopBackend === 'true' ? 'real virtual desktop required' : '',
     context.blockingConditions.length ? `blockers ${context.blockingConditions.slice(0, 3).join(', ')}` : '',
     context.foregroundTakeoverRequired === 'false' ? 'no foreground takeover' : '',

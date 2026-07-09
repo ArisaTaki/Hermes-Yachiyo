@@ -23,6 +23,7 @@ from .contracts import (
 )
 from .desktop_provider_contract import (
     OHA_DESKTOP_AGENT_RELEASE_PROVIDER_TOOLS,
+    virtual_desktop_provider_conformance_summary,
     virtual_desktop_provider_contract_evidence,
 )
 from .desktop_execution_policy import sandbox_desktop_provider_status
@@ -235,11 +236,13 @@ def controlled_desktop_provider_diagnostics_snapshot(
         desktop_session_isolated=desktop_session_isolated,
         provider_contract=provider_contract,
     )
-    provider_conformance = _provider_conformance_summary(
+    provider_conformance = virtual_desktop_provider_conformance_summary(
         provider_contract,
-        configured=configured,
-        ready=ready,
-        release_ready=release_ready,
+        status=provider_contract,
+        mode="provider_diagnostics_contract_check",
+        runtime_checked=configured,
+        release_candidate=ready,
+        public_release_ready=release_ready,
         supported_tools=supported_tools,
     )
     return ControlledDesktopProviderDiagnosticSnapshot(
@@ -329,62 +332,6 @@ def controlled_desktop_provider_diagnostics_payload(
     return controlled_desktop_provider_diagnostics_snapshot(
         sandbox_provider=sandbox_provider,
     ).model_dump(mode="json")
-
-
-def _provider_conformance_summary(
-    provider_contract: Mapping[str, Any],
-    *,
-    configured: bool,
-    ready: bool,
-    release_ready: bool,
-    supported_tools: list[str],
-) -> dict[str, Any]:
-    required_tools = _string_list(provider_contract.get("required_tools")) or list(
-        OHA_DESKTOP_AGENT_RELEASE_PROVIDER_TOOLS
-    )
-    covered_tools = [
-        tool for tool in required_tools if tool in set(_string_list(supported_tools))
-    ]
-    blockers = _string_list(provider_contract.get("blocking_conditions"))
-    return {
-        "ok": bool(provider_contract.get("ok")),
-        "mode": "provider_diagnostics_contract_check",
-        "runtime_checked": configured,
-        "release_candidate": ready,
-        "public_release_ready": release_ready,
-        "smoke_ok": None,
-        "provider_contract_ok": bool(provider_contract.get("ok")),
-        "required_tools": required_tools,
-        "covered_tools": covered_tools,
-        "missing_required_tools": _string_list(
-            provider_contract.get("missing_required_tools")
-        ),
-        "failed_tools": [],
-        "blocking_conditions": blockers,
-        "release_blocking_conditions": blockers,
-        "provider_contract_blocking_conditions": blockers,
-        "desktop_session_kind": str(
-            provider_contract.get("desktop_session_kind") or ""
-        ).strip(),
-        "desktop_session_isolated": _optional_bool(
-            provider_contract.get("desktop_session_isolated")
-        ),
-        "foreground_takeover_required": _optional_bool(
-            provider_contract.get("foreground_takeover_required")
-        ),
-        "desktop_backend_kind": str(
-            provider_contract.get("desktop_backend_kind") or ""
-        ).strip(),
-        "desktop_backend_is_loopback": _optional_bool(
-            provider_contract.get("desktop_backend_is_loopback")
-        ),
-        "desktop_backend_ready_for_public_release": _optional_bool(
-            provider_contract.get("desktop_backend_ready_for_public_release")
-        ),
-        "requires_real_virtual_desktop_backend": _optional_bool(
-            provider_contract.get("requires_real_virtual_desktop_backend")
-        ),
-    }
 
 
 def _provider_payload(

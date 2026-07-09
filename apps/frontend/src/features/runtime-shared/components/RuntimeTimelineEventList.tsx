@@ -143,6 +143,12 @@ export function RuntimeTimelineEventList({
               data-run-event-desktop-provider-session-kind={desktopProviderSession.desktopSessionKind}
               data-run-event-desktop-provider-session-foreground-takeover={desktopProviderSession.foregroundTakeoverRequired}
               data-run-event-desktop-provider-session-keyboard-mouse={desktopProviderSession.keyboardMouseCaptureSupported}
+              data-run-event-desktop-provider-conformance-mode={desktopProviderSession.providerConformanceMode}
+              data-run-event-desktop-provider-conformance-ok={desktopProviderSession.providerConformanceOk}
+              data-run-event-desktop-provider-conformance-public-release-ready={desktopProviderSession.providerConformancePublicReleaseReady}
+              data-run-event-desktop-provider-conformance-release-blockers={desktopProviderSession.providerConformanceReleaseBlockers.join(',')}
+              data-run-event-desktop-provider-conformance-missing-tools={desktopProviderSession.providerConformanceMissingTools.join(',')}
+              data-run-event-desktop-provider-conformance-failed-tools={desktopProviderSession.providerConformanceFailedTools.join(',')}
               data-run-event-desktop-provider-session-tool-names={desktopProviderSession.toolNames.join(',')}
               data-run-event-desktop-provider-session-supported-tools={desktopProviderSession.supportedTools.join(',')}
               data-run-event-desktop-provider-session-url={desktopProviderSession.url}
@@ -280,6 +286,7 @@ function RuntimeDesktopProviderSessionBlock({
     ['Session', context.executionSessionLabel || context.desktopSessionKind || context.executionSessionMode],
     ['Backend', runtimeDesktopProviderBackendSummary(context)],
     ['Safety', runtimeDesktopProviderSafetySummary(context)],
+    ['Conformance', runtimeDesktopProviderConformanceSummary(context)],
     ['Tools', context.toolNames.join(', ') || context.supportedTools.join(', ')],
     ['Blockers', context.blockingConditions.join(', ')],
     ['Error', context.error],
@@ -291,6 +298,9 @@ function RuntimeDesktopProviderSessionBlock({
       data-provider-backend-loopback={context.desktopBackendIsLoopback}
       data-provider-backend-release-ready={context.desktopBackendReadyForPublicRelease}
       data-provider-blockers={context.blockingConditions.join(',')}
+      data-provider-conformance-mode={context.providerConformanceMode}
+      data-provider-conformance-public-release-ready={context.providerConformancePublicReleaseReady}
+      data-provider-conformance-release-blockers={context.providerConformanceReleaseBlockers.join(',')}
       data-provider-id={context.providerId}
       data-provider-session-kind={context.desktopSessionKind}
       data-provider-status={context.status}
@@ -392,6 +402,28 @@ function runtimeDesktopProviderSafetySummary(
     context.foregroundTakeoverRequired === 'false' ? 'no foreground takeover' : '',
     context.foregroundTakeoverRequired === 'true' ? 'foreground takeover' : '',
     context.keyboardMouseCaptureSupported === 'true' ? 'keyboard/mouse ready' : '',
+  ].filter(Boolean).join(' · ');
+}
+
+function runtimeDesktopProviderConformanceSummary(
+  context: RuntimeDesktopProviderSessionContext,
+): string {
+  return [
+    context.providerConformanceMode,
+    context.providerConformanceOk === 'true' ? 'contract ready' : '',
+    context.providerConformanceOk === 'false' ? 'contract blocked' : '',
+    context.providerConformancePublicReleaseReady === 'true' ? 'public release-ready' : '',
+    context.providerConformancePublicReleaseReady === 'false' ? 'public release blocked' : '',
+    context.providerConformanceReleaseCandidate === 'true' ? 'release candidate' : '',
+    context.providerConformanceReleaseBlockers.length
+      ? `release blockers ${context.providerConformanceReleaseBlockers.slice(0, 3).join(', ')}`
+      : '',
+    context.providerConformanceMissingTools.length
+      ? `missing ${context.providerConformanceMissingTools.slice(0, 3).join(', ')}`
+      : '',
+    context.providerConformanceFailedTools.length
+      ? `failed ${context.providerConformanceFailedTools.slice(0, 3).join(', ')}`
+      : '',
   ].filter(Boolean).join(' · ');
 }
 
@@ -617,6 +649,23 @@ function runtimeEventMetadata(
     {
       label: 'provider real backend required',
       value: desktopProviderSession.requiresRealVirtualDesktopBackend,
+    },
+    { label: 'provider conformance', value: desktopProviderSession.providerConformanceMode },
+    {
+      label: 'provider public release-ready',
+      value: desktopProviderSession.providerConformancePublicReleaseReady,
+    },
+    {
+      label: 'provider release blockers',
+      value: desktopProviderSession.providerConformanceReleaseBlockers.join(', '),
+    },
+    {
+      label: 'provider missing tools',
+      value: desktopProviderSession.providerConformanceMissingTools.join(', '),
+    },
+    {
+      label: 'provider failed tools',
+      value: desktopProviderSession.providerConformanceFailedTools.join(', '),
     },
     { label: 'provider blockers', value: desktopProviderSession.blockingConditions.join(', ') },
     { label: 'provider foreground takeover', value: desktopProviderSession.foregroundTakeoverRequired },

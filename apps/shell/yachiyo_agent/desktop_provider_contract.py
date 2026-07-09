@@ -237,6 +237,92 @@ def virtual_desktop_provider_manifest_contract_evidence(
     }
 
 
+def virtual_desktop_provider_conformance_summary(
+    provider_contract: Mapping[str, Any] | None = None,
+    *,
+    status: Mapping[str, Any] | None = None,
+    mode: str = "provider_contract_check",
+    runtime_checked: bool = False,
+    release_candidate: bool | None = None,
+    public_release_ready: bool | None = None,
+    smoke_ok: bool | None = None,
+    supported_tools: Sequence[str] | None = None,
+    failed_tools: Sequence[str] | None = None,
+) -> dict[str, Any]:
+    """Return the public provider conformance shape shared by Studio and release gates."""
+
+    contract = dict(provider_contract or {})
+    status_payload = dict(status or {})
+    if not contract:
+        contract = virtual_desktop_provider_contract_evidence(
+            status_payload,
+            required_tools=OHA_DESKTOP_AGENT_RELEASE_PROVIDER_TOOLS,
+        )
+    contract_ok = bool(contract.get("ok"))
+    required = _string_list(contract.get("required_tools")) or list(
+        OHA_DESKTOP_AGENT_RELEASE_PROVIDER_TOOLS
+    )
+    supported = set(
+        _string_list(supported_tools)
+        or _string_list(contract.get("supported_tools"))
+        or _string_list(status_payload.get("supported_tools"))
+    )
+    blockers = _string_list(contract.get("blocking_conditions"))
+    return {
+        "ok": contract_ok,
+        "mode": str(mode or "provider_contract_check").strip(),
+        "runtime_checked": bool(runtime_checked),
+        "release_candidate": (
+            contract_ok if release_candidate is None else bool(release_candidate)
+        ),
+        "public_release_ready": (
+            contract_ok if public_release_ready is None else bool(public_release_ready)
+        ),
+        "smoke_ok": smoke_ok if isinstance(smoke_ok, bool) else None,
+        "provider_contract_ok": contract_ok,
+        "required_tools": required,
+        "covered_tools": [tool for tool in required if tool in supported],
+        "missing_required_tools": _string_list(contract.get("missing_required_tools")),
+        "failed_tools": _string_list(failed_tools),
+        "blocking_conditions": blockers,
+        "release_blocking_conditions": blockers,
+        "provider_contract_blocking_conditions": blockers,
+        "desktop_session_kind": _first_text(
+            contract.get("desktop_session_kind"),
+            status_payload.get("desktop_session_kind"),
+        ),
+        "desktop_session_isolated": _optional_bool(
+            contract.get("desktop_session_isolated")
+            if "desktop_session_isolated" in contract
+            else status_payload.get("desktop_session_isolated")
+        ),
+        "foreground_takeover_required": _optional_bool(
+            contract.get("foreground_takeover_required")
+            if "foreground_takeover_required" in contract
+            else status_payload.get("foreground_takeover_required")
+        ),
+        "desktop_backend_kind": _first_text(
+            contract.get("desktop_backend_kind"),
+            status_payload.get("desktop_backend_kind"),
+        ),
+        "desktop_backend_is_loopback": _optional_bool(
+            contract.get("desktop_backend_is_loopback")
+            if "desktop_backend_is_loopback" in contract
+            else status_payload.get("desktop_backend_is_loopback")
+        ),
+        "desktop_backend_ready_for_public_release": _optional_bool(
+            contract.get("desktop_backend_ready_for_public_release")
+            if "desktop_backend_ready_for_public_release" in contract
+            else status_payload.get("desktop_backend_ready_for_public_release")
+        ),
+        "requires_real_virtual_desktop_backend": _optional_bool(
+            contract.get("requires_real_virtual_desktop_backend")
+            if "requires_real_virtual_desktop_backend" in contract
+            else status_payload.get("requires_real_virtual_desktop_backend")
+        ),
+    }
+
+
 def virtual_desktop_provider_contract_evidence(
     status: Mapping[str, Any] | None,
     *,
@@ -388,6 +474,14 @@ def _string_list(value: Any) -> list[str]:
     else:
         raw = []
     return [str(item or "").strip() for item in raw if str(item or "").strip()]
+
+
+def _first_text(*values: Any) -> str:
+    for value in values:
+        text = str(value or "").strip()
+        if text:
+            return text
+    return ""
 
 
 def _join_url(base_url: str, path: str) -> str:

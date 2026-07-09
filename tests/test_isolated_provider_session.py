@@ -8,6 +8,9 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from apps.shell.agent.runtime.desktop_provider_session_events import (
+    desktop_provider_session_event_payload,
+)
 from apps.shell.yachiyo_agent import isolated_provider_session as session_module
 from apps.shell.yachiyo_agent.isolated_provider_session import (
     IsolatedDesktopProviderSessionManager,
@@ -543,6 +546,15 @@ def test_start_manifest_provider_satisfies_real_virtual_backend_contract(
     assert started["requires_real_virtual_desktop_backend"] is False
     assert started["provider_contract"]["ok"] is True
     assert started["provider_contract"]["missing_required_tools"] == []
+    assert started["provider_conformance"]["ok"] is True
+    assert started["provider_conformance"]["public_release_ready"] is True
+    assert started["provider_conformance"]["release_blocking_conditions"] == []
+    assert started["provider_conformance"]["covered_tools"] == list(
+        OHA_DESKTOP_AGENT_RELEASE_PROVIDER_TOOLS
+    )
+
+    event_payload = desktop_provider_session_event_payload(started)
+    assert event_payload["provider_conformance"]["public_release_ready"] is True
 
     manager.stop()
 

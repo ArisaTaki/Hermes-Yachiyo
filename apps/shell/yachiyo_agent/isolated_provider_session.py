@@ -26,6 +26,7 @@ from apps.shell.agent.runtime.isolated_desktop_provider import (
 )
 from apps.shell.yachiyo_agent.desktop_provider_contract import (
     OHA_DESKTOP_AGENT_RELEASE_PROVIDER_TOOLS,
+    virtual_desktop_provider_conformance_summary,
     virtual_desktop_provider_contract_evidence,
 )
 from apps.shell.yachiyo_agent.desktop_execution_policy import (
@@ -123,6 +124,11 @@ class IsolatedDesktopProviderSessionManager:
             provider_contract = _provider_contract_evidence_for_status(
                 provider_status,
             )
+            provider_conformance = _provider_conformance_for_status(
+                provider_status,
+                provider_contract=provider_contract,
+                mode="session_manager_provider_contract_check",
+            )
             return {
                 "ok": True,
                 "status": "running" if running else "stopped",
@@ -160,6 +166,7 @@ class IsolatedDesktopProviderSessionManager:
                 ),
                 "supported_tools": _string_list(provider_status.get("supported_tools")),
                 "provider_contract": provider_contract,
+                "provider_conformance": provider_conformance,
                 "source": self._source,
             }
 
@@ -799,6 +806,11 @@ def _external_isolated_desktop_provider_session_status() -> dict[str, Any]:
         provider_status.get("adapter_ready")
     )
     provider_contract = _provider_contract_evidence_for_status(provider_status)
+    provider_conformance = _provider_conformance_for_status(
+        provider_status,
+        provider_contract=provider_contract,
+        mode="external_provider_contract_check",
+    )
     return {
         "ok": bool(provider_status.get("available", True)),
         "status": str(
@@ -840,6 +852,7 @@ def _external_isolated_desktop_provider_session_status() -> dict[str, Any]:
         ),
         "supported_tools": _string_list(provider_status.get("supported_tools")),
         "provider_contract": provider_contract,
+        "provider_conformance": provider_conformance,
         "source": source,
         "external_provider_configured": True,
     }
@@ -1227,11 +1240,45 @@ def _provider_contract_evidence_for_status(status: dict[str, Any]) -> dict[str, 
     )
 
 
+def _provider_conformance_for_status(
+    status: dict[str, Any],
+    *,
+    provider_contract: dict[str, Any] | None = None,
+    mode: str = "session_provider_contract_check",
+    runtime_checked: bool | None = None,
+    release_candidate: bool | None = None,
+    public_release_ready: bool | None = None,
+) -> dict[str, Any]:
+    provider_status = _mapping(status.get("provider_status"))
+    source = {**provider_status, **status}
+    contract = provider_contract or _provider_contract_evidence_for_status(status)
+    return virtual_desktop_provider_conformance_summary(
+        contract,
+        status=source,
+        mode=mode,
+        runtime_checked=bool(provider_status or status)
+        if runtime_checked is None
+        else runtime_checked,
+        release_candidate=release_candidate,
+        public_release_ready=public_release_ready,
+        supported_tools=_string_list(
+            status.get("supported_tools") or provider_status.get("supported_tools")
+        ),
+    )
+
+
 def _public_session_status(status: dict[str, Any]) -> dict[str, Any]:
     provider_status = _mapping(status.get("provider_status"))
     provider_contract = _mapping(
         status.get("provider_contract") or provider_status.get("provider_contract")
     ) or _provider_contract_evidence_for_status(status)
+    provider_conformance = _mapping(
+        status.get("provider_conformance")
+        or provider_status.get("provider_conformance")
+    ) or _provider_conformance_for_status(
+        status,
+        provider_contract=provider_contract,
+    )
     return {
         "ok": bool(status.get("ok", True)),
         "status": str(status.get("status") or ""),
@@ -1281,6 +1328,7 @@ def _public_session_status(status: dict[str, Any]) -> dict[str, Any]:
             status.get("supported_tools") or provider_status.get("supported_tools")
         ),
         "provider_contract": provider_contract,
+        "provider_conformance": provider_conformance,
         "command": _string_list(status.get("command")),
         "env": {
             str(key): str(value)
@@ -1378,6 +1426,15 @@ def _real_virtual_desktop_provider_required_status(
     ):
         if blocker not in blockers:
             blockers.append(blocker)
+    provider_conformance = _mapping(
+        status.get("provider_conformance")
+        or provider_status.get("provider_conformance")
+    ) or _provider_conformance_for_status(
+        status,
+        provider_contract=provider_contract,
+        release_candidate=False,
+        public_release_ready=False,
+    )
     return {
         **status,
         "ok": False,
@@ -1416,6 +1473,7 @@ def _real_virtual_desktop_provider_required_status(
         "desktop_backend_ready_for_public_release": backend_release_ready,
         "requires_real_virtual_desktop_backend": True,
         "provider_contract": provider_contract,
+        "provider_conformance": provider_conformance,
         "source": str(status.get("source") or "isolated_provider_session_manager"),
     }
 

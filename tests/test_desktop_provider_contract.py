@@ -1,5 +1,6 @@
 from apps.shell.yachiyo_agent.desktop_provider_contract import (
     OHA_DESKTOP_AGENT_RELEASE_PROVIDER_TOOLS,
+    virtual_desktop_provider_conformance_summary,
     virtual_desktop_provider_contract_evidence,
     virtual_desktop_provider_manifest_contract_evidence,
     virtual_desktop_provider_manifest_template,
@@ -81,6 +82,32 @@ def test_virtual_desktop_provider_contract_requires_tool_coverage() -> None:
     assert evidence["ok"] is False
     assert evidence["missing_required_tools"] == ["desktop.verify"]
     assert "desktop_provider_missing_required_tools" in evidence["blocking_conditions"]
+
+
+def test_virtual_desktop_provider_conformance_summary_matches_public_shape() -> None:
+    contract = virtual_desktop_provider_contract_evidence(
+        _release_ready_status(),
+        required_tools=OHA_DESKTOP_AGENT_RELEASE_PROVIDER_TOOLS,
+    )
+
+    conformance = virtual_desktop_provider_conformance_summary(
+        contract,
+        status=_release_ready_status(),
+        mode="session_manager_provider_contract_check",
+        runtime_checked=True,
+    )
+
+    assert conformance["ok"] is True
+    assert conformance["mode"] == "session_manager_provider_contract_check"
+    assert conformance["runtime_checked"] is True
+    assert conformance["public_release_ready"] is True
+    assert conformance["release_candidate"] is True
+    assert conformance["provider_contract_ok"] is True
+    assert conformance["required_tools"] == list(OHA_DESKTOP_AGENT_RELEASE_PROVIDER_TOOLS)
+    assert conformance["covered_tools"] == list(OHA_DESKTOP_AGENT_RELEASE_PROVIDER_TOOLS)
+    assert conformance["release_blocking_conditions"] == []
+    assert conformance["desktop_session_kind"] == "virtual_desktop"
+    assert conformance["desktop_backend_is_loopback"] is False
 
 
 def test_virtual_desktop_provider_contract_checks_tool_results_when_present() -> None:

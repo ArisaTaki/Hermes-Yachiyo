@@ -128,6 +128,7 @@ def desktop_provider_session_event_payload(
         "requires_real_virtual_desktop_backend",
         "blocking_conditions",
         "supported_tools",
+        "provider_conformance",
     ):
         value = session.get(key)
         if value not in (None, "", [], {}):
