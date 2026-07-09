@@ -64,6 +64,7 @@ import {
   desktopProviderSessionStartRequestFromAction,
   runtimeRecoveryActionIsDesktopProviderSessionStart,
 } from '../features/runtime-shared/desktopProviderSessionRecovery';
+import { replanContinuationBlockedStatusMessage } from '../features/runtime-shared/replanContinuationStatus';
 import {
   runtimeToolRecoveryActionRunStartRequest,
   runtimeToolRecoveryActionTaskStart,
@@ -623,7 +624,7 @@ export function AgentStudioView() {
       }
       return {
         skipRefresh: true,
-        statusMessage: '未找到可自动执行的恢复动作',
+        statusMessage: replanContinuationBlockedStatusMessage(result),
       };
     }, label);
   }, [

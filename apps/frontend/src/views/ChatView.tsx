@@ -7,6 +7,7 @@ import type {
 } from 'react';
 
 import { useConfirmDialog } from '../components/ConfirmDialog';
+import { replanContinuationBlockedStatusMessage } from '../features/runtime-shared/replanContinuationStatus';
 import {
   clipboardImageFiles,
   fileFromDesktopImageSelection,
@@ -504,7 +505,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
           void refreshMessages({ allowDuringTransition: true });
           return;
         }
-        setStatus('未找到可自动执行的恢复动作');
+        setStatus(replanContinuationBlockedStatusMessage(result));
       })
       .catch(() => {
         setStatus('自动恢复动作提交失败');
