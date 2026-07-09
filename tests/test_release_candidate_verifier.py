@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from scripts import verify_release_candidate as rc
+from scripts import summarize_native_agent_capabilities as native_capabilities
 from scripts import smoke_planner_runtime_tool_parity as planner_tool_parity_smoke
 
 
@@ -175,13 +176,24 @@ def _command_index(commands: list[object], predicate) -> int:
 
 
 def _passed_source_smoke_section(mode: str, *case_ids: str) -> dict[str, object]:
+    required_checks_by_case = native_capabilities.SOURCE_SECTION_REQUIRED_CASE_CHECKS.get(
+        mode,
+        {},
+    )
+    cases = []
+    for case_id in case_ids:
+        case: dict[str, object] = {"id": case_id}
+        required_checks = required_checks_by_case.get(case_id, ())
+        if required_checks:
+            case["checks"] = {check_name: True for check_name in required_checks}
+        cases.append(case)
     return {
         "status": "passed",
         "evidence": {
             "ok": True,
             "mode": mode,
             "case_count": len(case_ids),
-            "cases": [{"id": case_id} for case_id in case_ids],
+            "cases": cases,
         },
     }
 
@@ -236,11 +248,20 @@ def _source_desktop_capability_report() -> dict[str, object]:
         "agent_entrypoint_desktop_execution_smoke": _passed_source_smoke_section(
             "agent_entrypoint_desktop_execution_smoke",
             "main_chat_generic_app_open_before_model",
+            "agent_run_generic_app_open_before_model",
+            "main_chat_generic_app_inspect_before_model",
+            "agent_run_generic_app_inspect_before_model",
             "main_chat_capability_discovered_app_open_before_model",
+            "main_chat_capability_discovered_app_open_path_before_model",
+            "main_chat_daily_desktop_before_model",
+            "agent_run_daily_desktop_overlay_before_model",
         ),
         "agent_entrypoint_data_analysis_smoke": _passed_source_smoke_section(
             "agent_entrypoint_data_analysis_smoke",
+            "main_chat_data_analysis_before_model",
+            "agent_run_data_analysis_before_model",
             "studio_agent_run_data_analysis_before_model",
+            "workflow_agent_node_data_analysis_before_model",
         ),
         "agent_studio_planner_orchestration_smoke": _passed_source_smoke_section(
             "agent_studio_planner_orchestration_smoke",
@@ -262,6 +283,9 @@ def _source_desktop_capability_report() -> dict[str, object]:
         ),
         "group_run_timeline_smoke": _passed_source_smoke_section(
             "group_run_timeline_smoke"
+        ),
+        "workflow_run_timeline_smoke": _passed_source_smoke_section(
+            "workflow_run_timeline_smoke"
         ),
     }
 
@@ -2710,7 +2734,7 @@ def test_release_candidate_verifier_merges_manual_source_capability_matrices(
     ) == 0
 
     output = capsys.readouterr().out
-    assert "Native Agent capability matrix: passed (31 capabilities)" in output
+    assert "Native Agent capability matrix: passed (32 capabilities)" in output
     assert (
         "Native Agent capability matrix sources: tmp/source-rc.json, tmp/provider-rc.json"
         in output
@@ -2719,8 +2743,8 @@ def test_release_candidate_verifier_merges_manual_source_capability_matrices(
     matrix = report["native_agent_capability_matrix"]
     assert matrix["status"] == "passed"
     assert matrix["ok"] is True
-    assert matrix["capability_count"] == 31
-    assert matrix["status_counts"] == {"passed": 31, "missing": 0}
+    assert matrix["capability_count"] == 32
+    assert matrix["status_counts"] == {"passed": 32, "missing": 0}
     assert matrix["missing_capability_ids"] == []
     assert matrix["source_reports"] == ["tmp/source-rc.json", "tmp/provider-rc.json"]
     capability_by_id = {item["id"]: item for item in matrix["capabilities"]}
@@ -2738,7 +2762,55 @@ def test_release_candidate_verifier_merges_manual_source_capability_matrices(
     )
     assert matrix_from_merged_report is not None
     assert matrix_from_merged_report["status"] == "passed"
-    assert matrix_from_merged_report["capability_count"] == 31
+    assert matrix_from_merged_report["capability_count"] == 32
+
+
+def test_release_candidate_verifier_merges_current_capability_evidence_with_manual_source():
+    manual_matrix = rc._native_agent_capability_matrix_from_payload(
+        {
+            **_source_desktop_capability_report(),
+            "native_agent_capability_matrix": {
+                "status": "incomplete",
+                "ok": False,
+                "capabilities": [
+                    {
+                        "id": "packaged_backend_bridge_identity",
+                        "status": "missing",
+                    },
+                    {
+                        "id": "packaged_app_bridge_isolation",
+                        "status": "missing",
+                    },
+                ],
+            },
+        },
+        source_label="tmp/packaged-extra-rc.json",
+        run_requested=False,
+    )
+    assert manual_matrix is not None
+    current_report = {
+        **_provider_package_capability_report(),
+        "source_revision": {
+            "available": True,
+            "commit": "abc1234567890abc1234567890abc1234567890a",
+            "short_commit": "abc1234",
+            "dirty": False,
+        },
+    }
+
+    merged = rc._native_agent_capability_matrix_for_final_report(
+        current_report,
+        manual_capability_matrix=manual_matrix,
+        run_requested=False,
+        merge_current_evidence=True,
+    )
+
+    capability_by_id = {item["id"]: item for item in merged["capabilities"]}
+    assert capability_by_id["packaged_backend_bridge_identity"]["status"] == "passed"
+    assert capability_by_id["packaged_app_bridge_isolation"]["status"] == "passed"
+    assert merged["source_reports"] == ["tmp/packaged-extra-rc.json"]
+    assert "packaged_backend_bridge_identity" not in merged["missing_capability_ids"]
+    assert "packaged_app_bridge_isolation" not in merged["missing_capability_ids"]
 
 
 def test_release_candidate_verifier_merges_multiple_manual_check_json_sources(

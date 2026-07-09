@@ -3672,6 +3672,82 @@ def _merge_native_agent_capability_matrices(
     }
 
 
+def _native_agent_capability_matrix_for_final_report(
+    report: dict[str, Any],
+    *,
+    manual_capability_matrix: dict[str, Any] | None,
+    run_requested: bool,
+    merge_current_evidence: bool,
+) -> dict[str, Any]:
+    current_matrix = _native_agent_capability_matrix_section(
+        report,
+        run_requested=run_requested,
+    )
+    if manual_capability_matrix is None:
+        return current_matrix
+    if not merge_current_evidence:
+        matrix = dict(manual_capability_matrix)
+        matrix["run_requested"] = run_requested
+        return matrix
+    current_passed_matrix = _native_agent_capability_matrix_passed_only(
+        current_matrix,
+        run_requested=run_requested,
+    )
+    if not current_passed_matrix.get("capabilities"):
+        matrix = dict(manual_capability_matrix)
+        matrix["run_requested"] = run_requested
+        return matrix
+    return _merge_native_agent_capability_matrices(
+        [manual_capability_matrix, current_passed_matrix],
+        run_requested=run_requested,
+    )
+
+
+def _native_agent_capability_matrix_passed_only(
+    matrix: dict[str, Any],
+    *,
+    run_requested: bool,
+) -> dict[str, Any]:
+    raw_capabilities = matrix.get("capabilities")
+    if not isinstance(raw_capabilities, list):
+        raw_capabilities = []
+    capabilities = [
+        dict(item)
+        for item in raw_capabilities
+        if isinstance(item, dict) and item.get("status") == "passed"
+    ]
+    status_summary = capability_matrix_status_summary(capabilities)
+    return {
+        "status": "passed" if status_summary.get("ok") is True else "incomplete",
+        **status_summary,
+        "capabilities": capabilities,
+        "run_requested": run_requested,
+    }
+
+
+def _current_run_has_explicit_capability_matrix_evidence(
+    *,
+    run_provider_smoke: bool,
+    run_packaged_backend_bridge_smoke: bool,
+    run_dmg_app_smoke: bool,
+    run_real_desktop_app_open_smoke: bool,
+    run_real_desktop_interaction_smoke: bool,
+    run_real_desktop_ui_inspection_smoke: bool,
+    run_electron_native_bridge_smoke: bool,
+) -> bool:
+    return any(
+        (
+            run_provider_smoke,
+            run_packaged_backend_bridge_smoke,
+            run_dmg_app_smoke,
+            run_real_desktop_app_open_smoke,
+            run_real_desktop_interaction_smoke,
+            run_real_desktop_ui_inspection_smoke,
+            run_electron_native_bridge_smoke,
+        )
+    )
+
+
 def _native_agent_capability_matrix_from_manual_inputs(
     root: Path,
     manual_checks_json: ManualChecksJsonInput,
@@ -5135,8 +5211,6 @@ def verify_release_candidate(
         manual_checks_markdown,
         run_requested=run_provider_smoke,
     )
-    if manual_capability_matrix is not None:
-        report["native_agent_capability_matrix"] = manual_capability_matrix
 
     source_only_conflicts: list[str] = []
     if source_only:
@@ -6088,25 +6162,20 @@ def verify_release_candidate(
             "run_requested": run_provider_smoke,
         }
 
-    existing_capability_matrix = report.get("native_agent_capability_matrix")
-    if (
-        not run_provider_smoke
-        and isinstance(existing_capability_matrix, dict)
-        and existing_capability_matrix.get("status") in {"passed", "incomplete"}
-        and isinstance(existing_capability_matrix.get("capabilities"), list)
-        and existing_capability_matrix.get("capabilities")
-        and (
-            existing_capability_matrix.get("source_report")
-            or existing_capability_matrix.get("source_reports")
-        )
-    ):
-        capability_matrix = existing_capability_matrix
-        capability_matrix["run_requested"] = run_provider_smoke
-    else:
-        capability_matrix = _native_agent_capability_matrix_section(
-            report,
-            run_requested=run_provider_smoke,
-        )
+    capability_matrix = _native_agent_capability_matrix_for_final_report(
+        report,
+        manual_capability_matrix=manual_capability_matrix,
+        run_requested=run_provider_smoke,
+        merge_current_evidence=_current_run_has_explicit_capability_matrix_evidence(
+            run_provider_smoke=run_provider_smoke,
+            run_packaged_backend_bridge_smoke=run_packaged_backend_bridge_smoke,
+            run_dmg_app_smoke=run_dmg_app_smoke,
+            run_real_desktop_app_open_smoke=run_real_desktop_app_open_smoke,
+            run_real_desktop_interaction_smoke=run_real_desktop_interaction_smoke,
+            run_real_desktop_ui_inspection_smoke=run_real_desktop_ui_inspection_smoke,
+            run_electron_native_bridge_smoke=run_electron_native_bridge_smoke,
+        ),
+    )
     report["native_agent_capability_matrix"] = capability_matrix
     capability_status = str(capability_matrix.get("status") or "skipped")
     if capability_status in {"passed", "incomplete"}:
