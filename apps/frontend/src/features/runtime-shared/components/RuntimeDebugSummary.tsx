@@ -206,6 +206,9 @@ export function runtimeDebugSummaryHasContent(summary?: RuntimeDebugSummarySnaps
     || summary.runtime_stage
     || summary.runtime_role
     || summary.current_capability_id
+    || summary.current_workspace_item_id
+    || summary.current_workspace_item_title
+    || summary.current_workspace_item_path
     || summary.latest_event_type
     || summary.latest_replan_request_id
     || summary.latest_replan_trigger
@@ -278,6 +281,14 @@ function runtimeDebugMetrics(summary: RuntimeDebugSummarySnapshot): RuntimeDebug
     summary.completed_checkpoints,
     summary.total_checkpoints,
     summary.blocked_checkpoints ? 'warning' : undefined,
+  );
+  addProgressMetric(
+    metrics,
+    'workspace_items',
+    'workspace',
+    summary.completed_workspace_items,
+    summary.total_workspace_items,
+    summary.blocked_workspace_items ? 'warning' : undefined,
   );
   addMetric(metrics, 'artifacts', 'artifacts', summary.artifact_count);
   addMetric(metrics, 'replans', 'replans', summary.replan_recovery_count, 'warning');
@@ -354,6 +365,10 @@ function runtimeDebugLatestFacts(summary?: RuntimeDebugSummarySnapshot | null): 
     summary.task_status ? `task ${summary.task_status}` : '',
     summary.current_step_title ? `step ${summary.current_step_title}` : '',
     summary.current_tool_name ? `current tool ${summary.current_tool_name}` : '',
+    summary.current_workspace_item_title ? `workspace ${summary.current_workspace_item_title}` : '',
+    summary.current_workspace_item_kind ? `workspace kind ${summary.current_workspace_item_kind}` : '',
+    summary.current_workspace_item_status ? `workspace status ${summary.current_workspace_item_status}` : '',
+    summary.current_workspace_item_path ? `workspace path ${summary.current_workspace_item_path}` : '',
     summary.current_request_id ? `current request ${summary.current_request_id}` : '',
     summary.current_request_tool_name ? `request tool ${summary.current_request_tool_name}` : '',
     summary.current_request_status ? `request status ${summary.current_request_status}` : '',

@@ -105,6 +105,12 @@ def runtime_debug_summary_from_runtime_objects(
         step_id=current_step_id,
         tool_name=current_tool_name,
     ) or _active_runtime_request(request_items)
+    current_workspace_item = _current_workspace_item(
+        effective_task_core,
+        request_items,
+        current_request=current_request,
+        current_step_id=current_step_id,
+    )
     desktop_provider_session = _desktop_provider_session(
         runtime_execution_envelope,
         request_items,
@@ -206,12 +212,32 @@ def runtime_debug_summary_from_runtime_objects(
         current_step_id=current_step_id,
         current_step_title=current_step_title,
         current_tool_name=current_tool_name,
+        current_workspace_item_id=_optional_text(
+            _field(current_workspace_item, "item_id") or _field(current_workspace_item, "id")
+        ),
+        current_workspace_item_title=_optional_text(
+            _field(current_workspace_item, "title") or _field(current_workspace_item, "name")
+        ),
+        current_workspace_item_kind=_optional_text(
+            _field(current_workspace_item, "kind") or _field(current_workspace_item, "type")
+        ),
+        current_workspace_item_path=_optional_text(
+            _field(current_workspace_item, "path")
+            or _field(current_workspace_item, "target_path")
+            or _field(current_workspace_item, "artifact_path")
+        ),
+        current_workspace_item_status=_optional_text(
+            _field(current_workspace_item, "status")
+        ),
         total_todos=task_totals["total_todos"],
         completed_todos=task_totals["completed_todos"],
         blocked_todos=task_totals["blocked_todos"],
         total_checkpoints=task_totals["total_checkpoints"],
         completed_checkpoints=task_totals["completed_checkpoints"],
         blocked_checkpoints=task_totals["blocked_checkpoints"],
+        total_workspace_items=task_totals["total_workspace_items"],
+        completed_workspace_items=task_totals["completed_workspace_items"],
+        blocked_workspace_items=task_totals["blocked_workspace_items"],
         runtime_stage_counts=runtime_stage_counts,
         runtime_doctrine=_first_text_from_items(
             [
@@ -950,16 +976,29 @@ def _task_totals(task_core: Any | None, task_progress: Any | None) -> dict[str, 
     total_checkpoints = _int_field(task_progress, "total_checkpoints")
     completed_checkpoints = _int_field(task_progress, "completed_checkpoints")
     blocked_checkpoints = _int_field(task_progress, "blocked_checkpoints")
+    total_workspace_items = _int_field(task_progress, "total_workspace_items")
+    completed_workspace_items = _int_field(task_progress, "completed_workspace_items")
+    blocked_workspace_items = _int_field(task_progress, "blocked_workspace_items")
 
     if task_core is not None:
         todos = _items(_field(task_core, "todos"))
         checkpoints = _items(_field(task_core, "checkpoints"))
+        workspace_items = _task_workspace_items(task_core)
         total_todos = total_todos or len(todos)
         completed_todos = completed_todos or _count_status(todos, "completed")
         blocked_todos = blocked_todos or _count_status(todos, "blocked")
         total_checkpoints = total_checkpoints or len(checkpoints)
         completed_checkpoints = completed_checkpoints or _count_status(checkpoints, "completed")
         blocked_checkpoints = blocked_checkpoints or _count_status(checkpoints, "blocked")
+        total_workspace_items = total_workspace_items or len(workspace_items)
+        completed_workspace_items = completed_workspace_items or _count_status(
+            workspace_items,
+            "completed",
+        )
+        blocked_workspace_items = blocked_workspace_items or _count_status(
+            workspace_items,
+            "blocked",
+        )
 
     return {
         "total_todos": total_todos,
@@ -968,6 +1007,9 @@ def _task_totals(task_core: Any | None, task_progress: Any | None) -> dict[str, 
         "total_checkpoints": total_checkpoints,
         "completed_checkpoints": completed_checkpoints,
         "blocked_checkpoints": blocked_checkpoints,
+        "total_workspace_items": total_workspace_items,
+        "completed_workspace_items": completed_workspace_items,
+        "blocked_workspace_items": blocked_workspace_items,
     }
 
 
@@ -992,13 +1034,79 @@ def _richer_task_core(primary: Any | None, fallback: Any | None) -> Any | None:
         return fallback
     if fallback is None:
         return primary
-    primary_total = len(_items(_field(primary, "todos"))) + len(
-        _items(_field(primary, "checkpoints"))
-    )
-    fallback_total = len(_items(_field(fallback, "todos"))) + len(
-        _items(_field(fallback, "checkpoints"))
-    )
+    primary_total = _task_core_total(primary)
+    fallback_total = _task_core_total(fallback)
     return fallback if fallback_total > primary_total else primary
+
+
+def _task_core_total(task_core: Any | None) -> int:
+    return (
+        len(_items(_field(task_core, "todos")))
+        + len(_items(_field(task_core, "checkpoints")))
+        + len(_task_workspace_items(task_core))
+    )
+
+
+def _task_workspace_items(task_core: Any | None) -> list[Any]:
+    return _items(_field(_field(task_core, "workspace"), "items"))
+
+
+def _current_workspace_item(
+    task_core: Any | None,
+    requests: list[Any],
+    *,
+    current_request: Any | None,
+    current_step_id: str | None,
+) -> Any | None:
+    current_request_items = _items(_field(current_request, "task_workspace_items"))
+    candidates = current_request_items + _task_workspace_items(task_core)
+    if not candidates:
+        for request in reversed(requests):
+            candidates.extend(_items(_field(request, "task_workspace_items")))
+            if candidates:
+                break
+    if not candidates:
+        return None
+    return min(
+        enumerate(candidates),
+        key=lambda indexed: _workspace_item_priority(
+            indexed[1],
+            current_step_id=current_step_id,
+            position=indexed[0],
+        ),
+    )[1]
+
+
+def _workspace_item_priority(
+    item: Any,
+    *,
+    current_step_id: str | None,
+    position: int,
+) -> tuple[int, int, int]:
+    source_step_id = _text(_field(item, "source_step_id"))
+    current_step = _text(current_step_id)
+    if current_step and source_step_id == current_step:
+        step_priority = 0
+    elif source_step_id:
+        step_priority = 1
+    else:
+        step_priority = 2
+    status = _text(_field(item, "status")).lower()
+    status_priority = {
+        "running": 0,
+        "active": 0,
+        "in_progress": 0,
+        "pending": 1,
+        "planned": 1,
+        "waiting": 2,
+        "waiting_approval": 2,
+        "blocked": 3,
+        "failed": 3,
+        "completed": 4,
+        "verified": 4,
+        "skipped": 5,
+    }.get(status, 1)
+    return (step_priority, status_priority, position)
 
 
 def _count_status(items: list[Any], status: str) -> int:

@@ -1045,12 +1045,20 @@ class RuntimeDebugSummarySnapshot(_PublicSnapshot):
     current_step_id: str | None = None
     current_step_title: str | None = None
     current_tool_name: str | None = None
+    current_workspace_item_id: str | None = None
+    current_workspace_item_title: str | None = None
+    current_workspace_item_kind: str | None = None
+    current_workspace_item_path: str | None = None
+    current_workspace_item_status: str | None = None
     total_todos: int = 0
     completed_todos: int = 0
     blocked_todos: int = 0
     total_checkpoints: int = 0
     completed_checkpoints: int = 0
     blocked_checkpoints: int = 0
+    total_workspace_items: int = 0
+    completed_workspace_items: int = 0
+    blocked_workspace_items: int = 0
     runtime_stage_counts: dict[str, int] = Field(default_factory=dict)
     runtime_doctrine: str | None = None
     runtime_stage: str | None = None

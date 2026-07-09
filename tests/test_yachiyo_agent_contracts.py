@@ -4333,6 +4333,69 @@ def test_runtime_debug_summary_counts_deferred_continuation_events() -> None:
     assert "deferred_continuation" in summary.debug_surfaces
 
 
+def test_runtime_debug_summary_projects_task_workspace_progress() -> None:
+    task_core = TaskCoreSnapshot(
+        core_id="task-core-1",
+        workspace=TaskWorkspaceSnapshot(
+            workspace_id="workspace-1",
+            title="Analysis workspace",
+            items=[
+                TaskWorkspaceItemSnapshot(
+                    item_id="dataset",
+                    title="Dataset",
+                    kind="input",
+                    path="data/source.csv",
+                    source_step_id="inspect-data",
+                    status="completed",
+                ),
+                TaskWorkspaceItemSnapshot(
+                    item_id="report-md",
+                    title="Analysis report",
+                    kind="artifact",
+                    path="reports/analysis.md",
+                    source_step_id="write-report",
+                    status="planned",
+                ),
+            ],
+        ),
+        todos=[
+            TaskTodoItemSnapshot(
+                todo_id="write-report",
+                title="Write report",
+                status="in_progress",
+                step_id="write-report",
+                tool_name="artifact.write",
+            )
+        ],
+    )
+    task_progress = TaskProgressSummarySnapshot(
+        core_id="task-core-1",
+        workspace_id="workspace-1",
+        status="running",
+        current_step_id="write-report",
+        current_step_title="Write report",
+        current_tool_name="artifact.write",
+        total_workspace_items=2,
+        completed_workspace_items=1,
+    )
+
+    summary = runtime_debug_summary_from_runtime_objects(
+        run_id="run-1",
+        task_core=task_core,
+        task_progress=task_progress,
+    )
+
+    assert summary.current_workspace_item_id == "report-md"
+    assert summary.current_workspace_item_title == "Analysis report"
+    assert summary.current_workspace_item_kind == "artifact"
+    assert summary.current_workspace_item_path == "reports/analysis.md"
+    assert summary.current_workspace_item_status == "planned"
+    assert summary.total_workspace_items == 2
+    assert summary.completed_workspace_items == 1
+    assert summary.blocked_workspace_items == 0
+    assert "task" in summary.debug_surfaces
+
+
 def test_runtime_debug_summary_projects_provider_session_from_replay_events() -> None:
     summary = runtime_debug_summary_from_runtime_objects(
         run_id="run-1",
