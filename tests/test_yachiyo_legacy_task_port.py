@@ -123,7 +123,7 @@ def test_daily_entrypoint_executes_read_only_active_window_verify() -> None:
     assert [request["tool"] for request in requests] == [
         "desktop.list_apps",
         "app.open",
-        "desktop.active_window",
+        "desktop.verify",
     ]
     assert requests[-1]["runtime_stage"] == "verify"
     assert [
@@ -2206,7 +2206,7 @@ def test_legacy_chat_task_starter_records_runtime_planner_metadata_and_events() 
     assert selection_events[0][1]["payload"]["selected_tools"] == [
         "desktop.list_apps",
         "app.open",
-        "desktop.active_window",
+        "desktop.verify",
     ]
     assert selection_events[0][1]["payload"]["legacy_request_count"] == 0
     model_loop_call = [
@@ -2216,7 +2216,7 @@ def test_legacy_chat_task_starter_records_runtime_planner_metadata_and_events() 
     assert [request["tool"] for request in model_loop_call[1]["direct_tool_requests"]] == [
         "desktop.list_apps",
         "app.open",
-        "desktop.active_window",
+        "desktop.verify",
     ]
 
 
@@ -2260,15 +2260,19 @@ def test_legacy_chat_task_starter_uses_runtime_execution_envelope_requests() -> 
     start_call = [call for call in runtime.calls if call[0] == "start_main_chat_run"][0]
     assert start_call[1]["metadata"]["yachiyo_runtime_planner"] is True
     assert start_call[1]["metadata"]["source"] == "launcher"
-    assert start_call[1]["runtime_execution_envelope"] == request["metadata"][
-        "yachiyo_execution_envelope"
-    ]
+    start_envelope = start_call[1]["runtime_execution_envelope"]
+    start_request = start_envelope["requests"][0]
+    assert start_request["request_id"] == (
+        "runtime-plan-test:request:1:desktop.inspect_app"
+    )
+    assert start_request["tool_name"] == "desktop.inspect_app"
+    assert start_request["desktop_execution_policy"]["source"] == (
+        "legacy_chat_direct_local"
+    )
     model_loop_call = [
         call for call in runtime.calls if call[0] == "execute_main_chat_model_loop"
     ][0]
-    assert model_loop_call[1]["runtime_execution_envelope"] == request["metadata"][
-        "yachiyo_execution_envelope"
-    ]
+    assert model_loop_call[1]["runtime_execution_envelope"] == start_envelope
     assert model_loop_call[1]["runtime_execution_metadata"]["yachiyo_runtime_planner"] is True
     assert model_loop_call[1]["runtime_execution_metadata"]["source"] == "launcher"
     direct_requests = model_loop_call[1]["direct_tool_requests"]

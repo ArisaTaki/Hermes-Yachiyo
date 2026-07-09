@@ -2077,6 +2077,7 @@ def _execution_request_checkpoint_policy(
         requires_post_action_verification=bool(
             runtime_metadata.get("requires_post_action_verification")
             or verification_targets
+            or (checkpoints and not runtime_metadata.get("requires_observation"))
         ),
     )
 

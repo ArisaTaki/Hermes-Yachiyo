@@ -52,7 +52,13 @@ AREA_PLANNER_CONTRACTS: dict[str, LegacyDesktopPlannerContract] = {
     "app_launch": LegacyDesktopPlannerContract(
         ("desktop_operation",),
         ("desktop.app_discovery", "desktop.app_control"),
-        ("desktop.list_apps", "app.open", "app.focus", "desktop.active_window"),
+        (
+            "desktop.list_apps",
+            "app.open",
+            "app.focus",
+            "desktop.active_window",
+            "desktop.verify",
+        ),
     ),
     "app_management": LegacyDesktopPlannerContract(
         ("desktop_operation",),
@@ -60,6 +66,7 @@ AREA_PLANNER_CONTRACTS: dict[str, LegacyDesktopPlannerContract] = {
         (
             "desktop.list_apps",
             "desktop.running_apps",
+            "desktop.list_windows",
             "app.show",
             "app.quit",
             "app.status",

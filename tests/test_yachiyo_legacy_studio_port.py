@@ -54,8 +54,11 @@ def test_legacy_studio_agent_run_appends_runtime_planner_events() -> None:
     plan_steps = events[1]["payload"]["plan"]["tool_plan"]["steps"]
     assert [step["tool_name"] for step in plan_steps[:2]] == ["workspace.read", "data.analyze"]
     execution_requests = events[1]["payload"]["runtime_execution_envelope"]["requests"]
-    assert [request["tool_name"] for request in execution_requests] == ["data.analyze"]
-    assert execution_requests[0]["step_id"] == "analyze-data-file"
+    assert [request["tool_name"] for request in execution_requests] == [
+        "workspace.read",
+        "data.analyze",
+    ]
+    assert execution_requests[1]["step_id"] == "analyze-data-file"
     assert events[2]["payload"]["task_core"]["workspace"]["title"] == "Data Analysis Workspace"
 
 
@@ -119,6 +122,54 @@ def test_legacy_studio_agent_run_forwards_direct_tool_requests() -> None:
     )
 
 
+def test_legacy_studio_agent_run_enriches_foreground_direct_tool_requests(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = _FakeStudioRunRuntime()
+    session_calls: list[tuple[dict[str, Any], bool]] = []
+
+    def fake_ensure(
+        envelope: dict[str, Any] | None,
+        *,
+        auto_start: bool = True,
+    ) -> dict[str, Any]:
+        session_calls.append((dict(envelope or {}), auto_start))
+        return _fake_running_isolated_session(["request:1:app.open"], ["app.open"])
+
+    monkeypatch.setattr(
+        "apps.shell.yachiyo_agent.legacy_ports."
+        "ensure_isolated_desktop_provider_session_for_envelope",
+        fake_ensure,
+    )
+
+    run = LegacyStudioPort(runtime).start_agent_run(
+        {
+            "agent_id": "agent-1",
+            "objective": "打开 Music",
+            "direct_tool_requests": [
+                {
+                    "tool": "app.open",
+                    "input": {"app_name": "Music"},
+                    "source": "agent_studio_runtime_plan",
+                }
+            ],
+        }
+    )
+
+    direct_request = runtime.agent_run_payload["direct_tool_requests"][0]
+
+    assert run["run_id"] == "agent-run-1"
+    assert session_calls[0][1] is True
+    assert session_calls[0][0]["requests"][0]["desktop_execution_policy"][
+        "prefer_isolated_desktop"
+    ] is True
+    assert direct_request["desktop_provider_session"]["running"] is True
+    assert direct_request["sandbox_provider"]["provider_id"] == "local-isolated-desktop"
+    assert direct_request["desktop_execution_route"]["selected_provider_id"] == (
+        "local-isolated-desktop"
+    )
+
+
 def test_legacy_studio_workflow_run_appends_runtime_planner_events() -> None:
     runtime = _FakeStudioRunRuntime()
 
@@ -147,12 +198,11 @@ def test_legacy_studio_workflow_run_appends_runtime_planner_events() -> None:
     assert [request["tool_name"] for request in envelope["requests"]] == [
         "desktop.list_apps",
         "app.open",
-        "desktop.active_window",
+        "desktop.verify",
     ]
     assert [request["tool"] for request in runtime.workflow_run_payload["direct_tool_requests"]] == [
         "desktop.list_apps",
         "app.open",
-        "desktop.active_window",
     ]
     events = runtime.events["workflow-run-1"]
     assert [event["event_type"] for event in events[:4]] == [
@@ -212,6 +262,67 @@ def test_legacy_studio_workflow_run_forwards_direct_tool_requests() -> None:
     assert runtime.workflow_run_payload["daily_desktop_planning_context"] == "打开 PixelForge"
 
 
+def test_legacy_studio_workflow_run_enriches_direct_requests_and_envelope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = _FakeStudioRunRuntime()
+
+    def fake_ensure(
+        envelope: dict[str, Any] | None,
+        *,
+        auto_start: bool = True,
+    ) -> dict[str, Any]:
+        assert auto_start is True
+        return _fake_running_isolated_session(["request-open"], ["app.open"])
+
+    monkeypatch.setattr(
+        "apps.shell.yachiyo_agent.legacy_ports."
+        "ensure_isolated_desktop_provider_session_for_envelope",
+        fake_ensure,
+    )
+    envelope = {
+        "decision_id": "decision-workflow",
+        "plan_id": "plan-workflow",
+        "requests": [
+            {
+                "request_id": "request-open",
+                "tool": "app.open",
+                "input": {"app_name": "PixelForge"},
+            }
+        ],
+    }
+
+    run = LegacyStudioPort(runtime).start_workflow_run(
+        {
+            "workflow_id": "workflow-1",
+            "objective": "打开 PixelForge",
+            "runtime_execution_envelope": envelope,
+            "direct_tool_requests": [
+                {
+                    "request_id": "request-open",
+                    "tool": "app.open",
+                    "input": {"app_name": "PixelForge"},
+                    "source": "agent_studio_runtime_plan",
+                }
+            ],
+        }
+    )
+
+    direct_request = runtime.workflow_run_payload["direct_tool_requests"][0]
+    envelope_request = runtime.workflow_run_payload["runtime_execution_envelope"][
+        "requests"
+    ][0]
+
+    assert run["workflow_run_id"] == "workflow-run-1"
+    assert direct_request["desktop_provider_session"]["running"] is True
+    assert direct_request["sandbox_provider"]["provider_id"] == "local-isolated-desktop"
+    assert runtime.workflow_run_payload["runtime_execution_envelope"][
+        "desktop_provider_session"
+    ]["running"] is True
+    assert envelope_request["desktop_provider_session"]["running"] is True
+    assert envelope_request["sandbox_provider"]["provider_id"] == "local-isolated-desktop"
+
+
 def test_legacy_studio_group_run_records_group_run_started_event() -> None:
     runtime = _FakeGroupRuntime()
 
@@ -236,6 +347,8 @@ def test_legacy_studio_group_run_records_group_run_started_event() -> None:
         "group.run.plan.created",
         "group.run.task_core.created",
         "group.run.plan.step",
+        "group.run.task.workspace_item.updated",
+        "group.run.task.workspace_item.updated",
         "group.run.task.todo.updated",
         "group.run.task.todo.updated",
         "group.run.task.checkpoint.updated",
@@ -328,13 +441,15 @@ def test_legacy_studio_group_run_records_member_failed_and_cancelled_events() ->
         "group.run.task_core.created",
         "group.run.plan.step",
     ]
-    assert event_types[6:10] == [
+    assert event_types[6:12] == [
+        "group.run.task.workspace_item.updated",
+        "group.run.task.workspace_item.updated",
         "group.run.task.todo.updated",
         "group.run.task.todo.updated",
         "group.run.task.checkpoint.updated",
         "group.run.task.checkpoint.updated",
     ]
-    assert event_types[10:] == [
+    assert event_types[12:] == [
         "group.member.started",
         "group.member.failed",
         "group.member.started",
@@ -588,6 +703,32 @@ def test_legacy_studio_port_reads_workflow_child_artifact_from_source_run() -> N
     assert runtime.last_artifact_request == {
         "run_id": "workflow-child-1",
         "artifact_path": "analysis.md",
+    }
+
+
+def _fake_running_isolated_session(
+    request_ids: list[str],
+    tool_names: list[str],
+) -> dict[str, Any]:
+    return {
+        "ok": True,
+        "needed": True,
+        "auto_start": True,
+        "started": True,
+        "running": True,
+        "status": "running",
+        "provider_id": "local-isolated-desktop",
+        "provider_kind": "sandbox_desktop",
+        "url": "http://127.0.0.1:19093",
+        "request_ids": request_ids,
+        "tool_names": tool_names,
+        "supported_tools": tool_names,
+        "adapter_ready": True,
+        "desktop_session_kind": "isolated_desktop",
+        "desktop_session_isolated": True,
+        "foreground_takeover_required": False,
+        "keyboard_mouse_capture_supported": True,
+        "source": "isolated_provider_session_manager",
     }
 
 

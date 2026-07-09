@@ -213,6 +213,11 @@ _LEGACY_CHAT_DIRECT_STRICT_PROVIDER_TOOLS = {
     "desktop.safe_click",
     "desktop.safe_scroll",
 }
+_AGENT_STUDIO_DIRECT_PROVIDER_POLICY_TOOL_PREFIXES = (
+    "app.",
+    "desktop.",
+    "media.",
+)
 
 
 def _rejection_reason(decision: dict[str, Any] | str | None) -> str:
@@ -1711,14 +1716,77 @@ class LegacyStudioPort:
             )
             run_metadata["yachiyo_execution_envelope"] = dict(runtime_execution_envelope)
             run_payload["metadata"] = run_metadata
+        if "runtime_execution_envelope" not in run_payload:
+            planner_run_metadata = runtime_planner_metadata(
+                planner_decision,
+                allowed_tools=allowed_tools,
+                metadata=planner_metadata,
+            )
+            planner_envelope = planner_run_metadata.get("yachiyo_execution_envelope")
+            if isinstance(planner_envelope, Mapping):
+                planner_envelope = runtime_execution_envelope_payload_with_request_context(
+                    planner_envelope,
+                    {"agent_id": str(agent_id or "").strip()},
+                )
+                run_payload["runtime_execution_envelope"] = dict(planner_envelope)
+                run_metadata = (
+                    dict(run_payload.get("metadata"))
+                    if isinstance(run_payload.get("metadata"), dict)
+                    else {}
+                )
+                for key, value in planner_run_metadata.items():
+                    run_metadata.setdefault(key, value)
+                run_metadata["yachiyo_execution_envelope"] = dict(planner_envelope)
+                run_payload["metadata"] = run_metadata
+        provider_session_metadata = _agent_studio_direct_provider_session_metadata(
+            planner_metadata
+        )
         direct_tool_request = request.get("direct_tool_request")
         if isinstance(direct_tool_request, dict):
-            run_payload["direct_tool_request"] = dict(direct_tool_request)
+            annotated_requests = _direct_tool_requests_with_desktop_provider_session(
+                [dict(direct_tool_request)],
+                metadata=provider_session_metadata,
+            )
+            run_payload["direct_tool_request"] = (
+                annotated_requests[0]
+                if annotated_requests
+                else dict(direct_tool_request)
+            )
         direct_tool_requests = request.get("direct_tool_requests")
         if isinstance(direct_tool_requests, list):
-            run_payload["direct_tool_requests"] = [
+            explicit_requests = [
                 dict(item) for item in direct_tool_requests if isinstance(item, dict)
             ]
+            run_payload["direct_tool_requests"] = (
+                _direct_tool_requests_with_desktop_provider_session(
+                    explicit_requests,
+                    metadata=provider_session_metadata,
+                )
+            )
+        if isinstance(run_payload.get("runtime_execution_envelope"), Mapping):
+            enriched_envelope = _runtime_execution_envelope_with_desktop_provider_session(
+                run_payload.get("runtime_execution_envelope"),
+                direct_tool_request=(
+                    run_payload.get("direct_tool_request")
+                    if isinstance(run_payload.get("direct_tool_request"), Mapping)
+                    else None
+                ),
+                direct_tool_requests=(
+                    run_payload.get("direct_tool_requests")
+                    if isinstance(run_payload.get("direct_tool_requests"), list)
+                    else None
+                ),
+                annotate_requests=True,
+            )
+            if enriched_envelope is not None:
+                run_payload["runtime_execution_envelope"] = enriched_envelope
+                run_metadata = (
+                    dict(run_payload.get("metadata"))
+                    if isinstance(run_payload.get("metadata"), dict)
+                    else {}
+                )
+                run_metadata["yachiyo_execution_envelope"] = enriched_envelope
+                run_payload["metadata"] = run_metadata
         planning_context = str(request.get("daily_desktop_planning_context") or "").strip()
         if planning_context:
             run_payload["daily_desktop_planning_context"] = planning_context
@@ -2831,7 +2899,20 @@ def _studio_workflow_run_payload(
         allowed_tools=allowed_tools,
     )
     if direct_tool_requests:
+        direct_tool_requests = _direct_tool_requests_with_desktop_provider_session(
+            direct_tool_requests,
+            metadata=_agent_studio_direct_provider_session_metadata(metadata),
+        )
         payload["direct_tool_requests"] = direct_tool_requests
+        enriched_envelope = _runtime_execution_envelope_with_desktop_provider_session(
+            payload.get("runtime_execution_envelope"),
+            direct_tool_requests=direct_tool_requests,
+            annotate_requests=True,
+        )
+        if enriched_envelope is not None:
+            payload["runtime_execution_envelope"] = enriched_envelope
+            metadata["yachiyo_execution_envelope"] = enriched_envelope
+            payload["metadata"] = metadata
 
     planning_context = str(request.get("daily_desktop_planning_context") or "").strip()
     if planning_context:
@@ -3012,6 +3093,8 @@ def _legacy_direct_request_needs_provider_session_policy(
     metadata: Mapping[str, Any] | None,
     legacy_chat_direct_local: bool,
 ) -> bool:
+    if _agent_studio_direct_provider_session_policy_requested(metadata):
+        return _agent_studio_direct_provider_policy_tool(tool_name)
     if not legacy_chat_direct_local:
         return False
     clean_tool = str(tool_name or "").strip()
@@ -3034,6 +3117,43 @@ def _strict_legacy_direct_foreground_provider_requested(
     ):
         return True
     return desktop_provider_session_strict_foreground_default(metadata)
+
+
+def _agent_studio_direct_provider_session_metadata(
+    metadata: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    payload = dict(metadata) if isinstance(metadata, Mapping) else {}
+    payload.setdefault("agent_studio_direct_tool_request", True)
+    payload.setdefault("auto_start_isolated_desktop_provider", True)
+    payload.setdefault("require_isolated_desktop_for_foreground", True)
+    return payload
+
+
+def _agent_studio_direct_provider_session_policy_requested(
+    metadata: Mapping[str, Any] | None,
+) -> bool:
+    if not isinstance(metadata, Mapping):
+        return False
+    source = str(metadata.get("source") or "").strip()
+    surface = str(metadata.get("surface") or "").strip()
+    return (
+        bool(metadata.get("agent_studio_direct_tool_request"))
+        or bool(metadata.get("planner_orchestration"))
+        or source
+        in {
+            "agent_studio",
+            "yachiyo_studio",
+            "agent_studio_runtime_plan",
+            "agent_studio_replan_recovery",
+            "agent_studio_planner_orchestration",
+        }
+        or surface == "agent_studio"
+    )
+
+
+def _agent_studio_direct_provider_policy_tool(tool_name: str) -> bool:
+    clean_tool = str(tool_name or "").strip()
+    return clean_tool.startswith(_AGENT_STUDIO_DIRECT_PROVIDER_POLICY_TOOL_PREFIXES)
 
 
 def _direct_tool_request_with_provider_session_policy(
@@ -3107,6 +3227,7 @@ def _runtime_execution_envelope_with_desktop_provider_session(
     *,
     direct_tool_request: Mapping[str, Any] | None = None,
     direct_tool_requests: list[dict[str, Any]] | None = None,
+    annotate_requests: bool = False,
 ) -> dict[str, Any] | None:
     if not isinstance(runtime_execution_envelope, Mapping):
         return None
@@ -3118,6 +3239,8 @@ def _runtime_execution_envelope_with_desktop_provider_session(
         return dict(runtime_execution_envelope)
     payload = dict(runtime_execution_envelope)
     payload.setdefault("desktop_provider_session", dict(session))
+    if annotate_requests:
+        return annotate_envelope_with_desktop_provider_session(payload, session)
     return payload
 
 
