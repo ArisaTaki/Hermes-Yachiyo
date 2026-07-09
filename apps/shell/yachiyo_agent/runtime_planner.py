@@ -1192,6 +1192,8 @@ class TaskIntentRouter:
             "app_name_hint": app_name_hint,
             "operation_hint": operation_hint,
         }
+        if _runtime_planner_preflight_ui_before_action(metadata):
+            inputs["preflight_ui_before_action"] = True
         if window_list is not None:
             inputs["window_list_hint"] = window_list
         if focus_window:
@@ -5291,6 +5293,9 @@ class RuntimePlanner:
         ui_operation_requested = _looks_like_ui_operation(
             intent.user_goal
         ) and operation_hint_value not in {"open", "focus"}
+        preflight_ui_before_action = bool(
+            intent.inputs.get("preflight_ui_before_action")
+        )
         if (
             ui_operation_requested
             or click_target
@@ -5302,14 +5307,56 @@ class RuntimePlanner:
             or hotkey
             or safe_type_text
         ) and (not foreground_submit_action or pre_submit_operation):
+            preflight_requested = (
+                preflight_ui_before_action
+                or _explicit_ui_observation_before_action_requested(intent.user_goal)
+            )
             if (
                 not inspect_preflight_step_id
-                and _explicit_ui_observation_before_action_requested(intent.user_goal)
+                and preflight_requested
                 and any(item for item in (click_target, type_target, safe_type_text, safe_click) if item)
             ):
                 observe_tool = _first_allowed(("desktop.ui_elements", "desktop.read_ui"), allowed)
                 if observe_tool:
-                    observe_payload: dict[str, Any] = {"limit": 80}
+                    if (
+                        preflight_ui_before_action
+                        and app_name
+                        and operation_uses_app_tool
+                        and not focus_step_added
+                        and not any(
+                            step.step_id
+                            in {
+                                "focus-opened-app",
+                                "open-or-focus-app",
+                                "open-selected-discovered-app",
+                            }
+                            for step in steps
+                        )
+                    ):
+                        prepare_tool = _first_allowed(
+                            app_control_tool_candidates(mode),
+                            allowed,
+                        )
+                        if prepare_tool:
+                            steps.append(
+                                _step(
+                                    intent,
+                                    "open-or-focus-app",
+                                    "Open or focus app",
+                                    "desktop.app_control",
+                                    prepare_tool,
+                                    input_preview={"app_name": app_name},
+                                    depends_on=["discover-desktop-state"],
+                                    reason=(
+                                        "Prepare the requested app before reading its UI "
+                                        "and running the foreground operation."
+                                    ),
+                                )
+                            )
+                    observe_payload = _preflight_ui_observation_input_preview(
+                        operation_preview,
+                        app_name=app_name,
+                    )
                     if _contains_any(intent.user_goal, ["按钮", "button", "buttons"]):
                         observe_payload["role_filter"] = "button"
                     observe_depends_on = ["discover-desktop-state"]
@@ -7851,6 +7898,27 @@ def _step_execution_mode_value(step: ToolPlanStepSnapshot, key: str) -> str:
     if isinstance(mode, Mapping):
         return str(mode.get(key) or "").strip()
     return str(getattr(mode, key, "") or "").strip()
+
+
+def _runtime_planner_preflight_ui_before_action(
+    metadata: Mapping[str, Any] | None,
+) -> bool:
+    if not isinstance(metadata, Mapping):
+        return False
+    if _strategy_truthy(
+        metadata,
+        "runtime_planner_preflight_ui_before_action",
+        "desktop_preflight_ui_before_action",
+        "preflight_ui_before_action",
+    ):
+        return True
+    policy = _planner_desktop_execution_policy(metadata)
+    return _strategy_truthy(
+        policy,
+        "runtime_planner_preflight_ui_before_action",
+        "desktop_preflight_ui_before_action",
+        "preflight_ui_before_action",
+    )
 
 
 def _strategy_truthy(source: Mapping[str, Any], *keys: str) -> bool:
@@ -12603,6 +12671,22 @@ def _desktop_verify_depends_on_ui_operation(depends_on: list[str]) -> bool:
         step_id.startswith("operate-foreground-ui") or step_id == "submit-foreground-ui"
         for step_id in depends_on
     )
+
+
+def _preflight_ui_observation_input_preview(
+    operation_preview: Mapping[str, Any],
+    *,
+    app_name: str,
+) -> dict[str, Any]:
+    preview = {
+        key: operation_preview[key]
+        for key in ("target", "role_filter", "limit", "selection_source", "query")
+        if key in operation_preview and operation_preview[key] not in (None, "")
+    }
+    if app_name:
+        preview["app_name"] = app_name
+    preview.setdefault("limit", 80)
+    return preview
 
 
 def _desktop_verify_input_preview(

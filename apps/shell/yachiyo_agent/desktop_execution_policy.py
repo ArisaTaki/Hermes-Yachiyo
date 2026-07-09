@@ -1006,6 +1006,7 @@ def with_agent_studio_desktop_execution_policy(
     payload.setdefault("desktop_provider_route_readonly", True)
     payload.setdefault("desktop_provider_route_foreground", True)
     payload.setdefault("desktop_provider_local_native", True)
+    payload.setdefault("runtime_planner_preflight_ui_before_action", True)
     if _has_desktop_execution_policy(payload):
         return payload
     payload["desktop_execution_policy"] = agent_studio_desktop_execution_policy()
@@ -1090,6 +1091,7 @@ def with_daily_entrypoint_desktop_execution_policy(
     payload.setdefault("desktop_provider_route_readonly", True)
     payload.setdefault("desktop_provider_route_foreground", True)
     payload.setdefault("desktop_provider_local_native", True)
+    payload.setdefault("runtime_planner_preflight_ui_before_action", True)
     if user_foreground_takeover_allowed(payload):
         payload["desktop_execution_policy"] = {
             **daily_entrypoint_desktop_execution_policy(surface=surface),

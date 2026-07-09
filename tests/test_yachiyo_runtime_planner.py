@@ -35456,7 +35456,6 @@ def test_runtime_planner_execution_keeps_open_and_focus_verification_steps() -> 
     assert open_envelope.requests[-1].observation_retry == {
         "from_tool": "desktop.active_window",
         "tool": "desktop.active_window",
-        "input": {},
         "reason": "verification_failed",
     }
     open_projected_requests = runtime_execution_requests_from_envelope_payload(
@@ -35884,6 +35883,54 @@ def test_runtime_execution_envelope_targets_foreground_ui_actions() -> None:
         "step_id": "verify-desktop-result",
         "verified_step_ids": ["operate-foreground-ui"],
     }
+
+
+def test_runtime_planner_preflights_ui_before_desktop_mutation_when_requested() -> None:
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.click_ui_element",
+        "desktop.ui_elements",
+    ]
+    decision = RuntimePlanner().decision(
+        "打开 PixelForge 并点击导出按钮",
+        allowed_tools=allowed_tools,
+        metadata={"runtime_planner_preflight_ui_before_action": True},
+    )
+    envelope = runtime_execution_envelope_from_decision(
+        decision,
+        allowed_tools=allowed_tools,
+        full_plan=True,
+        metadata={"runtime_planner_preflight_ui_before_action": True},
+    )
+
+    assert envelope is not None
+    assert [request.step_id for request in envelope.requests] == [
+        "discover-desktop-state",
+        "open-or-focus-app",
+        "read-foreground-ui",
+        "operate-foreground-ui",
+        "verify-desktop-result",
+    ]
+    assert [request.runtime_stage for request in envelope.requests] == [
+        "discover",
+        "operate",
+        "discover",
+        "operate",
+        "verify",
+    ]
+    assert envelope.requests[2].tool_name == "desktop.ui_elements"
+    assert envelope.requests[2].input == {
+        "target": "导出",
+        "role_filter": "button",
+        "limit": 80,
+        "app_name": "PixelForge",
+    }
+    assert envelope.requests[3].depends_on == ["read-foreground-ui"]
+    assert envelope.requests[4].depends_on == ["operate-foreground-ui"]
+    assert envelope.requests[4].task_verification_targets[0]["step_id"] == (
+        "operate-foreground-ui"
+    )
 
 
 def test_runtime_execution_envelope_keeps_selected_app_scope_for_foreground_typing() -> None:

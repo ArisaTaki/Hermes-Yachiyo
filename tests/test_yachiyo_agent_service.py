@@ -2339,12 +2339,27 @@ def test_agent_studio_service_plans_discovered_desktop_app_execution() -> None:
     assert envelope.intent_kind == "desktop_operation"
     assert [request.tool_name for request in envelope.requests] == [
         "desktop.list_apps",
+        "app.focus",
+        "desktop.ui_elements",
         "app.focus_and_click_ui_element",
         "desktop.ui_elements",
     ]
     assert envelope.requests[0].runtime_stage == "discover"
     assert envelope.requests[0].input == {"query": "PixelForge", "limit": 20}
     assert envelope.requests[1].input == {
+        "app_name": "PixelForge",
+        "selection_source": "desktop.list_apps",
+        "query": "PixelForge",
+    }
+    assert envelope.requests[2].step_id == "read-foreground-ui"
+    assert envelope.requests[2].runtime_stage == "discover"
+    assert envelope.requests[2].depends_on == ["open-or-focus-app"]
+    assert envelope.requests[2].input == {
+        "target": "Export",
+        "limit": 80,
+        "app_name": "PixelForge",
+    }
+    assert envelope.requests[3].input == {
         "app_name": "PixelForge",
         "target": "Export",
         "role_filter": "",
@@ -2353,16 +2368,16 @@ def test_agent_studio_service_plans_discovered_desktop_app_execution() -> None:
         "selection_source": "desktop.list_apps",
         "query": "PixelForge",
     }
-    assert envelope.requests[1].requires_post_action_verification is True
-    assert envelope.requests[2].input == {
+    assert envelope.requests[3].requires_post_action_verification is True
+    assert envelope.requests[4].input == {
         "app_name": "PixelForge",
         "selection_source": "desktop.list_apps",
         "query": "PixelForge",
         "limit": 80,
     }
-    assert envelope.requests[2].runtime_stage == "verify"
-    assert envelope.requests[2].requires_observation is True
-    assert envelope.requests[2].requires_post_action_verification is False
+    assert envelope.requests[4].runtime_stage == "verify"
+    assert envelope.requests[4].requires_observation is True
+    assert envelope.requests[4].requires_post_action_verification is False
 
 
 def test_agent_studio_service_projects_provider_session_recovery_without_autostart(
@@ -2445,6 +2460,7 @@ def test_agent_studio_service_projects_provider_session_recovery_without_autosta
     }
     assert [request["tool"] for request in action.deferred_continuation] == [
         "desktop.list_apps",
+        "desktop.ui_elements",
         "app.focus_and_click_ui_element",
         "desktop.ui_elements",
     ]
