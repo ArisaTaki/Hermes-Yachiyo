@@ -146,6 +146,9 @@ def test_legacy_studio_agent_run_enriches_foreground_direct_tool_requests(
         {
             "agent_id": "agent-1",
             "objective": "打开 Music",
+            "metadata": {
+                "provider_manifest": "tmp/virtual-provider.manifest.json",
+            },
             "direct_tool_requests": [
                 {
                     "tool": "app.open",
@@ -163,6 +166,9 @@ def test_legacy_studio_agent_run_enriches_foreground_direct_tool_requests(
     assert session_calls[0][0]["requests"][0]["desktop_execution_policy"][
         "prefer_isolated_desktop"
     ] is True
+    assert session_calls[0][0]["provider_manifest"] == (
+        "tmp/virtual-provider.manifest.json"
+    )
     assert direct_request["desktop_provider_session"]["running"] is True
     assert direct_request["sandbox_provider"]["provider_id"] == "local-isolated-desktop"
     assert direct_request["desktop_execution_route"]["selected_provider_id"] == (

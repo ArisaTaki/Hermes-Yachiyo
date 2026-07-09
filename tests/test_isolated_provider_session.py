@@ -1174,6 +1174,72 @@ def test_ensure_isolated_provider_session_detects_keyboard_mouse_requests(
     )
 
 
+def test_ensure_isolated_provider_session_passes_manifest_to_auto_start(
+    monkeypatch,
+) -> None:
+    starts: list[dict[str, Any] | None] = []
+
+    monkeypatch.setattr(
+        session_module,
+        "isolated_desktop_provider_session_status",
+        lambda: {"ok": True, "status": "stopped", "running": False},
+    )
+    monkeypatch.setattr(
+        session_module,
+        "start_isolated_desktop_provider_session",
+        lambda request=None: starts.append(request)
+        or {
+            "ok": True,
+            "status": "running",
+            "running": True,
+            "started": True,
+            "provider_id": "real-virtual-desktop",
+            "url": "http://127.0.0.1:29101",
+            "provider_status": {
+                "desktop_session_kind": "virtual_desktop",
+                "desktop_session_isolated": True,
+                "foreground_takeover_required": False,
+                "keyboard_mouse_capture_supported": True,
+                "requires_real_virtual_desktop_backend": False,
+                "supported_tools": ["app.open"],
+            },
+        },
+    )
+    envelope = {
+        "provider_manifest": "tmp/virtual-provider.manifest.json",
+        "requests": [
+            {
+                "request_id": "request-open",
+                "tool_name": "app.open",
+                "input": {"app_name": "Music"},
+                "desktop_execution_policy": {
+                    "source": "agent_studio",
+                    "mode": "preview_input",
+                    "prefer_isolated_desktop": True,
+                },
+                "desktop_execution_route": {
+                    "status": "real_virtual_desktop_provider_required",
+                    "blocking_conditions": ["real_virtual_desktop_backend_required"],
+                },
+            }
+        ],
+    }
+
+    session = ensure_isolated_desktop_provider_session_for_envelope(envelope)
+
+    assert starts == [
+        {
+            "tools": ["app.open"],
+            "requires_real_virtual_desktop_backend": True,
+            "provider_manifest": "tmp/virtual-provider.manifest.json",
+        }
+    ]
+    assert session["needed"] is True
+    assert session["running"] is True
+    assert session["started"] is True
+    assert session["requires_real_virtual_desktop_backend"] is True
+
+
 def test_annotate_envelope_routes_isolated_preferred_app_open_through_running_provider() -> None:
     session = {
         "ok": True,

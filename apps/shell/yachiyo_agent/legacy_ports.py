@@ -3017,7 +3017,10 @@ def _direct_tool_requests_with_desktop_provider_session(
         envelope_requests.append(envelope_request)
     if not envelope_requests:
         return [dict(request) for request in direct_tool_requests if isinstance(request, dict)]
-    envelope = {"requests": envelope_requests}
+    envelope: dict[str, Any] = {"requests": envelope_requests}
+    provider_manifest = _desktop_provider_manifest_path_from_metadata(metadata)
+    if provider_manifest:
+        envelope["provider_manifest"] = provider_manifest
     try:
         session = ensure_isolated_desktop_provider_session_for_envelope(
             envelope,
@@ -3075,6 +3078,40 @@ def _direct_tool_requests_with_desktop_provider_session(
         else:
             result.append(next_request)
     return result
+
+
+def _desktop_provider_manifest_path_from_metadata(
+    metadata: Mapping[str, Any] | None,
+) -> str:
+    if not isinstance(metadata, Mapping):
+        return ""
+    for key in (
+        "provider_manifest",
+        "provider_manifest_path",
+        "desktop_provider_manifest",
+        "desktop_provider_manifest_path",
+    ):
+        value = str(metadata.get(key) or "").strip()
+        if value:
+            return value
+    for key in (
+        "desktop_provider_session",
+        "desktop_execution_policy",
+        "sandbox_provider",
+    ):
+        nested = metadata.get(key)
+        if not isinstance(nested, Mapping):
+            continue
+        for manifest_key in (
+            "provider_manifest",
+            "provider_manifest_path",
+            "desktop_provider_manifest",
+            "desktop_provider_manifest_path",
+        ):
+            value = str(nested.get(manifest_key) or "").strip()
+            if value:
+                return value
+    return ""
 
 
 def _direct_tool_request_with_provider_execution_context(
