@@ -746,6 +746,8 @@ class TaskIntentRouter:
                 "打开",
                 "启动",
                 "开启",
+                "开一下",
+                "开下",
                 "开起来",
                 "切到",
                 "聚焦",
@@ -806,6 +808,8 @@ class TaskIntentRouter:
             score = 0.24
         if score <= 0 and app_preferences:
             score = 0.2
+        if score <= 0 and _app_name_hint(text) and _explicit_app_open_request(text):
+            score = 0.18
         if (
             score <= 0
             and _app_name_hint(text)
@@ -3398,7 +3402,19 @@ class RuntimePlanner:
             mode = "focus"
         if app_name and safe_shortcut and not _contains_any(
             intent.user_goal,
-            ["打开", "启动", "开启", "运行", "拉起", "open ", "launch ", "start "],
+            [
+                "打开",
+                "启动",
+                "开启",
+                "运行",
+                "拉起",
+                "开一下",
+                "开下",
+                "open ",
+                "launch ",
+                "start ",
+                "start up",
+            ],
         ):
             mode = "focus"
         operation_mode_hint = str(
@@ -3409,6 +3425,8 @@ class RuntimePlanner:
         if operation_mode_hint in {"open", "focus"}:
             mode = operation_mode_hint
         click_target = click_target_hint(intent.user_goal)
+        if click_target and _app_find_then_open_request(intent.user_goal):
+            click_target = None
         if (
             click_target
             and _click_target_needs_observation_choice(intent.user_goal, click_target)
@@ -5269,8 +5287,12 @@ class RuntimePlanner:
                 )
             )
             return steps
+        operation_hint_value = str(intent.inputs.get("operation_hint") or "").strip()
+        ui_operation_requested = _looks_like_ui_operation(
+            intent.user_goal
+        ) and operation_hint_value not in {"open", "focus"}
         if (
-            _looks_like_ui_operation(intent.user_goal)
+            ui_operation_requested
             or click_target
             or type_target
             or primary_safe_shortcut
@@ -20702,8 +20724,25 @@ def _app_name_hint(text: str) -> str:
         r"(?:切到|切回|聚焦|激活)(?:一下|下|到前台|前台)?\s*"
         r"(?:吗|嘛|呢|吧|么|可以|可不可以|行不行|好不好|好吗|好么)?[?？。！!]*$",
         r"(?:go\s+back\s+to|switch\s+back\s+to|back\s+to)\s+(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40})",
+        r"^(?:帮我|请|麻烦|能否|能不能|能|可以|可不可以)?(?:直接)?"
+        r"(?:打开|启动|开启|运行|拉起|开)(?:一下|下|起来)?\s*"
+        r"(?P<polite_app_cn>[\w .·-]{1,40}?)\s*"
+        r"(?:这个|那个|该)?(?:应用(?:程序)?|app|软件)?"
+        r"(?:吗|嘛|呢|吧|么|可以|可不可以|行不行|好不好|好吗|好么)?[?？。！!]*$",
+        r"^(?:帮我|请|麻烦)?(?:找一下|找下|找找|找)\s*"
+        r"(?P<find_open_app_cn>[\w .·-]{1,40}?)\s*"
+        r"(?:并|然后|再|接着|之后|后)\s*"
+        r"(?:打开|启动|开启|运行|拉起|开)(?:一下|下|起来)?"
+        r"(?:吗|嘛|呢|吧|么|可以|可不可以|行不行|好不好|好吗|好么)?[?？。！!]*$",
+        r"^(?:please\s+)?(?:find|look\s+for)\s+"
+        r"(?P<find_open_app_en>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s+"
+        r"(?:and|then)\s+(?:open|launch|start(?:\s+up)?)(?:\s+it)?"
+        r"(?:\s+for\s+me)?(?:\s+please)?[.!?]*$",
+        r"^(?:please\s+)?(?:open|launch|start(?:\s+up)?|focus|activate)\s+"
+        r"(?P<polite_app_en>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)"
+        r"(?:\s+for\s+me)?(?:\s+please)?[.!?]*$",
         r"(?:can|could|would)\s+you\s+(?:please\s+)?"
-        r"(?:open|launch|focus|start)\s+(?P<polite_app>[A-Za-z][A-Za-z0-9 ._-]{1,40})",
+        r"(?:open|launch|focus|start(?:\s+up)?)\s+(?P<polite_app>[A-Za-z][A-Za-z0-9 ._-]{1,40})",
         r"(?:open|launch|focus|start)\s+(?:the\s+)?(?:app|application)\s+(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40})",
         r"(?:bring|switch)\s+(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s+(?:to\s+(?:the\s+)?(?:front|foreground)|forward)",
         r"(?:activate)\s+(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40})",
@@ -21216,6 +21255,7 @@ def _clean_app_name_hint(value: str) -> str:
         flags=re.IGNORECASE,
     ).strip(" .，,。")
     app = re.sub(r"\s*(?:一下|下|起来)$", "", app).strip(" .，,。")
+    app = re.sub(r"\s*(?:这个|那个|该)$", "", app).strip(" .，,。")
     app = re.sub(r"\s*(?:的|里(?:的)?|里面(?:的)?|中(?:的)?|上(?:的)?|内(?:的)?)$", "", app).strip(" .，,。")
     app = re.sub(r"\s*(?:在|里|里面|中|上|内)$", "", app).strip(" .，,。")
     app = re.sub(r"\s+(?:app|application)$", "", app, flags=re.IGNORECASE).strip(" .，,。")
@@ -23240,7 +23280,35 @@ def _desktop_content_artifact_hint(text: str) -> dict[str, str]:
 
 
 def _explicit_app_open_request(text: str) -> bool:
-    return _contains_any(text, ("打开", "启动", "开启", "运行", "拉起", "open ", "launch ", "start "))
+    return _contains_any(
+        text,
+        ("打开", "启动", "开启", "运行", "拉起", "open ", "launch ", "start "),
+    ) or bool(
+        re.search(r"(?:开一下|开下|\bstart\s+up\b)", text, flags=re.IGNORECASE)
+        or re.search(r"开\s+[\w.·-]", text, flags=re.IGNORECASE)
+    )
+
+
+def _app_find_then_open_request(text: str) -> bool:
+    value = _clean_prompt(text)
+    if not value:
+        return False
+    return bool(
+        re.search(
+            r"^(?:帮我|请|麻烦)?(?:找一下|找下|找找|找)\s*"
+            r"[\w .·-]{1,40}?\s*(?:并|然后|再|接着|之后|后)\s*"
+            r"(?:打开|启动|开启|运行|拉起|开)(?:一下|下|起来)?",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:find|look\s+for)\s+"
+            r"[A-Za-z][A-Za-z0-9 ._-]{1,40}?\s+"
+            r"(?:and|then)\s+(?:open|launch|start(?:\s+up)?)\b",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _looks_like_foreground_submit_scope(value: str, lowered: str) -> bool:
@@ -24028,6 +24096,8 @@ def _desktop_operation_hint(text: str) -> str:
         return "focus_window"
     if window_list_hint(text) is not None:
         return "list_windows"
+    if _app_find_then_open_request(text):
+        return "open"
     if click_target_hint(text):
         return "click"
     if ui_inspection_hint(text) is not None:
@@ -24054,7 +24124,7 @@ def _desktop_operation_hint(text: str) -> str:
         return "create"
     if _contains_any(text, ["play", "播放"]):
         return "play"
-    if _contains_any(text, ["open", "launch", "打开", "启动"]):
+    if _contains_any(text, ["open", "launch", "start up", "打开", "启动", "开一下", "开下"]):
         return "open"
     return ""
 

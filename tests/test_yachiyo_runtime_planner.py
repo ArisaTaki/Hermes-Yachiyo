@@ -229,6 +229,38 @@ def test_runtime_planner_generic_app_aliases_are_not_legacy_app_names() -> None:
         assert is_legacy_app_name_hint(generic_name) is False
 
 
+def test_runtime_planner_routes_polite_unknown_app_open_phrases_to_discovery_chain() -> None:
+    allowed_tools = ["desktop.list_apps", "app.open", "desktop.verify"]
+    cases = (
+        ("帮我开一下 PixelForge", "PixelForge"),
+        ("找一下 PixelForge 并打开", "PixelForge"),
+        ("please start up PixelForge for me", "PixelForge"),
+        ("find PixelForge and open it", "PixelForge"),
+        ("open the newly installed app PixelForge", "PixelForge"),
+        ("能打开 DaVinci Resolve 这个应用吗", "DaVinci Resolve"),
+    )
+
+    for prompt, expected_app in cases:
+        decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+
+        assert decision.selected_intent.kind == "desktop_operation"
+        assert decision.selected_intent.inputs["app_name_hint"] == expected_app
+        assert decision.selected_intent.inputs["operation_hint"] == "open"
+        assert [
+            step.tool_name for step in decision.plan.tool_plan.steps
+        ] == ["desktop.list_apps", "app.open", "desktop.verify"]
+        assert _step_by_id(decision, "discover-desktop-state").input_preview == {
+            "query": expected_app,
+            "limit": 20,
+        }
+        assert _step_by_id(decision, "open-or-focus-app").input_preview == {
+            "app_name": expected_app,
+        }
+        assert _step_by_id(decision, "verify-desktop-result").input_preview == {
+            "app_name": expected_app,
+        }
+
+
 def test_runtime_planner_web_destinations_are_behind_compatibility_boundary() -> None:
     assert legacy_known_web_destination_url_hint("打开 GitHub") == "https://github.com"
     assert (
