@@ -41,6 +41,64 @@ def test_public_task_progress_events_preserve_task_group_workflow_context() -> N
         assert event.payload["status"] == "completed"
 
 
+def test_task_progress_result_preview_preserves_desktop_provider_evidence() -> None:
+    events = public_task_progress_events_for_tool_result(
+        tool_request={
+            **_tool_request(),
+            "tool": "desktop.safe_type_text",
+        },
+        tool_event={
+            "event": "agent.tool.call",
+            "detail": "desktop.safe_type_text",
+            "result": {
+                "ok": True,
+                "summary": "typed in isolated desktop",
+                "desktop_execution_provider_routed": True,
+                "desktop_execution_provider": {
+                    "provider_kind": "sandbox_desktop",
+                    "provider_id": "sandbox-1",
+                    "adapter_registered": True,
+                    "route_id": "route-1",
+                },
+                "desktop_execution_route": {
+                    "status": "sandbox_ready",
+                    "selected_provider_kind": "sandbox_desktop",
+                    "selected_provider_id": "sandbox-1",
+                    "can_execute": True,
+                    "sandbox_required": True,
+                },
+                "sandbox_provider": {
+                    "provider_kind": "sandbox_desktop",
+                    "provider_id": "sandbox-1",
+                    "status": "available",
+                    "desktop_session_isolated": True,
+                    "foreground_takeover_required": False,
+                },
+                "desktop_provider_session": {
+                    "provider_id": "sandbox-1",
+                    "running": True,
+                    "desktop_session_kind": "isolated_desktop",
+                    "desktop_session_isolated": True,
+                },
+            },
+        },
+        run_id="run-1",
+        after_sequence=20,
+    )
+
+    preview = events[1].payload["result_preview"]["desktop_provider"]
+    assert preview["routed"] is True
+    assert preview["blocked"] is False
+    assert preview["provider"]["provider_id"] == "sandbox-1"
+    assert preview["route"]["status"] == "sandbox_ready"
+    assert preview["sandbox_provider"]["desktop_session_isolated"] is True
+    assert preview["desktop_provider_session"]["desktop_session_kind"] == (
+        "isolated_desktop"
+    )
+    assert "url" not in preview["desktop_provider_session"]
+    assert "env" not in preview["desktop_provider_session"]
+
+
 def test_public_task_progress_events_mark_tool_start_active() -> None:
     events = public_task_progress_events_for_tool_start(
         tool_request=_tool_request(),
@@ -656,7 +714,22 @@ def test_task_replan_payloads_preserve_failed_recovery_action_context() -> None:
         tool_event={
             "event": "agent.tool.call",
             "detail": "terminal.run",
-            "result": {"ok": False, "error": "script failed"},
+            "result": {
+                "ok": False,
+                "error": "script failed",
+                "desktop_execution_provider_routed": True,
+                "blocked_by_desktop_execution_provider": True,
+                "desktop_execution_provider": {
+                    "provider_kind": "sandbox_desktop",
+                    "provider_id": "sandbox-1",
+                    "adapter_registered": True,
+                },
+                "desktop_execution_route": {
+                    "status": "provider_unavailable",
+                    "selected_provider_id": "sandbox-1",
+                    "can_execute": False,
+                },
+            },
         },
         event_scope="workflow.run",
         run_id="workflow-run-1",
@@ -688,6 +761,11 @@ def test_task_replan_payloads_preserve_failed_recovery_action_context() -> None:
         "analyze-data-file"
     )
     assert metadata["failed_recovery_result_preview"]["error"] == "script failed"
+    provider_preview = metadata["failed_recovery_result_preview"]["desktop_provider"]
+    assert provider_preview["routed"] is True
+    assert provider_preview["blocked"] is True
+    assert provider_preview["provider"]["provider_id"] == "sandbox-1"
+    assert provider_preview["route"]["status"] == "provider_unavailable"
 
 
 def _tool_request() -> dict:

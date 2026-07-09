@@ -1581,7 +1581,15 @@ def _sandbox_route_decision(
             "blocking_conditions": simulated_blockers,
             **provider_context,
         }
-    if _sandbox_route_requires_isolated_foreground_session(route, provider_context):
+    route_context = {
+        **dict(route),
+        "selected_provider_kind": provider_kind,
+        "selected_provider_id": provider_id,
+    }
+    if _sandbox_route_requires_isolated_foreground_session(
+        route_context,
+        provider_context,
+    ):
         return {
             **dict(route),
             "selected_provider_kind": provider_kind,
@@ -1692,7 +1700,7 @@ def _desktop_provider_route_context(
     payload["requires_user_foreground_session"] = requires_user_session and not isolated_session
     payload["user_foreground_takeover_risk"] = bool(
         payload["requires_user_foreground_session"]
-        and str(tool_name or "").strip() in _USER_FOREGROUND_TAKEOVER_TOOLS
+        and _tool_can_take_over_user_foreground(tool_name)
     )
     return payload
 
@@ -1865,12 +1873,27 @@ def _sandbox_route_requires_isolated_foreground_session(
 ) -> bool:
     if not bool(provider_context.get("user_foreground_takeover_risk")):
         return False
+    clean_tool = str(route.get("tool_name") or "").strip()
+    provider_kind = str(route.get("selected_provider_kind") or "").strip()
+    if (
+        provider_kind == "local_desktop"
+        and clean_tool in _LOCAL_LOW_RISK_FOREGROUND_TOOLS
+    ):
+        return False
     if bool(route.get("foreground_takeover_allowed")):
         return False
     requested_mode = (
         str(route.get("requested_mode") or "").strip().lower().replace("-", "_")
     )
     return bool(route.get("isolated_desktop_preferred")) or requested_mode == "sandbox_preferred"
+
+
+def _tool_can_take_over_user_foreground(tool_name: str) -> bool:
+    clean_tool = str(tool_name or "").strip()
+    return (
+        clean_tool in _USER_FOREGROUND_TAKEOVER_TOOLS
+        or clean_tool in _LOCAL_LOW_RISK_FOREGROUND_TOOLS
+    )
 
 
 def _execution_mode_payload(value: Mapping[str, Any] | Any | None) -> dict[str, Any]:

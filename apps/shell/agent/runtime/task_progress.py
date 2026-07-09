@@ -5,6 +5,9 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from typing import Any
 
+from apps.shell.agent.runtime.desktop_provider_result_preview import (
+    desktop_provider_result_preview,
+)
 from apps.shell.agent.runtime.event_scopes import (
     runtime_progress_base_event_type as _runtime_progress_base_event_type,
     runtime_progress_event_payload as _runtime_progress_event_payload,
@@ -1044,6 +1047,9 @@ def _task_progress_result_preview(result: Mapping[str, Any]) -> dict[str, Any]:
     stderr = str(result.get("stderr") or "").strip()
     if stderr:
         preview["stderr"] = stderr[:500]
+    provider_preview = desktop_provider_result_preview(result)
+    if provider_preview:
+        preview["desktop_provider"] = provider_preview
     return preview
 
 

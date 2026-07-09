@@ -1176,10 +1176,6 @@ def desktop_execution_route_requires_provider(route: Mapping[str, Any] | Any) ->
     provider_kind = _route_provider_kind(route)
     if not provider_kind or provider_kind in _DEFAULT_PROVIDER_KINDS:
         return False
-    if provider_kind == LOCAL_DESKTOP_PROVIDER_KIND and not bool(
-        route.get("sandbox_required")
-    ):
-        return False
     if bool(route.get("provider_execution_required")):
         return True
     if provider_kind == "sandbox_desktop":

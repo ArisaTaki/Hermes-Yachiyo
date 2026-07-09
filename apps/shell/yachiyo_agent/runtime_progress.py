@@ -5,14 +5,17 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any, Literal
 
+from apps.shell.agent.runtime.desktop_provider_result_preview import (
+    desktop_provider_result_preview,
+)
+from apps.shell.agent.runtime.event_scopes import (
+    runtime_progress_base_event_type as _runtime_progress_base_event_type,
+)
 from apps.shell.agent.runtime.task_progress import (
     append_task_progress_events_for_tool_result as _append_task_progress_events,
 )
 from apps.shell.agent.runtime.task_progress import (
     append_task_progress_events_for_tool_start as _append_task_start_events,
-)
-from apps.shell.agent.runtime.event_scopes import (
-    runtime_progress_base_event_type as _runtime_progress_base_event_type,
 )
 
 from .contracts import PlannerDecisionSnapshot, PublicRunEvent
@@ -478,6 +481,9 @@ def _failure_result_preview(result: Mapping[str, Any]) -> dict[str, Any]:
     ):
         if key in result:
             preview[key] = result.get(key)
+    provider_preview = desktop_provider_result_preview(result)
+    if provider_preview:
+        preview["desktop_provider"] = provider_preview
     return preview
 
 
