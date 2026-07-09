@@ -865,6 +865,7 @@ def desktop_execution_route_decision(
     local_provider = _local_desktop_provider_payload(decision_context)
     if (
         local_provider
+        and _local_desktop_fallback_allowed(sandbox_provider, clean_tool)
         and is_readonly_desktop_provider_tool(clean_tool)
         and sandbox_desktop_provider_can_execute_tool(local_provider, clean_tool)
     ):
@@ -880,6 +881,7 @@ def desktop_execution_route_decision(
         )
     if (
         local_provider
+        and _local_desktop_fallback_allowed(sandbox_provider, clean_tool)
         and _local_low_risk_foreground_tool_allowed(clean_tool, decision_context)
         and sandbox_desktop_provider_can_execute_tool(local_provider, clean_tool)
     ):
@@ -1883,6 +1885,20 @@ def _route_with_ready_reason(route: Mapping[str, Any], reason: str) -> dict[str,
     ):
         payload["reason"] = reason
     return payload
+
+
+def _local_desktop_fallback_allowed(
+    sandbox_provider: Mapping[str, Any],
+    tool_name: str,
+) -> bool:
+    provider_kind = str(sandbox_provider.get("provider_kind") or "").strip()
+    if provider_kind == "local_desktop":
+        return True
+    if not bool(sandbox_provider.get("available")):
+        return True
+    if _simulated_desktop_provider_blockers(sandbox_provider):
+        return True
+    return not sandbox_desktop_provider_can_execute_tool(sandbox_provider, tool_name)
 
 
 def _route_with_provider_auto_start(

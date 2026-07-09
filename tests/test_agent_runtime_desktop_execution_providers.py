@@ -699,6 +699,40 @@ def test_local_desktop_provider_status_routes_safe_app_activation(monkeypatch) -
     ]
 
 
+def test_configured_sandbox_provider_wins_over_local_desktop_fallback(monkeypatch) -> None:
+    monkeypatch.delenv("OHA_YACHIYO_DESKTOP_PROVIDER_URL", raising=False)
+    monkeypatch.delenv("OHA_YACHIYO_SANDBOX_DESKTOP_PROVIDER_URL", raising=False)
+    monkeypatch.delenv("OHA_YACHIYO_DESKTOP_PROVIDER_EXECUTE_URL", raising=False)
+    monkeypatch.delenv("OHA_YACHIYO_SANDBOX_DESKTOP_PROVIDER_EXECUTE_URL", raising=False)
+
+    route = desktop_execution_route_decision(
+        "desktop.list_apps",
+        policy={"mode": "preview_input", "source": "agent_studio"},
+        execution_mode={
+            "mode": "read_only_observation",
+            "foreground_control": False,
+            "keyboard_mouse_capture": False,
+            "sandbox_recommended": False,
+            "isolation": "none",
+        },
+        metadata={
+            "desktop_provider_route_readonly": True,
+            "desktop_provider_local_native": True,
+            "sandbox_provider": {
+                "available": True,
+                "provider_id": "catalog-provider",
+                "provider_kind": "sandbox_desktop",
+                "adapter_ready": True,
+                "supported_tools": ["desktop.list_apps"],
+            },
+        },
+    )
+
+    assert route["status"] == "sandbox_ready"
+    assert route["selected_provider_kind"] == "sandbox_desktop"
+    assert route["selected_provider_id"] == "catalog-provider"
+
+
 def test_local_low_risk_routes_win_over_running_loopback_provider(monkeypatch) -> None:
     monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_URL", "http://127.0.0.1:19093")
     monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_ID", "local-isolated-desktop")
