@@ -1832,6 +1832,7 @@ def test_agent_studio_start_agent_run_auto_starts_isolated_provider_for_input(
 
     assert start_calls == [
         {
+            "requires_real_virtual_desktop_backend": True,
             "tools": [
                 "app.focus_and_click_ui_element",
                 "desktop.list_apps",
@@ -1894,7 +1895,10 @@ def test_agent_studio_start_agent_run_auto_starts_isolated_provider_for_app_open
     )
 
     assert start_calls == [
-        {"tools": ["app.open", "desktop.active_window", "desktop.list_apps"]}
+        {
+            "requires_real_virtual_desktop_backend": True,
+            "tools": ["app.open", "desktop.active_window", "desktop.list_apps"],
+        }
     ]
     assert probe_calls
     assert envelope["desktop_provider_session"]["needed"] is True
@@ -1959,7 +1963,10 @@ def test_agent_studio_start_workflow_run_auto_starts_isolated_provider_for_app_o
 
     assert workflow_run.workflow_run_id == "workflow-run-1"
     assert start_calls == [
-        {"tools": ["app.open", "desktop.active_window", "desktop.list_apps"]}
+        {
+            "requires_real_virtual_desktop_backend": True,
+            "tools": ["app.open", "desktop.active_window", "desktop.list_apps"],
+        }
     ]
     assert probe_calls
     assert start_payload["runtime_execution_envelope"] == envelope

@@ -251,6 +251,29 @@ _USER_FOREGROUND_TAKEOVER_TOOLS = frozenset(
     }
 )
 
+_PROVIDER_START_STATUSES = frozenset(
+    {
+        "provider_required",
+        "sandbox_keyboard_mouse_provider_required",
+        "sandbox_desktop_session_required",
+        "sandbox_adapter_required",
+        "real_virtual_desktop_provider_required",
+    }
+)
+
+_PROVIDER_START_BLOCKERS = frozenset(
+    {
+        "sandbox_desktop_provider_required",
+        "sandbox_keyboard_mouse_provider_required",
+        "sandbox_desktop_session_required",
+        "sandbox_desktop_adapter_required",
+        "isolated_desktop_provider_required",
+        "loopback_desktop_backend",
+        "desktop_backend_not_release_ready",
+        "real_virtual_desktop_backend_required",
+    }
+)
+
 
 def desktop_execution_policy_payload(value: Any) -> dict[str, Any]:
     if isinstance(value, Mapping):
@@ -408,6 +431,13 @@ def desktop_provider_session_auto_start_recommended_for_requests(
             continue
         if tool_name in _APPROVAL_FIRST_KEYBOARD_MOUSE_TOOLS:
             continue
+        if _low_risk_foreground_request_recommends_provider_auto_start(
+            request,
+            tool_name,
+        ):
+            return True
+        if _request_readonly_provider_auto_start_recommended(request, tool_name):
+            return True
         if _request_policy_recommends_provider_auto_start(request, tool_name):
             return True
         if _low_risk_creation_shortcut_request(tool_name, request):
@@ -517,6 +547,23 @@ def _low_risk_creation_shortcut_request(
     return action in _LOW_RISK_CREATION_SHORTCUT_ACTIONS
 
 
+def _low_risk_foreground_request_recommends_provider_auto_start(
+    request: Mapping[str, Any],
+    tool_name: str,
+) -> bool:
+    if tool_name not in _LOCAL_LOW_RISK_FOREGROUND_TOOLS:
+        return False
+    policy = desktop_execution_policy_payload(request.get("desktop_execution_policy"))
+    if not policy:
+        policy = desktop_execution_policy_payload(
+            request.get("yachiyo_desktop_execution_policy")
+        )
+    if policy.get("allow_live_foreground") is True:
+        return False
+    mode = str(policy.get("mode") or "").strip().lower().replace("-", "_")
+    return mode not in {"allow", "supervised_live", "live", "foreground"}
+
+
 def _request_policy_recommends_provider_auto_start(
     request: Mapping[str, Any],
     tool_name: str,
@@ -544,6 +591,34 @@ def _request_policy_recommends_provider_auto_start(
             "require_sandbox_for_keyboard_mouse",
         )
     )
+
+
+def _request_readonly_provider_auto_start_recommended(
+    request: Mapping[str, Any],
+    tool_name: str,
+) -> bool:
+    if not is_readonly_desktop_provider_tool(tool_name):
+        return False
+    route = request.get("desktop_execution_route")
+    route_payload = dict(route) if isinstance(route, Mapping) else {}
+    if route_payload:
+        status = str(route_payload.get("status") or "").strip()
+        blockers = set(_string_list(route_payload.get("blocking_conditions")))
+        if route_payload.get("can_auto_start") is True and (
+            status in _PROVIDER_START_STATUSES
+            or bool(blockers & _PROVIDER_START_BLOCKERS)
+        ):
+            return True
+    if not desktop_readonly_provider_route_requested(request):
+        policy = desktop_execution_policy_payload(request.get("desktop_execution_policy"))
+        if not _metadata_truthy(
+            policy,
+            "prefer_isolated_desktop",
+            "desktop_provider_route_readonly",
+            "provider_route_readonly",
+        ):
+            return False
+    return _desktop_provider_session_auto_start_requested(request)
 
 
 def _local_low_risk_foreground_tool_allowed(
@@ -801,6 +876,24 @@ def desktop_execution_route_decision(
             _readonly_desktop_provider_route_reason(sandbox_provider),
         )
     if (
+        readonly_provider_requested
+        and is_readonly_desktop_provider_tool(clean_tool)
+        and _desktop_provider_session_auto_start_requested(decision_context)
+    ):
+        sandbox_route = _sandbox_route_decision(
+            route,
+            sandbox_provider,
+            clean_tool,
+            decision_context,
+        )
+        return _route_with_provider_auto_start(
+            sandbox_route,
+            reason=(
+                "Readonly desktop discovery should use the configured isolated "
+                "desktop provider when it can be auto-started."
+            ),
+        )
+    if (
         foreground_provider_requested
         and (foreground_required or execution_mode_name == "supervised_live")
         and _sandbox_provider_requires_keyboard_mouse_sandbox(
@@ -956,6 +1049,21 @@ def user_foreground_takeover_allowed(metadata: Mapping[str, Any] | None) -> bool
         "allow_nonisolated_desktop_provider",
         "allow_live_foreground",
     )
+
+
+def _desktop_provider_session_auto_start_requested(
+    metadata: Mapping[str, Any] | None,
+) -> bool:
+    explicit = _metadata_bool(
+        metadata,
+        "desktop_provider_session_auto_start",
+        "desktop_provider_auto_start",
+        "auto_start_desktop_provider_session",
+        "auto_start_isolated_desktop_provider",
+    )
+    if explicit is not None:
+        return explicit
+    return desktop_provider_session_auto_start_default()
 
 
 def sandbox_desktop_provider_can_execute_tool(
@@ -1148,14 +1256,29 @@ def _metadata_truthy(
         return False
     for key in keys:
         value = metadata.get(key)
-        if value is True:
-            return True
-        if isinstance(value, str) and value.strip().lower() in {"1", "true", "yes", "on"}:
+        if _optional_bool_value(value) is True:
             return True
     nested_metadata = metadata.get("metadata")
     if isinstance(nested_metadata, Mapping) and nested_metadata is not metadata:
         return _metadata_truthy(nested_metadata, *keys)
     return False
+
+
+def _metadata_bool(
+    metadata: Mapping[str, Any] | None,
+    *keys: str,
+) -> bool | None:
+    if not isinstance(metadata, Mapping):
+        return None
+    for key in keys:
+        if key in metadata:
+            parsed = _optional_bool_value(metadata.get(key))
+            if parsed is not None:
+                return parsed
+    nested_metadata = metadata.get("metadata")
+    if isinstance(nested_metadata, Mapping) and nested_metadata is not metadata:
+        return _metadata_bool(nested_metadata, *keys)
+    return None
 
 
 def _route_policy_metadata_context(
@@ -1645,6 +1768,21 @@ def _route_with_ready_reason(route: Mapping[str, Any], reason: str) -> dict[str,
         payload.get("can_execute") is True
         and not _string_list(payload.get("blocking_conditions"))
     ):
+        payload["reason"] = reason
+    return payload
+
+
+def _route_with_provider_auto_start(
+    route: Mapping[str, Any],
+    *,
+    reason: str,
+) -> dict[str, Any]:
+    payload = dict(route)
+    if payload.get("can_execute") is True:
+        payload["reason"] = reason
+        return payload
+    payload["can_auto_start"] = True
+    if reason:
         payload["reason"] = reason
     return payload
 

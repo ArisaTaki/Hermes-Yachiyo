@@ -5747,6 +5747,50 @@ def test_desktop_execution_route_decision_reports_provider_boundaries() -> None:
         DesktopExecutionRouteSnapshot(unknown=True)
 
 
+def test_readonly_desktop_route_can_auto_start_provider_when_configured(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for key in (
+        "OHA_YACHIYO_DESKTOP_PROVIDER_AUTO_START",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_URL",
+        "OHA_YACHIYO_SANDBOX_DESKTOP_PROVIDER_URL",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_EXECUTE_URL",
+        "OHA_YACHIYO_SANDBOX_DESKTOP_PROVIDER_EXECUTE_URL",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_START_COMMAND",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_MANIFEST",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+    local_route = desktop_execution_route_decision(
+        "desktop.list_apps",
+        policy={"mode": "preview_input", "prefer_isolated_desktop": True},
+        execution_mode=DesktopExecutionModeSnapshot(mode="tool_native"),
+        metadata={"desktop_provider_route_readonly": True},
+    )
+
+    assert local_route["status"] == "ready"
+    assert local_route["can_execute"] is True
+    assert local_route["selected_provider_kind"] == "none"
+
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_AUTO_START", "true")
+
+    provider_route = desktop_execution_route_decision(
+        "desktop.list_apps",
+        policy={"mode": "preview_input", "prefer_isolated_desktop": True},
+        execution_mode=DesktopExecutionModeSnapshot(mode="tool_native"),
+        metadata={"desktop_provider_route_readonly": True},
+    )
+
+    assert provider_route["status"] == "provider_required"
+    assert provider_route["can_execute"] is False
+    assert provider_route["can_auto_start"] is True
+    assert provider_route["sandbox_required"] is True
+    assert provider_route["blocking_conditions"] == [
+        "sandbox_desktop_provider_required"
+    ]
+    assert "Readonly desktop discovery" in provider_route["reason"]
+
+
 def test_desktop_execution_route_blocks_loopback_provider_backend() -> None:
     route = desktop_execution_route_decision(
         "app.open",
@@ -6139,6 +6183,11 @@ def test_daily_entrypoint_desktop_execution_policy_defaults_to_input_preview() -
         {"allow_user_foreground_takeover": True},
         surface="bubble",
     )
+    request = {
+        "tool": "desktop.safe_type_text",
+        "desktop_execution_policy": policy,
+        "input": {"text": "hello"},
+    }
 
     assert policy["mode"] == "preview_input"
     assert policy["prefer_isolated_desktop"] is True
@@ -6372,6 +6421,23 @@ def test_desktop_provider_session_auto_start_recommended_for_input_tasks() -> No
             ],
         )
         is False
+    )
+    assert (
+        desktop_provider_session_auto_start_recommended_for_requests(
+            [
+                {
+                    "tool": "desktop.list_apps",
+                    "desktop_execution_route": {
+                        "status": "provider_required",
+                        "can_auto_start": True,
+                        "blocking_conditions": [
+                            "sandbox_desktop_provider_required"
+                        ],
+                    },
+                }
+            ],
+        )
+        is True
     )
     assert (
         desktop_provider_session_auto_start_recommended_for_requests(
