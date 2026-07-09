@@ -520,3 +520,30 @@ def test_oha_desktop_agent_release_smoke_cli_rejects_bad_provider_manifest(
         "blocking_conditions"
     ]
     assert payload["provider_conformance"]["public_release_ready"] is False
+
+
+def test_oha_desktop_agent_release_smoke_cli_rejects_remote_provider_manifest(
+    tmp_path,
+    capsys,
+) -> None:
+    manifest_path = tmp_path / "remote-provider-manifest.json"
+    template = smoke.virtual_desktop_provider_manifest_template(
+        provider_id="remote-provider",
+        base_url="https://provider.example.com",
+    )
+    manifest_path.write_text(
+        json.dumps(template, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    exit_code = smoke.main(["--validate-provider-manifest", str(manifest_path)])
+
+    assert exit_code == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["ok"] is False
+    assert payload["remote_endpoint_allowed"] is False
+    assert payload["remote_endpoint_urls"]
+    assert "desktop_provider_manifest_remote_endpoint_not_allowed" in payload[
+        "blocking_conditions"
+    ]
+    assert payload["provider_conformance"]["public_release_ready"] is False

@@ -172,6 +172,8 @@ def test_virtual_desktop_provider_manifest_template_matches_release_contract() -
     assert manifest_evidence["execute_url"] == (
         "http://127.0.0.1:39097/tools/execute"
     )
+    assert manifest_evidence["remote_endpoint_allowed"] is False
+    assert manifest_evidence["remote_endpoint_urls"] == []
     assert manifest_evidence["blocking_conditions"] == []
     assert manifest_evidence["provider_conformance"]["mode"] == (
         "manifest_contract_check"
@@ -217,3 +219,44 @@ def test_virtual_desktop_provider_manifest_contract_reports_static_blockers() ->
     assert "desktop_provider_missing_required_tools" in evidence[
         "provider_conformance"
     ]["release_blocking_conditions"]
+
+
+def test_virtual_desktop_provider_manifest_contract_rejects_remote_endpoint_by_default() -> None:
+    template = virtual_desktop_provider_manifest_template(
+        provider_id="remote-provider",
+        base_url="https://provider.example.com",
+    )
+
+    evidence = virtual_desktop_provider_manifest_contract_evidence(template)
+
+    assert evidence["ok"] is False
+    assert evidence["remote_endpoint_allowed"] is False
+    assert evidence["remote_endpoint_urls"] == [
+        "https://provider.example.com",
+        "https://provider.example.com/status",
+        "https://provider.example.com/tools/execute",
+        "https://provider.example.com/health",
+        "https://provider.example.com/manifest",
+    ]
+    assert "desktop_provider_manifest_remote_endpoint_not_allowed" in evidence[
+        "blocking_conditions"
+    ]
+
+
+def test_virtual_desktop_provider_manifest_contract_allows_explicit_remote_endpoint() -> None:
+    template = {
+        **virtual_desktop_provider_manifest_template(
+            provider_id="remote-provider",
+            base_url="https://provider.example.com",
+        ),
+        "allow_remote": True,
+    }
+
+    evidence = virtual_desktop_provider_manifest_contract_evidence(template)
+
+    assert evidence["ok"] is True
+    assert evidence["remote_endpoint_allowed"] is True
+    assert evidence["remote_endpoint_urls"]
+    assert "desktop_provider_manifest_remote_endpoint_not_allowed" not in evidence[
+        "blocking_conditions"
+    ]

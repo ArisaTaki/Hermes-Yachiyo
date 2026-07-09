@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ipaddress
 from typing import Any, Mapping, Sequence
 from urllib.parse import urlparse
 
@@ -48,6 +49,7 @@ _MANIFEST_CHECK_BLOCKERS = {
     "runtime_endpoint_or_entrypoint_configured": (
         "desktop_provider_manifest_endpoint_or_entrypoint_missing"
     ),
+    "local_endpoint_or_remote_allowed": "desktop_provider_manifest_remote_endpoint_not_allowed",
     "status_endpoint_configured": "desktop_provider_manifest_status_endpoint_missing",
     "execute_endpoint_configured": "desktop_provider_manifest_execute_endpoint_missing",
     "release_contract_fields_ready": "virtual_desktop_provider_contract_not_ready",
@@ -176,6 +178,13 @@ def virtual_desktop_provider_manifest_contract_evidence(
     status_url = _manifest_endpoint_url(manifest_payload, "status")
     execute_url = _manifest_endpoint_url(manifest_payload, "execute")
     has_entrypoint = _manifest_entrypoint_configured(manifest_payload)
+    endpoint_urls = _manifest_endpoint_urls(manifest_payload)
+    remote_endpoint_urls = [
+        url
+        for url in endpoint_urls
+        if not _manifest_endpoint_url_is_local(url)
+    ]
+    remote_allowed = _optional_bool(manifest_payload.get("allow_remote")) is True
     contract_status = {
         **_manifest_release_status_payload(manifest_payload),
         "configured": bool(manifest_payload),
@@ -205,6 +214,8 @@ def virtual_desktop_provider_manifest_contract_evidence(
         "runtime_endpoint_or_entrypoint_configured": bool(
             status_url or execute_url or has_entrypoint
         ),
+        "local_endpoint_or_remote_allowed": remote_allowed
+        or not remote_endpoint_urls,
         "status_endpoint_configured": bool(status_url or has_entrypoint),
         "execute_endpoint_configured": bool(execute_url or has_entrypoint),
         "release_contract_fields_ready": release_contract.get("ok") is True,
@@ -214,21 +225,28 @@ def virtual_desktop_provider_manifest_contract_evidence(
         for key, passed in checks.items()
         if not passed and key in _MANIFEST_CHECK_BLOCKERS
     ]
+    blocking_conditions = _unique_strings(
+        [
+            *manifest_blockers,
+            *release_contract.get("blocking_conditions", []),
+        ]
+    )
+    manifest_ok = all(checks.values())
+    conformance_contract = {
+        **release_contract,
+        "ok": manifest_ok,
+        "blocking_conditions": blocking_conditions,
+    }
     return {
-        "ok": all(checks.values()),
+        "ok": manifest_ok,
         "contract_version": DESKTOP_PROVIDER_CONTRACT_VERSION,
         "runtime_checked": False,
         "checks": checks,
-        "blocking_conditions": _unique_strings(
-            [
-                *manifest_blockers,
-                *release_contract.get("blocking_conditions", []),
-            ]
-        ),
+        "blocking_conditions": blocking_conditions,
         "manifest_blocking_conditions": manifest_blockers,
         "release_contract": release_contract,
         "provider_conformance": virtual_desktop_provider_conformance_summary(
-            release_contract,
+            conformance_contract,
             status=contract_status,
             mode="manifest_contract_check",
             runtime_checked=False,
@@ -239,6 +257,9 @@ def virtual_desktop_provider_manifest_contract_evidence(
         "provider_kind": provider_kind,
         "status_url": status_url,
         "execute_url": execute_url,
+        "endpoint_urls": endpoint_urls,
+        "remote_endpoint_urls": remote_endpoint_urls,
+        "remote_endpoint_allowed": remote_allowed,
         "entrypoint_configured": has_entrypoint,
     }
 
@@ -544,6 +565,37 @@ def _manifest_endpoint_url(manifest: Mapping[str, Any], purpose: str) -> str:
             return value
         return _join_url(base_url, value) if base_url else value
     return _join_url(base_url, default_path) if base_url else ""
+
+
+def _manifest_endpoint_urls(manifest: Mapping[str, Any]) -> list[str]:
+    endpoint_urls = _mapping(manifest.get("endpoint_urls"))
+    urls = [
+        _manifest_base_url(manifest),
+        _manifest_endpoint_url(manifest, "status"),
+        _manifest_endpoint_url(manifest, "execute"),
+        *[
+            str(value or "").strip()
+            for value in endpoint_urls.values()
+            if str(value or "").strip()
+        ],
+    ]
+    return _unique_strings(urls)
+
+
+def _manifest_endpoint_url_is_local(url: str) -> bool:
+    value = str(url or "").strip()
+    if not value:
+        return True
+    parsed = urlparse(value)
+    host = str(parsed.hostname or "").strip().lower()
+    if not host:
+        return True
+    if host in {"localhost", "localhost.localdomain"} or host.endswith(".localhost"):
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
 
 
 def _manifest_base_url(manifest: Mapping[str, Any]) -> str:
