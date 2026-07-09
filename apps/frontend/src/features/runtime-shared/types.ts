@@ -128,7 +128,10 @@ export type RuntimeExecutionStrategySnapshot = {
   policy_mode?: DesktopExecutionPolicyMode | string;
   isolated_desktop_preferred?: boolean;
   foreground_takeover_allowed?: boolean;
+  user_foreground_takeover_risk?: boolean;
   sandbox_required?: boolean;
+  provider_auto_start_recommended?: boolean;
+  local_foreground_fallback_allowed?: boolean;
   foreground_control_step_count?: number;
   keyboard_mouse_step_count?: number;
   sandbox_recommended_step_count?: number;

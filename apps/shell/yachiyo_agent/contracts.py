@@ -586,7 +586,10 @@ class RuntimeExecutionStrategySnapshot(_PublicSnapshot):
     policy_mode: DesktopExecutionPolicyMode | str = "allow"
     isolated_desktop_preferred: bool = False
     foreground_takeover_allowed: bool = False
+    user_foreground_takeover_risk: bool = False
     sandbox_required: bool = False
+    provider_auto_start_recommended: bool = False
+    local_foreground_fallback_allowed: bool = False
     foreground_control_step_count: int = 0
     keyboard_mouse_step_count: int = 0
     sandbox_recommended_step_count: int = 0

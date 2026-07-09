@@ -8379,7 +8379,10 @@ def test_runtime_planner_execution_strategy_prefers_isolated_desktop_for_daily_k
     assert strategy.policy_mode == "preview_input"
     assert strategy.isolated_desktop_preferred is True
     assert strategy.foreground_takeover_allowed is False
+    assert strategy.user_foreground_takeover_risk is False
     assert strategy.sandbox_required is True
+    assert strategy.provider_auto_start_recommended is False
+    assert strategy.local_foreground_fallback_allowed is False
     assert strategy.keyboard_mouse_step_count >= 1
     assert "keyboard_mouse_capture_planned" in strategy.reasons
     assert "do_not_take_over_user_foreground_session" in strategy.mitigations
@@ -8395,6 +8398,54 @@ def test_runtime_planner_execution_strategy_prefers_isolated_desktop_for_daily_k
     assert envelope.execution_strategy.strategy_id == strategy.strategy_id
     assert envelope.execution_strategy.preferred_environment == "isolated_desktop"
     assert envelope.execution_strategy.sandbox_required is True
+    assert envelope.execution_strategy.provider_auto_start_recommended is False
+
+
+def test_runtime_execution_strategy_marks_explicit_live_foreground_risk() -> None:
+    decision = RuntimePlanner().decision(
+        "在当前应用输入 hello",
+        allowed_tools=["desktop.safe_type_text"],
+        metadata={
+            "allow_user_foreground_takeover": True,
+            "desktop_execution_policy": {"mode": "allow"},
+        },
+    )
+
+    strategy = decision.plan.execution_strategy
+
+    assert strategy is not None
+    assert strategy.preferred_environment == "isolated_desktop"
+    assert strategy.interaction_mode == "foreground"
+    assert strategy.foreground_takeover_allowed is True
+    assert strategy.user_foreground_takeover_risk is True
+    assert strategy.sandbox_required is True
+    assert strategy.provider_auto_start_recommended is False
+    assert strategy.local_foreground_fallback_allowed is False
+    assert "user_foreground_takeover_allowed" in strategy.reasons
+
+
+def test_runtime_execution_strategy_allows_low_risk_app_activation_fallback() -> None:
+    metadata = with_daily_entrypoint_desktop_execution_policy(
+        {"source": "chat"},
+        surface="chat",
+    )
+    decision = RuntimePlanner().decision(
+        "打开 PixelForge",
+        allowed_tools=["desktop.list_apps", "app.open", "desktop.active_window"],
+        metadata=metadata,
+    )
+
+    strategy = decision.plan.execution_strategy
+
+    assert strategy is not None
+    assert strategy.preferred_environment == "isolated_desktop"
+    assert strategy.interaction_mode == "foreground"
+    assert strategy.keyboard_mouse_step_count == 0
+    assert strategy.user_foreground_takeover_risk is False
+    assert strategy.sandbox_required is False
+    assert strategy.provider_auto_start_recommended is False
+    assert strategy.local_foreground_fallback_allowed is True
+    assert "local_low_risk_foreground_fallback_allowed" in strategy.reasons
 
 
 def test_runtime_execution_envelope_blocks_keyboard_mouse_without_controlled_provider(

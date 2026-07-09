@@ -51,6 +51,7 @@ from .data_analysis_plan_hints import (
 from .desktop_execution_policy import (
     desktop_execution_policy_mode,
     desktop_execution_policy_payload,
+    is_local_low_risk_foreground_tool,
     user_foreground_takeover_allowed,
 )
 from .desktop_plan_hints import (
@@ -7706,6 +7707,11 @@ def _execution_strategy_snapshot(
         for step in step_list
         if _step_execution_mode_value(step, "mode") == "read_only_observation"
     )
+    local_foreground_fallback_allowed = _strategy_local_foreground_fallback_allowed(
+        step_list,
+        foreground_control_count=foreground_control_count,
+        keyboard_mouse_count=keyboard_mouse_count,
+    )
     if sandbox_recommended_count:
         isolated_desktop_preferred = True
     sandbox_required = bool(
@@ -7735,6 +7741,20 @@ def _execution_strategy_snapshot(
     else:
         preferred_environment = "structured_runtime"
         interaction_mode = "background"
+    user_foreground_takeover_risk = bool(
+        (foreground_control_count or keyboard_mouse_count)
+        and foreground_takeover_allowed
+    )
+    provider_auto_start_recommended = _strategy_provider_auto_start_recommended(
+        preferred_environment=preferred_environment,
+        sandbox_required=sandbox_required,
+        local_foreground_fallback_allowed=local_foreground_fallback_allowed,
+        foreground_control_count=foreground_control_count,
+        keyboard_mouse_count=keyboard_mouse_count,
+        sandbox_recommended_count=sandbox_recommended_count,
+        approval_count=approval_count,
+        handoff_count=handoff_count,
+    )
     reasons = _execution_strategy_reasons(
         step_count=len(step_list),
         isolated_desktop_preferred=isolated_desktop_preferred,
@@ -7743,6 +7763,9 @@ def _execution_strategy_snapshot(
         sandbox_recommended_count=sandbox_recommended_count,
         approval_count=approval_count,
         handoff_count=handoff_count,
+        user_foreground_takeover_risk=user_foreground_takeover_risk,
+        provider_auto_start_recommended=provider_auto_start_recommended,
+        local_foreground_fallback_allowed=local_foreground_fallback_allowed,
     )
     mitigations = _execution_strategy_mitigations(
         preferred_environment=preferred_environment,
@@ -7750,6 +7773,8 @@ def _execution_strategy_snapshot(
         foreground_takeover_allowed=foreground_takeover_allowed,
         keyboard_mouse_count=keyboard_mouse_count,
         read_only_count=read_only_count,
+        provider_auto_start_recommended=provider_auto_start_recommended,
+        local_foreground_fallback_allowed=local_foreground_fallback_allowed,
     )
     return RuntimeExecutionStrategySnapshot(
         strategy_id=_stable_id(
@@ -7762,7 +7787,10 @@ def _execution_strategy_snapshot(
         policy_mode=policy_mode,
         isolated_desktop_preferred=isolated_desktop_preferred,
         foreground_takeover_allowed=foreground_takeover_allowed,
+        user_foreground_takeover_risk=user_foreground_takeover_risk,
         sandbox_required=sandbox_required,
+        provider_auto_start_recommended=provider_auto_start_recommended,
+        local_foreground_fallback_allowed=local_foreground_fallback_allowed,
         foreground_control_step_count=foreground_control_count,
         keyboard_mouse_step_count=keyboard_mouse_count,
         sandbox_recommended_step_count=sandbox_recommended_count,
@@ -7815,6 +7843,50 @@ def _strategy_truthy(source: Mapping[str, Any], *keys: str) -> bool:
     return False
 
 
+def _strategy_local_foreground_fallback_allowed(
+    steps: Iterable[ToolPlanStepSnapshot],
+    *,
+    foreground_control_count: int,
+    keyboard_mouse_count: int,
+) -> bool:
+    if not foreground_control_count or keyboard_mouse_count:
+        return False
+    foreground_tools = [
+        str(step.tool_name or "").strip()
+        for step in steps
+        if _step_execution_mode_flag(step, "foreground_control")
+    ]
+    return bool(foreground_tools) and all(
+        is_local_low_risk_foreground_tool(tool_name)
+        for tool_name in foreground_tools
+    )
+
+
+def _strategy_provider_auto_start_recommended(
+    *,
+    preferred_environment: str,
+    sandbox_required: bool,
+    local_foreground_fallback_allowed: bool,
+    foreground_control_count: int,
+    keyboard_mouse_count: int,
+    sandbox_recommended_count: int,
+    approval_count: int,
+    handoff_count: int,
+) -> bool:
+    if preferred_environment != "isolated_desktop":
+        return False
+    if local_foreground_fallback_allowed:
+        return False
+    if approval_count or handoff_count:
+        return False
+    return bool(
+        keyboard_mouse_count
+        or foreground_control_count
+        or sandbox_required
+        or sandbox_recommended_count
+    )
+
+
 def _execution_strategy_reasons(
     *,
     step_count: int,
@@ -7824,6 +7896,9 @@ def _execution_strategy_reasons(
     sandbox_recommended_count: int,
     approval_count: int,
     handoff_count: int,
+    user_foreground_takeover_risk: bool,
+    provider_auto_start_recommended: bool,
+    local_foreground_fallback_allowed: bool,
 ) -> list[str]:
     reasons: list[str] = []
     if not step_count:
@@ -7840,6 +7915,12 @@ def _execution_strategy_reasons(
         reasons.append("approval_required_for_risky_steps")
     if handoff_count:
         reasons.append("user_handoff_recommended")
+    if user_foreground_takeover_risk:
+        reasons.append("user_foreground_takeover_allowed")
+    if provider_auto_start_recommended:
+        reasons.append("isolated_provider_auto_start_recommended")
+    if local_foreground_fallback_allowed:
+        reasons.append("local_low_risk_foreground_fallback_allowed")
     return _unique_capabilities(reasons)
 
 
@@ -7850,6 +7931,8 @@ def _execution_strategy_mitigations(
     foreground_takeover_allowed: bool,
     keyboard_mouse_count: int,
     read_only_count: int,
+    provider_auto_start_recommended: bool,
+    local_foreground_fallback_allowed: bool,
 ) -> list[str]:
     mitigations: list[str] = []
     if preferred_environment == "isolated_desktop":
@@ -7860,6 +7943,10 @@ def _execution_strategy_mitigations(
         mitigations.append("require_sandbox_or_approval_for_keyboard_mouse")
     if not foreground_takeover_allowed:
         mitigations.append("do_not_take_over_user_foreground_session")
+    if provider_auto_start_recommended:
+        mitigations.append("auto_start_or_prompt_isolated_desktop_provider")
+    if local_foreground_fallback_allowed:
+        mitigations.append("limit_local_fallback_to_low_risk_app_activation")
     if read_only_count:
         mitigations.append("observe_before_operate")
     return _unique_capabilities(mitigations)

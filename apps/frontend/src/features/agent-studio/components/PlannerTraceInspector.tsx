@@ -1635,9 +1635,12 @@ function PlannerExecutionStrategySummary({
       data-execution-preferred-environment={strategy.preferred_environment || ''}
       data-foreground-control-step-count={strategy.foreground_control_step_count ?? 0}
       data-foreground-takeover-allowed={String(strategy.foreground_takeover_allowed === true)}
+      data-user-foreground-takeover-risk={String(strategy.user_foreground_takeover_risk === true)}
       data-handoff-step-count={strategy.handoff_step_count ?? 0}
       data-isolated-desktop-preferred={String(strategy.isolated_desktop_preferred === true)}
       data-keyboard-mouse-step-count={strategy.keyboard_mouse_step_count ?? 0}
+      data-provider-auto-start-recommended={String(strategy.provider_auto_start_recommended === true)}
+      data-local-foreground-fallback-allowed={String(strategy.local_foreground_fallback_allowed === true)}
       data-sandbox-recommended-step-count={strategy.sandbox_recommended_step_count ?? 0}
       data-sandbox-required={String(strategy.sandbox_required === true)}
       data-testid="agent-run-detail-planner-execution-strategy"
@@ -1670,6 +1673,18 @@ function PlannerExecutionStrategySummary({
         <span>
           <small>Sandbox</small>
           <strong>{strategy.sandbox_required ? 'required' : 'not required'}</strong>
+        </span>
+        <span>
+          <small>Takeover Risk</small>
+          <strong>{strategy.user_foreground_takeover_risk ? 'yes' : 'no'}</strong>
+        </span>
+        <span>
+          <small>Provider Start</small>
+          <strong>{strategy.provider_auto_start_recommended ? 'recommended' : 'not needed'}</strong>
+        </span>
+        <span>
+          <small>Local Fallback</small>
+          <strong>{strategy.local_foreground_fallback_allowed ? 'allowed' : 'blocked'}</strong>
         </span>
       </div>
       {reasons.length || mitigations.length ? (

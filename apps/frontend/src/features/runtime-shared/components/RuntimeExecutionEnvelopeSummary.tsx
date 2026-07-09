@@ -176,6 +176,15 @@ export function RuntimeExecutionEnvelopeSummary({
       data-execution-strategy-sandbox-required={
         executionStrategy ? String(executionStrategy.sandbox_required === true) : ''
       }
+      data-execution-strategy-user-foreground-takeover-risk={
+        executionStrategy ? String(executionStrategy.user_foreground_takeover_risk === true) : ''
+      }
+      data-execution-strategy-provider-auto-start-recommended={
+        executionStrategy ? String(executionStrategy.provider_auto_start_recommended === true) : ''
+      }
+      data-execution-strategy-local-foreground-fallback-allowed={
+        executionStrategy ? String(executionStrategy.local_foreground_fallback_allowed === true) : ''
+      }
       data-execution-strategy-keyboard-mouse-step-count={executionStrategy?.keyboard_mouse_step_count ?? ''}
       data-request-count={requests.length}
       data-risk-levels={riskCounts.map(([risk, count]) => `${risk}:${count}`).join(',')}
@@ -253,6 +262,18 @@ export function RuntimeExecutionEnvelopeSummary({
             <span>
               <small>Strategy</small>
               <strong>{executionStrategy?.preferred_environment || 'Runtime'}</strong>
+            </span>
+            <span>
+              <small>Takeover Risk</small>
+              <strong>{executionStrategy?.user_foreground_takeover_risk ? 'yes' : 'no'}</strong>
+            </span>
+            <span>
+              <small>Provider Start</small>
+              <strong>{executionStrategy?.provider_auto_start_recommended ? 'recommended' : 'not needed'}</strong>
+            </span>
+            <span>
+              <small>Local Fallback</small>
+              <strong>{executionStrategy?.local_foreground_fallback_allowed ? 'allowed' : 'blocked'}</strong>
             </span>
           </div>
           <RuntimeExecutionEnvelopePills
@@ -425,6 +446,15 @@ function RuntimeExecutionEnvelopePills({
           data-execution-strategy-preferred-environment={executionStrategy.preferred_environment || ''}
           data-execution-strategy-reasons={(executionStrategy.reasons || []).join(',')}
           data-execution-strategy-sandbox-required={String(executionStrategy.sandbox_required === true)}
+          data-execution-strategy-user-foreground-takeover-risk={
+            String(executionStrategy.user_foreground_takeover_risk === true)
+          }
+          data-execution-strategy-provider-auto-start-recommended={
+            String(executionStrategy.provider_auto_start_recommended === true)
+          }
+          data-execution-strategy-local-foreground-fallback-allowed={
+            String(executionStrategy.local_foreground_fallback_allowed === true)
+          }
           title={(executionStrategy.mitigations || []).join(' · ') || undefined}
         >
           strategy · {executionStrategy.preferred_environment}
