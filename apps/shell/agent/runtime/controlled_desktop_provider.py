@@ -265,18 +265,22 @@ class ControlledDesktopProvider(HeadlessDesktopProvider):
         payload: dict[str, Any],
     ) -> dict[str, Any]:
         dispatch: dict[str, Callable[[dict[str, Any]], dict[str, Any]]] = {
-            "app.open": lambda value: desktop.app_open(str(value.get("app_name") or "")),
+            "app.open": lambda value: desktop.app_open(
+                self._app_name_from_payload(value)
+            ),
             "desktop.open_app": lambda value: _alias_action(
-                desktop.app_open(str(value.get("app_name") or "")),
+                desktop.app_open(self._app_name_from_payload(value)),
                 "desktop.open_app",
             ),
-            "app.focus": lambda value: desktop.app_focus(str(value.get("app_name") or "")),
+            "app.focus": lambda value: desktop.app_focus(
+                self._app_name_from_payload(value)
+            ),
             "desktop.focus_app": lambda value: _alias_action(
-                desktop.app_focus(str(value.get("app_name") or "")),
+                desktop.app_focus(self._app_name_from_payload(value)),
                 "desktop.focus_app",
             ),
             "app.focus_window": lambda value: desktop.app_focus_window(
-                str(value.get("app_name") or ""),
+                self._app_name_from_payload(value),
                 str(value.get("title_contains") or ""),
             ),
             "desktop.safe_type_text": lambda value: desktop.desktop_safe_type_text(
@@ -338,17 +342,17 @@ class ControlledDesktopProvider(HeadlessDesktopProvider):
                 expected_app_name=str(value.get("expected_app_name") or ""),
             ),
             "desktop.inspect_app": lambda value: desktop.inspect_app(
-                str(value.get("app_name") or ""),
+                self._app_name_from_payload(value),
                 open_if_needed=value.get("open_if_needed", True),
                 focus=value.get("focus", True),
                 role_filter=str(value.get("role_filter") or ""),
                 limit=value.get("limit", 80),
             ),
             "media.music_app_open_and_play": lambda value: desktop.music_app_open_and_play(
-                str(value.get("app_name") or "")
+                self._app_name_from_payload(value)
             ),
             "media.music_app_control": lambda value: desktop.music_app_control(
-                str(value.get("app_name") or ""),
+                self._app_name_from_payload(value),
                 str(value.get("action") or ""),
             ),
         }
@@ -364,7 +368,7 @@ class ControlledDesktopProvider(HeadlessDesktopProvider):
         tool_name: str,
         payload: dict[str, Any],
     ) -> dict[str, Any] | None:
-        app_name = str(payload.get("app_name") or "").strip()
+        app_name = self._app_name_from_payload(payload)
         if tool_name == "app.open_and_safe_type_text":
             return self._app_foreground_action(
                 tool_name,

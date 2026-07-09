@@ -8,9 +8,13 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from apps.shell.agent.runtime import controlled_desktop_provider as controlled_provider_module
+from apps.shell.agent.runtime import headless_desktop_provider as headless_provider_module
+from apps.shell.agent.runtime.controlled_desktop_provider import ControlledDesktopProvider
 from apps.shell.agent.runtime.desktop_provider_session_events import (
     desktop_provider_session_event_payload,
 )
+from apps.shell.agent.runtime.headless_desktop_provider import HeadlessDesktopProvider
 from apps.shell.yachiyo_agent import isolated_provider_session as session_module
 from apps.shell.yachiyo_agent.isolated_provider_session import (
     IsolatedDesktopProviderSessionManager,
@@ -20,6 +24,111 @@ from apps.shell.yachiyo_agent.isolated_provider_session import (
 from apps.shell.yachiyo_agent.desktop_provider_contract import (
     OHA_DESKTOP_AGENT_RELEASE_PROVIDER_TOOLS,
 )
+
+
+def test_headless_provider_resolves_selected_app_placeholder_for_readonly_tools(
+    monkeypatch,
+) -> None:
+    calls: list[str] = []
+
+    def fake_windows(app_name: str) -> dict[str, Any]:
+        calls.append(app_name)
+        return {
+            "ok": True,
+            "action": "desktop.windows",
+            "summary": f"Windows for {app_name}",
+            "data": {"app_name": app_name, "windows": []},
+        }
+
+    monkeypatch.setattr(headless_provider_module.desktop, "windows", fake_windows)
+    provider = HeadlessDesktopProvider(supported_tools=["desktop.verify"])
+
+    result = provider.execute(
+        "desktop.verify",
+        {
+            "app_name": "<selected app from desktop.list_apps>",
+            "selection_source": "desktop.list_apps",
+            "query": "PixelForge",
+        },
+    )
+
+    assert result["ok"] is True
+    assert calls == ["PixelForge"]
+
+
+def test_controlled_provider_resolves_selected_app_placeholder_before_app_open(
+    monkeypatch,
+) -> None:
+    calls: list[str] = []
+
+    def fake_app_open(app_name: str) -> dict[str, Any]:
+        calls.append(app_name)
+        return {
+            "ok": True,
+            "action": "app.open",
+            "summary": f"Opened {app_name}",
+            "data": {"app_name": app_name},
+        }
+
+    monkeypatch.setattr(controlled_provider_module.desktop, "app_open", fake_app_open)
+    provider = ControlledDesktopProvider(supported_tools=["app.open"])
+
+    result = provider.execute(
+        "app.open",
+        {
+            "app_name": "<selected app from desktop.list_apps>",
+            "selection_source": "desktop.list_apps",
+            "query": "PixelForge",
+        },
+    )
+
+    assert result["ok"] is True
+    assert result["data"]["app_name"] == "PixelForge"
+    assert calls == ["PixelForge"]
+
+
+def test_controlled_provider_resolves_selected_app_placeholder_before_compound_action(
+    monkeypatch,
+) -> None:
+    calls: list[tuple[str, str]] = []
+
+    def fake_app_open(app_name: str) -> dict[str, Any]:
+        calls.append(("open", app_name))
+        return {"ok": True, "action": "app.open", "data": {"app_name": app_name}}
+
+    def fake_app_focus(app_name: str) -> dict[str, Any]:
+        calls.append(("focus", app_name))
+        return {"ok": True, "action": "app.focus", "data": {"app_name": app_name}}
+
+    def fake_type_text(text: str) -> dict[str, Any]:
+        calls.append(("type", text))
+        return {"ok": True, "action": "desktop.safe_type_text", "data": {"text": text}}
+
+    monkeypatch.setattr(controlled_provider_module.desktop, "app_open", fake_app_open)
+    monkeypatch.setattr(controlled_provider_module.desktop, "app_focus", fake_app_focus)
+    monkeypatch.setattr(
+        controlled_provider_module.desktop,
+        "desktop_safe_type_text",
+        fake_type_text,
+    )
+    provider = ControlledDesktopProvider(
+        supported_tools=["app.open_and_safe_type_text"],
+        require_approval_for_input=False,
+    )
+
+    result = provider.execute(
+        "app.open_and_safe_type_text",
+        {
+            "app_name": "<selected app from desktop.list_apps>",
+            "selection_source": "desktop.list_apps",
+            "query": "PixelForge",
+            "text": "hello",
+        },
+    )
+
+    assert result["ok"] is True
+    assert result["data"]["app_name"] == "PixelForge"
+    assert calls == [("open", "PixelForge"), ("focus", "PixelForge"), ("type", "hello")]
 
 
 def test_isolated_provider_session_manager_starts_applies_env_and_stops(

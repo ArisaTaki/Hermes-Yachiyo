@@ -174,34 +174,34 @@ class HeadlessDesktopProvider:
                 limit=value.get("limit", 200),
             ),
             "desktop.windows": lambda value: desktop.windows(
-                str(value.get("app_name") or "")
+                self._app_name_from_payload(value)
             ),
             "desktop.list_windows": lambda value: {
-                **desktop.windows(str(value.get("app_name") or "")),
+                **desktop.windows(self._app_name_from_payload(value)),
                 "action": "desktop.list_windows",
             },
             "desktop.ui_elements": lambda value: desktop.ui_elements(
                 role_filter=str(value.get("role_filter") or ""),
                 limit=value.get("limit", 80),
-                app_name=str(value.get("app_name") or ""),
+                app_name=self._app_name_from_payload(value),
             ),
             "desktop.read_ui": lambda value: {
                 **desktop.ui_elements(
                     role_filter=str(value.get("role_filter") or ""),
                     limit=value.get("limit", 80),
-                    app_name=str(value.get("app_name") or ""),
+                    app_name=self._app_name_from_payload(value),
                 ),
                 "action": "desktop.read_ui",
             },
             "desktop.verify": self._verify,
             "app.status": lambda value: desktop.app_status(
-                str(value.get("app_name") or "")
+                self._app_name_from_payload(value)
             ),
         }
         return dispatch[tool_name](payload)
 
     def _verify(self, payload: dict[str, Any]) -> dict[str, Any]:
-        app_name = str(payload.get("app_name") or "").strip()
+        app_name = self._app_name_from_payload(payload)
         if app_name:
             result = desktop.windows(app_name)
             return {
@@ -215,6 +215,20 @@ class HeadlessDesktopProvider:
             "action": "desktop.verify",
             "summary": result.get("summary") or "Verified active desktop window",
         }
+
+    def _app_name_from_payload(self, payload: Mapping[str, Any]) -> str:
+        raw_name = str(payload.get("app_name") or payload.get("name") or "").strip()
+        query = str(payload.get("query") or "").strip()
+        selection_source = str(
+            payload.get("selection_source") or payload.get("app_selection_source") or ""
+        ).strip()
+        if raw_name and not _selected_desktop_app_placeholder(raw_name):
+            return raw_name
+        if selection_source in {"desktop.list_apps", "desktop.running_apps"} and query:
+            return query
+        if _selected_desktop_app_placeholder(raw_name) and query:
+            return query
+        return ""
 
     def _unsupported_tool(self, tool_name: str, payload: dict[str, Any]) -> dict[str, Any]:
         return {
@@ -462,6 +476,11 @@ def _join_url(base_url: str, path: str) -> str:
         return ""
     clean_path = "/" + str(path or "").lstrip("/")
     return f"{clean_base}{clean_path}"
+
+
+def _selected_desktop_app_placeholder(value: str) -> bool:
+    clean = str(value or "").strip().lower()
+    return clean.startswith("<selected ") and "desktop." in clean
 
 
 def _string_list(value: Any) -> list[str]:
