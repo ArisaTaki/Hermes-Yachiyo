@@ -22,6 +22,10 @@ from .contracts import (
 )
 from .events import public_run_event_from_payload
 from .planner_projection import planner_replan_run_event_payload
+from .runtime_recovery_projection import (
+    runtime_execution_recovery_deferred_payload,
+    runtime_execution_recovery_retry,
+)
 
 
 def run_events_with_replan_requests(
@@ -439,7 +443,11 @@ def _runtime_execution_replan_request(
     trigger = _runtime_replan_trigger(request)
     request_id = _runtime_replan_request_id(request, trigger=trigger)
     evidence = _mapping(getattr(request, "observation_evidence", None))
-    retry = _mapping(getattr(request, "observation_retry", None))
+    retry = runtime_execution_recovery_retry(
+        request,
+        _mapping(getattr(request, "observation_retry", None)),
+        envelope=envelope,
+    )
     failure_detail = _runtime_replan_failure_detail(
         request,
         evidence=evidence,
@@ -451,6 +459,7 @@ def _runtime_execution_replan_request(
         evidence=evidence,
         retry=retry,
         fallback_tools=fallback_tools,
+        envelope=envelope,
     )
     metadata = _runtime_replan_metadata(
         request,
@@ -590,6 +599,7 @@ def _runtime_replan_recovery_actions(
     evidence: Mapping[str, Any],
     retry: Mapping[str, Any],
     fallback_tools: list[str],
+    envelope: RuntimeExecutionEnvelopeSnapshot,
 ) -> list[dict[str, Any]]:
     tool = _text(retry.get("tool") or retry.get("retry_tool") or retry.get("from_tool"))
     if not tool:
@@ -599,6 +609,15 @@ def _runtime_replan_recovery_actions(
     retry_input = _mapping(retry.get("input"))
     if not retry_input:
         retry_input = dict(request.input or {})
+    deferred_payload = runtime_execution_recovery_deferred_payload(
+        request,
+        envelope=envelope,
+        retry_tool=tool,
+    )
+    deferred_tool = _text(deferred_payload.get("deferred_tool"))
+    deferred_input = _mapping(deferred_payload.get("deferred_input"))
+    deferred_context = _mapping(deferred_payload.get("deferred_context"))
+    deferred_continuation = _mapping_list(deferred_payload.get("deferred_continuation"))
     action: dict[str, Any] = {
         "label": _runtime_replan_recovery_label(tool, retry),
         "tool": tool,
@@ -630,6 +649,21 @@ def _runtime_replan_recovery_actions(
             "replan_triggers": list(request.replan_triggers),
         },
     }
+    if deferred_tool:
+        action["deferred_tool"] = deferred_tool
+        action["metadata"]["deferred_tool"] = deferred_tool
+    if deferred_input:
+        action["deferred_input"] = deferred_input
+    if deferred_context:
+        action["deferred_context"] = deferred_context
+    if deferred_continuation:
+        action["deferred_continuation"] = deferred_continuation
+        action["metadata"]["deferred_continuation_count"] = len(deferred_continuation)
+        action["metadata"]["deferred_tools"] = [
+            continuation_tool
+            for item in deferred_continuation
+            if (continuation_tool := _text(item.get("tool") or item.get("tool_name")))
+        ]
     return [_compact_runtime_recovery_action(action)]
 
 
@@ -915,6 +949,12 @@ def _mapping(value: Any) -> dict[str, Any]:
     if not isinstance(value, Mapping):
         return {}
     return {key: item for key, item in value.items() if item not in (None, "", [], {})}
+
+
+def _mapping_list(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [_mapping(item) for item in value if isinstance(item, Mapping)]
 
 
 def _text(value: Any) -> str:

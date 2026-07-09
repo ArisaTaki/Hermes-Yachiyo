@@ -39,6 +39,12 @@ from apps.shell.yachiyo_agent.runtime_execution import (
     runtime_execution_envelope_from_decision,
     runtime_execution_requests_from_envelope_payload,
 )
+from apps.shell.yachiyo_agent.replan_event_projection import (
+    run_events_with_runtime_execution_replan_requests,
+)
+from apps.shell.yachiyo_agent.replan_recovery_snapshots import (
+    replan_recovery_snapshots_from_runtime_execution_envelope,
+)
 from apps.shell.yachiyo_agent.entrypoint_tool_selection import (
     planner_first_direct_decision_and_tool_requests,
     planner_first_direct_tool_selection,
@@ -35933,6 +35939,136 @@ def test_runtime_planner_preflights_ui_before_desktop_mutation_when_requested() 
     )
 
 
+def test_runtime_recovery_continues_after_failed_ui_preflight() -> None:
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.click_ui_element",
+        "desktop.ui_elements",
+    ]
+    decision = RuntimePlanner().decision(
+        "打开 PixelForge 并点击导出按钮",
+        allowed_tools=allowed_tools,
+        metadata={"runtime_planner_preflight_ui_before_action": True},
+    )
+    envelope = runtime_execution_envelope_from_decision(
+        decision,
+        allowed_tools=allowed_tools,
+        full_plan=True,
+        metadata={"runtime_planner_preflight_ui_before_action": True},
+    )
+    assert envelope is not None
+    failed_requests = [
+        request.model_copy(
+            update={
+                "status": "failed",
+                "observation_evidence": {
+                    **request.observation_evidence,
+                    "blocking_condition": "ui_observation_failed",
+                },
+            }
+        )
+        if request.step_id == "read-foreground-ui"
+        else request
+        for request in envelope.requests
+    ]
+    failed_envelope = envelope.model_copy(update={"requests": failed_requests})
+
+    recoveries = replan_recovery_snapshots_from_runtime_execution_envelope(
+        failed_envelope,
+        run_id="run-1",
+        task_id="task-1",
+    )
+
+    recovery = next(
+        item for item in recoveries if item.source_step_id == "read-foreground-ui"
+    )
+    action = recovery.recovery_actions[0]
+    assert action.tool == "desktop.ui_elements"
+    assert action.input == {
+        "target": "导出",
+        "role_filter": "button",
+        "limit": 80,
+        "app_name": "PixelForge",
+    }
+    assert action.observation_retry["reason"] == "observe_foreground_ui"
+    assert [item["tool"] for item in action.deferred_continuation] == [
+        "desktop.click_ui_element",
+        "desktop.ui_elements",
+    ]
+    assert action.deferred_continuation[0]["step_id"] == "operate-foreground-ui"
+    assert action.deferred_continuation[0]["approval_required"] is True
+    assert action.deferred_continuation[1]["step_id"] == "verify-desktop-result"
+    assert action.metadata["deferred_continuation_count"] == 2
+
+
+def test_runtime_replan_event_observes_then_retries_failed_ui_mutation() -> None:
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.click_ui_element",
+        "desktop.ui_elements",
+    ]
+    decision = RuntimePlanner().decision(
+        "打开 PixelForge 并点击导出按钮",
+        allowed_tools=allowed_tools,
+        metadata={"runtime_planner_preflight_ui_before_action": True},
+    )
+    envelope = runtime_execution_envelope_from_decision(
+        decision,
+        allowed_tools=allowed_tools,
+        full_plan=True,
+        metadata={"runtime_planner_preflight_ui_before_action": True},
+    )
+    assert envelope is not None
+    failed_requests = [
+        request.model_copy(
+            update={
+                "status": "failed",
+                "observation_evidence": {
+                    **request.observation_evidence,
+                    "blocking_condition": "ui_target_not_found",
+                },
+            }
+        )
+        if request.step_id == "operate-foreground-ui"
+        else request
+        for request in envelope.requests
+    ]
+    failed_envelope = envelope.model_copy(update={"requests": failed_requests})
+
+    events = run_events_with_runtime_execution_replan_requests(
+        [],
+        failed_envelope,
+        run_id="run-1",
+        task_id="task-1",
+    )
+
+    assert len(events) == 1
+    payload = events[0].payload
+    action = payload["recovery_actions"][0]
+    assert action["tool"] == "desktop.ui_elements"
+    assert action["input"] == {
+        "target": "导出",
+        "role_filter": "button",
+        "limit": 80,
+        "app_name": "PixelForge",
+    }
+    assert action["deferred_tool"] == "desktop.click_ui_element"
+    assert action["deferred_input"] == {
+        "target": "导出",
+        "role_filter": "button",
+        "click_count": 1,
+        "limit": 80,
+    }
+    assert action["deferred_context"]["step_id"] == "operate-foreground-ui"
+    assert [item["tool"] for item in action["deferred_continuation"]] == [
+        "desktop.ui_elements"
+    ]
+    assert action["deferred_continuation"][0]["step_id"] == "verify-desktop-result"
+    assert action["metadata"]["deferred_tool"] == "desktop.click_ui_element"
+
+
 def test_runtime_execution_envelope_keeps_selected_app_scope_for_foreground_typing() -> None:
     allowed_tools = [
         "desktop.list_apps",
@@ -36294,8 +36430,10 @@ def test_runtime_execution_envelope_preserves_request_level_replan_metadata(
         *,
         direct: bool = False,
         execution_normalized: bool = False,
+        metadata: Mapping[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
         assert execution_normalized is True
+        assert metadata is None
         return [
             {
                 "request_id": "runtime-generated-verify-request",

@@ -17,6 +17,10 @@ from .contracts import (
     TaskProgressSummarySnapshot,
     ToolCallSnapshot,
 )
+from .runtime_recovery_projection import (
+    runtime_execution_recovery_deferred_payload,
+    runtime_execution_recovery_retry,
+)
 from .tool_call_event_snapshots import is_tool_event, tool_call_payloads_from_event
 from .tool_call_payload_snapshots import tool_call_snapshot_from_payload
 
@@ -1768,6 +1772,7 @@ def _runtime_execution_request_recovery_snapshot(
     ):
         return None
 
+    retry = runtime_execution_recovery_retry(request, retry, envelope=envelope)
     retry_input = _mapping(retry.get("input"))
     if not retry_input:
         retry_input = _mapping(_runtime_request_value(request, "input"))
@@ -1809,10 +1814,24 @@ def _runtime_execution_request_recovery_snapshot(
         verification_targets=verification_targets,
     )
     execution_context = _runtime_execution_context(request, retry, envelope=envelope)
-    deferred_tool = _first_text(_runtime_request_value(request, "deferred_tool"))
-    deferred_input = _mapping(_runtime_request_value(request, "deferred_input"))
-    deferred_context = _mapping(_runtime_request_value(request, "deferred_context"))
-    deferred_continuation = _mapping_list(_runtime_request_value(request, "deferred_continuation"))
+    deferred_payload = runtime_execution_recovery_deferred_payload(
+        request,
+        envelope=envelope,
+        retry_tool=tool,
+    )
+    deferred_tool = _first_text(deferred_payload.get("deferred_tool"))
+    deferred_input = _mapping(deferred_payload.get("deferred_input"))
+    deferred_context = _mapping(deferred_payload.get("deferred_context"))
+    deferred_continuation = _mapping_list(deferred_payload.get("deferred_continuation"))
+    if deferred_continuation:
+        action_metadata["deferred_continuation_count"] = len(deferred_continuation)
+        action_metadata["deferred_tools"] = [
+            continuation_tool
+            for item in deferred_continuation
+            if (continuation_tool := _first_text(item.get("tool"), item.get("tool_name")))
+        ]
+    if deferred_tool:
+        action_metadata["deferred_tool"] = deferred_tool
     source_group_run_id = _first_text(
         _runtime_request_value(request, "group_run_id"),
         _runtime_request_value(request, "run_group_id"),
