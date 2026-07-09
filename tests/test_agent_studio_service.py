@@ -1293,7 +1293,11 @@ def test_agent_studio_service_delegates_desktop_provider_session_controls() -> N
     service = AgentStudioService(port)
 
     status = service.desktop_provider_session_status()
-    started = service.start_desktop_provider_session({"tools": ["desktop.safe_type_text"]})
+    start_request = {
+        "tools": ["desktop.safe_type_text"],
+        "provider_manifest": "tmp/virtual-provider.manifest.json",
+    }
+    started = service.start_desktop_provider_session(start_request)
     stopped = service.stop_desktop_provider_session()
 
     assert status["status"] == "stopped"
@@ -1301,7 +1305,7 @@ def test_agent_studio_service_delegates_desktop_provider_session_controls() -> N
     assert stopped["stopped"] is True
     assert port.calls[-3:] == [
         ("desktop_provider_session_status", None),
-        ("start_desktop_provider_session", {"tools": ["desktop.safe_type_text"]}),
+        ("start_desktop_provider_session", start_request),
         ("stop_desktop_provider_session", None),
     ]
 

@@ -244,6 +244,7 @@ class IsolatedDesktopProviderSessionManager:
         tools: list[str] | None = None,
         timeout_seconds: float = 10.0,
         requires_real_virtual_desktop_backend: bool = False,
+        provider_manifest: str | Path | None = None,
     ) -> dict[str, Any]:
         with self._lock:
             current = self.status(probe_health=True)
@@ -268,14 +269,23 @@ class IsolatedDesktopProviderSessionManager:
                     requires_real_virtual_desktop_backend
                 ),
             }
+            manifest_path: Path | None = None
             try:
-                manifest = _managed_external_provider_manifest(self._repo_root)
+                manifest_path = _managed_external_provider_manifest_path(
+                    self._repo_root,
+                    manifest_path=provider_manifest,
+                )
+                manifest = _managed_external_provider_manifest(
+                    self._repo_root,
+                    manifest_path=provider_manifest,
+                )
                 manifest_evidence = _provider_manifest_evidence_for_manifest(
                     manifest
                 )
                 command = _managed_external_provider_start_command(
                     self._repo_root,
                     manifest=manifest,
+                    manifest_path=manifest_path,
                 )
                 if not command:
                     raise RuntimeError(
@@ -284,6 +294,7 @@ class IsolatedDesktopProviderSessionManager:
                 start_cwd = _managed_external_provider_start_cwd(
                     self._repo_root,
                     manifest=manifest,
+                    manifest_path=manifest_path,
                 )
                 process = subprocess.Popen(
                     command,
@@ -302,6 +313,7 @@ class IsolatedDesktopProviderSessionManager:
                     command=command,
                     start_cwd=start_cwd,
                     timeout_seconds=timeout_seconds,
+                    manifest_path=manifest_path,
                 )
             try:
                 launch = _read_launch_payload(
@@ -319,6 +331,7 @@ class IsolatedDesktopProviderSessionManager:
                     command=command,
                     start_cwd=start_cwd,
                     timeout_seconds=timeout_seconds,
+                    manifest_path=manifest_path,
                 )
             env = _runtime_env_from_launch(_merge_manifest_launch(manifest, launch))
             self._process = process
@@ -390,10 +403,12 @@ def start_isolated_desktop_provider_session(
                 current_status=external_status,
             )
         return {**external_status, "started": False}
-    if _managed_external_provider_start_configured():
+    provider_manifest = _request_provider_manifest_path(payload)
+    if provider_manifest or _managed_external_provider_start_configured():
         started = _SESSION_MANAGER.start_managed_external(
             tools=clean_tools,
             requires_real_virtual_desktop_backend=requires_real_backend,
+            provider_manifest=provider_manifest or None,
         )
         if bool(started.get("ok")) is False:
             return started
@@ -418,6 +433,18 @@ def start_isolated_desktop_provider_session(
         ),
         tools=clean_tools,
     )
+
+
+def _request_provider_manifest_path(payload: dict[str, Any]) -> str:
+    for key in (
+        "provider_manifest",
+        "desktop_provider_manifest",
+        "desktop_provider_manifest_path",
+    ):
+        value = str(payload.get(key) or "").strip()
+        if value:
+            return value
+    return ""
 
 
 def stop_isolated_desktop_provider_session() -> dict[str, Any]:
@@ -706,6 +733,7 @@ def _managed_external_provider_start_command(
     repo_root: Path,
     *,
     manifest: dict[str, Any] | None = None,
+    manifest_path: Path | None = None,
 ) -> list[str]:
     raw = str(os.environ.get(_PROVIDER_START_COMMAND_ENV) or "").strip()
     if raw:
@@ -727,6 +755,7 @@ def _managed_external_provider_start_command(
         cwd = _managed_external_provider_start_cwd(
             repo_root,
             manifest=manifest_payload,
+            manifest_path=manifest_path,
         )
         return [
             sys.executable,
@@ -749,6 +778,7 @@ def _managed_external_provider_start_cwd(
     repo_root: Path,
     *,
     manifest: dict[str, Any] | None = None,
+    manifest_path: Path | None = None,
 ) -> Path:
     raw = str(os.environ.get(_PROVIDER_START_CWD_ENV) or "").strip()
     if raw:
@@ -758,12 +788,22 @@ def _managed_external_provider_start_cwd(
     if cwd:
         path = Path(cwd).expanduser()
         return path if path.is_absolute() else repo_root / path
-    manifest_path = _managed_external_provider_manifest_path(repo_root)
-    return manifest_path.parent if manifest_path is not None else repo_root
+    resolved_manifest_path = _managed_external_provider_manifest_path(
+        repo_root,
+        manifest_path=manifest_path,
+    )
+    return resolved_manifest_path.parent if resolved_manifest_path is not None else repo_root
 
 
-def _managed_external_provider_manifest(repo_root: Path | None = None) -> dict[str, Any]:
-    path = _managed_external_provider_manifest_path(repo_root)
+def _managed_external_provider_manifest(
+    repo_root: Path | None = None,
+    *,
+    manifest_path: str | Path | None = None,
+) -> dict[str, Any]:
+    path = _managed_external_provider_manifest_path(
+        repo_root,
+        manifest_path=manifest_path,
+    )
     if path is None:
         return {}
     payload = json.loads(path.read_text(encoding="utf-8"))
@@ -774,8 +814,10 @@ def _managed_external_provider_manifest(repo_root: Path | None = None) -> dict[s
 
 def _managed_external_provider_manifest_path(
     repo_root: Path | None = None,
+    *,
+    manifest_path: str | Path | None = None,
 ) -> Path | None:
-    raw = str(os.environ.get(_PROVIDER_MANIFEST_ENV) or "").strip()
+    raw = str(manifest_path or os.environ.get(_PROVIDER_MANIFEST_ENV) or "").strip()
     if not raw:
         return None
     path = Path(raw).expanduser()
@@ -1639,6 +1681,7 @@ def _managed_external_provider_start_failed_status(
     *,
     repo_root: Path,
     manifest: dict[str, Any] | None = None,
+    manifest_path: Path | None = None,
     command: list[str] | None = None,
     start_cwd: Path | None = None,
     timeout_seconds: float = 0.0,
@@ -1699,7 +1742,7 @@ def _managed_external_provider_start_failed_status(
         release_candidate=False,
         public_release_ready=False,
     )
-    manifest_path = _managed_external_provider_manifest_path(repo_root)
+    manifest_path = manifest_path or _managed_external_provider_manifest_path(repo_root)
     clean_command = [redact_api_error_text(item) for item in command or []]
     return {
         "ok": False,
