@@ -16,6 +16,10 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from apps.shell.yachiyo_agent import RuntimePlanner
 from apps.shell.yachiyo_agent import daily_desktop as daily_desktop_module
+from apps.shell.yachiyo_agent.desktop_provider_contract import (
+    VIRTUAL_DESKTOP_PROVIDER_TEMPLATE_BASE_URL,
+    virtual_desktop_provider_manifest_template,
+)
 from apps.shell.yachiyo_agent.daily_desktop import (
     daily_desktop_allowed_tools,
     planner_first_daily_desktop_entrypoint_requests,
@@ -849,11 +853,43 @@ def _parser() -> argparse.ArgumentParser:
             "an entrypoint for Oha-Yachiyo to start."
         ),
     )
+    parser.add_argument(
+        "--write-provider-manifest-template",
+        type=Path,
+        help=(
+            "Write a real virtual desktop provider manifest template and exit. "
+            "Use the generated file with --provider-manifest after replacing the "
+            "entrypoint/backend details with a real provider."
+        ),
+    )
+    parser.add_argument(
+        "--provider-manifest-template-provider-id",
+        default="oha-virtual-desktop-provider",
+        help="Provider id to place in --write-provider-manifest-template output.",
+    )
+    parser.add_argument(
+        "--provider-manifest-template-base-url",
+        default=VIRTUAL_DESKTOP_PROVIDER_TEMPLATE_BASE_URL,
+        help="Base URL to place in --write-provider-manifest-template output.",
+    )
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    if args.write_provider_manifest_template is not None:
+        template = virtual_desktop_provider_manifest_template(
+            provider_id=args.provider_manifest_template_provider_id,
+            base_url=args.provider_manifest_template_base_url,
+        )
+        _write_report(args.write_provider_manifest_template, template)
+        print(
+            "oha virtual desktop provider manifest template: "
+            f"{args.write_provider_manifest_template}",
+            file=sys.stderr,
+        )
+        print(json.dumps(template, ensure_ascii=False, indent=2, sort_keys=True))
+        return 0
     evidence = run_smoke(
         workdir=args.workdir,
         run_isolated_provider_smoke=bool(args.run_isolated_provider_smoke),

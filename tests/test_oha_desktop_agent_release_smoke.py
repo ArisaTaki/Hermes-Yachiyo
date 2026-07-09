@@ -385,3 +385,39 @@ def test_oha_desktop_agent_release_smoke_cli_passes_provider_manifest(
     assert exit_code == 0
     assert captured_kwargs["run_isolated_provider_smoke"] is True
     assert captured_kwargs["provider_manifest"] == manifest_path
+
+
+def test_oha_desktop_agent_release_smoke_cli_writes_provider_manifest_template(
+    tmp_path,
+    capsys,
+) -> None:
+    output_path = tmp_path / "provider-manifest.template.json"
+
+    exit_code = smoke.main(
+        [
+            "--write-provider-manifest-template",
+            str(output_path),
+            "--provider-manifest-template-provider-id",
+            "release-provider",
+            "--provider-manifest-template-base-url",
+            "http://127.0.0.1:39097",
+        ]
+    )
+
+    assert exit_code == 0
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+    assert payload["provider_id"] == "release-provider"
+    assert payload["provider_kind"] == "sandbox_desktop"
+    assert payload["desktop_session_kind"] == "virtual_desktop"
+    assert payload["desktop_session_isolated"] is True
+    assert payload["foreground_takeover_required"] is False
+    assert payload["desktop_backend_is_loopback"] is False
+    assert payload["desktop_backend_ready_for_public_release"] is True
+    assert payload["endpoint_urls"]["execute"] == (
+        "http://127.0.0.1:39097/tools/execute"
+    )
+    assert "desktop.list_apps" in payload["supported_tools"]
+    assert "desktop.verify" in payload["supported_tools"]
+    captured = capsys.readouterr()
+    assert "oha virtual desktop provider manifest template:" in captured.err
+    assert json.loads(captured.out)["provider_id"] == "release-provider"

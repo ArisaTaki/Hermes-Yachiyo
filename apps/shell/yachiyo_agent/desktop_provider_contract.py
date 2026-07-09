@@ -19,6 +19,8 @@ OHA_DESKTOP_AGENT_RELEASE_PROVIDER_TOOLS = (
     "desktop.verify",
 )
 
+VIRTUAL_DESKTOP_PROVIDER_TEMPLATE_BASE_URL = "http://127.0.0.1:29097"
+
 _CHECK_BLOCKERS = {
     "provider_configured": "desktop_execution_provider_not_configured",
     "provider_available": "desktop_execution_provider_unavailable",
@@ -36,6 +38,105 @@ _CHECK_BLOCKERS = {
     "all_tool_results_isolated": "desktop_provider_tool_result_not_isolated",
     "tool_sequence_covers_required_tools": "desktop_provider_smoke_incomplete",
 }
+
+
+def virtual_desktop_provider_manifest_template(
+    *,
+    provider_id: str = "oha-virtual-desktop-provider",
+    base_url: str = VIRTUAL_DESKTOP_PROVIDER_TEMPLATE_BASE_URL,
+) -> dict[str, Any]:
+    """Return the manifest shape a real isolated desktop backend must implement."""
+
+    clean_provider_id = str(provider_id or "oha-virtual-desktop-provider").strip()
+    clean_base_url = str(base_url or VIRTUAL_DESKTOP_PROVIDER_TEMPLATE_BASE_URL).strip()
+    endpoints = {
+        "status": "/status",
+        "health": "/health",
+        "manifest": "/manifest",
+        "execute": "/tools/execute",
+    }
+    endpoint_urls = {
+        key: _join_url(clean_base_url, path) for key, path in endpoints.items()
+    }
+    return {
+        "ok": True,
+        "contract_version": DESKTOP_PROVIDER_CONTRACT_VERSION,
+        "provider_id": clean_provider_id,
+        "provider_kind": "sandbox_desktop",
+        "execution_mode": "virtual_desktop",
+        "url": clean_base_url,
+        "base_url": clean_base_url,
+        "endpoints": endpoints,
+        "endpoint_urls": endpoint_urls,
+        "supported_tools": list(OHA_DESKTOP_AGENT_RELEASE_PROVIDER_TOOLS),
+        "capabilities": [
+            "desktop_discovery",
+            "app_launch",
+            "foreground_mutation",
+            "foreground_input",
+            "keyboard_mouse_capture",
+            "isolated_desktop",
+            "virtual_desktop",
+            "sandbox_desktop_session",
+            "permission_diagnostics",
+        ],
+        "foreground_mutation_supported": True,
+        "keyboard_mouse_capture_supported": True,
+        "desktop_session_kind": "virtual_desktop",
+        "desktop_session_isolated": True,
+        "foreground_takeover_required": False,
+        "desktop_backend_kind": "virtual_desktop_backend",
+        "desktop_backend_is_loopback": False,
+        "desktop_backend_ready_for_public_release": True,
+        "requires_real_virtual_desktop_backend": False,
+        "allow_remote": False,
+        "environment": {
+            "manifest": "OHA_YACHIYO_DESKTOP_PROVIDER_MANIFEST",
+            "url": "OHA_YACHIYO_DESKTOP_PROVIDER_URL",
+            "provider_id": "OHA_YACHIYO_DESKTOP_PROVIDER_ID",
+            "provider_kind": "OHA_YACHIYO_DESKTOP_PROVIDER_KIND",
+            "tools": "OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS",
+        },
+        "entrypoint": {
+            "argv": [
+                "/absolute/path/to/virtual-desktop-provider",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                "29097",
+            ],
+            "cwd": ".",
+        },
+        "smoke_command": [
+            "python",
+            "scripts/smoke_oha_desktop_agent_release.py",
+            "--run-isolated-provider-smoke",
+            "--use-configured-virtual-desktop-provider",
+            "--provider-manifest",
+            "/absolute/path/to/provider-manifest.json",
+            "--report-json",
+            "tmp/oha-desktop-agent-release-smoke.json",
+        ],
+        "safety": {
+            "loopback_default": False,
+            "remote_default_allowed": False,
+            "foreground_mutation_tools_supported": True,
+            "keyboard_mouse_capture_supported": True,
+            "desktop_session_kind": "virtual_desktop",
+            "desktop_session_isolated": True,
+            "foreground_takeover_required": False,
+            "desktop_backend_kind": "virtual_desktop_backend",
+            "desktop_backend_is_loopback": False,
+            "desktop_backend_ready_for_public_release": True,
+            "requires_real_virtual_desktop_backend": False,
+            "requires_runtime_approval": True,
+            "approval_required_tools": [
+                "desktop.click_ui_element",
+                "desktop.safe_shortcut",
+                "desktop.safe_type_text",
+            ],
+        },
+    }
 
 
 def virtual_desktop_provider_contract_evidence(
@@ -189,3 +290,9 @@ def _string_list(value: Any) -> list[str]:
     else:
         raw = []
     return [str(item or "").strip() for item in raw if str(item or "").strip()]
+
+
+def _join_url(base_url: str, path: str) -> str:
+    clean_base = str(base_url or "").rstrip("/")
+    clean_path = "/" + str(path or "").lstrip("/")
+    return f"{clean_base}{clean_path}" if clean_base else clean_path

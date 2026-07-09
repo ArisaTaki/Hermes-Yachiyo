@@ -1,6 +1,7 @@
 from apps.shell.yachiyo_agent.desktop_provider_contract import (
     OHA_DESKTOP_AGENT_RELEASE_PROVIDER_TOOLS,
     virtual_desktop_provider_contract_evidence,
+    virtual_desktop_provider_manifest_template,
 )
 
 
@@ -99,3 +100,37 @@ def test_virtual_desktop_provider_contract_checks_tool_results_when_present() ->
     assert "desktop_provider_tool_result_not_isolated" in evidence[
         "blocking_conditions"
     ]
+
+
+def test_virtual_desktop_provider_manifest_template_matches_release_contract() -> None:
+    template = virtual_desktop_provider_manifest_template(
+        provider_id="real-provider",
+        base_url="http://127.0.0.1:39097",
+    )
+
+    assert template["provider_id"] == "real-provider"
+    assert template["provider_kind"] == "sandbox_desktop"
+    assert template["endpoint_urls"]["status"] == "http://127.0.0.1:39097/status"
+    assert template["endpoint_urls"]["execute"] == (
+        "http://127.0.0.1:39097/tools/execute"
+    )
+    assert template["supported_tools"] == list(OHA_DESKTOP_AGENT_RELEASE_PROVIDER_TOOLS)
+    assert template["desktop_session_kind"] == "virtual_desktop"
+    assert template["desktop_session_isolated"] is True
+    assert template["foreground_takeover_required"] is False
+    assert template["desktop_backend_is_loopback"] is False
+    assert template["desktop_backend_ready_for_public_release"] is True
+    assert template["requires_real_virtual_desktop_backend"] is False
+
+    evidence = virtual_desktop_provider_contract_evidence(
+        {
+            **template,
+            "configured": True,
+            "available": True,
+            "adapter_ready": True,
+        },
+        required_tools=OHA_DESKTOP_AGENT_RELEASE_PROVIDER_TOOLS,
+    )
+
+    assert evidence["ok"] is True
+    assert evidence["blocking_conditions"] == []

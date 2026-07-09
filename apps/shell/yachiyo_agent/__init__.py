@@ -121,6 +121,7 @@ from .desktop_provider_contract import (
     DESKTOP_PROVIDER_CONTRACT_VERSION,
     OHA_DESKTOP_AGENT_RELEASE_PROVIDER_TOOLS,
     virtual_desktop_provider_contract_evidence,
+    virtual_desktop_provider_manifest_template,
 )
 from .daily_desktop import (
     daily_desktop_allowed_tools,
@@ -247,6 +248,7 @@ __all__ = [
     "DesktopRecoveryActionMetadataSnapshot",
     "OHA_DESKTOP_AGENT_RELEASE_PROVIDER_TOOLS",
     "virtual_desktop_provider_contract_evidence",
+    "virtual_desktop_provider_manifest_template",
     "DESKTOP_TOOL_RISK_LEVELS",
     "desktop_tool_risk_level",
     "desktop_tool_execution_mode",
