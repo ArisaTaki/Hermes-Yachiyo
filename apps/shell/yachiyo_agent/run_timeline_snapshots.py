@@ -20,6 +20,9 @@ from .artifact_event_snapshots import (
     merge_artifact_snapshot_lists,
 )
 from .artifacts import artifact_snapshots_from_payloads as _artifact_snapshots_from_payloads
+from .blocked_direct_request_events import (
+    run_events_with_blocked_direct_request_progress_events,
+)
 from .contracts import (
     ApprovalCardSnapshot,
     ArtifactSnapshot,
@@ -132,6 +135,15 @@ def run_timeline_snapshot_from_payload(
     events = run_events_with_runtime_execution_replan_requests(
         events,
         runtime_execution_envelope,
+        run_id=run_id,
+        task_id=_text(payload.get("task_id")),
+        group_run_id=group_run_id or "",
+        workflow_run_id=workflow_run_id,
+        created_at=_text(payload.get("updated_at") or payload.get("created_at")),
+    )
+    events = run_events_with_blocked_direct_request_progress_events(
+        events,
+        payload,
         run_id=run_id,
         task_id=_text(payload.get("task_id")),
         group_run_id=group_run_id or "",

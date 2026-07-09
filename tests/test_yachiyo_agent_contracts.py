@@ -4727,6 +4727,132 @@ def test_agent_task_snapshot_projects_blocked_direct_requests_into_task_core_rep
     assert snapshot.runtime_debug.blocked_runtime_request_count == 1
 
 
+def test_run_timeline_projects_blocked_direct_requests_into_workflow_events() -> None:
+    timeline = run_timeline_snapshot_from_payload(
+        {
+            **_blocked_direct_runtime_payload(),
+            "run_id": "workflow-run-1",
+            "workflow_run_id": "workflow-run-1",
+            "status": "running",
+        }
+    )
+
+    blocked_events = _blocked_direct_runtime_events(timeline.events)
+
+    assert {
+        "workflow.run.task.todo.updated",
+        "workflow.run.task.checkpoint.updated",
+        "workflow.run.replan.requested",
+    }.issubset({event.event_type for event in blocked_events})
+    assert timeline.task_progress is not None
+    assert timeline.task_progress.needs_replan is True
+    assert timeline.task_progress.blocked_step_ids == ["type-text"]
+    assert timeline.runtime_debug is not None
+    assert timeline.runtime_debug.needs_replan is True
+
+
+def test_group_run_projects_blocked_direct_requests_into_group_events() -> None:
+    group_run = group_run_snapshot_from_payload(
+        {
+            **_blocked_direct_runtime_payload(),
+            "group_run_id": "group-run-1",
+            "group_id": "group-1",
+            "title": "Group desktop run",
+            "objective": "Type text",
+            "status": "running",
+        }
+    )
+
+    blocked_events = _blocked_direct_runtime_events(group_run.events)
+
+    assert {
+        "group.run.task.todo.updated",
+        "group.run.task.checkpoint.updated",
+        "group.run.replan.requested",
+    }.issubset({event.event_type for event in blocked_events})
+    assert group_run.task_progress is not None
+    assert group_run.task_progress.needs_replan is True
+    assert group_run.task_progress.blocked_step_ids == ["type-text"]
+    assert group_run.runtime_debug is not None
+    assert group_run.runtime_debug.needs_replan is True
+
+
+def _blocked_direct_runtime_payload() -> dict[str, Any]:
+    return {
+        "task_id": "task-1",
+        "run_id": "run-1",
+        "status": "running",
+        "task_core": {
+            "core_id": "task-core-1",
+            "workspace": {
+                "workspace_id": "workspace-1",
+                "title": "Desktop workspace",
+                "items": [
+                    {
+                        "item_id": "type-input",
+                        "title": "type-text.input.json",
+                        "kind": "scratch",
+                        "source_step_id": "type-text",
+                        "status": "planned",
+                        "metadata": {"tool_name": "desktop.safe_type_text"},
+                    }
+                ],
+            },
+            "todos": [
+                {
+                    "todo_id": "todo-type",
+                    "title": "Type search text",
+                    "status": "pending",
+                    "capability_id": "desktop.ui_operation",
+                    "step_id": "type-text",
+                    "tool_name": "desktop.safe_type_text",
+                }
+            ],
+            "checkpoints": [
+                {
+                    "checkpoint_id": "checkpoint-type",
+                    "title": "Verify typed text",
+                    "status": "planned",
+                    "after_step_id": "type-text",
+                    "depends_on": ["type-text"],
+                    "verifies": ["desktop.safe_type_text"],
+                }
+            ],
+            "replan_signals": [],
+        },
+        "metadata": {
+            "yachiyo_blocked_direct_tool_requests": [
+                {
+                    "request_id": "request-type",
+                    "tool": "desktop.safe_type_text",
+                    "step_id": "type-text",
+                    "capability_id": "desktop.ui_operation",
+                    "status": "blocked",
+                    "blocked_by": "real_virtual_desktop_provider_required",
+                    "policy_reason": "Real virtual desktop provider required.",
+                    "desktop_execution_route": {
+                        "status": "real_virtual_desktop_provider_required",
+                        "can_execute": False,
+                        "blocking_conditions": [
+                            "real_virtual_desktop_provider_required"
+                        ],
+                    },
+                }
+            ]
+        },
+    }
+
+
+def _blocked_direct_runtime_events(
+    events: list[PublicRunEvent],
+) -> list[PublicRunEvent]:
+    return [
+        event
+        for event in events
+        if event.payload.get("source") == "runtime_blocked_direct_request"
+    ]
+
+
 def test_runtime_debug_summary_projects_task_workspace_progress() -> None:
     task_core = TaskCoreSnapshot(
         core_id="task-core-1",

@@ -7,6 +7,9 @@ from typing import Any
 
 from apps.shell.agent.runtime.events import redact_secrets
 
+from .blocked_direct_request_events import (
+    run_events_with_blocked_direct_request_progress_events,
+)
 from .contracts import (
     AgentGroupMemberSnapshot,
     ApprovalCardSnapshot,
@@ -145,6 +148,14 @@ def group_run_snapshot_from_payload(
     events = run_events_with_runtime_execution_replan_requests(
         events,
         runtime_execution_envelope,
+        run_id=group_run_id,
+        task_id=_text(payload.get("task_id")),
+        group_run_id=group_run_id,
+        created_at=_text(payload.get("updated_at") or payload.get("created_at")),
+    )
+    events = run_events_with_blocked_direct_request_progress_events(
+        events,
+        payload,
         run_id=group_run_id,
         task_id=_text(payload.get("task_id")),
         group_run_id=group_run_id,
