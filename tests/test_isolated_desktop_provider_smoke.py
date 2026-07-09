@@ -15,6 +15,13 @@ def test_isolated_desktop_provider_smoke_covers_operate_verify_sequence() -> Non
     assert evidence["checks"]["read_ui_returned_elements"] is True
     assert evidence["checks"]["verify_expected_text"] is True
     assert evidence["covered_tools"] == list(smoke.SMOKE_TOOLS)
+    assert evidence["provider_conformance"]["ok"] is True
+    assert evidence["provider_conformance"]["smoke_ok"] is True
+    assert evidence["provider_conformance"]["public_release_ready"] is False
+    assert evidence["provider_conformance"]["release_candidate"] is False
+    assert "loopback_desktop_backend" in evidence["provider_conformance"][
+        "release_blocking_conditions"
+    ]
     assert [item["action"] for item in evidence["tool_results"]] == list(
         smoke.SMOKE_TOOLS
     )
@@ -78,6 +85,15 @@ def test_isolated_desktop_provider_smoke_can_use_configured_provider(monkeypatch
     assert evidence["checks"]["provider_backend_not_loopback"] is True
     assert evidence["checks"]["provider_contract_ready"] is True
     assert evidence["provider_contract"]["ok"] is True
+    assert evidence["provider_conformance"]["ok"] is True
+    assert evidence["provider_conformance"]["mode"] == (
+        "release_virtual_desktop_provider_conformance"
+    )
+    assert evidence["provider_conformance"]["public_release_ready"] is True
+    assert evidence["provider_conformance"]["release_candidate"] is True
+    assert evidence["provider_conformance"]["blocking_conditions"] == []
+    assert evidence["provider_conformance"]["release_blocking_conditions"] == []
+    assert evidence["provider_conformance"]["covered_tools"] == list(smoke.SMOKE_TOOLS)
     assert evidence["checks"]["all_tool_results_isolated"] is True
     assert evidence["tool_results"][0]["sandbox_provider"][
         "desktop_session_isolated"
@@ -176,3 +192,4 @@ def test_isolated_desktop_provider_smoke_can_start_managed_configured_provider(
     assert state["stopped"] is True
     assert evidence["desktop_backend_ready_for_public_release"] is True
     assert evidence["provider_contract"]["ok"] is True
+    assert evidence["provider_conformance"]["public_release_ready"] is True

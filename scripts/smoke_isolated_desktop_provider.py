@@ -284,6 +284,13 @@ def _run_provider_smoke(
     )
     if use_configured_provider:
         checks["provider_contract_ready"] = provider_contract["ok"] is True
+    provider_conformance = _provider_conformance_summary(
+        checks=checks,
+        provider_contract=provider_contract,
+        tool_results=tool_results,
+        use_configured_provider=use_configured_provider,
+        status=status_payload,
+    )
     return {
         "ok": all(checks.values()),
         "mode": "isolated_desktop_provider_smoke",
@@ -295,6 +302,7 @@ def _run_provider_smoke(
         "tool_sequence": list(SMOKE_TOOLS),
         "checks": checks,
         "provider_contract": provider_contract,
+        "provider_conformance": provider_conformance,
         **_provider_status_summary(status_payload),
         "covered_tools": list(SMOKE_TOOLS),
     }
@@ -462,6 +470,13 @@ def _provider_status_only_report(
         required_tools=SMOKE_TOOLS,
         tool_results=[],
     )
+    provider_conformance = _provider_conformance_summary(
+        checks=checks,
+        provider_contract=provider_contract,
+        tool_results=[],
+        use_configured_provider=use_configured_provider,
+        status=status_payload,
+    )
     return {
         "ok": False,
         "mode": "isolated_desktop_provider_smoke",
@@ -473,6 +488,7 @@ def _provider_status_only_report(
         "checks": checks,
         "reason": reason,
         "provider_contract": provider_contract,
+        "provider_conformance": provider_conformance,
         "managed_provider_session": session_payload,
         "managed_provider_started": bool(session_payload.get("started")),
         **_provider_status_summary(status_payload),
@@ -498,6 +514,117 @@ def _provider_status_summary(status: Mapping[str, Any]) -> dict[str, Any]:
         ),
         "supported_tools": status.get("supported_tools") or [],
     }
+
+
+def _provider_conformance_summary(
+    *,
+    checks: Mapping[str, bool],
+    provider_contract: Mapping[str, Any],
+    tool_results: Sequence[Mapping[str, Any]],
+    use_configured_provider: bool,
+    status: Mapping[str, Any],
+) -> dict[str, Any]:
+    tool_sequence = [
+        str(item.get("tool") or item.get("action") or "").strip()
+        for item in tool_results
+        if isinstance(item, Mapping)
+    ]
+    failed_tools = [
+        str(item.get("tool") or item.get("action") or "").strip()
+        for item in tool_results
+        if isinstance(item, Mapping) and item.get("ok") is False
+    ]
+    required_tools = list(SMOKE_TOOLS)
+    missing_tools = [
+        tool for tool in required_tools if tool and tool not in set(tool_sequence)
+    ]
+    smoke_blocking_conditions = _unique_strings(
+        [
+            f"check_failed:{key}"
+            for key, passed in checks.items()
+            if passed is not True
+        ]
+    )
+    provider_contract_blocking_conditions = _string_list(
+        provider_contract.get("blocking_conditions")
+    )
+    release_blocking_conditions = _unique_strings(
+        [*smoke_blocking_conditions, *provider_contract_blocking_conditions]
+    )
+    smoke_ok = bool(checks) and all(checks.values())
+    public_release_ready = (
+        bool(use_configured_provider)
+        and smoke_ok
+        and provider_contract.get("ok") is True
+    )
+    return {
+        "ok": (
+            public_release_ready
+            if use_configured_provider
+            else smoke_ok
+        ),
+        "mode": (
+            "release_virtual_desktop_provider_conformance"
+            if use_configured_provider
+            else "dev_loopback_provider_conformance"
+        ),
+        "runtime_checked": True,
+        "release_candidate": bool(use_configured_provider),
+        "public_release_ready": public_release_ready,
+        "smoke_ok": smoke_ok,
+        "provider_contract_ok": provider_contract.get("ok") is True,
+        "required_tools": required_tools,
+        "covered_tools": [tool for tool in tool_sequence if tool],
+        "missing_required_tools": _unique_strings(
+            [
+                *missing_tools,
+                *_string_list(provider_contract.get("missing_required_tools")),
+            ]
+        ),
+        "failed_tools": _unique_strings(failed_tools),
+        "blocking_conditions": (
+            release_blocking_conditions
+            if use_configured_provider
+            else smoke_blocking_conditions
+        ),
+        "release_blocking_conditions": release_blocking_conditions,
+        "provider_contract_blocking_conditions": (
+            provider_contract_blocking_conditions
+        ),
+        "desktop_session_kind": str(status.get("desktop_session_kind") or ""),
+        "desktop_session_isolated": status.get("desktop_session_isolated"),
+        "foreground_takeover_required": status.get("foreground_takeover_required"),
+        "desktop_backend_kind": status.get("desktop_backend_kind"),
+        "desktop_backend_is_loopback": status.get("desktop_backend_is_loopback"),
+        "desktop_backend_ready_for_public_release": status.get(
+            "desktop_backend_ready_for_public_release"
+        ),
+        "requires_real_virtual_desktop_backend": status.get(
+            "requires_real_virtual_desktop_backend"
+        ),
+    }
+
+
+def _unique_strings(values: Sequence[Any]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        item = str(value or "").strip()
+        if not item or item in seen:
+            continue
+        result.append(item)
+        seen.add(item)
+    return result
+
+
+def _string_list(value: Any) -> list[str]:
+    if isinstance(value, str):
+        raw = value.split(",")
+    elif isinstance(value, Sequence) and not isinstance(value, (bytes, bytearray)):
+        raw = value
+    else:
+        raw = []
+    return [str(item or "").strip() for item in raw if str(item or "").strip()]
 
 
 def _parser() -> argparse.ArgumentParser:
