@@ -29,6 +29,14 @@ _TERMINAL_REQUEST_STATUSES = {
     "unavailable",
 }
 
+_VERIFICATION_BLOCKING_REQUEST_STATUSES = {
+    "",
+    "planned",
+    "running",
+    "completed",
+    "skipped",
+}
+
 
 def runtime_execution_envelope_with_status_overlay(
     envelope: RuntimeExecutionEnvelopeSnapshot | None,
@@ -70,6 +78,13 @@ def runtime_execution_envelope_with_status_overlay(
             active_step_ids=active_step_ids,
             active_status=active_status,
         )
+        verification_update = _request_verification_update(
+            request,
+            events=event_items,
+            tool_calls=tool_items,
+        )
+        if _request_verification_failed(verification_update):
+            status = _verified_failed_request_status(status)
         request_update: dict[str, Any] = {}
         if status:
             request_update["status"] = status
@@ -81,13 +96,7 @@ def runtime_execution_envelope_with_status_overlay(
                 approvals=approval_items,
             )
         )
-        request_update.update(
-            _request_verification_update(
-                request,
-                events=event_items,
-                tool_calls=tool_items,
-            )
-        )
+        request_update.update(verification_update)
         requests.append(request.model_copy(update=request_update) if request_update else request)
 
     updates: dict[str, Any] = {"requests": requests}
@@ -221,6 +230,16 @@ def _request_verification_update(
     for tool_call in tool_calls:
         if not _tool_call_matches_request(tool_call, request):
             continue
+        for source in (
+            tool_call.output_preview,
+            tool_call.metadata,
+            tool_call.input_preview,
+        ):
+            if not isinstance(source, dict):
+                continue
+            status = _verification_status(source)
+            if status:
+                verification_status = status
         _extend_unique(artifact_paths, _artifact_paths_from_payload(tool_call.output_preview))
         _extend_unique(artifact_paths, _artifact_paths_from_payload(tool_call.metadata))
 
@@ -234,6 +253,17 @@ def _request_verification_update(
     if artifact_paths:
         update["verification_artifact_paths"] = artifact_paths
     return update
+
+
+def _request_verification_failed(update: dict[str, Any]) -> bool:
+    return _text(update.get("verification_status")) == "verification_failed"
+
+
+def _verified_failed_request_status(status: str) -> str:
+    clean = _text(status)
+    if clean in _VERIFICATION_BLOCKING_REQUEST_STATUSES:
+        return "blocked"
+    return clean or "blocked"
 
 
 def _request_replay_evidence_update(
@@ -372,11 +402,21 @@ def _verification_status(payload: dict[str, Any]) -> str:
     status = _text(payload.get("verification_status"))
     if status:
         return status
+    if payload.get("verification_failed") is True:
+        return "verification_failed"
     checkpoint = payload.get("checkpoint")
     if isinstance(checkpoint, dict):
         checkpoint_payload = checkpoint.get("payload")
         if isinstance(checkpoint_payload, dict):
-            return _text(checkpoint_payload.get("verification_status"))
+            status = _verification_status(checkpoint_payload)
+            if status:
+                return status
+    for key in ("result", "data", "output", "output_preview", "metadata"):
+        nested = payload.get(key)
+        if isinstance(nested, dict):
+            status = _verification_status(nested)
+            if status:
+                return status
     return ""
 
 

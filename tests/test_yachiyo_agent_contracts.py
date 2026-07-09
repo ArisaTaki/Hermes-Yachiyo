@@ -777,6 +777,118 @@ def test_runtime_execution_request_projects_verification_evidence() -> None:
     ]
 
 
+def test_runtime_execution_request_blocks_completed_tool_when_verification_fails() -> None:
+    envelope = RuntimeExecutionEnvelopeSnapshot(
+        envelope_id="execution-envelope-verify-failed",
+        decision_id="decision-verify-failed",
+        plan_id="runtime-plan-verify-failed",
+        intent_kind="desktop_operation",
+        requests=[
+            RuntimeExecutionRequestSnapshot(
+                request_id="request-open-app",
+                step_id="open-app",
+                capability_id="desktop.app_control",
+                tool_name="app.open",
+                verification_targets=[
+                    {
+                        "step_id": "verify-open-app",
+                        "target": "Music",
+                    }
+                ],
+            )
+        ],
+    )
+    tool_call = ToolCallSnapshot(
+        tool_call_id="tool-call-open-app",
+        run_id="run-verify-failed",
+        step_id="open-app",
+        capability_id="desktop.app_control",
+        tool_name="app.open",
+        status="completed",
+        output_preview={"ok": True},
+    )
+    events = [
+        public_run_event_from_payload(
+            {
+                "event_id": "event-verify-open-app-failed",
+                "run_id": "run-verify-failed",
+                "sequence": 1,
+                "event_type": "workflow.run.task.checkpoint.updated",
+                "payload": {
+                    "checkpoint_id": "checkpoint-open-app",
+                    "step_id": "open-app",
+                    "status": "blocked",
+                    "verification_status": "verification_failed",
+                    "verified_by_step_id": "verify-open-app",
+                    "checkpoint": {
+                        "checkpoint_id": "checkpoint-open-app",
+                        "after_step_id": "open-app",
+                        "status": "blocked",
+                        "payload": {
+                            "verification_failed": True,
+                        },
+                    },
+                },
+            }
+        )
+    ]
+
+    projected = runtime_execution_envelope_with_status_overlay(
+        envelope,
+        tool_calls=[tool_call],
+        events=events,
+    )
+
+    assert projected is not None
+    request = projected.requests[0]
+    assert request.status == "blocked"
+    assert request.tool_call_ids == ["tool-call-open-app"]
+    assert request.verification_status == "verification_failed"
+    assert request.verification_step_id == "verify-open-app"
+    assert request.verification_event_ids == ["event-verify-open-app-failed"]
+
+
+def test_runtime_execution_request_blocks_completed_tool_result_verification_failure() -> None:
+    envelope = RuntimeExecutionEnvelopeSnapshot(
+        envelope_id="execution-envelope-tool-result-verify-failed",
+        decision_id="decision-tool-result-verify-failed",
+        plan_id="runtime-plan-tool-result-verify-failed",
+        intent_kind="desktop_operation",
+        requests=[
+            RuntimeExecutionRequestSnapshot(
+                request_id="request-verify-app",
+                step_id="verify-app",
+                capability_id="desktop.ui_observe",
+                tool_name="desktop.verify",
+            )
+        ],
+    )
+    tool_call = ToolCallSnapshot(
+        tool_call_id="tool-call-verify-app",
+        run_id="run-tool-result-verify-failed",
+        step_id="verify-app",
+        capability_id="desktop.ui_observe",
+        tool_name="desktop.verify",
+        status="completed",
+        output_preview={
+            "ok": False,
+            "verification_failed": True,
+            "reason": "target_window_not_found",
+        },
+    )
+
+    projected = runtime_execution_envelope_with_status_overlay(
+        envelope,
+        tool_calls=[tool_call],
+    )
+
+    assert projected is not None
+    request = projected.requests[0]
+    assert request.status == "blocked"
+    assert request.tool_call_ids == ["tool-call-verify-app"]
+    assert request.verification_status == "verification_failed"
+
+
 def test_replan_continuation_snapshot_is_public_contract() -> None:
     continuation = ReplanContinuationSnapshot(
         continuation_id="replan-continuation:replan-1:action-1",
