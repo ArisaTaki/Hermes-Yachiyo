@@ -35,7 +35,11 @@ from .desktop_permissions import (
     desktop_permission_missing_by_capability,
     desktop_runtime_blocking_conditions_by_capability,
 )
-from .desktop_execution_policy import sandbox_desktop_provider_status
+from .desktop_execution_policy import (
+    daily_entrypoint_desktop_execution_policy,
+    desktop_execution_policy_payload,
+    sandbox_desktop_provider_status,
+)
 from .desktop_plan_hints import hotkey_hint
 from .desk import LocalAgentDeskStore
 from .entrypoint_tool_selection import planner_first_direct_tool_selection
@@ -174,6 +178,25 @@ _LEGACY_CHAT_DIRECT_APPROVAL_FLAG_COMPAT_TOOLS = {
     "desktop.safe_type_text",
     "desktop.search_submit",
     "system.settings_open",
+}
+_LEGACY_CHAT_DIRECT_PROVIDER_PROTECTED_TOOLS = {
+    "app.open_and_safe_type_text",
+    "app.focus_and_safe_type_text",
+    "app.open_and_safe_shortcut",
+    "app.focus_and_safe_shortcut",
+    "app.open_and_safe_key",
+    "app.focus_and_safe_key",
+    "app.open_and_hotkey",
+    "app.focus_and_hotkey",
+    "desktop.hotkey",
+    "desktop.safe_key",
+    "desktop.safe_shortcut",
+    "desktop.safe_type_text",
+    "desktop.search_submit",
+    "desktop.shortcut",
+    "desktop.submit_foreground",
+    "desktop.type",
+    "desktop.type_text",
 }
 
 
@@ -2857,7 +2880,11 @@ def _direct_tool_requests_with_desktop_provider_session(
 ) -> list[dict[str, Any]]:
     if not direct_tool_requests:
         return []
-    if _direct_tool_requests_are_legacy_chat_direct_local(direct_tool_requests):
+    auto_start = _desktop_provider_session_auto_start_requested(metadata)
+    legacy_chat_direct_local = _direct_tool_requests_are_legacy_chat_direct_local(
+        direct_tool_requests
+    )
+    if legacy_chat_direct_local and not auto_start:
         return [dict(request) for request in direct_tool_requests if isinstance(request, dict)]
     envelope_requests = []
     for index, request in enumerate(direct_tool_requests, start=1):
@@ -2866,14 +2893,20 @@ def _direct_tool_requests_with_desktop_provider_session(
         tool_name = str(request.get("tool") or request.get("tool_name") or "").strip()
         if not tool_name:
             continue
-        envelope_request = dict(request)
+        envelope_request = _direct_tool_request_with_provider_session_policy(
+            request,
+            metadata=metadata,
+            enable=_legacy_direct_request_needs_provider_session_policy(
+                tool_name,
+                legacy_chat_direct_local=legacy_chat_direct_local,
+            ),
+        )
         envelope_request.setdefault("tool_name", tool_name)
         envelope_request.setdefault("request_id", f"request:{index}:{tool_name}")
         envelope_requests.append(envelope_request)
     if not envelope_requests:
         return [dict(request) for request in direct_tool_requests if isinstance(request, dict)]
     envelope = {"requests": envelope_requests}
-    auto_start = _desktop_provider_session_auto_start_requested(metadata)
     try:
         session = ensure_isolated_desktop_provider_session_for_envelope(
             envelope,
@@ -2909,21 +2942,69 @@ def _direct_tool_requests_with_desktop_provider_session(
         tool_name = str(request.get("tool") or request.get("tool_name") or "").strip()
         request_id = str(request.get("request_id") or f"request:{index}:{tool_name}").strip()
         annotated_request = by_request_id.get(request_id)
+        next_request = _direct_tool_request_with_provider_session_policy(
+            request,
+            metadata=metadata,
+            enable=_legacy_direct_request_needs_provider_session_policy(
+                tool_name,
+                legacy_chat_direct_local=legacy_chat_direct_local,
+            ),
+        )
         if isinstance(annotated_request, dict) and isinstance(
             annotated_request.get("desktop_provider_session"),
             dict,
         ):
             result.append(
                 {
-                    **dict(request),
+                    **next_request,
                     "desktop_provider_session": dict(
                         annotated_request["desktop_provider_session"]
                     ),
                 }
             )
         else:
-            result.append(dict(request))
+            result.append(next_request)
     return result
+
+
+def _legacy_direct_request_needs_provider_session_policy(
+    tool_name: str,
+    *,
+    legacy_chat_direct_local: bool,
+) -> bool:
+    return (
+        legacy_chat_direct_local
+        and str(tool_name or "").strip() in _LEGACY_CHAT_DIRECT_PROVIDER_PROTECTED_TOOLS
+    )
+
+
+def _direct_tool_request_with_provider_session_policy(
+    request: Mapping[str, Any],
+    *,
+    metadata: Mapping[str, Any] | None,
+    enable: bool,
+) -> dict[str, Any]:
+    payload = dict(request)
+    if enable:
+        payload["desktop_execution_policy"] = _desktop_provider_session_policy_from_metadata(
+            metadata
+        )
+    return payload
+
+
+def _desktop_provider_session_policy_from_metadata(
+    metadata: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    if isinstance(metadata, Mapping):
+        for key in (
+            "desktop_execution_policy",
+            "yachiyo_desktop_execution_policy",
+            "desktop_interaction_policy",
+        ):
+            policy = desktop_execution_policy_payload(metadata.get(key))
+            if policy:
+                return policy
+    return daily_entrypoint_desktop_execution_policy(surface="chat")
 
 
 def _failed_desktop_provider_session_for_envelope(
