@@ -2811,6 +2811,14 @@ def test_runtime_tool_call_executor_routes_running_provider_session_to_adapter()
                 "desktop_session_isolated": True,
                 "foreground_takeover_required": False,
                 "keyboard_mouse_capture_supported": True,
+                "provider_manifest_evidence": {
+                    "provider_id": "sandbox-1",
+                    "ok": True,
+                },
+                "provider_conformance": {
+                    "ok": True,
+                    "public_release_ready": True,
+                },
             },
         },
         ["desktop.safe_type_text"],
@@ -2825,7 +2833,15 @@ def test_runtime_tool_call_executor_routes_running_provider_session_to_adapter()
     assert result["desktop_execution_route"]["status"] == "sandbox_ready"
     assert result["desktop_execution_route"]["selected_provider_id"] == "sandbox-1"
     assert result["sandbox_provider"]["source"] == "desktop_provider_session"
+    assert result["sandbox_provider"]["provider_manifest_evidence"]["provider_id"] == (
+        "sandbox-1"
+    )
+    assert result["sandbox_provider"]["provider_conformance"]["public_release_ready"] is True
     assert result["desktop_provider_session"]["provider_id"] == "sandbox-1"
+    assert result["desktop_provider_session"]["provider_conformance"] == {
+        "ok": True,
+        "public_release_ready": True,
+    }
     assert "command" not in result["desktop_provider_session"]
     assert "env" not in result["desktop_provider_session"]
     assert adapter.calls == [
@@ -2841,10 +2857,15 @@ def test_runtime_tool_call_executor_routes_running_provider_session_to_adapter()
     assert provider_event["desktop_execution_provider"]["provider_id"] == "sandbox-1"
     assert provider_event["desktop_execution_route"]["status"] == "sandbox_ready"
     assert provider_event["sandbox_provider"]["source"] == "desktop_provider_session"
+    assert provider_event["sandbox_provider"]["provider_manifest_evidence"] == {
+        "provider_id": "sandbox-1",
+        "ok": True,
+    }
     event_session = provider_event["desktop_provider_session"]
     assert event_session["provider_id"] == "sandbox-1"
     assert event_session["desktop_session_isolated"] is True
     assert event_session["foreground_takeover_required"] is False
+    assert event_session["provider_conformance"]["public_release_ready"] is True
     assert "command" not in event_session
     assert "env" not in event_session
     assert any(
@@ -3963,6 +3984,14 @@ def test_runtime_tool_request_runner_allows_sandbox_ready_provider_route() -> No
                     "tool_names": ["desktop.safe_type_text"],
                     "command": ["python", "scripts/run_isolated_desktop_provider.py"],
                     "env": {"OHA_YACHIYO_DESKTOP_PROVIDER_TOKEN": "secret"},
+                    "provider_manifest_evidence": {
+                        "provider_id": "sandbox-1",
+                        "ok": True,
+                    },
+                    "provider_conformance": {
+                        "ok": True,
+                        "public_release_ready": True,
+                    },
                 },
             }
         ],
@@ -4022,6 +4051,14 @@ def test_runtime_tool_request_runner_executes_sandbox_route_through_provider() -
                     "tool_names": ["desktop.safe_type_text"],
                     "command": ["python", "scripts/run_isolated_desktop_provider.py"],
                     "env": {"OHA_YACHIYO_DESKTOP_PROVIDER_TOKEN": "secret"},
+                    "provider_manifest_evidence": {
+                        "provider_id": "sandbox-1",
+                        "ok": True,
+                    },
+                    "provider_conformance": {
+                        "ok": True,
+                        "public_release_ready": True,
+                    },
                 },
             }
         ],
@@ -4061,9 +4098,16 @@ def test_runtime_tool_request_runner_executes_sandbox_route_through_provider() -
     assert tool_call["result"]["desktop_execution_provider"]["provider_id"] == "sandbox-1"
     assert tool_call["desktop_provider_session"]["provider_id"] == "sandbox-1"
     assert tool_call["desktop_provider_session"]["running"] is True
+    assert tool_call["sandbox_provider"]["provider_manifest_evidence"]["ok"] is True
     assert "command" not in tool_call["desktop_provider_session"]
     assert "env" not in tool_call["desktop_provider_session"]
     assert tool_call["result"]["desktop_provider_session"]["provider_id"] == "sandbox-1"
+    assert (
+        tool_call["result"]["desktop_provider_session"]["provider_conformance"][
+            "public_release_ready"
+        ]
+        is True
+    )
     assert "command" not in tool_call["result"]["desktop_provider_session"]
     assert "env" not in tool_call["result"]["desktop_provider_session"]
 

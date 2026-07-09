@@ -6023,6 +6023,7 @@ def test_sandbox_desktop_provider_snapshot_json_shape_is_stable() -> None:
         "desktop_backend_ready_for_public_release",
         "requires_real_virtual_desktop_backend",
         "provider_contract",
+        "provider_manifest_evidence",
         "provider_conformance",
         "requires_real_sandbox_for",
     ]
@@ -6037,6 +6038,7 @@ def test_sandbox_desktop_provider_snapshot_json_shape_is_stable() -> None:
     assert payload["desktop_backend_ready_for_public_release"] is None
     assert payload["requires_real_virtual_desktop_backend"] is None
     assert payload["provider_contract"] == {}
+    assert payload["provider_manifest_evidence"] == {}
     assert payload["provider_conformance"] is None
     assert payload["requires_real_sandbox_for"] == []
     assert payload["blocking_conditions"] == ["sandbox_desktop_provider_required"]

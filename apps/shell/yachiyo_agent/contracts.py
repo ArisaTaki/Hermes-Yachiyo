@@ -248,6 +248,7 @@ class SandboxDesktopProviderSnapshot(_PublicSnapshot):
     desktop_backend_ready_for_public_release: bool | None = None
     requires_real_virtual_desktop_backend: bool | None = None
     provider_contract: dict[str, Any] = Field(default_factory=dict)
+    provider_manifest_evidence: dict[str, Any] = Field(default_factory=dict)
     provider_conformance: DesktopProviderConformanceSnapshot | None = None
     requires_real_sandbox_for: list[str] = Field(default_factory=list)
 

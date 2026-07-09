@@ -851,6 +851,17 @@ def desktop_execution_route_decision(
             "reason": "No executable tool was selected.",
             "blocking_conditions": ["missing_tool"],
         }
+    if _running_isolated_sandbox_provider_can_execute(sandbox_provider, clean_tool):
+        sandbox_route = _sandbox_route_decision(
+            route,
+            sandbox_provider,
+            clean_tool,
+            decision_context,
+        )
+        return _route_with_ready_reason(
+            sandbox_route,
+            _desktop_provider_ready_reason(sandbox_provider),
+        )
     local_provider = _local_desktop_provider_payload(decision_context)
     if (
         local_provider
@@ -1228,6 +1239,7 @@ def _sandbox_provider_payload(
 ) -> dict[str, Any]:
     if not isinstance(metadata, Mapping):
         return {}
+    explicit_provider: dict[str, Any] = {}
     for key in (
         "sandbox_desktop_provider",
         "sandbox_provider",
@@ -1235,14 +1247,46 @@ def _sandbox_provider_payload(
     ):
         value = metadata.get(key)
         if isinstance(value, Mapping):
-            return dict(value)
+            explicit_provider = dict(value)
+            break
     provider_session = _sandbox_provider_payload_from_desktop_provider_session(metadata)
+    if explicit_provider and provider_session:
+        return _sandbox_provider_payload_with_session_context(
+            explicit_provider,
+            provider_session,
+        )
+    if explicit_provider:
+        return explicit_provider
     if provider_session:
         return provider_session
     nested_metadata = metadata.get("metadata")
     if isinstance(nested_metadata, Mapping) and nested_metadata is not metadata:
         return _sandbox_provider_payload(nested_metadata)
     return {}
+
+
+def _sandbox_provider_payload_with_session_context(
+    provider: Mapping[str, Any],
+    provider_session: Mapping[str, Any],
+) -> dict[str, Any]:
+    payload = dict(provider)
+    for key in (
+        "desktop_session_kind",
+        "desktop_session_isolated",
+        "foreground_takeover_required",
+        "keyboard_mouse_capture_supported",
+        "desktop_backend_kind",
+        "desktop_backend_is_loopback",
+        "desktop_backend_ready_for_public_release",
+        "requires_real_virtual_desktop_backend",
+        "provider_contract",
+        "provider_manifest_evidence",
+        "provider_conformance",
+    ):
+        value = provider_session.get(key)
+        if payload.get(key) in (None, "", [], {}) and value not in (None, "", [], {}):
+            payload[key] = value
+    return payload
 
 
 def _sandbox_provider_payload_from_desktop_provider_session(
@@ -1258,7 +1302,7 @@ def _sandbox_provider_payload_from_desktop_provider_session(
         session.get("supported_tools")
     )
     blockers = [] if running else ["sandbox_desktop_provider_required"]
-    return {
+    payload = {
         "available": running,
         "provider_id": provider_id,
         "provider_kind": "sandbox_desktop",
@@ -1305,6 +1349,15 @@ def _sandbox_provider_payload_from_desktop_provider_session(
         if "keyboard_mouse_capture_supported" in session
         else True,
     }
+    for key in (
+        "provider_contract",
+        "provider_manifest_evidence",
+        "provider_conformance",
+    ):
+        value = session.get(key)
+        if isinstance(value, Mapping) and value:
+            payload[key] = dict(value)
+    return payload
 
 
 def _metadata_truthy(
@@ -1375,6 +1428,7 @@ def _sandbox_provider_public_payload(payload: Mapping[str, Any]) -> dict[str, An
         "desktop_backend_ready_for_public_release",
         "requires_real_virtual_desktop_backend",
         "provider_contract",
+        "provider_manifest_evidence",
         "provider_conformance",
         "requires_real_sandbox_for",
     }
@@ -1924,6 +1978,40 @@ def _desktop_provider_ready_status(sandbox_provider: Mapping[str, Any]) -> str:
     if _optional_bool_value(sandbox_provider.get("foreground_takeover_required")) is True:
         return "provider_ready"
     return "sandbox_ready"
+
+
+def _running_isolated_sandbox_provider_can_execute(
+    sandbox_provider: Mapping[str, Any],
+    tool_name: str,
+) -> bool:
+    if str(sandbox_provider.get("provider_kind") or "").strip() != "sandbox_desktop":
+        return False
+    if not bool(sandbox_provider.get("available")):
+        return False
+    if not bool(sandbox_provider.get("adapter_ready")):
+        return False
+    if _optional_bool_value(sandbox_provider.get("foreground_takeover_required")) is True:
+        return False
+    if _optional_bool_value(sandbox_provider.get("desktop_backend_is_loopback")) is True:
+        return False
+    if (
+        _optional_bool_value(
+            sandbox_provider.get("requires_real_virtual_desktop_backend")
+        )
+        is True
+    ):
+        return False
+    session_kind = str(sandbox_provider.get("desktop_session_kind") or "").strip()
+    session_isolated = _optional_bool_value(
+        sandbox_provider.get("desktop_session_isolated")
+    )
+    if session_isolated is not True and session_kind not in {
+        "isolated_desktop",
+        "sandbox_desktop",
+        "virtual_desktop",
+    }:
+        return False
+    return sandbox_desktop_provider_can_execute_tool(sandbox_provider, tool_name)
 
 
 def _desktop_provider_ready_reason(sandbox_provider: Mapping[str, Any]) -> str:

@@ -312,6 +312,7 @@ def _public_desktop_provider_session(session: Mapping[str, Any]) -> dict[str, An
         "requires_real_virtual_desktop_backend",
         "blocking_conditions",
         "provider_manifest_evidence",
+        "provider_conformance",
     ):
         value = session.get(key)
         if value not in (None, "", [], {}):
@@ -890,7 +891,7 @@ def _tool_request_with_desktop_execution_route(
         )
         if route_override:
             payload["desktop_execution_route"] = dict(route_override)
-            payload.setdefault("sandbox_provider", sandbox_desktop_provider_status(payload))
+        payload = _tool_request_with_sandbox_provider_session_context(payload)
         return payload
     policy = _desktop_execution_policy_from_request(payload)
     if not policy:
@@ -908,7 +909,57 @@ def _tool_request_with_desktop_execution_route(
     )
     if route_decision:
         payload["desktop_execution_route"] = dict(route_decision)
+        payload = _tool_request_with_sandbox_provider_session_context(
+            payload,
+            include_default=True,
+        )
+    return payload
+
+
+def _tool_request_with_sandbox_provider_session_context(
+    tool_request: Mapping[str, Any],
+    *,
+    include_default: bool = False,
+) -> dict[str, Any]:
+    payload = dict(tool_request)
+    sandbox_provider = _first_mapping(
+        payload.get("sandbox_provider"),
+        payload.get("sandbox_desktop_provider"),
+        payload.get("desktop_sandbox_provider"),
+    )
+    if sandbox_provider:
+        session = _first_mapping(payload.get("desktop_provider_session"))
+        payload["sandbox_provider"] = _sandbox_provider_with_session_context(
+            sandbox_provider,
+            session,
+        )
+        return payload
+    if include_default:
         payload.setdefault("sandbox_provider", sandbox_desktop_provider_status(payload))
+    return payload
+
+
+def _sandbox_provider_with_session_context(
+    sandbox_provider: Mapping[str, Any],
+    session: Mapping[str, Any],
+) -> dict[str, Any]:
+    payload = dict(sandbox_provider)
+    for key in (
+        "desktop_session_kind",
+        "desktop_session_isolated",
+        "foreground_takeover_required",
+        "keyboard_mouse_capture_supported",
+        "desktop_backend_kind",
+        "desktop_backend_is_loopback",
+        "desktop_backend_ready_for_public_release",
+        "requires_real_virtual_desktop_backend",
+        "provider_contract",
+        "provider_manifest_evidence",
+        "provider_conformance",
+    ):
+        value = session.get(key)
+        if payload.get(key) in (None, "", [], {}) and value not in (None, "", [], {}):
+            payload[key] = value
     return payload
 
 
