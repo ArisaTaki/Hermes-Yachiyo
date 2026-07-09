@@ -112,6 +112,15 @@ def test_oha_desktop_agent_release_smoke_covers_product_readiness(tmp_path) -> N
     assert section_by_id["provider_session_observability"]["report"]["runtime_debug"][
         "desktop_provider_session_foreground_takeover_required"
     ] is False
+    assert section_by_id["provider_session_observability"]["report"]["checks"][
+        "runtime_debug_surfaces_provider_manifest"
+    ] is True
+    assert section_by_id["provider_session_observability"]["report"]["runtime_debug"][
+        "desktop_provider_manifest_ok"
+    ] is False
+    assert "desktop_provider_manifest_remote_endpoint_not_allowed" in section_by_id[
+        "provider_session_observability"
+    ]["report"]["runtime_debug"]["desktop_provider_manifest_blocking_conditions"]
 
 
 def test_oha_desktop_agent_release_smoke_can_include_isolated_provider(

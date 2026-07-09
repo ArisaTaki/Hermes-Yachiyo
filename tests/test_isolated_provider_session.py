@@ -649,6 +649,9 @@ def test_start_manifest_provider_satisfies_real_virtual_backend_contract(
     )
 
     event_payload = desktop_provider_session_event_payload(started)
+    assert event_payload["provider_manifest_evidence"]["provider_id"] == (
+        "release-virtual-desktop"
+    )
     assert event_payload["provider_conformance"]["public_release_ready"] is True
 
     manager.stop()

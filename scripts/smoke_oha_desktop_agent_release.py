@@ -255,6 +255,16 @@ def _provider_session_observability_case() -> dict[str, Any]:
             "foreground_takeover_required": False,
             "keyboard_mouse_capture_supported": True,
             "supported_tools": ["app.focus", "desktop.ui_elements"],
+            "provider_manifest_evidence": {
+                "ok": False,
+                "remote_endpoint_allowed": False,
+                "remote_endpoint_urls": [
+                    "https://provider.example.com/tools/execute"
+                ],
+                "blocking_conditions": [
+                    "desktop_provider_manifest_remote_endpoint_not_allowed"
+                ],
+            },
         },
     }
     enriched_start = start_payload_with_planner_decision_events(
@@ -316,6 +326,11 @@ def _provider_session_observability_case() -> dict[str, Any]:
         "runtime_debug_marks_no_foreground_takeover": bool(runtime_debug)
         and runtime_debug.desktop_provider_session_foreground_takeover_required
         is False,
+        "runtime_debug_surfaces_provider_manifest": bool(runtime_debug)
+        and runtime_debug.desktop_provider_manifest_ok is False
+        and runtime_debug.desktop_provider_manifest_remote_endpoint_allowed is False
+        and "desktop_provider_manifest_remote_endpoint_not_allowed"
+        in runtime_debug.desktop_provider_manifest_blocking_conditions,
     }
     return {
         "id": "provider_session_observability",

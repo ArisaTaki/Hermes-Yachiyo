@@ -307,6 +307,7 @@ def _public_desktop_provider_session(session: Mapping[str, Any]) -> dict[str, An
         "desktop_backend_ready_for_public_release",
         "requires_real_virtual_desktop_backend",
         "blocking_conditions",
+        "provider_manifest_evidence",
     ):
         value = session.get(key)
         if value not in (None, "", [], {}):
