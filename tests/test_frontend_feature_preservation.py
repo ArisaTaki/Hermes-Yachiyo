@@ -117,6 +117,14 @@ def test_frontend_runtime_debug_summary_exposes_runtime_trace_facts() -> None:
             "data-desktop-provider-contract-version={summary?.desktop_provider_contract_version || ''}",
             "data-desktop-provider-contract-blockers="
             "{(summary?.desktop_provider_contract_blocking_conditions || []).join(',')}",
+            "data-desktop-provider-manifest-ok="
+            "{String(summary?.desktop_provider_manifest_ok ?? '')}",
+            "data-desktop-provider-manifest-remote-allowed="
+            "{String(summary?.desktop_provider_manifest_remote_endpoint_allowed ?? '')}",
+            "data-desktop-provider-manifest-remote-endpoints="
+            "{(summary?.desktop_provider_manifest_remote_endpoint_urls || []).join(',')}",
+            "data-desktop-provider-manifest-blockers="
+            "{(summary?.desktop_provider_manifest_blocking_conditions || []).join(',')}",
             "data-desktop-provider-conformance-ok="
             "{String(summary?.desktop_provider_conformance_ok ?? '')}",
             "data-desktop-provider-conformance-mode="
@@ -140,6 +148,10 @@ def test_frontend_runtime_debug_summary_exposes_runtime_trace_facts() -> None:
             "data-testid={`${testId}-desktop-provider`}",
             "data-provider-contract-blockers="
             "{(summary?.desktop_provider_contract_blocking_conditions || []).join(',')}",
+            "data-provider-manifest-blockers="
+            "{(summary?.desktop_provider_manifest_blocking_conditions || []).join(',')}",
+            "data-provider-manifest-remote-endpoints="
+            "{(summary?.desktop_provider_manifest_remote_endpoint_urls || []).join(',')}",
             "data-provider-conformance-release-blockers="
             "{(summary?.desktop_provider_conformance_release_blocking_conditions || []).join(',')}",
             "className=\"runtime-debug-recovery\"",
@@ -147,6 +159,8 @@ def test_frontend_runtime_debug_summary_exposes_runtime_trace_facts() -> None:
             "summary.desktop_provider_session_needed ? 'provider needed' : ''",
             "summary.desktop_provider_backend_ready_for_public_release === false ? "
             "'backend not release ready' : ''",
+            "summary.desktop_provider_manifest_remote_endpoint_allowed === false ? "
+            "'local provider endpoint required' : ''",
             "continuationCount > 0 ? `continues ${continuationCount}` : ''",
             "summary.runtime_doctrine ? `doctrine ${summary.runtime_doctrine}` : ''",
             "summary.current_request_tool_name ? "

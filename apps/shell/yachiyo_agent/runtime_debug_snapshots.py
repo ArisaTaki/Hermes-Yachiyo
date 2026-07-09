@@ -118,6 +118,9 @@ def runtime_debug_summary_from_runtime_objects(
     desktop_provider_contract = _desktop_provider_contract(
         desktop_provider_context_items
     )
+    desktop_provider_manifest = _desktop_provider_manifest(
+        desktop_provider_context_items
+    )
     desktop_provider_conformance = _desktop_provider_conformance(
         desktop_provider_context_items
     )
@@ -319,6 +322,19 @@ def runtime_debug_summary_from_runtime_objects(
         ),
         desktop_provider_contract_blocking_conditions=_string_list(
             _field(desktop_provider_contract, "blocking_conditions")
+        ),
+        desktop_provider_manifest_ok=_optional_bool(
+            _field(desktop_provider_manifest, "ok")
+        ),
+        desktop_provider_manifest_remote_endpoint_allowed=_optional_bool(
+            _field(desktop_provider_manifest, "remote_endpoint_allowed")
+        ),
+        desktop_provider_manifest_remote_endpoint_urls=_string_list(
+            _field(desktop_provider_manifest, "remote_endpoint_urls")
+        ),
+        desktop_provider_manifest_blocking_conditions=_string_list(
+            _field(desktop_provider_manifest, "blocking_conditions")
+            or _field(desktop_provider_manifest, "manifest_blocking_conditions")
         ),
         desktop_provider_conformance_ok=_optional_bool(
             _field(desktop_provider_conformance, "ok")
@@ -736,11 +752,13 @@ def _desktop_provider_context_items(
         _field(session, "provider_status"),
         _field(session, "health"),
         _field(session, "provider_conformance"),
+        _field(session, "provider_manifest_evidence"),
         _field(session, "sandbox_provider"),
         _field(_field(session, "sandbox_provider"), "health"),
         _field(envelope, "sandbox_provider"),
         _field(_field(envelope, "sandbox_provider"), "health"),
         _field(envelope, "provider_conformance"),
+        _field(envelope, "provider_manifest_evidence"),
     ):
         if item is not None:
             items.append(item)
@@ -751,7 +769,9 @@ def _desktop_provider_context_items(
             provider,
             _field(provider, "health"),
             _field(provider, "provider_conformance"),
+            _field(provider, "provider_manifest_evidence"),
             _field(request, "provider_conformance"),
+            _field(request, "provider_manifest_evidence"),
             _field(request, "desktop_execution_route"),
         ):
             if item is not None:
@@ -764,6 +784,20 @@ def _desktop_provider_contract(items: list[Any]) -> Any | None:
         contract = _field(item, "provider_contract")
         if isinstance(contract, dict):
             return contract
+    return None
+
+
+def _desktop_provider_manifest(items: list[Any]) -> Any | None:
+    for item in items:
+        evidence = _field(item, "provider_manifest_evidence")
+        if isinstance(evidence, dict):
+            return evidence
+        if isinstance(item, dict) and (
+            "remote_endpoint_urls" in item
+            or "remote_endpoint_allowed" in item
+            or "manifest_blocking_conditions" in item
+        ):
+            return item
     return None
 
 

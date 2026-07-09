@@ -71,6 +71,10 @@ export function RuntimeDebugSummary({
       data-desktop-provider-contract-ok={String(summary?.desktop_provider_contract_ok ?? '')}
       data-desktop-provider-contract-version={summary?.desktop_provider_contract_version || ''}
       data-desktop-provider-contract-blockers={(summary?.desktop_provider_contract_blocking_conditions || []).join(',')}
+      data-desktop-provider-manifest-ok={String(summary?.desktop_provider_manifest_ok ?? '')}
+      data-desktop-provider-manifest-remote-allowed={String(summary?.desktop_provider_manifest_remote_endpoint_allowed ?? '')}
+      data-desktop-provider-manifest-remote-endpoints={(summary?.desktop_provider_manifest_remote_endpoint_urls || []).join(',')}
+      data-desktop-provider-manifest-blockers={(summary?.desktop_provider_manifest_blocking_conditions || []).join(',')}
       data-desktop-provider-conformance-ok={String(summary?.desktop_provider_conformance_ok ?? '')}
       data-desktop-provider-conformance-mode={summary?.desktop_provider_conformance_mode || ''}
       data-desktop-provider-conformance-smoke-ok={String(summary?.desktop_provider_conformance_smoke_ok ?? '')}
@@ -125,6 +129,8 @@ export function RuntimeDebugSummary({
         <div
           className="runtime-debug-provider"
           data-provider-contract-blockers={(summary?.desktop_provider_contract_blocking_conditions || []).join(',')}
+          data-provider-manifest-blockers={(summary?.desktop_provider_manifest_blocking_conditions || []).join(',')}
+          data-provider-manifest-remote-endpoints={(summary?.desktop_provider_manifest_remote_endpoint_urls || []).join(',')}
           data-provider-conformance-release-blockers={(summary?.desktop_provider_conformance_release_blocking_conditions || []).join(',')}
           data-provider-session-tools={(summary?.desktop_provider_session_tool_names || []).join(',')}
           data-testid={`${testId}-desktop-provider`}
@@ -220,10 +226,16 @@ export function runtimeDebugSummaryHasContent(summary?: RuntimeDebugSummarySnaps
     || summary.latest_artifact_path
   ) return true;
   if (
-    typeof summary.desktop_provider_conformance_ok === 'boolean'
+    typeof summary.desktop_provider_manifest_ok === 'boolean'
+    || typeof summary.desktop_provider_manifest_remote_endpoint_allowed === 'boolean'
+    || typeof summary.desktop_provider_conformance_ok === 'boolean'
     || typeof summary.desktop_provider_conformance_smoke_ok === 'boolean'
     || typeof summary.desktop_provider_conformance_public_release_ready === 'boolean'
     || typeof summary.desktop_provider_conformance_release_candidate === 'boolean'
+  ) return true;
+  if (
+    (summary.desktop_provider_manifest_remote_endpoint_urls || []).length
+    || (summary.desktop_provider_manifest_blocking_conditions || []).length
   ) return true;
   if (
     (summary.desktop_provider_conformance_release_blocking_conditions || []).length
@@ -370,6 +382,9 @@ function runtimeDebugLatestFacts(summary?: RuntimeDebugSummarySnapshot | null): 
     summary.desktop_provider_contract_ok === true ? 'provider contract ready' : '',
     summary.desktop_provider_contract_ok === false ? 'provider contract blocked' : '',
     summary.desktop_provider_contract_version ? `provider contract ${summary.desktop_provider_contract_version}` : '',
+    summary.desktop_provider_manifest_ok === true ? 'provider manifest ready' : '',
+    summary.desktop_provider_manifest_ok === false ? 'provider manifest blocked' : '',
+    summary.desktop_provider_manifest_remote_endpoint_allowed === false ? 'local provider endpoint required' : '',
     summary.desktop_provider_conformance_ok === true ? 'provider conformance ready' : '',
     summary.desktop_provider_conformance_ok === false ? 'provider conformance blocked' : '',
     summary.desktop_provider_conformance_public_release_ready === true ? 'provider public release ready' : '',
@@ -378,6 +393,12 @@ function runtimeDebugLatestFacts(summary?: RuntimeDebugSummarySnapshot | null): 
     summary.desktop_provider_conformance_mode ? `provider conformance ${summary.desktop_provider_conformance_mode}` : '',
     (summary.desktop_provider_contract_blocking_conditions || []).length
       ? `provider blockers ${(summary.desktop_provider_contract_blocking_conditions || []).slice(0, 3).join(', ')}`
+      : '',
+    (summary.desktop_provider_manifest_blocking_conditions || []).length
+      ? `provider manifest blockers ${(summary.desktop_provider_manifest_blocking_conditions || []).slice(0, 3).join(', ')}`
+      : '',
+    (summary.desktop_provider_manifest_remote_endpoint_urls || []).length
+      ? `provider remote endpoints ${(summary.desktop_provider_manifest_remote_endpoint_urls || []).slice(0, 2).join(', ')}`
       : '',
     (summary.desktop_provider_conformance_release_blocking_conditions || []).length
       ? `provider release blockers ${(summary.desktop_provider_conformance_release_blocking_conditions || []).slice(0, 3).join(', ')}`
@@ -416,6 +437,12 @@ function runtimeDebugProviderFacts(
   const blockers = (summary.desktop_provider_contract_blocking_conditions || [])
     .filter(Boolean)
     .slice(0, compact ? 2 : 4);
+  const manifestBlockers = (summary.desktop_provider_manifest_blocking_conditions || [])
+    .filter(Boolean)
+    .slice(0, compact ? 2 : 4);
+  const remoteEndpoints = (summary.desktop_provider_manifest_remote_endpoint_urls || [])
+    .filter(Boolean)
+    .slice(0, compact ? 1 : 2);
   const conformanceBlockers = (summary.desktop_provider_conformance_release_blocking_conditions || [])
     .filter(Boolean)
     .slice(0, compact ? 2 : 4);
@@ -444,12 +471,17 @@ function runtimeDebugProviderFacts(
     summary.desktop_provider_requires_real_virtual_backend === true ? 'real virtual backend required' : '',
     summary.desktop_provider_contract_ok === true ? 'contract ready' : '',
     summary.desktop_provider_contract_ok === false ? 'contract blocked' : '',
+    summary.desktop_provider_manifest_ok === true ? 'manifest ready' : '',
+    summary.desktop_provider_manifest_ok === false ? 'manifest blocked' : '',
+    summary.desktop_provider_manifest_remote_endpoint_allowed === false ? 'local provider endpoint required' : '',
     summary.desktop_provider_conformance_public_release_ready === true ? 'provider release ready' : '',
     summary.desktop_provider_conformance_public_release_ready === false ? 'provider release blocked' : '',
     summary.desktop_provider_conformance_ok === false ? 'conformance blocked' : '',
     summary.desktop_provider_conformance_mode ? `conformance ${summary.desktop_provider_conformance_mode}` : '',
     tools.length ? `tools ${tools.join(', ')}` : '',
     blockers.length ? `blockers ${blockers.join(', ')}` : '',
+    manifestBlockers.length ? `manifest blockers ${manifestBlockers.join(', ')}` : '',
+    remoteEndpoints.length ? `remote endpoints ${remoteEndpoints.join(', ')}` : '',
     conformanceBlockers.length ? `release blockers ${conformanceBlockers.join(', ')}` : '',
     missingTools.length ? `missing ${missingTools.join(', ')}` : '',
     failedTools.length ? `failed ${failedTools.join(', ')}` : '',

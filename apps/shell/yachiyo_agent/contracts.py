@@ -1080,6 +1080,14 @@ class RuntimeDebugSummarySnapshot(_PublicSnapshot):
     desktop_provider_contract_blocking_conditions: list[str] = Field(
         default_factory=list
     )
+    desktop_provider_manifest_ok: bool | None = None
+    desktop_provider_manifest_remote_endpoint_allowed: bool | None = None
+    desktop_provider_manifest_remote_endpoint_urls: list[str] = Field(
+        default_factory=list
+    )
+    desktop_provider_manifest_blocking_conditions: list[str] = Field(
+        default_factory=list
+    )
     desktop_provider_conformance_ok: bool | None = None
     desktop_provider_conformance_mode: str | None = None
     desktop_provider_conformance_smoke_ok: bool | None = None

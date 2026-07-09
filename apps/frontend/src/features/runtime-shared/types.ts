@@ -1021,6 +1021,10 @@ export type RuntimeDebugSummarySnapshot = {
   desktop_provider_contract_ok?: boolean | null;
   desktop_provider_contract_version?: string | null;
   desktop_provider_contract_blocking_conditions?: string[];
+  desktop_provider_manifest_ok?: boolean | null;
+  desktop_provider_manifest_remote_endpoint_allowed?: boolean | null;
+  desktop_provider_manifest_remote_endpoint_urls?: string[];
+  desktop_provider_manifest_blocking_conditions?: string[];
   desktop_provider_conformance_ok?: boolean | null;
   desktop_provider_conformance_mode?: string | null;
   desktop_provider_conformance_smoke_ok?: boolean | null;

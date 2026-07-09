@@ -4426,6 +4426,54 @@ def test_runtime_debug_summary_projects_provider_session_from_replay_events() ->
     assert "desktop_provider" in summary.debug_surfaces
 
 
+def test_runtime_debug_summary_projects_provider_manifest_from_replay_events() -> None:
+    summary = runtime_debug_summary_from_runtime_objects(
+        run_id="run-provider-manifest",
+        events=[
+            PublicRunEvent(
+                run_id="run-provider-manifest",
+                sequence=1,
+                event_type="desktop.provider_session.failed",
+                payload={
+                    "desktop_provider_session": {
+                        "status": "start_failed",
+                        "needed": True,
+                        "provider_id": "local-isolated-desktop",
+                        "provider_manifest_evidence": {
+                            "ok": False,
+                            "remote_endpoint_allowed": False,
+                            "remote_endpoint_urls": [
+                                "https://provider.example.com/tools/execute"
+                            ],
+                            "blocking_conditions": [
+                                "desktop_provider_manifest_remote_endpoint_not_allowed"
+                            ],
+                        },
+                        "provider_conformance": {
+                            "ok": False,
+                            "public_release_ready": False,
+                            "release_blocking_conditions": [
+                                "desktop_provider_manifest_remote_endpoint_not_allowed"
+                            ],
+                        },
+                    }
+                },
+            )
+        ],
+    )
+
+    assert summary.desktop_provider_manifest_ok is False
+    assert summary.desktop_provider_manifest_remote_endpoint_allowed is False
+    assert summary.desktop_provider_manifest_remote_endpoint_urls == [
+        "https://provider.example.com/tools/execute"
+    ]
+    assert summary.desktop_provider_manifest_blocking_conditions == [
+        "desktop_provider_manifest_remote_endpoint_not_allowed"
+    ]
+    assert summary.desktop_provider_conformance_public_release_ready is False
+    assert "desktop_provider" in summary.debug_surfaces
+
+
 def test_agent_task_snapshot_uses_first_planned_desktop_step_for_progress() -> None:
     snapshot = agent_task_snapshot_from_payload(
         {
