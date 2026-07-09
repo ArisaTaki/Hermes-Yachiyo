@@ -11,6 +11,7 @@ import type {
   MemorySnapshot,
   PlannerDecisionSnapshot,
   PlannerOrchestrationStartSnapshot,
+  ReplanContinuationSnapshot,
   RestrictedToolPluginSnapshot,
   RunEventPageSnapshot,
   RerunRunRequest,
@@ -102,8 +103,17 @@ export type YachiyoStudioNextReplanContinuationRequest = {
 };
 
 export type YachiyoStudioNextReplanContinuationResult = {
+  action_id?: string | null;
+  approval_required?: boolean;
+  auto_start_blockers?: string[];
+  auto_start_eligible?: boolean;
+  auto_start_reason?: string;
+  continuation?: ReplanContinuationSnapshot | null;
+  manual_start_available?: boolean;
+  replan_request_id?: string;
   started: boolean;
   run?: YachiyoRunTimelineSnapshot | null;
+  tool_name?: string;
   reason?: string;
 };
 

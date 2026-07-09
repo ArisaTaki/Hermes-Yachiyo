@@ -16,6 +16,7 @@ from apps.bridge.routes.yachiyo_models import (
 )
 from apps.bridge.routes.yachiyo_services import (
     bad_request,
+    blocked_replan_continuation_response,
     snapshot,
     studio_service,
 )
@@ -87,16 +88,28 @@ async def start_next_replan_continuation(
     http_request: Request | None = None,
 ) -> dict[str, Any]:
     try:
+        service = studio_service(http_request)
         run_snapshot = await asyncio.to_thread(
-            studio_service(http_request).start_next_replan_continuation,
+            service.start_next_replan_continuation,
             run_id,
             request,
         )
         if run_snapshot is None:
+            payload = request.model_dump(exclude_none=True)
+            continuation = await asyncio.to_thread(
+                service.plan_next_replan_continuation,
+                run_id,
+                {
+                    **payload,
+                    "include_manual": True,
+                    "auto_start_only": False,
+                },
+            )
             return {
                 "started": False,
                 "run": None,
                 "reason": "no_auto_start_eligible_replan_continuation",
+                **blocked_replan_continuation_response(continuation),
             }
         return {"started": True, "run": snapshot(run_snapshot)}
     except KeyError as exc:

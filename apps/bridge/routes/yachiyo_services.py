@@ -57,5 +57,29 @@ def snapshot(model: Any) -> dict[str, Any]:
     return model.model_dump(mode="json")
 
 
+def blocked_replan_continuation_response(continuation: Any | None) -> dict[str, Any]:
+    if continuation is None:
+        return {}
+    payload = snapshot(continuation)
+    return {
+        "continuation": payload,
+        "manual_start_available": True,
+        "approval_required": bool(getattr(continuation, "approval_required", False)),
+        "auto_start_eligible": bool(
+            getattr(continuation, "auto_start_eligible", False)
+        ),
+        "auto_start_reason": str(
+            getattr(continuation, "auto_start_reason", "")
+            or "manual_replan_continuation_required"
+        ),
+        "auto_start_blockers": list(
+            getattr(continuation, "auto_start_blockers", []) or []
+        ),
+        "replan_request_id": str(getattr(continuation, "request_id", "") or ""),
+        "action_id": getattr(continuation, "action_id", None),
+        "tool_name": str(getattr(continuation, "tool_name", "") or ""),
+    }
+
+
 def bad_request(exc: Exception) -> HTTPException:
     return HTTPException(status_code=400, detail=redact_api_error_detail(exc))

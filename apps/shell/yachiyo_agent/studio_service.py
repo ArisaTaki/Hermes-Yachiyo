@@ -1142,16 +1142,26 @@ class AgentStudioService:
         request: Mapping[str, Any] | None = None,
     ) -> RunTimelineSnapshot | None:
         payload = _request_payload(request or {})
+        payload["auto_start_only"] = True
+        continuation = self.plan_next_group_replan_continuation(group_run_id, payload)
+        if continuation is None:
+            return None
+        return self.start_agent_run(_agent_start_payload_from_replan_continuation(continuation))
+
+    def plan_next_group_replan_continuation(
+        self,
+        group_run_id: str,
+        request: Mapping[str, Any] | None = None,
+    ) -> ReplanContinuationSnapshot | None:
+        payload = _request_payload(request or {})
         source_run = self.get_group_run(group_run_id)
-        continuation = _next_replan_recovery_action_continuation(
+        return _next_replan_recovery_action_continuation(
             source_run,
             payload,
             source="agent_studio_group_replan_auto_continuation",
             client_run_id=str(payload.get("client_run_id") or "").strip(),
+            auto_start_only=not _payload_allows_manual_replan_continuation(payload),
         )
-        if continuation is None:
-            return None
-        return self.start_agent_run(_agent_start_payload_from_replan_continuation(continuation))
 
     def start_group_tool_recovery_action(
         self,

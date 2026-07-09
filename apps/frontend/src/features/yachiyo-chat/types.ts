@@ -17,6 +17,7 @@ export type {
   RunEventPageSnapshot,
   RunTimelineSnapshot,
   StartChatTaskRequest,
+  ReplanContinuationSnapshot,
   ReplanRecoverySnapshot,
   TaskCoreSnapshot,
   TaskProgressSummarySnapshot,

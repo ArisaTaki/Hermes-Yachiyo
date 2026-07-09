@@ -39,6 +39,7 @@ export type {
   PublicRunEvent,
   RecoveryRunProvenanceSnapshot,
   RerunRunRequest,
+  ReplanContinuationSnapshot,
   ReplanRecoveryActionSnapshot,
   ReplanRecoverySnapshot,
   RuntimeExecutionEnvelopeSnapshot,

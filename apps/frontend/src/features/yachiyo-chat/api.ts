@@ -6,6 +6,7 @@ import type {
   ChatRunnableCatalogSnapshot,
   ChatSessionContext,
   PendingAttachment,
+  ReplanContinuationSnapshot,
   RuntimeExecutionEnvelopeSnapshot,
   RunEventPageSnapshot,
   RunTimelineSnapshot,
@@ -194,8 +195,17 @@ export type YachiyoTaskNextReplanContinuationRequest = {
 };
 
 export type YachiyoTaskNextReplanContinuationResult = {
+  action_id?: string | null;
+  approval_required?: boolean;
+  auto_start_blockers?: string[];
+  auto_start_eligible?: boolean;
+  auto_start_reason?: string;
+  continuation?: ReplanContinuationSnapshot | null;
+  manual_start_available?: boolean;
+  replan_request_id?: string;
   started: boolean;
   task?: AgentTaskSnapshot | null;
+  tool_name?: string;
   reason?: string;
 };
 

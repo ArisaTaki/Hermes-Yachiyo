@@ -25,6 +25,7 @@ from apps.shell.credential_store import MemoryCredentialStore
 from apps.shell.yachiyo_agent import (
     AgentTaskSnapshot,
     PlannerOrchestrationStartSnapshot,
+    ReplanContinuationSnapshot,
     RunTimelineSnapshot,
     WorkflowRunSnapshot,
     legacy_ports,
@@ -757,6 +758,92 @@ async def test_yachiyo_task_route_starts_next_replan_continuation(
 
 
 @pytest.mark.asyncio
+async def test_yachiyo_task_route_reports_manual_next_replan_continuation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _FakeAgentService:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, Any]] = []
+
+        def start_next_replan_continuation(
+            self,
+            task_id: str,
+            payload: dict[str, Any],
+        ) -> None:
+            self.calls.append(("start_next_replan_continuation", {"task_id": task_id, "payload": payload}))
+            return None
+
+        def plan_next_replan_continuation(
+            self,
+            task_id: str,
+            payload: dict[str, Any],
+        ) -> ReplanContinuationSnapshot:
+            self.calls.append(("plan_next_replan_continuation", {"task_id": task_id, "payload": payload}))
+            return ReplanContinuationSnapshot(
+                continuation_id="continuation-provider-1",
+                request_id="replan-provider-1",
+                action_id="replan-provider-1:action:1:desktop.provider_session.start",
+                tool_name="desktop.provider_session.start",
+                prompt="Start isolated desktop provider",
+                title="Start isolated desktop provider",
+                approval_required=True,
+                auto_start_eligible=False,
+                auto_start_reason="manual_replan_continuation_required",
+                auto_start_blockers=["approval_required"],
+                metadata={"requires_real_virtual_desktop_backend": True},
+            )
+
+    service = _FakeAgentService()
+    monkeypatch.setattr(yachiyo_chat_handlers, "agent_service", lambda _request=None: service)
+
+    response = await yachiyo.start_task_next_replan_continuation(
+        "task-1",
+        yachiyo.StartNextReplanContinuationBody(
+            request_id="replan-provider-1",
+            conversation_id="chat-1",
+        ),
+        None,
+    )
+
+    assert response["started"] is False
+    assert response["task"] is None
+    assert response["manual_start_available"] is True
+    assert response["approval_required"] is True
+    assert response["auto_start_eligible"] is False
+    assert response["auto_start_blockers"] == ["approval_required"]
+    assert response["continuation"]["tool_name"] == "desktop.provider_session.start"
+    assert response["continuation"]["metadata"]["requires_real_virtual_desktop_backend"] is True
+    assert service.calls == [
+        (
+            "start_next_replan_continuation",
+            {
+                "task_id": "task-1",
+                "payload": {
+                    "request_id": "replan-provider-1",
+                    "conversation_id": "chat-1",
+                    "continue_to_model": True,
+                    "metadata": {},
+                },
+            },
+        ),
+        (
+            "plan_next_replan_continuation",
+            {
+                "task_id": "task-1",
+                "payload": {
+                    "request_id": "replan-provider-1",
+                    "conversation_id": "chat-1",
+                    "continue_to_model": True,
+                    "metadata": {},
+                    "include_manual": True,
+                    "auto_start_only": False,
+                },
+            },
+        ),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_yachiyo_studio_run_route_starts_next_replan_continuation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -811,6 +898,80 @@ async def test_yachiyo_studio_run_route_starts_next_replan_continuation(
 
 
 @pytest.mark.asyncio
+async def test_yachiyo_studio_run_route_reports_manual_next_replan_continuation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _FakeStudioService:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, Any]] = []
+
+        def start_next_replan_continuation(
+            self,
+            run_id: str,
+            request: Any,
+        ) -> None:
+            payload = request.model_dump(exclude_none=True) if hasattr(request, "model_dump") else dict(request)
+            self.calls.append(("start_next_replan_continuation", {"run_id": run_id, "payload": payload}))
+            return None
+
+        def plan_next_replan_continuation(
+            self,
+            run_id: str,
+            payload: dict[str, Any],
+        ) -> ReplanContinuationSnapshot:
+            self.calls.append(("plan_next_replan_continuation", {"run_id": run_id, "payload": payload}))
+            return ReplanContinuationSnapshot(
+                continuation_id="continuation-provider-1",
+                request_id="replan-provider-1",
+                action_id="replan-provider-1:action:1:desktop.provider_session.start",
+                tool_name="desktop.provider_session.start",
+                prompt="Start isolated desktop provider",
+                title="Start isolated desktop provider",
+                agent_id="agent-1",
+                client_run_id="client-auto-1",
+                approval_required=True,
+                auto_start_eligible=False,
+                auto_start_reason="manual_replan_continuation_required",
+                auto_start_blockers=["approval_required"],
+            )
+
+    service = _FakeStudioService()
+    monkeypatch.setattr(yachiyo_studio_run_handlers, "studio_service", lambda _request=None: service)
+
+    response = await yachiyo.start_studio_run_next_replan_continuation(
+        "run-1",
+        yachiyo.StartNextReplanContinuationBody(
+            request_id="replan-provider-1",
+            agent_id="agent-1",
+            client_run_id="client-auto-1",
+        ),
+        None,
+    )
+
+    assert response["started"] is False
+    assert response["run"] is None
+    assert response["manual_start_available"] is True
+    assert response["approval_required"] is True
+    assert response["continuation"]["agent_id"] == "agent-1"
+    assert response["continuation"]["tool_name"] == "desktop.provider_session.start"
+    assert service.calls[-1] == (
+        "plan_next_replan_continuation",
+        {
+            "run_id": "run-1",
+            "payload": {
+                "request_id": "replan-provider-1",
+                "agent_id": "agent-1",
+                "client_run_id": "client-auto-1",
+                "continue_to_model": True,
+                "metadata": {},
+                "include_manual": True,
+                "auto_start_only": False,
+            },
+        },
+    )
+
+
+@pytest.mark.asyncio
 async def test_yachiyo_studio_group_run_route_starts_next_replan_continuation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -862,6 +1023,83 @@ async def test_yachiyo_studio_group_run_route_starts_next_replan_continuation(
             },
         )
     ]
+
+
+@pytest.mark.asyncio
+async def test_yachiyo_studio_group_route_reports_manual_next_replan_continuation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _FakeStudioService:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, Any]] = []
+
+        def start_next_group_replan_continuation(
+            self,
+            group_run_id: str,
+            request: Any,
+        ) -> None:
+            payload = request.model_dump(exclude_none=True) if hasattr(request, "model_dump") else dict(request)
+            self.calls.append(
+                ("start_next_group_replan_continuation", {"group_run_id": group_run_id, "payload": payload})
+            )
+            return None
+
+        def plan_next_group_replan_continuation(
+            self,
+            group_run_id: str,
+            payload: dict[str, Any],
+        ) -> ReplanContinuationSnapshot:
+            self.calls.append(
+                ("plan_next_group_replan_continuation", {"group_run_id": group_run_id, "payload": payload})
+            )
+            return ReplanContinuationSnapshot(
+                continuation_id="continuation-provider-1",
+                request_id="replan-provider-1",
+                action_id="replan-provider-1:action:1:desktop.provider_session.start",
+                tool_name="desktop.provider_session.start",
+                prompt="Start isolated desktop provider",
+                title="Start isolated desktop provider",
+                agent_id="agent-2",
+                client_run_id="client-group-auto-1",
+                source_group_run_id="group-run-1",
+                approval_required=True,
+                auto_start_eligible=False,
+                auto_start_reason="manual_replan_continuation_required",
+                auto_start_blockers=["approval_required"],
+            )
+
+    service = _FakeStudioService()
+    monkeypatch.setattr(yachiyo_studio_group_handlers, "studio_service", lambda _request=None: service)
+
+    response = await yachiyo.start_studio_group_run_next_replan_continuation(
+        "group-run-1",
+        yachiyo.StartNextReplanContinuationBody(
+            request_id="replan-provider-1",
+            client_run_id="client-group-auto-1",
+        ),
+        None,
+    )
+
+    assert response["started"] is False
+    assert response["run"] is None
+    assert response["manual_start_available"] is True
+    assert response["approval_required"] is True
+    assert response["continuation"]["source_group_run_id"] == "group-run-1"
+    assert response["continuation"]["tool_name"] == "desktop.provider_session.start"
+    assert service.calls[-1] == (
+        "plan_next_group_replan_continuation",
+        {
+            "group_run_id": "group-run-1",
+            "payload": {
+                "request_id": "replan-provider-1",
+                "client_run_id": "client-group-auto-1",
+                "continue_to_model": True,
+                "metadata": {},
+                "include_manual": True,
+                "auto_start_only": False,
+            },
+        },
+    )
 
 
 @pytest.mark.asyncio
