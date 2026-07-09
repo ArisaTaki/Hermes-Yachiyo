@@ -25,6 +25,7 @@ def test_oha_desktop_agent_release_smoke_covers_product_readiness(tmp_path) -> N
         "covers_approval_gate": True,
         "covers_data_analysis": True,
         "covers_studio_debug_catalog": True,
+        "covers_provider_session_observability": True,
     }
 
     section_by_id = {section["id"]: section for section in report["sections"]}
@@ -90,6 +91,18 @@ def test_oha_desktop_agent_release_smoke_covers_product_readiness(tmp_path) -> N
     assert section_by_id["studio_tool_catalog"]["report"]["checks"][
         "cleanup_remaining_fallbacks_are_planner_covered"
     ] is True
+    assert section_by_id["provider_session_observability"]["report"]["checks"][
+        "start_payload_projects_provider_session_event"
+    ] is True
+    assert section_by_id["provider_session_observability"]["report"]["checks"][
+        "run_timeline_projects_provider_session_event"
+    ] is True
+    assert section_by_id["provider_session_observability"]["report"]["runtime_debug"][
+        "desktop_provider_session_status"
+    ] == "start_failed"
+    assert section_by_id["provider_session_observability"]["report"]["runtime_debug"][
+        "desktop_provider_session_foreground_takeover_required"
+    ] is False
 
 
 def test_oha_desktop_agent_release_smoke_can_include_isolated_provider(

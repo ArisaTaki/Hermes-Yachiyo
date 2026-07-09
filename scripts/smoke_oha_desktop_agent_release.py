@@ -26,6 +26,12 @@ from apps.shell.yachiyo_agent.daily_desktop import (
     daily_desktop_allowed_tools,
     planner_first_daily_desktop_entrypoint_requests,
 )
+from apps.shell.yachiyo_agent.run_timeline_snapshots import (
+    run_timeline_snapshot_from_payload,
+)
+from apps.shell.yachiyo_agent.start_event_enrichment import (
+    start_payload_with_planner_decision_events,
+)
 from apps.shell.yachiyo_agent.tool_catalog import runtime_tool_catalog_snapshot
 from scripts import smoke_agent_entrypoint_desktop_execution
 from scripts import smoke_agent_studio_planner_orchestration
@@ -188,6 +194,100 @@ def _tool_catalog_case() -> dict[str, Any]:
         "ok": all(checks.values()),
         "tool_count": len(tool_names),
         "coverage": coverage.model_dump(mode="json") if coverage else None,
+        "checks": checks,
+    }
+
+
+def _provider_session_observability_case() -> dict[str, Any]:
+    envelope = {
+        "envelope_id": "release-provider-session-envelope",
+        "requests": [
+            {
+                "request_id": "request-focus-app",
+                "tool_name": "app.focus",
+            }
+        ],
+        "desktop_provider_session": {
+            "ok": False,
+            "status": "start_failed",
+            "needed": True,
+            "running": False,
+            "provider_id": "local-isolated-desktop",
+            "reason": "sandbox_desktop_provider_required",
+            "tool_names": ["app.focus"],
+            "desktop_session_kind": "isolated_desktop",
+            "desktop_session_isolated": True,
+            "foreground_takeover_required": False,
+            "keyboard_mouse_capture_supported": True,
+            "supported_tools": ["app.focus", "desktop.ui_elements"],
+        },
+    }
+    enriched_start = start_payload_with_planner_decision_events(
+        {
+            "run_id": "run-provider-session-release",
+            "task_id": "task-provider-session-release",
+            "session_id": "chat-release",
+            "events": [
+                {
+                    "event_type": "agent.intent.selected",
+                    "payload": {"intent": {"kind": "desktop_operation"}},
+                }
+            ],
+            "runtime_execution_envelope": envelope,
+        },
+        None,
+    )
+    timeline = run_timeline_snapshot_from_payload(
+        {
+            "run_id": "run-provider-session-release",
+            "task_id": "task-provider-session-release",
+            "session_id": "chat-release",
+            "status": "running",
+            "events": [
+                {
+                    "event_type": "run.started",
+                    "sequence": 1,
+                    "payload": {"task_id": "task-provider-session-release"},
+                }
+            ],
+            "runtime_execution_envelope": envelope,
+        }
+    )
+    start_event_types = [
+        str(event.get("event_type") or event.get("event") or "").strip()
+        for event in enriched_start.get("events") or []
+        if isinstance(event, dict)
+    ]
+    timeline_event_types = [event.event_type for event in timeline.events]
+    runtime_debug = timeline.runtime_debug
+    checks = {
+        "start_payload_preserves_existing_planner_event": start_event_types.count(
+            "agent.intent.selected"
+        )
+        == 1,
+        "start_payload_projects_provider_session_event": (
+            "desktop.provider_session.failed" in start_event_types
+        ),
+        "run_timeline_projects_provider_session_event": (
+            "desktop.provider_session.failed" in timeline_event_types
+        ),
+        "runtime_debug_surfaces_provider_session": bool(runtime_debug)
+        and runtime_debug.desktop_provider_session_status == "start_failed"
+        and runtime_debug.desktop_provider_session_provider_id
+        == "local-isolated-desktop",
+        "runtime_debug_marks_replan_and_user_action": bool(runtime_debug)
+        and runtime_debug.needs_replan
+        and runtime_debug.needs_user_action,
+        "runtime_debug_marks_no_foreground_takeover": bool(runtime_debug)
+        and runtime_debug.desktop_provider_session_foreground_takeover_required
+        is False,
+    }
+    return {
+        "id": "provider_session_observability",
+        "ok": all(checks.values()),
+        "start_event_types": start_event_types,
+        "timeline_event_types": timeline_event_types,
+        "runtime_debug": runtime_debug.model_dump(mode="json") if runtime_debug else None,
         "checks": checks,
     }
 
@@ -563,6 +663,11 @@ def _build_sections(
             "Agent Studio sees runtime tools and legacy-cleanup coverage.",
             _tool_catalog_case,
         ),
+        _run_section(
+            "provider_session_observability",
+            "Provider session requirements and failures are visible in start events, Run Timeline, and RuntimeDebug.",
+            _provider_session_observability_case,
+        ),
     ]
     if run_isolated_provider_smoke:
         sections.append(
@@ -635,6 +740,10 @@ def run_smoke(
         ),
         "covers_studio_debug_catalog": any(
             section["id"] == "studio_tool_catalog" for section in sections
+        ),
+        "covers_provider_session_observability": any(
+            section["id"] == "provider_session_observability"
+            for section in sections
         ),
     }
     if run_isolated_provider_smoke:
