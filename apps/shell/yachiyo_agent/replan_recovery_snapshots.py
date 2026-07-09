@@ -1929,6 +1929,8 @@ def _desktop_provider_session_recovery_snapshot(
         "diagnostic_route": "/yachiyo/studio/tools",
         "api_route": "/yachiyo/studio/tools/desktop-provider/session/start",
     }
+    if session.get("requires_real_virtual_desktop_backend") is True:
+        action_input["requires_real_virtual_desktop_backend"] = True
     session_payload = _desktop_provider_session_public_payload(session)
     deferred_continuation = _desktop_provider_session_deferred_continuation_requests(
         envelope,
@@ -1955,6 +1957,8 @@ def _desktop_provider_session_recovery_snapshot(
         "runtime_retry_source": "desktop_provider_session",
         "desktop_provider_session": session_payload,
     }
+    if session.get("requires_real_virtual_desktop_backend") is True:
+        metadata["requires_real_virtual_desktop_backend"] = True
     if deferred_continuation:
         metadata["deferred_continuation_count"] = len(deferred_continuation)
         metadata["deferred_tools"] = [
@@ -2215,7 +2219,14 @@ def _desktop_provider_session_public_payload(
         "desktop_session_isolated",
         "foreground_takeover_required",
         "keyboard_mouse_capture_supported",
+        "desktop_backend_kind",
+        "desktop_backend_is_loopback",
+        "desktop_backend_ready_for_public_release",
+        "requires_real_virtual_desktop_backend",
+        "blocking_conditions",
         "supported_tools",
+        "provider_contract",
+        "provider_conformance",
     ):
         value = session.get(key)
         if value not in (None, "", [], {}):

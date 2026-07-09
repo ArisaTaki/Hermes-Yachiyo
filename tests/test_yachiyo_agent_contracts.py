@@ -654,6 +654,85 @@ def test_runtime_execution_envelope_snapshot_is_public_contract() -> None:
     assert projected_requests[0]["desktop_execution_route"]["status"] == "ready"
 
 
+def test_provider_session_recovery_preserves_real_virtual_backend_requirement() -> None:
+    envelope = RuntimeExecutionEnvelopeSnapshot(
+        envelope_id="execution-envelope-provider-1",
+        decision_id="decision-provider-1",
+        plan_id="runtime-plan-provider-1",
+        intent_kind="desktop_operation",
+        requests=[
+            RuntimeExecutionRequestSnapshot(
+                request_id="request-type",
+                step_id="type-foreground-text",
+                capability_id="desktop.ui_operation",
+                tool_name="desktop.safe_type_text",
+                input={"text": "hello"},
+                planning_reason="planner_desktop_ui_operation",
+                execution_mode=DesktopExecutionModeSnapshot(
+                    mode="supervised_live",
+                    foreground_control=True,
+                    keyboard_mouse_capture=True,
+                ),
+                desktop_execution_policy=DesktopExecutionPolicySnapshot(
+                    mode="preview_input",
+                    prefer_isolated_desktop=True,
+                    avoid_user_foreground_takeover=True,
+                    require_sandbox_for_keyboard_mouse=True,
+                ),
+                desktop_execution_route=DesktopExecutionRouteSnapshot(
+                    tool_name="desktop.safe_type_text",
+                    selected_provider_kind="sandbox_desktop",
+                    status="real_virtual_desktop_provider_required",
+                    can_execute=False,
+                    sandbox_required=True,
+                    blocking_conditions=[
+                        "loopback_desktop_backend",
+                        "real_virtual_desktop_backend_required",
+                    ],
+                    requires_real_virtual_desktop_backend=True,
+                ),
+                runtime_stage="operate",
+                runtime_role="mutate_foreground_ui",
+            )
+        ],
+        desktop_provider_session={
+            "ok": False,
+            "status": "real_virtual_desktop_provider_required",
+            "needed": True,
+            "running": False,
+            "started": False,
+            "provider_id": "real-virtual-desktop",
+            "reason": "real_virtual_desktop_provider_required",
+            "request_ids": ["request-type"],
+            "tool_names": ["desktop.safe_type_text"],
+            "desktop_session_kind": "virtual_desktop",
+            "desktop_session_isolated": True,
+            "foreground_takeover_required": False,
+            "requires_real_virtual_desktop_backend": True,
+        },
+    )
+
+    recoveries = replan_recovery_snapshots_from_runtime_execution_envelope(
+        envelope,
+        run_id="run-1",
+        task_id="task-1",
+    )
+
+    recovery = recoveries[0]
+    action = recovery.recovery_actions[0]
+    assert recovery.selected_tool_name == "desktop.provider_session.start"
+    assert recovery.trigger == "real_virtual_desktop_provider_required"
+    assert action.input["requires_real_virtual_desktop_backend"] is True
+    assert action.metadata["requires_real_virtual_desktop_backend"] is True
+    assert action.metadata["desktop_provider_session"][
+        "requires_real_virtual_desktop_backend"
+    ] is True
+    assert action.deferred_continuation[0]["tool"] == "desktop.safe_type_text"
+    assert action.deferred_continuation[0]["desktop_execution_policy"][
+        "require_sandbox_for_keyboard_mouse"
+    ] is True
+
+
 def test_runtime_execution_request_projects_verification_evidence() -> None:
     envelope = RuntimeExecutionEnvelopeSnapshot(
         envelope_id="execution-envelope-verify",
