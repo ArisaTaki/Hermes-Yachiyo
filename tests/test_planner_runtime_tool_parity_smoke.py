@@ -15,7 +15,7 @@ def test_planner_runtime_tool_parity_covers_runtime_executable_tools():
     assert case_by_id["generic_app_open"]["request_tools"] == [
         "desktop.list_apps",
         "app.open",
-        "desktop.active_window",
+        "desktop.verify",
     ]
     assert case_by_id["app_scoped_ui_click"]["request_tools"] == [
         "desktop.inspect_app",

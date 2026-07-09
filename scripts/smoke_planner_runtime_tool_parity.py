@@ -29,8 +29,8 @@ PLANNER_TOOL_PARITY_CASES: tuple[dict[str, Any], ...] = (
         "category": "orchestrator",
         "prompt": "打开 PixelForge",
         "expected_intent": "desktop_operation",
-        "expected_plan_tools": ["desktop.list_apps", "app.open", "desktop.active_window"],
-        "expected_request_tools": ["desktop.list_apps", "app.open", "desktop.active_window"],
+        "expected_plan_tools": ["desktop.list_apps", "app.open", "desktop.verify"],
+        "expected_request_tools": ["desktop.list_apps", "app.open", "desktop.verify"],
         "approval_required": [],
     },
     {

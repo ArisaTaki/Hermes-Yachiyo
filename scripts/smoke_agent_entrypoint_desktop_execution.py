@@ -486,7 +486,7 @@ def _generic_app_open_case(
     selection_payload = _payload(selection_event)
     selected_intent_payload = _payload(selected_intent_event)
     task_core_summary = _task_core_summary(_task_core_from_selection_event(selection_event))
-    expected_plan_tools = ["desktop.list_apps", "app.open", "desktop.active_window"]
+    expected_plan_tools = ["desktop.list_apps", "app.open", "desktop.verify"]
     expected_execution_tools = expected_plan_tools
     expected_step_ids = [
         "discover-desktop-state",
@@ -763,7 +763,7 @@ def _capability_discovered_app_open_case(service: AgentRuntimeService) -> dict[s
     selected_intent_payload = _payload(selected_intent_event)
     completed_payload = _payload(completed_event)
     task_core_summary = _task_core_summary(_task_core_from_selection_event(selection_event))
-    expected_tools = ["desktop.list_apps", "app.open", "desktop.active_window"]
+    expected_tools = ["desktop.list_apps", "app.open", "desktop.verify"]
     expected_step_ids = [
         "discover_apps-desktop-state",
         "open-selected-discovered-app",
@@ -794,7 +794,7 @@ def _capability_discovered_app_open_case(service: AgentRuntimeService) -> dict[s
         "planned_tool_chain": planned_tools == [
             "desktop.list_apps",
             "app.open",
-            "desktop.active_window",
+            "desktop.verify",
         ],
         "planned_discovery_is_direct_execution": (
             not bool(_payload(planned_events[0]).get("continue_to_model"))
@@ -816,12 +816,12 @@ def _capability_discovered_app_open_case(service: AgentRuntimeService) -> dict[s
         "tool_call_chain": tool_call_tools == [
             "desktop.list_apps",
             "app.open",
-            "desktop.active_window",
+            "desktop.verify",
         ],
         "tool_results_match_chain": tool_result_actions == [
             "desktop.list_apps",
             "app.open",
-            "desktop.active_window",
+            "desktop.verify",
         ],
         "resolved_app_from_discovery": {
             "app_name": "PixelForge",
@@ -1208,13 +1208,13 @@ def run_smoke(*, workdir: Path | None = None) -> dict[str, Any]:
     checks = {
         "all_cases_passed": all(case.get("ok") is True for case in cases),
         "model_never_called": model_call_count == 0,
-        "daily_app_open_recommends_isolated_provider": (
+        "daily_app_open_uses_local_foreground_fallback": (
             desktop_provider_session_auto_start_recommended_for_requests(
                 [{"tool": "app.open", "input": {"app_name": "PixelForge"}}]
             )
-            is True
+            is False
         ),
-        "daily_media_playback_recommends_isolated_provider": (
+        "daily_media_playback_uses_local_foreground_fallback": (
             desktop_provider_session_auto_start_recommended_for_requests(
                 [
                     {
@@ -1222,6 +1222,12 @@ def run_smoke(*, workdir: Path | None = None) -> dict[str, Any]:
                         "input": {"app_name": "Music"},
                     }
                 ]
+            )
+            is False
+        ),
+        "daily_keyboard_mouse_recommends_provider": (
+            desktop_provider_session_auto_start_recommended_for_requests(
+                [{"tool": "desktop.safe_type_text", "input": {"text": "hello"}}]
             )
             is True
         ),

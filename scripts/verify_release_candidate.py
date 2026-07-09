@@ -15,12 +15,19 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Sequence
 
 _SOURCE_REVISION_SUBPROCESS_POPEN = subprocess.Popen
+_ISOLATED_SMOKE_SUBPROCESS_RUN = subprocess.run
+_DESKTOP_PROVIDER_ENV_PREFIXES = (
+    "OHA_YACHIYO_DESKTOP_PROVIDER",
+    "OHA_YACHIYO_SANDBOX_DESKTOP_PROVIDER",
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+_VERIFIER_SOURCE_ROOT = PROJECT_ROOT
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -388,6 +395,34 @@ def _source_revision(root: Path) -> dict[str, object]:
         "short_commit": commit[:7],
         "dirty": bool(status.strip()),
     }
+
+
+def _desktop_provider_env_key(name: str) -> bool:
+    return any(str(name).startswith(prefix) for prefix in _DESKTOP_PROVIDER_ENV_PREFIXES)
+
+
+def _without_desktop_provider_env() -> dict[str, str]:
+    return {
+        key: value
+        for key, value in os.environ.items()
+        if not _desktop_provider_env_key(key)
+    }
+
+
+@contextmanager
+def _preserve_desktop_provider_env() -> Any:
+    saved = {
+        key: value
+        for key, value in os.environ.items()
+        if _desktop_provider_env_key(key)
+    }
+    try:
+        yield
+    finally:
+        for key in list(os.environ):
+            if _desktop_provider_env_key(key):
+                os.environ.pop(key, None)
+        os.environ.update(saved)
 
 
 def _manual_check_source_revisions(
@@ -2292,7 +2327,7 @@ def verify_agent_entrypoint_desktop_execution_smoke(
     root: Path,
 ) -> tuple[list[Finding], dict[str, Any]]:
     try:
-        raw_evidence = run_agent_entrypoint_desktop_execution_smoke()
+        raw_evidence = _run_agent_entrypoint_desktop_execution_smoke_isolated()
     except Exception as exc:
         return [
             Finding(
@@ -2325,6 +2360,54 @@ def verify_agent_entrypoint_desktop_execution_smoke(
             redact_api_error_text(message),
         )
     ], evidence
+
+
+def _run_agent_entrypoint_desktop_execution_smoke_isolated() -> dict[str, Any]:
+    """Run the stateful entrypoint smoke in a subprocess to avoid module leaks."""
+
+    script_path = _VERIFIER_SOURCE_ROOT / "scripts/smoke_agent_entrypoint_desktop_execution.py"
+    with tempfile.TemporaryDirectory(prefix="oha-entrypoint-desktop-verifier-") as temp_dir:
+        report_path = Path(temp_dir) / "agent-entrypoint-desktop.json"
+        command = [
+            sys.executable,
+            str(script_path),
+            "--report-json",
+            str(report_path),
+        ]
+        result = _ISOLATED_SMOKE_SUBPROCESS_RUN(
+            command,
+            cwd=_VERIFIER_SOURCE_ROOT,
+            env=_without_desktop_provider_env(),
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        evidence: dict[str, Any] = {}
+        if report_path.exists():
+            try:
+                raw_evidence = json.loads(report_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                raw_evidence = {}
+            if isinstance(raw_evidence, dict):
+                evidence = raw_evidence
+        if result.returncode == 0 and evidence:
+            return evidence
+        detail = _redacted_process_detail(result.stdout, result.stderr)
+        if not evidence:
+            evidence = {
+                "ok": False,
+                "mode": "agent_entrypoint_desktop_execution_smoke",
+            }
+        evidence.setdefault("ok", False)
+        evidence.setdefault("mode", "agent_entrypoint_desktop_execution_smoke")
+        evidence["exit_code"] = result.returncode
+        if not str(evidence.get("error") or "").strip():
+            evidence["error"] = detail or (
+                "agent entrypoint desktop execution smoke exited with "
+                f"{result.returncode}"
+            )
+        return evidence
 
 
 def verify_agent_entrypoint_data_analysis_smoke(
@@ -2659,7 +2742,8 @@ def verify_approval_policy_gate_smoke(root: Path) -> tuple[list[Finding], dict[s
 
 def verify_approval_resume_timeline_smoke(root: Path) -> tuple[list[Finding], dict[str, Any]]:
     try:
-        raw_evidence = run_approval_resume_timeline_smoke()
+        with _preserve_desktop_provider_env():
+            raw_evidence = run_approval_resume_timeline_smoke()
     except Exception as exc:
         return [
             Finding(
@@ -2844,7 +2928,8 @@ def verify_workflow_run_timeline_smoke(root: Path) -> tuple[list[Finding], dict[
 
 def verify_native_provider_contract_smoke(root: Path) -> tuple[list[Finding], dict[str, Any]]:
     try:
-        raw_evidence = run_native_provider_contract_smoke()
+        with _preserve_desktop_provider_env():
+            raw_evidence = run_native_provider_contract_smoke()
     except Exception as exc:
         return [
             Finding(

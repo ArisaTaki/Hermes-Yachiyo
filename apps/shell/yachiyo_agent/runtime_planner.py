@@ -10988,9 +10988,19 @@ def _append_selected_discovered_launch_verification_step(
     }
     verify_tool = _first_allowed(
         (
-            ("desktop.ui_elements", "desktop.active_window", "screen.capture")
+            (
+                "desktop.ui_elements",
+                "desktop.verify",
+                "desktop.active_window",
+                "screen.capture",
+            )
             if embedded_action
-            else ("desktop.active_window", "desktop.ui_elements", "screen.capture")
+            else (
+                "desktop.verify",
+                "desktop.active_window",
+                "desktop.ui_elements",
+                "screen.capture",
+            )
         ),
         allowed,
     )
@@ -12546,16 +12556,16 @@ def _desktop_verify_tool_candidates(depends_on: list[str]) -> tuple[str, ...]:
     if _desktop_verify_depends_on_ui_operation(depends_on):
         return (
             "desktop.ui_elements",
+            "desktop.verify",
             "desktop.windows",
             "desktop.active_window",
-            "desktop.verify",
             "screen.capture",
         )
     return (
+        "desktop.verify",
         "desktop.active_window",
         "desktop.windows",
         "desktop.ui_elements",
-        "desktop.verify",
         "screen.capture",
     )
 

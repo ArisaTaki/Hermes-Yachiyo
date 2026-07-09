@@ -1002,7 +1002,7 @@ def test_release_candidate_verifier_reports_desktop_planner_discovery_smoke(
     assert [request["tool"] for request in case_by_id["generic_app_open"]["requests"]] == [
         "desktop.list_apps",
         "app.open",
-        "desktop.active_window",
+        "desktop.verify",
     ]
     assert case_by_id["app_scoped_click"]["requests"][0]["tool"] == "desktop.inspect_app"
     assert case_by_id["app_scoped_click"]["requests"][1]["tool"] == (

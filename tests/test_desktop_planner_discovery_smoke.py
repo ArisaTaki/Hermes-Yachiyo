@@ -25,7 +25,7 @@ def test_desktop_planner_discovery_smoke_covers_discover_operate_verify():
     assert [request["tool"] for request in cases["generic_app_open"]["requests"]] == [
         "desktop.list_apps",
         "app.open",
-        "desktop.active_window",
+        "desktop.verify",
     ]
     assert [request["tool"] for request in cases["generic_app_read_buttons"]["requests"]] == [
         "desktop.inspect_app",
@@ -44,6 +44,7 @@ def test_desktop_planner_discovery_smoke_covers_discover_operate_verify():
     assert [request["tool"] for request in cases["capability_app_discovery_open"]["requests"]] == [
         "desktop.list_apps",
         "app.open",
+        "desktop.verify",
     ]
     assert not cases["capability_app_discovery_open"]["requests"][0].get(
         "continue_to_model", False
@@ -56,6 +57,7 @@ def test_desktop_planner_discovery_smoke_covers_discover_operate_verify():
     assert [step["id"] for step in cases["capability_app_discovery_open"]["steps"]] == [
         "discover_apps-desktop-state",
         "open-selected-discovered-app",
+        "verify-desktop-result",
     ]
     assert cases["capability_app_discovery_open"]["steps"][1]["input"] == {
         "app_name": "<selected app from desktop.list_apps>",
@@ -106,7 +108,7 @@ def test_desktop_planner_discovery_smoke_covers_discover_operate_verify():
         "desktop.list_apps",
         "desktop.windows",
         "app.focus_window",
-        "desktop.active_window",
+        "desktop.verify",
     ]
     assert all(case["checks"]["uses_no_browser_tool"] for case in cases.values())
 

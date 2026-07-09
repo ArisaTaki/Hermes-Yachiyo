@@ -29,6 +29,7 @@ _ENTRYPOINT_DISCOVERY_TOOLS = {
 }
 _ENTRYPOINT_VERIFY_TOOLS = {
     "desktop.active_window",
+    "desktop.verify",
     "desktop.list_windows",
     "desktop.read_ui",
     "desktop.windows",
@@ -317,6 +318,7 @@ _SAFE_DIRECT_ENTRYPOINT_TOOLS = frozenset(
         "app.open_path_with_app",
         "app.show",
         "desktop.active_window",
+        "desktop.verify",
         "desktop.focus_app",
         "desktop.list_apps",
         "desktop.list_windows",

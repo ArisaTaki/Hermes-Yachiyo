@@ -20,7 +20,12 @@ DESKTOP_PLANNER_CASES: tuple[dict[str, Any], ...] = (
     {
         "id": "generic_app_open",
         "prompt": "打开 PixelForge",
-        "allowed_tools": ["desktop.list_apps", "app.open", "desktop.active_window"],
+        "allowed_tools": [
+            "desktop.list_apps",
+            "app.open",
+            "desktop.verify",
+            "desktop.active_window",
+        ],
         "expected_app": "PixelForge",
         "expected_steps": [
             "discover-desktop-state",
@@ -30,7 +35,7 @@ DESKTOP_PLANNER_CASES: tuple[dict[str, Any], ...] = (
         "expected_request_tools": [
             "desktop.list_apps",
             "app.open",
-            "desktop.active_window",
+            "desktop.verify",
         ],
     },
     {
@@ -76,15 +81,18 @@ DESKTOP_PLANNER_CASES: tuple[dict[str, Any], ...] = (
         "allowed_tools": [
             "desktop.list_apps",
             "app.open",
+            "desktop.verify",
         ],
         "expected_app": "pdf",
         "expected_steps": [
             "discover_apps-desktop-state",
             "open-selected-discovered-app",
+            "verify-desktop-result",
         ],
         "expected_request_tools": [
             "desktop.list_apps",
             "app.open",
+            "desktop.verify",
         ],
         "expected_model_followup": False,
     },
@@ -206,6 +214,7 @@ DESKTOP_PLANNER_CASES: tuple[dict[str, Any], ...] = (
             "desktop.list_apps",
             "desktop.windows",
             "app.focus_window",
+            "desktop.verify",
             "desktop.active_window",
         ],
         "expected_app": "Slack",
@@ -219,7 +228,7 @@ DESKTOP_PLANNER_CASES: tuple[dict[str, Any], ...] = (
             "desktop.list_apps",
             "desktop.windows",
             "app.focus_window",
-            "desktop.active_window",
+            "desktop.verify",
         ],
     },
 )

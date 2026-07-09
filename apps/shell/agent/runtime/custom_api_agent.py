@@ -93,6 +93,7 @@ _RUNTIME_REPLAN_ACTION_AUTO_SAFE_TOOLS = {
     "browser.current_page",
     "browser.screenshot",
     "desktop.active_window",
+    "desktop.verify",
     "desktop.focus_app",
     "desktop.list_apps",
     "desktop.open_app",
@@ -131,6 +132,7 @@ _DISCOVERED_APP_PLACEHOLDERS = {
 
 _DAILY_DESKTOP_VERIFY_TOOLS = {
     "desktop.active_window",
+    "desktop.verify",
     "desktop.list_windows",
     "desktop.read_ui",
     "screen.capture",
