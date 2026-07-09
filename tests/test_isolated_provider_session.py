@@ -1085,6 +1085,67 @@ def test_ensure_isolated_provider_session_blocks_external_provider_missing_tools
     assert session["provider_id"] == "real-virtual-desktop"
 
 
+def test_ensure_isolated_provider_session_treats_unsupported_sandbox_tool_as_needed(
+    monkeypatch,
+) -> None:
+    starts: list[dict[str, Any] | None] = []
+
+    monkeypatch.setattr(
+        session_module._SESSION_MANAGER,
+        "status",
+        lambda probe_health=True: {
+            "ok": True,
+            "status": "running",
+            "running": True,
+            "provider_id": "local-isolated-desktop",
+            "supported_tools": ["desktop.ui_elements"],
+        },
+    )
+    monkeypatch.setattr(
+        session_module,
+        "desktop_execution_provider_status_from_env",
+        lambda *args, **kwargs: {},
+    )
+    monkeypatch.setattr(
+        session_module,
+        "start_isolated_desktop_provider_session",
+        lambda request=None: starts.append(request) or {},
+    )
+    envelope = {
+        "requests": [
+            {
+                "request_id": "request-type",
+                "tool_name": "desktop.safe_type_text",
+                "execution_mode": {"keyboard_mouse_capture": True},
+                "desktop_execution_route": {
+                    "selected_provider_kind": "sandbox_desktop",
+                    "status": "sandbox_tool_not_supported",
+                    "sandbox_required": True,
+                    "blocking_conditions": ["sandbox_tool_not_supported"],
+                },
+                "sandbox_provider": {
+                    "provider_kind": "sandbox_desktop",
+                    "provider_id": "local-isolated-desktop",
+                    "available": True,
+                    "adapter_ready": True,
+                    "supported_tools": ["desktop.ui_elements"],
+                },
+            }
+        ]
+    }
+
+    session = ensure_isolated_desktop_provider_session_for_envelope(envelope)
+
+    assert starts == []
+    assert session["needed"] is True
+    assert session["ok"] is False
+    assert session["running"] is False
+    assert session["status"] == "provider_missing_required_tools"
+    assert session["reason"] == "isolated_provider_missing_required_tools"
+    assert session["request_ids"] == ["request-type"]
+    assert session["tool_names"] == ["desktop.safe_type_text"]
+
+
 def test_ensure_isolated_provider_session_surfaces_unavailable_external_provider(
     monkeypatch,
 ) -> None:

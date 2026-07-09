@@ -73,6 +73,7 @@ _PROVIDER_START_STATUSES = {
     "sandbox_keyboard_mouse_provider_required",
     "sandbox_desktop_session_required",
     "sandbox_adapter_required",
+    "sandbox_tool_not_supported",
     "real_virtual_desktop_provider_required",
 }
 
@@ -81,6 +82,7 @@ _PROVIDER_START_BLOCKERS = {
     "sandbox_keyboard_mouse_provider_required",
     "sandbox_desktop_session_required",
     "sandbox_desktop_adapter_required",
+    "sandbox_tool_not_supported",
     "isolated_desktop_provider_required",
     "loopback_desktop_backend",
     "desktop_backend_not_release_ready",
