@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import os
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any, Iterable
 from urllib.parse import urlparse
 
@@ -19,6 +21,7 @@ from apps.shell.yachiyo_agent.desktop_provider_contract import (
     virtual_desktop_provider_contract_evidence,
 )
 
+_PROVIDER_MANIFEST_ENV = "OHA_YACHIYO_DESKTOP_PROVIDER_MANIFEST"
 
 _SANDBOX_DESKTOP_PROVIDER_DEFAULT: dict[str, Any] = {
     "available": False,
@@ -457,6 +460,8 @@ def sandbox_desktop_provider_status(
         "sandbox_provider_health_probe",
     )
     provider = _sandbox_provider_payload(metadata) or _sandbox_provider_payload_from_env(
+        probe_health=should_probe_health,
+    ) or _sandbox_provider_payload_from_manifest(
         probe_health=should_probe_health,
     ) or _local_desktop_provider_payload(metadata)
     if provider:
@@ -1110,6 +1115,220 @@ def _sandbox_provider_payload_from_env(
     }
 
 
+def _sandbox_provider_payload_from_manifest(
+    *,
+    probe_health: bool = False,
+) -> dict[str, Any]:
+    manifest = _configured_provider_manifest()
+    if not manifest:
+        return {}
+    static_payload = _manifest_provider_static_payload(manifest)
+    manifest_env = _provider_env_from_manifest(manifest)
+    if not (
+        manifest_env.get("OHA_YACHIYO_DESKTOP_PROVIDER_URL")
+        or manifest_env.get("OHA_YACHIYO_DESKTOP_PROVIDER_EXECUTE_URL")
+    ):
+        return {
+            **static_payload,
+            "available": False,
+            "adapter_ready": False,
+            "status": "provider_required",
+            "reason": (
+                "Desktop provider manifest is configured, but no provider endpoint "
+                "is available yet."
+            ),
+            "blocking_conditions": ["sandbox_desktop_provider_required"],
+        }
+    provider_status = desktop_execution_provider_status_from_env(
+        manifest_env,
+        probe_health=probe_health,
+    )
+    if str(provider_status.get("provider_kind") or "") != "sandbox_desktop":
+        return {}
+    return {
+        **static_payload,
+        **provider_status,
+        "available": bool(provider_status.get("available")),
+        "adapter_ready": bool(provider_status.get("adapter_ready")),
+        "provider_kind": "sandbox_desktop",
+        "provider_id": str(
+            provider_status.get("provider_id")
+            or static_payload.get("provider_id")
+            or ""
+        ),
+        "supported_tools": _string_list(provider_status.get("supported_tools"))
+        or _string_list(static_payload.get("supported_tools")),
+        "blocking_conditions": _string_list(provider_status.get("blocking_conditions")),
+        "reason": str(
+            provider_status.get("reason")
+            or static_payload.get("reason")
+            or "Sandbox desktop provider is configured through provider manifest."
+        ),
+        "source": "provider_manifest",
+    }
+
+
+def _configured_provider_manifest() -> dict[str, Any]:
+    raw_path = str(os.environ.get(_PROVIDER_MANIFEST_ENV) or "").strip()
+    if not raw_path:
+        return {}
+    path = Path(raw_path).expanduser()
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+    return dict(payload) if isinstance(payload, Mapping) else {}
+
+
+def _manifest_provider_static_payload(manifest: Mapping[str, Any]) -> dict[str, Any]:
+    safety = _mapping(manifest.get("safety"))
+    supported_tools = _string_list(manifest.get("supported_tools"))
+    return {
+        "provider_id": str(manifest.get("provider_id") or "").strip(),
+        "provider_kind": str(manifest.get("provider_kind") or "sandbox_desktop").strip(),
+        "status": "provider_required",
+        "recommended_for": ["foreground_control", "keyboard_mouse_capture"],
+        "diagnostic_route": "/yachiyo/studio/tools",
+        "source": "provider_manifest",
+        "supported_tools": supported_tools,
+        "launch_hint": {"isolated_provider": dict(manifest)},
+        "foreground_mutation_supported": _optional_bool_value(
+            manifest.get("foreground_mutation_supported")
+            if "foreground_mutation_supported" in manifest
+            else safety.get("foreground_mutation_supported")
+        ),
+        "keyboard_mouse_capture_supported": _optional_bool_value(
+            manifest.get("keyboard_mouse_capture_supported")
+            if "keyboard_mouse_capture_supported" in manifest
+            else safety.get("keyboard_mouse_capture_supported")
+        ),
+        "desktop_session_kind": str(
+            manifest.get("desktop_session_kind")
+            or safety.get("desktop_session_kind")
+            or ""
+        ).strip(),
+        "desktop_session_isolated": _optional_bool_value(
+            manifest.get("desktop_session_isolated")
+            if "desktop_session_isolated" in manifest
+            else safety.get("desktop_session_isolated")
+        ),
+        "foreground_takeover_required": _optional_bool_value(
+            manifest.get("foreground_takeover_required")
+            if "foreground_takeover_required" in manifest
+            else safety.get("foreground_takeover_required")
+        ),
+        "desktop_backend_kind": str(
+            manifest.get("desktop_backend_kind")
+            or safety.get("desktop_backend_kind")
+            or ""
+        ).strip(),
+        "desktop_backend_is_loopback": _optional_bool_value(
+            manifest.get("desktop_backend_is_loopback")
+            if "desktop_backend_is_loopback" in manifest
+            else safety.get("desktop_backend_is_loopback")
+        ),
+        "desktop_backend_ready_for_public_release": _optional_bool_value(
+            manifest.get("desktop_backend_ready_for_public_release")
+            if "desktop_backend_ready_for_public_release" in manifest
+            else safety.get("desktop_backend_ready_for_public_release")
+        ),
+        "requires_real_virtual_desktop_backend": _optional_bool_value(
+            manifest.get("requires_real_virtual_desktop_backend")
+            if "requires_real_virtual_desktop_backend" in manifest
+            else safety.get("requires_real_virtual_desktop_backend")
+        ),
+    }
+
+
+def _provider_env_from_manifest(manifest: Mapping[str, Any]) -> dict[str, str]:
+    endpoint_urls = _mapping(manifest.get("endpoint_urls"))
+    if not endpoint_urls:
+        endpoint_urls = {
+            key: value
+            for key, value in _mapping(manifest.get("endpoints")).items()
+            if str(value or "").startswith(("http://", "https://"))
+        }
+    execute_url = _first_mapping_value(
+        endpoint_urls,
+        "execute",
+        "tools_execute",
+        "tools.execute",
+        "tools/execute",
+        "execute_url",
+    )
+    status_url = _first_mapping_value(endpoint_urls, "status", "health", "status_url")
+    base_url = (
+        _first_mapping_value(manifest, "url", "endpoint_origin", "base_url")
+        or _first_mapping_value(endpoint_urls, "url", "base_url", "base", "origin")
+        or _url_origin(str(execute_url or status_url or ""))
+    )
+    env: dict[str, str] = {}
+    if base_url:
+        env["OHA_YACHIYO_DESKTOP_PROVIDER_URL"] = str(base_url)
+    if execute_url:
+        env["OHA_YACHIYO_DESKTOP_PROVIDER_EXECUTE_URL"] = str(execute_url)
+    if status_url:
+        env["OHA_YACHIYO_DESKTOP_PROVIDER_STATUS_URL"] = str(status_url)
+    provider_id = str(manifest.get("provider_id") or "").strip()
+    if provider_id:
+        env["OHA_YACHIYO_DESKTOP_PROVIDER_ID"] = provider_id
+    provider_kind = str(manifest.get("provider_kind") or "sandbox_desktop").strip()
+    if provider_kind:
+        env["OHA_YACHIYO_DESKTOP_PROVIDER_KIND"] = provider_kind
+    supported_tools = _string_list(manifest.get("supported_tools"))
+    if supported_tools:
+        env["OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS"] = ",".join(supported_tools)
+    for env_key, manifest_key in (
+        (
+            "OHA_YACHIYO_DESKTOP_PROVIDER_KEYBOARD_MOUSE_CAPTURE_SUPPORTED",
+            "keyboard_mouse_capture_supported",
+        ),
+        (
+            "OHA_YACHIYO_DESKTOP_PROVIDER_FOREGROUND_MUTATION_SUPPORTED",
+            "foreground_mutation_supported",
+        ),
+        ("OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_ISOLATED", "desktop_session_isolated"),
+        (
+            "OHA_YACHIYO_DESKTOP_PROVIDER_FOREGROUND_TAKEOVER_REQUIRED",
+            "foreground_takeover_required",
+        ),
+        (
+            "OHA_YACHIYO_DESKTOP_PROVIDER_BACKEND_IS_LOOPBACK",
+            "desktop_backend_is_loopback",
+        ),
+        (
+            "OHA_YACHIYO_DESKTOP_PROVIDER_BACKEND_READY_FOR_PUBLIC_RELEASE",
+            "desktop_backend_ready_for_public_release",
+        ),
+        (
+            "OHA_YACHIYO_DESKTOP_PROVIDER_REQUIRES_REAL_VIRTUAL_DESKTOP_BACKEND",
+            "requires_real_virtual_desktop_backend",
+        ),
+    ):
+        bool_value = _manifest_bool_env(manifest, manifest_key)
+        if bool_value:
+            env[env_key] = bool_value
+    for env_key, manifest_key in (
+        ("OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_KIND", "desktop_session_kind"),
+        ("OHA_YACHIYO_DESKTOP_PROVIDER_BACKEND_KIND", "desktop_backend_kind"),
+    ):
+        value = str(manifest.get(manifest_key) or "").strip()
+        if value:
+            env[env_key] = value
+    if _optional_bool_value(manifest.get("allow_remote")) is True:
+        env["OHA_YACHIYO_DESKTOP_PROVIDER_ALLOW_REMOTE"] = "true"
+    return env
+
+
+def _manifest_bool_env(manifest: Mapping[str, Any], key: str) -> str:
+    safety = _mapping(manifest.get("safety"))
+    raw = manifest.get(key) if key in manifest else safety.get(key)
+    parsed = _optional_bool_value(raw)
+    if parsed is None:
+        return ""
+    return "true" if parsed else "false"
+
+
 def _local_desktop_provider_payload(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
     if not _metadata_truthy(metadata, *_LOCAL_DESKTOP_PROVIDER_KEYS):
         return {}
@@ -1507,6 +1726,25 @@ def _is_loopback_url(value: str) -> bool:
         return False
     host = (parsed.hostname or "").strip().lower()
     return host in {"localhost", "127.0.0.1", "::1"} or host.startswith("127.")
+
+
+def _mapping(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _first_mapping_value(mapping: Mapping[str, Any], *keys: str) -> Any:
+    for key in keys:
+        value = mapping.get(key)
+        if value not in (None, "", [], {}):
+            return value
+    return None
+
+
+def _url_origin(value: str) -> str:
+    parsed = urlparse(str(value or "").strip())
+    if parsed.scheme and parsed.netloc:
+        return f"{parsed.scheme}://{parsed.netloc}"
+    return ""
 
 
 def _health_payload(value: Any) -> dict[str, Any]:

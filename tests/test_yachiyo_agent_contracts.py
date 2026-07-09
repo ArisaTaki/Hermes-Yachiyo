@@ -6296,6 +6296,112 @@ def test_sandbox_desktop_provider_status_exposes_virtual_provider_contract(
     )
 
 
+def test_sandbox_desktop_provider_status_reads_provider_manifest(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+) -> None:
+    for key in list(os.environ):
+        if key.startswith(
+            (
+                "OHA_YACHIYO_DESKTOP_PROVIDER_",
+                "OHA_YACHIYO_SANDBOX_DESKTOP_PROVIDER_",
+            )
+        ):
+            monkeypatch.delenv(key, raising=False)
+    manifest_path = tmp_path / "release-provider-manifest.json"
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "provider_id": "release-virtual-desktop",
+                "provider_kind": "sandbox_desktop",
+                "endpoint_urls": {
+                    "status": "http://127.0.0.1:29097/status",
+                    "execute": "http://127.0.0.1:29097/tools/execute",
+                },
+                "supported_tools": list(OHA_DESKTOP_AGENT_RELEASE_PROVIDER_TOOLS),
+                "keyboard_mouse_capture_supported": True,
+                "foreground_mutation_supported": True,
+                "desktop_session_kind": "virtual_desktop",
+                "desktop_session_isolated": True,
+                "foreground_takeover_required": False,
+                "desktop_backend_kind": "vnc_virtual_desktop",
+                "desktop_backend_is_loopback": False,
+                "desktop_backend_ready_for_public_release": True,
+                "requires_real_virtual_desktop_backend": False,
+            }
+        ),
+        encoding="utf-8",
+    )
+    calls: list[tuple[dict[str, str], bool]] = []
+
+    def fake_provider_status(
+        environ: dict[str, str] | None = None,
+        *,
+        probe_health: bool = False,
+    ) -> dict[str, Any]:
+        env = dict(environ or {})
+        calls.append((env, probe_health))
+        return {
+            "configured": True,
+            "available": True,
+            "adapter_ready": True,
+            "provider_kind": "sandbox_desktop",
+            "provider_id": env["OHA_YACHIYO_DESKTOP_PROVIDER_ID"],
+            "status": "available",
+            "desktop_session_kind": env[
+                "OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_KIND"
+            ],
+            "desktop_session_isolated": True,
+            "foreground_takeover_required": False,
+            "keyboard_mouse_capture_supported": True,
+            "desktop_backend_kind": env["OHA_YACHIYO_DESKTOP_PROVIDER_BACKEND_KIND"],
+            "desktop_backend_is_loopback": False,
+            "desktop_backend_ready_for_public_release": True,
+            "requires_real_virtual_desktop_backend": False,
+            "supported_tools": env["OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS"].split(","),
+        }
+
+    monkeypatch.setattr(
+        desktop_policy_module,
+        "desktop_execution_provider_status_from_env",
+        fake_provider_status,
+    )
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_MANIFEST", str(manifest_path))
+
+    status = sandbox_desktop_provider_status({"desktop_provider_health_probe": True})
+    route = desktop_execution_route_decision(
+        "desktop.safe_type_text",
+        policy=daily_entrypoint_desktop_execution_policy(),
+        execution_mode={
+            "foreground_control": True,
+            "keyboard_mouse_capture": True,
+            "mode": "supervised_live",
+        },
+        metadata={"desktop_provider_health_probe": True},
+    )
+
+    assert calls[0][1] is True
+    assert calls[0][0]["OHA_YACHIYO_DESKTOP_PROVIDER_URL"] == (
+        "http://127.0.0.1:29097"
+    )
+    assert calls[0][0]["OHA_YACHIYO_DESKTOP_PROVIDER_EXECUTE_URL"] == (
+        "http://127.0.0.1:29097/tools/execute"
+    )
+    assert status["source"] == "provider_manifest"
+    assert status["provider_id"] == "release-virtual-desktop"
+    assert status["desktop_session_kind"] == "virtual_desktop"
+    assert status["desktop_session_isolated"] is True
+    assert status["foreground_takeover_required"] is False
+    assert status["desktop_backend_kind"] == "vnc_virtual_desktop"
+    assert status["desktop_backend_is_loopback"] is False
+    assert status["desktop_backend_ready_for_public_release"] is True
+    assert status["requires_real_virtual_desktop_backend"] is False
+    assert status["provider_contract"]["ok"] is True
+    assert route["status"] == "sandbox_ready"
+    assert route["selected_provider_id"] == "release-virtual-desktop"
+    assert route["provider_execution_required"] is True
+
+
 def test_desktop_recovery_action_metadata_snapshot_json_shape_is_stable() -> None:
     snapshot = DesktopRecoveryActionMetadataSnapshot(
         recovery_tool="system.settings_open",
