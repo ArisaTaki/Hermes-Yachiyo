@@ -735,6 +735,15 @@ export function TaskProgressInspector({
       data-latest-verification-status={taskProgress?.latest_verification_status || ''}
       data-latest-verification-step-id={taskProgress?.latest_verification_step_id || ''}
       data-needs-replan={String(taskProgress?.needs_replan === true)}
+      data-desktop-provider-session-needed={String(taskProgress?.desktop_provider_session_needed === true)}
+      data-desktop-provider-session-running={String(taskProgress?.desktop_provider_session_running === true)}
+      data-desktop-provider-session-status={taskProgress?.desktop_provider_session_status || ''}
+      data-desktop-provider-session-needs-user-action={
+        String(taskProgress?.desktop_provider_session_needs_user_action === true)
+      }
+      data-desktop-provider-session-needs-replan={
+        String(taskProgress?.desktop_provider_session_needs_replan === true)
+      }
       data-pending-verification-count={taskProgress?.pending_verification_count ?? 0}
       data-failed-verification-count={taskProgress?.failed_verification_count ?? 0}
       data-verified-verification-count={taskProgress?.verified_verification_count ?? 0}
@@ -780,6 +789,22 @@ export function TaskProgressInspector({
                 title={taskProgress.current_tool_name || ''}
               >
                 current · {taskProgress.current_step_title || taskProgress.current_step_id}
+              </span>
+            ) : null}
+            {taskProgress.desktop_provider_session_needed ? (
+              <span
+                className={`studio-tool-permission ${
+                  taskProgress.desktop_provider_session_needs_replan ? 'missing' : ''
+                }`}
+                data-desktop-provider-session-provider-id={
+                  taskProgress.desktop_provider_session_provider_id || ''
+                }
+                data-desktop-provider-session-status={
+                  taskProgress.desktop_provider_session_status || ''
+                }
+                title={(taskProgress.desktop_provider_session_tool_names || []).join(' · ') || undefined}
+              >
+                provider · {taskProgress.desktop_provider_session_running ? 'ready' : taskProgress.desktop_provider_session_status || 'waiting'}
               </span>
             ) : null}
             {taskProgress.blocked_step_ids?.slice(0, 6).map((stepId) => (

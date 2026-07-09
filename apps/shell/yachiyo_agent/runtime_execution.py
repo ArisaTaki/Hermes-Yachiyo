@@ -104,7 +104,10 @@ def runtime_execution_envelope_from_decision(
         execution_strategy=decision.plan.execution_strategy,
         requests=requests,
         task_core=decision.plan.task_core,
-        task_progress=task_progress_summary_from_task_core(decision.plan.task_core),
+        task_progress=task_progress_summary_from_task_core(
+            decision.plan.task_core,
+            desktop_provider_session=desktop_provider_session,
+        ),
         approvals_required=list(tool_plan.approvals_required),
         artifacts_expected=list(tool_plan.artifacts_expected),
         open_questions=list(tool_plan.open_questions),

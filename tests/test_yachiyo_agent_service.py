@@ -2109,6 +2109,15 @@ def test_yachiyo_chat_execution_routes_running_isolated_provider_session() -> No
     assert envelope.desktop_provider_session["provider_id"] == (
         "local-isolated-desktop"
     )
+    assert envelope.task_progress is not None
+    assert envelope.task_progress.desktop_provider_session_needed is True
+    assert envelope.task_progress.desktop_provider_session_running is True
+    assert envelope.task_progress.desktop_provider_session_provider_id == (
+        "local-isolated-desktop"
+    )
+    assert envelope.task_progress.desktop_provider_session_tool_names == allowed_tools
+    assert envelope.task_progress.desktop_provider_session_needs_user_action is False
+    assert "desktop provider ready" in envelope.task_progress.progress_text
     for tool_name in allowed_tools:
         assert requests[tool_name].desktop_provider_session["provider_id"] == (
             "local-isolated-desktop"
@@ -2367,6 +2376,15 @@ def test_agent_studio_service_projects_provider_session_recovery_without_autosta
     assert envelope.desktop_provider_session["needed"] is True
     assert envelope.desktop_provider_session["auto_start"] is False
     assert envelope.desktop_provider_session["running"] is False
+    assert envelope.task_progress is not None
+    assert envelope.task_progress.status == "provider_required"
+    assert envelope.task_progress.needs_user_action is True
+    assert envelope.task_progress.needs_replan is True
+    assert envelope.task_progress.desktop_provider_session_needed is True
+    assert envelope.task_progress.desktop_provider_session_running is False
+    assert envelope.task_progress.desktop_provider_session_needs_user_action is True
+    assert envelope.task_progress.desktop_provider_session_needs_replan is True
+    assert "desktop provider required" in envelope.task_progress.progress_text
     assert operation_request.desktop_provider_session["needed"] is True
     assert operation_request.desktop_execution_route is not None
     assert operation_request.desktop_execution_route.can_execute is False
@@ -2760,6 +2778,23 @@ def test_yachiyo_chat_entrypoint_auto_starts_isolated_provider_for_input(
     ]["started"] is True
     assert task.runtime_execution_envelope is not None
     assert task.runtime_execution_envelope.desktop_provider_session["started"] is True
+    assert task.runtime_execution_envelope.task_progress is not None
+    assert (
+        task.runtime_execution_envelope.task_progress.desktop_provider_session_needed
+        is True
+    )
+    assert (
+        task.runtime_execution_envelope.task_progress.desktop_provider_session_running
+        is True
+    )
+    assert (
+        task.runtime_execution_envelope.task_progress.desktop_provider_session_started
+        is True
+    )
+    assert (
+        task.runtime_execution_envelope.task_progress.desktop_provider_session_provider_id
+        == "local-isolated-desktop"
+    )
     assert task.runtime_debug is not None
     assert task.runtime_debug.desktop_provider_session_needed is True
     assert task.runtime_debug.desktop_provider_session_running is True

@@ -90,10 +90,12 @@ def run_timeline_snapshot_from_payload(
     rerun_provenance = run_timeline_rerun_provenance_from_payload(payload, events)
     recovery_source = run_timeline_recovery_source_from_payload(payload, events)
     task_core = task_core_snapshot_from_payload(payload, events=events)
+    desktop_provider_session = _desktop_provider_session_from_payload(payload)
     task_progress = task_progress_summary_from_task_core(
         task_core,
         events=events,
         needs_user_action=pending_approval is not None,
+        desktop_provider_session=desktop_provider_session,
     )
     planner_summary = planner_trace_summary_from_payload(payload)
     workflow_run_id = workflow_run_id_from_payload(payload, run_id)
@@ -117,6 +119,7 @@ def run_timeline_snapshot_from_payload(
             task_core,
             events=events,
             needs_user_action=pending_approval is not None,
+            desktop_provider_session=desktop_provider_session,
         )
     runtime_execution_envelope = runtime_execution_envelope_with_status_overlay(
         runtime_execution_envelope,

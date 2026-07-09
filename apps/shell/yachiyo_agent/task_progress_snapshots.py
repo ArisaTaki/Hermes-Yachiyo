@@ -18,6 +18,7 @@ def task_progress_summary_from_task_core(
     *,
     events: Iterable[PublicRunEvent] | None = None,
     needs_user_action: bool = False,
+    desktop_provider_session: Mapping[str, Any] | None = None,
 ) -> TaskProgressSummarySnapshot | None:
     if task_core is None:
         return None
@@ -27,13 +28,24 @@ def task_progress_summary_from_task_core(
     checkpoints = list(task_core.checkpoints or [])
     workspace_items = list(task_core.workspace.items or [])
     latest_replan = _latest_unresolved_replan_event(event_list)
+    provider_progress = _desktop_provider_progress(desktop_provider_session)
     blocked_step_ids = _blocked_step_ids(todos)
     approval_step_ids = _approval_step_ids(todos, checkpoints, event_list)
+    effective_needs_user_action = bool(
+        needs_user_action
+        or approval_step_ids
+        or provider_progress["needs_user_action"]
+    )
+    effective_needs_replan = bool(
+        latest_replan is not None
+        or provider_progress["needs_replan"]
+    )
     status = _summary_status(
         todos,
         checkpoints,
-        replan_requested=latest_replan is not None,
-        needs_user_action=bool(needs_user_action or approval_step_ids),
+        replan_requested=effective_needs_replan,
+        needs_user_action=effective_needs_user_action,
+        desktop_provider_session=provider_progress,
     )
     current = _current_todo(todos)
     completed_todos = _count_status(todos, "completed")
@@ -78,8 +90,16 @@ def task_progress_summary_from_task_core(
         latest_replan_request_id=_optional_text(latest_payload.get("request_id")),
         latest_replan_trigger=_optional_text(latest_payload.get("trigger")),
         latest_replan_step_id=_optional_text(latest_payload.get("source_step_id")),
-        needs_replan=latest_replan is not None,
-        needs_user_action=bool(needs_user_action or approval_step_ids),
+        needs_replan=effective_needs_replan,
+        needs_user_action=effective_needs_user_action,
+        desktop_provider_session_status=provider_progress["status"],
+        desktop_provider_session_needed=provider_progress["needed"],
+        desktop_provider_session_running=provider_progress["running"],
+        desktop_provider_session_started=provider_progress["started"],
+        desktop_provider_session_provider_id=provider_progress["provider_id"],
+        desktop_provider_session_tool_names=provider_progress["tool_names"],
+        desktop_provider_session_needs_user_action=provider_progress["needs_user_action"],
+        desktop_provider_session_needs_replan=provider_progress["needs_replan"],
         blocked_step_ids=blocked_step_ids,
         approval_step_ids=approval_step_ids,
         progress_text=_progress_text(
@@ -89,7 +109,8 @@ def task_progress_summary_from_task_core(
             waiting_approval=waiting_approval_checkpoints,
             pending_verifications=verification_counts["pending"],
             failed_verifications=verification_counts["failed"],
-            replan_requested=latest_replan is not None,
+            replan_requested=effective_needs_replan,
+            desktop_provider_session=provider_progress,
         ),
     )
 
@@ -108,7 +129,16 @@ def _summary_status(
     *,
     replan_requested: bool,
     needs_user_action: bool,
+    desktop_provider_session: Mapping[str, Any],
 ) -> str:
+    if bool(desktop_provider_session.get("needs_replan")):
+        return (
+            "provider_start_failed"
+            if bool(desktop_provider_session.get("auto_start"))
+            else "provider_required"
+        )
+    if bool(desktop_provider_session.get("waiting")):
+        return "waiting_provider"
     if needs_user_action or any(_status(checkpoint) == "waiting_approval" for checkpoint in checkpoints):
         return "waiting_approval"
     if replan_requested:
@@ -282,10 +312,27 @@ def _progress_text(
     pending_verifications: int,
     failed_verifications: int,
     replan_requested: bool,
+    desktop_provider_session: Mapping[str, Any],
 ) -> str:
     if not total:
+        parts: list[str] = []
+    else:
+        parts = [f"{completed}/{total} todos completed"]
+    if bool(desktop_provider_session.get("needs_replan")):
+        status = (
+            "start_failed"
+            if bool(desktop_provider_session.get("auto_start"))
+            else "required"
+        )
+        parts.append(f"desktop provider {status}")
+    elif bool(desktop_provider_session.get("waiting")):
+        parts.append("waiting desktop provider")
+    elif bool(desktop_provider_session.get("needed")) and bool(
+        desktop_provider_session.get("running")
+    ):
+        parts.append("desktop provider ready")
+    if not total and not parts:
         return "No task steps"
-    parts = [f"{completed}/{total} todos completed"]
     if blocked:
         parts.append(f"{blocked} blocked")
     if waiting_approval:
@@ -297,6 +344,48 @@ def _progress_text(
     if replan_requested:
         parts.append("replan requested")
     return " | ".join(parts)
+
+
+def _desktop_provider_progress(
+    session: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    payload = dict(session) if isinstance(session, Mapping) else {}
+    status = _text(payload.get("status"))
+    needed = bool(payload.get("needed"))
+    running = bool(payload.get("running"))
+    started = bool(payload.get("started"))
+    auto_start = bool(payload.get("auto_start"))
+    provider_id = _optional_text(payload.get("provider_id"))
+    tool_names = _dedupe(_string_values(payload.get("tool_names")))
+    failure_statuses = {
+        "start_failed",
+        "provider_missing_required_tools",
+        "external_isolated_provider_unavailable",
+        "real_virtual_desktop_provider_required",
+        "virtual_desktop_provider_contract_required",
+    }
+    needs_replan = bool(
+        needed
+        and not running
+        and (
+            (payload.get("ok") is False and auto_start)
+            or status in failure_statuses
+            or bool(payload.get("requires_real_virtual_desktop_backend"))
+        )
+    )
+    waiting = bool(needed and not running and not needs_replan)
+    return {
+        "status": status or None,
+        "needed": needed,
+        "running": running,
+        "started": started,
+        "provider_id": provider_id,
+        "tool_names": tool_names,
+        "auto_start": auto_start,
+        "needs_user_action": waiting or needs_replan,
+        "needs_replan": needs_replan,
+        "waiting": waiting,
+    }
 
 
 def _dedupe(values: Iterable[str]) -> list[str]:
@@ -318,3 +407,9 @@ def _text(value: Any) -> str:
 def _optional_text(value: Any) -> str | None:
     text = _text(value)
     return text or None
+
+
+def _string_values(values: Any) -> list[str]:
+    if not isinstance(values, Iterable) or isinstance(values, (str, bytes, Mapping)):
+        return [_text(values)] if _text(values) else []
+    return [_text(value) for value in values if _text(value)]

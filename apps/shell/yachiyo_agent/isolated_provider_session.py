@@ -36,6 +36,10 @@ from apps.shell.yachiyo_agent.desktop_execution_policy import (
     local_low_risk_foreground_tool_allowed,
     user_foreground_takeover_allowed,
 )
+from apps.shell.yachiyo_agent.contracts import TaskCoreSnapshot
+from apps.shell.yachiyo_agent.task_progress_snapshots import (
+    task_progress_summary_from_task_core,
+)
 from packages.security import redact_api_error_text
 
 _ENV_KEYS = {
@@ -536,7 +540,59 @@ def annotate_envelope_with_desktop_provider_session(
             else request
             for request in requests
         ]
+    payload = _envelope_with_desktop_provider_task_progress(
+        payload,
+        public_session,
+    )
     return payload
+
+
+def _envelope_with_desktop_provider_task_progress(
+    envelope: dict[str, Any],
+    session: dict[str, Any],
+) -> dict[str, Any]:
+    task_core_payload = envelope.get("task_core")
+    if not isinstance(task_core_payload, dict):
+        return envelope
+    try:
+        task_core = TaskCoreSnapshot.model_validate(task_core_payload)
+    except ValueError:
+        return envelope
+    task_progress = task_progress_summary_from_task_core(
+        task_core,
+        desktop_provider_session=session,
+    )
+    if task_progress is None:
+        return envelope
+    existing_progress = (
+        dict(envelope.get("task_progress"))
+        if isinstance(envelope.get("task_progress"), dict)
+        else {}
+    )
+    progress_payload = task_progress.model_dump(mode="json")
+    if existing_progress:
+        progress_payload = {
+            **existing_progress,
+            **{
+                key: progress_payload[key]
+                for key in (
+                    "status",
+                    "needs_user_action",
+                    "needs_replan",
+                    "desktop_provider_session_status",
+                    "desktop_provider_session_needed",
+                    "desktop_provider_session_running",
+                    "desktop_provider_session_started",
+                    "desktop_provider_session_provider_id",
+                    "desktop_provider_session_tool_names",
+                    "desktop_provider_session_needs_user_action",
+                    "desktop_provider_session_needs_replan",
+                    "progress_text",
+                )
+                if key in progress_payload
+            },
+        }
+    return {**envelope, "task_progress": progress_payload}
 
 
 def _read_launch_payload(

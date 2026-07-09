@@ -429,6 +429,9 @@ function TaskCoreProgress({ task }: { task: AgentTaskSnapshot }) {
       data-latest-replan-request-id={progress?.latest_replan_request_id || ''}
       data-latest-verification-status={progress?.latest_verification_status || ''}
       data-needs-replan={String(progress?.needs_replan === true)}
+      data-desktop-provider-session-needed={String(progress?.desktop_provider_session_needed === true)}
+      data-desktop-provider-session-running={String(progress?.desktop_provider_session_running === true)}
+      data-desktop-provider-session-status={progress?.desktop_provider_session_status || ''}
       data-pending-verification-count={pendingVerificationCount}
       data-failed-verification-count={failedVerificationCount}
       data-progress-status={progress?.status || ''}
@@ -443,6 +446,9 @@ function TaskCoreProgress({ task }: { task: AgentTaskSnapshot }) {
           <span>
             {progressDetail || `${completedCount}/${totalCount}`}
             {activeTodo ? ` · ${activeTodo.title || activeTodo.step_id || 'ready'}` : ''}
+            {progress?.desktop_provider_session_needed
+              ? ` · provider ${progress.desktop_provider_session_running ? 'ready' : progress.desktop_provider_session_status || 'waiting'}`
+              : ''}
           </span>
         </div>
         {visibleTodos.length ? (

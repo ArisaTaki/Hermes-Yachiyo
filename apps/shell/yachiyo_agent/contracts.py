@@ -694,6 +694,14 @@ class TaskProgressSummarySnapshot(_PublicSnapshot):
     latest_replan_step_id: str | None = None
     needs_replan: bool = False
     needs_user_action: bool = False
+    desktop_provider_session_status: str | None = None
+    desktop_provider_session_needed: bool = False
+    desktop_provider_session_running: bool = False
+    desktop_provider_session_started: bool = False
+    desktop_provider_session_provider_id: str | None = None
+    desktop_provider_session_tool_names: list[str] = Field(default_factory=list)
+    desktop_provider_session_needs_user_action: bool = False
+    desktop_provider_session_needs_replan: bool = False
     blocked_step_ids: list[str] = Field(default_factory=list)
     approval_step_ids: list[str] = Field(default_factory=list)
     progress_text: str = ""

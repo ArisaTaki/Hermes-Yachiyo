@@ -651,6 +651,14 @@ export type TaskProgressSummarySnapshot = {
   latest_replan_step_id?: string | null;
   needs_replan?: boolean;
   needs_user_action?: boolean;
+  desktop_provider_session_status?: string | null;
+  desktop_provider_session_needed?: boolean;
+  desktop_provider_session_running?: boolean;
+  desktop_provider_session_started?: boolean;
+  desktop_provider_session_provider_id?: string | null;
+  desktop_provider_session_tool_names?: string[];
+  desktop_provider_session_needs_user_action?: boolean;
+  desktop_provider_session_needs_replan?: boolean;
   blocked_step_ids?: string[];
   approval_step_ids?: string[];
   progress_text?: string;

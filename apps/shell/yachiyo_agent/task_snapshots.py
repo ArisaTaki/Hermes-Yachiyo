@@ -227,10 +227,16 @@ def agent_task_snapshot_from_payload(
     task_core = task_core_snapshot_from_payload(payload, events=all_events)
     if task_core is None and runtime_execution_envelope is not None:
         task_core = runtime_execution_envelope.task_core
+    desktop_provider_session = (
+        runtime_execution_envelope.desktop_provider_session
+        if runtime_execution_envelope is not None
+        else {}
+    )
     task_progress = task_progress_summary_from_task_core(
         task_core,
         events=all_events,
         needs_user_action=needs_user_action,
+        desktop_provider_session=desktop_provider_session,
     )
     runtime_execution_envelope = runtime_execution_envelope_with_status_overlay(
         runtime_execution_envelope,
@@ -252,6 +258,7 @@ def agent_task_snapshot_from_payload(
         task_core,
         events=all_events,
         needs_user_action=needs_user_action,
+        desktop_provider_session=desktop_provider_session,
     )
     runtime_execution_envelope = runtime_execution_envelope_with_status_overlay(
         runtime_execution_envelope,
