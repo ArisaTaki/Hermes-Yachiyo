@@ -249,16 +249,16 @@ def _request_needs_app_discovery_first(
     if not _tool_uses_app_name_for_foreground_execution(tool_name):
         return False
     app_name = str(payload.get("app_name") or "").strip()
-    if not app_name or app_name == "<selected app from desktop.list_apps>":
+    if not app_name or _is_selected_desktop_app_placeholder(app_name):
         return False
-    if str(payload.get("selection_source") or "").strip() == "desktop.list_apps":
+    if _is_desktop_app_selection_source(payload.get("selection_source")):
         return False
     input_resolution = (
         request.get("input_resolution")
         if isinstance(request.get("input_resolution"), Mapping)
         else {}
     )
-    if str(input_resolution.get("source_tool") or "").strip() == "desktop.list_apps":
+    if _is_desktop_app_selection_source(input_resolution.get("source_tool")):
         return False
     return True
 
@@ -318,6 +318,20 @@ def _payload_uses_selected_desktop_app(payload: Mapping[str, Any]) -> bool:
     if str(payload.get("app_name") or "").strip() == "<selected app from desktop.list_apps>":
         return True
     return str(payload.get("selection_source") or "").strip() == "desktop.list_apps"
+
+
+def _is_selected_desktop_app_placeholder(value: Any) -> bool:
+    return str(value or "").strip() in {
+        "<selected app from desktop.list_apps>",
+        "<selected app from desktop.running_apps>",
+    }
+
+
+def _is_desktop_app_selection_source(value: Any) -> bool:
+    return str(value or "").strip() in {
+        "desktop.list_apps",
+        "desktop.running_apps",
+    }
 
 
 def _defer_unknown_app_ui_element_operations_to_observation(

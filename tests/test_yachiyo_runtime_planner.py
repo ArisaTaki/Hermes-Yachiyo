@@ -35939,6 +35939,61 @@ def test_runtime_planner_preflights_ui_before_desktop_mutation_when_requested() 
     )
 
 
+def test_runtime_execution_keeps_running_app_selection_source_when_list_apps_available() -> None:
+    allowed_tools = [
+        "desktop.list_apps",
+        "desktop.running_apps",
+        "app.focus",
+        "desktop.ui_elements",
+        "terminal.run",
+        "artifact.write",
+    ]
+    decision = RuntimePlanner().decision(
+        "分析当前打开的表格应用里的数据并输出报告",
+        allowed_tools=allowed_tools,
+    )
+    envelope = runtime_execution_envelope_from_decision(
+        decision,
+        allowed_tools=allowed_tools,
+        full_plan=True,
+    )
+
+    assert envelope is not None
+    assert [request.tool_name for request in envelope.requests] == [
+        "desktop.running_apps",
+        "app.focus",
+        "desktop.ui_elements",
+        "terminal.run",
+        "artifact.write",
+    ]
+    assert envelope.requests[1].input == {
+        "app_name": "<selected app from desktop.running_apps>",
+        "selection_source": "desktop.running_apps",
+        "query": "spreadsheet",
+    }
+    assert envelope.requests[2].input == {
+        "app_name": "<selected app from desktop.running_apps>",
+        "selection_source": "desktop.running_apps",
+        "query": "spreadsheet",
+        "role_filter": "text",
+        "limit": 120,
+    }
+
+    projected_requests = runtime_execution_requests_from_envelope_payload(
+        envelope.model_dump(mode="json"),
+        allowed_tools=allowed_tools,
+    )
+    assert [request["tool"] for request in projected_requests] == [
+        "desktop.running_apps",
+        "app.focus",
+        "desktop.ui_elements",
+        "terminal.run",
+        "artifact.write",
+    ]
+    assert projected_requests[1]["input"]["selection_source"] == "desktop.running_apps"
+    assert projected_requests[2]["input"]["selection_source"] == "desktop.running_apps"
+
+
 def test_runtime_recovery_continues_after_failed_ui_preflight() -> None:
     allowed_tools = [
         "desktop.list_apps",
