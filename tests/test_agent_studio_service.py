@@ -1319,6 +1319,16 @@ def test_legacy_studio_tool_catalog_exposes_local_desktop_provider(monkeypatch) 
         "apps.shell.yachiyo_agent.legacy_ports.desktop_runtime_blocking_conditions_by_capability",
         lambda: {},
     )
+    monkeypatch.setattr(
+        "apps.shell.yachiyo_agent.controlled_provider_diagnostics.isolated_desktop_provider_session_status",
+        lambda: {
+            "ok": True,
+            "status": "stopped",
+            "running": False,
+            "provider_status": {},
+            "source": "isolated_provider_session_manager",
+        },
+    )
 
     class Runtime:
         def list_restricted_tool_plugins(self) -> dict[str, Any]:

@@ -1582,7 +1582,11 @@ def planner_decision_and_tool_requests(
         allowed_tools=allowed,
         metadata=metadata,
     )
-    requests = _tool_requests_for_decision(decision, allowed)
+    requests = _tool_requests_for_decision(
+        decision,
+        allowed,
+        allow_unavailable_context=_request_execution_context_enabled(metadata),
+    )
     requests = _annotated_tool_requests_for_decision(
         requests,
         decision,
@@ -1658,7 +1662,11 @@ def _tool_requests_for_decision(
     if decision.selected_intent.kind == "media_playback":
         return _media_tool_requests(decision.selected_intent.inputs, allowed)
     if decision.selected_intent.kind == "data_analysis":
-        return _data_analysis_tool_requests(decision, allowed)
+        return _data_analysis_tool_requests(
+            decision,
+            allowed,
+            allow_readiness_blocked=allow_unavailable_context,
+        )
     if decision.selected_intent.kind == "system_control":
         return _system_tool_requests(decision.selected_intent.inputs, allowed)
     if decision.selected_intent.kind == "web_research":
@@ -4101,9 +4109,18 @@ def _canonical_app_name(app_name: str) -> str:
     return legacy_app_name_hint(app_name)
 
 
-def _data_analysis_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]:
+def _data_analysis_tool_requests(
+    decision: Any,
+    allowed: set[str],
+    *,
+    allow_readiness_blocked: bool = False,
+) -> list[dict[str, Any]]:
     app_requests = _data_analysis_spreadsheet_app_requests(decision, allowed)
-    file_open_requests = _data_analysis_file_open_requests(decision, allowed)
+    file_open_requests = _data_analysis_file_open_requests(
+        decision,
+        allowed,
+        allow_readiness_blocked=allow_readiness_blocked,
+    )
     data_analyze_step = next(
         (
             item
@@ -4420,6 +4437,8 @@ def _data_analysis_spreadsheet_app_requests(
 def _data_analysis_file_open_requests(
     decision: Any,
     allowed: set[str],
+    *,
+    allow_readiness_blocked: bool = False,
 ) -> list[dict[str, Any]]:
     step = next(
         (
@@ -4430,7 +4449,10 @@ def _data_analysis_file_open_requests(
         None,
     )
     tool_name = str(getattr(step, "tool_name", "") or "").strip()
-    if not _step_available(step):
+    if not _direct_step_available(
+        step,
+        allow_readiness_blocked=allow_readiness_blocked,
+    ):
         return []
     if tool_name != "desktop.open_path" or tool_name not in allowed:
         return []

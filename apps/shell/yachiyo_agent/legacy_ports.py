@@ -38,6 +38,7 @@ from .desktop_permissions import (
 from .desktop_execution_policy import (
     daily_entrypoint_desktop_execution_policy,
     desktop_execution_policy_payload,
+    desktop_provider_session_auto_start_recommended_for_requests,
     desktop_provider_session_strict_foreground_default,
     sandbox_desktop_provider_status,
 )
@@ -108,6 +109,7 @@ _DAILY_DESKTOP_METADATA_DISCOVERY_TOOLS = {
 }
 _DAILY_DESKTOP_METADATA_VERIFY_TOOLS = {
     "desktop.active_window",
+    "desktop.verify",
     "desktop.windows",
     "desktop.ui_elements",
     "desktop.inspect_app",
@@ -2984,7 +2986,11 @@ def _direct_tool_requests_with_desktop_provider_session(
 ) -> list[dict[str, Any]]:
     if not direct_tool_requests:
         return []
-    auto_start = _desktop_provider_session_auto_start_requested(metadata)
+    auto_start = _desktop_provider_session_auto_start_requested(
+        metadata
+    ) or desktop_provider_session_auto_start_recommended_for_requests(
+        direct_tool_requests
+    )
     legacy_chat_direct_local = _direct_tool_requests_are_legacy_chat_direct_local(
         direct_tool_requests
     )
@@ -3473,9 +3479,17 @@ def _matching_runtime_tool_event(
             return index, event
         if request_step and event_step == request_step:
             return index, event
-        if request_tool and event_tool == request_tool:
+        if request_tool and _runtime_tool_names_match(request_tool, event_tool):
             return index, event
     return None
+
+
+def _runtime_tool_names_match(request_tool: str, event_tool: str) -> bool:
+    if request_tool == event_tool:
+        return True
+    if request_tool == "desktop.verify":
+        return event_tool in _DAILY_DESKTOP_METADATA_VERIFY_TOOLS
+    return False
 
 
 def _event_payload_for_append(payload: dict[str, Any]) -> dict[str, Any]:

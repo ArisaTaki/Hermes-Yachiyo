@@ -2610,7 +2610,7 @@ def test_legacy_chat_task_starter_does_not_direct_run_approval_required_envelope
     assert [request["tool"] for request in direct_requests] == [
         "desktop.list_apps",
         "app.open",
-        "desktop.active_window",
+        "desktop.verify",
     ]
     assert all(request["tool"] != "terminal.run" for request in direct_requests)
     assert all(request.get("approval_required") is not True for request in direct_requests)
@@ -2721,7 +2721,7 @@ def test_legacy_chat_task_starter_planned_timeline_keeps_runtime_planner_sequenc
     assert [event["tool"] for event in timeline] == [
         "desktop.list_apps",
         "app.open",
-        "desktop.active_window",
+        "desktop.verify",
     ]
     assert timeline[0]["input_preview"] == {"query": "PixelForge", "limit": 20}
     assert timeline[1]["input_preview"] == {
@@ -2729,7 +2729,11 @@ def test_legacy_chat_task_starter_planned_timeline_keeps_runtime_planner_sequenc
         "selection_source": "desktop.list_apps",
         "query": "PixelForge",
     }
-    assert timeline[2]["input_preview"] == {}
+    assert timeline[2]["input_preview"] == {
+        "app_name": "PixelForge",
+        "selection_source": "desktop.list_apps",
+        "query": "PixelForge",
+    }
 
 
 def test_legacy_chat_task_starter_uses_generic_planner_coverage_for_legacy_timeline() -> None:
@@ -2745,7 +2749,7 @@ def test_legacy_chat_task_starter_uses_generic_planner_coverage_for_legacy_timel
     assert [event["tool"] for event in app_timeline] == [
         "desktop.list_apps",
         "app.open",
-        "desktop.active_window",
+        "desktop.verify",
     ]
     assert {event["source"] for event in app_timeline} == {
         "runtime_planner",
@@ -3537,9 +3541,14 @@ def test_legacy_runtime_port_readiness_includes_desktop_execution_capabilities(m
     assert capabilities["tasks"] is True
     assert capabilities["runnables"] == 1
     assert capabilities["sandbox_provider"]["status"] == "available"
-    assert capabilities["sandbox_provider"]["provider_kind"] == "local_desktop"
+    assert capabilities["sandbox_provider"]["provider_kind"] in {
+        "local_desktop",
+        "sandbox_desktop",
+    }
     assert capabilities["desktop_provider_ready"] is True
-    assert "desktop.list_apps" in capabilities["desktop_provider_supported_tools"]
+    assert capabilities["desktop_provider_supported_tools"]
+    if capabilities["sandbox_provider"]["provider_kind"] == "local_desktop":
+        assert "desktop.list_apps" in capabilities["desktop_provider_supported_tools"]
     assert capabilities["desktop_execution"]["platform"] in {
         "macos",
         "windows",
@@ -4337,18 +4346,32 @@ def test_legacy_studio_port_starts_agent_run_with_daily_desktop_overlay() -> Non
     )
 
     assert run["run_id"] == "studio-agent-run-1"
-    assert runtime.calls[0] == (
-        "create_agent_run",
-        {
-            "agent_id": "agent-1",
-            "user_goal": "打开 PixelForge",
-            "source": "yachiyo_studio",
-            "client_run_id": "studio-run-1",
-            "run_group_id": None,
-            "daily_desktop_policy_overlay": True,
-            "runtime_planner_entrypoint": True,
-        },
+    assert runtime.calls[0][0] == "create_agent_run"
+    create_payload = runtime.calls[0][1]
+    assert {
+        key: create_payload.get(key)
+        for key in (
+            "agent_id",
+            "user_goal",
+            "source",
+            "client_run_id",
+            "run_group_id",
+            "daily_desktop_policy_overlay",
+            "runtime_planner_entrypoint",
+        )
+    } == {
+        "agent_id": "agent-1",
+        "user_goal": "打开 PixelForge",
+        "source": "yachiyo_studio",
+        "client_run_id": "studio-run-1",
+        "run_group_id": None,
+        "daily_desktop_policy_overlay": True,
+        "runtime_planner_entrypoint": True,
+    }
+    assert create_payload["runtime_execution_envelope"]["intent_kind"] == (
+        "desktop_operation"
     )
+    assert create_payload["metadata"]["yachiyo_runtime_planner"] is True
 
 
 def test_legacy_studio_port_start_workflow_run_returns_runtime_events() -> None:

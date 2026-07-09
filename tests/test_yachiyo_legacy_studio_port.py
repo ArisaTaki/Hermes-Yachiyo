@@ -170,8 +170,33 @@ def test_legacy_studio_agent_run_enriches_foreground_direct_tool_requests(
     )
 
 
-def test_legacy_studio_workflow_run_appends_runtime_planner_events() -> None:
+def test_legacy_studio_workflow_run_appends_runtime_planner_events(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     runtime = _FakeStudioRunRuntime()
+
+    def fake_ensure(
+        envelope: dict[str, Any] | None,
+        *,
+        auto_start: bool = True,
+    ) -> dict[str, Any]:
+        request_ids = [
+            str(request.get("request_id") or "")
+            for request in (envelope or {}).get("requests", [])
+            if isinstance(request, dict)
+        ]
+        tool_names = [
+            str(request.get("tool_name") or request.get("tool") or "")
+            for request in (envelope or {}).get("requests", [])
+            if isinstance(request, dict)
+        ]
+        return _fake_running_isolated_session(request_ids, tool_names)
+
+    monkeypatch.setattr(
+        "apps.shell.yachiyo_agent.legacy_ports."
+        "ensure_isolated_desktop_provider_session_for_envelope",
+        fake_ensure,
+    )
 
     run = LegacyStudioPort(runtime).start_workflow_run(
         {
