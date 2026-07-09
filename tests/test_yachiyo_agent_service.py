@@ -238,6 +238,8 @@ def _install_fake_isolated_provider_session(
                     "supported_tools": [
                         "desktop.list_apps",
                         "app.open",
+                        "desktop.active_window",
+                        "desktop.verify",
                         "app.focus_and_click_ui_element",
                         "desktop.safe_shortcut",
                         "desktop.type",
@@ -287,7 +289,8 @@ def _install_fake_isolated_provider_session(
             "OHA_YACHIYO_DESKTOP_PROVIDER_URL": "http://127.0.0.1:19093",
             "OHA_YACHIYO_DESKTOP_PROVIDER_ID": "local-isolated-desktop",
             "OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS": (
-                "desktop.list_apps,app.open,app.focus_and_click_ui_element,"
+                "desktop.list_apps,app.open,desktop.active_window,desktop.verify,"
+                "app.focus_and_click_ui_element,"
                 "desktop.safe_shortcut,desktop.type,desktop.safe_key,"
                 "desktop.click_ui_element,desktop.ui_elements,"
                 "media.music_app_open_and_play"
@@ -323,6 +326,8 @@ def _install_fake_isolated_provider_session(
                 "supported_tools": [
                     "desktop.list_apps",
                     "app.open",
+                    "desktop.active_window",
+                    "desktop.verify",
                     "app.focus_and_click_ui_element",
                     "desktop.safe_shortcut",
                     "desktop.type",

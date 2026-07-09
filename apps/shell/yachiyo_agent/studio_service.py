@@ -159,6 +159,82 @@ def _tool_names_from_catalog(
     ]
 
 
+_STUDIO_DESKTOP_BACKFILL_TOOLS = (
+    "desktop.list_apps",
+    "app.open",
+    "desktop.verify",
+)
+_STUDIO_DESKTOP_BACKFILL_CAPABILITIES = {
+    "desktop.app_discovery",
+    "desktop.app_control",
+    "desktop.visual_verification",
+}
+
+
+def _runtime_planner_decision_for_studio(
+    prompt: str,
+    *,
+    catalog: ToolCatalogSnapshot,
+    allowed_tools: Iterable[str] | None,
+    metadata: Mapping[str, Any],
+) -> tuple[PlannerDecisionSnapshot, dict[str, Any]]:
+    enriched_metadata = dict(metadata)
+    tools = _tool_names_from_catalog(catalog, allowed_tools)
+    decision = RuntimePlanner().decision(
+        prompt,
+        allowed_tools=tools or None,
+        metadata=enriched_metadata,
+    )
+    if allowed_tools is not None or not _decision_needs_desktop_backfill(decision):
+        return decision, enriched_metadata
+
+    backfilled_tools = _dedupe_tool_names([*tools, *_STUDIO_DESKTOP_BACKFILL_TOOLS])
+    if backfilled_tools == tools:
+        return decision, enriched_metadata
+
+    enriched_metadata = {
+        **enriched_metadata,
+        "runtime_planner_catalog_backfill": "desktop_discover_operate_verify",
+        "runtime_planner_catalog_backfilled_tools": list(_STUDIO_DESKTOP_BACKFILL_TOOLS),
+    }
+    return RuntimePlanner().decision(
+        prompt,
+        allowed_tools=backfilled_tools,
+        metadata=enriched_metadata,
+    ), enriched_metadata
+
+
+def _decision_needs_desktop_backfill(decision: PlannerDecisionSnapshot) -> bool:
+    intent_kind = str(decision.selected_intent.kind or "").strip()
+    if intent_kind != "desktop_operation":
+        return False
+    missing = {
+        str(capability_id or "").strip()
+        for capability_id in decision.plan.tool_plan.missing_capabilities
+        if str(capability_id or "").strip()
+    }
+    if not missing.intersection(_STUDIO_DESKTOP_BACKFILL_CAPABILITIES):
+        return False
+    return any(
+        str(step.capability_id or "").strip() in _STUDIO_DESKTOP_BACKFILL_CAPABILITIES
+        and str(step.status or "").strip() == "unavailable"
+        and not str(step.tool_name or "").strip()
+        for step in decision.plan.tool_plan.steps
+    )
+
+
+def _dedupe_tool_names(values: Iterable[str]) -> list[str]:
+    seen: set[str] = set()
+    tools: list[str] = []
+    for value in values:
+        clean = str(value or "").strip()
+        if not clean or clean in seen:
+            continue
+        seen.add(clean)
+        tools.append(clean)
+    return tools
+
+
 def _studio_runtime_execution_envelope_with_policy(
     envelope: Any,
     metadata: Mapping[str, Any],
@@ -328,12 +404,13 @@ class AgentStudioService:
             planner_metadata,
             catalog,
         )
-        tools = _tool_names_from_catalog(catalog, allowed_tools)
-        return RuntimePlanner().decision(
+        decision, _metadata = _runtime_planner_decision_for_studio(
             prompt,
-            allowed_tools=tools or None,
             metadata=enriched_metadata,
+            catalog=catalog,
+            allowed_tools=allowed_tools,
         )
+        return decision
 
     def plan_execution(
         self,
@@ -374,20 +451,18 @@ class AgentStudioService:
             if payload is not None:
                 decision = PlannerDecisionSnapshot.model_validate(payload)
             else:
-                decision = RuntimePlanner().decision(
+                decision, enriched_metadata = _runtime_planner_decision_for_studio(
                     prompt,
-                    allowed_tools=(
-                        _tool_names_from_catalog(catalog, allowed_tools) or None
-                    ),
                     metadata=enriched_metadata,
+                    catalog=catalog,
+                    allowed_tools=allowed_tools,
                 )
         else:
-            decision = RuntimePlanner().decision(
+            decision, enriched_metadata = _runtime_planner_decision_for_studio(
                 prompt,
-                allowed_tools=(
-                    _tool_names_from_catalog(catalog, allowed_tools) or None
-                ),
                 metadata=enriched_metadata,
+                catalog=catalog,
+                allowed_tools=allowed_tools,
             )
         envelope = runtime_execution_envelope_from_decision(
             decision,
@@ -1355,12 +1430,12 @@ class AgentStudioService:
                 metadata,
                 catalog,
             )
-            tools = _tool_names_from_catalog(catalog, allowed_tools)
-            return RuntimePlanner().decision(
+            return _runtime_planner_decision_for_studio(
                 prompt,
-                allowed_tools=tools or None,
                 metadata=enriched_metadata,
-            ), enriched_metadata
+                catalog=catalog,
+                allowed_tools=allowed_tools,
+            )
         except Exception:
             return None, metadata
 

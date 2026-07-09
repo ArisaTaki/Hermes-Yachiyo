@@ -16063,6 +16063,9 @@ _RUNTIME_DOV_DESKTOP_POST_ACTION_TOOLS = frozenset(
         "desktop.minimize_window",
         "desktop.close_window",
         "desktop.quit_app",
+        "workflow.run",
+        "group.run",
+        "agent.group_run",
     }
 )
 

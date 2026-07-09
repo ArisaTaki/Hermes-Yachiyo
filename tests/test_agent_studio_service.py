@@ -69,6 +69,7 @@ def _install_fake_isolated_provider_session(
                     "supported_tools": [
                         "desktop.list_apps",
                         "app.open",
+                        "desktop.verify",
                         "app.focus_and_click_ui_element",
                         "desktop.ui_elements",
                         "media.music_app_open_and_play",
@@ -105,8 +106,9 @@ def _install_fake_isolated_provider_session(
             "OHA_YACHIYO_DESKTOP_PROVIDER_URL": "http://127.0.0.1:19093",
             "OHA_YACHIYO_DESKTOP_PROVIDER_ID": "local-isolated-desktop",
             "OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS": (
-                "desktop.list_apps,app.open,app.focus_and_click_ui_element,"
-                "desktop.ui_elements,media.music_app_open_and_play"
+                "desktop.list_apps,app.open,desktop.verify,"
+                "app.focus_and_click_ui_element,desktop.ui_elements,"
+                "media.music_app_open_and_play"
             ),
             "OHA_YACHIYO_DESKTOP_PROVIDER_KEYBOARD_MOUSE_CAPTURE_SUPPORTED": "true",
             "OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_KIND": "isolated_desktop",
@@ -131,6 +133,7 @@ def _install_fake_isolated_provider_session(
                 "supported_tools": [
                     "desktop.list_apps",
                     "app.open",
+                    "desktop.verify",
                     "app.focus_and_click_ui_element",
                     "desktop.ui_elements",
                     "media.music_app_open_and_play",
@@ -1397,6 +1400,157 @@ def test_agent_studio_service_plans_task_from_tool_catalog() -> None:
         "artifact.write",
     ]
     assert port.calls == [("list_tool_catalog", None)]
+
+
+def test_agent_studio_service_backfills_desktop_chain_from_partial_catalog() -> None:
+    port = _FakeStudioPort()
+    service = AgentStudioService(port)
+
+    decision = service.plan_task("帮我开一下 PixelForge")
+
+    assert decision.selected_intent.kind == "desktop_operation"
+    assert decision.plan.tool_plan.missing_capabilities == []
+    assert [step.tool_name for step in decision.plan.tool_plan.steps] == [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.verify",
+    ]
+    assert [step.status for step in decision.plan.tool_plan.steps] == [
+        "planned",
+        "planned",
+        "planned",
+    ]
+    assert port.calls == [("list_tool_catalog", None)]
+
+
+def test_agent_studio_start_agent_run_backfills_desktop_chain_from_partial_catalog(
+    monkeypatch,
+) -> None:
+    start_calls = _install_fake_isolated_provider_session(monkeypatch)
+    port = _FakeStudioPort()
+    service = AgentStudioService(port)
+
+    started = service.start_agent_run(
+        {
+            "agent_id": "agent-1",
+            "objective": "帮我开一下 PixelForge",
+            "metadata": {"surface": "agent_studio"},
+        }
+    )
+
+    start_payload = _port_call_payload(port, "start_agent_run")
+    tools = [request["tool"] for request in start_payload["direct_tool_requests"]]
+    envelope = start_payload["runtime_execution_envelope"]
+    plan_event = next(
+        event for event in started.events if event.event_type == "agent.plan.created"
+    )
+
+    assert tools == ["desktop.list_apps", "app.open", "desktop.verify"]
+    assert start_payload["metadata"]["runtime_planner_catalog_backfill"] == (
+        "desktop_discover_operate_verify"
+    )
+    assert start_payload["metadata"]["yachiyo_execution_requests"] == tools
+    assert start_payload["direct_tool_requests"][0]["input"] == {
+        "query": "PixelForge",
+        "limit": 20,
+    }
+    assert start_payload["direct_tool_requests"][1]["input"] == {
+        "app_name": "PixelForge",
+        "selection_source": "desktop.list_apps",
+        "query": "PixelForge",
+    }
+    assert start_payload["direct_tool_requests"][2]["runtime_stage"] == "verify"
+    assert envelope["desktop_provider_session"]["started"] is True
+    assert envelope["desktop_provider_session"]["tool_names"] == [
+        "app.open",
+        "desktop.list_apps",
+        "desktop.verify",
+    ]
+    assert start_calls == [
+        {
+            "requires_real_virtual_desktop_backend": True,
+            "tools": ["app.open", "desktop.list_apps", "desktop.verify"],
+        }
+    ]
+    assert [
+        request["tool_name"]
+        for request in plan_event.payload["runtime_execution_envelope"]["requests"]
+    ] == ["desktop.list_apps", "app.open", "desktop.verify"]
+
+
+def test_agent_studio_plan_execution_backfills_desktop_chain_from_partial_catalog(
+    monkeypatch,
+) -> None:
+    start_calls = _install_fake_isolated_provider_session(monkeypatch)
+    port = _FakeStudioPort()
+    service = AgentStudioService(port)
+
+    envelope = service.plan_execution("帮我开一下 PixelForge")
+
+    assert [request.tool_name for request in envelope.requests] == [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.verify",
+    ]
+    assert envelope.desktop_provider_session["needed"] is True
+    assert envelope.desktop_provider_session["started"] is False
+    assert envelope.desktop_provider_session["tool_names"] == [
+        "app.open",
+        "desktop.list_apps",
+        "desktop.verify",
+    ]
+    assert start_calls == []
+
+
+def test_agent_studio_start_group_run_backfills_desktop_chain_from_partial_catalog(
+    monkeypatch,
+) -> None:
+    start_calls = _install_fake_isolated_provider_session(monkeypatch)
+    port = _FakeStudioPort()
+    service = AgentStudioService(port)
+
+    group_run = service.start_group_run(
+        {
+            "group_id": "group-1",
+            "objective": "find PixelForge and open it",
+            "metadata": {"surface": "agent_studio"},
+        }
+    )
+
+    start_payload = _port_call_payload(port, "start_group_run")
+    tools = [request["tool"] for request in start_payload["direct_tool_requests"]]
+    plan_event = next(
+        event
+        for event in group_run.events
+        if event.event_type == "group.run.plan.created"
+    )
+
+    assert tools == ["desktop.list_apps", "app.open", "desktop.verify"]
+    assert {
+        request.get("group_id")
+        for request in start_payload["direct_tool_requests"]
+    } == {"group-1"}
+    assert start_payload["metadata"]["runtime_planner_catalog_backfill"] == (
+        "desktop_discover_operate_verify"
+    )
+    assert start_payload["metadata"]["yachiyo_execution_requests"] == tools
+    assert start_payload["runtime_execution_envelope"]["desktop_provider_session"][
+        "started"
+    ] is True
+    assert start_calls == [
+        {
+            "requires_real_virtual_desktop_backend": True,
+            "tools": ["app.open", "desktop.list_apps", "desktop.verify"],
+        }
+    ]
+    assert [
+        request["tool_name"]
+        for request in plan_event.payload["runtime_execution_envelope"]["requests"]
+    ] == ["desktop.list_apps", "app.open", "desktop.verify"]
+    assert {
+        request.get("group_run_id")
+        for request in plan_event.payload["runtime_execution_envelope"]["requests"]
+    } == {group_run.group_run_id}
 
 
 def test_agent_studio_plan_execution_projects_catalog_provider_to_runtime_requests(
