@@ -3183,6 +3183,13 @@ def test_yachiyo_chat_entrypoint_surfaces_partial_blocked_desktop_plan(
         and event.payload.get("trigger") == "runtime_blocked"
         for event in blocked_timeline_events
     )
+    runtime_blocked_recoveries = [
+        recovery
+        for recovery in task.replan_recoveries
+        if recovery.trigger == "runtime_blocked"
+    ]
+    assert runtime_blocked_recoveries
+    assert all(recovery.recovery_actions for recovery in runtime_blocked_recoveries)
 
 
 def test_yachiyo_chat_entrypoint_does_not_direct_execute_blocked_provider_route(

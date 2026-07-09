@@ -108,6 +108,16 @@ def _blocked_direct_progress_payloads(
     if not step_id and not tool_name:
         return []
     metadata = _blocked_direct_runtime_metadata(request)
+    observation_retry = _blocked_direct_observation_retry(request)
+    recovery_actions = _blocked_direct_recovery_actions(
+        request,
+        observation_retry=observation_retry,
+        metadata=metadata,
+    )
+    fallback_tools = [
+        _text(observation_retry.get("tool") or observation_retry.get("retry_tool"))
+    ]
+    fallback_tools = [tool for tool in fallback_tools if tool]
     base = {
         "source": "runtime_blocked_direct_request",
         "runtime_blocked_request_id": _text(request.get("request_id")),
@@ -173,9 +183,74 @@ def _blocked_direct_progress_payloads(
                 "condition": _blocked_direct_request_detail(request),
                 "failure_event_type": "runtime.blocked_direct_request",
                 "failure_detail": _blocked_direct_request_detail(request),
+                "fallback_tools": fallback_tools,
+                "recovery_actions": recovery_actions,
+                "observation_retry": observation_retry,
                 "metadata": metadata,
             },
         ),
+    ]
+
+
+def _blocked_direct_observation_retry(request: Mapping[str, Any]) -> dict[str, Any]:
+    retry = _mapping(request.get("observation_retry"))
+    if retry:
+        return retry
+    desktop_loop = _mapping(request.get("desktop_loop"))
+    retry_tool = _text(desktop_loop.get("retry_tool") or desktop_loop.get("source_tool"))
+    retry_input = _mapping(desktop_loop.get("retry_input"))
+    retry_reason = _text(desktop_loop.get("retry_reason") or desktop_loop.get("reason"))
+    if not retry_tool and not retry_input and not retry_reason:
+        return {}
+    return {
+        key: value
+        for key, value in {
+            "tool": retry_tool,
+            "input": retry_input,
+            "reason": retry_reason,
+        }.items()
+        if value not in ("", {}, None)
+    }
+
+
+def _blocked_direct_recovery_actions(
+    request: Mapping[str, Any],
+    *,
+    observation_retry: Mapping[str, Any],
+    metadata: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    retry_tool = _text(
+        observation_retry.get("tool")
+        or observation_retry.get("retry_tool")
+        or observation_retry.get("from_tool")
+    )
+    if not retry_tool:
+        return []
+    step_id = _blocked_direct_step_id(request)
+    retry_input = _mapping(observation_retry.get("input"))
+    if not retry_input:
+        retry_input = _mapping(request.get("input") or request.get("input_preview"))
+    label = _text(
+        observation_retry.get("label")
+        or observation_retry.get("title")
+        or observation_retry.get("reason")
+    ) or f"Retry {retry_tool}"
+    return [
+        {
+            "label": label,
+            "tool": retry_tool,
+            "input": retry_input,
+            "planning_reason": _text(
+                observation_retry.get("planning_reason")
+                or "runtime_blocked_direct_request_recovery"
+            ),
+            "source_step_id": step_id,
+            "target_capability_id": _text(request.get("capability_id")),
+            "risk_level": _text(request.get("risk_level") or "low"),
+            "approval_required": bool(request.get("approval_required", False)),
+            "observation_retry": dict(observation_retry),
+            "metadata": dict(metadata),
+        }
     ]
 
 
@@ -304,6 +379,10 @@ def _blocked_direct_runtime_metadata(request: Mapping[str, Any]) -> dict[str, An
         "runtime_blocking_conditions": _blocked_direct_blocking_conditions(request),
     }
     return {key: value for key, value in metadata.items() if value not in ("", [], None)}
+
+
+def _mapping(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, Mapping) else {}
 
 
 def _text(value: Any) -> str:
