@@ -3163,6 +3163,26 @@ def test_yachiyo_chat_entrypoint_surfaces_partial_blocked_desktop_plan(
     assert task.task_progress is not None
     assert task.task_progress.needs_replan is True
     assert set(task.task_progress.blocked_step_ids).issuperset(blocked_step_ids)
+    blocked_timeline_events = [
+        event
+        for event in task.recent_events
+        if event.payload.get("source") == "runtime_blocked_direct_request"
+    ]
+    assert any(
+        event.event_type == "agent.task.todo.updated"
+        and event.payload.get("status") == "blocked"
+        for event in blocked_timeline_events
+    )
+    assert any(
+        event.event_type == "agent.task.checkpoint.updated"
+        and event.payload.get("status") == "blocked"
+        for event in blocked_timeline_events
+    )
+    assert any(
+        event.event_type == "agent.replan.requested"
+        and event.payload.get("trigger") == "runtime_blocked"
+        for event in blocked_timeline_events
+    )
 
 
 def test_yachiyo_chat_entrypoint_does_not_direct_execute_blocked_provider_route(
