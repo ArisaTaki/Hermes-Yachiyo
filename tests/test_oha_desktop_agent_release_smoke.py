@@ -309,6 +309,18 @@ def test_oha_desktop_agent_release_smoke_public_release_requires_real_backend(
         "real_virtual_desktop_backend_required",
         "virtual_desktop_provider_not_configured",
     ]
+    readiness = report["public_release_readiness"]
+    assert readiness["ready"] is False
+    assert readiness["blocking_conditions"] == report["isolated_provider_release_blockers"]
+    assert [action["id"] for action in readiness["next_actions"]] == [
+        "write_provider_manifest_template",
+        "configure_virtual_desktop_provider",
+        "attach_real_virtual_desktop_backend",
+        "run_public_release_smoke",
+    ]
+    assert readiness["required_commands"]["public_release_smoke"].startswith(
+        "python scripts/smoke_oha_desktop_agent_release.py --public-release"
+    )
 
 
 def test_oha_desktop_agent_release_smoke_public_release_accepts_configured_provider(
@@ -359,6 +371,19 @@ def test_oha_desktop_agent_release_smoke_public_release_accepts_configured_provi
     assert report["isolated_provider_release_ready"] is True
     assert report["checks"]["isolated_provider_release_backend_verified"] is True
     assert report["isolated_provider_release_blockers"] == []
+    assert report["public_release_readiness"]["ready"] is True
+    assert report["public_release_readiness"]["next_actions"] == [
+        {
+            "id": "run_public_release_smoke",
+            "title": "Run public release smoke",
+            "reason": "This is the release gate for desktop-agent provider readiness.",
+            "command": (
+                "python scripts/smoke_oha_desktop_agent_release.py "
+                "--public-release "
+                "--report-json tmp/oha-desktop-agent-public-release-smoke.json"
+            ),
+        }
+    ]
 
 
 def test_oha_desktop_agent_release_smoke_cli_writes_report(
@@ -402,6 +427,7 @@ def test_oha_desktop_agent_release_smoke_cli_writes_report(
         "mode": "oha_desktop_agent_release_smoke",
         "public_release_required": False,
         "public_release_ready": False,
+        "public_release_readiness": {},
         "section_count": 0,
         "failed_sections": [],
         "checks": {"all_sections_passed": True},
