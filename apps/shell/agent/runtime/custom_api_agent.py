@@ -34,6 +34,10 @@ from apps.shell.agent.runtime.event_scopes import (
     runtime_replan_request_event_type as _runtime_replan_request_event_type,
     runtime_scope_context as _runtime_planner_scope_context,
 )
+from apps.shell.agent.runtime.replan_deferred import (
+    materialized_deferred_items,
+    safe_deferred_continuation_request,
+)
 from apps.shell.agent.runtime.followup_content_snapshot import (
     followup_content_snapshot_for_tool_call,
     followup_content_snapshots,
@@ -14982,10 +14986,11 @@ def _direct_sequence_requests_with_safe_deferred_continuations(
         expanded.append(item)
         if bool(item.get("continue_to_model")):
             continue
-        for continuation in _mapping_list(item.get("deferred_continuation")):
-            next_request = _runtime_replan_safe_deferred_continuation_request(
+        for continuation in materialized_deferred_items(item):
+            next_request = safe_deferred_continuation_request(
                 continuation,
                 allowed,
+                auto_safe_tools=_RUNTIME_REPLAN_ACTION_AUTO_SAFE_TOOLS,
             )
             if not next_request:
                 continue
@@ -18200,11 +18205,14 @@ def _auto_replan_runtime_recovery_action_requests(
                 verification_targets = _mapping_list(payload.get("verification_targets"))
             if verification_targets:
                 request["verification_targets"] = [dict(target) for target in verification_targets]
+            raw_deferred_items = materialized_deferred_items(action)
             deferred_continuation = _runtime_replan_action_deferred_continuation_requests(
                 action,
                 payload,
                 allowed,
             )
+            if raw_deferred_items and len(deferred_continuation) != len(raw_deferred_items):
+                continue
             if deferred_continuation:
                 request["deferred_continuation"] = deferred_continuation
             if _runtime_replan_action_needs_model_followup(
@@ -18273,7 +18281,7 @@ def _runtime_replan_action_deferred_continuation_requests(
     payload: Mapping[str, Any],
     allowed: set[str],
 ) -> list[dict[str, Any]]:
-    continuation = _mapping_list(action.get("deferred_continuation"))
+    continuation = materialized_deferred_items(action)
     if not continuation:
         return []
     requests: list[dict[str, Any]] = []
@@ -18281,9 +18289,10 @@ def _runtime_replan_action_deferred_continuation_requests(
     trigger = str(payload.get("trigger") or "").strip()
     action_id = str(action.get("action_id") or action.get("id") or "").strip()
     for item in continuation:
-        request = _runtime_replan_safe_deferred_continuation_request(
+        request = safe_deferred_continuation_request(
             item,
             allowed,
+            auto_safe_tools=_RUNTIME_REPLAN_ACTION_AUTO_SAFE_TOOLS,
         )
         if not request:
             continue
@@ -18333,8 +18342,12 @@ def _auto_replan_recovery_deferred_continuation_requests(
             tool_timeline_start=tool_timeline_start,
         ):
             continue
-        for item in _mapping_list(source_request.get("deferred_continuation")):
-            request = _runtime_replan_safe_deferred_continuation_request(item, allowed)
+        for item in materialized_deferred_items(source_request):
+            request = safe_deferred_continuation_request(
+                item,
+                allowed,
+                auto_safe_tools=_RUNTIME_REPLAN_ACTION_AUTO_SAFE_TOOLS,
+            )
             if not request:
                 continue
             for key, value in _runtime_replan_deferred_inherited_metadata(
@@ -18381,29 +18394,6 @@ def _runtime_replan_source_request_completed(
         timeline,
         tool_timeline_start=tool_timeline_start,
     )
-
-
-def _runtime_replan_safe_deferred_continuation_request(
-    item: Mapping[str, Any],
-    allowed: set[str],
-) -> dict[str, Any]:
-    tool_name = str(item.get("tool") or item.get("tool_name") or "").strip()
-    if not tool_name or tool_name not in allowed:
-        return {}
-    if tool_name not in _RUNTIME_REPLAN_ACTION_AUTO_SAFE_TOOLS:
-        return {}
-    risk_level = str(item.get("risk_level") or "").strip().lower()
-    if risk_level in {"high", "critical"}:
-        return {}
-    if bool(item.get("approval_required")):
-        return {}
-    request = dict(item)
-    request["tool"] = tool_name
-    raw_input = item.get("input") if isinstance(item.get("input"), Mapping) else {}
-    request["input"] = dict(raw_input)
-    request.pop("tool_name", None)
-    request.pop("continue_to_model", None)
-    return request
 
 
 def _runtime_replan_deferred_inherited_metadata(

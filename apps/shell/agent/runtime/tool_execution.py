@@ -21,6 +21,10 @@ from apps.shell.agent.runtime.event_scopes import (
     runtime_replan_request_event_payload as _runtime_replan_event_payload,
     runtime_replan_request_event_type as _runtime_replan_event_type,
 )
+from apps.shell.agent.runtime.replan_deferred import (
+    materialized_deferred_items,
+    safe_deferred_continuation_request,
+)
 from apps.shell.agent.runtime.task_progress import append_task_progress_events_for_tool_result
 from apps.shell.agent.runtime.task_progress import append_task_progress_events_for_tool_start
 from apps.shell.yachiyo_agent.capability_registry import capability_recovery_tools
@@ -3943,17 +3947,24 @@ def _runtime_replan_action_request(
         request["task_verification_targets"] = [
             dict(target) for target in verification_targets
         ]
+    raw_deferred_items = materialized_deferred_items(action)
     deferred_continuation = _runtime_replan_action_deferred_continuation_requests(
         action,
         replan_payload,
         allowed,
     )
+    if raw_deferred_items and len(deferred_continuation) != len(raw_deferred_items):
+        return {}
     if deferred_continuation:
         if action_id:
             for deferred_request in deferred_continuation:
                 deferred_request.setdefault("action_id", action_id)
                 deferred_request.setdefault("replan_recovery_action_id", action_id)
         request["deferred_continuation"] = deferred_continuation
+    for key in ("deferred_tool", "deferred_input", "deferred_context"):
+        value = action.get(key)
+        if value not in (None, "", [], {}):
+            request[key] = dict(value) if isinstance(value, Mapping) else value
     return request
 
 
@@ -3962,7 +3973,7 @@ def _runtime_replan_action_deferred_continuation_requests(
     replan_payload: Mapping[str, Any],
     allowed: set[str],
 ) -> list[dict[str, Any]]:
-    continuation = _mapping_list(action.get("deferred_continuation"))
+    continuation = materialized_deferred_items(action)
     if not continuation:
         return []
     request_id = str(replan_payload.get("request_id") or "").strip()
@@ -3970,7 +3981,13 @@ def _runtime_replan_action_deferred_continuation_requests(
     action_id = str(action.get("action_id") or action.get("id") or "").strip()
     requests: list[dict[str, Any]] = []
     for item in continuation:
-        request = _runtime_replan_safe_deferred_continuation_request(item, allowed)
+        request = safe_deferred_continuation_request(
+            item,
+            allowed,
+            auto_safe_tools=_RUNTIME_REPLAN_AUTO_SAFE_TOOLS,
+            allow_approved_unsafe=False,
+            approved_unsafe_tools=_RUNTIME_REPLAN_MANUAL_APPROVAL_DEFERRED_TOOLS,
+        )
         if not request:
             continue
         if request_id:
@@ -4010,9 +4027,16 @@ def _runtime_replan_deferred_continuation_requests(
         for request in remaining_requests
         if isinstance(request, Mapping)
     }
+    approved_deferred = _runtime_replan_request_approves_deferred_actions(tool_request)
     requests: list[dict[str, Any]] = []
-    for item in _mapping_list(tool_request.get("deferred_continuation")):
-        request = _runtime_replan_safe_deferred_continuation_request(item, allowed)
+    for item in materialized_deferred_items(tool_request):
+        request = safe_deferred_continuation_request(
+            item,
+            allowed,
+            auto_safe_tools=_RUNTIME_REPLAN_AUTO_SAFE_TOOLS,
+            allow_approved_unsafe=approved_deferred,
+            approved_unsafe_tools=_RUNTIME_REPLAN_MANUAL_APPROVAL_DEFERRED_TOOLS,
+        )
         if not request:
             continue
         request.setdefault("replan_request_id", request_id)
@@ -4040,7 +4064,10 @@ def _runtime_replan_deferred_continuation_requests(
             value = tool_request.get(key)
             if key not in request and value not in (None, "", [], {}):
                 request[key] = dict(value) if isinstance(value, Mapping) else value
-        request.setdefault("source", "runtime_replan_recovery")
+        request.setdefault(
+            "source",
+            str(tool_request.get("source") or "runtime_replan_recovery").strip(),
+        )
         request.setdefault("planning_reason", "planner_replan_deferred_continuation")
         signature = _deferred_request_signature(request)
         if signature in existing_signatures:
@@ -4050,25 +4077,28 @@ def _runtime_replan_deferred_continuation_requests(
     return _dedupe_runtime_replan_recovery_requests(requests)
 
 
-def _runtime_replan_safe_deferred_continuation_request(
-    item: Mapping[str, Any],
-    allowed: set[str],
-) -> dict[str, Any]:
-    tool_name = str(item.get("tool") or item.get("tool_name") or "").strip()
-    if not tool_name or tool_name not in allowed:
-        return {}
-    if tool_name not in _RUNTIME_REPLAN_AUTO_SAFE_TOOLS:
-        return {}
-    risk_level = str(item.get("risk_level") or "").strip().lower()
-    if risk_level in {"high", "critical"} or bool(item.get("approval_required")):
-        return {}
-    request = dict(item)
-    request["tool"] = tool_name
-    raw_input = item.get("input") if isinstance(item.get("input"), Mapping) else {}
-    request["input"] = dict(raw_input)
-    request.pop("tool_name", None)
-    request.pop("continue_to_model", None)
-    return request
+_RUNTIME_REPLAN_MANUAL_APPROVAL_DEFERRED_TOOLS = {
+    "app.focus_and_click_ui_element",
+    "app.focus_and_type_into_ui_element",
+    "app.open_and_click_ui_element",
+    "app.open_and_type_into_ui_element",
+    "desktop.click",
+    "desktop.click_ui_element",
+    "desktop.safe_click",
+    "desktop.safe_type_text",
+    "desktop.type",
+    "desktop.type_into_ui_element",
+    "desktop.type_text",
+}
+
+
+def _runtime_replan_request_approves_deferred_actions(
+    tool_request: Mapping[str, Any],
+) -> bool:
+    source = str(tool_request.get("source") or "").strip()
+    if source in {"agent_studio_replan_recovery", "yachiyo_chat_replan_recovery"}:
+        return True
+    return bool(tool_request.get("approved_by_replan_recovery_action"))
 
 
 def _runtime_replan_action_auto_start_blocked(action: Mapping[str, Any]) -> bool:

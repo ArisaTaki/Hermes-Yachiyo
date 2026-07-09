@@ -1795,6 +1795,163 @@ def test_runtime_tool_request_runner_runs_safe_replan_deferred_continuation() ->
     ]
 
 
+def test_runtime_tool_request_runner_runs_approved_replan_deferred_tool() -> None:
+    run_events: list[tuple[str, str, dict[str, Any]]] = []
+    timeline: list[dict[str, Any]] = []
+    seen_requests: list[dict[str, Any]] = []
+
+    def call_agent_tool(
+        tool_request: dict[str, Any],
+        *_args: Any,
+        **_kwargs: Any,
+    ) -> dict[str, Any]:
+        seen_requests.append(dict(tool_request))
+        return {"ok": True, "status": "ok"}
+
+    runner = _runner(call_agent_tool=call_agent_tool, run_events=run_events)
+
+    runner.run(
+        [
+            {
+                "tool": "desktop.ui_elements",
+                "input": {"target": "Export", "limit": 80},
+                "source": "agent_studio_replan_recovery",
+                "replan_request_id": "runtime-replan-ui",
+                "replan_recovery_action_id": "runtime-replan-ui:action:1:desktop.ui_elements",
+                "approval_required": True,
+                "risk_level": "medium",
+                "deferred_tool": "desktop.click_ui_element",
+                "deferred_input": {"target": "Export", "click_count": 1, "limit": 80},
+                "deferred_context": {
+                    "step_id": "operate-foreground-ui",
+                    "runtime_stage": "operate",
+                    "runtime_role": "click_ui",
+                },
+                "deferred_continuation": [
+                    {
+                        "tool": "desktop.ui_elements",
+                        "input": {"limit": 80},
+                        "step_id": "verify-desktop-result",
+                        "runtime_stage": "verify",
+                        "risk_level": "low",
+                    }
+                ],
+            }
+        ],
+        ["desktop.ui_elements", "desktop.click_ui_element"],
+        FakeBroker({"ok": True}),
+        [{"role": "user", "content": "Retry approved UI recovery"}],
+        timeline,
+        [],
+        next_iteration=1,
+        run_id="run-approved-recovery-deferred-tool",
+        budget=FakeBudget(),
+    )
+
+    assert [request["tool"] for request in seen_requests] == [
+        "desktop.ui_elements",
+        "desktop.click_ui_element",
+        "desktop.ui_elements",
+    ]
+    click_request = seen_requests[1]
+    assert click_request["source"] == "agent_studio_replan_recovery"
+    assert click_request["replan_request_id"] == "runtime-replan-ui"
+    assert click_request["step_id"] == "operate-foreground-ui"
+    assert click_request["approved_by_replan_recovery_action"] is True
+    assert click_request["approval_status"] == "approved"
+    assert "approval_required" not in click_request
+    enqueued_event = next(
+        event
+        for event in timeline
+        if event["event"] == "agent.deferred_continuation.enqueued"
+    )
+    assert enqueued_event["deferred_tools"] == [
+        "desktop.click_ui_element",
+        "desktop.ui_elements",
+    ]
+    assert enqueued_event["runtime_retry_source"] == "runtime_replan_recovery"
+    run_enqueued = next(
+        payload
+        for _run_id, event_type, payload in run_events
+        if event_type == "agent.deferred_continuation.enqueued"
+    )
+    assert run_enqueued["deferred_tools"] == [
+        "desktop.click_ui_element",
+        "desktop.ui_elements",
+    ]
+
+
+def test_runtime_tool_request_runner_does_not_auto_start_partial_deferred_recovery() -> None:
+    timeline: list[dict[str, Any]] = []
+    seen_requests: list[dict[str, Any]] = []
+
+    def call_agent_tool(
+        tool_request: dict[str, Any],
+        *_args: Any,
+        **_kwargs: Any,
+    ) -> dict[str, Any]:
+        seen_requests.append(dict(tool_request))
+        if tool_request["tool"] == "desktop.ui_elements":
+            return {
+                "ok": False,
+                "verification_failed": True,
+                "error": "target unavailable",
+                "recovery_actions": [
+                    {
+                        "label": "Observe then click Export",
+                        "tool": "desktop.ui_elements",
+                        "input": {"target": "Export", "limit": 80},
+                        "risk_level": "low",
+                        "deferred_continuation": [
+                            {
+                                "tool": "desktop.click_ui_element",
+                                "input": {"target": "Export", "click_count": 1},
+                                "approval_required": True,
+                                "risk_level": "medium",
+                            },
+                            {
+                                "tool": "desktop.ui_elements",
+                                "input": {"limit": 80},
+                                "risk_level": "low",
+                            },
+                        ],
+                    }
+                ],
+            }
+        return {"ok": True, "status": "ok"}
+
+    runner = _runner(call_agent_tool=call_agent_tool)
+
+    runner.run(
+        [
+            {
+                "tool": "desktop.ui_elements",
+                "input": {"target": "Export", "limit": 80},
+                "source": "runtime_planner",
+                "step_id": "read-foreground-ui",
+                "replan_triggers": ["verification_failed"],
+            }
+        ],
+        ["desktop.ui_elements", "desktop.click_ui_element"],
+        FakeBroker({"ok": True}),
+        [{"role": "user", "content": "Observe then click Export"}],
+        timeline,
+        [],
+        next_iteration=1,
+        run_id="run-partial-recovery-blocked",
+        budget=FakeBudget(),
+    )
+
+    assert [request["tool"] for request in seen_requests] == ["desktop.ui_elements"]
+    replan_event = next(event for event in timeline if event["event"] == "agent.replan.requested")
+    action = replan_event["payload"]["recovery_actions"][0]
+    assert action["deferred_continuation"][0]["tool"] == "desktop.click_ui_element"
+    assert not any(
+        event["event"] == "agent.deferred_continuation.enqueued"
+        for event in timeline
+    )
+
+
 def test_runtime_tool_request_runner_records_group_scoped_replan_request() -> None:
     run_events: list[tuple[str, str, dict[str, Any]]] = []
     timeline: list[dict[str, Any]] = []

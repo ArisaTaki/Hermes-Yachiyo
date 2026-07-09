@@ -1165,6 +1165,53 @@ def test_auto_replan_recovery_runs_safe_deferred_continuation_after_source_succe
     ]
 
 
+def test_auto_replan_recovery_materializes_safe_deferred_tool_after_source_success() -> None:
+    recovery_requests = [
+        {
+            "tool": "desktop.ui_elements",
+            "input": {"target": "Export", "limit": 80},
+            "source": "runtime_planner",
+            "planning_reason": "planner_replan_runtime_recovery_action",
+            "replan_request_id": "replan-observe",
+            "replan_trigger": "verification_failed",
+            "replan_recovery_action_id": "action-observe",
+            "deferred_tool": "desktop.active_window",
+            "deferred_input": {"app_name": "PixelForge"},
+            "deferred_context": {"step_id": "verify-active-window"},
+        }
+    ]
+    timeline = [
+        _timeline(
+            "agent.tool.call",
+            "desktop.ui_elements",
+            input_preview={"target": "Export", "limit": 80},
+            result={"ok": True},
+            replan_request_id="replan-observe",
+        )
+    ]
+
+    continuation = custom_api_agent_module._auto_replan_recovery_deferred_continuation_requests(
+        recovery_requests,
+        ["desktop.ui_elements", "desktop.active_window"],
+        timeline,
+        tool_timeline_start=0,
+    )
+
+    assert continuation == [
+        {
+            "tool": "desktop.active_window",
+            "input": {"app_name": "PixelForge"},
+            "step_id": "verify-active-window",
+            "planner_step_id": "verify-active-window",
+            "replan_request_id": "replan-observe",
+            "replan_trigger": "verification_failed",
+            "replan_recovery_action_id": "action-observe",
+            "source": "runtime_planner",
+            "planning_reason": "planner_replan_deferred_continuation",
+        }
+    ]
+
+
 def test_auto_runtime_planner_requests_execute_safe_deferred_replan_continuation() -> None:
     batches: list[list[str]] = []
 
