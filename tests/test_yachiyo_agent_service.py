@@ -894,6 +894,53 @@ class _ReplanRecoveryTaskRuntimePort(_FakeRuntimePort):
         )
 
 
+class _RuntimeBlockedDirectReplanTaskRuntimePort(_FakeRuntimePort):
+    def get_task_timeline(self, task_id: str) -> dict[str, Any]:
+        self.calls.append(("get_task_timeline", task_id))
+        return _task_payload(
+            task_id=task_id,
+            run_id="run-blocked",
+            session_id="chat-1",
+            title="Search Apple Music",
+            status="running",
+            metadata={
+                "yachiyo_blocked_direct_tool_requests": [
+                    {
+                        "request_id": "blocked-type-1",
+                        "tool": "desktop.safe_type_text",
+                        "step_id": "type-media-search-query",
+                        "capability_id": "desktop.ui_operation",
+                        "risk_level": "low",
+                        "approval_required": False,
+                        "blocked_by": "real_virtual_desktop_provider_required",
+                        "desktop_execution_route": {
+                            "status": "real_virtual_desktop_provider_required",
+                            "reason": "real desktop provider is not attached yet",
+                            "blocking_conditions": [
+                                "real_virtual_desktop_provider_required"
+                            ],
+                        },
+                        "observation_retry": {
+                            "tool": "desktop.safe_type_text",
+                            "input": {"text": "超时空辉夜姬"},
+                            "reason": "Retry safe media search typing",
+                        },
+                    }
+                ],
+            },
+        )
+
+    def start_chat_task(self, request: dict[str, Any]) -> dict[str, Any]:
+        self.calls.append(("start_chat_task", request))
+        return _task_payload(
+            task_id="runtime-blocked-recovery-task",
+            run_id="runtime-blocked-recovery-run",
+            session_id=request.get("conversation_id") or "chat-1",
+            title=request.get("title") or "Runtime blocked recovery",
+            status="running",
+        )
+
+
 class _ApprovalReplanRecoveryTaskRuntimePort(_ReplanRecoveryTaskRuntimePort):
     def get_task_timeline(self, task_id: str) -> dict[str, Any]:
         payload = super().get_task_timeline(task_id)
@@ -1388,6 +1435,57 @@ def test_yachiyo_agent_service_auto_starts_next_safe_replan_continuation() -> No
     )
     assert request["direct_tool_requests"][0]["tool"] == "desktop.list_apps"
     assert request["direct_tool_requests"][0]["approval_required"] is False
+
+
+def test_yachiyo_agent_service_plans_runtime_blocked_direct_replan_continuation() -> None:
+    port = _RuntimeBlockedDirectReplanTaskRuntimePort()
+    service = YachiyoAgentService(port)
+
+    continuation = service.plan_next_replan_continuation(
+        "task-blocked",
+        {"conversation_id": "chat-1", "include_manual": True},
+    )
+
+    assert continuation is not None
+    assert continuation.request_id == "runtime-blocked:blocked-type-1"
+    assert continuation.tool_name == "desktop.safe_type_text"
+    assert continuation.auto_start_eligible is True
+    assert continuation.auto_start_reason == "safe_low_risk_replan_continuation"
+    assert continuation.auto_start_blockers == []
+    direct_request = continuation.direct_tool_requests[0]
+    assert direct_request["tool"] == "desktop.safe_type_text"
+    assert direct_request["input"] == {"text": "超时空辉夜姬"}
+    assert direct_request["observation_retry"]["input"] == {"text": "超时空辉夜姬"}
+    assert direct_request["approval_required"] is False
+    assert direct_request["replan_trigger"] == "runtime_blocked"
+    assert direct_request["source_step_id"] == "type-media-search-query"
+    assert [name for name, _payload in port.calls] == ["get_task_timeline"]
+
+
+def test_yachiyo_agent_service_auto_starts_runtime_blocked_direct_replan() -> None:
+    port = _RuntimeBlockedDirectReplanTaskRuntimePort()
+    service = YachiyoAgentService(port)
+
+    task = service.start_next_replan_continuation(
+        "task-blocked",
+        {"conversation_id": "chat-1"},
+    )
+
+    assert task is not None
+    assert task.task_id == "runtime-blocked-recovery-task"
+    assert [name for name, _payload in port.calls] == [
+        "get_task_timeline",
+        "start_chat_task",
+    ]
+    request = port.calls[1][1]
+    assert request["metadata"]["source"] == "yachiyo_chat_replan_auto_continuation"
+    assert request["metadata"]["replan_auto_start_eligible"] is True
+    assert request["metadata"]["replan_trigger"] == "runtime_blocked"
+    direct_request = request["direct_tool_requests"][0]
+    assert direct_request["tool"] == "desktop.safe_type_text"
+    assert direct_request["input"] == {"text": "超时空辉夜姬"}
+    assert direct_request["observation_retry"]["input"] == {"text": "超时空辉夜姬"}
+    assert direct_request["approval_required"] is False
 
 
 def test_yachiyo_agent_service_auto_continuation_preserves_desktop_loop_context() -> None:
