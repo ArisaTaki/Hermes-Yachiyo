@@ -499,6 +499,10 @@ def test_start_isolated_provider_session_can_start_provider_from_manifest(
     assert started["started"] is True
     assert started["source"] == "managed_external_provider_session"
     assert started["provider_id"] == "manifest-virtual-desktop"
+    assert started["provider_manifest_evidence"]["provider_id"] == (
+        "manifest-virtual-desktop"
+    )
+    assert started["provider_manifest_evidence"]["remote_endpoint_urls"] == []
     assert started["desktop_session_kind"] == "virtual_desktop"
     assert started["desktop_backend_kind"] == "vnc_virtual_desktop"
     assert started["desktop_backend_is_loopback"] is False
@@ -749,6 +753,10 @@ def test_isolated_provider_session_status_can_use_manifest_endpoint(
         assert status["running"] is True
         assert status["source"] == "provider_manifest"
         assert status["provider_id"] == "manifest-running-desktop"
+        assert status["provider_manifest_evidence"]["provider_id"] == (
+            "manifest-running-desktop"
+        )
+        assert status["provider_manifest_evidence"]["remote_endpoint_urls"] == []
         assert status["desktop_backend_kind"] == "vnc_virtual_desktop"
         assert status["desktop_backend_ready_for_public_release"] is True
         assert status["requires_real_virtual_desktop_backend"] is False

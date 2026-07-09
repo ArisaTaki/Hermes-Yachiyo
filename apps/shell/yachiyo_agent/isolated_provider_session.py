@@ -28,6 +28,7 @@ from apps.shell.yachiyo_agent.desktop_provider_contract import (
     OHA_DESKTOP_AGENT_RELEASE_PROVIDER_TOOLS,
     virtual_desktop_provider_conformance_summary,
     virtual_desktop_provider_contract_evidence,
+    virtual_desktop_provider_manifest_contract_evidence,
 )
 from apps.shell.yachiyo_agent.desktop_execution_policy import (
     is_user_foreground_takeover_tool,
@@ -98,6 +99,7 @@ class IsolatedDesktopProviderSessionManager:
         self._process: subprocess.Popen[str] | None = None
         self._env: dict[str, str] = {}
         self._command: list[str] = []
+        self._provider_manifest_evidence: dict[str, Any] = {}
         self._source = "isolated_provider_session_manager"
         self._started_at = 0.0
         self._lock = threading.RLock()
@@ -112,6 +114,7 @@ class IsolatedDesktopProviderSessionManager:
                 process = None
                 self._env = {}
                 self._command = []
+                self._provider_manifest_evidence = {}
                 self._source = "isolated_provider_session_manager"
                 self._started_at = 0.0
             provider_status = (
@@ -167,6 +170,9 @@ class IsolatedDesktopProviderSessionManager:
                 ),
                 "supported_tools": _string_list(provider_status.get("supported_tools")),
                 "provider_contract": provider_contract,
+                "provider_manifest_evidence": dict(
+                    self._provider_manifest_evidence
+                ),
                 "provider_conformance": provider_conformance,
                 "source": self._source,
             }
@@ -215,6 +221,7 @@ class IsolatedDesktopProviderSessionManager:
             self._process = process
             self._command = command
             self._env = env
+            self._provider_manifest_evidence = {}
             self._source = "isolated_provider_session_manager"
             self._started_at = time.time()
             _apply_runtime_env(env)
@@ -252,6 +259,9 @@ class IsolatedDesktopProviderSessionManager:
             }
             try:
                 manifest = _managed_external_provider_manifest(self._repo_root)
+                manifest_evidence = _provider_manifest_evidence_for_manifest(
+                    manifest
+                )
                 command = _managed_external_provider_start_command(
                     self._repo_root,
                     manifest=manifest,
@@ -303,6 +313,7 @@ class IsolatedDesktopProviderSessionManager:
             self._process = process
             self._command = command
             self._env = env
+            self._provider_manifest_evidence = manifest_evidence
             self._source = "managed_external_provider_session"
             self._started_at = time.time()
             _apply_runtime_env(env)
@@ -318,6 +329,7 @@ class IsolatedDesktopProviderSessionManager:
             self._process = None
             self._env = {}
             self._command = []
+            self._provider_manifest_evidence = {}
             self._source = "isolated_provider_session_manager"
             self._started_at = 0.0
             return {
@@ -816,6 +828,18 @@ def _bool_env_value(value: Any, *, default: bool) -> str:
 def _external_isolated_desktop_provider_session_status() -> dict[str, Any]:
     provider_status = desktop_execution_provider_status_from_env(probe_health=True)
     env_snapshot = _provider_env_snapshot()
+    provider_manifest_evidence: dict[str, Any] = {}
+    manifest_payload: dict[str, Any] = {}
+    if str(os.environ.get(_PROVIDER_MANIFEST_ENV) or "").strip():
+        try:
+            manifest_payload = _managed_external_provider_manifest(
+                _SESSION_MANAGER._repo_root
+            )
+            provider_manifest_evidence = _provider_manifest_evidence_for_manifest(
+                manifest_payload
+            )
+        except Exception:
+            manifest_payload = {}
     source = "runtime_env"
     is_candidate = _external_status_is_isolated_provider_candidate(provider_status)
     running = bool(provider_status.get("available")) and bool(
@@ -829,9 +853,14 @@ def _external_isolated_desktop_provider_session_status() -> dict[str, Any]:
         )
     ):
         try:
-            manifest_env = _runtime_env_from_launch(
-                _managed_external_provider_manifest(_SESSION_MANAGER._repo_root)
+            manifest = manifest_payload or _managed_external_provider_manifest(
+                _SESSION_MANAGER._repo_root
             )
+            if not provider_manifest_evidence:
+                provider_manifest_evidence = _provider_manifest_evidence_for_manifest(
+                    manifest
+                )
+            manifest_env = _runtime_env_from_launch(manifest)
         except Exception:
             manifest_env = {}
         if manifest_env:
@@ -899,6 +928,7 @@ def _external_isolated_desktop_provider_session_status() -> dict[str, Any]:
         ),
         "supported_tools": _string_list(provider_status.get("supported_tools")),
         "provider_contract": provider_contract,
+        "provider_manifest_evidence": provider_manifest_evidence,
         "provider_conformance": provider_conformance,
         "source": source,
         "external_provider_configured": True,
@@ -1314,6 +1344,17 @@ def _provider_conformance_for_status(
     )
 
 
+def _provider_manifest_evidence_for_manifest(
+    manifest: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if not isinstance(manifest, dict) or not manifest:
+        return {}
+    return virtual_desktop_provider_manifest_contract_evidence(
+        manifest,
+        required_tools=OHA_DESKTOP_AGENT_RELEASE_PROVIDER_TOOLS,
+    )
+
+
 def _managed_external_provider_start_failed_status(
     request: dict[str, Any],
     exc: Exception,
@@ -1325,6 +1366,9 @@ def _managed_external_provider_start_failed_status(
     timeout_seconds: float = 0.0,
 ) -> dict[str, Any]:
     manifest_payload = _provider_runtime_payload(manifest or {})
+    provider_manifest_evidence = _provider_manifest_evidence_for_manifest(
+        manifest or {}
+    )
     requires_real_backend = (
         _optional_bool(
             request.get("requires_real_virtual_desktop_backend"),
@@ -1409,6 +1453,7 @@ def _managed_external_provider_start_failed_status(
         "supported_tools": _string_list(source.get("supported_tools")),
         "provider_status": source,
         "provider_contract": provider_contract,
+        "provider_manifest_evidence": provider_manifest_evidence,
         "provider_conformance": provider_conformance,
         "command": clean_command,
         "manifest_path": str(manifest_path or ""),
@@ -1430,6 +1475,10 @@ def _public_session_status(status: dict[str, Any]) -> dict[str, Any]:
     ) or _provider_conformance_for_status(
         status,
         provider_contract=provider_contract,
+    )
+    provider_manifest_evidence = _mapping(
+        status.get("provider_manifest_evidence")
+        or provider_status.get("provider_manifest_evidence")
     )
     return {
         "ok": bool(status.get("ok", True)),
@@ -1480,6 +1529,7 @@ def _public_session_status(status: dict[str, Any]) -> dict[str, Any]:
             status.get("supported_tools") or provider_status.get("supported_tools")
         ),
         "provider_contract": provider_contract,
+        "provider_manifest_evidence": provider_manifest_evidence,
         "provider_conformance": provider_conformance,
         "command": _string_list(status.get("command")),
         "env": {
