@@ -8,6 +8,7 @@ from typing import Any
 from apps.shell.agent.runtime.desktop_execution_providers import (
     LOCAL_DESKTOP_PROVIDER_ID,
     LOCAL_DESKTOP_PROVIDER_KIND,
+    desktop_execution_provider_registry_from_env,
 )
 from apps.shell.yachiyo_agent import (
     AgentStudioService,
@@ -3289,6 +3290,86 @@ def test_yachiyo_chat_entrypoint_surfaces_partial_blocked_desktop_plan(
     ]
     assert runtime_blocked_recoveries
     assert all(recovery.recovery_actions for recovery in runtime_blocked_recoveries)
+
+
+def test_yachiyo_chat_entrypoint_local_direct_route_executes_despite_loopback_session(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_URL", "http://127.0.0.1:19093")
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_ID", "local-isolated-desktop")
+    monkeypatch.setenv(
+        "OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS",
+        (
+            "desktop.list_apps,app.open_and_safe_shortcut,desktop.safe_type_text,"
+            "desktop.search_submit,media.music_app_open_and_play,desktop.ui_elements"
+        ),
+    )
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_KIND", "sandbox_desktop")
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_KIND", "isolated_desktop")
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_ISOLATED", "true")
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_FOREGROUND_TAKEOVER_REQUIRED", "false")
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_BACKEND_KIND", "loopback_session_harness")
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_BACKEND_IS_LOOPBACK", "true")
+    monkeypatch.setenv(
+        "OHA_YACHIYO_DESKTOP_PROVIDER_REQUIRES_REAL_VIRTUAL_DESKTOP_BACKEND",
+        "true",
+    )
+    calls: list[tuple[str, dict[str, Any], bool]] = []
+
+    class FakeBroker:
+        def call(
+            self,
+            name: str,
+            payload: dict[str, Any],
+            *,
+            approved: bool = False,
+        ) -> dict[str, Any]:
+            calls.append((name, payload, approved))
+            return {"ok": True, "action": name, "data": {"played": True}}
+
+    port = _FakeRuntimePort()
+    service = YachiyoAgentService(port)
+
+    service.start_chat_task(
+        StartChatTaskRequest(
+            prompt="帮我打开 Apple Music 播放超时空辉夜姬",
+            conversation_id="chat-1",
+            metadata={"launcher_mode": "bubble"},
+        )
+    )
+
+    request_payload = port.calls[0][1]
+    playback_request = next(
+        request
+        for request in request_payload["direct_tool_requests"]
+        if request["tool"] == "media.music_app_open_and_play"
+    )
+    registry = desktop_execution_provider_registry_from_env({})
+
+    result = registry.execute_if_routed(
+        playback_request["tool"],
+        playback_request["input"],
+        tool_request=playback_request,
+        broker=FakeBroker(),
+    )
+
+    assert playback_request["desktop_execution_route"]["selected_provider_kind"] == (
+        LOCAL_DESKTOP_PROVIDER_KIND
+    )
+    assert playback_request["sandbox_provider"]["provider_kind"] == (
+        LOCAL_DESKTOP_PROVIDER_KIND
+    )
+    assert result is not None
+    assert result["ok"] is True
+    assert result["desktop_execution_provider"]["provider_kind"] == (
+        LOCAL_DESKTOP_PROVIDER_KIND
+    )
+    assert result["local_desktop_provider"]["provider_id"] == LOCAL_DESKTOP_PROVIDER_ID
+    assert result["desktop_execution_evidence"]["effect"] == "media_control"
+    assert "simulated_desktop_provider" not in result
+    assert calls == [
+        ("media.music_app_open_and_play", {"app_name": "Music"}, False)
+    ]
 
 
 def test_yachiyo_chat_entrypoint_does_not_direct_execute_blocked_provider_route(

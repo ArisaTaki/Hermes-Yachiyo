@@ -5,6 +5,11 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from apps.shell.agent.runtime.desktop_execution_providers import (
+    LOCAL_DESKTOP_PROVIDER_KIND,
+    local_desktop_execution_provider_status,
+)
+
 from .contracts import (
     DesktopExecutionLoopSnapshot,
     DesktopExecutionRouteSnapshot,
@@ -738,6 +743,25 @@ def _sandbox_provider_for_request(
     return None
 
 
+def _provider_snapshot_for_route(
+    route: DesktopExecutionRouteSnapshot | None,
+    provider: SandboxDesktopProviderSnapshot | None,
+) -> SandboxDesktopProviderSnapshot | None:
+    if route is None:
+        return provider
+    provider_kind = str(route.selected_provider_kind or "").strip()
+    if provider_kind != LOCAL_DESKTOP_PROVIDER_KIND:
+        return provider
+    if provider is not None and str(provider.provider_kind or "").strip() == provider_kind:
+        return provider
+    return SandboxDesktopProviderSnapshot.model_validate(
+        sandbox_desktop_provider_status(
+            {"sandbox_provider": local_desktop_execution_provider_status()},
+            probe_health=False,
+        )
+    )
+
+
 def _sandbox_provider_requires_controlled_input(
     provider_payload: Mapping[str, Any],
     *,
@@ -890,6 +914,10 @@ def _execution_request_snapshot(
         request,
         execution_mode=execution_mode,
         desktop_execution_policy=desktop_execution_policy,
+    )
+    sandbox_provider = _provider_snapshot_for_route(
+        desktop_execution_route,
+        sandbox_provider,
     )
     tool_plan_id = str(getattr(decision.plan.tool_plan, "plan_id", "") or "").strip()
     return RuntimeExecutionRequestSnapshot(

@@ -241,6 +241,55 @@ def test_default_desktop_provider_registry_routes_low_risk_tools_to_local_broker
     assert calls == [("app.open", {"app_name": "Music"}, False)]
 
 
+def test_local_provider_route_ignores_unselected_loopback_session() -> None:
+    calls: list[tuple[str, dict[str, Any], bool]] = []
+
+    class FakeBroker:
+        def call(
+            self,
+            name: str,
+            payload: dict[str, Any],
+            *,
+            approved: bool = False,
+        ) -> dict[str, Any]:
+            calls.append((name, payload, approved))
+            return {"ok": True, "action": name, "data": {"played": True}}
+
+    registry = desktop_execution_provider_registry_from_env({})
+    tool_request = _local_tool_request(
+        "media.music_app_open_and_play",
+        {"app_name": "Music"},
+    )
+    tool_request["desktop_provider_session"] = {
+        "provider_id": "local-isolated-desktop",
+        "running": True,
+        "desktop_session_kind": "isolated_desktop",
+        "desktop_session_isolated": True,
+        "foreground_takeover_required": False,
+        "desktop_backend_kind": "loopback_session_harness",
+        "desktop_backend_is_loopback": True,
+        "requires_real_virtual_desktop_backend": True,
+    }
+
+    result = registry.execute_if_routed(
+        "media.music_app_open_and_play",
+        {"app_name": "Music"},
+        tool_request=tool_request,
+        broker=FakeBroker(),
+    )
+
+    assert result is not None
+    assert result["ok"] is True
+    assert result["desktop_execution_provider"]["provider_kind"] == (
+        LOCAL_DESKTOP_PROVIDER_KIND
+    )
+    assert result["desktop_execution_evidence"]["effect"] == "media_control"
+    assert "simulated_desktop_provider" not in result
+    assert calls == [
+        ("media.music_app_open_and_play", {"app_name": "Music"}, False)
+    ]
+
+
 def test_local_provider_direct_fallback_executes_low_risk_discovery(
     monkeypatch,
 ) -> None:

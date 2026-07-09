@@ -1695,11 +1695,16 @@ def _simulated_desktop_provider_blockers(
     tool_request: Mapping[str, Any],
 ) -> list[str]:
     blockers: list[str] = []
-    for source in (
-        route,
-        sandbox_provider_payload(tool_request),
-        _mapping(tool_request.get("desktop_provider_session")),
-    ):
+    selected_provider_kind = _route_provider_kind(route)
+    sources: list[Mapping[str, Any]] = [route]
+    routed_provider = sandbox_provider_payload(tool_request)
+    if routed_provider:
+        sources.append(routed_provider)
+    if selected_provider_kind != LOCAL_DESKTOP_PROVIDER_KIND:
+        session = _mapping(tool_request.get("desktop_provider_session"))
+        if session:
+            sources.append(session)
+    for source in sources:
         if not source:
             continue
         backend_kind = str(source.get("desktop_backend_kind") or "").strip()
