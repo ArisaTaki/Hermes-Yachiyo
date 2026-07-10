@@ -447,7 +447,7 @@ def _approval_entrypoint_requests(
     requests: Sequence[Mapping[str, Any]],
 ) -> list[dict[str, Any]]:
     selected: list[dict[str, Any]] = []
-    for request in requests:
+    for index, request in enumerate(requests):
         if not isinstance(request, Mapping):
             continue
         tool_name = str(request.get("tool") or request.get("tool_name") or "").strip()
@@ -457,6 +457,14 @@ def _approval_entrypoint_requests(
             if _system_ui_open_confirm_is_redundant(selected, request):
                 return selected
             selected.append(_entrypoint_request_copy(request))
+            selected.extend(
+                _entrypoint_request_copy(remaining)
+                for remaining in requests[index + 1 :]
+                if isinstance(remaining, Mapping)
+                and str(
+                    remaining.get("tool") or remaining.get("tool_name") or ""
+                ).strip()
+            )
             return selected
         if tool_name in _APPROVAL_ENTRYPOINT_PREREQUISITE_TOOLS:
             selected.append(_entrypoint_request_copy(request))

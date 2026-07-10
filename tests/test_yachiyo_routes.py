@@ -1627,6 +1627,7 @@ async def test_yachiyo_task_approve_handles_consecutive_foreground_sequence_appr
         assert calls == [
             ("hotkey", "l", ["command"]),
             ("type", "github.com"),
+            ("ui_elements", "", 80, ""),
         ]
 
         after_second = await yachiyo.approve_task(sent["task_id"], None, request)
@@ -1647,6 +1648,7 @@ async def test_yachiyo_task_approve_handles_consecutive_foreground_sequence_appr
         assert calls == [
             ("hotkey", "l", ["command"]),
             ("type", "github.com"),
+            ("ui_elements", "", 80, ""),
             ("hotkey", "return", []),
             ("ui_elements", "", 80, ""),
         ]

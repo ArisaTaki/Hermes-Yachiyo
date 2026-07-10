@@ -4,6 +4,10 @@ from __future__ import annotations
 
 from typing import Any
 
+from apps.shell.yachiyo_agent.runtime_execution import (
+    runtime_execution_continuation_requests_from_envelope_payload,
+)
+
 
 class RuntimeMainChatFacadeMixin:
     """Keeps daily Chat runtime methods while delegating to split services."""
@@ -82,6 +86,18 @@ class RuntimeMainChatFacadeMixin:
         }
         if runtime_execution_envelope is not None:
             payload["runtime_execution_envelope"] = runtime_execution_envelope
+            if not payload.get("remaining_tool_requests"):
+                payload["remaining_tool_requests"] = (
+                    runtime_execution_continuation_requests_from_envelope_payload(
+                        runtime_execution_envelope,
+                        after_request=(
+                            pending_approval.get("tool_request")
+                            if isinstance(pending_approval.get("tool_request"), dict)
+                            else None
+                        ),
+                        allowed_tools=tool_policy.get("allowed_tools") or [],
+                    )
+                )
         if runtime_execution_metadata is not None:
             payload["runtime_execution_metadata"] = runtime_execution_metadata
         return payload

@@ -37,6 +37,7 @@ from apps.shell.yachiyo_agent.planner_execution import (
 )
 from apps.shell.yachiyo_agent.runtime_execution import (
     runtime_execution_blocked_requests_from_envelope_payload,
+    runtime_execution_continuation_requests_from_envelope_payload,
     runtime_execution_envelope_from_decision,
     runtime_execution_requests_from_envelope_payload,
 )
@@ -31387,6 +31388,48 @@ def test_runtime_execution_keeps_prefetch_read_for_builtin_data_analysis() -> No
     ]
     assert projected_requests[0]["input"]["source_kind"] == "csv"
     assert projected_requests[1]["input"]["source_kind"] == "csv"
+
+
+def test_runtime_execution_projects_plan_after_approved_request() -> None:
+    allowed_tools = [
+        "desktop.running_apps",
+        "desktop.ui_elements",
+        "desktop.hotkey",
+        "desktop.safe_type_text",
+    ]
+    decision = RuntimePlanner().decision(
+        "按 Command+L，再输入 github.com，再按回车",
+        allowed_tools=allowed_tools,
+    )
+    envelope = runtime_execution_envelope_from_decision(
+        decision,
+        allowed_tools=allowed_tools,
+        full_plan=True,
+    )
+
+    assert envelope is not None
+    first_hotkey = next(
+        request
+        for request in envelope.requests
+        if request.tool_name == "desktop.hotkey"
+    )
+    continuation = runtime_execution_continuation_requests_from_envelope_payload(
+        envelope,
+        after_request={
+            "request_id": first_hotkey.request_id,
+            "step_id": first_hotkey.step_id,
+            "tool": first_hotkey.tool_name,
+        },
+        allowed_tools=allowed_tools,
+    )
+
+    assert [request["tool"] for request in continuation] == [
+        "desktop.safe_type_text",
+        "desktop.hotkey",
+        "desktop.ui_elements",
+    ]
+    assert continuation[0]["input"] == {"text": "github.com"}
+    assert continuation[1]["input"] == {"key": "return", "modifiers": []}
 
 
 def test_planner_tool_requests_prefetches_context_data_source_for_analysis() -> None:

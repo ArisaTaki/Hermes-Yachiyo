@@ -605,6 +605,63 @@ def runtime_execution_requests_from_envelope_payload(
     return projected
 
 
+def runtime_execution_continuation_requests_from_envelope_payload(
+    envelope_payload: Any,
+    *,
+    after_request: Mapping[str, Any] | None,
+    allowed_tools: Iterable[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Project planned requests after an approved envelope request."""
+
+    if isinstance(envelope_payload, RuntimeExecutionEnvelopeSnapshot):
+        envelope = envelope_payload.model_dump(mode="json")
+    elif isinstance(envelope_payload, Mapping):
+        envelope = dict(envelope_payload)
+    else:
+        return []
+    if not isinstance(after_request, Mapping):
+        return []
+    requests = envelope.get("requests")
+    if not isinstance(requests, list):
+        return []
+    allowed = {
+        str(tool or "").strip()
+        for tool in (allowed_tools or [])
+        if str(tool or "").strip()
+    }
+    current_request_id = _text(after_request.get("request_id"))
+    current_step_id = _text(
+        after_request.get("step_id") or after_request.get("planner_step_id")
+    )
+    current_tool = _text(after_request.get("tool") or after_request.get("tool_name"))
+    current_index = -1
+    for index, request in enumerate(requests):
+        if not isinstance(request, Mapping):
+            continue
+        request_id = _text(request.get("request_id"))
+        step_id = _text(request.get("step_id") or request.get("planner_step_id"))
+        tool_name = _text(request.get("tool_name") or request.get("tool"))
+        if current_request_id and request_id == current_request_id:
+            current_index = index
+            break
+        if current_step_id and step_id == current_step_id and tool_name == current_tool:
+            current_index = index
+            break
+    if current_index < 0:
+        return []
+
+    projected: list[dict[str, Any]] = []
+    for request in requests[current_index + 1 :]:
+        if not isinstance(request, Mapping) or _request_status_is_non_executable(request):
+            continue
+        tool_request = _tool_request_from_execution_request(request, envelope=envelope)
+        tool_name = _text(tool_request.get("tool"))
+        if not tool_name or (allowed and tool_name not in allowed):
+            continue
+        projected.append(tool_request)
+    return projected
+
+
 def runtime_execution_blocked_requests_from_envelope_payload(
     envelope_payload: Any,
     *,

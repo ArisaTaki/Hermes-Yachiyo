@@ -61,6 +61,32 @@ def test_approval_entrypoint_skips_redundant_system_ui_confirm() -> None:
     ]
 
 
+def test_approval_entrypoint_preserves_requests_after_first_approval() -> None:
+    requests = [
+        {
+            "tool": "desktop.hotkey",
+            "input": {"key": "l", "modifiers": ["command"]},
+            "approval_required": True,
+            "risk_level": "medium",
+        },
+        {
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "github.com"},
+            "risk_level": "low",
+        },
+        {
+            "tool": "desktop.hotkey",
+            "input": {"key": "return", "modifiers": []},
+            "approval_required": True,
+            "risk_level": "high",
+        },
+    ]
+
+    selected = daily_desktop_approval_or_submit_entrypoint_requests(requests)
+
+    assert selected == requests
+
+
 def test_submit_foreground_entrypoint_requires_approval() -> None:
     selected = daily_desktop_approval_or_submit_entrypoint_requests(
         [],

@@ -222,9 +222,54 @@ class ApprovalResumeCoordinator:
             handoff = ToolApprovalContinuationHandoff.from_context(agent, context)
         direct_result = _daily_desktop_resume_result_after_remaining_tools(context)
         if direct_result:
+            self._record_daily_desktop_completion(context, direct_result)
             return direct_result
         request = ToolApprovalCustomApiContinuationRequest.from_handoff(handoff)
         return request.execute(self._continue_custom_api_agent)
+
+    def _record_daily_desktop_completion(
+        self,
+        context: ToolApprovalResumeContext,
+        result_text: str,
+    ) -> None:
+        if any(
+            isinstance(event, Mapping)
+            and str(event.get("event") or event.get("event_type") or "").strip()
+            == "agent.desktop.intent_completed"
+            for event in context.timeline
+        ):
+            return
+        tools = [
+            str(event.get("detail") or "").strip()
+            for event in context.timeline
+            if isinstance(event, Mapping)
+            and str(event.get("event") or event.get("event_type") or "").strip()
+            == "agent.tool.call"
+            and isinstance(event.get("result"), Mapping)
+            and event["result"].get("ok") is True
+            and str(event.get("source") or "").strip()
+            != "runtime_post_action_auto_verify"
+            and str(event.get("detail") or "").strip()
+        ]
+        payload = {
+            "tool": context.tool_name,
+            "source": "runtime_planner",
+            "tools": tools,
+            "result": result_text,
+        }
+        context.timeline.append(
+            self._timeline(
+                "agent.desktop.intent_completed",
+                tools[-1] if tools else context.tool_name,
+                **payload,
+            )
+        )
+        if self._append_run_event is not None:
+            self._append_run_event(
+                context.run_id,
+                "agent.desktop.intent_completed",
+                payload,
+            )
 
     def continuation_handoff_after_approved_tool(
         self,
@@ -574,8 +619,29 @@ def _daily_desktop_tool_result_phrase(tool_name: str, result: Mapping[str, Any])
     if clean_tool in {"desktop.hotkey", "desktop.shortcut"} or action == "desktop.hotkey":
         key = str(data.get("key") or result.get("key") or "").strip()
         modifiers = data.get("modifiers") if isinstance(data.get("modifiers"), list) else []
-        combo = "+".join([*(str(item).strip() for item in modifiers if str(item).strip()), key])
+        combo = _daily_desktop_hotkey_text(key, modifiers)
         return f"已发送快捷键：{combo or key}。"
+    if clean_tool == "desktop.safe_type_text" or action == "desktop.safe_type_text":
+        character_count = data.get("character_count")
+        if not isinstance(character_count, int):
+            text = str(data.get("text") or result.get("text") or "")
+            character_count = len(text) if text else None
+        if isinstance(character_count, int) and character_count >= 0:
+            return f"已向前台输入文字（{character_count} 个字符）。"
+        return "已向前台输入文字。"
+    if clean_tool == "desktop.safe_shortcut" or action == "desktop.safe_shortcut":
+        shortcut_action = str(
+            data.get("shortcut_action") or result.get("shortcut_action") or ""
+        ).strip()
+        label = {
+            "copy": "已复制选中内容。",
+            "paste": "已粘贴。",
+            "select_all": "已全选。",
+            "undo": "已撤销。",
+            "redo": "已重做。",
+            "find": "已打开查找。",
+        }.get(shortcut_action)
+        return label or "已执行快捷动作。"
     if clean_tool in {"app.open", "desktop.open_app"} or action in {"app.open", "desktop.open_app"}:
         app_name = str(data.get("app_name") or result.get("app_name") or "").strip()
         return f"已打开 {app_name}。" if app_name else "已打开应用。"
@@ -583,6 +649,23 @@ def _daily_desktop_tool_result_phrase(tool_name: str, result: Mapping[str, Any])
         app_name = str(data.get("app_name") or result.get("app_name") or "").strip()
         return f"已聚焦 {app_name}。" if app_name else ""
     return ""
+
+
+def _daily_desktop_hotkey_text(key: str, modifiers: list[Any]) -> str:
+    modifier_labels = {
+        "command": "Command",
+        "control": "Control",
+        "option": "Option",
+        "shift": "Shift",
+    }
+    parts = [
+        modifier_labels.get(str(item).strip().lower(), str(item).strip())
+        for item in modifiers
+        if str(item).strip()
+    ]
+    clean_key = str(key or "").strip()
+    parts.append(clean_key.upper() if len(clean_key) == 1 else clean_key)
+    return "+".join(part for part in parts if part)
 
 
 def _approved_workspace_patch_step(
