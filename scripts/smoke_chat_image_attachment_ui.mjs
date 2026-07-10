@@ -30,8 +30,9 @@ const TEST_IMAGE_DATA_URL = `data:image/svg+xml;base64,${Buffer.from(
 const TEST_IMAGE_BYTE_SIZE = Buffer.from(TEST_IMAGE_DATA_URL.split(',')[1] || '', 'base64').length;
 
 const bridgeState = {
+  legacyPostPayloads: [],
   messages: [],
-  postPayloads: [],
+  publicTaskPayloads: [],
 };
 
 function log(message) {
@@ -261,16 +262,16 @@ async function startMockBridge() {
         sendJson(response, 200, messagePayload());
         return;
       }
-      if (request.method === 'POST' && url.pathname === '/ui/chat/messages') {
+      if (request.method === 'POST' && url.pathname === '/yachiyo/tasks') {
         const body = await readRequestJson(request);
-        log(`mock bridge received chat message with ${Array.isArray(body.attachments) ? body.attachments.length : 0} attachment(s)`);
-        bridgeState.postPayloads.push(body);
         const attachments = Array.isArray(body.attachments) ? body.attachments : [];
+        log(`mock bridge received public task with ${attachments.length} attachment(s)`);
+        bridgeState.publicTaskPayloads.push(body);
         bridgeState.messages = [
           {
             id: 'user-image-message',
             role: 'user',
-            content: String(body.text || ''),
+            content: String(body.prompt || ''),
             status: 'completed',
             created_at: new Date().toISOString(),
             attachments: attachments.map((attachment, index) => ({
@@ -301,7 +302,35 @@ async function startMockBridge() {
             },
           },
         ];
-        sendJson(response, 200, { ok: true, task_id: TASK_ID, run_id: RUN_ID, run_status: 'completed' });
+        sendJson(response, 200, {
+          task_id: TASK_ID,
+          conversation_id: SESSION_ID,
+          title: RUN_GOAL,
+          status: 'completed',
+          summary: RUN_RESULT,
+          current_step: null,
+          progress_text: '已完成',
+          needs_user_action: false,
+          pending_approvals: [],
+          recent_events: [],
+          tool_calls: [],
+          artifacts: [],
+          metadata: {
+            run_id: RUN_ID,
+            run_group_id: RUN_GROUP_ID,
+            source: 'main_chat',
+          },
+          open_in_studio_url: `#/agents?run_id=${RUN_ID}`,
+          created_at: now,
+          updated_at: now,
+        });
+        return;
+      }
+      if (request.method === 'POST' && url.pathname === '/ui/chat/messages') {
+        const body = await readRequestJson(request);
+        log(`mock bridge received chat message with ${Array.isArray(body.attachments) ? body.attachments.length : 0} attachment(s)`);
+        bridgeState.legacyPostPayloads.push(body);
+        sendJson(response, 409, { ok: false, error: 'legacy chat fallback is not allowed in this smoke' });
         return;
       }
       sendJson(response, 404, { ok: false, error: `not found: ${request.method} ${url.pathname}` });
@@ -712,10 +741,16 @@ async function main() {
     const devUrl = `http://127.0.0.1:${vitePort}`;
     await waitForHttp(devUrl);
     await runElectronSmoke(devUrl, bridge.url);
-    const payload = bridgeState.postPayloads[0];
-    if (!payload) fail('Chat UI did not send a message');
-    if (payload.text !== 'browser image attachment smoke') fail(`unexpected submitted text: ${payload.text}`);
-    if (!payload.client_message_id) fail('Chat UI did not submit client_message_id for image message idempotency');
+    const payload = bridgeState.publicTaskPayloads[0];
+    if (!payload) fail('Chat UI did not submit the image message through /yachiyo/tasks');
+    if (bridgeState.legacyPostPayloads.length) fail('Chat UI fell back to legacy /ui/chat/messages');
+    if (payload.prompt !== 'browser image attachment smoke') fail(`unexpected submitted prompt: ${payload.prompt}`);
+    if (payload.agent_id !== 'builtin:yachiyo-main') fail(`unexpected public task agent: ${payload.agent_id}`);
+    if (payload.conversation_id !== SESSION_ID) fail(`unexpected public task conversation: ${payload.conversation_id}`);
+    if (!payload.metadata?.client_message_id) fail('Chat UI did not submit client_message_id for image task idempotency');
+    if (payload.metadata?.attachment_count !== CHAT_IMAGE_SMOKE_FILE_NAMES.length) {
+      fail(`unexpected public task attachment_count: ${payload.metadata?.attachment_count}`);
+    }
     if (!Array.isArray(payload.attachments) || payload.attachments.length !== CHAT_IMAGE_SMOKE_FILE_NAMES.length) {
       fail(`Chat UI did not submit exactly ${CHAT_IMAGE_SMOKE_FILE_NAMES.length} attachments`);
     }
