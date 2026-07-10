@@ -1354,7 +1354,7 @@ class ChatAPI:
             metadata=metadata,
             allowed_tools=allowed_entrypoint_tools,
             metadata_allowed_tools=allowed_daily_desktop_tools,
-            allow_legacy_fallback=True,
+            allow_legacy_fallback=False,
         )
 
     def _daily_desktop_entrypoint_requests(
@@ -1381,7 +1381,7 @@ class ChatAPI:
             metadata_allowed_tools=allowed_daily_desktop_tools,
             execution_normalized=True,
             include_runtime_context=True,
-            allow_legacy_fallback=True,
+            allow_legacy_fallback=False,
         )
 
     def _daily_desktop_followup_goal_text(

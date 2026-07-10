@@ -248,7 +248,7 @@ def _desktop_candidates_for_quick_message(
         allowed_tools=allowed_tools,
         execution_normalized=True,
         include_runtime_context=True,
-        allow_legacy_fallback=True,
+        allow_legacy_fallback=False,
     )
 
 

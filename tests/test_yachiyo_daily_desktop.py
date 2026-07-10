@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import date, timedelta
+from pathlib import Path
 
 import apps.shell.yachiyo_agent.isolated_provider_session as isolated_provider_session_module
 import apps.shell.yachiyo_agent.planner_execution as planner_execution_module
@@ -19,6 +20,14 @@ from apps.shell.yachiyo_agent.daily_desktop import (
     entrypoint_plan_user_metadata,
     planner_first_daily_desktop_entrypoint_requests,
 )
+
+
+def test_daily_desktop_product_entrypoints_do_not_enable_legacy_intent_fallback() -> None:
+    for path in (
+        Path("apps/shell/chat_api.py"),
+        Path("apps/shell/chat_bridge.py"),
+    ):
+        assert "allow_legacy_fallback=True" not in path.read_text(encoding="utf-8")
 
 
 def test_daily_desktop_runtime_plan_reuses_one_planner_decision(monkeypatch) -> None:

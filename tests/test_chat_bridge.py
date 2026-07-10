@@ -1217,7 +1217,7 @@ def test_chat_bridge_quick_message_discovers_data_source_with_main_chat_tools(
         store.close()
 
 
-def test_chat_bridge_quick_message_keeps_legacy_fallback_inside_main_chat_policy(
+def test_chat_bridge_quick_message_routes_runtime_planner_inside_main_chat_policy(
     tmp_path,
 ):
     store = ChatStore(db_path=str(tmp_path / "chat.db"))
@@ -1247,7 +1247,15 @@ def test_chat_bridge_quick_message_keeps_legacy_fallback_inside_main_chat_policy
 
         assert result["ok"] is True
         assert result["task_id"] == "task-policy"
-        assert "agent_task" not in result
+        agent_task = result["agent_task"]
+        assert agent_task["task_id"] == "task-policy"
+        assert agent_task["runtime_execution_envelope"]["intent_kind"] == "web_research"
+        assert agent_task["runtime_execution_envelope"]["source"] == "runtime_planner"
+        assert agent_task["task_core"]["todos"][0]["tool_name"] == "browser.open_url"
+        assert all(
+            event["payload"].get("source") != "daily_desktop_intent"
+            for event in agent_task["recent_events"]
+        )
     finally:
         store.close()
 

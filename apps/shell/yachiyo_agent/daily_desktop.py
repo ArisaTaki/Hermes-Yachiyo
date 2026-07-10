@@ -1467,7 +1467,7 @@ def daily_desktop_entrypoint_runtime_plan(
     metadata: Mapping[str, Any] | None = None,
     allowed_tools: Sequence[str] | None = None,
     metadata_allowed_tools: Sequence[str] | None = None,
-    allow_legacy_fallback: bool = True,
+    allow_legacy_fallback: bool = False,
 ) -> DailyDesktopEntrypointRuntimePlan:
     """Plan once, then derive entrypoint and Runtime execution projections."""
 
