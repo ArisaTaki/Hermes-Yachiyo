@@ -735,18 +735,29 @@ class LegacyChatTaskStarter:
             return None
 
         metadata = request.get("metadata") if isinstance(request.get("metadata"), dict) else {}
+        attachments = [
+            dict(item)
+            for item in request.get("attachments") or []
+            if isinstance(item, dict)
+        ]
         client_message_id = str(
             metadata.get("client_message_id")
             or metadata.get("idempotency_key")
             or metadata.get("client_task_id")
             or ""
         ).strip()
-        result = ChatAPI(self._app_runtime).send_runnable_message_in_session(
+        send_message = ChatAPI(self._app_runtime).send_runnable_message_in_session
+        send_kwargs = {
+            "runnable_id": agent_id,
+            "client_message_id": client_message_id,
+            "metadata": metadata,
+        }
+        if attachments:
+            send_kwargs["attachments"] = attachments
+        result = send_message(
             str(request.get("conversation_id") or ""),
             str(request.get("prompt") or ""),
-            runnable_id=agent_id,
-            client_message_id=client_message_id,
-            metadata=metadata,
+            **send_kwargs,
         )
         if result.get("ok") is False:
             raise ValueError(str(result.get("error") or "发送 Agent 任务失败"))
@@ -772,14 +783,18 @@ class LegacyChatTaskStarter:
         if not run_id:
             if agent_id != MAIN_CHAT_AGENT_ID or not task_id:
                 return None
-            executed = self._execute_main_daily_desktop_task(
-                task_id=task_id,
-                conversation_id=conversation_id,
-                prompt=str(request.get("prompt") or request.get("goal") or ""),
-                metadata=metadata,
-                runtime_execution_envelope=request.get("runtime_execution_envelope"),
-                direct_tool_request=request.get("direct_tool_request"),
-                direct_tool_requests=request.get("direct_tool_requests"),
+            executed = (
+                None
+                if attachments
+                else self._execute_main_daily_desktop_task(
+                    task_id=task_id,
+                    conversation_id=conversation_id,
+                    prompt=str(request.get("prompt") or request.get("goal") or ""),
+                    metadata=metadata,
+                    runtime_execution_envelope=request.get("runtime_execution_envelope"),
+                    direct_tool_request=request.get("direct_tool_request"),
+                    direct_tool_requests=request.get("direct_tool_requests"),
+                )
             )
             if executed is not None:
                 return executed

@@ -124,6 +124,16 @@ def planner_enriched_chat_request(
     metadata = _normalized_entrypoint_metadata(
         payload.get("metadata") if isinstance(payload.get("metadata"), Mapping) else {}
     )
+    attachments = [
+        item
+        for item in payload.get("attachments") or []
+        if isinstance(item, Mapping)
+    ]
+    if attachments:
+        metadata["yachiyo_attachment_input"] = True
+        metadata["yachiyo_attachment_count"] = len(attachments)
+        payload["metadata"] = metadata
+        return payload
     request_allowed_tools = _request_allowed_tools(payload)
     effective_allowed_tools = allowed_tools or request_allowed_tools
     decision = runtime_planner_decision(

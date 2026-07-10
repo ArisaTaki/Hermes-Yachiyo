@@ -11441,6 +11441,34 @@ def test_start_chat_task_request_keeps_runnable_target_fields() -> None:
     }
 
 
+def test_start_chat_task_request_keeps_public_attachments() -> None:
+    request = StartChatTaskRequest(
+        prompt="Analyze this image",
+        conversation_id="chat-1",
+        attachments=[
+            {
+                "id": "attachment-1",
+                "name": "chart.png",
+                "mime_type": "image/png",
+                "size": 8,
+                "data_url": "data:image/png;base64,ZmFrZS1wbmc=",
+            }
+        ],
+    )
+
+    payload = request.model_dump(mode="json", exclude_none=True)
+
+    assert payload["attachments"] == [
+        {
+            "id": "attachment-1",
+            "name": "chart.png",
+            "mime_type": "image/png",
+            "size": 8,
+            "data_url": "data:image/png;base64,ZmFrZS1wbmc=",
+        }
+    ]
+
+
 def test_studio_save_requests_keep_public_field_names() -> None:
     agent = SaveAgentRequest(
         agent_id="agent-1",

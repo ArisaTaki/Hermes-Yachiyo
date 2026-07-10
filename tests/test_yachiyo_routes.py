@@ -7772,6 +7772,75 @@ async def test_yachiyo_task_route_uses_chat_backed_main_agent_entry(monkeypatch:
 
 
 @pytest.mark.asyncio
+async def test_yachiyo_task_route_keeps_main_chat_attachments_in_public_entry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime = _FakeAgentRuntime()
+    app_runtime = SimpleNamespace(
+        agent_runtime_service=runtime,
+        chat_session=SimpleNamespace(session_id="chat-1"),
+        chat_calls=[],
+    )
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(runtime=app_runtime)))
+
+    class FakeChatAPI:
+        def __init__(self, app_runtime: Any) -> None:
+            self._app_runtime = app_runtime
+
+        def send_runnable_message_in_session(
+            self,
+            session_id: str,
+            text: str,
+            *,
+            runnable_id: str = "",
+            client_message_id: str = "",
+            metadata: dict[str, Any] | None = None,
+            attachments: list[dict[str, Any]] | None = None,
+        ) -> dict[str, Any]:
+            self._app_runtime.chat_calls.append(
+                {
+                    "session_id": session_id,
+                    "text": text,
+                    "runnable_id": runnable_id,
+                    "client_message_id": client_message_id,
+                    "metadata": metadata,
+                    "attachments": attachments,
+                }
+            )
+            return {
+                "ok": True,
+                "task_id": "chat-image-task-1",
+                "session_id": "chat-1",
+                "status": "pending",
+            }
+
+    monkeypatch.setattr(legacy_ports, "ChatAPI", FakeChatAPI)
+    attachment = {
+        "id": "attachment-1",
+        "name": "chart.png",
+        "mime_type": "image/png",
+        "size": 8,
+        "data_url": "data:image/png;base64,ZmFrZS1wbmc=",
+    }
+
+    started = await yachiyo.start_task(
+        yachiyo.StartChatTaskRequest(
+            prompt="分析这张图",
+            conversation_id="chat-1",
+            agent_id="builtin:yachiyo-main",
+            attachments=[attachment],
+            metadata={"client_message_id": "client-image-1"},
+        ),
+        request,
+    )
+
+    assert started["task_id"] == "chat-image-task-1"
+    assert started["conversation_id"] == "chat-1"
+    assert app_runtime.chat_calls[0]["attachments"] == [attachment]
+    assert not any(call[0] == "create_run_for_runnable_async" for call in runtime.calls)
+
+
+@pytest.mark.asyncio
 async def test_yachiyo_task_route_defaults_launcher_task_to_chat_backed_main_agent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

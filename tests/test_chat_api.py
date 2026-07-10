@@ -12597,6 +12597,40 @@ def test_main_chat_runnable_id_creates_normal_chat_task(tmp_path, monkeypatch):
         store.close()
 
 
+def test_main_chat_runnable_session_preserves_attachments(tmp_path, monkeypatch):
+    monkeypatch.setenv("OHA_YACHIYO_HOME", str(tmp_path / "oha-yachiyo-home"))
+    api, runtime, store = _make_api(tmp_path)
+    data_url = "data:image/png;base64," + base64.b64encode(b"fake-png").decode("ascii")
+
+    try:
+        result = api.send_runnable_message_in_session(
+            "s1",
+            "分析这张图",
+            runnable_id=MAIN_CHAT_AGENT_ID,
+            client_message_id="main-chat-image-1",
+            attachments=[
+                {
+                    "id": "attachment-1",
+                    "name": "chart.png",
+                    "mime_type": "image/png",
+                    "size": 8,
+                    "data_url": data_url,
+                }
+            ],
+        )
+
+        assert result["ok"] is True
+        task = runtime.state.get_task(result["task_id"])
+        assert task is not None
+        assert task.attachments[0]["name"] == "chart.png"
+        assert Path(task.attachments[0]["path"]).read_bytes() == b"fake-png"
+        user_message = runtime.chat_session.get_messages()[0]
+        assert user_message.attachments[0]["name"] == "chart.png"
+        assert user_message.metadata["client_message_id"] == "main-chat-image-1"
+    finally:
+        store.close()
+
+
 def test_agent_mention_session_title_uses_goal_without_mention(tmp_path, monkeypatch):
     api, runtime, store = _make_api(tmp_path)
     agent = {

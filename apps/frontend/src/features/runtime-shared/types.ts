@@ -1821,6 +1821,15 @@ export type StartChatTaskRequest = {
   agent_id?: string | null;
   workflow_id?: string | null;
   group_id?: string | null;
+  attachments?: Array<{
+    id: string;
+    name: string;
+    mime_type: string;
+    size: number;
+    width?: number;
+    height?: number;
+    data_url: string;
+  }>;
   metadata?: Record<string, unknown>;
 };
 

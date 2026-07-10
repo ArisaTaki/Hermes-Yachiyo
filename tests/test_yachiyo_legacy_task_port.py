@@ -353,6 +353,32 @@ def test_legacy_runtime_port_forwards_runtime_execution_plan_to_runnable_run() -
     assert "daily_desktop_policy_overlay" not in create_call
 
 
+def test_planner_enriched_chat_request_defers_attachment_planning() -> None:
+    request = planner_enriched_chat_request(
+        {
+            "prompt": "打开图片里的应用并整理数据",
+            "conversation_id": "chat-1",
+            "attachments": [
+                {
+                    "id": "attachment-1",
+                    "name": "screen.png",
+                    "mime_type": "image/png",
+                    "data_url": "data:image/png;base64,c2NyZWVu",
+                }
+            ],
+            "metadata": {"source": "chat"},
+        }
+    )
+
+    assert request["attachments"][0]["id"] == "attachment-1"
+    assert request["metadata"]["source"] == "chat"
+    assert request["metadata"]["yachiyo_attachment_input"] is True
+    assert request["metadata"]["yachiyo_attachment_count"] == 1
+    assert "yachiyo_runtime_planner" not in request["metadata"]
+    assert "runtime_execution_envelope" not in request
+    assert "direct_tool_requests" not in request
+
+
 def test_legacy_runtime_port_appends_runtime_planner_events_when_available() -> None:
     runtime = _PlannerEventFakeRuntime()
 

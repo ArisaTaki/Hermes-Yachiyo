@@ -767,18 +767,22 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     focusComposerSoon();
     const clientMessageId = createClientMessageId();
     try {
-      const shouldTryPublicTask = (
-        outgoingAttachments.length === 0
-        && String(activeSessionContext?.conversation_kind || '') !== 'group'
-      );
-      const publicTaskTarget = shouldTryPublicTask
+      const isGroupConversation = String(activeSessionContext?.conversation_kind || '') === 'group';
+      const publicTaskCandidate = !isGroupConversation
         ? yachiyoPublicTaskTarget(text, runnables, assistantProfile)
         : null;
-      const dailyDesktopTaskPrompt = shouldTryPublicTask && !publicTaskTarget
+      const shouldTryPublicTask = !isGroupConversation && (
+        outgoingAttachments.length === 0 || !publicTaskCandidate
+      );
+      const publicTaskTarget = shouldTryPublicTask ? publicTaskCandidate : null;
+      const dailyDesktopTaskPrompt = shouldTryPublicTask
+        && !publicTaskTarget
+        && outgoingAttachments.length === 0
         ? yachiyoDailyDesktopTaskPrompt(text)
         : null;
       if (shouldTryPublicTask) {
         const handled = await startPublicYachiyoTask({
+          attachments: outgoingAttachments,
           clientMessageId,
           conversationId: sessions?.current_session_id || latestChatSnapshotRef.current.currentSessionId || null,
           prompt: publicTaskTarget ? yachiyoPublicTaskPrompt(text, publicTaskTarget) : dailyDesktopTaskPrompt || text,

@@ -2114,13 +2114,14 @@ class ChatAPI:
         runnable_id: str = "",
         client_message_id: str = "",
         metadata: dict[str, Any] | None = None,
+        attachments: list[dict[str, Any]] | None = None,
     ) -> Dict[str, Any]:
         """Send an Agent/Workflow message through the existing Chat runtime path."""
 
         def _send() -> Dict[str, Any]:
             result = self.send_message(
                 text,
-                [],
+                attachments or [],
                 runnable_id=runnable_id,
                 client_message_id=client_message_id,
                 metadata=metadata,

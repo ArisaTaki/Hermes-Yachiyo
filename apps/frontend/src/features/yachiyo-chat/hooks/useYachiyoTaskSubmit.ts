@@ -2,13 +2,14 @@ import { useCallback } from 'react';
 
 import { startYachiyoTask } from '../api';
 import { chatRunnableRunningStatusText, chatRunnableSettledStatusText } from '../taskStatusText';
-import type { AgentTaskSnapshot } from '../types';
+import type { AgentTaskSnapshot, PendingAttachment } from '../types';
 
 const MAIN_CHAT_AGENT_ID = 'builtin:yachiyo-main';
 
 type StartPublicYachiyoTaskRequest = {
   clientMessageId: string;
   conversationId: string | null;
+  attachments?: PendingAttachment[];
   metadata?: Record<string, unknown>;
   prompt: string;
   runnableId?: string | null;
@@ -42,6 +43,7 @@ export function useYachiyoTaskSubmit({
   setStatus,
 }: UseYachiyoTaskSubmitOptions) {
   const startPublicYachiyoTask = useCallback(async ({
+    attachments,
     clientMessageId,
     conversationId,
     metadata,
@@ -61,6 +63,7 @@ export function useYachiyoTaskSubmit({
       const task = await startYachiyoTask({
         prompt,
         conversation_id: conversationId,
+        ...(attachments?.length ? { attachments } : {}),
         ...(runnableKind === 'workflow' && cleanRunnableId
           ? { workflow_id: cleanRunnableId }
           : {}),
@@ -72,6 +75,7 @@ export function useYachiyoTaskSubmit({
           : {}),
         metadata: {
           client_message_id: clientMessageId,
+          attachment_count: attachments?.length || 0,
           source: 'chat',
           runnable_kind: runnableKind || 'main',
           ...metadata,
