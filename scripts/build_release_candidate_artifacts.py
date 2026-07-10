@@ -15,6 +15,11 @@ BUILD_METADATA_FILE = ROOT / "apps" / "frontend" / "public" / "oha-yachiyo-build
 BACKEND_ARTIFACT = ROOT / "dist" / "backend" / (
     "oha-yachiyo-backend.exe" if sys.platform.startswith("win") else "oha-yachiyo-backend"
 )
+DESKTOP_PROVIDER_ARTIFACT = ROOT / "dist" / "desktop-provider" / (
+    "oha-yachiyo-desktop-provider.exe"
+    if sys.platform.startswith("win")
+    else "oha-yachiyo-desktop-provider"
+)
 ELECTRON_DIST_DIR = ROOT / "dist" / "electron"
 
 
@@ -69,6 +74,7 @@ def build_release_candidate_artifacts(
     channel: str,
     repository: str | None = None,
     clean_backend: bool = True,
+    clean_desktop_provider: bool = True,
     clean_electron: bool = True,
     built_at: str | None = None,
 ) -> dict[str, Path]:
@@ -94,6 +100,14 @@ def build_release_candidate_artifacts(
             backend_command.append("--clean")
         _run(backend_command)
 
+        desktop_provider_command = [
+            sys.executable,
+            "scripts/build_virtual_desktop_guest.py",
+        ]
+        if clean_desktop_provider:
+            desktop_provider_command.append("--clean")
+        _run(desktop_provider_command)
+
         if clean_electron:
             shutil.rmtree(ELECTRON_DIST_DIR, ignore_errors=True)
         _run(["npm", "--prefix", "apps/frontend", "run", "dist:mac"])
@@ -102,6 +116,7 @@ def build_release_candidate_artifacts(
 
     return {
         "backend": BACKEND_ARTIFACT,
+        "desktop_provider": DESKTOP_PROVIDER_ARTIFACT,
         "dmg": _latest_dmg_artifact(),
         "metadata": BUILD_METADATA_FILE,
     }
@@ -129,6 +144,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Do not pass --clean to scripts/build_backend.py.",
     )
     parser.add_argument(
+        "--no-clean-desktop-provider",
+        action="store_true",
+        help="Do not pass --clean to the virtual desktop guest provider build.",
+    )
+    parser.add_argument(
         "--no-clean-electron",
         action="store_true",
         help="Do not remove old dist/electron output before running electron-builder.",
@@ -139,6 +159,7 @@ def main(argv: list[str] | None = None) -> int:
             channel=args.channel,
             repository=args.repository,
             clean_backend=not args.no_clean_backend,
+            clean_desktop_provider=not args.no_clean_desktop_provider,
             clean_electron=not args.no_clean_electron,
             built_at=args.built_at,
         )
@@ -146,6 +167,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"release candidate artifact build failed: {exc}", file=sys.stderr)
         return 1
     print(f"packaged backend: {artifacts['backend']}")
+    print(f"virtual desktop guest provider: {artifacts['desktop_provider']}")
     print(f"Electron DMG: {artifacts['dmg']}")
     print(f"restored tracked build metadata: {artifacts['metadata']}")
     return 0

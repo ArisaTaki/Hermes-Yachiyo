@@ -307,6 +307,7 @@ def test_public_release_gate_defaults_to_safe_preflight_with_demo_blockers(
     assert "tests/test_oha_desktop_agent_release_smoke.py" in release_pytest_command
     assert "tests/test_virtual_desktop_guest_provider.py" in release_pytest_command
     assert "tests/test_virtual_desktop_ssh_bridge.py" in release_pytest_command
+    assert "tests/test_build_virtual_desktop_guest.py" in release_pytest_command
     assert "tests/test_oha_parity_summary.py" in release_pytest_command
     public_demo_command = next(
         command for command in commands if "scripts/run_public_demo_smokes.py" in command

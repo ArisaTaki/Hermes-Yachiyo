@@ -33,6 +33,8 @@ files:
 extraResources:
   - from: ../../dist/backend/oha-yachiyo-backend
     to: backend/oha-yachiyo-backend
+  - from: ../../dist/desktop-provider/oha-yachiyo-desktop-provider
+    to: desktop-provider/oha-yachiyo-desktop-provider
   - from: ../../assets
     to: assets
     filter:

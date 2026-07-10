@@ -53,13 +53,24 @@ guest Provider、建立仅监听 loopback 的 tunnel、重写启动 endpoint，�
 session 时一并终止 SSH/guest 进程。Host token 不会转发到 SSH 子进程；guest 只读取
 上面的 `0600` token file。
 
+发布构建会生成独立的 guest executable，不要求 VM 安装 Python 或保留完整仓库：
+
+```bash
+python scripts/build_virtual_desktop_guest.py --clean
+# dist/desktop-provider/oha-yachiyo-desktop-provider
+```
+
+`scripts/build_release_candidate_artifacts.py` 会自动构建该文件，并放入
+`Oha-Yachiyo.app/Contents/Resources/desktop-provider/`。将它复制到 VM，例如
+`/usr/local/bin/oha-yachiyo-desktop-provider`，并保持可执行权限。
+
 ```bash
 export OHA_YACHIYO_VIRTUAL_DESKTOP_SSH_TARGET="yachiyo@<vm-address>"
-export OHA_YACHIYO_VIRTUAL_DESKTOP_REMOTE_REPO="/Users/yachiyo/Hermes-Yachiyo"
+export OHA_YACHIYO_VIRTUAL_DESKTOP_REMOTE_EXECUTABLE="/usr/local/bin/oha-yachiyo-desktop-provider"
 
 python scripts/run_ssh_virtual_desktop_provider.py \
   --ssh-target "$OHA_YACHIYO_VIRTUAL_DESKTOP_SSH_TARGET" \
-  --remote-repo "$OHA_YACHIYO_VIRTUAL_DESKTOP_REMOTE_REPO" \
+  --remote-provider-executable "$OHA_YACHIYO_VIRTUAL_DESKTOP_REMOTE_EXECUTABLE" \
   --session-id "$OHA_YACHIYO_VIRTUAL_DESKTOP_SESSION_ID" \
   --manifest > tmp/oha-virtual-desktop-provider.manifest.json
 
@@ -70,7 +81,8 @@ Manifest 的 `entrypoint` 会让现有 `IsolatedDesktopProviderSessionManager` �
 bridge。SSH 必须使用已配置的 key/agent，并启用 host key verification；可通过重复的
 `--ssh-option` 传入现有 OpenSSH 配置项。Bridge 保留本地 `SSH_AUTH_SOCK` 用于认证，
 但强制 `ForwardAgent=no`，不会把本地 SSH agent 转发进 VM。`--remote-repo` 必须是
-guest 内的绝对路径。
+guest 内的绝对路径，仅用于开发期源码模式；发布模式优先使用
+`--remote-provider-executable`。
 
 ### 外部 Provider
 

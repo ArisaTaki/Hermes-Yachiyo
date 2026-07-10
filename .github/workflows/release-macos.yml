@@ -288,6 +288,9 @@ jobs:
             tests/test_model_profiles.py \
             tests/test_provider_catalog_sync.py \
             tests/test_build_backend.py \
+            tests/test_build_virtual_desktop_guest.py \
+            tests/test_virtual_desktop_guest_provider.py \
+            tests/test_virtual_desktop_ssh_bridge.py \
             tests/test_build_metadata.py \
             tests/test_prepare_app_build_metadata.py \
             tests/test_release_candidate_verifier.py \
@@ -372,6 +375,9 @@ jobs:
 
       - name: Build packaged backend
         run: python scripts/build_backend.py --clean
+
+      - name: Build virtual desktop guest provider
+        run: python scripts/build_virtual_desktop_guest.py --clean
 
       - name: Import macOS self-signing certificate
         id: macos_signing
@@ -486,7 +492,7 @@ jobs:
             exit 1
           fi
 
-          package_scan_paths=(dist/backend)
+          package_scan_paths=(dist/backend dist/desktop-provider)
           app_resource_dirs=()
           while IFS= read -r -d '' resources_dir; do
             app_resource_dirs+=("${resources_dir}")

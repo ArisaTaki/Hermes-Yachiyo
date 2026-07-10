@@ -34,6 +34,16 @@ def _config() -> SshVirtualDesktopBridgeConfig:
     )
 
 
+def _packaged_config() -> SshVirtualDesktopBridgeConfig:
+    return SshVirtualDesktopBridgeConfig(
+        ssh_target="yachiyo@192.0.2.10",
+        remote_repo="",
+        session_id="vm-session-1",
+        remote_provider_executable="/usr/local/bin/oha-yachiyo-desktop-provider",
+        local_port=39097,
+    )
+
+
 def test_ssh_virtual_desktop_command_uses_tunnel_without_forwarding_token() -> None:
     command = ssh_virtual_desktop_command(_config())
     rendered = " ".join(command)
@@ -45,6 +55,15 @@ def test_ssh_virtual_desktop_command_uses_tunnel_without_forwarding_token() -> N
     assert "OHA_YACHIYO_DESKTOP_PROVIDER_TOKEN" not in rendered
     assert "StrictHostKeyChecking=yes" in command
     assert "ForwardAgent=no" in command
+
+
+def test_ssh_virtual_desktop_command_runs_packaged_guest_without_python() -> None:
+    command = ssh_virtual_desktop_command(_packaged_config())
+    rendered = " ".join(command)
+
+    assert "/usr/local/bin/oha-yachiyo-desktop-provider" in rendered
+    assert "run_virtual_desktop_guest_provider.py" not in rendered
+    assert "python3" not in rendered
 
 
 def test_ssh_virtual_desktop_manifest_passes_static_contract() -> None:
@@ -60,6 +79,15 @@ def test_ssh_virtual_desktop_manifest_passes_static_contract() -> None:
     assert manifest["endpoint_urls"]["execute"] == (
         "http://127.0.0.1:39097/tools/execute"
     )
+
+
+def test_packaged_ssh_manifest_omits_source_repo_requirement() -> None:
+    manifest = ssh_virtual_desktop_provider_manifest(_packaged_config())
+    args = manifest["entrypoint"]["args"]
+
+    assert "--remote-provider-executable" in args
+    assert "--remote-repo" not in args
+    assert manifest["ssh_bridge"]["remote_repo"] == ""
 
 
 def test_ssh_virtual_desktop_manifest_is_startable_by_session_manager(

@@ -63,6 +63,16 @@ Oha-Yachiyo.app/Contents/Resources/backend/oha-yachiyo-backend
 
 这由 `apps/frontend/electron/main.ts` 中的 packaged backend 路径控制。`scripts/build_backend.py` 使用 PyInstaller 把 `apps.desktop_backend.app` 冻结为单文件后端，`apps/frontend/electron-builder.yml` 再把它放进 Electron Resources。
 
+同一发布构建还会生成可复制到 macOS VM 的独立桌面 guest-agent：
+
+```text
+Oha-Yachiyo.app/Contents/Resources/desktop-provider/oha-yachiyo-desktop-provider
+```
+
+`scripts/build_virtual_desktop_guest.py` 使用独立 PyInstaller work/dist 目录构建它；
+guest-agent 不要求 VM 保留源码仓库或 Python 环境。详细的 VM marker、token file 和
+SSH bridge 部署方式见 `docs/desktop-provider-contract.md`。
+
 打包版默认 Bridge 地址是 `http://127.0.0.1:18420`，开发模式默认是
 `http://127.0.0.1:8420`。如果打包版启动时发现 `18420` 已被占用，会临时
 分配一个空闲本地端口并传给内置 Python backend，避免连接到本地开发
@@ -87,9 +97,9 @@ Oha-Yachiyo.app/Contents/Resources/backend/oha-yachiyo-backend
 2. 安装 Python 与 Node 依赖。
 3. 运行关键 smoke tests。
 4. 通过 `python scripts/prepare_app_build_metadata.py` 写入当前 channel / commit / latest URL 的 build metadata。
-5. PyInstaller 构建后端，并把同一份 build metadata 打入后端可执行文件。
+5. PyInstaller 构建主后端和独立 virtual desktop guest provider，并把 build metadata 打入主后端可执行文件。
 6. 如果配置了自签名证书，electron-builder 生成 `.app` 目录后由脚本签名 `.app` 并创建未签名 DMG；否则 electron-builder 直接生成 unsigned DMG。
-7. Verify packaged app resources 会检查 `.app` 结构、后端可执行文件、`app.asar`、关键 UI selector 和 packaged resources 旧身份扫描；启用自签名时，还会对最终 packaged `.app` 运行 `codesign --verify --deep --strict --verbose=2`。
+7. Verify packaged app resources 会检查 `.app` 结构、主后端、virtual desktop guest provider、`app.asar`、关键 UI selector 和 packaged resources 旧身份扫描；启用自签名时，还会对最终 packaged `.app` 运行 `codesign --verify --deep --strict --verbose=2`。
 8. 生成版本化 DMG、latest DMG、SHA256、latest JSON 和 release notes。
 9. 对 `release/` 目录执行 binary-safe release artifact scan，确认最终 DMG、JSON、checksum 和 notes 没有旧产品身份或旧执行内核 token，并校验每个 DMG 的 `.sha256` 文件、latest JSON 的 `name` / `channel` / `branch` / `source_branch` / `version` / `commit` / `short_commit` / `build_number` / `run_number` / `run_id` / `tag` / `signing` / `published_at` / `changelog` 元数据格式和一致性，以及 latest JSON 的 `dmg_name` / `sha256` 均与同目录 DMG 内容一致；随后运行最终 RC gate，并在配置真实 provider smoke secrets 时把 opt-in streaming/tool-call/native Agent/native Workflow full-chain provider smoke 结果写入 `release/rc-verification.json`。
 10. 上传 workflow artifact，并创建或更新 GitHub Release 与 latest channel release。

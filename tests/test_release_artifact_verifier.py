@@ -1045,6 +1045,8 @@ def _write_packaged_app_bundle(
     identifier=verifier.PACKAGED_APP_IDENTIFIER,
     executable_mode=0o755,
     backend_mode=0o755,
+    desktop_provider_mode=0o755,
+    include_desktop_provider=True,
     include_asar=True,
     include_permission_copy=True,
     include_backend_metadata=True,
@@ -1083,6 +1085,26 @@ def _write_packaged_app_bundle(
         backend_bytes += b"\n" + verifier.PACKAGED_BACKEND_BUILD_METADATA_MARKER + b"\n"
     backend.write_bytes(backend_bytes)
     backend.chmod(backend_mode)
+    if include_desktop_provider:
+        desktop_provider = app_dir / verifier.PACKAGED_DESKTOP_PROVIDER_RELATIVE_PATH
+        desktop_provider.parent.mkdir(parents=True, exist_ok=True)
+        desktop_provider.write_text(
+            "#!/bin/sh\n"
+            "cat <<'JSON'\n"
+            + json.dumps(
+                {
+                    "ok": True,
+                    "desktop_session_kind": "virtual_desktop",
+                    "capabilities": ["idempotent_tool_requests"],
+                    "supported_tools": list(
+                        verifier.PACKAGED_DESKTOP_PROVIDER_REQUIRED_TOOLS
+                    ),
+                }
+            )
+            + "\nJSON\n",
+            encoding="utf-8",
+        )
+        desktop_provider.chmod(desktop_provider_mode)
     if include_asar:
         asar = app_dir / verifier.PACKAGED_ASAR_RELATIVE_PATH
         asar.parent.mkdir(parents=True, exist_ok=True)
@@ -1136,6 +1158,7 @@ def test_verifier_reports_incomplete_packaged_app_bundle(tmp_path):
         identifier="io.github.arisataki.old-yachiyo",
         executable_mode=0o644,
         backend_mode=0o644,
+        desktop_provider_mode=0o644,
         include_asar=False,
     )
 
@@ -1152,6 +1175,7 @@ def test_verifier_reports_incomplete_packaged_app_bundle(tmp_path):
     assert f"packaged app bundle identifier must be {verifier.PACKAGED_APP_IDENTIFIER}" in messages
     assert "packaged app main executable is not executable" in messages
     assert "packaged backend executable is not executable" in messages
+    assert "packaged virtual desktop guest provider is not executable" in messages
     assert verifier.Finding(
         app_dir / verifier.PACKAGED_ASAR_RELATIVE_PATH,
         "packaged Electron app.asar is missing from app resources",
@@ -1192,6 +1216,48 @@ def test_verifier_reports_packaged_backend_missing_build_metadata(tmp_path):
     assert verifier.Finding(
         app_dir / verifier.PACKAGED_BACKEND_RELATIVE_PATH,
         "packaged backend executable must include the app build metadata resource",
+    ) in findings
+
+
+def test_verifier_reports_missing_packaged_desktop_provider(tmp_path):
+    app_dir = _write_packaged_app_bundle(
+        tmp_path,
+        include_desktop_provider=False,
+    )
+
+    findings = verifier.verify_release_artifacts(
+        root=tmp_path,
+        paths=[],
+        check_required_files=False,
+        check_release_security_guards=False,
+        check_packaged_app_bundle=True,
+        allow_binary_targets=True,
+    )
+
+    assert verifier.Finding(
+        app_dir / verifier.PACKAGED_DESKTOP_PROVIDER_RELATIVE_PATH,
+        "packaged virtual desktop guest provider is missing from app resources",
+    ) in findings
+
+
+def test_verifier_rejects_packaged_desktop_provider_with_invalid_manifest(tmp_path):
+    app_dir = _write_packaged_app_bundle(tmp_path)
+    desktop_provider = app_dir / verifier.PACKAGED_DESKTOP_PROVIDER_RELATIVE_PATH
+    desktop_provider.write_text("#!/bin/sh\necho not-json\n", encoding="utf-8")
+    desktop_provider.chmod(0o755)
+
+    findings = verifier.verify_release_artifacts(
+        root=tmp_path,
+        paths=[],
+        check_required_files=False,
+        check_release_security_guards=False,
+        check_packaged_app_bundle=True,
+        allow_binary_targets=True,
+    )
+
+    assert verifier.Finding(
+        desktop_provider,
+        "packaged virtual desktop guest provider returned invalid manifest JSON",
     ) in findings
 
 
@@ -1909,7 +1975,10 @@ def test_verifier_requires_release_workflow_binary_scans_packaged_outputs(tmp_pa
     assert "macOS release workflow must label alpha releases separately" in messages
     assert "macOS release workflow must publish alpha builds to alpha-latest metadata" in messages
     assert "macOS release workflow must publish experimental Oha builds to oha-develop-latest metadata" in messages
-    assert "macOS release workflow must scan the packaged backend binary" in messages
+    assert (
+        "macOS release workflow must scan backend and desktop provider binaries"
+        in messages
+    )
     assert "macOS release workflow must discover packaged app resource directories" in messages
     assert "macOS release workflow must binary-scan packaged app resources" in messages
     assert "macOS release workflow must validate packaged app bundle structure" in messages

@@ -54,6 +54,7 @@ class SshVirtualDesktopBridgeConfig:
     provider_id: str = DEFAULT_PROVIDER_ID
     remote_python: str = DEFAULT_REMOTE_PYTHON
     remote_provider_script: str = DEFAULT_REMOTE_PROVIDER_SCRIPT
+    remote_provider_executable: str = ""
     identity_file: str = ""
     ssh_options: tuple[str, ...] = ()
 
@@ -62,12 +63,18 @@ def ssh_virtual_desktop_command(
     config: SshVirtualDesktopBridgeConfig,
 ) -> list[str]:
     _validate_config(config)
-    remote_script = _remote_path(config.remote_repo, config.remote_provider_script)
+    provider_command = (
+        (config.remote_provider_executable,)
+        if config.remote_provider_executable
+        else (
+            config.remote_python,
+            _remote_path(config.remote_repo, config.remote_provider_script),
+        )
+    )
     remote_command = " ".join(
         shlex.quote(value)
         for value in (
-            config.remote_python,
-            remote_script,
+            *provider_command,
             "--host",
             "127.0.0.1",
             "--port",
@@ -130,6 +137,7 @@ def ssh_virtual_desktop_provider_manifest(
                 "ssh_target": config.ssh_target,
                 "remote_repo": config.remote_repo,
                 "remote_provider_script": config.remote_provider_script,
+                "remote_provider_executable": config.remote_provider_executable,
                 "local_host": config.local_host,
                 "local_port": config.local_port,
                 "guest_port": config.guest_port,
@@ -313,27 +321,35 @@ def _manifest_entrypoint_args(config: SshVirtualDesktopBridgeConfig) -> list[str
     args = [
         "--ssh-target",
         config.ssh_target,
-        "--remote-repo",
-        config.remote_repo,
-        "--session-id",
-        config.session_id,
-        "--guest-marker",
-        config.guest_marker,
-        "--guest-token-file",
-        config.guest_token_file,
-        "--local-host",
-        config.local_host,
-        "--local-port",
-        str(config.local_port),
-        "--guest-port",
-        str(config.guest_port),
-        "--provider-id",
-        config.provider_id,
-        "--remote-python",
-        config.remote_python,
-        "--remote-provider-script",
-        config.remote_provider_script,
     ]
+    if config.remote_repo:
+        args.extend(["--remote-repo", config.remote_repo])
+    args.extend(
+        [
+            "--session-id",
+            config.session_id,
+            "--guest-marker",
+            config.guest_marker,
+            "--guest-token-file",
+            config.guest_token_file,
+            "--local-host",
+            config.local_host,
+            "--local-port",
+            str(config.local_port),
+            "--guest-port",
+            str(config.guest_port),
+            "--provider-id",
+            config.provider_id,
+            "--remote-python",
+            config.remote_python,
+            "--remote-provider-script",
+            config.remote_provider_script,
+        ]
+    )
+    if config.remote_provider_executable:
+        args.extend(
+            ["--remote-provider-executable", config.remote_provider_executable]
+        )
     if config.identity_file:
         args.extend(["--identity-file", config.identity_file])
     for option in config.ssh_options:
@@ -354,6 +370,7 @@ def _config_from_args(args: argparse.Namespace) -> SshVirtualDesktopBridgeConfig
         provider_id=args.provider_id,
         remote_python=args.remote_python,
         remote_provider_script=args.remote_provider_script,
+        remote_provider_executable=args.remote_provider_executable,
         identity_file=args.identity_file,
         ssh_options=tuple(args.ssh_option),
     )
@@ -445,10 +462,14 @@ def _remote_path(repo: str, value: str) -> str:
 def _validate_config(config: SshVirtualDesktopBridgeConfig) -> None:
     if not config.ssh_target or config.ssh_target.startswith("-"):
         raise ValueError("SSH target is required and must not start with '-'")
-    if not config.remote_repo:
-        raise ValueError("remote repo path is required")
-    if not config.remote_repo.startswith("/"):
-        raise ValueError("remote repo path must be absolute")
+    if config.remote_provider_executable:
+        if not config.remote_provider_executable.startswith("/"):
+            raise ValueError("remote provider executable path must be absolute")
+    else:
+        if not config.remote_repo:
+            raise ValueError("remote repo path is required")
+        if not config.remote_repo.startswith("/"):
+            raise ValueError("remote repo path must be absolute")
     if not config.session_id:
         raise ValueError("virtual desktop session id is required")
     if config.local_host not in {"127.0.0.1", "localhost", "::1"}:
@@ -461,7 +482,7 @@ def _validate_config(config: SshVirtualDesktopBridgeConfig) -> None:
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--ssh-target", required=True)
-    parser.add_argument("--remote-repo", required=True)
+    parser.add_argument("--remote-repo", default="")
     parser.add_argument("--session-id", required=True)
     parser.add_argument("--guest-marker", default=DEFAULT_REMOTE_GUEST_MARKER)
     parser.add_argument("--guest-token-file", default=DEFAULT_REMOTE_TOKEN_FILE)
@@ -474,6 +495,7 @@ def _parser() -> argparse.ArgumentParser:
         "--remote-provider-script",
         default=DEFAULT_REMOTE_PROVIDER_SCRIPT,
     )
+    parser.add_argument("--remote-provider-executable", default="")
     parser.add_argument("--identity-file", default="")
     parser.add_argument("--ssh-option", action="append", default=[])
     parser.add_argument("--launch-timeout-seconds", type=float, default=30.0)

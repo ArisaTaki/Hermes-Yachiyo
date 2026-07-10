@@ -104,6 +104,8 @@ DEFAULT_SCAN_PATHS: tuple[Path, ...] = (
     Path("docs/release-packaging.md"),
     Path("apps/frontend/electron-builder.yml"),
     Path("scripts/build_backend.py"),
+    Path("scripts/build_virtual_desktop_guest.py"),
+    Path("scripts/run_ssh_virtual_desktop_provider.py"),
     Path("scripts/prepare_app_build_metadata.py"),
     Path("scripts/build_release_candidate_artifacts.py"),
     Path("scripts/refresh_local_rc_signoff.py"),
@@ -270,6 +272,17 @@ PACKAGED_APP_OUTPUT_DIR = Path("dist/electron")
 PACKAGED_APP_NAME = "Oha-Yachiyo.app"
 PACKAGED_APP_IDENTIFIER = "io.github.arisataki.oha-yachiyo"
 PACKAGED_BACKEND_RELATIVE_PATH = Path("Contents/Resources/backend/oha-yachiyo-backend")
+PACKAGED_DESKTOP_PROVIDER_RELATIVE_PATH = Path(
+    "Contents/Resources/desktop-provider/oha-yachiyo-desktop-provider"
+)
+PACKAGED_DESKTOP_PROVIDER_REQUIRED_TOOLS = (
+    "desktop.list_apps",
+    "app.open",
+    "desktop.read_ui",
+    "desktop.click_ui_element",
+    "desktop.safe_type_text",
+    "desktop.verify",
+)
 PACKAGED_BACKEND_BUILD_METADATA_MARKER = b"apps/frontend/public/oha-yachiyo-build.json"
 PACKAGED_ASAR_RELATIVE_PATH = Path("Contents/Resources/app.asar")
 CHAT_IMAGE_ATTACHMENT_SMOKE_SCRIPT = Path("scripts/smoke_chat_image_attachment_ui.mjs")
@@ -676,6 +689,10 @@ TRACKED_GENERATED_PATHS: tuple[str, ...] = (
     "apps/frontend/dist-electron",
 )
 PACKAGING_CONFIG_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
+    (
+        "../../dist/desktop-provider/oha-yachiyo-desktop-provider",
+        "macOS release packaging must include the virtual desktop guest provider",
+    ),
     (
         "npmRebuild: false",
         "macOS release packaging must disable local native dependency rebuilds",
@@ -1244,8 +1261,12 @@ RELEASE_WORKFLOW_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow must document screen recording permission setup",
     ),
     (
-        "package_scan_paths=(dist/backend)",
-        "macOS release workflow must scan the packaged backend binary",
+        "package_scan_paths=(dist/backend dist/desktop-provider)",
+        "macOS release workflow must scan backend and desktop provider binaries",
+    ),
+    (
+        "python scripts/build_virtual_desktop_guest.py --clean",
+        "macOS release workflow must build the virtual desktop guest provider",
     ),
     (
         "find dist/electron -path '*/Oha-Yachiyo.app/Contents/Resources'",
@@ -3370,6 +3391,18 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover packaged backend build command guards",
     ),
     (
+        "tests/test_build_virtual_desktop_guest.py",
+        "macOS release workflow smoke tests must cover virtual desktop guest build guards",
+    ),
+    (
+        "tests/test_virtual_desktop_guest_provider.py",
+        "macOS release workflow smoke tests must cover virtual desktop guest attestation",
+    ),
+    (
+        "tests/test_virtual_desktop_ssh_bridge.py",
+        "macOS release workflow smoke tests must cover the virtual desktop SSH bridge",
+    ),
+    (
         "tests/test_build_metadata.py",
         "macOS release workflow smoke tests must cover release-like build metadata guards",
     ),
@@ -4468,6 +4501,26 @@ def _verify_packaged_app_bundle(
                         )
                     )
 
+        desktop_provider_path = app_dir / PACKAGED_DESKTOP_PROVIDER_RELATIVE_PATH
+        if not desktop_provider_path.is_file():
+            findings.append(
+                Finding(
+                    desktop_provider_path,
+                    "packaged virtual desktop guest provider is missing from app resources",
+                )
+            )
+        elif not os.access(desktop_provider_path, os.X_OK):
+            findings.append(
+                Finding(
+                    desktop_provider_path,
+                    "packaged virtual desktop guest provider is not executable",
+                )
+            )
+        else:
+            findings.extend(
+                _verify_packaged_desktop_provider_manifest(desktop_provider_path)
+            )
+
         asar_path = app_dir / PACKAGED_ASAR_RELATIVE_PATH
         if not asar_path.is_file():
             findings.append(Finding(asar_path, "packaged Electron app.asar is missing from app resources"))
@@ -4502,6 +4555,82 @@ def _verify_packaged_app_bundle(
                             )
                         )
 
+    return findings
+
+
+def _verify_packaged_desktop_provider_manifest(path: Path) -> list[Finding]:
+    try:
+        completed = subprocess.run(
+            [str(path), "--session-id", "packaged-release-check", "--manifest"],
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=15,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return [
+            Finding(
+                path,
+                f"packaged virtual desktop guest provider manifest smoke failed: {exc}",
+            )
+        ]
+    if completed.returncode != 0:
+        return [
+            Finding(
+                path,
+                "packaged virtual desktop guest provider manifest command failed",
+            )
+        ]
+    try:
+        payload = json.loads(completed.stdout)
+    except (TypeError, ValueError):
+        return [
+            Finding(
+                path,
+                "packaged virtual desktop guest provider returned invalid manifest JSON",
+            )
+        ]
+    if not isinstance(payload, dict):
+        return [
+            Finding(
+                path,
+                "packaged virtual desktop guest provider manifest must be an object",
+            )
+        ]
+    findings: list[Finding] = []
+    if payload.get("ok") is not True:
+        findings.append(Finding(path, "packaged virtual desktop guest provider manifest is not ok"))
+    if str(payload.get("desktop_session_kind") or "") != "virtual_desktop":
+        findings.append(
+            Finding(
+                path,
+                "packaged virtual desktop guest provider must declare virtual_desktop",
+            )
+        )
+    capabilities = {
+        str(item or "").strip() for item in payload.get("capabilities", [])
+    }
+    if "idempotent_tool_requests" not in capabilities:
+        findings.append(
+            Finding(
+                path,
+                "packaged virtual desktop guest provider must support idempotent requests",
+            )
+        )
+    supported_tools = {
+        str(item or "").strip() for item in payload.get("supported_tools", [])
+    }
+    missing_tools = sorted(
+        set(PACKAGED_DESKTOP_PROVIDER_REQUIRED_TOOLS) - supported_tools
+    )
+    if missing_tools:
+        findings.append(
+            Finding(
+                path,
+                "packaged virtual desktop guest provider is missing tools: "
+                + ", ".join(missing_tools),
+            )
+        )
     return findings
 
 

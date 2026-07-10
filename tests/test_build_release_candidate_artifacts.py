@@ -20,6 +20,9 @@ def test_build_release_candidate_artifacts_restores_tracked_metadata(
     metadata_path.parent.mkdir(parents=True)
     metadata_path.write_text('{"commit":"dev"}\n', encoding="utf-8")
     backend_path = tmp_path / "dist" / "backend" / "oha-yachiyo-backend"
+    provider_path = (
+        tmp_path / "dist" / "desktop-provider" / "oha-yachiyo-desktop-provider"
+    )
     dmg_path = tmp_path / "dist" / "electron" / "Oha-Yachiyo-0.4.0-arm64.dmg"
     legacy_dmg_path = tmp_path / "dist" / "electron" / "Hermes-Yachiyo-0.1.0-arm64.dmg"
     legacy_app_path = tmp_path / "dist" / "electron" / "mac-arm64" / "Hermes-Yachiyo.app"
@@ -30,6 +33,7 @@ def test_build_release_candidate_artifacts_restores_tracked_metadata(
     monkeypatch.setattr(builder, "ROOT", tmp_path)
     monkeypatch.setattr(builder, "BUILD_METADATA_FILE", metadata_path)
     monkeypatch.setattr(builder, "BACKEND_ARTIFACT", backend_path)
+    monkeypatch.setattr(builder, "DESKTOP_PROVIDER_ARTIFACT", provider_path)
     monkeypatch.setattr(builder, "ELECTRON_DIST_DIR", dmg_path.parent)
 
     def fake_run(command: list[str]) -> None:
@@ -39,6 +43,12 @@ def test_build_release_candidate_artifacts_restores_tracked_metadata(
         elif command[:2] == [sys.executable, "scripts/build_backend.py"]:
             backend_path.parent.mkdir(parents=True)
             backend_path.write_text("backend", encoding="utf-8")
+        elif command[:2] == [
+            sys.executable,
+            "scripts/build_virtual_desktop_guest.py",
+        ]:
+            provider_path.parent.mkdir(parents=True)
+            provider_path.write_text("provider", encoding="utf-8")
         elif command == ["npm", "--prefix", "apps/frontend", "run", "dist:mac"]:
             dmg_path.parent.mkdir(parents=True)
             dmg_path.write_text("dmg", encoding="utf-8")
@@ -63,6 +73,7 @@ def test_build_release_candidate_artifacts_restores_tracked_metadata(
             "2026-06-12T00:00:00Z",
         ],
         [sys.executable, "scripts/build_backend.py", "--clean"],
+        [sys.executable, "scripts/build_virtual_desktop_guest.py", "--clean"],
         ["npm", "--prefix", "apps/frontend", "run", "dist:mac"],
     ]
     assert metadata_path.read_text(encoding="utf-8") == '{"commit":"dev"}\n'
@@ -70,6 +81,7 @@ def test_build_release_candidate_artifacts_restores_tracked_metadata(
     assert not legacy_app_path.exists()
     assert artifacts == {
         "backend": backend_path,
+        "desktop_provider": provider_path,
         "dmg": dmg_path,
         "metadata": metadata_path,
     }
