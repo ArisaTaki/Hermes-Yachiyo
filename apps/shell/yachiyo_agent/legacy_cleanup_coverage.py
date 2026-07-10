@@ -318,20 +318,6 @@ PLANNER_OWNED_LEGACY_ENTRYPOINTS: tuple[dict[str, Any], ...] = (
 
 REMAINING_FALLBACK_CONTRACTS: tuple[dict[str, Any], ...] = (
     _fallback_contract(
-        "browser_navigation_shapes",
-        "Browser navigation and utilities",
-        (
-            "Planner owns browser shortcuts and inspection, but the daily legacy "
-            "shapes remain the compatibility path."
-        ),
-        ["刷新当前网页", "打开浏览器历史记录"],
-        [
-            "project browser shortcut and current-page requests",
-            "add planner-forbidden browser facade coverage",
-            "remove the matching browser utility branches",
-        ],
-    ),
-    _fallback_contract(
         "foreground_command_shapes",
         "Foreground app commands",
         (
