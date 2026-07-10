@@ -227,6 +227,20 @@ def schedule_context_source_hint(text: str) -> str:
     return context_source_hint(text)
 
 
+def schedule_context_target_tool_hint(
+    text: str,
+    allowed_tools: Iterable[str] | None,
+) -> str | None:
+    if not schedule_context_source_hint(text):
+        return None
+    candidates = (
+        ("calendar.create_event",)
+        if _looks_like_calendar_event(text)
+        else ("reminders.create",)
+    )
+    return _first_allowed(candidates, _allowed_tool_set(allowed_tools))
+
+
 def _looks_like_calendar_event(text: str) -> bool:
     lowered = str(text or "").lower()
     return any(term in lowered for term in ("calendar", "event", "meeting", "日历", "日程", "会议")) or (

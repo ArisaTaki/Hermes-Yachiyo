@@ -6465,6 +6465,149 @@ def test_daily_desktop_entrypoint_routes_clipboard_requests() -> None:
     ]
 
 
+def test_daily_desktop_routes_context_capture_schedule_without_legacy(
+    monkeypatch,
+) -> None:
+    _forbid_legacy_daily_parser(
+        monkeypatch,
+        "context capture and schedule transfers must be planner-owned",
+    )
+    cases = (
+        ("把剪贴板内容写进备忘录", "clipboard", "notes"),
+        ("create a note from selected text", "selection", "notes"),
+        ("把当前网页链接写进备忘录", "current_page_link", "notes"),
+        ("create a note from current page content", "current_page_content", "notes"),
+        ("把当前窗口内容写进备忘录", "visible_text", "notes"),
+        ("create a reminder from clipboard", "clipboard", "reminders"),
+        ("把选中的内容创建成提醒事项", "selection", "reminders"),
+        ("add current page link to reminders", "current_page_link", "reminders"),
+        ("把当前页面内容创建成提醒事项", "current_page_content", "reminders"),
+        ("add current window content to reminders", "visible_text", "reminders"),
+        ("把剪贴板内容创建成日历事件", "clipboard", "calendar"),
+        ("create a calendar event from selected text", "selection", "calendar"),
+        ("把当前网页链接创建成日历事件", "current_page_link", "calendar"),
+        ("create a calendar event from current page content", "current_page_content", "calendar"),
+        ("把当前窗口内容加入日历", "visible_text", "calendar"),
+    )
+    source_actions = {
+        "clipboard": [],
+        "selection": ["copy"],
+        "current_page_link": ["copy_current_page_link"],
+        "current_page_content": ["select_all", "copy"],
+        "visible_text": ["select_all", "copy"],
+    }
+    destinations = {
+        "notes": ("Notes", "new_note"),
+        "reminders": ("Reminders", "new_reminder"),
+        "calendar": ("Calendar", "new_event"),
+    }
+
+    for prompt, source, destination in cases:
+        app_name, create_action = destinations[destination]
+        expected = [
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.safe_shortcut",
+                "input": {"action": action},
+            }
+            for action in source_actions[source]
+        ]
+        expected.extend(
+            [
+                {
+                    "protocol": "json_fallback",
+                    "tool": "app.open_and_safe_shortcut",
+                    "input": {"app_name": app_name, "action": create_action},
+                },
+                {
+                    "protocol": "json_fallback",
+                    "tool": "desktop.safe_shortcut",
+                    "input": {"action": "paste"},
+                },
+            ]
+        )
+
+        assert daily_desktop_entrypoint_requests(prompt) == expected
+
+
+def test_context_capture_schedule_adapter_rejects_invalid_projection_boundary() -> None:
+    from apps.shell.yachiyo_agent.daily_desktop import (
+        _legacy_compatible_context_capture_schedule_entrypoint_requests,
+        daily_desktop_allowed_tools,
+    )
+    from apps.shell.yachiyo_agent.planner_execution import (
+        planner_decision_and_tool_requests,
+    )
+
+    allowed = daily_desktop_allowed_tools()
+    decision, requests = planner_decision_and_tool_requests(
+        "把剪贴板内容写进备忘录",
+        allowed,
+    )
+    wrong_reason = [
+        {**request, "planning_reason": "planner_desktop_operation"}
+        for request in requests
+    ]
+
+    assert _legacy_compatible_context_capture_schedule_entrypoint_requests(
+        decision,
+        wrong_reason,
+        allowed=allowed,
+    ) == []
+    assert _legacy_compatible_context_capture_schedule_entrypoint_requests(
+        decision,
+        requests,
+        allowed=("clipboard.read", "notes.create"),
+    ) == []
+
+    target_step_id = "create-note-from-context"
+    wrong_destination_steps = [
+        step.model_copy(update={"tool_name": "reminders.create"})
+        if step.step_id == target_step_id
+        else step
+        for step in decision.plan.tool_plan.steps
+    ]
+    wrong_destination = decision.model_copy(
+        update={
+            "plan": decision.plan.model_copy(
+                update={
+                    "tool_plan": decision.plan.tool_plan.model_copy(
+                        update={"steps": wrong_destination_steps}
+                    )
+                }
+            )
+        }
+    )
+    assert _legacy_compatible_context_capture_schedule_entrypoint_requests(
+        wrong_destination,
+        requests,
+        allowed=allowed,
+    ) == []
+
+    wrong_source_steps = [
+        step.model_copy(update={"input_preview": {"body_source": "selection"}})
+        if step.step_id == target_step_id
+        else step
+        for step in decision.plan.tool_plan.steps
+    ]
+    wrong_source = decision.model_copy(
+        update={
+            "plan": decision.plan.model_copy(
+                update={
+                    "tool_plan": decision.plan.tool_plan.model_copy(
+                        update={"steps": wrong_source_steps}
+                    )
+                }
+            )
+        }
+    )
+    assert _legacy_compatible_context_capture_schedule_entrypoint_requests(
+        wrong_source,
+        requests,
+        allowed=allowed,
+    ) == []
+
+
 def test_daily_desktop_entrypoint_routes_context_sources_to_notes() -> None:
     selected_text_note_requests = [
         {

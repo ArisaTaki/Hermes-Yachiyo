@@ -96,6 +96,7 @@ from .planner_primitives import (
 )
 from .schedule_plan_hints import (
     schedule_context_source_hint,
+    schedule_context_target_tool_hint,
     schedule_tool_preview,
     scheduled_runnable_payload,
 )
@@ -2666,6 +2667,10 @@ class TaskIntentRouter:
             return _empty_intent("schedule", text)
         context_source = schedule_context_source_hint(text)
         inputs: dict[str, Any] = {"context_source": context_source} if context_source else {}
+        if context_source:
+            context_target_tool = schedule_context_target_tool_hint(text, None)
+            if context_target_tool:
+                inputs["schedule_tool_hint"] = context_target_tool
         schedule_tool_hint, schedule_payload = schedule_tool_preview(text, None)
         if schedule_payload:
             inputs["schedule_payload"] = dict(schedule_payload)
@@ -7436,6 +7441,11 @@ class RuntimePlanner:
         tool_name, input_preview = schedule_tool_preview(intent.user_goal, allowed)
         context_source = str(intent.inputs.get("context_source") or "").strip()
         if context_source and not input_preview:
+            context_target_tool = str(
+                intent.inputs.get("schedule_tool_hint")
+                or schedule_context_target_tool_hint(intent.user_goal, allowed)
+                or ""
+            ).strip()
             context_steps = _context_source_steps(
                 intent,
                 allowed,
@@ -7451,7 +7461,9 @@ class RuntimePlanner:
                     "create-schedule-item-from-context",
                     "Create schedule item from captured context",
                     "schedule.reminder",
-                    _first_allowed(("reminders.create", "calendar.create_event", "future_task.schedule"), allowed),
+                    _first_allowed((context_target_tool,), allowed)
+                    if context_target_tool
+                    else None,
                     input_preview={"body_source": context_source},
                     risk_level="medium",
                     approval_required=True,
@@ -22784,6 +22796,8 @@ def _is_structured_notes_app_target(app_name: str) -> bool:
 
 def _clean_dynamic_context_target_app(value: str) -> str:
     app = str(value or "").strip(" .，,。")
+    if _is_structured_notes_app_target(app):
+        return "Notes"
     app = re.sub(
         r"(?:的)?\s*(?:搜索框|搜索栏|查找框|检索框|地址栏|网址栏|输入框|文本框)$",
         "",

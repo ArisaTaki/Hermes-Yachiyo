@@ -580,9 +580,9 @@ def _planner_owned_legacy_compatible_entrypoint_requests(
     metadata: Mapping[str, Any] | None,
 ) -> list[dict[str, Any]]:
     try:
-        from .planner_execution import planner_tool_requests
+        from .planner_execution import planner_decision_and_tool_requests
 
-        planner_requests = planner_tool_requests(
+        decision, planner_requests = planner_decision_and_tool_requests(
             str(text or ""),
             allowed,
             metadata=metadata,
@@ -590,6 +590,15 @@ def _planner_owned_legacy_compatible_entrypoint_requests(
     except Exception:
         logger.debug("Runtime planner legacy-compatible entrypoint unavailable", exc_info=True)
         return []
+    context_capture_requests = (
+        _legacy_compatible_context_capture_schedule_entrypoint_requests(
+            decision,
+            planner_requests,
+            allowed=allowed,
+        )
+    )
+    if context_capture_requests:
+        return context_capture_requests
     media_requests = _legacy_compatible_media_entrypoint_requests(
         planner_requests,
         text=text,
@@ -664,6 +673,120 @@ _LEGACY_COMPATIBLE_OBSERVATION_TOOLS = frozenset(
         "screen.capture",
     }
 )
+
+
+def _legacy_compatible_context_capture_schedule_entrypoint_requests(
+    decision: Any,
+    requests: Sequence[Mapping[str, Any]] | None,
+    *,
+    allowed: Sequence[str],
+) -> list[dict[str, Any]]:
+    intent = getattr(decision, "selected_intent", None)
+    intent_kind = str(getattr(intent, "kind", "") or "").strip()
+    intent_inputs = getattr(intent, "inputs", None)
+    if intent_kind not in {"information_capture", "schedule"} or not isinstance(
+        intent_inputs,
+        Mapping,
+    ):
+        return []
+    source = str(
+        intent_inputs.get("source")
+        if intent_kind == "information_capture"
+        else intent_inputs.get("context_source")
+        or ""
+    ).strip()
+    user_goal = str(getattr(intent, "user_goal", "") or "")
+    if source == "visible_text" and re.search(
+        r"(?:屏幕|screen)",
+        user_goal,
+        flags=re.IGNORECASE,
+    ):
+        return []
+    expected_source_tools = {
+        "clipboard": ["clipboard.read"],
+        "selection": ["desktop.safe_shortcut", "clipboard.read"],
+        "current_page_link": ["browser.current_page"],
+        "current_page_content": ["browser.extract_text"],
+        "visible_text": ["desktop.ui_elements"],
+    }
+    source_tools = expected_source_tools.get(source)
+    items = [dict(request) for request in requests or [] if isinstance(request, Mapping)]
+    if not source_tools or [str(item.get("tool") or "").strip() for item in items] != source_tools:
+        return []
+    expected_reason = (
+        "planner_prefetch_information_capture_context"
+        if intent_kind == "information_capture"
+        else "planner_prefetch_schedule_context"
+    )
+    if any(
+        str(item.get("planning_reason") or "").strip() != expected_reason
+        for item in items
+    ):
+        return []
+    if source == "selection":
+        first_input = items[0].get("input") if isinstance(items[0].get("input"), Mapping) else {}
+        if str(first_input.get("action") or "").strip() != "copy":
+            return []
+    if source == "visible_text":
+        source_input = items[0].get("input") if isinstance(items[0].get("input"), Mapping) else {}
+        if str(source_input.get("role_filter") or "").strip() != "text":
+            return []
+    destination = _context_capture_schedule_destination(decision, intent_kind, source)
+    if not destination:
+        return []
+    required_tools = {"app.open_and_safe_shortcut", "desktop.safe_shortcut"}
+    if not required_tools.issubset(set(allowed)):
+        return []
+    app_name, action = destination
+    source_actions = {
+        "clipboard": [],
+        "selection": ["copy"],
+        "current_page_link": ["copy_current_page_link"],
+        "current_page_content": ["select_all", "copy"],
+        "visible_text": ["select_all", "copy"],
+    }[source]
+    projected = [
+        {"tool": "desktop.safe_shortcut", "input": {"action": action_name}}
+        for action_name in source_actions
+    ]
+    projected.extend(
+        [
+            {
+                "tool": "app.open_and_safe_shortcut",
+                "input": {"app_name": app_name, "action": action},
+            },
+            {"tool": "desktop.safe_shortcut", "input": {"action": "paste"}},
+        ]
+    )
+    return [_legacy_shape_request(request) for request in projected]
+
+
+def _context_capture_schedule_destination(
+    decision: Any,
+    intent_kind: str,
+    source: str,
+) -> tuple[str, str] | None:
+    plan = getattr(decision, "plan", None)
+    tool_plan = getattr(plan, "tool_plan", None)
+    steps = list(getattr(tool_plan, "steps", None) or [])
+    if not steps:
+        return None
+    destination_step = steps[-1]
+    tool_name = str(getattr(destination_step, "tool_name", "") or "").strip()
+    input_preview = getattr(destination_step, "input_preview", None)
+    if not isinstance(input_preview, Mapping) or str(
+        input_preview.get("body_source") or ""
+    ).strip() != source:
+        return None
+    destinations = {
+        "notes.create": ("Notes", "new_note"),
+        "reminders.create": ("Reminders", "new_reminder"),
+        "calendar.create_event": ("Calendar", "new_event"),
+    }
+    destination = destinations.get(tool_name)
+    if intent_kind == "information_capture":
+        return destination if tool_name == "notes.create" else None
+    return destination if tool_name in {"reminders.create", "calendar.create_event"} else None
 
 
 def _legacy_compatible_foreground_type_entrypoint_requests(

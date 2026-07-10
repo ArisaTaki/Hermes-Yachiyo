@@ -26417,7 +26417,10 @@ def test_runtime_planner_tracks_context_schedule_source_without_body() -> None:
     )
 
     assert decision.selected_intent.kind == "schedule"
-    assert decision.selected_intent.inputs == {"context_source": "selection"}
+    assert decision.selected_intent.inputs == {
+        "context_source": "selection",
+        "schedule_tool_hint": "reminders.create",
+    }
     assert [step.step_id for step in decision.plan.tool_plan.steps] == [
         "copy-selected-schedule-context",
         "read-schedule-context",
@@ -26436,6 +26439,33 @@ def test_runtime_planner_tracks_context_schedule_source_without_body() -> None:
     assert create_step.approval_required is True
 
 
+def test_runtime_planner_does_not_cross_schedule_context_targets() -> None:
+    cases = (
+        (
+            "create a reminder from selected text",
+            ["calendar.create_event", "desktop.safe_shortcut", "clipboard.read"],
+            "calendar.create_event",
+        ),
+        (
+            "把选中的内容创建成日历事件",
+            ["reminders.create", "desktop.safe_shortcut", "clipboard.read"],
+            "reminders.create",
+        ),
+    )
+
+    for prompt, allowed_tools, forbidden_target in cases:
+        decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+
+        assert decision.selected_intent.kind == "schedule"
+        assert decision.selected_intent.inputs["context_source"] == "selection"
+        assert forbidden_target not in {
+            step.tool_name for step in decision.plan.tool_plan.steps
+        }
+        assert forbidden_target not in {
+            request["tool"] for request in planner_tool_requests(prompt, allowed_tools)
+        }
+
+
 def test_runtime_planner_tracks_browser_context_sources() -> None:
     note_decision = RuntimePlanner().decision(
         "create a note from current page link",
@@ -26452,10 +26482,23 @@ def test_runtime_planner_tracks_browser_context_sources() -> None:
         allowed_tools=["calendar.create_event", "browser.extract_text"],
     )
     assert schedule_decision.selected_intent.kind == "schedule"
+    assert schedule_decision.selected_intent.inputs == {
+        "context_source": "current_page_content",
+        "schedule_tool_hint": "calendar.create_event",
+    }
     schedule_read_step = _step_by_id(schedule_decision, "read-schedule-context")
     assert schedule_read_step.capability_id == "browser.research"
     assert schedule_read_step.tool_name == "browser.extract_text"
     assert schedule_read_step.action == "extract_text"
+    schedule_create_step = _step_by_id(
+        schedule_decision,
+        "create-schedule-item-from-context",
+    )
+    assert schedule_create_step.tool_name == "calendar.create_event"
+    assert schedule_create_step.input_preview == {
+        "body_source": "current_page_content"
+    }
+    assert schedule_create_step.approval_required is True
 
 
 def test_runtime_planner_routes_clipboard_write_to_clipboard_capability() -> None:
