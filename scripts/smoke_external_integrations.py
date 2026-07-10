@@ -417,7 +417,14 @@ async def run_astrbot_plugin_bridge_check(
             "Bridge 响应超时",
             "Traceback",
             "RuntimeError",
-            "⚠️",
+            "处理失败",
+            "未知错误",
+            "Native Agent 未就绪",
+            "资源不存在",
+            "请求参数有误",
+            "Bridge 内部错误",
+            "请求错误",
+            "请求失败",
         )
         return any(marker in response for marker in failure_markers)
 

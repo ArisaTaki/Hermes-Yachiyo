@@ -867,9 +867,10 @@ def test_real_desktop_interaction_smoke_cli_writes_report_json(
         "ok": True,
         "mode": "real_desktop_interaction_smoke",
         "skipped": True,
-        "platform": "Linux",
-        "app_name": "Calculator",
-        "tool_chain": smoke.TOOL_CHAIN,
+            "platform": "Linux",
+            "app_name": "Calculator",
+            "provider_mode": "real",
+            "tool_chain": smoke.TOOL_CHAIN,
         "reason": "real desktop interaction smoke only runs on macOS",
         "report_json": str(report_path),
     }
