@@ -1,5 +1,6 @@
 import {
   assertRuntimeRecoveryActionApprovalReady,
+  desktopProviderSessionCanContinue,
   desktopProviderSessionRecoveryStatusMessage,
   desktopProviderSessionStartRequestFromAction,
   runtimeRecoveryActionIsDesktopProviderSessionStart,
@@ -158,20 +159,25 @@ export async function startYachiyoTaskRecoveryAction({
     source_task_title: task.title || '',
     ...metadata,
   };
+  let providerSession: DesktopProviderSessionSnapshot | undefined;
+  let providerStatusMessage = '';
   if (runtimeRecoveryActionIsDesktopProviderSessionStart(action)) {
     assertRuntimeRecoveryActionApprovalReady(action);
-    const providerSession = await startYachiyoDesktopProviderSession(
+    providerSession = await startYachiyoDesktopProviderSession(
       desktopProviderSessionStartRequestFromAction(action),
     );
-    return {
-      mode: 'desktop_provider_session',
-      prompt: action.prompt || action.label || action.tool,
-      providerSession,
-      replanAttempted: false,
-      statusMessage: desktopProviderSessionRecoveryStatusMessage(providerSession),
-      task: null,
-      title: action.label || action.prompt || action.tool,
-    };
+    providerStatusMessage = desktopProviderSessionRecoveryStatusMessage(providerSession);
+    if (!desktopProviderSessionCanContinue(providerSession)) {
+      return {
+        mode: 'desktop_provider_session',
+        prompt: action.prompt || action.label || action.tool,
+        providerSession,
+        replanAttempted: false,
+        statusMessage: providerStatusMessage,
+        task: null,
+        title: action.label || action.prompt || action.tool,
+      };
+    }
   }
   const fallbackStart = runtimeToolRecoveryActionTaskStart(action, sourceMetadata);
   const prompt = fallbackStart.prompt;
@@ -179,7 +185,9 @@ export async function startYachiyoTaskRecoveryAction({
     return {
       mode: 'none',
       prompt: '',
+      providerSession,
       replanAttempted: false,
+      statusMessage: providerStatusMessage || undefined,
       task: null,
       title: fallbackStart.title,
     };
@@ -201,7 +209,11 @@ export async function startYachiyoTaskRecoveryAction({
       return {
         mode: 'replan',
         prompt,
+        providerSession,
         replanAttempted: true,
+        statusMessage: providerSession
+          ? `${providerStatusMessage}；已继续原任务`
+          : undefined,
         task: startedTask,
         title: fallbackStart.title,
       };
@@ -218,7 +230,11 @@ export async function startYachiyoTaskRecoveryAction({
     fallbackResult,
     mode: 'task',
     prompt,
+    providerSession,
     replanAttempted: Boolean(replanRequest),
+    statusMessage: providerSession
+      ? `${providerStatusMessage}；已通过兼容任务继续原操作`
+      : undefined,
     task: fallbackTask,
     title: fallbackStart.title,
   };

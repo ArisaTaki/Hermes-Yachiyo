@@ -120,6 +120,16 @@ export function desktopProviderSessionRecoveryStatusMessage(
   return `已请求启动隔离桌面 Provider：${providerId}`;
 }
 
+export function desktopProviderSessionCanContinue(
+  session: DesktopProviderSessionSnapshot,
+): boolean {
+  if (session.ok === false) return false;
+  if (session.running || session.started) return true;
+  return ['available', 'healthy', 'ready', 'running'].includes(
+    stringValue(session.status).toLowerCase(),
+  );
+}
+
 function recordValue(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
   return value as Record<string, unknown>;

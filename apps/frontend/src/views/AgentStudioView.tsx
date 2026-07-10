@@ -60,6 +60,7 @@ import { useWorkflowSaveActions } from '../features/agent-studio/hooks/useWorkfl
 import { useWorkflowCanvasActions } from '../features/agent-studio/hooks/useWorkflowCanvasActions';
 import {
   assertRuntimeRecoveryActionApprovalReady,
+  desktopProviderSessionCanContinue,
   desktopProviderSessionRecoveryStatusMessage,
   desktopProviderSessionStartRequestFromAction,
   runtimeRecoveryActionIsDesktopProviderSessionStart,
@@ -385,15 +386,19 @@ export function AgentStudioView() {
     requestId: string,
     action: RuntimeToolRecoveryAction,
   ) => {
+    let providerStatusMessage = '';
     if (runtimeRecoveryActionIsDesktopProviderSessionStart(action)) {
       assertRuntimeRecoveryActionApprovalReady(action);
       const session = await startYachiyoStudioDesktopProviderSession(
         desktopProviderSessionStartRequestFromAction(action),
       );
-      return {
-        selectedRunId: runId,
-        statusMessage: desktopProviderSessionRecoveryStatusMessage(session),
-      };
+      providerStatusMessage = desktopProviderSessionRecoveryStatusMessage(session);
+      if (!desktopProviderSessionCanContinue(session)) {
+        return {
+          selectedRunId: runId,
+          statusMessage: providerStatusMessage,
+        };
+      }
     }
     const request = runtimeToolRecoveryActionRunStartRequest(action, requestId, {
       source: 'agent_studio_replan_recovery',
@@ -403,7 +408,9 @@ export function AgentStudioView() {
     const run = await startYachiyoRunReplanRecoveryAction(runId, request);
     return {
       selectedRunId: run.run_id,
-      statusMessage: `已启动恢复 Run：${run.title || action.label || action.tool}`,
+      statusMessage: providerStatusMessage
+        ? `${providerStatusMessage}；已继续恢复 Run：${run.title || action.label || action.tool}`
+        : `已启动恢复 Run：${run.title || action.label || action.tool}`,
     };
   };
   const runGroupReplanRecoveryAction = async (
@@ -411,14 +418,18 @@ export function AgentStudioView() {
     requestId: string,
     action: RuntimeToolRecoveryAction,
   ) => {
+    let providerStatusMessage = '';
     if (runtimeRecoveryActionIsDesktopProviderSessionStart(action)) {
       assertRuntimeRecoveryActionApprovalReady(action);
       const session = await startYachiyoStudioDesktopProviderSession(
         desktopProviderSessionStartRequestFromAction(action),
       );
-      return {
-        statusMessage: desktopProviderSessionRecoveryStatusMessage(session),
-      };
+      providerStatusMessage = desktopProviderSessionRecoveryStatusMessage(session);
+      if (!desktopProviderSessionCanContinue(session)) {
+        return {
+          statusMessage: providerStatusMessage,
+        };
+      }
     }
     const request = runtimeToolRecoveryActionRunStartRequest(action, requestId, {
       source: 'agent_studio_group_replan_recovery',
@@ -428,7 +439,9 @@ export function AgentStudioView() {
     const run = await startYachiyoGroupRunReplanRecoveryAction(groupRunId, request);
     return {
       selectedRunId: run.run_id,
-      statusMessage: `已启动 GroupRun 恢复 Run：${run.title || action.label || action.tool}`,
+      statusMessage: providerStatusMessage
+        ? `${providerStatusMessage}；已继续 GroupRun 恢复 Run：${run.title || action.label || action.tool}`
+        : `已启动 GroupRun 恢复 Run：${run.title || action.label || action.tool}`,
     };
   };
 

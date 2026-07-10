@@ -1000,6 +1000,17 @@ class _ProviderSessionReplanRecoveryTaskRuntimePort(_ReplanRecoveryTaskRuntimePo
         return payload
 
 
+class _ApprovedProviderSessionReplanRecoveryTaskRuntimePort(
+    _ProviderSessionReplanRecoveryTaskRuntimePort
+):
+    def get_task_timeline(self, task_id: str) -> dict[str, Any]:
+        payload = super().get_task_timeline(task_id)
+        action = payload["events"][1]["payload"]["metadata"]["recovery_actions"][0]
+        action["approval_id"] = "approval-provider-1"
+        action["approval_status"] = "approved"
+        return payload
+
+
 class _DeferredReplanRecoveryTaskRuntimePort(_ReplanRecoveryTaskRuntimePort):
     def get_task_timeline(self, task_id: str) -> dict[str, Any]:
         payload = super().get_task_timeline(task_id)
@@ -1304,6 +1315,41 @@ def test_yachiyo_agent_service_marks_provider_session_recovery_as_control_action
     assert (
         continuation["desktop_execution_policy"]["require_sandbox_for_keyboard_mouse"]
         is True
+    )
+
+
+def test_yachiyo_agent_service_does_not_repeat_approved_provider_action_approval() -> None:
+    port = _ApprovedProviderSessionReplanRecoveryTaskRuntimePort()
+    service = YachiyoAgentService(port)
+
+    task = service.start_replan_recovery_action(
+        "task-1",
+        {
+            "request_id": "replan-1",
+            "action_id": "replan-1:action:1:desktop.provider_session.start",
+            "conversation_id": "chat-1",
+        },
+    )
+
+    assert task.task_id == "recovery-task-1"
+    request = port.calls[1][1]
+    direct_request = request["direct_tool_requests"][0]
+    assert direct_request["approval_required"] is False
+    assert direct_request["approval_id"] == "approval-provider-1"
+    assert direct_request["approval_status"] == "approved"
+    assert direct_request["source_recovery_approval_satisfied"] is True
+    assert request["metadata"]["recovery_action_approval_required"] is True
+    assert request["metadata"]["recovery_action_approval_id"] == "approval-provider-1"
+    assert request["metadata"]["recovery_action_approval_status"] == "approved"
+    assert request["metadata"]["recovery_action_approval_satisfied"] is True
+    assert request["metadata"]["replan_auto_start_blockers"] == [
+        "approval_required",
+        "tool_not_auto_safe",
+        "deferred_tool_not_auto_safe",
+        "deferred_continuation_tool_not_auto_safe",
+    ]
+    assert direct_request["deferred_continuation"][0]["tool"] == (
+        "app.focus_and_click_ui_element"
     )
 
 

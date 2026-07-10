@@ -465,7 +465,10 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
         task,
       });
       if (result.mode === 'replan') {
-        setStatus(`已启动恢复动作：${action.label || result.title || result.prompt}`);
+        setStatus(
+          result.statusMessage
+          || `已启动恢复动作：${action.label || result.title || result.prompt}`,
+        );
       } else if (result.mode === 'desktop_provider_session') {
         setStatus(result.statusMessage || '已请求启动隔离桌面 Provider');
       } else if (result.fallbackResult === false) {

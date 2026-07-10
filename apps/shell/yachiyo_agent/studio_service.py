@@ -2199,7 +2199,10 @@ def _replan_continuation_auto_start_context(
     blockers: list[str] = []
     tool_name = str(action.tool or direct_request.get("tool") or "").strip()
     approval_required = bool(
-        action.approval_required
+        (
+            action.approval_required
+            and not _replan_recovery_action_approval_satisfied(action)
+        )
         or direct_request.get("approval_required")
         or _replan_continuation_deferred_approval_required(direct_request)
         or str(action.approval_status or "").strip().lower() in {
@@ -2316,6 +2319,7 @@ def _replan_recovery_action_direct_request(
     continue_to_model: bool,
     source: str = "agent_studio_replan_recovery",
 ) -> dict[str, Any]:
+    approval_satisfied = _replan_recovery_action_approval_satisfied(action)
     request = {
         "tool": str(action.tool or "").strip(),
         "input": dict(action.input or {}),
@@ -2330,9 +2334,15 @@ def _replan_recovery_action_direct_request(
         "recovery_action_label": str(action.label or recovery.recovery_action_label or ""),
         "permission_target": str(action.permission_target or recovery.permission_target or ""),
         "risk_level": str(action.risk_level or recovery.risk_level or ""),
-        "approval_required": bool(action.approval_required),
+        "approval_required": bool(action.approval_required and not approval_satisfied),
         "selected": True,
     }
+    if action.approval_id:
+        request["approval_id"] = str(action.approval_id)
+    if action.approval_status:
+        request["approval_status"] = str(action.approval_status)
+    if approval_satisfied:
+        request["source_recovery_approval_satisfied"] = True
     replan_triggers = _replan_recovery_action_triggers(recovery, action)
     if replan_triggers:
         request["replan_triggers"] = replan_triggers
@@ -2909,7 +2919,19 @@ def _replan_recovery_action_metadata(
             metadata[key] = value
     if action.approval_required:
         metadata["recovery_action_approval_required"] = True
+    if action.approval_id:
+        metadata["recovery_action_approval_id"] = str(action.approval_id)
+    if action.approval_status:
+        metadata["recovery_action_approval_status"] = str(action.approval_status)
+    if _replan_recovery_action_approval_satisfied(action):
+        metadata["recovery_action_approval_satisfied"] = True
     return metadata
+
+
+def _replan_recovery_action_approval_satisfied(
+    action: ReplanRecoveryActionSnapshot,
+) -> bool:
+    return str(action.approval_status or "").strip().lower() == "approved"
 
 
 def _replan_recovery_action_is_provider_session_start(
