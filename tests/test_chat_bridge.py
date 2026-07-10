@@ -611,6 +611,16 @@ def _wait_for_agent_run(service: AgentRuntimeService, run_id: str) -> dict:
 
 
 def test_chat_bridge_agent_session_quick_message_uses_daily_desktop_overlay_for_lightweight_entrypoints(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "apps.shell.yachiyo_agent.isolated_provider_session.ensure_isolated_desktop_provider_session_for_envelope",
+        lambda _envelope: {
+            "ok": False,
+            "needed": True,
+            "running": False,
+            "started": False,
+            "reason": "test_provider_unavailable",
+        },
+    )
     for mode in ("bubble", "live2d"):
         store = ChatStore(db_path=str(tmp_path / f"{mode}-chat.db"))
         runtime = _runtime_with_chat_store(store)
@@ -686,9 +696,38 @@ def test_chat_bridge_agent_session_quick_message_uses_daily_desktop_overlay_for_
             assert captured[-1]["runnable_id"] == agent["id"]
             assert captured[-1]["user_goal"] == "能否帮我播放apple Music?"
             assert captured[-1]["daily_desktop_policy_overlay"] is True
+            envelope = captured[-1]["runtime_execution_envelope"]
+            assert envelope["decision_id"]
+            assert envelope["plan_id"]
+            assert (
+                captured[-1]["metadata"]["desktop_execution_policy"]["mode"]
+                == "preview_input"
+            )
+            assert "direct_tool_requests" not in captured[-1]
             user = [message for message in runtime.chat_session.get_messages() if message.role == "user"][-1]
             assert user.metadata["launcher_mode"] == mode
             assert user.metadata["daily_desktop_tool"] == "media.music_app_open_and_play"
+
+            third = bridge.send_quick_message(
+                "打开系统设置",
+                metadata={
+                    "source": "launcher",
+                    "launcher_mode": mode,
+                    "launcher_surface": "quick_message",
+                    "desktop_permission_recovery": True,
+                    "recovery_tool": "app.open",
+                    "recovery_input": {"app_name": "System Settings"},
+                    "recovery_permission_target": "screen_recording",
+                    "recovery_risk_level": "low",
+                },
+            )
+
+            assert third["ok"] is True
+            assert [
+                request["tool"]
+                for request in captured[-1]["direct_tool_requests"]
+            ] == ["app.open"]
+            assert "runtime_execution_envelope" not in captured[-1]
         finally:
             store.close()
 

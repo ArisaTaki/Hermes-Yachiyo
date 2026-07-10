@@ -4,16 +4,132 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
+import apps.shell.yachiyo_agent.isolated_provider_session as isolated_provider_session_module
+import apps.shell.yachiyo_agent.planner_execution as planner_execution_module
 from apps.shell.agent.runtime.desktop_intents import daily_desktop_entrypoint_tool_requests
 from apps.shell.yachiyo_agent.daily_desktop import (
+    DailyDesktopEntrypointRuntimePlan,
     daily_desktop_direct_metadata_request,
+    daily_desktop_entrypoint_runtime_plan,
     daily_desktop_entrypoint_requests,
     daily_desktop_planned_timeline,
     daily_desktop_recovery_execution_prompt,
+    daily_desktop_runtime_plan_prepared_for_execution,
     daily_desktop_user_metadata,
     entrypoint_plan_user_metadata,
     planner_first_daily_desktop_entrypoint_requests,
 )
+
+
+def test_daily_desktop_runtime_plan_reuses_one_planner_decision(monkeypatch) -> None:
+    calls: list[str] = []
+    original_decision = planner_execution_module.RuntimePlanner.decision
+    monkeypatch.setattr(
+        isolated_provider_session_module,
+        "ensure_isolated_desktop_provider_session_for_envelope",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("planning must not start a desktop provider")
+        ),
+    )
+
+    def counted_decision(self, prompt, **kwargs):
+        calls.append(str(prompt))
+        return original_decision(self, prompt, **kwargs)
+
+    monkeypatch.setattr(
+        planner_execution_module.RuntimePlanner,
+        "decision",
+        counted_decision,
+    )
+
+    plan = daily_desktop_entrypoint_runtime_plan(
+        "打开 PixelForge",
+        metadata={
+            "allow_user_foreground_takeover": True,
+            "desktop_provider_health_probe": False,
+            "desktop_provider_session_auto_start": False,
+        },
+        allowed_tools=["desktop.list_apps", "app.open", "desktop.active_window"],
+        allow_legacy_fallback=False,
+    )
+
+    assert calls == ["打开 PixelForge"]
+    assert plan.decision is not None
+    assert plan.has_plan is True
+    assert plan.runtime_execution_envelope["decision_id"] == plan.decision.decision_id
+    assert plan.entrypoint_requests
+    assert {
+        request["tool"] for request in plan.entrypoint_requests
+    }.issubset({"desktop.list_apps", "app.open", "desktop.active_window"})
+    assert [
+        request["tool_name"]
+        for request in plan.runtime_execution_envelope["requests"]
+    ] == ["desktop.list_apps", "app.open", "desktop.active_window"]
+
+
+def test_daily_desktop_runtime_plan_waits_for_approval_before_provider_start(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        isolated_provider_session_module,
+        "ensure_isolated_desktop_provider_session_for_envelope",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("approval-first plans must not start a provider")
+        ),
+    )
+    plan = DailyDesktopEntrypointRuntimePlan(
+        decision=object(),
+        entrypoint_requests=[],
+        executable_requests=[],
+        runtime_execution_envelope={
+            "requests": [
+                {
+                    "tool_name": "desktop.click_ui_element",
+                    "input": {"label": "Send"},
+                    "approval_required": True,
+                    "status": "planned",
+                }
+            ]
+        },
+        selected_source="runtime_execution_envelope",
+        allowed_tools=("desktop.click_ui_element",),
+    )
+
+    prepared = daily_desktop_runtime_plan_prepared_for_execution(plan)
+
+    assert prepared is plan
+
+
+def test_daily_desktop_runtime_plan_prepares_provider_at_execution_boundary(
+    monkeypatch,
+) -> None:
+    provider_calls: list[dict] = []
+    plan = daily_desktop_entrypoint_runtime_plan(
+        "打开 PixelForge",
+        metadata={"desktop_provider_health_probe": False},
+        allowed_tools=["desktop.list_apps", "app.open", "desktop.active_window"],
+        allow_legacy_fallback=False,
+    )
+    monkeypatch.setattr(
+        isolated_provider_session_module,
+        "ensure_isolated_desktop_provider_session_for_envelope",
+        lambda envelope: provider_calls.append(dict(envelope))
+        or {
+            "ok": False,
+            "needed": True,
+            "running": False,
+            "started": False,
+            "reason": "test_provider_unavailable",
+        },
+    )
+
+    prepared = daily_desktop_runtime_plan_prepared_for_execution(plan)
+
+    assert len(provider_calls) == 1
+    assert prepared.runtime_execution_envelope["desktop_provider_session"][
+        "reason"
+    ] == "test_provider_unavailable"
+    assert prepared.decision is plan.decision
 
 
 def test_daily_desktop_entrypoint_requests_project_shared_metadata_and_timeline() -> None:

@@ -46,11 +46,13 @@ from apps.shell.agent.runtime.config import MAIN_CHAT_AGENT_ID
 from apps.shell.agent_runtime import AgentRuntimeError, get_agent_runtime_service
 from apps.shell.native_capabilities import get_native_image_input_capability
 from apps.shell.yachiyo_agent.daily_desktop import (
+    DailyDesktopEntrypointRuntimePlan,
     daily_desktop_approval_or_submit_entrypoint_requests,
     daily_desktop_allowed_tools,
+    daily_desktop_entrypoint_runtime_plan,
     daily_desktop_executable_entrypoint_requests,
     daily_desktop_requests_can_complete_without_model,
-    daily_desktop_runtime_execution_envelope,
+    daily_desktop_runtime_plan_prepared_for_execution,
     daily_desktop_safe_direct_entrypoint_requests,
     direct_browser_entrypoint_requests,
     entrypoint_plan_user_metadata,
@@ -1332,12 +1334,37 @@ class ChatAPI:
         except Exception:
             logger.debug("刷新桌面执行权限缓存失败", exc_info=True)
 
+    def _daily_desktop_entrypoint_runtime_plan(
+        self,
+        text: str,
+        *,
+        metadata: dict[str, Any] | None = None,
+    ) -> DailyDesktopEntrypointRuntimePlan:
+        allowed_daily_desktop_tools = daily_desktop_allowed_tools()
+        try:
+            runtime_service = self._agent_runtime_service()
+        except Exception:
+            runtime_service = None
+        allowed_entrypoint_tools = main_chat_entrypoint_allowed_tools(
+            runtime_service,
+            fallback=allowed_daily_desktop_tools,
+        )
+        return daily_desktop_entrypoint_runtime_plan(
+            text,
+            metadata=metadata,
+            allowed_tools=allowed_entrypoint_tools,
+            metadata_allowed_tools=allowed_daily_desktop_tools,
+            allow_legacy_fallback=True,
+        )
+
     def _daily_desktop_entrypoint_requests(
         self,
         text: str,
         *,
         metadata: dict[str, Any] | None = None,
     ) -> list[dict[str, Any]]:
+        """Compatibility projection retained for legacy callers and tests."""
+
         allowed_daily_desktop_tools = daily_desktop_allowed_tools()
         try:
             runtime_service = self._agent_runtime_service()
@@ -1355,27 +1382,6 @@ class ChatAPI:
             execution_normalized=True,
             include_runtime_context=True,
             allow_legacy_fallback=True,
-        )
-
-    def _daily_desktop_runtime_execution_envelope(
-        self,
-        text: str,
-        *,
-        metadata: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        allowed_daily_desktop_tools = daily_desktop_allowed_tools()
-        try:
-            runtime_service = self._agent_runtime_service()
-        except Exception:
-            runtime_service = None
-        allowed_entrypoint_tools = main_chat_entrypoint_allowed_tools(
-            runtime_service,
-            fallback=allowed_daily_desktop_tools,
-        )
-        return daily_desktop_runtime_execution_envelope(
-            text,
-            metadata=metadata,
-            allowed_tools=allowed_entrypoint_tools,
         )
 
     def _daily_desktop_followup_goal_text(
@@ -1822,17 +1828,37 @@ class ChatAPI:
                 self._entrypoint_planning_text(text, metadata)
             )
             task_text = self._daily_desktop_followup_goal_text(task_text, current_context)
-            daily_desktop_requests = self._daily_desktop_entrypoint_requests(
-                task_text,
-                metadata=metadata,
+            daily_planning_metadata = with_daily_entrypoint_desktop_execution_policy(
+                metadata,
+                surface="chat",
             )
-            daily_desktop_runtime_envelope = (
-                self._daily_desktop_runtime_execution_envelope(
+            daily_desktop_runtime_plan = self._daily_desktop_entrypoint_runtime_plan(
+                task_text,
+                metadata=daily_planning_metadata,
+            )
+            if (
+                not raw_attachments
+                and current_context.get("conversation_kind") != "group"
+                and self._daily_desktop_requests_can_direct_execute(
+                    daily_desktop_runtime_plan.entrypoint_requests,
                     task_text,
-                    metadata=metadata,
+                    metadata=daily_planning_metadata,
                 )
-                if daily_desktop_requests
-                else {}
+            ):
+                daily_desktop_runtime_plan = (
+                    daily_desktop_runtime_plan_prepared_for_execution(
+                        daily_desktop_runtime_plan,
+                        metadata=daily_planning_metadata,
+                    )
+                )
+            daily_desktop_entrypoint_requests = list(
+                daily_desktop_runtime_plan.entrypoint_requests
+            )
+            daily_desktop_requests = list(
+                daily_desktop_runtime_plan.executable_requests
+            )
+            daily_desktop_runtime_envelope = dict(
+                daily_desktop_runtime_plan.runtime_execution_envelope
             )
             direct_daily_desktop_intent = (
                 not raw_attachments
@@ -1840,7 +1866,7 @@ class ChatAPI:
                 and self._daily_desktop_requests_can_direct_execute(
                     daily_desktop_requests,
                     task_text,
-                    metadata=metadata,
+                    metadata=daily_planning_metadata,
                 )
             )
             direct_daily_desktop_tool_requests = (
@@ -2302,6 +2328,9 @@ class ChatAPI:
             "run_group_id": run_group_id,
         }
         user_metadata = self._merge_user_metadata(user_metadata, metadata) or {}
+        runnable_daily_desktop_runtime_plan: (
+            DailyDesktopEntrypointRuntimePlan | None
+        ) = None
         runnable_daily_desktop_requests: list[dict[str, Any]] = []
         runnable_planning_goal = user_goal
         if (
@@ -2311,13 +2340,28 @@ class ChatAPI:
                 or keep_manual_group
             )
         ):
+            user_metadata = with_daily_entrypoint_desktop_execution_policy(
+                user_metadata,
+                surface=str(user_metadata.get("launcher_mode") or "agent"),
+            )
             runnable_planning_goal = self._daily_desktop_followup_goal_text(
                 user_goal,
                 current_context,
             )
-            runnable_daily_desktop_requests = self._daily_desktop_entrypoint_requests(
-                runnable_planning_goal,
-                metadata=user_metadata,
+            runnable_daily_desktop_runtime_plan = (
+                self._daily_desktop_entrypoint_runtime_plan(
+                    runnable_planning_goal,
+                    metadata=user_metadata,
+                )
+            )
+            runnable_daily_desktop_runtime_plan = (
+                daily_desktop_runtime_plan_prepared_for_execution(
+                    runnable_daily_desktop_runtime_plan,
+                    metadata=user_metadata,
+                )
+            )
+            runnable_daily_desktop_requests = list(
+                runnable_daily_desktop_runtime_plan.entrypoint_requests
             )
             if runnable_daily_desktop_requests:
                 self._warm_daily_desktop_permission_cache(runnable_daily_desktop_requests)
@@ -2482,9 +2526,27 @@ class ChatAPI:
                 "upstream": upstream,
                 "on_complete": _on_run_complete,
             }
-            if runnable_daily_desktop_requests:
+            if (
+                runnable_daily_desktop_runtime_plan is not None
+                and runnable_daily_desktop_runtime_plan.has_plan
+            ):
                 run_kwargs["daily_desktop_policy_overlay"] = True
                 run_kwargs["runtime_planner_entrypoint"] = True
+                run_kwargs["metadata"] = dict(user_metadata)
+                runtime_execution_envelope = (
+                    runnable_daily_desktop_runtime_plan.runtime_execution_envelope
+                )
+                if runtime_execution_envelope:
+                    run_kwargs["runtime_execution_envelope"] = dict(
+                        runtime_execution_envelope
+                    )
+                elif runnable_daily_desktop_runtime_plan.executable_requests:
+                    run_kwargs["direct_tool_requests"] = [
+                        dict(request)
+                        for request in (
+                            runnable_daily_desktop_runtime_plan.executable_requests
+                        )
+                    ]
                 if runnable_planning_goal != user_goal:
                     run_kwargs["daily_desktop_planning_context"] = runnable_planning_goal
             run = service.create_run_for_runnable_async(**run_kwargs)

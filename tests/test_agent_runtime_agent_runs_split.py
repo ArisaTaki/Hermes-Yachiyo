@@ -362,6 +362,49 @@ def test_agent_run_direct_request_approval_promotes_temporary_policy() -> None:
     assert enriched["tool_policy"]["approval_required"]["python.run"] is True
 
 
+def test_agent_run_reuses_runtime_envelope_without_replanning_and_preserves_approval(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "apps.shell.agent.runtime.agent_runs.planner_first_direct_decision_and_tool_requests",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("runtime envelope should own entrypoint planning")
+        ),
+    )
+    agent = {
+        "agent_id": "agent-yachiyo",
+        "name": "Yachiyo",
+        "tool_policy": {
+            "allowed_tools": ["workspace.read"],
+            "approval_required": {},
+        },
+    }
+    payload = {
+        "runtime_planner_entrypoint": True,
+        "daily_desktop_policy_overlay": True,
+        "user_goal": "在当前应用提交表单",
+        "runtime_execution_envelope": {
+            "envelope_id": "execution-envelope-submit",
+            "requests": [
+                {
+                    "tool_name": "desktop.submit_foreground",
+                    "input": {},
+                    "step_id": "submit-foreground-ui",
+                    "status": "planned",
+                    "approval_required": True,
+                }
+            ],
+        },
+    }
+
+    enriched = _with_entrypoint_runtime_planner(agent, payload)
+
+    assert enriched["_runtime_planner_entrypoint"] is True
+    assert enriched["_daily_desktop_policy_overlay"] is True
+    assert "desktop.submit_foreground" in enriched["tool_policy"]["allowed_tools"]
+    assert enriched["tool_policy"]["approval_required"]["desktop.submit_foreground"] is True
+
+
 def test_agent_run_direct_request_tool_name_alias_is_normalized() -> None:
     agent = {
         "agent_id": "agent-yachiyo",

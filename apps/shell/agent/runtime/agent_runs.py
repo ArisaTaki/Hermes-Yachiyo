@@ -20,6 +20,9 @@ from apps.shell.yachiyo_agent.entrypoint_tool_selection import (
 from apps.shell.yachiyo_agent.desktop_execution_policy import (
     with_daily_entrypoint_desktop_execution_policy,
 )
+from apps.shell.yachiyo_agent.runtime_execution import (
+    runtime_execution_requests_from_envelope_payload,
+)
 
 @dataclass(frozen=True)
 class AgentRunStart:
@@ -410,9 +413,10 @@ def _runtime_planner_entrypoint_should_execute(context: str, allowed_tools: list
 
 def _with_entrypoint_runtime_planner(agent: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
     agent = _with_daily_desktop_policy_overlay(agent, payload)
+    execution_requests = _payload_execution_tool_requests(payload)
     agent = agent_with_direct_request_approvals(
         agent,
-        _payload_direct_tool_requests(payload),
+        execution_requests,
     )
     if not payload.get("runtime_planner_entrypoint"):
         return agent
@@ -423,6 +427,12 @@ def _with_entrypoint_runtime_planner(agent: dict[str, Any], payload: dict[str, A
         or _looks_like_daily_desktop_howto_question(planning_goal)
     ):
         return agent
+    if _payload_has_runtime_execution_plan(payload):
+        return {
+            **agent,
+            "_runtime_planner_entrypoint": True,
+            "_runtime_planner_entrypoint_context": planning_goal,
+        }
     policy = agent.get("tool_policy") if isinstance(agent.get("tool_policy"), dict) else {}
     allowed = _string_list(policy.get("allowed_tools"))
     _decision, direct_requests = planner_first_direct_decision_and_tool_requests(
@@ -452,7 +462,7 @@ def _with_daily_desktop_policy_overlay(agent: dict[str, Any], payload: dict[str,
     ):
         return agent
     direct_requests = _payload_direct_tool_requests(payload)
-    if not direct_requests:
+    if not direct_requests and not _payload_has_runtime_execution_plan(payload):
         _decision, direct_requests = planner_first_direct_decision_and_tool_requests(
             planning_goal,
             list(DAILY_DESKTOP_TOOL_NAMES),
@@ -558,6 +568,22 @@ def _payload_direct_tool_requests(payload: dict[str, Any]) -> list[dict[str, Any
         if request:
             requests.append(request)
     return requests
+
+
+def _payload_execution_tool_requests(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    direct_requests = _payload_direct_tool_requests(payload)
+    if direct_requests:
+        return direct_requests
+    envelope = payload.get("runtime_execution_envelope")
+    return runtime_execution_requests_from_envelope_payload(envelope)
+
+
+def _payload_has_runtime_execution_plan(payload: dict[str, Any]) -> bool:
+    envelope = payload.get("runtime_execution_envelope")
+    if not isinstance(envelope, dict):
+        return False
+    requests = envelope.get("requests")
+    return isinstance(requests, list) and bool(requests)
 
 
 def _normalized_payload_direct_tool_request(value: Any) -> dict[str, Any] | None:

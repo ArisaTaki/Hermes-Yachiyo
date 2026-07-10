@@ -27552,10 +27552,22 @@ def test_custom_api_agent_loop_executes_explicit_direct_tool_request_list() -> N
     ]
 
 
-def test_custom_api_agent_loop_derives_direct_requests_from_runtime_envelope() -> None:
+@pytest.mark.parametrize(
+    ("continue_to_model", "expected_result", "expected_model_calls"),
+    [
+        (False, "已打开 Notes。", 0),
+        (True, "done", 1),
+    ],
+)
+def test_custom_api_agent_loop_derives_direct_requests_from_runtime_envelope(
+    continue_to_model: bool,
+    expected_result: str,
+    expected_model_calls: int,
+) -> None:
     budget = FakeBudget()
     tool_runs: list[list[dict[str, Any]]] = []
     timeline: list[dict[str, Any]] = []
+    model_calls: list[bool] = []
     runtime_execution_envelope = {
         "envelope_id": "execution-envelope-direct",
         "intent_kind": "desktop_operation",
@@ -27565,9 +27577,15 @@ def test_custom_api_agent_loop_derives_direct_requests_from_runtime_envelope() -
                 "tool_name": "app.open",
                 "input": {"app_name": "Notes"},
                 "status": "planned",
+                "source": "runtime_planner",
+                "continue_to_model": continue_to_model,
             }
         ],
     }
+
+    def call_model(*_args, **_kwargs):
+        model_calls.append(True)
+        return {"content": "done"}
 
     def run_tool_requests(
         tool_requests,
@@ -27594,7 +27612,11 @@ def test_custom_api_agent_loop_derives_direct_requests_from_runtime_envelope() -
         )
 
     loop = RuntimeCustomApiAgentLoop(
-        agent_model_config_private=lambda _agent: {},
+        agent_model_config_private=lambda _agent: {
+            "base_url": "https://example.invalid",
+            "model": "test-model",
+            "api_key": "test-key",
+        },
         compile_agent_runtime=lambda _agent: {
             "tool_policy": {"allowed_tools": ["app.open"]},
         },
@@ -27606,9 +27628,7 @@ def test_custom_api_agent_loop_derives_direct_requests_from_runtime_envelope() -
         operating_doctrine="Use runtime execution envelope requests.",
         memory_tool_names=set(),
         future_task_tool_names=set(),
-        call_model=lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            AssertionError("runtime envelope direct request should not call model")
-        ),
+        call_model=call_model,
         coalesce_model_message=lambda value: value,
         message_visible_content_text=lambda message: str(message.get("content") or ""),
         model_message_metadata=lambda _message: {},
@@ -27619,6 +27639,11 @@ def test_custom_api_agent_loop_derives_direct_requests_from_runtime_envelope() -
         tool_loop_projection=FakeToolLoopProjection(),
         run_tool_requests=run_tool_requests,
         error_type=agent_runtime.AgentRuntimeError,
+    )
+    loop._runtime_planner_tool_requests = lambda *_args, **_kwargs: (
+        (_ for _ in ()).throw(
+            AssertionError("runtime envelope should not be replanned")
+        )
     )
 
     result = loop.run(
@@ -27631,12 +27656,153 @@ def test_custom_api_agent_loop_derives_direct_requests_from_runtime_envelope() -
         runtime_execution_envelope=runtime_execution_envelope,
     )
 
-    assert result == "已打开 Notes。"
+    assert result == expected_result
+    assert len(model_calls) == expected_model_calls
     assert [request["tool"] for request in tool_runs[0]] == ["app.open"]
     selection = next(event for event in timeline if event["event"] == "agent.plan.selection")
     assert selection["selected_source"] == "runtime_execution_envelope"
     assert selection["yachiyo_execution_envelope"] == runtime_execution_envelope
     assert selection["yachiyo_execution_requests"] == ["app.open"]
+
+
+@pytest.mark.parametrize("with_executable_prefix", [False, True])
+def test_custom_api_agent_loop_does_not_replan_blocked_runtime_envelope(
+    with_executable_prefix: bool,
+) -> None:
+    timeline: list[dict[str, Any]] = []
+    tool_runs: list[list[dict[str, Any]]] = []
+    requests = []
+    if with_executable_prefix:
+        requests.append(
+            {
+                "request_id": "request-list-apps",
+                "step_id": "list-apps",
+                "tool_name": "desktop.list_apps",
+                "input": {"query": "Notes"},
+                "status": "planned",
+            }
+        )
+    requests.append(
+        {
+            "request_id": "request-open-notes",
+            "step_id": "open-notes",
+            "tool_name": "app.open",
+            "input": {"app_name": "Notes"},
+            "status": "planned",
+            **({"depends_on": ["list-apps"]} if with_executable_prefix else {}),
+            "desktop_execution_route": {
+                "status": "real_virtual_desktop_provider_required",
+                "can_execute": False,
+                "reason": "A real isolated desktop provider is required.",
+                "blocking_conditions": [
+                    "real_virtual_desktop_provider_required"
+                ],
+            },
+        }
+    )
+    runtime_execution_envelope = {
+        "envelope_id": "execution-envelope-blocked",
+        "decision_id": "decision-blocked",
+        "plan_id": "plan-blocked",
+        "requests": requests,
+    }
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {},
+        compile_agent_runtime=lambda _agent: {
+            "tool_policy": {
+                "allowed_tools": ["desktop.list_apps", "app.open"]
+            },
+        },
+        run_budget=lambda _run_id, _timeline_value: FakeBudget(),
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda allowed_tools: [
+            {"name": tool} for tool in allowed_tools
+        ],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=2,
+        operating_doctrine="Use runtime execution envelope requests.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("blocked runtime envelope must not call model")
+        ),
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda _message, _content: [],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=lambda tool_requests, *_args, **_kwargs: tool_runs.append(
+            tool_requests
+        ),
+        error_type=agent_runtime.AgentRuntimeError,
+    )
+    loop._runtime_planner_tool_requests = lambda *_args, **_kwargs: (
+        (_ for _ in ()).throw(
+            AssertionError("blocked runtime envelope must not be replanned")
+        )
+    )
+
+    result = loop.run(
+        {"name": "Yachiyo"},
+        "ignored",
+        broker={},
+        timeline=timeline,
+        artifacts=[],
+        run_id="run-runtime-envelope-blocked",
+        runtime_execution_envelope=runtime_execution_envelope,
+    )
+
+    assert "真实隔离桌面 Provider" in result
+    blocked = next(
+        event
+        for event in timeline
+        if event["event"] == "agent.desktop.intent_unavailable"
+    )
+    assert blocked["source"] == "runtime_execution_envelope"
+    assert blocked["status"] == "blocked"
+    assert blocked["decision_id"] == "decision-blocked"
+    assert blocked["plan_id"] == "plan-blocked"
+    expected_tools = ["desktop.list_apps"] if with_executable_prefix else []
+    assert [request["tool"] for run in tool_runs for request in run] == expected_tools
+    assert blocked["completed_tools"] == expected_tools
+
+
+def test_completed_app_open_keeps_explicit_unavailable_replan_followup() -> None:
+    request = {
+        "tool": "app.open",
+        "input": {"app_name": "Notes"},
+    }
+    timeline = [
+        _timeline(
+            "agent.tool.call",
+            "app.open",
+            input_preview={"app_name": "Notes"},
+            result={
+                "ok": True,
+                "action": "app.open",
+                "summary": "Opened Notes",
+                "data": {"app_name": "Notes"},
+            },
+        )
+    ]
+    replan = {
+        "trigger": "tool_unavailable",
+        "target_capability_id": "desktop.app_discovery",
+        "followup_target": {
+            "kind": "desktop_discovered_app_action",
+            "target_action": "inspect_app",
+        },
+    }
+
+    assert not custom_api_agent_module._runtime_planner_completed_direct_requests_with_unavailable_replan(
+        [request],
+        [replan],
+        timeline,
+        tool_timeline_start=0,
+    )
 
 
 def test_custom_api_agent_loop_verifies_model_system_volume_tool_call() -> None:

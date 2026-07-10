@@ -576,12 +576,24 @@ def runtime_execution_requests_from_envelope_payload(
     if not isinstance(requests, list):
         return []
     projected: list[dict[str, Any]] = []
+    non_executable_step_ids = _non_executable_runtime_step_ids(
+        requests,
+        envelope=envelope,
+        allowed_tools=allowed,
+    )
     for request in requests:
         if not isinstance(request, Mapping):
             continue
-        if _request_status_is_non_executable(request):
-            continue
-        if _request_desktop_route_is_non_executable(request):
+        step_id = _text(request.get("step_id") or request.get("planner_step_id"))
+        if (
+            _request_status_is_non_executable(request)
+            or _request_desktop_route_is_non_executable(request)
+            or step_id in non_executable_step_ids
+            or _request_depends_on_non_executable_step(
+                request,
+                non_executable_step_ids,
+            )
+        ):
             continue
         projected_request = _tool_request_from_execution_request(request, envelope=envelope)
         tool_name = str(projected_request.get("tool") or "").strip()
@@ -613,11 +625,25 @@ def runtime_execution_blocked_requests_from_envelope_payload(
     requests = envelope.get("requests")
     if not isinstance(requests, list):
         return []
+    non_executable_step_ids = _non_executable_runtime_step_ids(
+        requests,
+        envelope=envelope,
+        allowed_tools=allowed,
+    )
     projected: list[dict[str, Any]] = []
     for request in requests:
         if not isinstance(request, Mapping):
             continue
-        if not _request_desktop_route_is_non_executable(request):
+        step_id = _text(request.get("step_id") or request.get("planner_step_id"))
+        if not (
+            _request_status_is_non_executable(request)
+            or _request_desktop_route_is_non_executable(request)
+            or step_id in non_executable_step_ids
+            or _request_depends_on_non_executable_step(
+                request,
+                non_executable_step_ids,
+            )
+        ):
             continue
         projected_request = _tool_request_from_execution_request(request, envelope=envelope)
         tool_name = str(projected_request.get("tool") or "").strip()
@@ -635,7 +661,11 @@ def runtime_execution_blocked_requests_from_envelope_payload(
                 **projected_request,
                 "status": "blocked",
                 "blocked_by_runtime_readiness": True,
-                "blocked_by": str(route.get("status") or "desktop_provider_unavailable"),
+                "blocked_by": str(
+                    route.get("status")
+                    or request.get("status")
+                    or "runtime_dependency_unavailable"
+                ),
                 "policy_reason": str(
                     route.get("reason")
                     or projected_request.get("policy_reason")
@@ -644,6 +674,51 @@ def runtime_execution_blocked_requests_from_envelope_payload(
             }
         )
     return projected
+
+
+def _non_executable_runtime_step_ids(
+    requests: list[Any],
+    *,
+    envelope: Mapping[str, Any],
+    allowed_tools: set[str],
+) -> set[str]:
+    blocked: set[str] = set()
+    mapped_requests = [request for request in requests if isinstance(request, Mapping)]
+    for request in mapped_requests:
+        step_id = _text(request.get("step_id") or request.get("planner_step_id"))
+        if not step_id:
+            continue
+        projected = _tool_request_from_execution_request(request, envelope=envelope)
+        tool_name = _text(projected.get("tool"))
+        if (
+            _request_status_is_non_executable(request)
+            or _request_desktop_route_is_non_executable(request)
+            or not tool_name
+            or (allowed_tools and tool_name not in allowed_tools)
+        ):
+            blocked.add(step_id)
+
+    changed = True
+    while changed:
+        changed = False
+        for request in mapped_requests:
+            step_id = _text(request.get("step_id") or request.get("planner_step_id"))
+            if not step_id or step_id in blocked:
+                continue
+            if _request_depends_on_non_executable_step(request, blocked):
+                blocked.add(step_id)
+                changed = True
+    return blocked
+
+
+def _request_depends_on_non_executable_step(
+    request: Mapping[str, Any],
+    non_executable_step_ids: set[str],
+) -> bool:
+    return any(
+        dependency in non_executable_step_ids
+        for dependency in _string_list(request.get("depends_on"))
+    )
 
 
 def _request_status_is_non_executable(request: Mapping[str, Any]) -> bool:

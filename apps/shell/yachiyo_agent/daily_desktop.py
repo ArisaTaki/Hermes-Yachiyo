@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import re
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from apps.shell.agent.runtime.desktop_intents import (
@@ -16,10 +17,30 @@ from apps.shell.agent.tools.policy import DAILY_DESKTOP_TOOL_NAMES
 
 from .desktop_execution_policy import (
     daily_entrypoint_desktop_execution_policy,
+    desktop_provider_session_auto_start_recommended_for_requests,
     desktop_execution_policy_payload,
 )
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class DailyDesktopEntrypointRuntimePlan:
+    decision: Any | None
+    entrypoint_requests: list[dict[str, Any]]
+    executable_requests: list[dict[str, Any]]
+    runtime_execution_envelope: dict[str, Any]
+    selected_source: str
+    allowed_tools: tuple[str, ...] = ()
+
+    @property
+    def has_plan(self) -> bool:
+        requests = self.runtime_execution_envelope.get("requests")
+        return bool(
+            self.entrypoint_requests
+            or (isinstance(requests, list) and requests)
+        )
+
 
 _ENTRYPOINT_DISCOVERY_TOOLS = {
     "desktop.list_apps",
@@ -1440,11 +1461,179 @@ def planner_first_daily_desktop_entrypoint_requests(
     )
 
 
+def daily_desktop_entrypoint_runtime_plan(
+    text: str,
+    *,
+    metadata: Mapping[str, Any] | None = None,
+    allowed_tools: Sequence[str] | None = None,
+    metadata_allowed_tools: Sequence[str] | None = None,
+    allow_legacy_fallback: bool = True,
+) -> DailyDesktopEntrypointRuntimePlan:
+    """Plan once, then derive entrypoint and Runtime execution projections."""
+
+    allowed = daily_desktop_allowed_tools(allowed_tools)
+    direct_request = daily_desktop_metadata_tool_request(
+        metadata,
+        daily_desktop_allowed_tools(
+            metadata_allowed_tools
+            if metadata_allowed_tools is not None
+            else allowed
+        ),
+    )
+    if direct_request:
+        requests = [direct_request]
+        return DailyDesktopEntrypointRuntimePlan(
+            decision=None,
+            entrypoint_requests=requests,
+            executable_requests=requests,
+            runtime_execution_envelope={},
+            selected_source="metadata",
+            allowed_tools=tuple(allowed),
+        )
+
+    decision = None
+    planner_requests: list[dict[str, Any]] = []
+    runtime_execution_envelope: dict[str, Any] = {}
+    executable_requests: list[dict[str, Any]] = []
+    blocked_requests: list[dict[str, Any]] = []
+    try:
+        from .planner_execution import (
+            planner_decision_and_tool_requests,
+            planner_execution_tool_requests,
+        )
+        from .runtime_execution import (
+            runtime_execution_blocked_requests_from_envelope_payload,
+            runtime_execution_requests_from_envelope_payload,
+        )
+
+        decision, planner_requests = planner_decision_and_tool_requests(
+            str(text or ""),
+            allowed,
+            metadata=metadata,
+        )
+        runtime_execution_envelope = daily_desktop_runtime_execution_envelope(
+            text,
+            metadata=metadata,
+            allowed_tools=allowed,
+            decision=decision,
+        )
+        executable_requests = runtime_execution_requests_from_envelope_payload(
+            runtime_execution_envelope,
+            allowed_tools=allowed,
+        )
+        blocked_requests = runtime_execution_blocked_requests_from_envelope_payload(
+            runtime_execution_envelope,
+            allowed_tools=allowed,
+        )
+        if executable_requests or blocked_requests:
+            return DailyDesktopEntrypointRuntimePlan(
+                decision=decision,
+                entrypoint_requests=executable_requests or blocked_requests,
+                executable_requests=executable_requests,
+                runtime_execution_envelope=runtime_execution_envelope,
+                selected_source="runtime_execution_envelope",
+                allowed_tools=tuple(allowed),
+            )
+        if planner_requests:
+            normalized = planner_execution_tool_requests(planner_requests, allowed)
+            executable_requests = [
+                dict(request) for request in (normalized or planner_requests)
+            ]
+    except Exception:
+        logger.debug("Runtime planner entrypoint plan unavailable", exc_info=True)
+
+    if executable_requests:
+        return DailyDesktopEntrypointRuntimePlan(
+            decision=decision,
+            entrypoint_requests=executable_requests,
+            executable_requests=executable_requests,
+            runtime_execution_envelope=runtime_execution_envelope,
+            selected_source="runtime_planner",
+            allowed_tools=tuple(allowed),
+        )
+    legacy_requests = (
+        _legacy_entrypoint_compatibility_requests(
+            daily_desktop_entrypoint_requests(
+                text,
+                metadata=metadata,
+                allowed_tools=allowed,
+            )
+        )
+        if allow_legacy_fallback
+        else []
+    )
+    return DailyDesktopEntrypointRuntimePlan(
+        decision=decision,
+        entrypoint_requests=legacy_requests,
+        executable_requests=legacy_requests,
+        runtime_execution_envelope={},
+        selected_source="daily_desktop_intent" if legacy_requests else "none",
+        allowed_tools=tuple(allowed),
+    )
+
+
+def daily_desktop_runtime_plan_prepared_for_execution(
+    plan: DailyDesktopEntrypointRuntimePlan,
+    *,
+    metadata: Mapping[str, Any] | None = None,
+) -> DailyDesktopEntrypointRuntimePlan:
+    """Start an approved low-risk provider session without replanning the task."""
+
+    if (
+        plan.decision is None
+        or not plan.runtime_execution_envelope
+        or not desktop_provider_session_auto_start_recommended_for_requests(
+            plan.runtime_execution_envelope
+        )
+    ):
+        return plan
+    refreshed_envelope = daily_desktop_runtime_execution_envelope(
+        "",
+        metadata=metadata,
+        allowed_tools=plan.allowed_tools,
+        decision=plan.decision,
+        ensure_provider=True,
+    )
+    if not refreshed_envelope:
+        return plan
+    try:
+        from .runtime_execution import (
+            runtime_execution_blocked_requests_from_envelope_payload,
+            runtime_execution_requests_from_envelope_payload,
+        )
+
+        executable_requests = runtime_execution_requests_from_envelope_payload(
+            refreshed_envelope,
+            allowed_tools=plan.allowed_tools,
+        )
+        blocked_requests = runtime_execution_blocked_requests_from_envelope_payload(
+            refreshed_envelope,
+            allowed_tools=plan.allowed_tools,
+        )
+    except Exception:
+        logger.debug("Prepared Runtime envelope projection unavailable", exc_info=True)
+        return plan
+    return DailyDesktopEntrypointRuntimePlan(
+        decision=plan.decision,
+        entrypoint_requests=(
+            executable_requests
+            or blocked_requests
+            or plan.entrypoint_requests
+        ),
+        executable_requests=executable_requests,
+        runtime_execution_envelope=refreshed_envelope,
+        selected_source="runtime_execution_envelope",
+        allowed_tools=plan.allowed_tools,
+    )
+
+
 def daily_desktop_runtime_execution_envelope(
     text: str,
     *,
     metadata: Mapping[str, Any] | None = None,
     allowed_tools: Sequence[str] | None = None,
+    decision: Any | None = None,
+    ensure_provider: bool = False,
 ) -> dict[str, Any]:
     """Return the full Runtime execution envelope for daily entrypoints."""
 
@@ -1453,17 +1642,37 @@ def daily_desktop_runtime_execution_envelope(
         from .runtime_execution import runtime_execution_envelope_payload
         from .runtime_planner import RuntimePlanner
 
-        decision = RuntimePlanner().decision(
-            str(text or ""),
-            allowed_tools=allowed,
-            metadata=metadata,
+        selected_decision = (
+            decision
+            if decision is not None
+            else RuntimePlanner().decision(
+                str(text or ""), allowed_tools=allowed, metadata=metadata
+            )
         )
-        return runtime_execution_envelope_payload(
-            decision,
+        envelope = runtime_execution_envelope_payload(
+            selected_decision,
             allowed_tools=allowed,
             full_plan=True,
             metadata=metadata,
         )
+        if not envelope or not ensure_provider:
+            return envelope
+        from .isolated_provider_session import (
+            annotate_envelope_with_desktop_provider_session,
+            ensure_isolated_desktop_provider_session_for_envelope,
+        )
+
+        session = ensure_isolated_desktop_provider_session_for_envelope(envelope)
+        if session.get("needed") and session.get("running"):
+            refreshed = runtime_execution_envelope_payload(
+                selected_decision,
+                allowed_tools=allowed,
+                full_plan=True,
+                metadata=metadata,
+            )
+            if refreshed:
+                envelope = refreshed
+        return annotate_envelope_with_desktop_provider_session(envelope, session)
     except Exception:
         logger.debug("Runtime execution envelope unavailable for daily desktop", exc_info=True)
         return {}

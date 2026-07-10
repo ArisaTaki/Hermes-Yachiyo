@@ -655,6 +655,44 @@ def test_runtime_execution_envelope_snapshot_is_public_contract() -> None:
     assert projected_requests[0]["desktop_execution_route"]["status"] == "ready"
 
 
+def test_runtime_execution_projection_skips_requests_with_blocked_dependencies() -> None:
+    envelope = {
+        "envelope_id": "execution-envelope-dependent-block",
+        "requests": [
+            {
+                "tool_name": "desktop.search_submit",
+                "input": {},
+                "step_id": "submit-query",
+                "depends_on": ["type-query"],
+                "status": "planned",
+            },
+            {
+                "tool_name": "desktop.safe_type_text",
+                "input": {"text": "Kaguya"},
+                "step_id": "type-query",
+                "depends_on": ["focus-search"],
+                "status": "planned",
+            },
+            {
+                "tool_name": "desktop.safe_shortcut",
+                "input": {"action": "find"},
+                "step_id": "focus-search",
+                "status": "blocked",
+            },
+            {
+                "tool_name": "desktop.list_apps",
+                "input": {"query": "Music"},
+                "step_id": "independent-discovery",
+                "status": "planned",
+            },
+        ],
+    }
+
+    projected = runtime_execution_requests_from_envelope_payload(envelope)
+
+    assert [request["tool"] for request in projected] == ["desktop.list_apps"]
+
+
 def test_provider_session_recovery_preserves_real_virtual_backend_requirement() -> None:
     envelope = RuntimeExecutionEnvelopeSnapshot(
         envelope_id="execution-envelope-provider-1",

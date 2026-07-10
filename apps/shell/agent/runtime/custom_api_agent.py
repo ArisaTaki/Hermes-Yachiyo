@@ -72,6 +72,7 @@ from apps.shell.yachiyo_agent.planner_projection import (
 )
 from apps.shell.yachiyo_agent.policy import desktop_tool_execution_mode_for_input
 from apps.shell.yachiyo_agent.runtime_execution import (
+    runtime_execution_blocked_requests_from_envelope_payload,
     runtime_execution_envelope_payload,
     runtime_execution_requests_from_envelope_payload,
     runtime_execution_requests_from_metadata,
@@ -351,6 +352,17 @@ class RuntimeCustomApiAgentLoop:
             direct_tool_request,
             desktop_execution_policy,
         )
+        runtime_execution_envelope_owned = _runtime_execution_envelope_has_requests(
+            runtime_execution_envelope
+        )
+        blocked_runtime_execution_requests = (
+            runtime_execution_blocked_requests_from_envelope_payload(
+                runtime_execution_envelope,
+                allowed_tools=allowed_tools,
+            )
+            if runtime_execution_envelope_owned
+            else []
+        )
         if direct_tool_requests is None:
             direct_tool_requests = _runtime_execution_context_tool_requests(
                 runtime_execution_envelope,
@@ -424,7 +436,7 @@ class RuntimeCustomApiAgentLoop:
                     and str(request.get("source") or "").strip() == "runtime_planner"
                     for request in direct_planned_tool_requests
                     if isinstance(request, dict)
-                ):
+                ) and not runtime_execution_envelope_owned:
                     (
                         runtime_planner_decision,
                         planner_execution_requests,
@@ -440,6 +452,22 @@ class RuntimeCustomApiAgentLoop:
                 planned_tool_requests = [direct_planned_tool_request]
                 if not direct_tool_selection_payload:
                     direct_tool_selection_payload = runtime_execution_selection_payload
+            elif runtime_execution_envelope_owned:
+                self._record_direct_tool_selection_event(
+                    runtime_execution_selection_payload,
+                    timeline=timeline,
+                    run_id=run_id,
+                    scope_context=_runtime_planner_scope_context(
+                        runtime_execution_selection_payload,
+                        timeline=timeline,
+                    ),
+                )
+                return self._record_blocked_runtime_execution_envelope(
+                    runtime_execution_envelope,
+                    blocked_runtime_execution_requests,
+                    timeline=timeline,
+                    run_id=run_id,
+                )
             else:
                 (
                     runtime_planner_decision,
@@ -883,6 +911,17 @@ class RuntimeCustomApiAgentLoop:
                             tool_timeline_start=retry_timeline_start,
                         )
                         else True
+                    )
+                if (
+                    runtime_execution_envelope_owned
+                    and blocked_runtime_execution_requests
+                ):
+                    return self._record_blocked_runtime_execution_envelope(
+                        runtime_execution_envelope,
+                        blocked_runtime_execution_requests,
+                        timeline=timeline,
+                        run_id=run_id,
+                        completed_requests=execution_tool_requests,
                     )
                 if (
                     explicit_model_followup
@@ -4481,6 +4520,110 @@ class RuntimeCustomApiAgentLoop:
                 ),
             }
         )
+        return summary
+
+    def _record_blocked_runtime_execution_envelope(
+        self,
+        envelope: Mapping[str, Any] | None,
+        blocked_requests: list[dict[str, Any]],
+        *,
+        timeline: list[dict[str, Any]],
+        run_id: str,
+        completed_requests: Iterable[Mapping[str, Any]] = (),
+    ) -> str:
+        envelope_payload = dict(envelope or {})
+        raw_requests = (
+            envelope_payload.get("requests")
+            if isinstance(envelope_payload.get("requests"), list)
+            else []
+        )
+        candidate: Mapping[str, Any] = (
+            blocked_requests[0]
+            if blocked_requests
+            else next(
+                (request for request in raw_requests if isinstance(request, Mapping)),
+                {},
+            )
+        )
+        route = (
+            candidate.get("desktop_execution_route")
+            if isinstance(candidate.get("desktop_execution_route"), Mapping)
+            else {}
+        )
+        tool_name = str(
+            candidate.get("tool") or candidate.get("tool_name") or ""
+        ).strip()
+        blocked_by = str(
+            candidate.get("blocked_by")
+            or route.get("status")
+            or candidate.get("status")
+            or "runtime_execution_not_ready"
+        ).strip()
+        reason = str(
+            candidate.get("policy_reason")
+            or route.get("reason")
+            or "Runtime execution requirements are not currently satisfied."
+        ).strip()
+        completed_tools = _tool_names_from_requests(completed_requests)
+        if completed_tools and "real_virtual_desktop_provider" in blocked_by:
+            summary = (
+                "Runtime 已完成可执行的前置步骤，但后续步骤需要真实隔离桌面 Provider，"
+                "因此没有继续执行。请启动或配置 Provider 后重试。"
+            )
+        elif "real_virtual_desktop_provider" in blocked_by:
+            summary = (
+                "当前没有可用的真实隔离桌面 Provider，Runtime 已保留执行计划但没有执行。"
+                "请启动或配置真实隔离桌面 Provider 后重试。"
+            )
+        else:
+            summary = f"Runtime 已保留执行计划，但当前执行条件未满足，因此没有执行：{reason}"
+        event_payload = {
+            **_runtime_planner_scope_context(
+                envelope_payload,
+                candidate,
+                timeline=timeline,
+            ),
+            "tool": tool_name,
+            "status": "blocked",
+            "source": "runtime_execution_envelope",
+            "reason": "runtime_execution_not_ready",
+            "blocked_by": blocked_by,
+            "blocked_summary": summary,
+            "policy_reason": reason,
+            "input_preview": dict(candidate.get("input") or {}),
+            "runtime_execution_envelope_id": str(
+                envelope_payload.get("envelope_id")
+                or envelope_payload.get("execution_id")
+                or ""
+            ),
+            "decision_id": str(envelope_payload.get("decision_id") or ""),
+            "plan_id": str(envelope_payload.get("plan_id") or ""),
+            "request_id": str(candidate.get("request_id") or ""),
+            "step_id": str(
+                candidate.get("step_id")
+                or candidate.get("planner_step_id")
+                or ""
+            ),
+            "blocking_conditions": _string_list(
+                route.get("blocking_conditions")
+                or candidate.get("blocking_conditions")
+            ),
+            "completed_tools": completed_tools,
+        }
+        detail = tool_name or "runtime_execution_envelope"
+        timeline.append(
+            self._timeline(
+                "agent.desktop.intent_unavailable",
+                detail,
+                **event_payload,
+            )
+        )
+        if run_id and self._append_run_event is not None:
+            self._append_run_event(
+                run_id,
+                "agent.desktop.intent_unavailable",
+                event_payload,
+            )
         return summary
 
     @staticmethod
@@ -10098,9 +10241,13 @@ def _runtime_replan_payload_requires_continuation(payload: Mapping[str, Any]) ->
         return True
     if _replan_ui_observed_action_target(payload):
         return True
-    if isinstance(payload.get("followup_target"), Mapping):
+    if isinstance(payload.get("followup_target"), Mapping) and payload.get(
+        "followup_target"
+    ):
         return True
-    if isinstance(payload.get("action_target"), Mapping):
+    if isinstance(payload.get("action_target"), Mapping) and payload.get(
+        "action_target"
+    ):
         return True
     metadata = payload.get("metadata") if isinstance(payload.get("metadata"), Mapping) else {}
     trigger = str(payload.get("trigger") or metadata.get("signal_trigger") or "").strip()
@@ -10114,9 +10261,12 @@ def _runtime_replan_payload_requires_continuation(payload: Mapping[str, Any]) ->
         )
     ):
         return True
-    return isinstance(metadata.get("followup_target"), Mapping) or isinstance(
-        metadata.get("action_target"),
-        Mapping,
+    return bool(
+        isinstance(metadata.get("followup_target"), Mapping)
+        and metadata.get("followup_target")
+    ) or bool(
+        isinstance(metadata.get("action_target"), Mapping)
+        and metadata.get("action_target")
     )
 
 
@@ -14697,6 +14847,15 @@ def _runtime_execution_context_tool_requests(
         allowed_tools=allowed_tools,
     )
     return requests or None
+
+
+def _runtime_execution_envelope_has_requests(
+    runtime_execution_envelope: Mapping[str, Any] | None,
+) -> bool:
+    if not isinstance(runtime_execution_envelope, Mapping):
+        return False
+    requests = runtime_execution_envelope.get("requests")
+    return isinstance(requests, list) and bool(requests)
 
 
 def _runtime_execution_context_selection_payload(
