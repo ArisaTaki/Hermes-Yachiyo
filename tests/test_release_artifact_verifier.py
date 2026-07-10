@@ -3124,6 +3124,10 @@ def test_verifier_requires_release_workflow_signing_path_before_dmg_build(tmp_pa
         "macOS release workflow must require a public-release-ready virtual desktop backend"
         in messages
     )
+    assert (
+        "macOS release workflow must merge real virtual desktop evidence into release smoke summary"
+        in messages
+    )
 
 
 def test_verifier_requires_release_workflow_first_launch_permission_guidance(tmp_path):

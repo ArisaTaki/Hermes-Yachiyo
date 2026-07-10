@@ -830,6 +830,7 @@ jobs:
             release/rc-verification.json \
             release/public-release-gate/oha-desktop-agent-release-smoke.json \
             release/public-release-gate/public-demo.json \
+            release/virtual-desktop-provider-smoke.json \
             --diagnostics-zip release/public-release-gate/diagnostics.zip \
             --output-json release/release-smoke.json \
             --output-markdown release/release-smoke.md || release_smoke_status=$?

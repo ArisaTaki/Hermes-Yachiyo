@@ -1404,6 +1404,10 @@ RELEASE_WORKFLOW_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow must archive real virtual desktop provider smoke evidence",
     ),
     (
+        "            release/virtual-desktop-provider-smoke.json \\",
+        "macOS release workflow must merge real virtual desktop evidence into release smoke summary",
+    ),
+    (
         "find dist/electron -path '*/Oha-Yachiyo.app/Contents/Resources'",
         "macOS release workflow must discover packaged app resource directories",
     ),

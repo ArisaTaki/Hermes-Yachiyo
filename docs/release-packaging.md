@@ -93,7 +93,7 @@ OHA_YACHIYO_VIRTUAL_DESKTOP_SSH_PRIVATE_KEY
 OHA_YACHIYO_VIRTUAL_DESKTOP_SSH_KNOWN_HOSTS
 ```
 
-三个 Secrets 全空时，workflow 会写出 `release/virtual-desktop-provider-smoke.json`，状态为 `not_configured`，并继续现有免费发布；只配置其中一部分会直接失败，避免误以为已经收集真实 VM evidence。完整配置时，workflow 使用临时 `0600` 私钥、固定 `BatchMode=yes`、`IdentitiesOnly=yes`、`StrictHostKeyChecking=yes` 和显式 `UserKnownHostsFile`，调用 `install_virtual_desktop_guest.py` 安装当前构建产物，再由 `smoke_oha_desktop_agent_release.py --public-release` 验证 app 发现/打开、UI 读取、click/type/shortcut、结果验证和 provider lifecycle。私钥、known_hosts、token、manifest 与安装报告只保留在 runner 临时目录并在步骤结束时删除；归档内容只有脱敏的 `release/virtual-desktop-provider-smoke.json`。
+三个 Secrets 全空时，workflow 会写出 `release/virtual-desktop-provider-smoke.json`，状态为 `not_configured`，并继续现有免费发布；只配置其中一部分会直接失败，避免误以为已经收集真实 VM evidence。完整配置时，workflow 使用临时 `0600` 私钥、固定 `BatchMode=yes`、`IdentitiesOnly=yes`、`StrictHostKeyChecking=yes` 和显式 `UserKnownHostsFile`，调用 `install_virtual_desktop_guest.py` 安装当前构建产物，再由 `smoke_oha_desktop_agent_release.py --public-release` 验证 app 发现/打开、UI 读取、click/type/shortcut、结果验证和 provider lifecycle。私钥、known_hosts、token、manifest 与安装报告只保留在 runner 临时目录并在步骤结束时删除；归档内容只有脱敏的 `release/virtual-desktop-provider-smoke.json`。该报告同时作为第四个 source report 传给 `summarize_release_smoke.py`：`not_configured` 不会产生通过证据；真实 VM 报告只有同时满足 release backend、provider contract 和 conformance 条件时才会补齐 `oha_real_virtual_desktop_backend`。
 
 ## 打包结构
 
