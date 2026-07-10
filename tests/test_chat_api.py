@@ -183,13 +183,18 @@ def test_chat_api_direct_generic_app_open_forwards_safe_direct_requests(
         assert [request["tool"] for request in captured["direct_tool_requests"]] == [
             "desktop.list_apps",
             "app.open",
-            "desktop.active_window",
+            "desktop.verify",
         ]
         assert captured["direct_tool_requests"][0]["input"] == {
             "query": "Linear",
             "limit": 20,
         }
         assert captured["direct_tool_requests"][1]["input"]["app_name"] == "Linear"
+        assert captured["direct_tool_requests"][2]["input"] == {
+            "app_name": "Linear",
+            "query": "Linear",
+            "selection_source": "desktop.list_apps",
+        }
         assert captured["direct_tool_requests"][2]["continue_to_model"] is True
         assert captured["runtime_execution_envelope"]["requests"]
     finally:
@@ -257,6 +262,10 @@ def _wait_for_assistant_content(runtime: _RuntimeStub, content: str, timeout: fl
     raise TimeoutError(f"Assistant message {content!r} 未在 {timeout} 秒内写入")
 
 
+def _assert_dict_contains(actual: dict[str, Any], expected: dict[str, Any]) -> None:
+    assert {key: actual.get(key) for key in expected} == expected
+
+
 def test_run_status_labels_are_user_facing_chinese():
     assert ChatAPI._workflow_status_label("running") == "进行中"
     assert ChatAPI._workflow_status_label("processing") == "进行中"
@@ -307,14 +316,18 @@ def test_send_message_uses_entrypoint_planning_context_for_daily_entrypoint(tmp_
     api, runtime, store = _make_api(tmp_path)
     planned: list[tuple[str, dict[str, Any] | None]] = []
 
-    def daily_desktop_entrypoint_requests(text: str, *, metadata=None):
+    def daily_desktop_entrypoint_runtime_plan(text: str, *, metadata=None):
         planned.append((text, metadata))
-        return []
+        return SimpleNamespace(
+            entrypoint_requests=[],
+            executable_requests=[],
+            runtime_execution_envelope={},
+        )
 
     monkeypatch.setattr(
         api,
-        "_daily_desktop_entrypoint_requests",
-        daily_desktop_entrypoint_requests,
+        "_daily_desktop_entrypoint_runtime_plan",
+        daily_desktop_entrypoint_runtime_plan,
     )
     try:
         result = api.send_message(
@@ -325,12 +338,13 @@ def test_send_message_uses_entrypoint_planning_context_for_daily_entrypoint(tmp_
         user = runtime.chat_session.get_messages()[0]
 
         assert result["ok"] is True
-        assert planned == [
-            (
-                "当前浏览器页面 点击登录",
-                {"entrypoint_planning_context": "当前浏览器页面 点击登录"},
-            )
-        ]
+        assert len(planned) == 1
+        planned_text, planned_metadata = planned[0]
+        assert planned_text == "当前浏览器页面 点击登录"
+        assert planned_metadata is not None
+        assert planned_metadata["entrypoint_planning_context"] == "当前浏览器页面 点击登录"
+        assert planned_metadata["runtime_planner_preflight_ui_before_action"] is True
+        assert planned_metadata["desktop_execution_policy"]["mode"] == "preview_input"
         assert task is not None
         assert task.description == "当前浏览器页面 点击登录"
         assert user.content == "点击登录"
@@ -587,8 +601,14 @@ def test_send_message_executes_direct_data_analysis_task_and_records_artifact(
         assert user.metadata["daily_desktop_tool"] == "data.analyze"
         assert user.metadata["yachiyo_intent_kind"] == "data_analysis"
         assert selection_event["payload"]["selection_source"] == "runtime_planner"
-        assert selection_event["payload"]["plan_tools"] == ["data.analyze"]
-        assert selection_event["payload"]["selected_tools"] == ["data.analyze"]
+        assert selection_event["payload"]["plan_tools"] == [
+            "workspace.read",
+            "data.analyze",
+        ]
+        assert selection_event["payload"]["selected_tools"] == [
+            "workspace.read",
+            "data.analyze",
+        ]
         assert "agent.intent.selected" in event_types
         assert "agent.plan.created" in event_types
         assert "agent.plan.selection" in event_types
@@ -2245,12 +2265,16 @@ def test_send_message_executes_natural_calendar_event_without_model(tmp_path, mo
         assistant = runtime.chat_session.get_assistant_message_for_task(result["task_id"])
 
         assert result["ok"] is True
-        assert result["status"] == "completed"
+        assert result["status"] == "waiting_approval"
         assert result["run_id"] == run["run_id"]
-        assert calendar_calls == [("开会", tomorrow_1000, tomorrow_1100, "")]
-        assert result["agent_task"]["status"] == "completed"
-        assert result["agent_task"]["summary"] == f"已创建日历事件：开会（{tomorrow_1000} - {tomorrow_1100}）。"
+        assert calendar_calls == []
+        assert result["agent_task"]["status"] == "waiting_approval"
+        assert result["agent_task"]["needs_user_action"] is True
+        assert result["agent_task"]["pending_approvals"][0]["tool_name"] == (
+            "calendar.create_event"
+        )
         assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "calendar.create_event"
+        assert result["agent_task"]["tool_calls"][-1]["status"] == "waiting_approval"
         assert result["agent_task"]["tool_calls"][-1]["input_preview"] == {
             "title": "开会",
             "start_at": tomorrow_1000,
@@ -2258,15 +2282,20 @@ def test_send_message_executes_natural_calendar_event_without_model(tmp_path, mo
         }
         assert planned_event["payload"]["tool"] == "calendar.create_event"
         assert task is not None
-        assert task.status == TaskStatus.COMPLETED
-        assert task.result == f"已创建日历事件：开会（{tomorrow_1000} - {tomorrow_1100}）。"
+        assert task.status != TaskStatus.COMPLETED
         assert assistant is not None
-        assert assistant.status == MessageStatus.COMPLETED
-        assert assistant.content == task.result
-        assert run["status"] == "completed"
+        assert assistant.status != MessageStatus.COMPLETED
+        assert run["status"] == "approval_required"
+        assert run["pending_approval"]["tool"] == "calendar.create_event"
+        assert run["pending_approval"]["input_preview"] == {
+            "title": "开会",
+            "start_at": tomorrow_1000,
+            "end_at": tomorrow_1100,
+        }
         assert "agent.desktop.intent_planned" in event_types
-        assert "agent.tool.call" in event_types
-        assert "agent.desktop.intent_completed" in event_types
+        assert "agent.tool.call" not in event_types
+        assert "agent.desktop.intent_approval_required" in event_types
+        assert "agent.desktop.intent_completed" not in event_types
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
     finally:
@@ -2330,25 +2359,36 @@ def test_send_message_executes_natural_reminder_without_model(tmp_path, monkeypa
         user_message = runtime.chat_session.get_messages()[0]
 
         assert result["ok"] is True
-        assert result["status"] == "completed"
+        assert result["status"] == "waiting_approval"
         assert result["run_id"] == run["run_id"]
-        assert reminder_calls == [("join meeting", tomorrow_0900, "")]
-        assert result["agent_task"]["status"] == "completed"
+        assert reminder_calls == []
+        assert result["agent_task"]["status"] == "waiting_approval"
+        assert result["agent_task"]["needs_user_action"] is True
+        assert result["agent_task"]["pending_approvals"][0]["tool_name"] == (
+            "reminders.create"
+        )
         assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "reminders.create"
+        assert result["agent_task"]["tool_calls"][-1]["status"] == "waiting_approval"
         assert result["agent_task"]["tool_calls"][-1]["input_preview"] == {
             "title": "join meeting",
             "due_at": tomorrow_0900,
         }
         assert planned_event["payload"]["tool"] == "reminders.create"
         assert task is not None
-        assert task.status == TaskStatus.COMPLETED
+        assert task.status != TaskStatus.COMPLETED
         assert assistant is not None
-        assert assistant.status == MessageStatus.COMPLETED
-        assert run["status"] == "completed"
+        assert assistant.status != MessageStatus.COMPLETED
+        assert run["status"] == "approval_required"
+        assert run["pending_approval"]["tool"] == "reminders.create"
+        assert run["pending_approval"]["input_preview"] == {
+            "title": "join meeting",
+            "due_at": tomorrow_0900,
+        }
         assert user_message.metadata["daily_desktop_tool"] == "reminders.create"
         assert "agent.desktop.intent_planned" in event_types
-        assert "agent.tool.call" in event_types
-        assert "agent.desktop.intent_completed" in event_types
+        assert "agent.tool.call" not in event_types
+        assert "agent.desktop.intent_approval_required" in event_types
+        assert "agent.desktop.intent_completed" not in event_types
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
     finally:
@@ -3572,7 +3612,22 @@ def test_send_message_executes_direct_app_focus_task(tmp_path, monkeypatch):
             "data": {"app_name": app_name},
         }
 
+    def fake_desktop_verify(_broker, payload, _approved):
+        return {
+            "ok": True,
+            "action": "desktop.verify",
+            "summary": f"Verified desktop app: {payload.get('app_name', '')}",
+            "data": {"app_name": payload.get("app_name", "")},
+        }
+
+    from apps.shell.agent.tools import registry
+
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+    monkeypatch.setitem(
+        registry.TOOL_DISPATCH_REGISTRY,
+        "desktop.verify",
+        fake_desktop_verify,
+    )
     try:
         result = api.send_message("Slack 切到前台")
         task = runtime.state.get_task(result["task_id"])
@@ -3586,7 +3641,11 @@ def test_send_message_executes_direct_app_focus_task(tmp_path, monkeypatch):
         assert result["ok"] is True
         assert result["status"] == "completed"
         assert result["agent_task"]["summary"] == "已切换到 Slack。"
-        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "app.focus"
+        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "desktop.verify"
+        assert any(
+            tool_call["tool_name"] == "app.focus"
+            for tool_call in result["agent_task"]["tool_calls"]
+        )
         assert task is not None
         assert task.status == TaskStatus.COMPLETED
         assert task.result == "已切换到 Slack。"
@@ -3631,7 +3690,22 @@ def test_send_message_executes_direct_app_open_task(tmp_path, monkeypatch):
             },
         }
 
+    def fake_desktop_verify(_broker, payload, _approved):
+        return {
+            "ok": True,
+            "action": "desktop.verify",
+            "summary": f"Verified desktop app: {payload.get('app_name', '')}",
+            "data": {"app_name": payload.get("app_name", "")},
+        }
+
+    from apps.shell.agent.tools import registry
+
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
+    monkeypatch.setitem(
+        registry.TOOL_DISPATCH_REGISTRY,
+        "desktop.verify",
+        fake_desktop_verify,
+    )
     try:
         result = api.send_message("把 Word 打开一下")
         task = runtime.state.get_task(result["task_id"])
@@ -3646,7 +3720,11 @@ def test_send_message_executes_direct_app_open_task(tmp_path, monkeypatch):
         assert result["ok"] is True
         assert result["status"] == "completed"
         assert result["agent_task"]["summary"] == "已打开 Microsoft Word。"
-        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "app.open"
+        assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "desktop.verify"
+        assert any(
+            tool_call["tool_name"] == "app.open"
+            for tool_call in result["agent_task"]["tool_calls"]
+        )
         assert task is not None
         assert task.status == TaskStatus.COMPLETED
         assert task.result == "已打开 Microsoft Word。"
@@ -3667,7 +3745,7 @@ def test_send_message_executes_direct_app_open_task(tmp_path, monkeypatch):
         assert second["ok"] is True
         assert second["status"] == "completed"
         assert second["agent_task"]["summary"] == "已打开 Finder。"
-        assert second["agent_task"]["tool_calls"][-1]["tool_name"] == "app.open"
+        assert second["agent_task"]["tool_calls"][-1]["tool_name"] == "desktop.verify"
         assert second_task is not None
         assert second_task.status == TaskStatus.COMPLETED
         assert second_task.result == "已打开 Finder。"
@@ -3679,7 +3757,7 @@ def test_send_message_executes_direct_app_open_task(tmp_path, monkeypatch):
         assert third["ok"] is True
         assert third["status"] == "completed"
         assert third["agent_task"]["summary"] == "已打开 Messages。"
-        assert third["agent_task"]["tool_calls"][-1]["tool_name"] == "app.open"
+        assert third["agent_task"]["tool_calls"][-1]["tool_name"] == "desktop.verify"
         assert third_task is not None
         assert third_task.status == TaskStatus.COMPLETED
         assert third_task.result == "已打开 Messages。"
@@ -3691,7 +3769,7 @@ def test_send_message_executes_direct_app_open_task(tmp_path, monkeypatch):
         assert fourth["ok"] is True
         assert fourth["status"] == "completed"
         assert fourth["agent_task"]["summary"] == "已打开 WeChat。"
-        assert fourth["agent_task"]["tool_calls"][-1]["tool_name"] == "app.open"
+        assert fourth["agent_task"]["tool_calls"][-1]["tool_name"] == "desktop.verify"
         assert fourth_task is not None
         assert fourth_task.status == TaskStatus.COMPLETED
         assert fourth_task.result == "已打开 WeChat。"
@@ -3703,7 +3781,7 @@ def test_send_message_executes_direct_app_open_task(tmp_path, monkeypatch):
         assert fifth["ok"] is True
         assert fifth["status"] == "completed"
         assert fifth["agent_task"]["summary"] == "已打开 WeChat。"
-        assert fifth["agent_task"]["tool_calls"][-1]["tool_name"] == "app.open"
+        assert fifth["agent_task"]["tool_calls"][-1]["tool_name"] == "desktop.verify"
         assert fifth_task is not None
         assert fifth_task.status == TaskStatus.COMPLETED
         assert fifth_task.result == "已打开 WeChat。"
@@ -7835,12 +7913,15 @@ def test_send_message_routes_ui_element_language_to_approval_gate(
             assert result["agent_task"]["status"] == "waiting_approval"
             assert result["agent_task"]["needs_user_action"] is True
             assert result["agent_task"]["pending_approvals"][0]["tool_name"] == tool_name
-            assert result["agent_task"]["pending_approvals"][0]["input_preview"] == input_preview
+            _assert_dict_contains(
+                result["agent_task"]["pending_approvals"][0]["input_preview"],
+                input_preview,
+            )
             assert result["agent_task"]["tool_calls"][-1]["tool_name"] == tool_name
             assert result["agent_task"]["tool_calls"][-1]["status"] == "waiting_approval"
             assert run["status"] == "approval_required"
             assert run["pending_approval"]["tool"] == tool_name
-            assert run["pending_approval"]["input_preview"] == input_preview
+            _assert_dict_contains(run["pending_approval"]["input_preview"], input_preview)
             assert "agent.desktop.intent_planned" in event_types
             assert "agent.desktop.intent_approval_required" in event_types
             assert "agent.tool.approval_required" in event_types
@@ -7947,12 +8028,15 @@ def test_send_message_routes_browser_click_and_type_text_to_approval_gate(
             assert result["agent_task"]["status"] == "waiting_approval"
             assert result["agent_task"]["needs_user_action"] is True
             assert result["agent_task"]["pending_approvals"][0]["tool_name"] == tool_name
-            assert result["agent_task"]["pending_approvals"][0]["input_preview"] == input_preview
+            _assert_dict_contains(
+                result["agent_task"]["pending_approvals"][0]["input_preview"],
+                input_preview,
+            )
             assert result["agent_task"]["tool_calls"][-1]["tool_name"] == tool_name
             assert result["agent_task"]["tool_calls"][-1]["status"] == "waiting_approval"
             assert run["status"] == "approval_required"
             assert run["pending_approval"]["tool"] == tool_name
-            assert run["pending_approval"]["input_preview"] == input_preview
+            _assert_dict_contains(run["pending_approval"]["input_preview"], input_preview)
             assert "agent.desktop.intent_planned" in event_types
             assert "agent.desktop.intent_approval_required" in event_types
             assert "agent.tool.approval_required" in event_types
@@ -8016,12 +8100,15 @@ def test_send_message_routes_app_prefix_search_field_click_to_approval_without_m
         assert result["agent_task"]["pending_approvals"][0]["tool_name"] == (
             "app.focus_and_click_ui_element"
         )
-        assert result["agent_task"]["pending_approvals"][0]["input_preview"] == input_preview
+        _assert_dict_contains(
+            result["agent_task"]["pending_approvals"][0]["input_preview"],
+            input_preview,
+        )
         assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "app.focus_and_click_ui_element"
         assert result["agent_task"]["tool_calls"][-1]["status"] == "waiting_approval"
         assert run["status"] == "approval_required"
         assert run["pending_approval"]["tool"] == "app.focus_and_click_ui_element"
-        assert run["pending_approval"]["input_preview"] == input_preview
+        _assert_dict_contains(run["pending_approval"]["input_preview"], input_preview)
         assert "agent.desktop.intent_planned" in event_types
         assert "agent.desktop.intent_approval_required" in event_types
         assert "agent.tool.approval_required" in event_types
@@ -8108,16 +8195,16 @@ def test_send_message_routes_app_browser_search_click_to_approval_without_model(
             for call in result["agent_task"]["tool_calls"]
         )
         assert result["agent_task"]["pending_approvals"][0]["tool_name"] == "browser.click"
-        assert result["agent_task"]["pending_approvals"][0]["input_preview"] == {
-            "selector": "search-result=1",
-            "click_count": 1,
-        }
+        _assert_dict_contains(
+            result["agent_task"]["pending_approvals"][0]["input_preview"],
+            {"selector": "search-result=1", "click_count": 1},
+        )
         assert run["status"] == "approval_required"
         assert run["pending_approval"]["tool"] == "browser.click"
-        assert run["pending_approval"]["input_preview"] == {
-            "selector": "search-result=1",
-            "click_count": 1,
-        }
+        _assert_dict_contains(
+            run["pending_approval"]["input_preview"],
+            {"selector": "search-result=1", "click_count": 1},
+        )
         assert "agent.desktop.intent_planned" in event_types
         assert "agent.desktop.intent_approval_required" in event_types
         assert "agent.tool.approval_required" in event_types
@@ -8186,16 +8273,16 @@ def test_send_message_routes_site_search_play_to_approval_without_model(
         assert result["agent_task"]["tool_calls"][0]["tool_name"] == "browser.open_url"
         assert result["agent_task"]["tool_calls"][0]["status"] == "completed"
         assert result["agent_task"]["pending_approvals"][0]["tool_name"] == "browser.click"
-        assert result["agent_task"]["pending_approvals"][0]["input_preview"] == {
-            "selector": "search-result=1",
-            "click_count": 1,
-        }
+        _assert_dict_contains(
+            result["agent_task"]["pending_approvals"][0]["input_preview"],
+            {"selector": "search-result=1", "click_count": 1},
+        )
         assert run["status"] == "approval_required"
         assert run["pending_approval"]["tool"] == "browser.click"
-        assert run["pending_approval"]["input_preview"] == {
-            "selector": "search-result=1",
-            "click_count": 1,
-        }
+        _assert_dict_contains(
+            run["pending_approval"]["input_preview"],
+            {"selector": "search-result=1", "click_count": 1},
+        )
         assert "agent.desktop.intent_planned" in event_types
         assert "agent.desktop.intent_approval_required" in event_types
         assert "agent.tool.approval_required" in event_types
@@ -8719,12 +8806,15 @@ def test_send_message_routes_return_submit_to_approval_without_model(tmp_path, m
             assert result["agent_task"]["status"] == "waiting_approval"
             assert result["agent_task"]["needs_user_action"] is True
             assert result["agent_task"]["pending_approvals"][0]["tool_name"] == "desktop.submit_foreground"
-            assert result["agent_task"]["pending_approvals"][0]["input_preview"] == input_preview
+            _assert_dict_contains(
+                result["agent_task"]["pending_approvals"][0]["input_preview"],
+                input_preview,
+            )
             assert result["agent_task"]["tool_calls"][-1]["tool_name"] == "desktop.submit_foreground"
             assert result["agent_task"]["tool_calls"][-1]["status"] == "waiting_approval"
             assert run["status"] == "approval_required"
             assert run["pending_approval"]["tool"] == "desktop.submit_foreground"
-            assert run["pending_approval"]["input_preview"] == input_preview
+            _assert_dict_contains(run["pending_approval"]["input_preview"], input_preview)
             assert "agent.desktop.intent_planned" in event_types
             assert "agent.desktop.intent_approval_required" in event_types
             assert "agent.tool.approval_required" in event_types
@@ -8903,12 +8993,15 @@ def test_send_message_routes_polite_hotkey_to_approval_without_model(tmp_path, m
             assert result["agent_task"]["status"] == "waiting_approval"
             assert result["agent_task"]["needs_user_action"] is True
             assert result["agent_task"]["pending_approvals"][0]["tool_name"] == tool_name
-            assert result["agent_task"]["pending_approvals"][0]["input_preview"] == input_preview
+            _assert_dict_contains(
+                result["agent_task"]["pending_approvals"][0]["input_preview"],
+                input_preview,
+            )
             assert result["agent_task"]["tool_calls"][-1]["tool_name"] == tool_name
             assert result["agent_task"]["tool_calls"][-1]["status"] == "waiting_approval"
             assert run["status"] == "approval_required"
             assert run["pending_approval"]["tool"] == tool_name
-            assert run["pending_approval"]["input_preview"] == input_preview
+            _assert_dict_contains(run["pending_approval"]["input_preview"], input_preview)
             assert "agent.desktop.intent_planned" in event_types
             assert "agent.desktop.intent_approval_required" in event_types
             assert "agent.tool.approval_required" in event_types
@@ -12592,6 +12685,25 @@ def test_main_chat_runnable_id_creates_normal_chat_task(tmp_path, monkeypatch):
             "source": "launcher",
             "launcher_mode": "bubble",
             "client_message_id": "main-chat-entry-1",
+            "desktop_provider_health_probe": True,
+            "desktop_provider_route_readonly": True,
+            "desktop_provider_route_foreground": True,
+            "desktop_provider_local_native": True,
+            "runtime_planner_preflight_ui_before_action": True,
+            "desktop_provider_session_strict_foreground": True,
+            "desktop_provider_session_auto_start": True,
+            "desktop_execution_policy": {
+                "mode": "preview_input",
+                "prefer_isolated_desktop": True,
+                "avoid_user_foreground_takeover": True,
+                "require_sandbox_for_keyboard_mouse": True,
+                "allow_media_control": True,
+                "source": "daily_chat",
+                "reason": (
+                    "Daily entrypoints should use structured desktop tools by default; "
+                    "keyboard and mouse capture still requires an isolated desktop provider."
+                ),
+            },
         }
     finally:
         store.close()
@@ -13342,7 +13454,17 @@ def test_direct_group_agent_followup_targets_latest_active_agent(tmp_path, monke
                     return agent
             return None
 
-        def create_run_for_runnable_async(self, *, runnable_id="", name="", user_goal="", run_group_id="", upstream="", on_complete=None):
+        def create_run_for_runnable_async(
+            self,
+            *,
+            runnable_id="",
+            name="",
+            user_goal="",
+            run_group_id="",
+            upstream="",
+            on_complete=None,
+            **_kwargs,
+        ):
             agent = self.resolve_runnable(runnable_id=runnable_id, name=name)
             run_id = "agent_run_design" if agent and agent["id"] == design["id"] else "agent_run_coding"
             run = {
@@ -13453,7 +13575,17 @@ def test_direct_group_agent_command_flushes_previous_completed_agent_summary(tmp
                     return agent
             return None
 
-        def create_run_for_runnable_async(self, *, runnable_id="", name="", user_goal="", run_group_id="", upstream="", on_complete=None):
+        def create_run_for_runnable_async(
+            self,
+            *,
+            runnable_id="",
+            name="",
+            user_goal="",
+            run_group_id="",
+            upstream="",
+            on_complete=None,
+            **_kwargs,
+        ):
             runnable = self.resolve_runnable(runnable_id=runnable_id, name=name) or {}
             run_id = "agent_run_design" if runnable_id == design["id"] else "agent_run_coding"
             run = {
@@ -20739,7 +20871,11 @@ def test_cancel_current_tasks_does_not_log_already_cancelled_stale_message(tmp_p
     api, runtime, store = _make_api(tmp_path)
     activity_store = ActivityStore(db_path=str(tmp_path / "activity.db"))
     monkeypatch.setattr(chat_api_mod, "get_activity_store", lambda: activity_store)
-    monkeypatch.setattr(api, "_sync_task_status_to_messages", lambda: None)
+    monkeypatch.setattr(
+        api,
+        "_sync_task_status_to_messages",
+        lambda notify_group_summary=False: None,
+    )
     try:
         result = api.send_message("已经取消但消息状态还没刷新")
         task_id = result["task_id"]
