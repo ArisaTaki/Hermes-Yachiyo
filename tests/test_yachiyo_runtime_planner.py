@@ -14761,6 +14761,9 @@ def test_runtime_planner_discovers_generic_browser_before_acting() -> None:
     assert planner_tool_requests("打开一个浏览器", open_allowed) == (
         _selected_discovered_app_open_chain("browser")
     )
+    assert planner_tool_requests("open a webpage", open_allowed) == (
+        _selected_discovered_app_open_chain("browser")
+    )
 
     inspect_allowed = ["desktop.list_apps", "app.focus", "desktop.ui_elements"]
     assert planner_tool_requests("默认浏览器有哪些按钮", inspect_allowed) == [

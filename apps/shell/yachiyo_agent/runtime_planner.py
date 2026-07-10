@@ -23601,7 +23601,7 @@ def _normalized_generic_browser_label(value: str) -> bool:
         "",
         english,
     ).strip()
-    return english in {"browser", "web browser", "web"}
+    return english in {"browser", "web browser", "web", "web page", "webpage"}
 
 
 def _generic_browser_app_search_hint(text: str) -> dict[str, str]:
