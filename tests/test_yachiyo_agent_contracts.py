@@ -10634,6 +10634,46 @@ def test_tool_call_snapshot_from_event_keeps_policy_reason() -> None:
     assert calls[0].runtime_execution_metadata == {"yachiyo_runtime_planner": True}
 
 
+def test_tool_call_snapshots_merge_legacy_approval_with_completion_event() -> None:
+    from apps.shell.yachiyo_agent.tool_call_snapshots import (
+        tool_call_snapshots_from_payloads,
+    )
+
+    calls = tool_call_snapshots_from_payloads(
+        [
+            {
+                "tool_call_id": "legacy-call-1",
+                "run_id": "run-1",
+                "tool_name": "desktop.quit_app",
+                "status": "waiting_approval",
+                "approval_id": "approval-1",
+                "input_preview": {},
+            }
+        ],
+        run_id="run-1",
+        events=[
+            PublicRunEvent(
+                event_id="event-2",
+                run_id="run-1",
+                sequence=2,
+                event_type="agent.desktop.intent_completed",
+                detail="desktop.quit_app",
+                payload={
+                    "tool": "desktop.quit_app",
+                    "tools": ["desktop.quit_app", "desktop.active_window"],
+                    "source": "runtime_planner",
+                    "summary": "已请求退出当前应用。",
+                },
+                created_at="2026-06-14T00:00:01Z",
+            )
+        ],
+    )
+
+    assert len(calls) == 1
+    assert calls[0].status == "completed"
+    assert calls[0].approval_id == "approval-1"
+
+
 def test_memory_trace_snapshot_keeps_runtime_trace_fields() -> None:
     snapshot = MemoryTraceSnapshot(
         trace_id="trace-1",

@@ -648,6 +648,8 @@ def _daily_desktop_tool_result_phrase(tool_name: str, result: Mapping[str, Any])
     if clean_tool in {"app.focus", "desktop.focus_app"} or action in {"app.focus", "desktop.focus_app"}:
         app_name = str(data.get("app_name") or result.get("app_name") or "").strip()
         return f"已聚焦 {app_name}。" if app_name else ""
+    if clean_tool == "desktop.quit_app" or action == "desktop.quit_app":
+        return "已请求退出当前应用。"
     return ""
 
 
