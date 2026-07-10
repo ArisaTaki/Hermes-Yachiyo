@@ -106,12 +106,16 @@ def virtual_desktop_provider_manifest_template(
         "desktop_backend_ready_for_public_release": True,
         "requires_real_virtual_desktop_backend": False,
         "allow_remote": False,
+        "authentication": {
+            "token_env": "OHA_YACHIYO_DESKTOP_PROVIDER_TOKEN",
+        },
         "environment": {
             "manifest": "OHA_YACHIYO_DESKTOP_PROVIDER_MANIFEST",
             "url": "OHA_YACHIYO_DESKTOP_PROVIDER_URL",
             "provider_id": "OHA_YACHIYO_DESKTOP_PROVIDER_ID",
             "provider_kind": "OHA_YACHIYO_DESKTOP_PROVIDER_KIND",
             "tools": "OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS",
+            "token": "OHA_YACHIYO_DESKTOP_PROVIDER_TOKEN",
         },
         "entrypoint": {
             "argv": [

@@ -12,6 +12,10 @@ from urllib.parse import urlparse
 from urllib.request import Request
 
 from apps.core.tls import urlopen_with_bundled_ca
+from apps.shell.agent.runtime.desktop_provider_credentials import (
+    DESKTOP_PROVIDER_TOKEN_ENV,
+    desktop_provider_token_from_manifest,
+)
 from packages.security import redact_api_error_text
 
 
@@ -1941,9 +1945,9 @@ def _provider_env_from_manifest(manifest: Mapping[str, Any]) -> dict[str, str]:
             env[env_key] = value
     if _optional_bool_value(manifest.get("allow_remote")) is True:
         env["OHA_YACHIYO_DESKTOP_PROVIDER_ALLOW_REMOTE"] = "true"
-    token = str(manifest.get("token") or "").strip()
+    token = desktop_provider_token_from_manifest(manifest)
     if token:
-        env["OHA_YACHIYO_DESKTOP_PROVIDER_TOKEN"] = token
+        env[DESKTOP_PROVIDER_TOKEN_ENV] = token
     return env
 
 

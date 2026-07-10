@@ -21,6 +21,11 @@ from apps.shell.agent.runtime.controlled_desktop_provider import (
 from apps.shell.agent.runtime.desktop_execution_providers import (
     desktop_execution_provider_status_from_env,
 )
+from apps.shell.agent.runtime.desktop_provider_credentials import (
+    DESKTOP_PROVIDER_TOKEN_ENV,
+    desktop_provider_token_from_manifest,
+    public_desktop_provider_env,
+)
 from apps.shell.agent.runtime.isolated_desktop_provider import (
     DEFAULT_ISOLATED_PROVIDER_ID,
 )
@@ -44,7 +49,11 @@ from apps.shell.yachiyo_agent.contracts import TaskCoreSnapshot
 from apps.shell.yachiyo_agent.task_progress_snapshots import (
     task_progress_summary_from_task_core,
 )
-from packages.security import redact_api_error_text
+from packages.security import (
+    redact_api_error_text,
+    sanitize_sensitive_value,
+    scrubbed_subprocess_env,
+)
 
 _ENV_KEYS = {
     "OHA_YACHIYO_DESKTOP_PROVIDER_URL",
@@ -63,6 +72,7 @@ _ENV_KEYS = {
     "OHA_YACHIYO_DESKTOP_PROVIDER_BACKEND_READY_FOR_PUBLIC_RELEASE",
     "OHA_YACHIYO_DESKTOP_PROVIDER_REQUIRES_REAL_VIRTUAL_DESKTOP_BACKEND",
     "OHA_YACHIYO_DESKTOP_PROVIDER_ALLOW_REMOTE",
+    DESKTOP_PROVIDER_TOKEN_ENV,
 }
 
 _PROVIDER_START_COMMAND_ENV = "OHA_YACHIYO_DESKTOP_PROVIDER_START_COMMAND"
@@ -110,6 +120,7 @@ class IsolatedDesktopProviderSessionManager:
         self._repo_root = repo_root or Path(__file__).resolve().parents[3]
         self._process: subprocess.Popen[str] | None = None
         self._env: dict[str, str] = {}
+        self._previous_env: dict[str, str | None] = {}
         self._command: list[str] = []
         self._provider_manifest_evidence: dict[str, Any] = {}
         self._source = "isolated_provider_session_manager"
@@ -121,10 +132,14 @@ class IsolatedDesktopProviderSessionManager:
             process = self._process
             running = process is not None and process.poll() is None
             if process is not None and not running:
-                _clear_runtime_env(self._env)
+                _clear_runtime_env(
+                    self._env,
+                    previous_env=self._previous_env,
+                )
                 self._process = None
                 process = None
                 self._env = {}
+                self._previous_env = {}
                 self._command = []
                 self._provider_manifest_evidence = {}
                 self._source = "isolated_provider_session_manager"
@@ -152,8 +167,11 @@ class IsolatedDesktopProviderSessionManager:
                 "pid": int(process.pid) if running and process is not None else None,
                 "provider_id": self._env.get("OHA_YACHIYO_DESKTOP_PROVIDER_ID", ""),
                 "url": self._env.get("OHA_YACHIYO_DESKTOP_PROVIDER_URL", ""),
+                "authentication_configured": bool(
+                    self._env.get(DESKTOP_PROVIDER_TOKEN_ENV)
+                ),
                 "command": list(self._command),
-                "env": dict(self._env),
+                "env": public_desktop_provider_env(self._env),
                 "started_at": self._started_at,
                 "provider_status": provider_status,
                 "desktop_session_kind": str(
@@ -236,8 +254,13 @@ class IsolatedDesktopProviderSessionManager:
             self._provider_manifest_evidence = {}
             self._source = "isolated_provider_session_manager"
             self._started_at = time.time()
-            _apply_runtime_env(env)
-            return {**self.status(probe_health=True), "started": True, "launch": launch}
+            self._previous_env = {}
+            _apply_runtime_env(env, previous_env=self._previous_env)
+            return {
+                **self.status(probe_health=True),
+                "started": True,
+                "launch": sanitize_sensitive_value(launch),
+            }
 
     def start_managed_external(
         self,
@@ -254,7 +277,7 @@ class IsolatedDesktopProviderSessionManager:
             manifest: dict[str, Any] = {}
             command: list[str] = []
             start_cwd = self._repo_root
-            start_env = dict(os.environ)
+            start_env = scrubbed_subprocess_env()
             requested_tools = sorted(
                 {
                     str(item or "").strip()
@@ -280,6 +303,12 @@ class IsolatedDesktopProviderSessionManager:
                     self._repo_root,
                     manifest_path=provider_manifest,
                 )
+                provider_token = desktop_provider_token_from_manifest(
+                    manifest,
+                    environment=os.environ,
+                )
+                if provider_token:
+                    start_env[DESKTOP_PROVIDER_TOKEN_ENV] = provider_token
                 manifest_evidence = _provider_manifest_evidence_for_manifest(
                     manifest
                 )
@@ -366,8 +395,13 @@ class IsolatedDesktopProviderSessionManager:
             self._provider_manifest_evidence = manifest_evidence
             self._source = "managed_external_provider_session"
             self._started_at = time.time()
-            _apply_runtime_env(env)
-            return {**self.status(probe_health=True), "started": True, "launch": launch}
+            self._previous_env = {}
+            _apply_runtime_env(env, previous_env=self._previous_env)
+            return {
+                **self.status(probe_health=True),
+                "started": True,
+                "launch": sanitize_sensitive_value(launch),
+            }
 
     def stop(self, *, timeout_seconds: float = 5.0) -> dict[str, Any]:
         with self._lock:
@@ -375,9 +409,13 @@ class IsolatedDesktopProviderSessionManager:
             was_running = process is not None and process.poll() is None
             if was_running and process is not None:
                 _terminate_process(process, timeout_seconds=timeout_seconds)
-            _clear_runtime_env(self._env)
+            _clear_runtime_env(
+                self._env,
+                previous_env=self._previous_env,
+            )
             self._process = None
             self._env = {}
+            self._previous_env = {}
             self._command = []
             self._provider_manifest_evidence = {}
             self._source = "isolated_provider_session_manager"
@@ -771,6 +809,9 @@ def _runtime_env_from_launch(launch: dict[str, Any]) -> dict[str, str]:
                 env[env_key] = "true" if value else "false"
             else:
                 env[env_key] = str(value)
+    provider_token = desktop_provider_token_from_manifest(launch)
+    if provider_token:
+        env[DESKTOP_PROVIDER_TOKEN_ENV] = provider_token
     return env
 
 
@@ -1152,8 +1193,12 @@ def _external_isolated_desktop_provider_session_status() -> dict[str, Any]:
             or provider_status.get("endpoint_origin")
             or ""
         ),
+        "authentication_configured": bool(
+            env_snapshot.get(DESKTOP_PROVIDER_TOKEN_ENV)
+            or os.environ.get(DESKTOP_PROVIDER_TOKEN_ENV)
+        ),
         "command": [],
-        "env": env_snapshot,
+        "env": public_desktop_provider_env(env_snapshot),
         "started_at": 0.0,
         "provider_status": dict(provider_status),
         "desktop_session_kind": str(provider_status.get("desktop_session_kind") or ""),
@@ -1290,16 +1335,30 @@ def _request_requires_real_virtual_backend(request: dict[str, Any]) -> bool:
     return False
 
 
-def _apply_runtime_env(env: dict[str, str]) -> None:
+def _apply_runtime_env(
+    env: dict[str, str],
+    *,
+    previous_env: dict[str, str | None] | None = None,
+) -> None:
     for key, value in env.items():
         if key in _ENV_KEYS:
+            if previous_env is not None and key not in previous_env:
+                previous_env[key] = os.environ.get(key)
             os.environ[key] = value
 
 
-def _clear_runtime_env(env: dict[str, str]) -> None:
+def _clear_runtime_env(
+    env: dict[str, str],
+    *,
+    previous_env: dict[str, str | None] | None = None,
+) -> None:
     for key in _ENV_KEYS:
         if os.environ.get(key) == env.get(key):
-            os.environ.pop(key, None)
+            previous = previous_env.get(key) if previous_env is not None else None
+            if previous is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = previous
 
 
 def _terminate_process(
@@ -1952,6 +2011,9 @@ def _public_session_status(status: dict[str, Any]) -> dict[str, Any]:
         "pid": status.get("pid"),
         "provider_id": str(status.get("provider_id") or ""),
         "url": str(status.get("url") or ""),
+        "authentication_configured": bool(
+            status.get("authentication_configured")
+        ),
         "desktop_session_kind": str(
             status.get("desktop_session_kind")
             or provider_status.get("desktop_session_kind")
@@ -1997,13 +2059,7 @@ def _public_session_status(status: dict[str, Any]) -> dict[str, Any]:
         "provider_manifest_evidence": provider_manifest_evidence,
         "provider_conformance": provider_conformance,
         "command": _string_list(status.get("command")),
-        "env": {
-            str(key): str(value)
-            for key, value in (status.get("env") or {}).items()
-            if str(key).strip()
-        }
-        if isinstance(status.get("env"), dict)
-        else {},
+        "env": public_desktop_provider_env(status.get("env")),
         "source": str(status.get("source") or "isolated_provider_session_manager"),
     }
 

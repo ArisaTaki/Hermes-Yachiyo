@@ -412,6 +412,62 @@ def test_start_isolated_provider_session_surfaces_managed_external_start_failure
     assert "OHA_YACHIYO_DESKTOP_PROVIDER_URL" not in session_module.os.environ
 
 
+def test_provider_manifest_token_reaches_runtime_without_status_disclosure(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("TEST_VIRTUAL_DESKTOP_TOKEN", "secret-token")
+    launch = {
+        "provider_id": "authenticated-provider",
+        "provider_kind": "sandbox_desktop",
+        "url": "http://127.0.0.1:29097",
+        "authentication": {"token_env": "TEST_VIRTUAL_DESKTOP_TOKEN"},
+    }
+
+    env = session_module._runtime_env_from_launch(launch)
+
+    assert env["OHA_YACHIYO_DESKTOP_PROVIDER_TOKEN"] == "secret-token"
+    assert "OHA_YACHIYO_DESKTOP_PROVIDER_TOKEN" not in (
+        session_module.public_desktop_provider_env(env)
+    )
+
+    manager = IsolatedDesktopProviderSessionManager(repo_root=Path("/repo"))
+    manager._env = env
+    monkeypatch.setattr(
+        session_module,
+        "desktop_execution_provider_status_from_env",
+        lambda *_args, **_kwargs: {
+            "available": True,
+            "adapter_ready": True,
+            "provider_id": "authenticated-provider",
+        },
+    )
+
+    status = manager.status(probe_health=False)
+
+    assert status["authentication_configured"] is True
+    assert "OHA_YACHIYO_DESKTOP_PROVIDER_TOKEN" not in status["env"]
+
+
+def test_provider_runtime_env_restores_preexisting_credentials(monkeypatch) -> None:
+    token_env = "OHA_YACHIYO_DESKTOP_PROVIDER_TOKEN"
+    monkeypatch.setenv(token_env, "user-configured-token")
+    previous_env: dict[str, str | None] = {}
+    managed_env = {token_env: "managed-session-token"}
+
+    session_module._apply_runtime_env(
+        managed_env,
+        previous_env=previous_env,
+    )
+    assert session_module.os.environ[token_env] == "managed-session-token"
+
+    session_module._clear_runtime_env(
+        managed_env,
+        previous_env=previous_env,
+    )
+
+    assert session_module.os.environ[token_env] == "user-configured-token"
+
+
 def test_managed_external_release_start_rejects_unattested_launch(
     monkeypatch,
     tmp_path,
@@ -591,6 +647,8 @@ def test_start_isolated_provider_session_can_start_provider_from_manifest(
     for key in session_module._ENV_KEYS:
         monkeypatch.delenv(key, raising=False)
     monkeypatch.delenv("OHA_YACHIYO_DESKTOP_PROVIDER_START_COMMAND", raising=False)
+    monkeypatch.setenv("TEST_VIRTUAL_DESKTOP_TOKEN", "manifest-secret-token")
+    monkeypatch.setenv("OPENAI_API_KEY", "must-not-reach-provider")
     manifest_path = tmp_path / "provider-manifest.json"
     provider_script = tmp_path / "provider.py"
     provider_script.write_text("# fake provider\n", encoding="utf-8")
@@ -609,6 +667,9 @@ def test_start_isolated_provider_session_can_start_provider_from_manifest(
                 "desktop_backend_is_loopback": False,
                 "desktop_backend_ready_for_public_release": True,
                 "requires_real_virtual_desktop_backend": False,
+                "authentication": {
+                    "token_env": "TEST_VIRTUAL_DESKTOP_TOKEN",
+                },
                 "entrypoint": {
                     "script": "provider.py",
                     "args": ["--host", "127.0.0.1", "--port", "0"],
@@ -629,6 +690,7 @@ def test_start_isolated_provider_session_can_start_provider_from_manifest(
                 "url": "http://127.0.0.1:29095",
                 "execute_url": "http://127.0.0.1:29095/tools/execute",
                 "status_url": "http://127.0.0.1:29095/status",
+                "token": "manifest-secret-token",
             }
             self.stdout = io.StringIO(json.dumps(payload) + "\n")
             self.stderr = io.StringIO("")
@@ -724,6 +786,10 @@ def test_start_isolated_provider_session_can_start_provider_from_manifest(
     assert popen_calls[0]["env"]["OHA_YACHIYO_DESKTOP_PROVIDER_REQUESTED_TOOLS"] == (
         "app.open,desktop.verify"
     )
+    assert popen_calls[0]["env"]["OHA_YACHIYO_DESKTOP_PROVIDER_TOKEN"] == (
+        "manifest-secret-token"
+    )
+    assert "OPENAI_API_KEY" not in popen_calls[0]["env"]
     assert started["started"] is True
     assert started["source"] == "managed_external_provider_session"
     assert started["provider_id"] == "manifest-virtual-desktop"
@@ -736,6 +802,9 @@ def test_start_isolated_provider_session_can_start_provider_from_manifest(
     assert started["desktop_backend_is_loopback"] is False
     assert started["desktop_backend_ready_for_public_release"] is True
     assert started["requires_real_virtual_desktop_backend"] is False
+    assert started["authentication_configured"] is True
+    assert "OHA_YACHIYO_DESKTOP_PROVIDER_TOKEN" not in started["env"]
+    assert started["launch"]["token"] == "[redacted]"
     assert session_module.os.environ["OHA_YACHIYO_DESKTOP_PROVIDER_EXECUTE_URL"] == (
         "http://127.0.0.1:29095/tools/execute"
     )

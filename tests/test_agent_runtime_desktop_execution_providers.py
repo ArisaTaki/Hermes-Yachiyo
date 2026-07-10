@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from apps.shell.agent.runtime import desktop_execution_providers as provider_module
 from apps.shell.agent.runtime.desktop_execution_providers import (
     DesktopExecutionProviderRegistry,
     LocalDesktopExecutionProviderAdapter,
@@ -89,6 +90,22 @@ def _local_tool_request(tool_name: str, payload: dict[str, Any]) -> dict[str, An
             "supported_tools": [tool_name],
         },
     }
+
+
+def test_provider_manifest_token_env_configures_http_adapter(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("TEST_VIRTUAL_DESKTOP_TOKEN", "manifest-token")
+
+    env = provider_module._provider_env_from_manifest(
+        {
+            "provider_id": "sandbox-1",
+            "url": "http://127.0.0.1:19091",
+            "authentication": {"token_env": "TEST_VIRTUAL_DESKTOP_TOKEN"},
+        }
+    )
+
+    assert env["OHA_YACHIYO_DESKTOP_PROVIDER_TOKEN"] == "manifest-token"
 
 
 def test_desktop_provider_registry_from_env_routes_tool_to_local_http_provider() -> None:

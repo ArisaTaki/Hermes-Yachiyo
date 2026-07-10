@@ -52,12 +52,21 @@ manifest 可以只描述已经运行的 endpoint，也可以带 `entrypoint` 让
   "desktop_session_kind": "virtual_desktop",
   "desktop_session_isolated": true,
   "foreground_takeover_required": false,
+  "authentication": {
+    "token_env": "OHA_YACHIYO_DESKTOP_PROVIDER_TOKEN"
+  },
   "entrypoint": {
     "script": "provider.py",
     "args": ["--host", "127.0.0.1", "--port", "0"]
   }
 }
 ```
+
+`authentication.token_env` 指向宿主环境中的 Bearer token 变量。托管启动时
+Oha-Yachiyo 会把解析出的 token 以 `OHA_YACHIYO_DESKTOP_PROVIDER_TOKEN`
+传给 provider 子进程，并在调用 Status/Execute endpoint 时发送
+`Authorization: Bearer <token>`。不要把 token 明文写进 manifest；session、
+Studio 和 diagnostics 的公共 `env` 投影不会返回 token。
 
 `entrypoint.command` / `entrypoint.argv` 也可直接提供完整启动命令。`entrypoint.script` 的相对路径默认按 manifest 所在目录解析；如果是仓库内置脚本，也会回退到仓库根目录解析。
 

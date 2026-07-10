@@ -149,6 +149,9 @@ def test_virtual_desktop_provider_manifest_template_matches_release_contract() -
     assert template["desktop_backend_is_loopback"] is False
     assert template["desktop_backend_ready_for_public_release"] is True
     assert template["requires_real_virtual_desktop_backend"] is False
+    assert template["authentication"] == {
+        "token_env": "OHA_YACHIYO_DESKTOP_PROVIDER_TOKEN"
+    }
 
     evidence = virtual_desktop_provider_contract_evidence(
         {
