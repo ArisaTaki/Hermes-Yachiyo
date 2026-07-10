@@ -2046,6 +2046,28 @@ def test_chat_bridge_quick_message_opens_default_browser_without_model(
 ):
     open_calls: list[str] = []
 
+    def fake_list_apps(query: str = "", limit: Any = 200) -> dict:
+        return {
+            "ok": True,
+            "action": "desktop.list_apps",
+            "summary": f"Found Google Chrome for {query}",
+            "data": {
+                "query": query,
+                "apps": [
+                    {
+                        "name": "Google Chrome",
+                        "path": "/Applications/Google Chrome.app",
+                        "match_score": 100,
+                    }
+                ],
+                "best_match": {
+                    "name": "Google Chrome",
+                    "path": "/Applications/Google Chrome.app",
+                    "match_score": 100,
+                },
+            },
+        }
+
     def fake_app_open(app_name: str) -> dict:
         open_calls.append(app_name)
         return {
@@ -2058,7 +2080,30 @@ def test_chat_bridge_quick_message_opens_default_browser_without_model(
             },
         }
 
+    def fake_inspect_app(
+        app_name: str,
+        *,
+        open_if_needed: bool = True,
+        focus: bool = True,
+        role_filter: str = "",
+        limit: Any = 80,
+    ) -> dict:
+        return {
+            "ok": True,
+            "action": "desktop.inspect_app",
+            "summary": f"Verified desktop app: {app_name}",
+            "data": {
+                "app_name": app_name,
+                "running": True,
+                "focus_verified": True,
+                "role_filter": role_filter,
+                "limit": limit,
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.list_apps", fake_list_apps)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.inspect_app", fake_inspect_app)
     cases = (
         ("打开默认浏览器", "live2d"),
         ("打开网页", "bubble"),
@@ -2075,9 +2120,10 @@ def test_chat_bridge_quick_message_opens_default_browser_without_model(
 
         assert result["ok"] is True
         assert agent_task["summary"] == "已打开 Google Chrome。"
-        assert agent_task["tool_calls"][-1]["tool_name"] == "app.open"
-        assert agent_task["tool_calls"][-1]["input_preview"] == {"app_name": "Google Chrome"}
-        assert agent_task["tool_calls"][-1]["status"] == "completed"
+        open_call = _agent_task_tool_call(agent_task, "app.open")
+        assert open_call["input_preview"]["app_name"] == "Google Chrome"
+        assert open_call["status"] == "completed"
+        assert _agent_task_tool_call(agent_task, "desktop.verify")["status"] == "completed"
         assert run["status"] == "completed"
         assert "agent.desktop.intent_planned" in event_types
         assert "agent.tool.call" in event_types
@@ -2094,6 +2140,29 @@ def test_chat_bridge_quick_message_opens_explicit_desktop_client_without_model(
 ):
     open_calls: list[str] = []
 
+    def fake_list_apps(query: str = "", limit: Any = 200) -> dict:
+        app_name = "Finder" if query == "Finder" else "ChatGPT"
+        return {
+            "ok": True,
+            "action": "desktop.list_apps",
+            "summary": f"Found {app_name} for {query}",
+            "data": {
+                "query": query,
+                "apps": [
+                    {
+                        "name": app_name,
+                        "path": f"/Applications/{app_name}.app",
+                        "match_score": 100,
+                    }
+                ],
+                "best_match": {
+                    "name": app_name,
+                    "path": f"/Applications/{app_name}.app",
+                    "match_score": 100,
+                },
+            },
+        }
+
     def fake_app_open(app_name: str) -> dict:
         open_calls.append(app_name)
         return {
@@ -2106,7 +2175,30 @@ def test_chat_bridge_quick_message_opens_explicit_desktop_client_without_model(
             },
         }
 
+    def fake_inspect_app(
+        app_name: str,
+        *,
+        open_if_needed: bool = True,
+        focus: bool = True,
+        role_filter: str = "",
+        limit: Any = 80,
+    ) -> dict:
+        return {
+            "ok": True,
+            "action": "desktop.inspect_app",
+            "summary": f"Verified desktop app: {app_name}",
+            "data": {
+                "app_name": app_name,
+                "running": True,
+                "focus_verified": True,
+                "role_filter": role_filter,
+                "limit": limit,
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.list_apps", fake_list_apps)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.inspect_app", fake_inspect_app)
     cases = (
         ("打开 ChatGPT 客户端", "live2d", "ChatGPT"),
         ("打开文件夹", "bubble", "Finder"),
@@ -2122,9 +2214,10 @@ def test_chat_bridge_quick_message_opens_explicit_desktop_client_without_model(
 
         assert result["ok"] is True
         assert agent_task["summary"] == f"已打开 {app_name}。"
-        assert agent_task["tool_calls"][-1]["tool_name"] == "app.open"
-        assert agent_task["tool_calls"][-1]["input_preview"] == {"app_name": app_name}
-        assert agent_task["tool_calls"][-1]["status"] == "completed"
+        open_call = _agent_task_tool_call(agent_task, "app.open")
+        assert open_call["input_preview"]["app_name"] == app_name
+        assert open_call["status"] == "completed"
+        assert _agent_task_tool_call(agent_task, "desktop.verify")["status"] == "completed"
         assert run["status"] == "completed"
         assert "agent.desktop.intent_planned" in event_types
         assert "agent.tool.call" in event_types
