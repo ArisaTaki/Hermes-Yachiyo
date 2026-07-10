@@ -608,6 +608,13 @@ def _planner_owned_legacy_compatible_entrypoint_requests(
     )
     if browser_search_requests:
         return browser_search_requests
+    browser_internal_page_requests = (
+        _legacy_compatible_browser_internal_page_entrypoint_requests(
+            planner_requests,
+        )
+    )
+    if browser_internal_page_requests:
+        return browser_internal_page_requests
     search_box_requests = _legacy_compatible_context_transfer_search_box_requests(
         planner_requests,
         text=text,
@@ -738,6 +745,54 @@ def _legacy_compatible_media_entrypoint_requests(
     if _legacy_compatible_named_music_search_sequence(visible, tools, text=text):
         return [_legacy_shape_request(request) for request in visible]
     return []
+
+
+def _legacy_compatible_browser_internal_page_entrypoint_requests(
+    requests: Sequence[Mapping[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    items = [dict(request) for request in requests or [] if isinstance(request, Mapping)]
+    if not items or any(
+        str(request.get("planning_reason") or "").strip()
+        != "planner_desktop_operation"
+        for request in items
+    ):
+        return []
+    visible = _visible_entrypoint_plan_requests(items)
+    tools = [str(request.get("tool") or "").strip() for request in visible]
+    if tools not in (
+        [
+            "app.focus_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+        ],
+        [
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+        ],
+    ):
+        return []
+    first_input = visible[0].get("input") if isinstance(visible[0].get("input"), Mapping) else {}
+    type_input = visible[1].get("input") if isinstance(visible[1].get("input"), Mapping) else {}
+    app_name = str(first_input.get("app_name") or "").strip()
+    internal_url = str(type_input.get("text") or "").strip()
+    allowed_internal_urls = {
+        "Google Chrome": r"chrome://(?:bookmarks|downloads|extensions)/",
+        "Microsoft Edge": r"edge://(?:downloads|extensions|favorites)/",
+        "Brave Browser": r"brave://(?:bookmarks|downloads|extensions)/",
+        "Firefox": r"about:(?:addons|downloads)",
+    }
+    allowed_url = allowed_internal_urls.get(app_name, "")
+    if (
+        str(first_input.get("action") or "").strip() != "focus_address_bar"
+        or not allowed_url
+        or not re.fullmatch(allowed_url, internal_url, flags=re.IGNORECASE)
+    ):
+        return []
+    legacy_requests = [_legacy_shape_request(request) for request in visible]
+    if internal_url.lower() == "edge://favorites/":
+        legacy_requests[1]["input"] = {"text": "edge://bookmarks/"}
+    return legacy_requests
 
 
 def _legacy_compatible_search_entrypoint_requests(
@@ -1183,7 +1238,7 @@ def _legacy_compatible_simple_request(text: str, request: Mapping[str, Any]) -> 
         return True
     if tool_name == "desktop.safe_shortcut":
         payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
-        return str(payload.get("action") or "").strip() in _CONTEXT_TRANSFER_SAFE_SHORTCUTS
+        return str(payload.get("action") or "").strip() in _LEGACY_COMPATIBLE_SAFE_SHORTCUTS
     if tool_name == "browser.open_url":
         return _legacy_compatible_browser_open_request(text, request)
     if tool_name in _LEGACY_COMPATIBLE_APP_ACTION_TOOLS:
@@ -1270,6 +1325,29 @@ _LEGACY_FINDER_FOCUS_SHAPE_ACTIONS = frozenset(
 
 _CONTEXT_TRANSFER_SAFE_SHORTCUTS = frozenset(
     {"copy", "copy_current_page_link", "paste", "select_all"}
+)
+
+_LEGACY_COMPATIBLE_SAFE_SHORTCUTS = frozenset(
+    {
+        *_CONTEXT_TRANSFER_SAFE_SHORTCUTS,
+        "bookmark_page",
+        "browser_back",
+        "browser_forward",
+        "close_tab",
+        "focus_address_bar",
+        "new_private_window",
+        "new_tab",
+        "new_window",
+        "next_tab",
+        "open_devtools",
+        "previous_tab",
+        "refresh",
+        "reopen_closed_tab",
+        "reset_zoom",
+        "show_history",
+        "zoom_in",
+        "zoom_out",
+    }
 )
 
 

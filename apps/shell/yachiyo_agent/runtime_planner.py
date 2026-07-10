@@ -524,6 +524,19 @@ class TaskIntentRouter:
         safe_shortcut_sequence = safe_shortcut_sequence_hint(text)
         if safe_shortcut_sequence:
             safe_shortcut = dict(safe_shortcut_sequence[0])
+        browser_scope_candidate = _browser_scoped_safe_shortcut_app_candidate(
+            text,
+            safe_shortcut,
+        )
+        invalid_browser_scope = bool(
+            browser_scope_candidate
+            and not _is_browser_or_search_app_name(browser_scope_candidate)
+        )
+        if invalid_browser_scope:
+            safe_shortcut = None
+            safe_shortcut_sequence = []
+        if _browser_foreground_safe_shortcut_hint(safe_shortcut):
+            app_capability = {}
         creative_canvas = _creative_canvas_create_hint(text)
         if creative_canvas and safe_shortcut is None:
             safe_shortcut = {"action": "new_document"}
@@ -547,6 +560,8 @@ class TaskIntentRouter:
             screen_capture = None
         finder_special_location = _finder_special_location_hint(text)
         app_scoped_safe_operation = finder_special_location or _app_scoped_safe_operation_hint(text)
+        if invalid_browser_scope:
+            app_scoped_safe_operation = {}
         if _standalone_hotkey_request(text):
             app_scoped_safe_operation = {}
         if (
@@ -951,9 +966,14 @@ class TaskIntentRouter:
         ):
             app_name_hint = direct_app_name_hint
         generic_browser_discovery = bool(generic_browser_search)
-        if not generic_browser_discovery and desktop_discovery is None and (
-            _is_generic_browser_app_label(app_name_hint)
-            or _generic_browser_app_target_requested(text)
+        if (
+            not generic_browser_discovery
+            and desktop_discovery is None
+            and not _browser_foreground_safe_shortcut_hint(safe_shortcut)
+            and (
+                _is_generic_browser_app_label(app_name_hint)
+                or _generic_browser_app_target_requested(text)
+            )
         ):
             desktop_discovery = {
                 "action": "discover_apps",
@@ -1396,6 +1416,8 @@ class TaskIntentRouter:
         metadata: Mapping[str, Any],
     ) -> TaskIntentSnapshot:
         if _looks_like_desktop_permissions_request(text, text.lower()):
+            return _empty_intent("media_playback", text)
+        if _browser_foreground_safe_shortcut_hint(safe_shortcut_hint(text)):
             return _empty_intent("media_playback", text)
         if _generic_music_app_target_requested(text):
             return _empty_intent("media_playback", text)
@@ -3236,6 +3258,17 @@ class RuntimePlanner:
         )
         if safe_shortcut_sequence:
             safe_shortcut = dict(safe_shortcut_sequence[0])
+        browser_scope_candidate = _browser_scoped_safe_shortcut_app_candidate(
+            intent.user_goal,
+            safe_shortcut,
+        )
+        invalid_browser_scope = bool(
+            browser_scope_candidate
+            and not _is_browser_or_search_app_name(browser_scope_candidate)
+        )
+        if invalid_browser_scope:
+            safe_shortcut = None
+            safe_shortcut_sequence = []
         safe_key = safe_key_hint(intent.user_goal)
         safe_scroll = safe_scroll_hint(intent.user_goal)
         if str((safe_shortcut or {}).get("action") or "").strip() in {
@@ -3246,6 +3279,8 @@ class RuntimePlanner:
         app_scoped_safe_operation = _finder_special_location_hint(
             intent.user_goal
         ) or _app_scoped_safe_operation_hint(intent.user_goal)
+        if invalid_browser_scope:
+            app_scoped_safe_operation = {}
         if _standalone_hotkey_request(intent.user_goal):
             app_scoped_safe_operation = {}
         if safe_shortcut is None and app_scoped_safe_operation.get("safe_shortcut"):
@@ -3440,21 +3475,10 @@ class RuntimePlanner:
         mode = app_control_mode(intent.user_goal)
         if foreground_paste and _current_or_foreground_app_scope_hint(intent.user_goal):
             mode = "focus"
-        if app_name and safe_shortcut and not _contains_any(
-            intent.user_goal,
-            [
-                "打开",
-                "启动",
-                "开启",
-                "运行",
-                "拉起",
-                "开一下",
-                "开下",
-                "open ",
-                "launch ",
-                "start ",
-                "start up",
-            ],
+        if (
+            app_name
+            and safe_shortcut
+            and not _explicit_app_prepare_prefix(intent.user_goal)
         ):
             mode = "focus"
         operation_mode_hint = str(
@@ -21198,6 +21222,36 @@ def _clean_app_name_hint(value: str) -> str:
     return "" if app.lower() in generic else app
 
 
+def _browser_scoped_safe_shortcut_app_candidate(
+    text: str,
+    hint: Mapping[str, Any] | None,
+) -> str:
+    if not _browser_foreground_safe_shortcut_hint(hint):
+        return ""
+    value = _clean_prompt(text)
+    patterns = (
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:打开|启动|切到|聚焦)?\s*(?P<app>[\w .·-]{1,40}?)\s*"
+        r"(?:新建|打开)?(?:无痕|隐身|私密)窗口$",
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:打开|启动|切到|聚焦)?\s*(?P<app>[\w .·-]{1,40}?)\s*"
+        r"(?:(?:聚焦|打开|选中)地址栏|(?:打开|显示)?(?:浏览器)?历史记录|"
+        r"(?:打开|显示)?开发者工具|刷新(?:一下)?|(?:网页|页面)?(?:放大|缩小)|"
+        r"(?:恢复)?实际大小|前进(?:下一页)?|(?:返回|后退)(?:上一页)?)$",
+        r"^(?:please\s+)?(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s+"
+        r"(?:open\s+(?:an?\s+)?(?:incognito|private)\s+window|"
+        r"focus\s+(?:the\s+)?(?:address|url)\s+bar|"
+        r"(?:open|show)\s+(?:browser|browsing)?\s*history|"
+        r"(?:open|show)\s+devtools|refresh|reload|zoom\s+(?:in|out)|"
+        r"reset\s+zoom|go\s+(?:forward|back)|forward|back)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if match:
+            return _canonical_app_name_hint(_clean_app_name_hint(match.group("app")))
+    return ""
+
+
 def _app_scoped_safe_shortcut_app_name_hint(
     text: str,
     safe_shortcut: Mapping[str, Any] | None = None,
@@ -21222,6 +21276,33 @@ def _app_scoped_safe_shortcut_app_name_hint(
             app = _clean_app_name_hint(match.group("app"))
             if _is_finder_app_name(app):
                 return "Finder"
+        return ""
+    if action in {
+        "bookmark_page",
+        "browser_back",
+        "browser_forward",
+        "close_tab",
+        "focus_address_bar",
+        "new_private_window",
+        "new_tab",
+        "new_window",
+        "next_tab",
+        "open_devtools",
+        "previous_tab",
+        "refresh",
+        "reopen_closed_tab",
+        "reset_zoom",
+        "show_history",
+        "zoom_in",
+        "zoom_out",
+    }:
+        app = _browser_scoped_safe_shortcut_app_candidate(value, hint)
+        if (
+            app
+            and _is_browser_or_search_app_name(app)
+            and not _is_generic_browser_app_label(app)
+        ):
+            return app
         return ""
     if action != "toggle_full_screen":
         return ""
@@ -24032,10 +24113,37 @@ def _foreground_safe_shortcut_hint(hint: Mapping[str, Any] | None) -> bool:
         "show_history",
         "open_devtools",
         "focus_address_bar",
+        "zoom_in",
+        "zoom_out",
+        "reset_zoom",
         "copy_current_page_link",
         "screenshot_selection",
         "screenshot_toolbar",
         "paste",
+    }
+
+
+def _browser_foreground_safe_shortcut_hint(hint: Mapping[str, Any] | None) -> bool:
+    if not isinstance(hint, Mapping):
+        return False
+    return str(hint.get("action") or "").strip() in {
+        "bookmark_page",
+        "browser_back",
+        "browser_forward",
+        "close_tab",
+        "focus_address_bar",
+        "new_private_window",
+        "new_tab",
+        "new_window",
+        "next_tab",
+        "open_devtools",
+        "previous_tab",
+        "refresh",
+        "reopen_closed_tab",
+        "reset_zoom",
+        "show_history",
+        "zoom_in",
+        "zoom_out",
     }
 
 
@@ -24094,12 +24202,27 @@ def _app_search_prepare_mode(text: str, fallback: str) -> str:
     return "focus"
 
 
+def _explicit_app_prepare_prefix(text: str) -> bool:
+    return bool(
+        re.match(
+            r"^(?:你)?(?:可以帮我|能帮我|帮我|请|麻烦|能否|能不能|可以)?"
+            r"(?:直接)?(?:打开|启动|开启|运行|拉起|开一下|开下)"
+            r"|^(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?"
+            r"(?:open|launch|start(?:\s+up)?)\s+",
+            _clean_prompt(text),
+            flags=re.IGNORECASE,
+        )
+    )
+
+
 def _safe_shortcut_targets_foreground(
     text: str,
     hint: Mapping[str, Any] | None,
     app_name_hint: str,
 ) -> bool:
     if not _foreground_safe_shortcut_hint(hint):
+        return False
+    if _app_scoped_safe_shortcut_app_name_hint(text, hint):
         return False
     return not _safe_shortcut_has_explicit_app_scope(text, app_name_hint)
 
@@ -24133,6 +24256,13 @@ def _safe_shortcut_has_explicit_app_scope(text: str, app_name_hint: str) -> bool
         "dev",
         "devtools",
         "developertools",
+        "无痕窗口",
+        "隐身窗口",
+        "私密窗口",
+        "地址栏",
+        "浏览器历史记录",
+        "历史记录",
+        "开发者工具",
         "addressbar",
         "urlbar",
         "一个新窗口",

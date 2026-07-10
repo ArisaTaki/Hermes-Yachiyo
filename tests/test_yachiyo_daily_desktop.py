@@ -2892,7 +2892,8 @@ def test_daily_desktop_entrypoint_routes_app_blank_new_item_shortcuts() -> None:
     assert daily_desktop_entrypoint_requests("Word 新建消息") == []
 
 
-def test_daily_desktop_entrypoint_routes_browser_app_utility_shortcuts() -> None:
+def test_daily_desktop_entrypoint_routes_browser_app_utility_shortcuts(monkeypatch) -> None:
+    _forbid_legacy_daily_parser(monkeypatch, "browser app shortcuts must be planner-owned")
     cases = (
         ("打开 Chrome 新建无痕窗口", "app.open_and_safe_shortcut", "new_private_window"),
         ("Chrome 新建无痕窗口", "app.focus_and_safe_shortcut", "new_private_window"),
@@ -2914,18 +2915,73 @@ def test_daily_desktop_entrypoint_routes_browser_app_utility_shortcuts() -> None
         ]
 
     internal_page_cases = (
-        ("Chrome 打开下载内容", "app.focus_and_safe_shortcut", "chrome://downloads/"),
-        ("Chrome 打开书签", "app.focus_and_safe_shortcut", "chrome://bookmarks/"),
-        ("Chrome 打开扩展程序", "app.focus_and_safe_shortcut", "chrome://extensions/"),
-        ("打开 Chrome 下载内容", "app.open_and_safe_shortcut", "chrome://downloads/"),
-        ("open Chrome extensions", "app.open_and_safe_shortcut", "chrome://extensions/"),
+        (
+            "Chrome 打开下载内容",
+            "app.focus_and_safe_shortcut",
+            "Google Chrome",
+            "chrome://downloads/",
+        ),
+        (
+            "Chrome 打开书签",
+            "app.focus_and_safe_shortcut",
+            "Google Chrome",
+            "chrome://bookmarks/",
+        ),
+        (
+            "Chrome 打开扩展程序",
+            "app.focus_and_safe_shortcut",
+            "Google Chrome",
+            "chrome://extensions/",
+        ),
+        (
+            "打开 Chrome 下载内容",
+            "app.open_and_safe_shortcut",
+            "Google Chrome",
+            "chrome://downloads/",
+        ),
+        (
+            "open Chrome extensions",
+            "app.open_and_safe_shortcut",
+            "Google Chrome",
+            "chrome://extensions/",
+        ),
+        (
+            "打开 Edge 下载内容",
+            "app.open_and_safe_shortcut",
+            "Microsoft Edge",
+            "edge://downloads/",
+        ),
+        (
+            "Edge 打开书签",
+            "app.focus_and_safe_shortcut",
+            "Microsoft Edge",
+            "edge://bookmarks/",
+        ),
+        (
+            "打开 Brave 扩展程序",
+            "app.open_and_safe_shortcut",
+            "Brave Browser",
+            "brave://extensions/",
+        ),
+        (
+            "open Firefox extensions",
+            "app.open_and_safe_shortcut",
+            "Firefox",
+            "about:addons",
+        ),
+        (
+            "打开 Firefox 下载内容",
+            "app.open_and_safe_shortcut",
+            "Firefox",
+            "about:downloads",
+        ),
     )
-    for prompt, tool_name, internal_url in internal_page_cases:
+    for prompt, tool_name, app_name, internal_url in internal_page_cases:
         assert daily_desktop_entrypoint_requests(prompt) == [
             {
                 "protocol": "json_fallback",
                 "tool": tool_name,
-                "input": {"app_name": "Google Chrome", "action": "focus_address_bar"},
+                "input": {"app_name": app_name, "action": "focus_address_bar"},
             },
             {
                 "protocol": "json_fallback",
@@ -2938,6 +2994,107 @@ def test_daily_desktop_entrypoint_routes_browser_app_utility_shortcuts() -> None
                 "input": {},
             },
         ]
+
+
+def test_planner_rejects_browser_shortcuts_scoped_to_non_browser_apps() -> None:
+    from apps.shell.yachiyo_agent.daily_desktop import (
+        _planner_owned_legacy_compatible_entrypoint_requests,
+        daily_desktop_allowed_tools,
+    )
+
+    allowed = daily_desktop_allowed_tools()
+    for prompt in (
+        "Spotify 页面放大",
+        "Music 前进",
+        "Mail 打开开发者工具",
+    ):
+        planner_requests = planner_execution_module.planner_tool_requests(
+            prompt,
+            allowed,
+        )
+        compatible_requests = _planner_owned_legacy_compatible_entrypoint_requests(
+            prompt,
+            allowed,
+            metadata=None,
+        )
+
+        for requests in (planner_requests, compatible_requests):
+            assert {
+                str(request.get("tool") or "")
+                for request in requests
+            } <= {"desktop.running_apps"}
+
+
+def test_daily_desktop_entrypoint_routes_browser_safe_shortcuts_without_legacy(
+    monkeypatch,
+) -> None:
+    _forbid_legacy_daily_parser(monkeypatch, "browser shortcuts must be planner-owned")
+    cases = (
+        ("刷新一下这个网页", "refresh"),
+        ("refresh the current page", "refresh"),
+        ("聚焦地址栏", "focus_address_bar"),
+        ("打开地址栏", "focus_address_bar"),
+        ("打开新标签页", "new_tab"),
+        ("新建无痕窗口", "new_private_window"),
+        ("打开私密窗口", "new_private_window"),
+        ("前进下一页", "browser_forward"),
+        ("把当前网页加入书签", "bookmark_page"),
+        ("打开浏览器历史记录", "show_history"),
+        ("打开开发者工具", "open_devtools"),
+        ("打开当前网页的开发者工具", "open_devtools"),
+        ("网页放大", "zoom_in"),
+        ("网页缩小", "zoom_out"),
+        ("实际大小", "reset_zoom"),
+        ("下一个标签", "next_tab"),
+        ("上一个标签", "previous_tab"),
+        ("show browsing history", "show_history"),
+        ("open devtools", "open_devtools"),
+        ("zoom in page", "zoom_in"),
+        ("zoom out page", "zoom_out"),
+        ("reset zoom", "reset_zoom"),
+    )
+
+    for prompt, action in cases:
+        assert daily_desktop_entrypoint_requests(prompt) == [
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.safe_shortcut",
+                "input": {"action": action},
+            }
+        ]
+
+
+def test_browser_internal_page_adapter_rejects_unapproved_destinations() -> None:
+    from apps.shell.yachiyo_agent.daily_desktop import (
+        _legacy_compatible_browser_internal_page_entrypoint_requests,
+    )
+
+    for app_name, target in (
+        ("Google Chrome", "chrome://settings/"),
+        ("Google Chrome", "https://example.com"),
+        ("Safari", "chrome://downloads/"),
+    ):
+        requests = [
+            {
+                "tool": "app.focus_and_safe_shortcut",
+                "input": {"app_name": app_name, "action": "focus_address_bar"},
+                "planning_reason": "planner_desktop_operation",
+            },
+            {
+                "tool": "desktop.safe_type_text",
+                "input": {"text": target},
+                "planning_reason": "planner_desktop_operation",
+            },
+            {
+                "tool": "desktop.search_submit",
+                "input": {},
+                "planning_reason": "planner_desktop_operation",
+            },
+        ]
+
+        assert _legacy_compatible_browser_internal_page_entrypoint_requests(
+            requests
+        ) == []
 
 
 def test_daily_desktop_entrypoint_routes_app_command_palette_and_preferences() -> None:

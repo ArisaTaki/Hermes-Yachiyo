@@ -3065,7 +3065,8 @@ def _safe_shortcut_action_from_phrase(value: str) -> str:
         )
     normalized = re.sub(r"\s+", "", phrase).lower()
     normalized = re.sub(
-        r"^(复制|拷贝|粘贴|全选|撤销|重做|查找|搜索|刷新|后退|前进)(?:一下|下|一次)",
+        r"^(复制|拷贝|粘贴|全选|撤销|重做|查找|搜索|刷新|后退|前进)"
+        r"(?:一下|下(?!一页)|一次)",
         r"\1",
         normalized,
     )
@@ -3559,6 +3560,17 @@ def _safe_shortcut_action_from_phrase(value: str) -> str:
         "打开当前网页的开发者工具": "open_devtools",
         "opendevtools": "open_devtools",
         "showdevtools": "open_devtools",
+        "网页放大": "zoom_in",
+        "页面放大": "zoom_in",
+        "zoominpage": "zoom_in",
+        "zoomin": "zoom_in",
+        "网页缩小": "zoom_out",
+        "页面缩小": "zoom_out",
+        "zoomoutpage": "zoom_out",
+        "zoomout": "zoom_out",
+        "实际大小": "reset_zoom",
+        "恢复实际大小": "reset_zoom",
+        "resetzoom": "reset_zoom",
         "显示应用窗口": "application_windows",
         "显示当前应用窗口": "application_windows",
         "显示当前应用所有窗口": "application_windows",
@@ -3785,6 +3797,57 @@ def _safe_shortcut_action_from_trailing_phrase(value: str) -> str:
         return screenshot_action
     if contains_any(normalized, ["音量", "声音", "亮度", "volume", "sound", "brightness"]):
         return ""
+    browser_suffix_actions = (
+        (
+            "new_private_window",
+            (
+                "新建无痕窗口",
+                "打开无痕窗口",
+                "新建隐身窗口",
+                "打开隐身窗口",
+                "新建私密窗口",
+                "打开私密窗口",
+                "newprivatewindow",
+                "openprivatewindow",
+                "newincognitowindow",
+                "openincognitowindow",
+            ),
+        ),
+        (
+            "focus_address_bar",
+            (
+                "聚焦地址栏",
+                "打开地址栏",
+                "选中地址栏",
+                "focusaddressbar",
+                "focusurlbar",
+            ),
+        ),
+        (
+            "show_history",
+            (
+                "打开历史记录",
+                "显示历史记录",
+                "打开浏览器历史记录",
+                "showbrowsinghistory",
+                "openbrowsinghistory",
+            ),
+        ),
+        (
+            "open_devtools",
+            ("打开开发者工具", "显示开发者工具", "opendevtools", "showdevtools"),
+        ),
+        ("refresh", ("刷新", "刷新页面", "刷新当前网页", "refresh", "refreshpage")),
+        ("browser_forward", ("前进下一页", "前进", "forwardpage", "goforward")),
+        ("browser_back", ("返回上一页", "后退上一页", "后退", "goback", "backpage")),
+        ("bookmark_page", ("加入书签", "把当前网页加入书签", "bookmarkthispage")),
+        ("zoom_in", ("网页放大", "页面放大", "zoominpage", "zoomin")),
+        ("zoom_out", ("网页缩小", "页面缩小", "zoomoutpage", "zoomout")),
+        ("reset_zoom", ("实际大小", "恢复实际大小", "resetzoom")),
+    )
+    for action, suffixes in browser_suffix_actions:
+        if any(normalized.endswith(suffix) for suffix in suffixes):
+            return action
     full_screen_suffixes = (
         "窗口最大化",
         "当前窗口最大化",
