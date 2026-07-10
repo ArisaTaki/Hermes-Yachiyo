@@ -6,6 +6,7 @@ from pathlib import Path
 
 from apps.shell.agent.runtime.agent_facade import RuntimeAgentFacadeMixin
 from apps.shell.agent.runtime.engine_facade import RuntimeEngineFacadeMixin
+from apps.shell.agent.runtime.group_facade import RuntimeGroupFacadeMixin
 from apps.shell.agent.runtime.installation_facade import RuntimeInstallationFacadeMixin
 from apps.shell.agent.runtime.main_chat_facade import RuntimeMainChatFacadeMixin
 from apps.shell.agent.runtime.model_facade import RuntimeModelFacadeMixin
@@ -28,6 +29,7 @@ class NativeRunEngine(
     RuntimeStudioFacadeMixin,
     RuntimeMainChatFacadeMixin,
     RuntimeRunFacadeMixin,
+    RuntimeGroupFacadeMixin,
     RuntimeAgentFacadeMixin,
     RuntimeToolFacadeMixin,
     RuntimeRestrictedPluginFacadeMixin,

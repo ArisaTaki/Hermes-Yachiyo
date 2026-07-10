@@ -1958,6 +1958,20 @@ class LegacyStudioPort:
     def start_group_run(self, request: dict[str, Any]) -> dict[str, Any]:
         start_agent_group_run = getattr(self._runtime, "start_agent_group_run", None)
         if callable(start_agent_group_run):
+            if getattr(self._runtime, "_native_group_run_orchestration", False):
+                group_id = str(request.get("group_id") or "").strip()
+                if not group_id:
+                    raise ValueError("缺少 group_id")
+                if not str(
+                    request.get("objective") or request.get("goal") or ""
+                ).strip():
+                    raise ValueError("群组运行目标不能为空")
+                return start_agent_group_run(
+                    {
+                        **request,
+                        "group": self.get_group(group_id),
+                    }
+                )
             return start_agent_group_run(request)
 
         return start_legacy_group_run(

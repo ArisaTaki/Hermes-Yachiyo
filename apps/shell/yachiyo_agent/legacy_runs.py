@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from typing import Any
 
+from apps.shell.agent.runtime.group_projection import RuntimeGroupRunProjector
+
 from .links import studio_run_url
 
 
-class LegacyRunPayloadProjector:
+class LegacyRunPayloadProjector(RuntimeGroupRunProjector):
     """Normalizes legacy runtime run payloads before public snapshot projection."""
 
     def chat_task_payload(
@@ -49,29 +51,6 @@ class LegacyRunPayloadProjector:
             events.extend(_event_list_from_payload(payload, ("events",)))
         return _dedupe_events(events)
 
-    def group_artifacts(self, runs: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        artifacts: list[dict[str, Any]] = []
-        for run in runs:
-            run_id = str(run.get("run_id") or "")
-            for artifact in run.get("artifacts") or []:
-                if isinstance(artifact, dict):
-                    artifacts.append({**artifact, "source_run_id": run_id})
-        return artifacts
-
-    def run_with_task_link(self, run: dict[str, Any], runtime: Any) -> dict[str, Any]:
-        link = self.task_link_for_run(run, runtime)
-        if not link:
-            return run
-        return {
-            **run,
-            "task_id": link.get("task_id") or run.get("task_id") or "",
-            "session_id": link.get("session_id") or run.get("session_id") or "",
-            "task_run_link_created_at": link.get("created_at") or "",
-            "task_run_link_updated_at": link.get("updated_at") or "",
-            "task_run_link_run_status": link.get("run_status") or run.get("status") or "",
-            "task_run_link_last_event_sequence": link.get("last_event_sequence") or 0,
-        }
-
     def run_with_runtime_events(
         self,
         run: dict[str, Any],
@@ -85,35 +64,6 @@ class LegacyRunPayloadProjector:
             "events": events,
             "recent_events": events,
         }
-
-    def child_run_payload(self, run: dict[str, Any], runtime: Any) -> dict[str, Any]:
-        return self.run_with_runtime_events(
-            self.run_with_task_link(run, runtime),
-            runtime,
-        )
-
-    def task_link_for_run(self, run: dict[str, Any], runtime: Any) -> dict[str, Any] | None:
-        run_id = str(run.get("run_id") or "").strip()
-        if not run_id:
-            return None
-
-        task_links = getattr(runtime, "task_run_links", None)
-        for_run = getattr(task_links, "for_run", None)
-        if callable(for_run):
-            link = for_run(run_id)
-            if isinstance(link, dict):
-                return link
-
-        task_id = str(run.get("task_id") or "").strip()
-        get_task_run_link = getattr(runtime, "get_task_run_link", None)
-        if task_id and callable(get_task_run_link):
-            try:
-                link = get_task_run_link(task_id)
-            except KeyError:
-                return None
-            if isinstance(link, dict):
-                return link
-        return None
 
     def group_run_from_legacy_run_group(
         self,
@@ -152,69 +102,6 @@ class LegacyRunPayloadProjector:
 
     def run_group_events(self, run_group: dict[str, Any]) -> list[dict[str, Any]]:
         return _event_list_from_payload(run_group, ("events", "run_events", "timeline"))
-
-    def group_events_from_child_runs(
-        self,
-        runs: list[dict[str, Any]],
-        runtime: Any,
-    ) -> list[dict[str, Any]]:
-        events: list[dict[str, Any]] = []
-        for run in runs:
-            run_id = str(run.get("run_id") or "").strip()
-            for event in self.events_for_run(run, runtime):
-                event_type = _event_type(event)
-                if not event_type.startswith("group."):
-                    continue
-                item = dict(event)
-                if not item.get("event_type") and item.get("event"):
-                    item["event_type"] = event_type
-                if run_id and not item.get("run_id"):
-                    item["run_id"] = run_id
-                events.append(item)
-        return events
-
-    def events_for_run(self, run: dict[str, Any], runtime: Any) -> list[dict[str, Any]]:
-        existing_events = _event_list_from_payload(
-            run,
-            ("events", "run_events", "recent_events", "timeline"),
-        )
-        explicit_group_events = [
-            event
-            for event in existing_events
-            if _event_type(event).startswith("group.") and event.get("event_type")
-        ]
-        if explicit_group_events:
-            return explicit_group_events
-        existing_group_events = [
-            event for event in existing_events if _event_type(event).startswith("group.")
-        ]
-        if existing_group_events:
-            return existing_group_events
-        run_id = str(run.get("run_id") or "").strip()
-        list_run_events = getattr(runtime, "list_run_events", None)
-        if run_id and callable(list_run_events):
-            try:
-                payload = list_run_events(run_id)
-            except Exception:
-                payload = {}
-            events = _event_list_from_payload(payload, ("events",))
-            if events:
-                return events
-        return existing_events
-
-    def child_runs_for_run_group(
-        self,
-        run_group: dict[str, Any],
-        runtime: Any,
-    ) -> list[dict[str, Any]]:
-        child_runs = []
-        for run_id in run_group.get("child_run_ids") or []:
-            try:
-                child_runs.append(self.child_run_payload(runtime.get_run(str(run_id)), runtime))
-            except KeyError:
-                continue
-        return child_runs
-
 
 def _event_list_from_payload(
     payload: dict[str, Any],

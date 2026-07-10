@@ -9,6 +9,7 @@ from typing import Any
 import pytest
 
 from apps.shell.agent.runtime.errors import AgentRuntimeError
+from apps.shell.agent.runtime.group_runs import start_agent_group_run as start_native_group_run
 from apps.shell.yachiyo_agent.daily_desktop import (
     daily_desktop_allowed_tools,
     daily_desktop_requests_can_complete_without_model,
@@ -3791,6 +3792,37 @@ def test_legacy_runtime_port_starts_and_links_chat_group_task() -> None:
         "link_task_run",
         {"task_id": "task-group-1", "run_id": "run-1", "session_id": "chat-1"},
     ) in runtime.calls
+
+
+def test_legacy_runtime_port_delegates_chat_group_task_to_native_runtime() -> None:
+    class NativeGroupRuntime(_FakeRuntime):
+        _native_group_run_orchestration = True
+
+        def start_agent_group_run(self, request: dict[str, Any]) -> dict[str, Any]:
+            self.calls.append(("start_agent_group_run", dict(request)))
+            payload = dict(request)
+            group = payload.pop("group")
+            return start_native_group_run(self, payload, group=group)
+
+    runtime = NativeGroupRuntime()
+
+    task = LegacyRuntimePort(runtime).start_chat_task(
+        {
+            "prompt": "一起整理调研结论",
+            "conversation_id": "chat-1",
+            "client_task_id": "task-group-native-1",
+            "group_id": "group-1",
+        }
+    )
+
+    native_call = next(call for call in runtime.calls if call[0] == "start_agent_group_run")
+    assert native_call[1]["group"]["group_id"] == "group-1"
+    assert native_call[1]["group"]["members"] == [
+        {"agent_id": "agent-1", "name": "Planner"}
+    ]
+    assert task["metadata"]["runnable_kind"] == "group"
+    assert task["metadata"]["group_id"] == "group-1"
+    assert task["metadata"]["run_group_id"] == "group-run-1"
 
 
 def test_legacy_runtime_port_aggregates_group_run_chat_task_timeline() -> None:

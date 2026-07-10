@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from apps.shell.yachiyo_agent.legacy_group_runs import (
     _group_run_planner_event_type,
     group_member_orchestration_context,
@@ -9,8 +11,11 @@ from apps.shell.yachiyo_agent.legacy_group_runs import (
     group_run_orchestration_context,
     group_run_status_from_child_runs,
     group_run_summary_from_child_runs,
+    start_legacy_group_run,
 )
 from apps.shell.yachiyo_agent import legacy_group_orchestration
+from apps.shell.agent.runtime import group_facade
+from apps.shell.yachiyo_agent.legacy_ports import LegacyStudioPort
 
 
 def test_legacy_group_run_plan_orders_debate_members_before_moderator() -> None:
@@ -44,6 +49,104 @@ def test_legacy_group_run_plan_orders_debate_members_before_moderator() -> None:
     assert group_member_orchestration_context(plan, plan["members"][2], 2)[
         "group_member_phase"
     ] == "moderator_summary"
+
+
+def test_native_group_facade_owns_group_run_start(monkeypatch) -> None:
+    captured = {}
+
+    def fake_start(runtime, request, *, group):
+        captured.update({"runtime": runtime, "request": request, "group": group})
+        return {"group_run_id": "group-run-1"}
+
+    monkeypatch.setattr(group_facade, "_start_agent_group_run", fake_start)
+
+    class Runtime(group_facade.RuntimeGroupFacadeMixin):
+        pass
+
+    runtime = Runtime()
+    result = runtime.start_agent_group_run(
+        {
+            "group_id": "group-1",
+            "objective": "Prepare report",
+            "group": {"group_id": "group-1", "members": []},
+        }
+    )
+
+    assert result == {"group_run_id": "group-run-1"}
+    assert captured == {
+        "runtime": runtime,
+        "request": {"group_id": "group-1", "objective": "Prepare report"},
+        "group": {"group_id": "group-1", "members": []},
+    }
+
+
+def test_legacy_studio_port_resolves_group_before_native_start() -> None:
+    class Runtime:
+        _native_group_run_orchestration = True
+
+        def __init__(self) -> None:
+            self.requests = []
+
+        def get_agent_group(self, group_id):
+            return {
+                "group_id": group_id,
+                "name": "Research",
+                "members": [{"agent_id": "agent-1"}],
+            }
+
+        def start_agent_group_run(self, request):
+            self.requests.append(request)
+            return {"group_run_id": "group-run-1"}
+
+    runtime = Runtime()
+    result = LegacyStudioPort(runtime).start_group_run(
+        {"group_id": "group-1", "objective": "Prepare report"}
+    )
+
+    assert result == {"group_run_id": "group-run-1"}
+    assert runtime.requests == [
+        {
+            "group_id": "group-1",
+            "objective": "Prepare report",
+            "group": {
+                "group_id": "group-1",
+                "name": "Research",
+                "members": [{"agent_id": "agent-1"}],
+            },
+        }
+    ]
+
+
+def test_legacy_studio_port_validates_group_id_before_native_lookup() -> None:
+    class Runtime:
+        _native_group_run_orchestration = True
+
+        def get_agent_group(self, group_id):
+            raise AssertionError(f"must not resolve blank group id: {group_id}")
+
+        def start_agent_group_run(self, request):
+            raise AssertionError(f"must not start invalid group run: {request}")
+
+    with pytest.raises(ValueError, match="缺少 group_id"):
+        LegacyStudioPort(Runtime()).start_group_run({"objective": "Prepare report"})
+
+    with pytest.raises(ValueError, match="群组运行目标不能为空"):
+        LegacyStudioPort(Runtime()).start_group_run({"group_id": "group-1"})
+
+
+@pytest.mark.parametrize(
+    ("payload", "message"),
+    [
+        ({"objective": "Prepare report"}, "缺少 group_id"),
+        ({"group_id": "group-1"}, "群组运行目标不能为空"),
+    ],
+)
+def test_legacy_group_run_validates_before_group_lookup(payload, message: str) -> None:
+    def fail_lookup(group_id: str):
+        raise AssertionError(f"must not resolve invalid request: {group_id}")
+
+    with pytest.raises(ValueError, match=message):
+        start_legacy_group_run(object(), payload, get_group=fail_lookup)
 
 
 def test_legacy_group_run_wrappers_delegate_to_split_orchestration_module() -> None:

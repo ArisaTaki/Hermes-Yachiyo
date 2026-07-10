@@ -1,0 +1,594 @@
+"""Native GroupRun orchestration over child Agent runs and runtime events."""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from typing import Any
+
+from apps.shell.yachiyo_agent.planner_projection import (
+    planner_run_event_payloads,
+    runtime_planner_decision,
+    runtime_planner_metadata,
+)
+from apps.shell.yachiyo_agent.runtime_execution import (
+    runtime_execution_envelope_payload_with_request_context,
+    runtime_execution_requests_from_envelope_payload,
+    runtime_execution_requests_from_metadata,
+)
+
+from .group_orchestration import (
+    active_speaker_agent_id,
+    group_member_orchestration_context,
+    group_member_phase,
+    group_orchestration_plan,
+    group_orchestration_strategy,
+    group_run_orchestration_context,
+    group_run_status_from_child_runs,
+    group_run_summary_from_child_runs,
+    member_sort_order,
+    normalized_group_mode,
+)
+from .group_projection import GroupRunProjector, RuntimeGroupRunProjector
+from .group_run_support import (
+    append_group_member_event,
+    append_group_run_event,
+    create_runnable_run,
+    group_member_agent_override,
+    group_member_with_inherited_policy,
+)
+
+
+def start_agent_group_run(
+    runtime: Any,
+    request: dict[str, Any],
+    *,
+    group: dict[str, Any],
+    projector: GroupRunProjector | None = None,
+) -> dict[str, Any]:
+    group_id = str(request.get("group_id") or "").strip()
+    objective = str(request.get("objective") or request.get("goal") or "").strip()
+    client_run_id = str(
+        request.get("client_run_id") or request.get("client_request_id") or ""
+    ).strip()
+    if not group_id:
+        raise ValueError("缺少 group_id")
+    if not objective:
+        raise ValueError("群组运行目标不能为空")
+
+    run_projector = projector or RuntimeGroupRunProjector()
+    resolved_group_id = str(group.get("group_id") or group.get("id") or "").strip()
+    if resolved_group_id and resolved_group_id != group_id:
+        raise ValueError("群组定义与 group_id 不匹配")
+    members = [item for item in group.get("members") or [] if isinstance(item, dict)]
+    if not members:
+        raise NotImplementedError("这个群组没有可复用的成员定义")
+    orchestration_plan = group_orchestration_plan(group, members)
+    members = [
+        group_member_with_inherited_policy(runtime, member, group)
+        for member in orchestration_plan["members"]
+    ]
+
+    child_runs: list[dict[str, Any]] = []
+    run_group_id = ""
+    for index, member in enumerate(members):
+        agent_id = str(member.get("agent_id") or "").strip()
+        if not agent_id:
+            continue
+        child_client_run_id = (
+            f"{client_run_id}:{index}:{agent_id}" if client_run_id else ""
+        )
+
+        def on_member_complete(
+            completed_run: dict[str, Any],
+            *,
+            current_member: dict[str, Any] = member,
+            current_index: int = index,
+            current_child_client_run_id: str = child_client_run_id,
+        ) -> None:
+            append_group_member_event(
+                runtime,
+                completed_run,
+                group_member_terminal_event_type(completed_run),
+                group_id=group_id,
+                group=group,
+                run_group_id="",
+                objective=objective,
+                member=current_member,
+                member_index=current_index,
+                client_run_id=client_run_id,
+                child_client_run_id=current_child_client_run_id,
+                orchestration=group_member_orchestration_context(
+                    orchestration_plan,
+                    current_member,
+                    current_index,
+                ),
+            )
+
+        member_direct_tool_requests = (
+            _member_runtime_execution_requests(request, member, index)
+            if index == 0
+            else []
+        )
+        child_run = create_runnable_run(
+            runtime,
+            runnable_id=agent_id,
+            user_goal=objective,
+            run_group_id=run_group_id,
+            client_run_id=child_client_run_id,
+            on_complete=on_member_complete,
+            agent_override=group_member_agent_override(runtime, member, group),
+            daily_desktop_policy_overlay=True,
+            runtime_planner_entrypoint=True,
+            runtime_execution_envelope=(
+                dict(request.get("runtime_execution_envelope"))
+                if isinstance(request.get("runtime_execution_envelope"), Mapping)
+                else None
+            ),
+            metadata=(
+                dict(request.get("metadata"))
+                if isinstance(request.get("metadata"), Mapping)
+                else None
+            ),
+            direct_tool_requests=(
+                member_direct_tool_requests if member_direct_tool_requests else None
+            ),
+            daily_desktop_planning_context=_group_planning_context(request, objective),
+        )
+        if not run_group_id:
+            run_group_id = str(child_run.get("run_group_id") or "")
+            append_group_run_event(
+                runtime,
+                child_run,
+                "group.run.started",
+                group_id=group_id,
+                group=group,
+                run_group_id=run_group_id,
+                objective=objective,
+                status="running",
+                members=members,
+                child_run_ids=[str(child_run.get("run_id") or "")],
+                client_run_id=client_run_id,
+                orchestration=group_run_orchestration_context(orchestration_plan),
+            )
+            append_group_run_event(
+                runtime,
+                child_run,
+                "group.run.plan",
+                group_id=group_id,
+                group=group,
+                run_group_id=run_group_id,
+                objective=objective,
+                status="running",
+                members=members,
+                child_run_ids=[str(child_run.get("run_id") or "")],
+                client_run_id=client_run_id,
+                orchestration=group_run_orchestration_context(orchestration_plan),
+            )
+            append_group_run_planner_events(
+                runtime,
+                child_run,
+                objective,
+                group_id=group_id,
+                group=group,
+                run_group_id=run_group_id,
+                members=members,
+                child_run_ids=[str(child_run.get("run_id") or "")],
+                client_run_id=client_run_id,
+                orchestration=group_run_orchestration_context(orchestration_plan),
+            )
+        append_group_member_event(
+            runtime,
+            child_run,
+            "group.member.started",
+            group_id=group_id,
+            group=group,
+            run_group_id=run_group_id,
+            objective=objective,
+            member=member,
+            member_index=index,
+            client_run_id=client_run_id,
+            child_client_run_id=child_client_run_id,
+            orchestration=group_member_orchestration_context(
+                orchestration_plan,
+                member,
+                index,
+            ),
+        )
+        append_group_member_planner_events(
+            runtime,
+            child_run,
+            objective,
+            member,
+        )
+        child_status = str(child_run.get("status") or "").strip()
+        if child_status in {"approval_required", "waiting_approval"}:
+            append_group_member_event(
+                runtime,
+                child_run,
+                "group.member.approval_required",
+                group_id=group_id,
+                group=group,
+                run_group_id=run_group_id,
+                objective=objective,
+                member=member,
+                member_index=index,
+                client_run_id=client_run_id,
+                child_client_run_id=child_client_run_id,
+                orchestration=group_member_orchestration_context(
+                    orchestration_plan,
+                    member,
+                    index,
+                ),
+            )
+        elif child_status in {"completed", "failed", "cancelled"}:
+            append_group_member_event(
+                runtime,
+                child_run,
+                group_member_terminal_event_type(child_run),
+                group_id=group_id,
+                group=group,
+                run_group_id=run_group_id,
+                objective=objective,
+                member=member,
+                member_index=index,
+                client_run_id=client_run_id,
+                child_client_run_id=child_client_run_id,
+                orchestration=group_member_orchestration_context(
+                    orchestration_plan,
+                    member,
+                    index,
+                ),
+            )
+        child_runs.append(child_run)
+
+    if not child_runs:
+        raise NotImplementedError("这个群组没有可运行的成员")
+
+    projected_status = group_run_status_from_child_runs(child_runs)
+    if projected_status and run_group_id:
+        update_run_group = getattr(runtime, "_update_run_group", None)
+        if callable(update_run_group):
+            update_run_group(
+                run_group_id,
+                status=projected_status,
+                summary=(
+                    group_run_summary_from_child_runs(child_runs)
+                    if projected_status in {"completed", "failed", "cancelled"}
+                    else None
+                ),
+            )
+        if projected_status == "approval_required" and child_runs:
+            append_group_run_event(
+                runtime,
+                child_runs[0],
+                "group.run.approval_required",
+                group_id=group_id,
+                group=group,
+                run_group_id=run_group_id,
+                objective=objective,
+                status=projected_status,
+                members=members,
+                child_run_ids=[
+                    str(run.get("run_id") or "")
+                    for run in child_runs
+                    if str(run.get("run_id") or "")
+                ],
+                client_run_id=client_run_id,
+                orchestration=group_run_orchestration_context(orchestration_plan),
+            )
+
+    run_group = runtime.get_run_group(run_group_id) if run_group_id else {}
+    projected_child_runs = [
+        run_projector.child_run_payload(run, runtime)
+        for run in child_runs
+    ]
+    return {
+        "run_group_id": run_group_id,
+        "group_run_id": run_group_id,
+        "group_id": group_id,
+        "title": (
+            request.get("title")
+            or run_group.get("title")
+            or group.get("name")
+            or "Group run"
+        ),
+        "status": run_group.get("status") or "running",
+        "objective": objective,
+        "participants": members,
+        "active_speaker_agent_id": active_speaker_agent_id(
+            orchestration_plan,
+            projected_child_runs,
+        ),
+        "runs": projected_child_runs,
+        "child_run_ids": run_group.get("child_run_ids")
+        or [run.get("run_id") for run in projected_child_runs if run.get("run_id")],
+        "events": run_projector.group_events_from_child_runs(projected_child_runs, runtime),
+        "shared_artifacts": run_projector.group_artifacts(projected_child_runs),
+        "pending_approvals": [
+            run.get("pending_approval")
+            for run in projected_child_runs
+            if run.get("pending_approval")
+        ],
+        "final_answer": run_group.get("summary") or "",
+        "created_at": run_group.get("created_at") or "",
+        "updated_at": run_group.get("updated_at") or "",
+    }
+
+
+def append_group_member_planner_events(
+    runtime: Any,
+    child_run: dict[str, Any],
+    objective: str,
+    member: dict[str, Any],
+) -> None:
+    append_run_event = getattr(runtime, "append_run_event", None)
+    run_id = str(child_run.get("run_id") or "").strip()
+    if not callable(append_run_event) or not run_id:
+        return
+    decision = runtime_planner_decision(
+        objective,
+        allowed_tools=_member_allowed_tools(member),
+        metadata={"runnable_kind": "group", "agent_id": member.get("agent_id")},
+    )
+    for event_type, payload in planner_run_event_payloads(decision):
+        try:
+            append_run_event(run_id, event_type, payload)
+        except Exception:
+            continue
+
+
+def append_group_run_planner_events(
+    runtime: Any,
+    run: dict[str, Any],
+    objective: str,
+    *,
+    group_id: str,
+    group: dict[str, Any],
+    run_group_id: str,
+    members: list[dict[str, Any]],
+    child_run_ids: list[str],
+    client_run_id: str = "",
+    orchestration: dict[str, Any] | None = None,
+) -> None:
+    decision = runtime_planner_decision(
+        objective,
+        metadata={"runnable_kind": "group_run", "group_id": group_id},
+    )
+    event_context = {
+        "group_id": group_id,
+        "group_run_id": run_group_id,
+        "run_group_id": run_group_id,
+    }
+    for event_type, payload in planner_run_event_payloads(decision):
+        append_group_run_event(
+            runtime,
+            run,
+            _group_run_planner_event_type(event_type),
+            group_id=group_id,
+            group=group,
+            run_group_id=run_group_id,
+            objective=objective,
+            status="running",
+            members=members,
+            child_run_ids=child_run_ids,
+            client_run_id=client_run_id,
+            orchestration={
+                **dict(orchestration or {}),
+                **_planner_event_payload_with_context(payload, event_context),
+                "planner_event_type": event_type,
+                "planner_scope": "group_run",
+            },
+        )
+
+
+def _group_run_planner_event_type(event_type: str) -> str:
+    if event_type == "agent.intent.selected":
+        return "group.run.intent.selected"
+    if event_type == "agent.plan.created":
+        return "group.run.plan.created"
+    if event_type == "agent.task_core.created":
+        return "group.run.task_core.created"
+    if event_type == "agent.plan.step":
+        return "group.run.plan.step"
+    if event_type == "agent.plan.selection":
+        return "group.run.plan.selection"
+    if event_type == "agent.replan.requested":
+        return "group.run.replan.requested"
+    if event_type == "agent.replan.recovery.updated":
+        return "group.run.replan.recovery.updated"
+    if event_type == "agent.desktop.intent_planned":
+        return "group.run.desktop.intent_planned"
+    if event_type == "agent.desktop.intent_approval_required":
+        return "group.run.desktop.intent_approval_required"
+    if event_type == "agent.desktop.intent_completed":
+        return "group.run.desktop.intent_completed"
+    if event_type == "agent.desktop.intent_unavailable":
+        return "group.run.desktop.intent_unavailable"
+    if event_type == "agent.desktop.permission_recovery":
+        return "group.run.desktop.permission_recovery"
+    if event_type == "agent.desktop.readiness_recovered":
+        return "group.run.desktop.readiness_recovered"
+    if event_type == "agent.task.workspace_item.updated":
+        return "group.run.task.workspace_item.updated"
+    if event_type == "agent.task.todo.updated":
+        return "group.run.task.todo.updated"
+    if event_type == "agent.task.checkpoint.updated":
+        return "group.run.task.checkpoint.updated"
+    return "group.run.planner_event"
+
+
+def _planner_event_payload_with_context(
+    payload: dict[str, Any],
+    event_context: Mapping[str, Any],
+) -> dict[str, Any]:
+    enriched = dict(payload)
+    clean_context = {
+        str(key): str(value).strip()
+        for key, value in event_context.items()
+        if str(key or "").strip() and str(value or "").strip()
+    }
+    for key, value in clean_context.items():
+        enriched.setdefault(key, value)
+    envelope = enriched.get("runtime_execution_envelope")
+    if isinstance(envelope, Mapping):
+        enriched["runtime_execution_envelope"] = (
+            runtime_execution_envelope_payload_with_request_context(
+                envelope,
+                clean_context,
+            )
+        )
+    return enriched
+
+
+def _member_allowed_tools(member: dict[str, Any]) -> list[str] | None:
+    tool_policy = member.get("tool_policy") if isinstance(member.get("tool_policy"), dict) else {}
+    allowed_tools = tool_policy.get("allowed_tools") if isinstance(tool_policy, dict) else None
+    if not isinstance(allowed_tools, list):
+        return None
+    return [
+        str(tool or "").strip()
+        for tool in allowed_tools
+        if str(tool or "").strip()
+    ]
+
+
+def _member_runtime_execution_requests(
+    request: Mapping[str, Any],
+    member: dict[str, Any],
+    member_index: int,
+) -> list[dict[str, Any]]:
+    for requests in _runtime_execution_request_candidates(request, member):
+        if not requests:
+            continue
+        return [
+            _runtime_execution_request_with_group_context(
+                tool_request,
+                request,
+                member,
+                member_index,
+            )
+            for tool_request in requests
+        ]
+    return []
+
+
+def _runtime_execution_request_candidates(
+    request: Mapping[str, Any],
+    member: dict[str, Any],
+) -> list[list[dict[str, Any]]]:
+    allowed_tools = _member_allowed_tools(member)
+    metadata = request.get("metadata") if isinstance(request.get("metadata"), Mapping) else {}
+    candidates: list[list[dict[str, Any]]] = []
+    direct_requests = _allowed_direct_tool_requests(
+        request.get("direct_tool_requests"),
+        allowed_tools=allowed_tools,
+    )
+    if direct_requests:
+        candidates.append(direct_requests)
+    top_level_requests = runtime_execution_requests_from_envelope_payload(
+        request.get("runtime_execution_envelope"),
+        allowed_tools=allowed_tools,
+    )
+    if top_level_requests:
+        candidates.append(top_level_requests)
+    metadata_requests = runtime_execution_requests_from_metadata(
+        metadata,
+        allowed_tools=allowed_tools,
+    )
+    if metadata_requests:
+        candidates.append(metadata_requests)
+    planner_requests = _runtime_planner_direct_requests(
+        request,
+        allowed_tools=allowed_tools,
+    )
+    if planner_requests:
+        candidates.append(planner_requests)
+    return candidates
+
+
+def _runtime_planner_direct_requests(
+    request: Mapping[str, Any],
+    *,
+    allowed_tools: list[str] | None,
+) -> list[dict[str, Any]]:
+    objective = _group_planning_context(
+        request,
+        str(request.get("objective") or request.get("goal") or "").strip(),
+    )
+    if not objective:
+        return []
+    metadata = request.get("metadata") if isinstance(request.get("metadata"), Mapping) else {}
+    decision = runtime_planner_decision(
+        objective,
+        allowed_tools=allowed_tools,
+        metadata=metadata,
+    )
+    planner_metadata = runtime_planner_metadata(
+        decision,
+        allowed_tools=allowed_tools,
+        metadata=metadata,
+    )
+    return runtime_execution_requests_from_metadata(
+        planner_metadata,
+        allowed_tools=allowed_tools,
+    )
+
+
+def _allowed_direct_tool_requests(
+    direct_tool_requests: Any,
+    *,
+    allowed_tools: list[str] | None,
+) -> list[dict[str, Any]]:
+    if not isinstance(direct_tool_requests, list):
+        return []
+    allowed = {
+        str(tool or "").strip()
+        for tool in allowed_tools or []
+        if str(tool or "").strip()
+    }
+    requests: list[dict[str, Any]] = []
+    for request in direct_tool_requests:
+        if not isinstance(request, Mapping):
+            continue
+        tool_name = str(request.get("tool") or request.get("tool_name") or "").strip()
+        if not tool_name:
+            continue
+        if allowed and tool_name not in allowed:
+            continue
+        copied = dict(request)
+        copied["tool"] = tool_name
+        requests.append(copied)
+    return requests
+
+
+def _runtime_execution_request_with_group_context(
+    tool_request: dict[str, Any],
+    request: Mapping[str, Any],
+    member: Mapping[str, Any],
+    member_index: int,
+) -> dict[str, Any]:
+    enriched = dict(tool_request)
+    for key, value in {
+        "group_id": request.get("group_id"),
+        "agent_id": member.get("agent_id"),
+        "group_member_index": member_index,
+    }.items():
+        if value is None:
+            continue
+        if not str(value).strip():
+            continue
+        enriched.setdefault(key, value)
+    return enriched
+
+
+def _group_planning_context(request: Mapping[str, Any], objective: str) -> str:
+    return str(request.get("daily_desktop_planning_context") or objective or "").strip()
+
+
+def group_member_terminal_event_type(run: dict[str, Any]) -> str:
+    status = str(run.get("status") or "").strip()
+    if status == "failed":
+        return "group.member.failed"
+    if status == "cancelled":
+        return "group.member.cancelled"
+    return "group.member.completed"

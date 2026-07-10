@@ -1477,18 +1477,30 @@ def test_group_and_workflow_acceptance_paths_are_guarded() -> None:
         ],
     )
     _assert_contains(
-        "apps/shell/yachiyo_agent/legacy_group_runs.py",
+        "apps/shell/agent/runtime/group_runs.py",
         [
-            "def start_legacy_group_run",
-            "def group_orchestration_plan",
+            "def start_agent_group_run",
             '"group.run.plan"',
             '"group.run.task.todo.updated"',
             '"group.run.task.checkpoint.updated"',
+        ],
+    )
+    _assert_contains(
+        "apps/shell/agent/runtime/group_orchestration.py",
+        [
+            "def group_orchestration_plan",
             '"participants_then_moderator"',
             '"fan_out"',
             '"moderator_first"',
             "group_member_phase",
             "group_member_parallel",
+        ],
+    )
+    _assert_contains(
+        "apps/shell/agent/runtime/group_facade.py",
+        [
+            "class RuntimeGroupFacadeMixin",
+            "def start_agent_group_run",
         ],
     )
     _assert_contains(

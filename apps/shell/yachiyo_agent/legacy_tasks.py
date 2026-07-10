@@ -407,6 +407,10 @@ class LegacyRuntimePort:
         execution_kwargs: dict[str, Any],
         requested_task_id: str,
     ) -> dict[str, Any]:
+        if not group_id:
+            raise ValueError("缺少 group_id")
+        if not prompt:
+            raise ValueError("群组运行目标不能为空")
         group_request = {
             **request,
             "group_id": group_id,
@@ -418,7 +422,15 @@ class LegacyRuntimePort:
         }
         start_agent_group_run = getattr(self._runtime, "start_agent_group_run", None)
         if callable(start_agent_group_run):
-            group_run = start_agent_group_run(group_request)
+            if getattr(self._runtime, "_native_group_run_orchestration", False):
+                group_run = start_agent_group_run(
+                    {
+                        **group_request,
+                        "group": self._get_group_for_run(group_id),
+                    }
+                )
+            else:
+                group_run = start_agent_group_run(group_request)
         else:
             group_run = start_legacy_group_run(
                 self._runtime,
