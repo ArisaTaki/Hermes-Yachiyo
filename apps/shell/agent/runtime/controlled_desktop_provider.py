@@ -139,6 +139,7 @@ class ControlledDesktopProvider(HeadlessDesktopProvider):
                 "foreground_input",
                 "keyboard_mouse_capture",
                 "sandbox_control",
+                "idempotent_tool_requests",
                 "permission_diagnostics",
             ],
             "blocking_conditions": [],

@@ -13,6 +13,7 @@ def _release_ready_status() -> dict[str, object]:
         "available": True,
         "adapter_ready": True,
         "authentication_configured": True,
+        "capabilities": ["idempotent_tool_requests"],
         "desktop_session_kind": "virtual_desktop",
         "desktop_session_isolated": True,
         "foreground_takeover_required": False,
@@ -50,6 +51,7 @@ def test_virtual_desktop_provider_contract_accepts_release_ready_provider() -> N
     assert evidence["desktop_session_isolated"] is True
     assert evidence["foreground_takeover_required"] is False
     assert evidence["keyboard_mouse_capture_supported"] is True
+    assert evidence["idempotent_tool_requests_supported"] is True
     assert evidence["checks"]["tool_sequence_covers_required_tools"] is True
 
 
@@ -83,6 +85,16 @@ def test_virtual_desktop_provider_contract_requires_tool_coverage() -> None:
     assert evidence["ok"] is False
     assert evidence["missing_required_tools"] == ["desktop.verify"]
     assert "desktop_provider_missing_required_tools" in evidence["blocking_conditions"]
+
+
+def test_virtual_desktop_provider_contract_requires_idempotent_requests() -> None:
+    status = {**_release_ready_status(), "capabilities": []}
+
+    evidence = virtual_desktop_provider_contract_evidence(status)
+
+    assert evidence["ok"] is False
+    assert evidence["idempotent_tool_requests_supported"] is False
+    assert "desktop_provider_idempotency_required" in evidence["blocking_conditions"]
 
 
 def test_virtual_desktop_provider_conformance_summary_matches_public_shape() -> None:

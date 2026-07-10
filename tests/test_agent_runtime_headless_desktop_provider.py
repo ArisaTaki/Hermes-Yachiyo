@@ -163,6 +163,8 @@ def test_headless_desktop_provider_http_status_and_execute(monkeypatch) -> None:
 
     assert status_payload["ok"] is True
     assert status_payload["provider_id"] == "provider-http"
+    assert status_payload["authentication_configured"] is True
+    assert "idempotent_tool_requests" in status_payload["capabilities"]
     assert status_payload["supported_tools"] == ["desktop.list_apps"]
     assert manifest_payload["ok"] is True
     assert manifest_payload["endpoint_urls"]["execute"] == f"{base_url}/tools/execute"
@@ -172,6 +174,118 @@ def test_headless_desktop_provider_http_status_and_execute(monkeypatch) -> None:
     assert execute_payload["result"]["headless_desktop_provider"]["provider_id"] == (
         "provider-http"
     )
+
+
+def test_headless_desktop_provider_replays_idempotent_tool_request(monkeypatch) -> None:
+    calls: list[str] = []
+
+    def fake_list_apps(*, query: str = "", limit: Any = 200) -> dict[str, Any]:
+        calls.append(query)
+        return {
+            "ok": True,
+            "action": "desktop.list_apps",
+            "summary": f"query={query};limit={limit}",
+        }
+
+    monkeypatch.setattr(
+        "apps.shell.agent.runtime.headless_desktop_provider.desktop.list_apps",
+        fake_list_apps,
+    )
+    server = build_headless_desktop_provider_server(
+        host="127.0.0.1",
+        port=0,
+        token="secret",
+        provider=HeadlessDesktopProvider(supported_tools=["desktop.list_apps"]),
+        quiet=True,
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        url = f"http://127.0.0.1:{server.server_address[1]}/tools/execute"
+
+        def execute(query: str) -> tuple[int, dict[str, Any]]:
+            request = urllib.request.Request(
+                url,
+                data=json.dumps(
+                    {
+                        "request_id": "request-stable-1",
+                        "tool": "desktop.list_apps",
+                        "input": {"query": query, "limit": 3},
+                        "approved": True,
+                    }
+                ).encode("utf-8"),
+                headers={
+                    "Authorization": "Bearer secret",
+                    "Content-Type": "application/json",
+                    "Idempotency-Key": "request-stable-1",
+                },
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(request, timeout=5) as response:
+                    return response.status, json.loads(response.read().decode("utf-8"))
+            except urllib.error.HTTPError as exc:
+                return exc.code, json.loads(exc.read().decode("utf-8"))
+
+        first_status, first = execute("Music")
+        second_status, second = execute("Music")
+        conflict_status, conflict = execute("Notes")
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+    assert first_status == 200
+    assert second_status == 200
+    assert calls == ["Music"]
+    assert first["provider_request_replayed"] is False
+    assert second["provider_request_replayed"] is True
+    assert second["result"]["provider_request_id"] == "request-stable-1"
+    assert second["result"]["provider_request_replayed"] is True
+    assert conflict_status == 409
+    assert conflict["error"] == "desktop_provider_idempotency_key_reused"
+    assert conflict["provider_request_id"] == "request-stable-1"
+
+
+def test_headless_desktop_provider_rejects_mismatched_idempotency_keys() -> None:
+    server = build_headless_desktop_provider_server(
+        host="127.0.0.1",
+        port=0,
+        provider=HeadlessDesktopProvider(supported_tools=["desktop.list_apps"]),
+        quiet=True,
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{server.server_address[1]}/tools/execute",
+            data=json.dumps(
+                {
+                    "request_id": "payload-request",
+                    "tool": "desktop.list_apps",
+                    "input": {},
+                }
+            ).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "Idempotency-Key": "header-request",
+            },
+            method="POST",
+        )
+        try:
+            urllib.request.urlopen(request, timeout=5)
+        except urllib.error.HTTPError as exc:
+            status_code = exc.code
+            payload = json.loads(exc.read().decode("utf-8"))
+        else:
+            raise AssertionError("expected idempotency key mismatch response")
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+    assert status_code == 400
+    assert payload["error"] == "desktop_provider_idempotency_key_mismatch"
 
 
 def test_headless_desktop_provider_works_through_runtime_adapter(monkeypatch) -> None:

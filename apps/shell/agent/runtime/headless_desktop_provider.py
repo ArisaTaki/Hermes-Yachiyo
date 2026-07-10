@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import argparse
+import copy
+import hashlib
 import json
 import os
 import sys
+import threading
+from collections import OrderedDict
 from collections.abc import Callable, Iterable, Mapping
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
@@ -62,6 +66,7 @@ class HeadlessDesktopProvider:
             "capabilities": [
                 "desktop_discovery",
                 "read_only_observation",
+                "idempotent_tool_requests",
                 "permission_diagnostics",
                 "no_foreground_mutation",
             ],
@@ -97,6 +102,7 @@ class HeadlessDesktopProvider:
             "capabilities": [
                 "desktop_discovery",
                 "read_only_observation",
+                "idempotent_tool_requests",
                 "permission_diagnostics",
                 "no_foreground_mutation",
             ],
@@ -293,7 +299,11 @@ class HeadlessDesktopProviderRequestHandler(BaseHTTPRequestHandler):
             return
         if not self._authorized():
             return
-        self._send_json(self._provider().status())
+        status = dict(self._provider().status())
+        status["authentication_configured"] = bool(
+            str(getattr(self.server, "token", "") or "").strip()
+        )
+        self._send_json(status)
 
     def do_POST(self) -> None:
         if self.path not in {"/tools/execute", "/execute"}:
@@ -308,24 +318,69 @@ class HeadlessDesktopProviderRequestHandler(BaseHTTPRequestHandler):
                 status=400,
             )
             return
+        request_id, request_id_error = self._provider_request_id(request_payload)
+        if request_id_error:
+            self._send_json(
+                {"ok": False, "error": request_id_error},
+                status=400,
+            )
+            return
         tool_name = str(request_payload.get("tool") or "").strip()
         tool_input = request_payload.get("input")
-        result = self._provider().execute(
-            tool_name,
-            tool_input if isinstance(tool_input, Mapping) else {},
-            approved=bool(request_payload.get("approved")),
-            route=(
-                request_payload.get("route")
-                if isinstance(request_payload.get("route"), Mapping)
-                else {}
-            ),
-            tool_request=(
-                request_payload.get("tool_request")
-                if isinstance(request_payload.get("tool_request"), Mapping)
-                else {}
-            ),
+        tool_request = (
+            dict(request_payload.get("tool_request"))
+            if isinstance(request_payload.get("tool_request"), Mapping)
+            else {}
         )
-        self._send_json({"ok": bool(result.get("ok")), "result": result})
+        if request_id:
+            tool_request.setdefault("request_id", request_id)
+
+        def execute() -> dict[str, Any]:
+            result = self._provider().execute(
+                tool_name,
+                tool_input if isinstance(tool_input, Mapping) else {},
+                approved=bool(request_payload.get("approved")),
+                route=(
+                    request_payload.get("route")
+                    if isinstance(request_payload.get("route"), Mapping)
+                    else {}
+                ),
+                tool_request=tool_request,
+            )
+            return {
+                "ok": bool(result.get("ok")),
+                "result": result,
+                **(
+                    {
+                        "provider_request_id": request_id,
+                        "provider_request_replayed": False,
+                    }
+                    if request_id
+                    else {}
+                ),
+            }
+
+        response_payload, replayed, replay_error = self._replay_cache().execute_once(
+            request_id,
+            request_payload,
+            execute,
+        )
+        if replay_error:
+            self._send_json(
+                {
+                    "ok": False,
+                    "error": replay_error,
+                    "provider_request_id": request_id,
+                },
+                status=409,
+            )
+            return
+        if replayed:
+            response_payload["provider_request_replayed"] = True
+            result = response_payload.get("result")
+            if isinstance(result, dict):
+                result["provider_request_replayed"] = True
+        self._send_json(response_payload)
 
     def log_message(self, format: str, *args: Any) -> None:
         if bool(getattr(self.server, "quiet", False)):
@@ -345,6 +400,22 @@ class HeadlessDesktopProviderRequestHandler(BaseHTTPRequestHandler):
 
     def _provider(self) -> HeadlessDesktopProvider:
         return getattr(self.server, "provider")
+
+    def _replay_cache(self) -> "ProviderRequestReplayCache":
+        return getattr(self.server, "replay_cache")
+
+    def _provider_request_id(
+        self,
+        request_payload: Mapping[str, Any],
+    ) -> tuple[str, str]:
+        header_id = str(self.headers.get("Idempotency-Key") or "").strip()
+        payload_id = str(request_payload.get("request_id") or "").strip()
+        if header_id and payload_id and header_id != payload_id:
+            return "", "desktop_provider_idempotency_key_mismatch"
+        request_id = header_id or payload_id
+        if len(request_id) > 256:
+            return "", "desktop_provider_request_id_too_long"
+        return request_id, ""
 
     def _read_json_payload(self) -> Any:
         try:
@@ -366,6 +437,68 @@ class HeadlessDesktopProviderRequestHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
+class ProviderRequestReplayCache:
+    """Executes each stable provider request id once per server process."""
+
+    def __init__(self, *, capacity: int = 512) -> None:
+        self._capacity = max(1, int(capacity))
+        self._entries: OrderedDict[str, dict[str, Any]] = OrderedDict()
+        self._condition = threading.Condition()
+
+    def execute_once(
+        self,
+        request_id: str,
+        request_payload: Mapping[str, Any],
+        execute: Callable[[], dict[str, Any]],
+    ) -> tuple[dict[str, Any], bool, str]:
+        clean_request_id = str(request_id or "").strip()
+        if not clean_request_id:
+            return execute(), False, ""
+        fingerprint = _provider_request_fingerprint(request_payload)
+        with self._condition:
+            while True:
+                entry = self._entries.get(clean_request_id)
+                if entry is None:
+                    self._entries[clean_request_id] = {
+                        "fingerprint": fingerprint,
+                        "complete": False,
+                    }
+                    break
+                if entry.get("fingerprint") != fingerprint:
+                    return {}, False, "desktop_provider_idempotency_key_reused"
+                if entry.get("complete"):
+                    self._entries.move_to_end(clean_request_id)
+                    return copy.deepcopy(entry["response"]), True, ""
+                self._condition.wait()
+        try:
+            response = execute()
+        except Exception:
+            with self._condition:
+                self._entries.pop(clean_request_id, None)
+                self._condition.notify_all()
+            raise
+        with self._condition:
+            if _provider_response_is_replayable(response):
+                self._entries[clean_request_id] = {
+                    "fingerprint": fingerprint,
+                    "complete": True,
+                    "response": copy.deepcopy(response),
+                }
+                self._entries.move_to_end(clean_request_id)
+                self._evict_completed_entries()
+            else:
+                self._entries.pop(clean_request_id, None)
+            self._condition.notify_all()
+        return response, False, ""
+
+    def _evict_completed_entries(self) -> None:
+        for request_id in list(self._entries):
+            if len(self._entries) <= self._capacity:
+                return
+            if self._entries[request_id].get("complete"):
+                self._entries.pop(request_id, None)
+
+
 def build_headless_desktop_provider_server(
     *,
     host: str = DEFAULT_HOST,
@@ -378,6 +511,7 @@ def build_headless_desktop_provider_server(
     server.provider = provider or HeadlessDesktopProvider()  # type: ignore[attr-defined]
     server.token = str(token or "").strip()  # type: ignore[attr-defined]
     server.quiet = bool(quiet)  # type: ignore[attr-defined]
+    server.replay_cache = ProviderRequestReplayCache()  # type: ignore[attr-defined]
     return server
 
 
@@ -476,6 +610,25 @@ def _join_url(base_url: str, path: str) -> str:
         return ""
     clean_path = "/" + str(path or "").lstrip("/")
     return f"{clean_base}{clean_path}"
+
+
+def _provider_request_fingerprint(request_payload: Mapping[str, Any]) -> str:
+    canonical = json.dumps(
+        dict(request_payload),
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def _provider_response_is_replayable(response: Mapping[str, Any]) -> bool:
+    result = response.get("result")
+    if not isinstance(result, Mapping):
+        return True
+    return str(result.get("error") or "").strip() not in {
+        "desktop_provider_tool_approval_required",
+    }
 
 
 def _selected_desktop_app_placeholder(value: str) -> bool:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import threading
+import urllib.request
 from typing import Any
 
 from apps.shell.agent.runtime.controlled_desktop_provider import (
@@ -92,6 +93,65 @@ def test_controlled_desktop_provider_executes_approved_safe_type(monkeypatch) ->
     )
     assert result["controlled_desktop_provider"]["keyboard_mouse_capture_supported"] is True
     assert "headless_desktop_provider" not in result
+
+
+def test_controlled_provider_idempotency_allows_approval_resume(monkeypatch) -> None:
+    calls: list[str] = []
+
+    def fake_safe_type(text: str) -> dict[str, Any]:
+        calls.append(text)
+        return {"ok": True, "action": "desktop.safe_type_text", "summary": "typed"}
+
+    monkeypatch.setattr(
+        "apps.shell.agent.runtime.controlled_desktop_provider.desktop.desktop_safe_type_text",
+        fake_safe_type,
+    )
+    server = build_controlled_desktop_provider_server(
+        host="127.0.0.1",
+        port=0,
+        provider=ControlledDesktopProvider(
+            supported_tools=["desktop.safe_type_text"],
+        ),
+        quiet=True,
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        url = f"http://127.0.0.1:{server.server_address[1]}/tools/execute"
+
+        def execute(approved: bool) -> dict[str, Any]:
+            request = urllib.request.Request(
+                url,
+                data=json.dumps(
+                    {
+                        "request_id": "approval-resume-1",
+                        "tool": "desktop.safe_type_text",
+                        "input": {"text": "hello"},
+                        "approved": approved,
+                    }
+                ).encode("utf-8"),
+                headers={
+                    "Content-Type": "application/json",
+                    "Idempotency-Key": "approval-resume-1",
+                },
+                method="POST",
+            )
+            with urllib.request.urlopen(request, timeout=5) as response:
+                return json.loads(response.read().decode("utf-8"))
+
+        pending = execute(False)
+        approved = execute(True)
+        replay = execute(True)
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+    assert pending["result"]["error"] == "desktop_provider_tool_approval_required"
+    assert approved["ok"] is True
+    assert approved["provider_request_replayed"] is False
+    assert replay["provider_request_replayed"] is True
+    assert calls == ["hello"]
 
 
 def test_controlled_desktop_provider_works_through_runtime_adapter(monkeypatch) -> None:

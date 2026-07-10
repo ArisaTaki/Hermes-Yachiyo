@@ -28,6 +28,7 @@ _CHECK_BLOCKERS = {
     "provider_available": "desktop_execution_provider_unavailable",
     "adapter_ready": "desktop_execution_provider_adapter_unavailable",
     "authentication_configured": "desktop_provider_authentication_required",
+    "idempotent_tool_requests_supported": "desktop_provider_idempotency_required",
     "desktop_session_isolated": "desktop_session_not_isolated",
     "foreground_takeover_not_required": "foreground_takeover_required",
     "desktop_backend_declared": "desktop_backend_kind_missing",
@@ -339,6 +340,11 @@ def virtual_desktop_provider_conformance_summary(
             if "authentication_configured" in contract
             else status_payload.get("authentication_configured")
         ),
+        "idempotent_tool_requests_supported": bool(
+            contract.get("idempotent_tool_requests_supported")
+            if "idempotent_tool_requests_supported" in contract
+            else _idempotent_tool_requests_supported(status_payload)
+        ),
         "desktop_backend_kind": _first_text(
             contract.get("desktop_backend_kind"),
             status_payload.get("desktop_backend_kind"),
@@ -378,6 +384,9 @@ def virtual_desktop_provider_contract_evidence(
         "provider_available": bool(status_payload.get("available")),
         "adapter_ready": bool(status_payload.get("adapter_ready")),
         "authentication_configured": _authentication_configured(status_payload),
+        "idempotent_tool_requests_supported": (
+            _idempotent_tool_requests_supported(status_payload)
+        ),
         "desktop_session_isolated": _desktop_session_isolated(status_payload),
         "foreground_takeover_not_required": (
             _optional_bool(status_payload.get("foreground_takeover_required")) is False
@@ -447,6 +456,9 @@ def virtual_desktop_provider_contract_evidence(
             status_payload.get("keyboard_mouse_capture_supported")
         ),
         "authentication_configured": _authentication_configured(status_payload),
+        "idempotent_tool_requests_supported": (
+            _idempotent_tool_requests_supported(status_payload)
+        ),
         "desktop_backend_kind": desktop_backend_kind,
         "desktop_backend_is_loopback": _optional_bool(
             status_payload.get("desktop_backend_is_loopback")
@@ -481,6 +493,17 @@ def _authentication_configured(status: Mapping[str, Any]) -> bool:
         or authentication.get("token")
         or authentication.get("token_env")
     )
+
+
+def _idempotent_tool_requests_supported(status: Mapping[str, Any]) -> bool:
+    explicit = _optional_bool(status.get("idempotent_tool_requests_supported"))
+    if explicit is not None:
+        return explicit
+    health = _mapping(status.get("health"))
+    capabilities = _string_list(status.get("capabilities")) or _string_list(
+        health.get("capabilities")
+    )
+    return "idempotent_tool_requests" in capabilities
 
 
 def _supported_tools(status: Mapping[str, Any]) -> set[str]:
@@ -552,6 +575,7 @@ def _manifest_release_status_payload(manifest: Mapping[str, Any]) -> dict[str, A
     payload: dict[str, Any] = {}
     for key in (
         "supported_tools",
+        "capabilities",
         "desktop_session_kind",
         "desktop_session_isolated",
         "foreground_takeover_required",

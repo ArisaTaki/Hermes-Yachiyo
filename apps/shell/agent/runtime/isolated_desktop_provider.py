@@ -79,6 +79,7 @@ class IsolatedDesktopProvider(ControlledDesktopProvider):
                 "sandbox_control",
                 "isolated_desktop",
                 "sandbox_desktop_session",
+                "idempotent_tool_requests",
                 "permission_diagnostics",
             ],
             "blocking_conditions": [],
