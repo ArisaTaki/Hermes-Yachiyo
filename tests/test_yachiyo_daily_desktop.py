@@ -7061,7 +7061,7 @@ def test_daily_desktop_entrypoint_routes_colloquial_volume_questions_to_desktop_
     assert daily_desktop_entrypoint_requests("漂亮一点") == []
 
 
-def test_daily_desktop_structured_recovery_metadata_projects_exact_low_risk_request() -> None:
+def test_daily_desktop_structured_recovery_keeps_raw_and_execution_policy_boundaries() -> None:
     metadata = {
         "desktop_permission_recovery": True,
         "recovery_tool": "system.settings_open",
@@ -7080,7 +7080,6 @@ def test_daily_desktop_structured_recovery_metadata_projects_exact_low_risk_requ
         allowed_tools=["system.settings_open"],
     )
 
-    assert requests == [direct_request]
     assert requests[0] == {
         "protocol": "json_fallback",
         "tool": "system.settings_open",
@@ -7088,6 +7087,16 @@ def test_daily_desktop_structured_recovery_metadata_projects_exact_low_risk_requ
         "source": "daily_desktop_metadata",
         "planning_reason": "structured_recovery_metadata",
     }
+    assert direct_request is not None
+    assert {
+        key: value
+        for key, value in direct_request.items()
+        if key != "desktop_execution_policy"
+    } == requests[0]
+    assert direct_request["desktop_execution_policy"]["mode"] == "preview_input"
+    assert direct_request["desktop_execution_policy"][
+        "require_sandbox_for_keyboard_mouse"
+    ] is True
     assert daily_desktop_user_metadata(requests) == {
         "daily_desktop_intent": True,
         "daily_desktop_source": "daily_desktop_metadata",

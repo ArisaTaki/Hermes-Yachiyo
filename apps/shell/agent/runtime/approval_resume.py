@@ -109,11 +109,19 @@ class ApprovalResumeCoordinator:
                 context,
                 tool_timeline_start=task_progress_start,
             )
-            self._record_replan_request_after_resume_failure(context, tool_result)
+            self._record_replan_request_after_resume_failure(
+                context,
+                tool_result,
+                tool_timeline_start=task_progress_start,
+            )
             raise AgentRuntimeError(failure.detail)
         if _approval_resume_tool_result_blocks_plan_continuation(tool_result):
             context.remaining_requests = []
-            self._record_replan_request_after_resume_result(context, tool_result)
+            self._record_replan_request_after_resume_result(
+                context,
+                tool_result,
+                tool_timeline_start=task_progress_start,
+            )
         else:
             context.remaining_requests = _approval_resume_remaining_requests_after_tool(
                 context,
@@ -158,6 +166,8 @@ class ApprovalResumeCoordinator:
         self,
         context: ToolApprovalResumeContext,
         tool_result: Any,
+        *,
+        tool_timeline_start: int,
     ) -> None:
         append_replan_request_event_for_tool_result(
             tool_request={**context.tool_request, "tool": context.tool_name},
@@ -169,6 +179,7 @@ class ApprovalResumeCoordinator:
             timeline=context.timeline,
             timeline_factory=self._timeline,
             append_run_event=self._append_run_event,
+            runtime_tool_timeline_start=tool_timeline_start,
             run_id=context.run_id,
         )
 
@@ -176,6 +187,8 @@ class ApprovalResumeCoordinator:
         self,
         context: ToolApprovalResumeContext,
         tool_result: Any,
+        *,
+        tool_timeline_start: int,
     ) -> None:
         result = tool_result if isinstance(tool_result, Mapping) else {}
         append_replan_request_event_for_tool_result(
@@ -188,6 +201,7 @@ class ApprovalResumeCoordinator:
             timeline=context.timeline,
             timeline_factory=self._timeline,
             append_run_event=self._append_run_event,
+            runtime_tool_timeline_start=tool_timeline_start,
             run_id=context.run_id,
         )
 

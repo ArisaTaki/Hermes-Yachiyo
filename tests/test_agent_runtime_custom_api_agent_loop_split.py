@@ -5619,6 +5619,316 @@ def test_auto_replan_focus_recovery_reopens_when_focus_tool_unavailable() -> Non
     assert alias_requests[1]["verification_target"] == {"app_name": "PixelForge"}
 
 
+def test_auto_replan_focus_recovery_skips_completed_reopen_before_verification() -> None:
+    payloads = [
+        {
+            "request_id": "replan-open-focus",
+            "trigger": "verification_failed",
+            "source_step_id": "verify-desktop-result",
+            "source_tool_name": "desktop.active_window",
+            "target_capability_id": "desktop.app_discovery",
+            "failure_detail": "foreground_focus_unverified",
+            "metadata": {
+                "expected_app_name": "PixelForge",
+                "blocking_conditions": ["foreground_focus_unverified"],
+            },
+        }
+    ]
+    timeline = [
+        _timeline(
+            "agent.tool.call",
+            "app.open",
+            input_preview={"app_name": "PixelForge"},
+            result={
+                "ok": True,
+                "action": "app.open",
+                "summary": "Opened PixelForge",
+                "data": {"app_name": "PixelForge"},
+            },
+        ),
+        _timeline(
+            "agent.tool.call",
+            "desktop.active_window",
+            input_preview={},
+            result={
+                "ok": True,
+                "action": "desktop.active_window",
+                "data": {"app_name": "Finder"},
+            },
+        ),
+    ]
+
+    requests = custom_api_agent_module._auto_replan_recovery_requests_with_task_context(
+        payloads,
+        ["app.open", "desktop.active_window"],
+        timeline,
+    )
+
+    assert [request["tool"] for request in requests] == ["desktop.active_window"]
+    assert requests[0]["verification_target"] == {"app_name": "PixelForge"}
+    assert requests[0]["replan_request_id"] == "replan-open-focus"
+
+    next_batch_requests = (
+        custom_api_agent_module._auto_replan_recovery_requests_with_task_context(
+            payloads,
+            ["app.open", "desktop.active_window"],
+            timeline,
+            tool_timeline_start=len(timeline),
+        )
+    )
+    assert [request["tool"] for request in next_batch_requests] == [
+        "app.open",
+        "desktop.active_window",
+    ]
+
+
+def test_auto_replan_completed_reopen_promotes_deferred_observation() -> None:
+    payloads = [
+        {
+            "request_id": "replan-open-observe",
+            "trigger": "tool_failure",
+            "source_step_id": "recover-desktop-action",
+            "source_tool_name": "desktop.verify",
+            "metadata": {
+                "recovery_actions": [
+                    {
+                        "tool": "app.open",
+                        "input": {"app_name": "PixelForge"},
+                        "risk_level": "low",
+                        "deferred_continuation": [
+                            {"tool": "desktop.active_window", "input": {}}
+                        ],
+                    }
+                ],
+            },
+        }
+    ]
+    timeline = [
+        _timeline(
+            "agent.tool.call",
+            "app.open",
+            input_preview={"app_name": "PixelForge"},
+            result={"ok": True, "status": "ok"},
+        )
+    ]
+
+    requests = custom_api_agent_module._auto_replan_recovery_requests_with_task_context(
+        payloads,
+        ["app.open", "desktop.active_window"],
+        timeline,
+    )
+
+    assert [request["tool"] for request in requests] == ["desktop.active_window"]
+    assert requests[0]["source"] == "runtime_planner"
+    assert requests[0]["planning_reason"] == "planner_replan_deferred_continuation"
+    assert requests[0]["replan_request_id"] == "replan-open-observe"
+
+
+@pytest.mark.parametrize("open_tool", ["app.open", "desktop.open_app"])
+@pytest.mark.parametrize(
+    "deferred_fields",
+    [
+        {
+            "deferred_continuation": [
+                {"tool": "desktop.active_window", "input": {}}
+            ]
+        },
+        {
+            "deferred_tool": "desktop.active_window",
+            "deferred_input": {},
+        },
+    ],
+)
+def test_pending_replan_resume_keeps_completed_open_and_runs_deferred_observation(
+    open_tool: str,
+    deferred_fields: dict[str, Any],
+) -> None:
+    executed_requests: list[dict[str, Any]] = []
+    timeline: list[dict[str, Any]] = []
+
+    def run_tool_requests(
+        requests: list[dict[str, Any]],
+        *_args: Any,
+        **_kwargs: Any,
+    ) -> None:
+        executed_requests.extend(dict(request) for request in requests)
+        for request in requests:
+            timeline.append(
+                _timeline(
+                    "agent.tool.call",
+                    request["tool"],
+                    input_preview=dict(request.get("input") or {}),
+                    result={"ok": True, "status": "ok"},
+                )
+            )
+
+    replan_payload = {
+        "request_id": "replan-resume-open-observe",
+        "trigger": "tool_failure",
+        "source": "runtime_tool_request_runner",
+        "source_step_id": "recover-desktop-action",
+        "source_tool_name": "desktop.verify",
+        "runtime_tool_timeline_start": 0,
+        "metadata": {
+            "recovery_actions": [
+                {
+                    "tool": open_tool,
+                    "input": {"app_name": "PixelForge"},
+                    "risk_level": "low",
+                    "metadata": {
+                        "runtime_replan_auto_start_eligible": True,
+                        "runtime_replan_auto_start_blockers": [],
+                    },
+                    **deferred_fields,
+                }
+            ]
+        },
+    }
+    timeline.extend(
+        [
+            _timeline(
+                "agent.tool.call",
+                open_tool,
+                input_preview={"app_name": "PixelForge"},
+                result={"ok": True, "status": "ok"},
+            ),
+            _timeline(
+                "agent.replan.requested",
+                "tool_failure",
+                source="runtime_tool_request_runner",
+                payload=replan_payload,
+            ),
+        ]
+    )
+    loop = _private_runtime_loop(run_tool_requests=run_tool_requests)
+
+    loop._run_pending_runtime_replan_recovery(
+        [open_tool, "desktop.active_window"],
+        RecordingDesktopBroker([]),
+        [{"role": "user", "content": "Resume the pending desktop task"}],
+        timeline,
+        [],
+        agent={"name": "Yachiyo"},
+        run_id="",
+        budget=FakeBudget(),
+        next_iteration=1,
+    )
+
+    assert [request["tool"] for request in executed_requests] == [
+        "desktop.active_window"
+    ]
+    assert executed_requests[0]["replan_request_id"] == (
+        "replan-resume-open-observe"
+    )
+
+
+@pytest.mark.parametrize("legacy_start", [None, 0])
+def test_pending_replan_resume_scopes_idempotency_per_payload(
+    legacy_start: int | None,
+) -> None:
+    executed_requests: list[dict[str, Any]] = []
+    timeline: list[dict[str, Any]] = []
+
+    def run_tool_requests(
+        requests: list[dict[str, Any]],
+        *_args: Any,
+        **_kwargs: Any,
+    ) -> None:
+        executed_requests.extend(dict(request) for request in requests)
+        for request in requests:
+            timeline.append(
+                _timeline(
+                    "agent.tool.call",
+                    request["tool"],
+                    input_preview=dict(request.get("input") or {}),
+                    result={"ok": True, "status": "ok"},
+                )
+            )
+
+    legacy_payload = {
+        "request_id": "replan-legacy-open-observe",
+        "trigger": "tool_failure",
+        "source": "runtime_tool_request_runner",
+        "source_step_id": "legacy-recovery",
+        "source_tool_name": "desktop.verify",
+        "metadata": {
+            "recovery_actions": [
+                {
+                    "tool": "app.open",
+                    "input": {"app_name": "PixelForge"},
+                    "risk_level": "low",
+                    "metadata": {"runtime_replan_auto_start_eligible": True},
+                    "deferred_tool": "desktop.active_window",
+                    "deferred_input": {},
+                }
+            ]
+        },
+    }
+    if legacy_start is not None:
+        legacy_payload["runtime_tool_timeline_start"] = legacy_start
+    current_payload = {
+        "request_id": "replan-current-reopen",
+        "trigger": "tool_failure",
+        "source": "runtime_tool_request_runner",
+        "source_step_id": "current-recovery",
+        "source_tool_name": "desktop.verify",
+        "runtime_tool_timeline_start": 3,
+        "metadata": {
+            "recovery_actions": [
+                {
+                    "tool": "app.open",
+                    "input": {"app_name": "PixelForge"},
+                    "risk_level": "low",
+                    "continue_to_model": False,
+                    "metadata": {"runtime_replan_auto_start_eligible": True},
+                }
+            ]
+        },
+    }
+    timeline.extend(
+        [
+            _timeline(
+                "agent.tool.call",
+                "app.open",
+                input_preview={"app_name": "PixelForge"},
+                result={"ok": True, "status": "ok"},
+            ),
+            _timeline(
+                "agent.replan.requested",
+                "legacy failure",
+                source="runtime_tool_request_runner",
+                payload=legacy_payload,
+            ),
+            _timeline("agent.model.followup", "batch boundary"),
+            _timeline(
+                "agent.replan.requested",
+                "current failure",
+                source="runtime_tool_request_runner",
+                payload=current_payload,
+            ),
+        ]
+    )
+    loop = _private_runtime_loop(run_tool_requests=run_tool_requests)
+
+    loop._run_pending_runtime_replan_recovery(
+        ["app.open", "desktop.active_window"],
+        RecordingDesktopBroker([]),
+        [{"role": "user", "content": "Resume pending desktop work"}],
+        timeline,
+        [],
+        agent={"name": "Yachiyo"},
+        run_id="",
+        budget=FakeBudget(),
+        next_iteration=1,
+    )
+
+    assert [request["tool"] for request in executed_requests] == [
+        "desktop.active_window",
+        "app.open",
+    ]
+    assert executed_requests[-1]["replan_request_id"] == "replan-current-reopen"
+
+
 def test_auto_replan_verification_recovery_inspects_target_app_when_available() -> None:
     recovery_requests = custom_api_agent_module._auto_replan_verification_recovery_requests(
         [

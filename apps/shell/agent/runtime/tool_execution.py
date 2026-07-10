@@ -3242,6 +3242,7 @@ class RuntimeToolRequestRunner:
         run_id: str = "",
         budget: Any = None,
     ) -> None:
+        tool_timeline_start = len(timeline)
         budget = budget or self._run_budget(run_id, timeline)
         user_goal = self._user_goal_from_messages(messages)
         foreground_readiness_blocker: dict[str, Any] | None = None
@@ -3363,6 +3364,7 @@ class RuntimeToolRequestRunner:
                     tool_event_type="agent.tool.skipped",
                     tool_result=runtime_skip,
                     timeline=timeline,
+                    tool_timeline_start=tool_timeline_start,
                     run_id=run_id,
                 )
                 auto_recovery_enqueued = self._enqueue_runtime_replan_recovery_requests(
@@ -3373,6 +3375,7 @@ class RuntimeToolRequestRunner:
                     allowed_tools=allowed_tools,
                     remaining_requests=tool_requests[index + 1 :],
                     timeline=timeline,
+                    tool_timeline_start=tool_timeline_start,
                     run_id=run_id,
                 )
                 self._tool_loop_projection.append_tool_result_message(
@@ -3427,6 +3430,7 @@ class RuntimeToolRequestRunner:
                     tool_event_type="agent.tool.skipped",
                     tool_result=tool_result,
                     timeline=timeline,
+                    tool_timeline_start=tool_timeline_start,
                     run_id=run_id,
                 )
                 auto_recovery_enqueued = self._enqueue_runtime_replan_recovery_requests(
@@ -3437,6 +3441,7 @@ class RuntimeToolRequestRunner:
                     allowed_tools=allowed_tools,
                     remaining_requests=tool_requests[index + 1 :],
                     timeline=timeline,
+                    tool_timeline_start=tool_timeline_start,
                     run_id=run_id,
                 )
                 self._tool_loop_projection.append_tool_result_message(
@@ -3473,6 +3478,7 @@ class RuntimeToolRequestRunner:
                     tool_event_type="agent.tool.call",
                     tool_result=tool_result,
                     timeline=timeline,
+                    tool_timeline_start=tool_timeline_start,
                     run_id=run_id,
                 )
                 pending_approval = self._pending_approval_builder.build(
@@ -3514,6 +3520,7 @@ class RuntimeToolRequestRunner:
                     tool_event_type="agent.tool.failed",
                     tool_result=tool_result,
                     timeline=timeline,
+                    tool_timeline_start=tool_timeline_start,
                     run_id=run_id,
                 )
                 raise AgentRuntimeError(fatal_failure)
@@ -3528,6 +3535,7 @@ class RuntimeToolRequestRunner:
                 tool_event_type="agent.tool.call",
                 tool_result=tool_result,
                 timeline=timeline,
+                tool_timeline_start=tool_timeline_start,
                 run_id=run_id,
             )
             previous_readiness_blocker = foreground_readiness_blocker
@@ -3566,6 +3574,7 @@ class RuntimeToolRequestRunner:
                 allowed_tools=allowed_tools,
                 remaining_requests=tool_requests[index + 1 :],
                 timeline=timeline,
+                tool_timeline_start=tool_timeline_start,
                 run_id=run_id,
             )
             if (
@@ -3670,6 +3679,7 @@ class RuntimeToolRequestRunner:
         tool_event_type: str,
         tool_result: dict[str, Any],
         timeline: list[dict[str, Any]],
+        tool_timeline_start: int,
         run_id: str,
     ) -> dict[str, Any]:
         traced_request = {**tool_request, "tool": tool_name}
@@ -3692,6 +3702,7 @@ class RuntimeToolRequestRunner:
             timeline=timeline,
             timeline_factory=self._timeline,
             append_run_event=self._append_run_event,
+            runtime_tool_timeline_start=tool_timeline_start,
             run_id=run_id,
         )
 
@@ -3705,12 +3716,15 @@ class RuntimeToolRequestRunner:
         allowed_tools: list[str],
         remaining_requests: list[dict[str, Any]],
         timeline: list[dict[str, Any]],
+        tool_timeline_start: int,
         run_id: str,
     ) -> bool:
         recovery_requests = _runtime_replan_auto_recovery_action_requests(
             replan_payload,
             allowed_tools=allowed_tools,
             remaining_requests=remaining_requests,
+            timeline=timeline,
+            tool_timeline_start=tool_timeline_start,
         )
         if not recovery_requests:
             return False
@@ -3820,6 +3834,8 @@ def _runtime_replan_auto_recovery_action_requests(
     *,
     allowed_tools: list[str],
     remaining_requests: list[dict[str, Any]],
+    timeline: list[dict[str, Any]],
+    tool_timeline_start: int,
 ) -> list[dict[str, Any]]:
     if not isinstance(replan_payload, Mapping) or not replan_payload:
         return []
@@ -3869,12 +3885,61 @@ def _runtime_replan_auto_recovery_action_requests(
         )
         if not request:
             continue
+        if _runtime_replan_request_already_succeeded(
+            request,
+            timeline,
+            tool_timeline_start=tool_timeline_start,
+        ):
+            continuations = _runtime_replan_deferred_continuation_requests(
+                str(request.get("tool") or "").strip(),
+                request,
+                {"ok": True},
+                allowed_tools=list(allowed),
+                remaining_requests=[*remaining_requests, *requests],
+            )
+            for continuation in continuations:
+                signature = _deferred_request_signature(continuation)
+                if signature in existing_signatures:
+                    continue
+                existing_signatures.add(signature)
+                requests.append(continuation)
+            continue
         signature = _deferred_request_signature(request)
         if signature in existing_signatures:
             continue
         existing_signatures.add(signature)
         requests.append(request)
     return _dedupe_runtime_replan_recovery_requests(requests)
+
+
+def _runtime_replan_request_already_succeeded(
+    request: Mapping[str, Any],
+    timeline: list[dict[str, Any]],
+    *,
+    tool_timeline_start: int,
+) -> bool:
+    tool_name = str(request.get("tool") or "").strip()
+    if tool_name not in _RUNTIME_REPLAN_NO_REPEAT_AFTER_SUCCESS_TOOLS:
+        return False
+    request_input = (
+        request.get("input") if isinstance(request.get("input"), Mapping) else {}
+    )
+    for event in timeline[max(0, int(tool_timeline_start or 0)) :]:
+        if str(event.get("event") or "").strip() != "agent.tool.call":
+            continue
+        if str(event.get("detail") or "").strip() != tool_name:
+            continue
+        result = event.get("result") if isinstance(event.get("result"), Mapping) else {}
+        if result.get("ok") is not True or result.get("approval_required"):
+            continue
+        event_input = (
+            event.get("input_preview")
+            if isinstance(event.get("input_preview"), Mapping)
+            else {}
+        )
+        if all(event_input.get(key) == value for key, value in request_input.items()):
+            return True
+    return False
 
 
 def _runtime_replan_payload_reports_recovery_failure(
@@ -4593,6 +4658,7 @@ def append_replan_request_event_for_tool_result(
     timeline: list[dict[str, Any]],
     timeline_factory: Callable[..., dict[str, Any]],
     append_run_event: Callable[[str, str, dict[str, Any]], Any] | None = None,
+    runtime_tool_timeline_start: int | None = None,
     run_id: str = "",
 ) -> dict[str, Any]:
     payload = _runtime_replan_request_payload_for_tool_result(
@@ -4604,6 +4670,11 @@ def append_replan_request_event_for_tool_result(
         return {}
     event_type = _runtime_replan_event_type(payload)
     event_payload = _runtime_replan_event_payload(payload, event_type)
+    if runtime_tool_timeline_start is not None:
+        event_payload["runtime_tool_timeline_start"] = max(
+            0,
+            int(runtime_tool_timeline_start or 0),
+        )
     detail = (
         str(payload.get("reason") or "").strip()
         or str(payload.get("failure_detail") or "").strip()
@@ -5676,6 +5747,11 @@ _RUNTIME_REPLAN_AUTO_SAFE_TOOLS = {
     "fs.read_file",
     "screen.capture",
     "workspace.read",
+}
+
+_RUNTIME_REPLAN_NO_REPEAT_AFTER_SUCCESS_TOOLS = {
+    "app.open",
+    "desktop.open_app",
 }
 
 

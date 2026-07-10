@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 
 from apps.shell import agent_runtime
+from apps.shell.agent.runtime import tool_execution as tool_execution_module
 from apps.shell.agent.runtime.desktop_execution_providers import (
     DesktopExecutionProviderRegistry,
     LOCAL_DESKTOP_PROVIDER_ID,
@@ -1719,6 +1720,224 @@ def test_runtime_tool_request_runner_auto_runs_safe_replan_recovery_action() -> 
         if event_type == "agent.deferred_continuation.enqueued"
     )
     assert run_enqueued["replan_request_id"] == replan_event["payload"]["request_id"]
+
+
+@pytest.mark.parametrize("open_tool", ["app.open", "desktop.open_app"])
+def test_runtime_tool_request_runner_does_not_repeat_successful_open_on_replan(
+    open_tool: str,
+) -> None:
+    seen_requests: list[dict[str, Any]] = []
+    timeline: list[dict[str, Any]] = [
+        _timeline(
+            "agent.tool.call",
+            open_tool,
+            input_preview={"app_name": "EarlierApp"},
+            result={"ok": True, "status": "ok"},
+        )
+    ]
+
+    def call_agent_tool(
+        tool_request: dict[str, Any],
+        *_args: Any,
+        **_kwargs: Any,
+    ) -> dict[str, Any]:
+        seen_requests.append(dict(tool_request))
+        if tool_request["tool"] == "desktop.verify":
+            result = {
+                "ok": False,
+                "verification_failed": True,
+                "error": "foreground_focus_unverified",
+                "recovery_actions": [
+                    {
+                        "label": "Open target app",
+                        "tool": open_tool,
+                        "input": {"app_name": "PixelForge"},
+                        "risk_level": "low",
+                        "permission_target": "app_launch",
+                    }
+                ],
+            }
+        else:
+            result = {"ok": True, "status": "ok"}
+        timeline.append(
+            _timeline(
+                "agent.tool.call",
+                tool_request["tool"],
+                input_preview=dict(tool_request.get("input") or {}),
+                result=result,
+            )
+        )
+        return result
+
+    runner = _runner(call_agent_tool=call_agent_tool, run_events=[])
+
+    runner.run(
+        [
+            {
+                "tool": open_tool,
+                "input": {"app_name": "PixelForge"},
+                "source": "runtime_planner",
+            },
+            {
+                "tool": "desktop.verify",
+                "input": {"app_name": "PixelForge"},
+                "source": "runtime_planner",
+                "replan_triggers": ["verification_failed"],
+            },
+        ],
+        [open_tool, "desktop.verify"],
+        FakeBroker({"ok": True}),
+        [{"role": "user", "content": "Open PixelForge and verify it"}],
+        timeline,
+        [],
+        next_iteration=1,
+        run_id="run-idempotent-open-recovery",
+        budget=FakeBudget(),
+    )
+
+    assert [request["tool"] for request in seen_requests] == [
+        open_tool,
+        "desktop.verify",
+    ]
+    assert not [
+        event
+        for event in timeline
+        if event["event"] == "agent.deferred_continuation.enqueued"
+        and open_tool in event["deferred_tools"]
+    ]
+    replan_event = next(
+        event for event in timeline if event["event"] == "agent.replan.requested"
+    )
+    assert replan_event["payload"]["runtime_tool_timeline_start"] == 1
+
+
+def test_runtime_replan_idempotency_keeps_focus_retryable() -> None:
+    request = {
+        "tool": "app.focus",
+        "input": {"app_name": "PixelForge"},
+    }
+    timeline = [
+        _timeline(
+            "agent.tool.call",
+            "app.focus",
+            input_preview={"app_name": "PixelForge"},
+            result={"ok": True, "status": "ok"},
+        )
+    ]
+
+    assert not tool_execution_module._runtime_replan_request_already_succeeded(
+        request,
+        timeline,
+        tool_timeline_start=0,
+    )
+
+
+def test_runtime_replan_idempotency_ignores_success_from_prior_tool_batch() -> None:
+    request = {
+        "tool": "app.open",
+        "input": {"app_name": "PixelForge"},
+    }
+    timeline = [
+        _timeline(
+            "agent.tool.call",
+            "app.open",
+            input_preview={"app_name": "PixelForge"},
+            result={"ok": True, "status": "ok"},
+        )
+    ]
+
+    assert not tool_execution_module._runtime_replan_request_already_succeeded(
+        request,
+        timeline,
+        tool_timeline_start=len(timeline),
+    )
+
+
+@pytest.mark.parametrize(
+    "deferred_fields",
+    [
+        {
+            "deferred_continuation": [
+                {"tool": "desktop.active_window", "input": {}}
+            ]
+        },
+        {
+            "deferred_tool": "desktop.active_window",
+            "deferred_input": {},
+        },
+    ],
+)
+def test_runtime_replan_skips_completed_open_but_runs_deferred_observation(
+    deferred_fields: dict[str, Any],
+) -> None:
+    seen_requests: list[dict[str, Any]] = []
+    timeline: list[dict[str, Any]] = []
+
+    def call_agent_tool(
+        tool_request: dict[str, Any],
+        *_args: Any,
+        **_kwargs: Any,
+    ) -> dict[str, Any]:
+        seen_requests.append(dict(tool_request))
+        if tool_request["tool"] == "desktop.verify":
+            result = {
+                "ok": False,
+                "verification_failed": True,
+                "error": "foreground_focus_unverified",
+                "recovery_actions": [
+                    {
+                        "label": "Open and observe target app",
+                        "tool": "app.open",
+                        "input": {"app_name": "PixelForge"},
+                        "risk_level": "low",
+                        "permission_target": "app_launch",
+                        **deferred_fields,
+                    }
+                ],
+            }
+        else:
+            result = {"ok": True, "status": "ok"}
+        timeline.append(
+            _timeline(
+                "agent.tool.call",
+                tool_request["tool"],
+                input_preview=dict(tool_request.get("input") or {}),
+                result=result,
+            )
+        )
+        return result
+
+    runner = _runner(call_agent_tool=call_agent_tool, run_events=[])
+    runner.run(
+        [
+            {
+                "tool": "app.open",
+                "input": {"app_name": "PixelForge"},
+                "source": "runtime_planner",
+            },
+            {
+                "tool": "desktop.verify",
+                "input": {"app_name": "PixelForge"},
+                "source": "runtime_planner",
+                "replan_triggers": ["verification_failed"],
+            },
+        ],
+        ["app.open", "desktop.verify", "desktop.active_window"],
+        FakeBroker({"ok": True}),
+        [{"role": "user", "content": "Open PixelForge and verify it"}],
+        timeline,
+        [],
+        next_iteration=1,
+        run_id="run-idempotent-open-with-observation",
+        budget=FakeBudget(),
+    )
+
+    assert [request["tool"] for request in seen_requests] == [
+        "app.open",
+        "desktop.verify",
+        "desktop.active_window",
+    ]
+    assert seen_requests[-1]["source"] == "runtime_replan_recovery"
 
 
 def test_runtime_tool_request_runner_runs_safe_replan_deferred_continuation() -> None:

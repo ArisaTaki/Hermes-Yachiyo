@@ -112,6 +112,11 @@ _RUNTIME_REPLAN_ACTION_AUTO_SAFE_TOOLS = {
     "workspace.read",
 }
 
+_RUNTIME_REPLAN_NO_REPEAT_AFTER_SUCCESS_TOOLS = {
+    "app.open",
+    "desktop.open_app",
+}
+
 _DAILY_DESKTOP_DISCOVERY_TOOLS = {
     "desktop.list_apps",
     "desktop.running_apps",
@@ -1033,6 +1038,7 @@ class RuntimeCustomApiAgentLoop:
                             replan_payloads,
                             allowed_tools,
                             timeline,
+                            tool_timeline_start=tool_timeline_start,
                         )
                     )
                     if auto_replan_recovery_requests:
@@ -3553,7 +3559,7 @@ class RuntimeCustomApiAgentLoop:
         if not replan_payloads:
             return ""
         allowed_tool_list = list(allowed_tools)
-        recovery_requests = _auto_replan_recovery_requests_with_task_context(
+        recovery_requests = _pending_auto_replan_recovery_requests_with_task_context(
             replan_payloads,
             allowed_tool_list,
             timeline,
@@ -8736,6 +8742,32 @@ def _pending_runtime_replan_payloads(
             continue
         payloads.append(payload)
     return payloads
+
+
+def _pending_auto_replan_recovery_requests_with_task_context(
+    replan_payloads: Iterable[Mapping[str, Any]],
+    allowed_tools: Iterable[str],
+    timeline: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    allowed_tool_list = list(allowed_tools)
+    requests: list[dict[str, Any]] = []
+    for payload in replan_payloads:
+        if not isinstance(payload, Mapping):
+            continue
+        raw_start = payload.get("runtime_tool_timeline_start")
+        tool_timeline_start = int(raw_start) if isinstance(raw_start, int) else 0
+        requests.extend(
+            _auto_replan_recovery_requests_with_task_context(
+                [dict(payload)],
+                allowed_tool_list,
+                timeline,
+                tool_timeline_start=min(
+                    len(timeline),
+                    max(0, tool_timeline_start),
+                ),
+            )
+        )
+    return requests
 
 
 def _handled_runtime_replan_request_identities(
@@ -17879,13 +17911,83 @@ def _auto_replan_recovery_requests_with_task_context(
     replan_payloads: list[dict[str, Any]],
     allowed_tools: Iterable[str],
     timeline: list[dict[str, Any]],
+    *,
+    tool_timeline_start: int = 0,
 ) -> list[dict[str, Any]]:
-    requests = _auto_replan_recovery_requests(replan_payloads, allowed_tools)
+    allowed_tool_list = list(allowed_tools)
+    requests = _auto_replan_recovery_requests(replan_payloads, allowed_tool_list)
+    requests = _drop_completed_nonrepeat_replan_recovery_prefix(
+        requests,
+        allowed_tool_list,
+        timeline,
+        tool_timeline_start=tool_timeline_start,
+    )
     return _replan_recovery_requests_with_task_context(
         requests,
         replan_payloads,
         timeline,
     )
+
+
+def _drop_completed_nonrepeat_replan_recovery_prefix(
+    requests: list[dict[str, Any]],
+    allowed_tools: Iterable[str],
+    timeline: list[dict[str, Any]],
+    *,
+    tool_timeline_start: int,
+) -> list[dict[str, Any]]:
+    remaining = list(requests)
+    while (
+        remaining
+        and str(remaining[0].get("tool") or "").strip()
+        in _RUNTIME_REPLAN_NO_REPEAT_AFTER_SUCCESS_TOOLS
+        and _runtime_replan_source_request_completed(
+            remaining[0],
+            timeline,
+            tool_timeline_start=tool_timeline_start,
+        )
+    ):
+        completed_request = remaining[0]
+        deferred_requests = _completed_nonrepeat_replan_deferred_requests(
+            completed_request,
+            allowed_tools,
+        )
+        remaining = [*deferred_requests, *remaining[1:]]
+    return remaining
+
+
+def _completed_nonrepeat_replan_deferred_requests(
+    source_request: Mapping[str, Any],
+    allowed_tools: Iterable[str],
+) -> list[dict[str, Any]]:
+    allowed = {
+        str(tool or "").strip()
+        for tool in allowed_tools
+        if str(tool or "").strip()
+    }
+    requests: list[dict[str, Any]] = []
+    for item in materialized_deferred_items(source_request):
+        request = safe_deferred_continuation_request(
+            item,
+            allowed,
+            auto_safe_tools=_RUNTIME_REPLAN_ACTION_AUTO_SAFE_TOOLS,
+        )
+        if not request:
+            continue
+        for key, value in _runtime_replan_deferred_inherited_metadata(
+            source_request
+        ).items():
+            request.setdefault(key, value)
+        request.setdefault(
+            "source",
+            str(source_request.get("source") or "runtime_planner").strip(),
+        )
+        request.setdefault(
+            "planning_reason",
+            "planner_replan_deferred_continuation",
+        )
+        requests.append(request)
+    return _dedupe_replan_recovery_requests(requests)
 
 
 def _replan_recovery_requests_with_task_context(
