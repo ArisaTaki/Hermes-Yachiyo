@@ -2893,7 +2893,8 @@ def _clean_management_app_name_hint(value: str) -> str:
 def _is_foreground_window_close_request(value: str, lowered: str) -> bool:
     return bool(
         re.search(
-            r"(?:关闭|关掉|关上|关(?:一下|下|了)?)\s*(?:当前|现在|前台|这个|该)?\s*(?:窗口|window)",
+            r"(?:关闭(?:一下|下)?|关掉|关上|关(?:一下|下|了)?)\s*"
+            r"(?:当前|现在|前台|这个|该)?\s*(?:窗口|window)",
             value,
             flags=re.IGNORECASE,
         )

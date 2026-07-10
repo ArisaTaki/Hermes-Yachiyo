@@ -123,6 +123,28 @@ class TaskIntentRouter:
     ) -> list[TaskIntentSnapshot]:
         text = _clean_prompt(prompt)
         metadata = metadata or {}
+        invalid_palette_reason = _invalid_command_palette_request_reason(text)
+        if invalid_palette_reason:
+            return [
+                TaskIntentSnapshot(
+                    intent_id=_stable_id("intent", "desktop_operation", text),
+                    kind="desktop_operation",
+                    title="Desktop Operation",
+                    user_goal=text,
+                    confidence=0.95,
+                    description=(
+                        "Command palette execution requires a non-empty command and "
+                        "uses confirmation rather than message sending."
+                    ),
+                    inputs={"invalid_command_palette_request": invalid_palette_reason},
+                    missing_inputs=(
+                        ["command_palette_command"]
+                        if invalid_palette_reason == "missing_command"
+                        else []
+                    ),
+                    risk_level="medium",
+                )
+            ]
         candidates = [
             self._data_analysis_intent(text, metadata),
             self._media_playback_intent(text, metadata),
@@ -1594,11 +1616,19 @@ class TaskIntentRouter:
             _looks_like_app_search_field_input(text) or _app_first_type_scope_hint(text)
         ):
             return _empty_intent("web_research", text)
-        dynamic_source = source if source in {"clipboard", "selection"} else ""
-        web_search = _web_search_hint(text, dynamic_source)
         app_scoped_search_name = str(
             app_search_hint.get("app_name") or app_name_hint
         ).strip()
+        if (
+            app_search_hint
+            and app_name_hint
+            and app_scoped_search_name
+            and not _is_browser_or_search_app_name(app_scoped_search_name)
+            and not _known_web_destination_search_hint(text)
+        ):
+            return _empty_intent("web_research", text)
+        dynamic_source = source if source in {"clipboard", "selection"} else ""
+        web_search = _web_search_hint(text, dynamic_source)
         if (
             not web_search
             and not (
@@ -3218,6 +3248,8 @@ class RuntimePlanner:
         intent: TaskIntentSnapshot,
         allowed: set[str] | None,
     ) -> list[ToolPlanStepSnapshot]:
+        if str(intent.inputs.get("invalid_command_palette_request") or "").strip():
+            return []
         focus_window = focus_window_hint(intent.user_goal)
         window_list = window_list_hint(intent.user_goal)
         ui_inspection = ui_inspection_hint(intent.user_goal)
@@ -21204,6 +21236,10 @@ def _clean_app_name_hint(value: str) -> str:
         "请",
         "点",
         "点击",
+        "切换",
+        "退出",
+        "toggle",
+        "leave",
     }
     if context_source_hint(app):
         return ""
@@ -24087,6 +24123,7 @@ def _foreground_safe_shortcut_hint(hint: Mapping[str, Any] | None) -> bool:
     if not isinstance(hint, Mapping):
         return False
     return str(hint.get("action") or "").strip() in {
+        "find",
         "refresh",
         "new_tab",
         "new_window",
@@ -24102,7 +24139,9 @@ def _foreground_safe_shortcut_hint(hint: Mapping[str, Any] | None) -> bool:
         "switch_next_app",
         "switch_previous_app",
         "hide_other_apps",
+        "toggle_full_screen",
         "mission_control",
+        "application_windows",
         "spotlight_search",
         "emoji_picker",
         "lock_screen",
@@ -24120,6 +24159,9 @@ def _foreground_safe_shortcut_hint(hint: Mapping[str, Any] | None) -> bool:
         "screenshot_selection",
         "screenshot_toolbar",
         "paste",
+        "redo",
+        "select_all",
+        "undo",
     }
 
 
@@ -24151,12 +24193,16 @@ def _system_foreground_safe_shortcut_hint(hint: Mapping[str, Any] | None) -> boo
     if not isinstance(hint, Mapping):
         return False
     return str(hint.get("action") or "").strip() in {
+        "application_windows",
         "hide_other_apps",
         "mission_control",
         "spotlight_search",
         "emoji_picker",
         "lock_screen",
         "force_quit_dialog",
+        "switch_next_app",
+        "switch_previous_app",
+        "toggle_full_screen",
     }
 
 
@@ -25973,6 +26019,8 @@ def _clean_app_scoped_followup(value: str) -> str:
 
 def _app_command_palette_hint(text: str) -> dict[str, Any]:
     value = _clean_prompt(text)
+    if _invalid_command_palette_request_reason(value):
+        return {}
     if not re.search(
         r"命令面板|指令面板|command\s+palette|(?:执行|运行|打开)\s*命令|\b(?:run|execute|open)\s+(?:the\s+)?command\b",
         value,
@@ -26111,6 +26159,27 @@ def _app_command_palette_hint(text: str) -> dict[str, Any]:
             result["submit"] = True
         return result
     return {}
+
+
+def _invalid_command_palette_request_reason(text: str) -> str:
+    value = _clean_prompt(text)
+    palette = r"(?:命令面板|指令面板|command\s+palette)"
+    if not re.search(palette, value, flags=re.IGNORECASE):
+        return ""
+    if re.search(
+        rf"{palette}\s*(?:输入|打字|键入|敲入|打入|打上|type|enter)\s*$",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        return "missing_command"
+    if re.search(
+        rf"{palette}\s*(?:(?:并|然后|再|接着|and\s+then|and|then)\s*)?"
+        r"(?:发送|send)(?:\s|$)",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        return "unsupported_send_action"
+    return ""
 
 
 def _command_palette_mode(value: str) -> str:
@@ -26734,6 +26803,9 @@ def _app_search_query_hint(text: str, app_name: str) -> str:
     chinese_search_verb = r"(?:搜索|查找|检索|找(?:到)?)(?!框|栏|输入|结果)"
     raw_scope_patterns = (
         r"(?:在|用|通过)\s*(?P<raw_app>[\w .·-]{1,40}?)(?:里|中|上|内)?\s*"
+        rf"{chinese_search_verb}\s*(?P<raw_query>[^。！？!?]+)$",
+        r"(?:切到|聚焦)\s*(?P<raw_app>[\w .·-]{1,40}?)\s*"
+        r"(?:[，,]\s*)?(?:并|然后|再|接着|之后)?\s*"
         rf"{chinese_search_verb}\s*(?P<raw_query>[^。！？!?]+)$",
     )
     for pattern in raw_scope_patterns:

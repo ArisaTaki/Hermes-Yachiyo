@@ -179,6 +179,9 @@ SAFE_SHORTCUT_ACTIONS = (
     "reopen_closed_tab",
 )
 APP_SAFE_SHORTCUT_ACTIONS = SAFE_SHORTCUT_ACTIONS + (
+    "command_palette",
+    "obsidian_command_palette",
+    "preferences",
     "finder_quick_look",
     "finder_get_info",
     "new_folder",

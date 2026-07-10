@@ -138,6 +138,23 @@ def test_desktop_safe_shortcut_actions_are_low_risk_and_validated() -> None:
         )
 
 
+def test_app_command_shortcut_actions_are_explicitly_validated() -> None:
+    for action, app_name in (
+        ("command_palette", "Visual Studio Code"),
+        ("obsidian_command_palette", "Obsidian"),
+        ("preferences", "Slack"),
+    ):
+        ToolDescriptorRegistry.validate_payload(
+            "app.focus_and_safe_shortcut",
+            {"app_name": app_name, "action": action},
+        )
+    with pytest.raises(AgentRuntimeError, match="action"):
+        ToolDescriptorRegistry.validate_payload(
+            "app.focus_and_safe_shortcut",
+            {"app_name": "Visual Studio Code", "action": "arbitrary_palette"},
+        )
+
+
 def test_write_patch_payload_validation_requires_patch_and_matching_hash_aliases() -> None:
     with pytest.raises(AgentRuntimeError, match="patch"):
         ToolDescriptorRegistry.validate_payload("workspace.write_patch", {"path": "a.txt"})

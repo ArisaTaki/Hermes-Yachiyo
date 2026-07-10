@@ -21519,6 +21519,38 @@ def test_runtime_planner_routes_app_scoped_fullscreen_shortcut_to_desktop_operat
     assert all(step.tool_name != "system.volume" for step in decision.plan.tool_plan.steps)
 
 
+def test_runtime_planner_rejects_invalid_command_palette_execution_requests() -> None:
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.focus_and_safe_shortcut",
+        "app.focus_and_safe_type_text",
+        "desktop.safe_type_text",
+        "desktop.submit_foreground",
+        "desktop.ui_elements",
+    ]
+    cases = (
+        ("在 VS Code 里打开命令面板输入 ", "missing_command"),
+        (
+            "在 VS Code 里打开命令面板发送 Format Document",
+            "unsupported_send_action",
+        ),
+        (
+            "VS Code command palette send Format Document",
+            "unsupported_send_action",
+        ),
+    )
+
+    for prompt, reason in cases:
+        decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+
+        assert decision.selected_intent.kind == "desktop_operation"
+        assert decision.selected_intent.inputs == {
+            "invalid_command_palette_request": reason
+        }
+        assert decision.plan.tool_plan.steps == []
+        assert planner_tool_requests(prompt, allowed_tools) == []
+
+
 def test_runtime_planner_routes_finder_scoped_safe_shortcuts() -> None:
     cases = (
         ("打开Finder然后按空格", "app.open_and_safe_shortcut", "finder_quick_look"),

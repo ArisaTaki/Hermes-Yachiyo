@@ -615,6 +615,13 @@ def _planner_owned_legacy_compatible_entrypoint_requests(
     )
     if browser_internal_page_requests:
         return browser_internal_page_requests
+    foreground_command_requests = (
+        _legacy_compatible_foreground_command_entrypoint_requests(
+            planner_requests,
+        )
+    )
+    if foreground_command_requests:
+        return foreground_command_requests
     search_box_requests = _legacy_compatible_context_transfer_search_box_requests(
         planner_requests,
         text=text,
@@ -793,6 +800,106 @@ def _legacy_compatible_browser_internal_page_entrypoint_requests(
     if internal_url.lower() == "edge://favorites/":
         legacy_requests[1]["input"] = {"text": "edge://bookmarks/"}
     return legacy_requests
+
+
+def _legacy_compatible_foreground_command_entrypoint_requests(
+    requests: Sequence[Mapping[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    items = [dict(request) for request in requests or [] if isinstance(request, Mapping)]
+    if not items or any(
+        str(request.get("planning_reason") or "").strip()
+        != "planner_desktop_operation"
+        for request in items
+    ):
+        return []
+    visible = _visible_entrypoint_plan_requests(items)
+    if _legacy_compatible_command_palette_sequence(visible):
+        return [_legacy_shape_request(request) for request in visible]
+    if _legacy_compatible_app_management_sequence(visible):
+        return [_legacy_shape_request(request) for request in visible]
+    return []
+
+
+def _legacy_compatible_command_palette_sequence(
+    requests: Sequence[Mapping[str, Any]],
+) -> bool:
+    tools = [str(request.get("tool") or "").strip() for request in requests]
+    if tools not in (
+        ["app.open_and_safe_shortcut", "desktop.safe_type_text"],
+        ["app.focus_and_safe_shortcut", "desktop.safe_type_text"],
+        [
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.submit_foreground",
+        ],
+        [
+            "app.focus_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.submit_foreground",
+        ],
+        [
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.safe_key",
+            "desktop.submit_foreground",
+        ],
+        [
+            "app.focus_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.safe_key",
+            "desktop.submit_foreground",
+        ],
+    ):
+        return False
+    first_input = requests[0].get("input")
+    type_input = requests[1].get("input")
+    if not isinstance(first_input, Mapping) or not isinstance(type_input, Mapping):
+        return False
+    if (
+        str(first_input.get("action") or "").strip()
+        not in {"command_palette", "obsidian_command_palette"}
+        or not str(first_input.get("app_name") or "").strip()
+        or not str(type_input.get("text") or "").strip()
+    ):
+        return False
+    for request in requests[2:]:
+        tool_name = str(request.get("tool") or "").strip()
+        payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+        if tool_name == "desktop.safe_key":
+            if str(payload.get("action") or "").strip() not in {
+                "arrow_down",
+                "arrow_left",
+                "arrow_right",
+                "arrow_up",
+            }:
+                return False
+            repeat_count = payload.get("repeat_count", 1)
+            if not isinstance(repeat_count, int) or not 1 <= repeat_count <= 10:
+                return False
+        elif (
+            tool_name != "desktop.submit_foreground"
+            or str(payload.get("action") or "").strip() != "confirm"
+        ):
+            return False
+    return True
+
+
+def _legacy_compatible_app_management_sequence(
+    requests: Sequence[Mapping[str, Any]],
+) -> bool:
+    if len(requests) != 2:
+        return False
+    first, second = requests
+    first_tool = str(first.get("tool") or "").strip()
+    second_tool = str(second.get("tool") or "").strip()
+    first_input = first.get("input") if isinstance(first.get("input"), Mapping) else {}
+    second_input = second.get("input") if isinstance(second.get("input"), Mapping) else {}
+    app_name = str(first_input.get("app_name") or "").strip()
+    if first_tool not in {"app.focus", "app.open"} or not app_name:
+        return False
+    if second_tool in {"app.hide", "app.minimize", "app.quit"}:
+        return str(second_input.get("app_name") or "").strip() == app_name
+    return second_tool == "desktop.close_window" and not second_input
 
 
 def _legacy_compatible_search_entrypoint_requests(
@@ -1221,6 +1328,9 @@ _LEGACY_COMPATIBLE_SIMPLE_PLANNER_TOOLS = frozenset(
         "app.open_and_safe_key",
         "app.open_and_safe_scroll",
         "app.open_and_safe_shortcut",
+        "app.hide",
+        "app.minimize",
+        "app.quit",
         "app.show",
         "app.status",
         "browser.open_url",
@@ -1228,12 +1338,20 @@ _LEGACY_COMPATIBLE_SIMPLE_PLANNER_TOOLS = frozenset(
         "desktop.open_path",
         "desktop.reveal_path",
         "desktop.running_apps",
+        "desktop.close_window",
+        "desktop.hide_app",
+        "desktop.minimize_window",
+        "desktop.quit_app",
+        "desktop.show_all_apps",
     }
 )
 
 
 def _legacy_compatible_simple_request(text: str, request: Mapping[str, Any]) -> bool:
     tool_name = str(request.get("tool") or "").strip()
+    if tool_name in _LEGACY_COMPATIBLE_FOREGROUND_COMMAND_TOOLS:
+        payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+        return not payload
     if tool_name in {"desktop.open_path", "desktop.reveal_path", "desktop.running_apps"}:
         return True
     if tool_name == "desktop.safe_shortcut":
@@ -1246,7 +1364,14 @@ def _legacy_compatible_simple_request(text: str, request: Mapping[str, Any]) -> 
     if tool_name == "app.status":
         payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
         return bool(str(payload.get("app_name") or "").strip())
-    if tool_name not in {"app.open", "app.focus", "app.show"}:
+    if tool_name not in {
+        "app.focus",
+        "app.hide",
+        "app.minimize",
+        "app.open",
+        "app.quit",
+        "app.show",
+    }:
         return False
     payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
     app_name = str(payload.get("app_name") or "").strip()
@@ -1254,6 +1379,8 @@ def _legacy_compatible_simple_request(text: str, request: Mapping[str, Any]) -> 
         return False
     if _generic_non_app_name(app_name):
         return False
+    if tool_name in {"app.hide", "app.minimize", "app.quit"}:
+        return True
     if explicit_known_app_action_target_hint(text) == app_name:
         return True
     return not _app_prompt_has_non_launch_followup(text)
@@ -1272,6 +1399,7 @@ _LEGACY_COMPATIBLE_APP_ACTION_TOOLS = frozenset(
 
 _LEGACY_COMPATIBLE_APP_ACTIONS = frozenset(
     {
+        "command_palette",
         "copy",
         "escape",
         "find",
@@ -1288,10 +1416,13 @@ _LEGACY_COMPATIBLE_APP_ACTIONS = frozenset(
         "new_private_window",
         "new_reminder",
         "open_devtools",
+        "obsidian_command_palette",
         "parent_folder",
+        "preferences",
         "rename_selected",
         "show_history",
         "tab",
+        "toggle_full_screen",
     }
 )
 
@@ -1327,24 +1458,49 @@ _CONTEXT_TRANSFER_SAFE_SHORTCUTS = frozenset(
     {"copy", "copy_current_page_link", "paste", "select_all"}
 )
 
+_LEGACY_COMPATIBLE_FOREGROUND_COMMAND_TOOLS = frozenset(
+    {
+        "desktop.close_window",
+        "desktop.hide_app",
+        "desktop.minimize_window",
+        "desktop.quit_app",
+        "desktop.show_all_apps",
+    }
+)
+
 _LEGACY_COMPATIBLE_SAFE_SHORTCUTS = frozenset(
     {
         *_CONTEXT_TRANSFER_SAFE_SHORTCUTS,
+        "application_windows",
         "bookmark_page",
         "browser_back",
         "browser_forward",
         "close_tab",
         "focus_address_bar",
+        "force_quit_dialog",
+        "hide_other_apps",
+        "emoji_picker",
+        "find",
+        "lock_screen",
+        "mission_control",
         "new_private_window",
         "new_tab",
         "new_window",
         "next_tab",
+        "next_window",
         "open_devtools",
         "previous_tab",
+        "previous_window",
+        "redo",
         "refresh",
         "reopen_closed_tab",
         "reset_zoom",
         "show_history",
+        "spotlight_search",
+        "switch_next_app",
+        "switch_previous_app",
+        "toggle_full_screen",
+        "undo",
         "zoom_in",
         "zoom_out",
     }

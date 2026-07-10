@@ -3097,7 +3097,57 @@ def test_browser_internal_page_adapter_rejects_unapproved_destinations() -> None
         ) == []
 
 
-def test_daily_desktop_entrypoint_routes_app_command_palette_and_preferences() -> None:
+def test_foreground_command_adapter_rejects_unsafe_or_mismatched_sequences() -> None:
+    from apps.shell.yachiyo_agent.daily_desktop import (
+        _legacy_compatible_foreground_command_entrypoint_requests,
+    )
+
+    def request(tool: str, payload: dict) -> dict:
+        return {
+            "tool": tool,
+            "input": payload,
+            "planning_reason": "planner_desktop_operation",
+        }
+
+    rejected_sequences = (
+        [
+            request(
+                "app.focus_and_safe_shortcut",
+                {"app_name": "Visual Studio Code", "action": "command_palette"},
+            ),
+            request("desktop.safe_type_text", {"text": ""}),
+        ],
+        [
+            request(
+                "app.focus_and_safe_shortcut",
+                {"app_name": "Visual Studio Code", "action": "command_palette"},
+            ),
+            request("desktop.safe_type_text", {"text": "Format Document"}),
+            request("desktop.submit_foreground", {"action": "send"}),
+        ],
+        [
+            request("app.open", {"app_name": "WeChat"}),
+            request("app.quit", {"app_name": "Slack"}),
+        ],
+        [
+            request("app.focus", {"app_name": "WeChat"}),
+            request("desktop.close_window", {"app_name": "WeChat"}),
+        ],
+    )
+
+    for requests in rejected_sequences:
+        assert _legacy_compatible_foreground_command_entrypoint_requests(
+            requests
+        ) == []
+
+
+def test_daily_desktop_entrypoint_routes_app_command_palette_and_preferences(
+    monkeypatch,
+) -> None:
+    _forbid_legacy_daily_parser(
+        monkeypatch,
+        "app command shortcuts must be planner-owned",
+    )
     cases = (
         ("打开 VS Code 命令面板", "app.open_and_safe_shortcut", "Visual Studio Code", "command_palette"),
         ("在 VS Code 里打开命令面板", "app.focus_and_safe_shortcut", "Visual Studio Code", "command_palette"),
@@ -3122,6 +3172,8 @@ def test_daily_desktop_entrypoint_routes_app_command_palette_and_preferences() -
             }
         ]
 
+    monkeypatch.undo()
+
     assert daily_desktop_entrypoint_requests("打开设置") == [
         {
             "protocol": "json_fallback",
@@ -3138,7 +3190,13 @@ def test_daily_desktop_entrypoint_routes_app_command_palette_and_preferences() -
     )
 
 
-def test_daily_desktop_entrypoint_routes_command_palette_input_and_execution() -> None:
+def test_daily_desktop_entrypoint_routes_command_palette_input_and_execution(
+    monkeypatch,
+) -> None:
+    _forbid_legacy_daily_parser(
+        monkeypatch,
+        "command palette sequences must be planner-owned",
+    )
     assert daily_desktop_entrypoint_requests("在 VS Code 里打开命令面板输入 Format Document") == [
         {
             "protocol": "json_fallback",
@@ -3259,6 +3317,8 @@ def test_daily_desktop_entrypoint_routes_command_palette_input_and_execution() -
             "input": {"action": "confirm"},
         },
     ]
+    monkeypatch.undo()
+
     assert (
         daily_desktop_entrypoint_requests(
             "在 VS Code 里执行命令 Format Document",
@@ -3268,7 +3328,10 @@ def test_daily_desktop_entrypoint_routes_command_palette_input_and_execution() -
     )
 
 
-def test_daily_desktop_entrypoint_routes_app_fullscreen_to_app_safe_shortcut() -> None:
+def test_daily_desktop_entrypoint_routes_app_fullscreen_to_app_safe_shortcut(
+    monkeypatch,
+) -> None:
+    _forbid_legacy_daily_parser(monkeypatch, "app fullscreen must be planner-owned")
     cases = (
         ("Chrome 最大化", "app.focus_and_safe_shortcut", "Google Chrome"),
         ("Chrome 全屏", "app.focus_and_safe_shortcut", "Google Chrome"),
@@ -3345,8 +3408,6 @@ def test_daily_desktop_entrypoint_routes_polite_focus_and_show_questions_to_desk
         ]
         assert daily_desktop_user_metadata(requests)["daily_desktop_tool"] == tool_name
 
-    monkeypatch.undo()
-
     app_window_sequence = daily_desktop_entrypoint_requests("打开微信然后隐藏")
 
     assert app_window_sequence == [
@@ -3401,7 +3462,13 @@ def test_daily_desktop_entrypoint_routes_polite_focus_and_show_questions_to_desk
     ]
 
 
-def test_daily_desktop_entrypoint_routes_current_app_window_control_to_desktop_tools() -> None:
+def test_daily_desktop_entrypoint_routes_current_app_window_control_to_desktop_tools(
+    monkeypatch,
+) -> None:
+    _forbid_legacy_daily_parser(
+        monkeypatch,
+        "foreground app and window controls must be planner-owned",
+    )
     cases = (
         ("你可以帮我隐藏一下前台应用吗", "desktop.hide_app", {}),
         ("把这个应用隐藏起来", "desktop.hide_app", {}),
@@ -3459,6 +3526,7 @@ def test_daily_desktop_entrypoint_routes_current_app_window_control_to_desktop_t
         "desktop.close_window",
     ]
 
+
     assert daily_desktop_entrypoint_requests("当前窗口是什么") == [
         {
             "protocol": "json_fallback",
@@ -3506,7 +3574,43 @@ def test_daily_desktop_entrypoint_routes_current_app_window_control_to_desktop_t
             }
         ]
 
+    monkeypatch.undo()
     assert daily_desktop_entrypoint_requests("我现在是不是在家") == []
+
+
+def test_daily_desktop_entrypoint_routes_foreground_shortcuts_without_legacy(
+    monkeypatch,
+) -> None:
+    _forbid_legacy_daily_parser(
+        monkeypatch,
+        "foreground shortcuts must be planner-owned",
+    )
+    cases = (
+        ("当前窗口最大化", "toggle_full_screen"),
+        ("退出全屏", "toggle_full_screen"),
+        ("toggle fullscreen", "toggle_full_screen"),
+        ("leave full screen", "toggle_full_screen"),
+        ("切换到上一个应用", "switch_previous_app"),
+        ("切到下一个应用", "switch_next_app"),
+        ("隐藏其它应用", "hide_other_apps"),
+        ("打开任务控制中心", "mission_control"),
+        ("显示当前应用窗口", "application_windows"),
+        ("打开聚焦搜索", "spotlight_search"),
+        ("打开 emoji 面板", "emoji_picker"),
+        ("锁屏", "lock_screen"),
+        ("打开强制退出窗口", "force_quit_dialog"),
+        ("撤销", "undo"),
+        ("重做", "redo"),
+    )
+
+    for prompt, action in cases:
+        assert daily_desktop_entrypoint_requests(prompt) == [
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.safe_shortcut",
+                "input": {"action": action},
+            }
+        ]
 
 
 def test_daily_desktop_entrypoint_routes_system_window_hotkeys_and_system_apps() -> None:
