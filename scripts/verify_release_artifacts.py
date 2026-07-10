@@ -3415,6 +3415,10 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover virtual desktop guest provisioning",
     ),
     (
+        "tests/test_virtual_desktop_guest_provision_route.py",
+        "macOS release workflow smoke tests must cover the Studio VM provision route",
+    ),
+    (
         "tests/test_desktop_provider_credentials.py",
         "macOS release workflow smoke tests must cover desktop provider credentials",
     ),

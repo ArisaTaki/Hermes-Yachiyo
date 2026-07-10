@@ -9154,6 +9154,8 @@ def test_yachiyo_studio_routes_include_run_action_facade() -> None:
     assert '@router.get("/studio/tools/desktop-provider/session")' in source
     assert '@router.post("/studio/tools/desktop-provider/session/start")' in source
     assert '@router.post("/studio/tools/desktop-provider/session/stop")' in source
+    assert '@router.post("/studio/tools/desktop-provider/provision")' in source
+    assert "provision_virtual_desktop_guest(" in source
     assert '@router.post("/studio/planner")' in source
     assert '@router.get("/studio/agents/{agent_id}")' in source
     assert '@router.patch("/studio/agents/{agent_id}")' in source

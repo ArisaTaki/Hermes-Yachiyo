@@ -76,6 +76,15 @@ class DesktopProviderSessionBody(BaseModel):
     tools: list[str] | None = None
 
 
+class VirtualDesktopGuestProvisionBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    ssh_target: str = Field(..., min_length=1, max_length=500)
+    session_id: str = Field(..., min_length=1, max_length=160)
+    approved: bool = False
+    start_session: bool = True
+
+
 class PlanTaskBody(BaseModel):
     model_config = ConfigDict(extra="allow")
 

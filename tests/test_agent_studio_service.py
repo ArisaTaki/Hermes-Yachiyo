@@ -1289,6 +1289,17 @@ def test_agent_studio_service_delegates_desktop_provider_session_controls() -> N
             self.calls.append(("stop_desktop_provider_session", None))
             return {"ok": True, "status": "stopped", "running": False, "stopped": True}
 
+        def provision_virtual_desktop_guest(
+            self,
+            request: dict[str, Any],
+        ) -> dict[str, Any]:
+            self.calls.append(("provision_virtual_desktop_guest", request))
+            return {
+                "ok": True,
+                "status": "running",
+                "provider_manifest": "/tmp/provider.manifest.json",
+            }
+
     port = SessionPort()
     service = AgentStudioService(port)
 
@@ -1299,14 +1310,84 @@ def test_agent_studio_service_delegates_desktop_provider_session_controls() -> N
     }
     started = service.start_desktop_provider_session(start_request)
     stopped = service.stop_desktop_provider_session()
+    provision_request = {
+        "ssh_target": "yachiyo@192.0.2.10",
+        "session_id": "vm-session-1",
+        "approved": True,
+    }
+    provisioned = service.provision_virtual_desktop_guest(provision_request)
 
     assert status["status"] == "stopped"
     assert started["running"] is True
     assert stopped["stopped"] is True
-    assert port.calls[-3:] == [
+    assert provisioned["provider_manifest"] == "/tmp/provider.manifest.json"
+    assert port.calls[-4:] == [
         ("desktop_provider_session_status", None),
         ("start_desktop_provider_session", start_request),
         ("stop_desktop_provider_session", None),
+        ("provision_virtual_desktop_guest", provision_request),
+    ]
+
+
+def test_legacy_studio_port_provisions_vm_only_after_explicit_approval(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    install_calls: list[Any] = []
+    start_calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        "apps.shell.yachiyo_agent.legacy_ports.isolated_desktop_provider_session_status",
+        lambda: {"ok": True, "status": "stopped", "running": False},
+    )
+
+    def fake_install(config: Any) -> dict[str, Any]:
+        install_calls.append(config)
+        return {
+            "ok": True,
+            "provider_manifest": str(tmp_path / "provider.manifest.json"),
+            "provider_id": "oha-macos-virtual-desktop",
+        }
+
+    def fake_start(request: dict[str, Any]) -> dict[str, Any]:
+        start_calls.append(request)
+        return {
+            "ok": True,
+            "status": "running",
+            "running": True,
+            "started": True,
+        }
+
+    monkeypatch.setattr(
+        "apps.shell.yachiyo_agent.legacy_ports.install_virtual_desktop_guest",
+        fake_install,
+    )
+    monkeypatch.setattr(
+        "apps.shell.yachiyo_agent.legacy_ports.start_isolated_desktop_provider_session",
+        fake_start,
+    )
+    port = LegacyStudioPort(object())
+    request = {
+        "ssh_target": "yachiyo@192.0.2.10",
+        "session_id": "vm-session-1",
+    }
+
+    pending = port.provision_virtual_desktop_guest(request)
+    provisioned = port.provision_virtual_desktop_guest(
+        {**request, "approved": True}
+    )
+
+    assert pending["status"] == "approval_required"
+    assert pending["approval_required"] is True
+    assert len(install_calls) == 1
+    assert install_calls[0].ssh_target == "yachiyo@192.0.2.10"
+    assert install_calls[0].session_id == "vm-session-1"
+    assert provisioned["status"] == "running"
+    assert provisioned["running"] is True
+    assert start_calls == [
+        {
+            "provider_manifest": str(tmp_path / "provider.manifest.json"),
+            "requires_real_virtual_desktop_backend": True,
+        }
     ]
 
 

@@ -17,6 +17,7 @@ from apps.shell.agent.runtime.direct_request_policy import (
     approval_required_policy_from_direct_requests,
 )
 from apps.shell.agent.runtime.errors import AgentRuntimeError
+from packages.security import redact_api_error_text
 
 from .daily_desktop import (
     daily_desktop_allowed_tools,
@@ -98,6 +99,10 @@ from .isolated_provider_session import (
     stop_isolated_desktop_provider_session,
 )
 from .tool_catalog import runtime_tool_catalog_snapshot
+from .virtual_desktop_guest_installer import (
+    VirtualDesktopGuestInstallConfig,
+    install_virtual_desktop_guest,
+)
 from .workflow_run_snapshots import workflow_run_snapshot_from_payload
 
 _LEGACY_RUN_PROJECTOR = LegacyRunPayloadProjector()
@@ -1537,6 +1542,77 @@ class LegacyStudioPort:
 
     def stop_desktop_provider_session(self) -> dict[str, Any]:
         return stop_isolated_desktop_provider_session()
+
+    def provision_virtual_desktop_guest(
+        self,
+        request: dict[str, Any],
+    ) -> dict[str, Any]:
+        payload = dict(request or {})
+        ssh_target = str(payload.get("ssh_target") or "").strip()
+        session_id = str(payload.get("session_id") or "").strip()
+        if payload.get("approved") is not True:
+            return {
+                "ok": False,
+                "status": "approval_required",
+                "approval_required": True,
+                "approval": {
+                    "kind": "virtual_desktop_guest_provision",
+                    "risk": "high",
+                    "target": ssh_target,
+                    "session_id": session_id,
+                },
+            }
+        current = isolated_desktop_provider_session_status()
+        if current.get("running") is True:
+            return {
+                "ok": False,
+                "status": "desktop_provider_session_running",
+                "approval_required": False,
+                "running": True,
+                "session": current,
+            }
+        config_kwargs: dict[str, Any] = {
+            "ssh_target": ssh_target,
+            "session_id": session_id,
+        }
+        try:
+            provisioned = install_virtual_desktop_guest(
+                VirtualDesktopGuestInstallConfig(**config_kwargs)
+            )
+        except Exception as exc:
+            return {
+                "ok": False,
+                "status": "provision_failed",
+                "approval_required": False,
+                "error": redact_api_error_text(exc),
+            }
+        result = {
+            **provisioned,
+            "status": "provisioned",
+            "approval_required": False,
+        }
+        if payload.get("start_session", True) is not True:
+            return result
+        session = start_isolated_desktop_provider_session(
+            {
+                "provider_manifest": provisioned["provider_manifest"],
+                "requires_real_virtual_desktop_backend": True,
+            }
+        )
+        running = session.get("running") is True
+        return {
+            **result,
+            "ok": running,
+            "status": "running" if running else "session_start_failed",
+            "running": running,
+            "started": session.get("started") is True,
+            "session": session,
+            **(
+                {"error": str(session.get("error") or session.get("reason") or "")}
+                if not running
+                else {}
+            ),
+        }
 
     def list_restricted_tool_plugins(self) -> dict[str, Any]:
         list_plugins = getattr(self._runtime, "list_restricted_tool_plugins", None)

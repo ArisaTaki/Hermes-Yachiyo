@@ -14,6 +14,7 @@ from apps.bridge.routes.yachiyo_models import (
     RestrictedToolPluginInstallBody,
     RestrictedToolPluginUpdateBody,
     StartPlannerOrchestrationBody,
+    VirtualDesktopGuestProvisionBody,
 )
 from apps.bridge.routes.yachiyo_services import snapshot, studio_service
 from apps.bridge.routes.yachiyo_services import bad_request
@@ -49,6 +50,16 @@ async def stop_desktop_provider_session(
 ) -> dict[str, Any]:
     return await asyncio.to_thread(
         studio_service(http_request).stop_desktop_provider_session
+    )
+
+
+async def provision_virtual_desktop_guest(
+    request: VirtualDesktopGuestProvisionBody,
+    http_request: Request | None = None,
+) -> dict[str, Any]:
+    return await asyncio.to_thread(
+        studio_service(http_request).provision_virtual_desktop_guest,
+        request.model_dump(exclude_none=True),
     )
 
 

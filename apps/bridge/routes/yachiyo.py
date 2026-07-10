@@ -31,6 +31,7 @@ from apps.bridge.routes.yachiyo_models import (
     StartPlannerOrchestrationBody,
     StartWorkflowRunBody,
     TaskApprovalRequest,
+    VirtualDesktopGuestProvisionBody,
 )
 from apps.shell.yachiyo_agent import (
     AgentDeskFileEventRequest,
@@ -260,6 +261,17 @@ async def stop_studio_desktop_provider_session(
     http_request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
     return await yachiyo_studio_handlers.stop_desktop_provider_session(http_request)
+
+
+@router.post("/studio/tools/desktop-provider/provision")
+async def provision_studio_virtual_desktop_guest(
+    request: VirtualDesktopGuestProvisionBody,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
+    return await yachiyo_studio_handlers.provision_virtual_desktop_guest(
+        request,
+        http_request,
+    )
 
 
 @router.post("/studio/planner")

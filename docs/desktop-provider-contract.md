@@ -76,6 +76,9 @@ python scripts/install_virtual_desktop_guest.py \
 export OHA_YACHIYO_DESKTOP_PROVIDER_MANIFEST="$PWD/tmp/oha-virtual-desktop-provider.manifest.json"
 ```
 
+安装版也可以在 `Agent Studio > Tools > Desktop Session` 输入 VM SSH Target 与
+Session ID，显式确认后完成同一安装、manifest 写入和 Session 启动流程。
+
 安装器会校验传输前后的 SHA256，在 VM 当前用户目录原子安装 Guest Provider，生成
 当前 boot/session marker，并把同一随机 bearer token 分别保存为 Host/Guest 的
 `0600` 文件。Manifest 的 `entrypoint.argv` 会让现有

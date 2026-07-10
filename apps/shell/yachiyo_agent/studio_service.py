@@ -382,6 +382,23 @@ class AgentStudioService:
             return dict(stop_session())
         return {"ok": True, "status": "unavailable", "running": False}
 
+    def provision_virtual_desktop_guest(
+        self,
+        request: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        provision = getattr(
+            self._studio_port,
+            "provision_virtual_desktop_guest",
+            None,
+        )
+        if callable(provision):
+            return dict(provision(dict(request)))
+        return {
+            "ok": False,
+            "status": "unavailable",
+            "approval_required": False,
+        }
+
     def plan_task(
         self,
         prompt: str,

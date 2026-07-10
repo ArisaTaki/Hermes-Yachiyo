@@ -86,6 +86,27 @@ export type YachiyoStudioDesktopProviderSessionSnapshot = {
   requires_real_virtual_desktop_backend?: boolean | null;
 };
 
+export type YachiyoStudioVirtualDesktopProvisionRequest = {
+  ssh_target: string;
+  session_id: string;
+  approved: boolean;
+  start_session?: boolean;
+};
+
+export type YachiyoStudioVirtualDesktopProvisionSnapshot = {
+  ok?: boolean;
+  status?: string;
+  error?: string;
+  approval_required?: boolean;
+  provider_id?: string;
+  provider_manifest?: string;
+  remote_provider_executable?: string;
+  local_token_file?: string;
+  running?: boolean;
+  started?: boolean;
+  session?: YachiyoStudioDesktopProviderSessionSnapshot;
+};
+
 export type YachiyoStudioRunReplanRecoveryActionRequest = {
   request_id: string;
   action_id?: string;
@@ -185,6 +206,15 @@ export async function stopYachiyoStudioDesktopProviderSession(): Promise<Yachiyo
   return apiPost<YachiyoStudioDesktopProviderSessionSnapshot>(
     '/yachiyo/studio/tools/desktop-provider/session/stop',
     {},
+  );
+}
+
+export async function provisionYachiyoStudioVirtualDesktopGuest(
+  request: YachiyoStudioVirtualDesktopProvisionRequest,
+): Promise<YachiyoStudioVirtualDesktopProvisionSnapshot> {
+  return apiPost<YachiyoStudioVirtualDesktopProvisionSnapshot>(
+    '/yachiyo/studio/tools/desktop-provider/provision',
+    request,
   );
 }
 

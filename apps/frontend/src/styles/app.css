@@ -15539,6 +15539,33 @@ button.activity-item {
   min-width: 0;
 }
 
+.studio-provider-provision-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 7px;
+  min-width: 0;
+}
+
+.studio-provider-provision-fields label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.studio-provider-provision-fields label > span {
+  color: var(--hy-muted);
+  font-size: 11px;
+  font-weight: 560;
+}
+
+.studio-provider-provision-fields .hy-input {
+  min-width: 0;
+}
+
+.studio-provider-provision-approval {
+  margin: 0;
+}
+
 .studio-provider-manifest-field > label {
   color: var(--hy-muted);
   font-size: 11px;

@@ -8,6 +8,7 @@ import {
 import {
   planYachiyoStudioExecution,
   planYachiyoStudioTask,
+  provisionYachiyoStudioVirtualDesktopGuest,
   startYachiyoStudioDesktopProviderSession,
   startYachiyoStudioPlannerOrchestration,
   stopYachiyoStudioDesktopProviderSession,
@@ -33,6 +34,8 @@ const emptyCatalog: ToolCatalogSnapshot = {
 };
 
 const DESKTOP_PROVIDER_MANIFEST_STORAGE_KEY = 'oha-yachiyo.desktop-provider-manifest';
+const DESKTOP_PROVIDER_SSH_TARGET_STORAGE_KEY = 'oha-yachiyo.desktop-provider-ssh-target';
+const DESKTOP_PROVIDER_SESSION_ID_STORAGE_KEY = 'oha-yachiyo.desktop-provider-session-id';
 
 type AgentStudioToolsTabProps = {
   catalog: ToolCatalogSnapshot | null;
@@ -64,13 +67,20 @@ export function AgentStudioToolsTab({
   const [plannerExecutionEnvelope, setPlannerExecutionEnvelope] = useState<RuntimeExecutionEnvelopeSnapshot | null>(null);
   const [plannerExecutionError, setPlannerExecutionError] = useState('');
   const [plannerExecutionLoading, setPlannerExecutionLoading] = useState(false);
-  const [providerSessionBusy, setProviderSessionBusy] = useState<'start' | 'stop' | ''>('');
+  const [providerSessionBusy, setProviderSessionBusy] = useState<'provision' | 'start' | 'stop' | ''>('');
   const [providerSessionError, setProviderSessionError] = useState('');
   const [providerSessionResult, setProviderSessionResult] = useState<YachiyoStudioDesktopProviderSessionSnapshot | null>(null);
   const [providerManifestPath, setProviderManifestPath] = useState(
     readStoredDesktopProviderManifestPath,
   );
   const [providerManifestPicking, setProviderManifestPicking] = useState(false);
+  const [providerProvisionTarget, setProviderProvisionTarget] = useState(
+    () => readStoredValue(DESKTOP_PROVIDER_SSH_TARGET_STORAGE_KEY),
+  );
+  const [providerProvisionSessionId, setProviderProvisionSessionId] = useState(
+    () => readStoredValue(DESKTOP_PROVIDER_SESSION_ID_STORAGE_KEY, 'oha-yachiyo-vm'),
+  );
+  const [providerProvisionApproved, setProviderProvisionApproved] = useState(false);
   const legacyCleanupCoverage = catalog.legacy_cleanup_coverage || null;
 
   useEffect(() => {
@@ -88,6 +98,14 @@ export function AgentStudioToolsTab({
   useEffect(() => {
     storeDesktopProviderManifestPath(providerManifestPath);
   }, [providerManifestPath]);
+
+  useEffect(() => {
+    storeValue(DESKTOP_PROVIDER_SSH_TARGET_STORAGE_KEY, providerProvisionTarget);
+  }, [providerProvisionTarget]);
+
+  useEffect(() => {
+    storeValue(DESKTOP_PROVIDER_SESSION_ID_STORAGE_KEY, providerProvisionSessionId);
+  }, [providerProvisionSessionId]);
 
   const capabilityOptions = useMemo(() => {
     const ids = new Set<string>();
@@ -224,6 +242,34 @@ export function AgentStudioToolsTab({
     }
   }
 
+  async function handleProviderProvision() {
+    const sshTarget = providerProvisionTarget.trim();
+    const sessionId = providerProvisionSessionId.trim();
+    if (providerSessionBusy || !sshTarget || !sessionId || !providerProvisionApproved) return;
+    setProviderSessionBusy('provision');
+    setProviderSessionError('');
+    try {
+      const result = await provisionYachiyoStudioVirtualDesktopGuest({
+        ssh_target: sshTarget,
+        session_id: sessionId,
+        approved: true,
+        start_session: true,
+      });
+      if (result.provider_manifest) setProviderManifestPath(result.provider_manifest);
+      if (result.session) setProviderSessionResult(result.session);
+      if (result.ok !== true) {
+        setProviderSessionError(result.error || result.status || 'VM Provider 安装失败');
+      } else {
+        setProviderProvisionApproved(false);
+      }
+      onReload();
+    } catch (error) {
+      setProviderSessionError(errorMessage(error));
+    } finally {
+      setProviderSessionBusy('');
+    }
+  }
+
   async function handleProviderManifestChoose() {
     if (providerManifestPicking || providerSessionBusy) return;
     setProviderManifestPicking(true);
@@ -319,8 +365,15 @@ export function AgentStudioToolsTab({
           manifestPath={providerManifestPath}
           manifestPickerAvailable={hasDesktopProviderManifestPicker()}
           manifestPicking={providerManifestPicking}
+          provisionApproved={providerProvisionApproved}
+          provisionSessionId={providerProvisionSessionId}
+          provisionTarget={providerProvisionTarget}
           onChooseManifest={() => void handleProviderManifestChoose()}
           onManifestPathChange={setProviderManifestPath}
+          onProvision={() => void handleProviderProvision()}
+          onProvisionApprovedChange={setProviderProvisionApproved}
+          onProvisionSessionIdChange={setProviderProvisionSessionId}
+          onProvisionTargetChange={setProviderProvisionTarget}
           onStart={() => void handleProviderSessionStart()}
           onStop={() => void handleProviderSessionStop()}
         />
@@ -379,20 +432,34 @@ function DesktopProviderSessionPanel({
   manifestPath,
   manifestPickerAvailable,
   manifestPicking,
+  provisionApproved,
+  provisionSessionId,
+  provisionTarget,
   onChooseManifest,
   onManifestPathChange,
+  onProvision,
+  onProvisionApprovedChange,
+  onProvisionSessionIdChange,
+  onProvisionTargetChange,
   onStart,
   onStop,
 }: {
-  busy: 'start' | 'stop' | '';
+  busy: 'provision' | 'start' | 'stop' | '';
   catalog: ToolCatalogSnapshot;
   error: string;
   latestResult: YachiyoStudioDesktopProviderSessionSnapshot | null;
   manifestPath: string;
   manifestPickerAvailable: boolean;
   manifestPicking: boolean;
+  provisionApproved: boolean;
+  provisionSessionId: string;
+  provisionTarget: string;
   onChooseManifest: () => void;
   onManifestPathChange: (value: string) => void;
+  onProvision: () => void;
+  onProvisionApprovedChange: (value: boolean) => void;
+  onProvisionSessionIdChange: (value: string) => void;
+  onProvisionTargetChange: (value: string) => void;
   onStart: () => void;
   onStop: () => void;
 }) {
@@ -545,6 +612,63 @@ function DesktopProviderSessionPanel({
       </div>
       {sessionError ? <div className="notice danger">{sessionError}</div> : null}
       {error ? <div className="notice danger">{error}</div> : null}
+      <div className="studio-provider-provision-fields">
+        <label>
+          <span>VM SSH Target</span>
+          <input
+            className="hy-input"
+            data-testid="studio-desktop-provider-ssh-target"
+            disabled={Boolean(busy) || running}
+            onChange={(event) => onProvisionTargetChange(event.target.value)}
+            placeholder="user@vm-host"
+            spellCheck={false}
+            type="text"
+            value={provisionTarget}
+          />
+        </label>
+        <label>
+          <span>Session ID</span>
+          <input
+            className="hy-input"
+            data-testid="studio-desktop-provider-session-id"
+            disabled={Boolean(busy) || running}
+            onChange={(event) => onProvisionSessionIdChange(event.target.value)}
+            spellCheck={false}
+            type="text"
+            value={provisionSessionId}
+          />
+        </label>
+      </div>
+      <label
+        className="agent-checkbox-row studio-provider-provision-approval"
+        data-testid="studio-desktop-provider-provision-approval"
+      >
+        <input
+          checked={provisionApproved}
+          disabled={Boolean(busy) || running}
+          onChange={(event) => onProvisionApprovedChange(event.target.checked)}
+          type="checkbox"
+        />
+        <span>允许安装并启动 VM Provider</span>
+      </label>
+      <div className="studio-planner-actions">
+        <button
+          className="hy-btn hy-btn-ghost"
+          data-testid="studio-desktop-provider-provision"
+          disabled={
+            Boolean(busy)
+            || running
+            || !provisionApproved
+            || !provisionTarget.trim()
+            || !provisionSessionId.trim()
+          }
+          onClick={onProvision}
+          type="button"
+        >
+          <UiIcon name="installer" />
+          <span>{busy === 'provision' ? '安装中' : '安装 VM Provider'}</span>
+        </button>
+      </div>
       <div className="studio-provider-manifest-field">
         <label htmlFor="studio-desktop-provider-manifest">Provider manifest</label>
         <span className="studio-provider-manifest-control">
@@ -625,6 +749,27 @@ function storeDesktopProviderManifestPath(value: string): void {
     }
   } catch {
     // Local persistence is optional; the manifest remains usable for this session.
+  }
+}
+
+function readStoredValue(key: string, fallback = ''): string {
+  try {
+    return window.localStorage.getItem(key) || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function storeValue(key: string, value: string): void {
+  try {
+    const cleanValue = value.trim();
+    if (cleanValue) {
+      window.localStorage.setItem(key, cleanValue);
+    } else {
+      window.localStorage.removeItem(key);
+    }
+  } catch {
+    // Local persistence is optional for VM connection metadata.
   }
 }
 
