@@ -8,8 +8,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
-from apps.shell.agent.runtime.desktop_intents import (
-    daily_desktop_entrypoint_tool_requests,
+from apps.shell.agent.runtime.desktop_recovery_metadata import (
     daily_desktop_metadata_tool_request,
     daily_desktop_recovery_prompt,
 )
@@ -554,6 +553,10 @@ def daily_desktop_entrypoint_requests(
     metadata: Mapping[str, Any] | None = None,
     allowed_tools: Sequence[str] | None = None,
 ) -> list[dict[str, Any]]:
+    from apps.shell.agent.runtime.desktop_intents import (
+        daily_desktop_entrypoint_tool_requests,
+    )
+
     allowed = daily_desktop_allowed_tools(allowed_tools)
     planner_requests = _planner_owned_legacy_compatible_entrypoint_requests(
         str(text or ""),

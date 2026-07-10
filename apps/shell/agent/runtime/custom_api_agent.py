@@ -11,10 +11,9 @@ from typing import Any, Callable
 from apps.shell.agent.runtime.approval_tool_sets import (
     APPROVAL_PLAN_TOOLS as _DAILY_DESKTOP_APPROVAL_PLAN_TOOLS,
 )
-from apps.shell.agent.runtime.desktop_intents import (
+from apps.shell.agent.runtime.desktop_intents import daily_desktop_intent_candidates
+from apps.shell.agent.runtime.desktop_recovery_metadata import (
     daily_desktop_metadata_tool_request,
-    daily_desktop_intent_candidates,
-    daily_desktop_intent_tool_requests,
 )
 from apps.shell.agent.runtime.desktop_tool_labels import (
     DAILY_DESKTOP_TOOL_LABELS as _DAILY_DESKTOP_TOOL_LABELS,
