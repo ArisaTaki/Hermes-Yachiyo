@@ -4789,8 +4789,18 @@ def test_agent_run_runtime_planner_entrypoint_analyzes_data_before_model(tmp_pat
         events = service.list_run_events(run["run_id"])["events"]
         event_types = [event["event_type"] for event in events]
         selection_event = next(event for event in events if event["event_type"] == "agent.plan.selection")
-        planned_event = next(event for event in events if event["event_type"] == "agent.desktop.intent_planned")
-        tool_event = next(event for event in events if event["event_type"] == "agent.tool.call")
+        planned_event = next(
+            event
+            for event in events
+            if event["event_type"] == "agent.desktop.intent_planned"
+            and event.get("payload", {}).get("tool") == "data.analyze"
+        )
+        tool_event = next(
+            event
+            for event in events
+            if event["event_type"] == "agent.tool.call"
+            and event.get("payload", {}).get("tool") == "data.analyze"
+        )
         artifact_event = next(
             event
             for event in events
@@ -5495,7 +5505,12 @@ def test_workflow_agent_node_runtime_planner_entrypoint_analyzes_data_before_mod
         events = service.list_run_events(child["run_id"])["events"]
         event_types = [event["event_type"] for event in events]
         selection_event = next(event for event in events if event["event_type"] == "agent.plan.selection")
-        tool_event = next(event for event in events if event["event_type"] == "agent.tool.call")
+        tool_event = next(
+            event
+            for event in events
+            if event["event_type"] == "agent.tool.call"
+            and event.get("payload", {}).get("tool") == "data.analyze"
+        )
         artifact_event = next(
             event
             for event in events
