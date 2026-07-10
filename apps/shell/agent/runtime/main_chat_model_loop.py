@@ -240,8 +240,40 @@ class MainChatModelLoopRunner:
             terminal = self._terminal_run_or_none(run_id)
             if terminal is not None:
                 return terminal
-            safe_error = self._redact_secrets(exc)
-            timeline.append(self._timeline("model.request.failed", safe_error))
+            provider_blocker = (
+                _desktop_provider_required_failure(timeline)
+                if (
+                    direct_daily_desktop_intent
+                    and not default_profile_id
+                    and _is_missing_chat_profile_error(exc)
+                )
+                else {}
+            )
+            safe_error = str(
+                provider_blocker.get("summary") or self._redact_secrets(exc)
+            )
+            failure_event = (
+                "agent.desktop.permission_recovery"
+                if provider_blocker
+                else "model.request.failed"
+            )
+            timeline.append(
+                self._timeline(
+                    failure_event,
+                    safe_error,
+                    **(
+                        {
+                            "status": "blocked",
+                            "recovery_actions": provider_blocker["recovery_actions"],
+                            "blocking_conditions": provider_blocker[
+                                "blocking_conditions"
+                            ],
+                        }
+                        if provider_blocker
+                        else {}
+                    ),
+                )
+            )
             self._update_run(
                 run_id,
                 status="failed",
@@ -250,11 +282,19 @@ class MainChatModelLoopRunner:
                 artifacts=artifacts,
                 pending_approval=None,
             )
-            self._append_run_event(
-                run_id,
-                "model.request.failed",
-                self._task_model_events.model_request_failed_payload(safe_error),
+            event_payload = (
+                {
+                    "error": safe_error,
+                    "status": "blocked",
+                    "recovery_actions": provider_blocker["recovery_actions"],
+                    "blocking_conditions": provider_blocker["blocking_conditions"],
+                }
+                if provider_blocker
+                else self._task_model_events.model_request_failed_payload(safe_error)
             )
+            self._append_run_event(run_id, failure_event, event_payload)
+            if provider_blocker:
+                raise self._error_type(safe_error) from exc
             raise
         terminal = self._terminal_run_or_none(run_id)
         if terminal is not None:
@@ -360,3 +400,78 @@ def _latest_user_intent_text(messages: list[dict[str, Any]]) -> str:
         if content:
             return content
     return ""
+
+
+_DESKTOP_PROVIDER_BLOCKING_CONDITIONS = {
+    "desktop_backend_not_release_ready",
+    "desktop_execution_provider_adapter_unavailable",
+    "desktop_execution_provider_unavailable",
+    "desktop_provider_authentication_required",
+    "desktop_provider_missing_required_tools",
+    "loopback_desktop_backend",
+    "real_virtual_desktop_backend_required",
+    "sandbox_desktop_provider_required",
+    "sandbox_keyboard_mouse_provider_required",
+}
+
+
+def _desktop_provider_required_failure(
+    timeline: list[dict[str, Any]],
+) -> dict[str, Any]:
+    for event in reversed(timeline):
+        if str(event.get("event") or "").strip() != "agent.tool.skipped":
+            continue
+        result = event.get("result") if isinstance(event.get("result"), dict) else {}
+        if str(result.get("error") or "").strip() != "desktop_execution_policy_blocked":
+            continue
+        blockers = sorted(
+            {
+                str(value or "").strip()
+                for value in result.get("blocking_conditions") or []
+                if str(value or "").strip() in _DESKTOP_PROVIDER_BLOCKING_CONDITIONS
+            }
+        )
+        if not blockers:
+            continue
+        recovery_actions = [
+            dict(action)
+            for action in result.get("recovery_actions") or []
+            if isinstance(action, dict)
+        ]
+        if not recovery_actions:
+            recovery_actions = [
+                {
+                    "tool": "desktop.provider_session.start",
+                    "label": "Start isolated desktop provider",
+                    "input": {"diagnostic_route": "/yachiyo/studio/tools"},
+                    "planning_reason": "desktop_provider_session_recovery",
+                    "permission_target": "isolated_desktop_provider",
+                    "risk_level": "medium",
+                    "approval_required": True,
+                    "approval_status": "pending",
+                }
+            ]
+        real_provider_required = bool(
+            {"loopback_desktop_backend", "real_virtual_desktop_backend_required"}
+            .intersection(blockers)
+        )
+        return {
+            "blocking_conditions": blockers,
+            "recovery_actions": recovery_actions,
+            "summary": (
+                "桌面任务需要真实的隔离桌面 Provider；当前开发 Provider 不能执行此前台操作。"
+                "请在 Agent Studio 配置 Provider 后重试，或选择受监督执行。"
+                if real_provider_required
+                else "桌面任务需要隔离桌面 Provider，当前环境尚未就绪。"
+                "请在 Agent Studio 配置 Provider 后重试，或选择受监督执行。"
+            ),
+        }
+    return {}
+
+
+def _is_missing_chat_profile_error(error: Exception) -> bool:
+    detail = str(error or "").strip()
+    return bool(
+        "缺少可运行的 Chat Profile" in detail
+        or detail == "native_agent_not_ready:chat_model_profile_required"
+    )

@@ -433,6 +433,161 @@ def test_main_chat_model_loop_runner_projects_approval_required_without_bypassin
     assert pending["runtime_execution_metadata"]["desktop_execution_policy"]["mode"] == "preview_input"
 
 
+def test_main_chat_model_loop_runner_reports_provider_blocker_without_chat_profile() -> None:
+    runner, state = _runner()
+    runner._default_profile_id = lambda: ""
+    runner._compile_agent_runtime = lambda _agent: {
+        "tool_policy": {"allowed_tools": ["app.focus"]},
+        "workspace_policy": {"default_workdir": "/tmp/project"},
+    }
+
+    def fail_after_provider_block(
+        _agent: dict[str, Any],
+        _context: str,
+        _broker: dict[str, Any],
+        timeline: list[dict[str, Any]],
+        _artifacts: list[dict[str, Any]],
+        **_kwargs: Any,
+    ) -> str:
+        timeline.append(
+            _timeline(
+                "agent.tool.skipped",
+                "app.focus",
+                result={
+                    "ok": False,
+                    "error": "desktop_execution_policy_blocked",
+                    "blocking_conditions": [
+                        "loopback_desktop_backend",
+                        "real_virtual_desktop_backend_required",
+                    ],
+                },
+            )
+        )
+        raise agent_runtime.AgentRuntimeError(
+            "Agent 缺少可运行的 Chat Profile；请在 Agent Studio 为该岗位选择已测试的文本模型。"
+        )
+
+    runner._continue_custom_api_agent = fail_after_provider_block
+    envelope = {
+        "requests": [
+            {
+                "request_id": "focus-browser",
+                "tool_name": "app.focus",
+                "input": {"app_name": "Google Chrome"},
+            }
+        ]
+    }
+
+    with pytest.raises(agent_runtime.AgentRuntimeError, match="隔离桌面 Provider"):
+        runner.execute(
+            "run-1",
+            [{"role": "user", "content": "打开 Chrome 后退一下"}],
+            runtime_execution_envelope=envelope,
+        )
+
+    assert state["updates"][-1]["status"] == "failed"
+    assert "Chat Profile" not in state["updates"][-1]["result"]
+    event_type, event_payload = state["events"][-1]
+    assert event_type == "agent.desktop.permission_recovery"
+    assert event_payload["error"] == state["updates"][-1]["result"]
+    assert event_payload["status"] == "blocked"
+    assert event_payload["blocking_conditions"] == [
+        "loopback_desktop_backend",
+        "real_virtual_desktop_backend_required",
+    ]
+    assert event_payload["recovery_actions"] == [
+        {
+            "tool": "desktop.provider_session.start",
+            "label": "Start isolated desktop provider",
+            "input": {"diagnostic_route": "/yachiyo/studio/tools"},
+            "planning_reason": "desktop_provider_session_recovery",
+            "permission_target": "isolated_desktop_provider",
+            "risk_level": "medium",
+            "approval_required": True,
+            "approval_status": "pending",
+        }
+    ]
+
+
+def test_main_chat_model_loop_runner_preserves_unrelated_error_after_provider_block() -> None:
+    runner, state = _runner()
+    runner._default_profile_id = lambda: ""
+    runner._compile_agent_runtime = lambda _agent: {
+        "tool_policy": {"allowed_tools": ["app.focus"]},
+        "workspace_policy": {"default_workdir": "/tmp/project"},
+    }
+
+    def fail_with_unrelated_error(
+        _agent: dict[str, Any],
+        _context: str,
+        _broker: dict[str, Any],
+        timeline: list[dict[str, Any]],
+        _artifacts: list[dict[str, Any]],
+        **_kwargs: Any,
+    ) -> str:
+        timeline.append(
+            _timeline(
+                "agent.tool.skipped",
+                "app.focus",
+                result={
+                    "error": "desktop_execution_policy_blocked",
+                    "blocking_conditions": ["sandbox_desktop_provider_required"],
+                },
+            )
+        )
+        raise agent_runtime.AgentRuntimeError("planner payload malformed")
+
+    runner._continue_custom_api_agent = fail_with_unrelated_error
+
+    with pytest.raises(agent_runtime.AgentRuntimeError, match="planner payload malformed"):
+        runner.execute(
+            "run-1",
+            [{"role": "user", "content": "打开 Chrome 后退一下"}],
+            runtime_execution_envelope={
+                "requests": [
+                    {
+                        "request_id": "focus-browser",
+                        "tool_name": "app.focus",
+                        "input": {"app_name": "Google Chrome"},
+                    }
+                ]
+            },
+        )
+
+    assert state["updates"][-1]["result"] == "planner payload malformed"
+    assert state["events"][-1][0] == "model.request.failed"
+
+
+def test_main_chat_model_loop_runner_forwards_provider_recovery_actions() -> None:
+    action = {
+        "tool": "desktop.provider_session.start",
+        "label": "Configure release provider",
+        "input": {"provider_id": "provider-1"},
+        "permission_target": "isolated_desktop_provider",
+        "risk_level": "medium",
+        "approval_required": True,
+        "deferred_continuation": [
+            {"tool": "app.focus", "input": {"app_name": "Google Chrome"}}
+        ],
+    }
+    failure = main_chat_model_loop._desktop_provider_required_failure(
+        [
+            _timeline(
+                "agent.tool.skipped",
+                "app.focus",
+                result={
+                    "error": "desktop_execution_policy_blocked",
+                    "blocking_conditions": ["sandbox_desktop_provider_required"],
+                    "recovery_actions": [action],
+                },
+            )
+        ]
+    )
+
+    assert failure["recovery_actions"] == [action]
+    assert failure["recovery_actions"][0] is not action
+
+
 def test_native_runtime_installs_main_chat_model_loop_runner(tmp_path) -> None:
     service = AgentRuntimeService(
         db_path=tmp_path / "agent-runtime.db",
