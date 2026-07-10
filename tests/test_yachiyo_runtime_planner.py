@@ -158,13 +158,17 @@ def test_planner_enriched_chat_request_keeps_partial_blocked_desktop_requests(
         request["tool"]: request["desktop_execution_route"]
         for request in enriched["direct_tool_requests"]
     }
+    blocked_routes = {
+        request["tool"]: request["desktop_execution_route"]
+        for request in enriched["blocked_direct_tool_requests"]
+    }
     blocked_tools = [
         request["tool"] for request in enriched["blocked_direct_tool_requests"]
     ]
     assert direct_routes["desktop.list_apps"]["selected_provider_kind"] == (
         "local_desktop"
     )
-    assert direct_routes["media.music_app_open_and_play"]["selected_provider_kind"] == (
+    assert blocked_routes["media.music_app_open_and_play"]["selected_provider_kind"] == (
         "local_desktop"
     )
     assert "desktop.safe_type_text" in blocked_tools
@@ -2558,6 +2562,13 @@ def test_runtime_planner_timeline_preview_includes_created_plan_event() -> None:
         "agent.plan.step",
         "agent.plan.step",
         "agent.plan.step",
+        "agent.task.workspace_item.updated",
+        "agent.task.workspace_item.updated",
+        "agent.task.workspace_item.updated",
+        "agent.task.workspace_item.updated",
+        "agent.task.workspace_item.updated",
+        "agent.task.workspace_item.updated",
+        "agent.task.workspace_item.updated",
         "agent.task.todo.updated",
         "agent.task.todo.updated",
         "agent.task.todo.updated",
@@ -2576,7 +2587,11 @@ def test_runtime_planner_timeline_preview_includes_created_plan_event() -> None:
     assert task_core_event["payload"]["core_id"] == decision.plan.task_core.core_id
     assert task_core_event["payload"]["todo_count"] == 3
     assert task_core_event["payload"]["checkpoint_count"] == 4
-    todo_event = decision.plan.timeline_preview[6]
+    todo_event = next(
+        event
+        for event in decision.plan.timeline_preview
+        if event["event_type"] == "agent.task.todo.updated"
+    )
     assert todo_event["payload"]["todo_id"] == (
         decision.plan.task_core.todos[0].todo_id
     )
@@ -8747,6 +8762,7 @@ def test_runtime_planner_inspects_app_before_app_scoped_ui_operation() -> None:
         "verify-desktop-result",
     ]
     assert _step_by_id(current_app_find_then_click, "read-foreground-ui").input_preview == {
+        "target": "导出",
         "role_filter": "button",
         "limit": 80,
     }
@@ -12710,6 +12726,8 @@ def test_runtime_planner_defers_observed_type_submit_until_followup() -> None:
         "open-or-focus-app",
         "focus-opened-app",
         "operate-foreground-ui",
+        "operate-foreground-ui-followup-return",
+        "verify-desktop-result",
     ]
     operation = _step_by_id(decision, "operate-foreground-ui")
     assert operation.action == "observe_ui_target"
@@ -16345,6 +16363,33 @@ def test_runtime_planner_routes_current_window_observation_to_active_window() ->
             }
         ]
 
+    app_scoped_tools = [
+        "desktop.list_apps",
+        "app.open",
+        "app.focus",
+        "desktop.active_window",
+    ]
+    for prompt, app_name, execution_app_name in (
+        ("Slack 看看当前窗口", "Slack", "Slack"),
+        ("打开 Slack 看看当前窗口", "Slack", "Slack"),
+        ("打开 Chrome 看当前窗口", "Chrome", "Google Chrome"),
+    ):
+        decision = RuntimePlanner().decision(prompt, allowed_tools=app_scoped_tools)
+        assert decision.selected_intent.inputs["app_name_hint"] == app_name
+        assert [step.tool_name for step in decision.plan.tool_plan.steps] == [
+            "desktop.list_apps",
+            "app.open",
+            "desktop.active_window",
+        ]
+        requests = planner_direct_tool_requests(prompt, app_scoped_tools)
+        assert [request["tool"] for request in requests] == [
+            "desktop.list_apps",
+            "app.open",
+            "desktop.active_window",
+        ]
+        assert requests[1]["input"] == {"app_name": execution_app_name}
+        assert all(step.tool_name for step in decision.plan.tool_plan.steps)
+
     assert planner_direct_tool_requests("显示当前窗口列表", allowed_tools) == [
         {
             "protocol": "json_fallback",
@@ -16686,6 +16731,7 @@ def test_runtime_planner_observes_current_ui_before_followup_click() -> None:
         "verify-desktop-result",
     ]
     assert _step_by_id(decision, "read-foreground-ui").input_preview == {
+        "target": "保存",
         "limit": 80,
         "role_filter": "button",
     }
@@ -17241,7 +17287,7 @@ def test_runtime_planner_does_not_treat_current_window_as_app_for_foreground_inp
     assert [step.step_id for step in decision.plan.tool_plan.steps] == [
         "discover-desktop-state",
         "operate-foreground-ui",
-        "submit-foreground-ui",
+        "operate-foreground-ui-followup-return",
         "verify-desktop-result",
     ]
     assert _step_by_id(decision, "discover-desktop-state").tool_name == "desktop.running_apps"
@@ -17735,7 +17781,10 @@ def test_runtime_planner_extracts_leading_app_for_ui_operations() -> None:
         "role_filter": "text",
         "limit": 80,
     }
-    assert _step_by_id(type_decision, "submit-foreground-ui").approval_required is True
+    assert _step_by_id(
+        type_decision,
+        "operate-foreground-ui-followup-return",
+    ).approval_required is True
 
     for app_type_decision in (focus_type_decision, in_type_decision):
         assert app_type_decision.selected_intent.inputs["app_name_hint"] == "Slack"
@@ -21127,17 +21176,17 @@ def test_runtime_planner_models_explicit_submit_after_foreground_input() -> None
     assert [step.step_id for step in decision.plan.tool_plan.steps] == [
         "discover-desktop-state",
         "operate-foreground-ui",
-        "submit-foreground-ui",
+        "operate-foreground-ui-followup-return",
         "verify-desktop-result",
     ]
-    submit = _step_by_id(decision, "submit-foreground-ui")
+    submit = _step_by_id(decision, "operate-foreground-ui-followup-return")
     assert submit.tool_name == "desktop.submit_foreground"
     assert submit.input_preview == {"action": "confirm"}
     assert submit.risk_level == "high"
     assert submit.approval_required is True
     assert submit.depends_on == ["operate-foreground-ui"]
     assert _step_by_id(decision, "verify-desktop-result").depends_on == [
-        "submit-foreground-ui"
+        "operate-foreground-ui-followup-return"
     ]
 
 
@@ -21505,7 +21554,7 @@ def test_runtime_planner_prefers_ui_readback_after_foreground_operation() -> Non
     assert verify.tool_name == "desktop.ui_elements"
     assert verify.action == "read_ui"
     assert verify.input_preview == {"app_name": "PixelForge", "role_filter": "text", "limit": 80}
-    assert verify.depends_on == ["submit-foreground-ui"]
+    assert verify.depends_on == ["operate-foreground-ui-followup-return"]
     assert "Read foreground UI" in verify.reason
 
 
@@ -28078,6 +28127,25 @@ def test_planner_desktop_tool_requests_maps_explicit_discovery_actions() -> None
             "planning_reason": "planner_desktop_operation",
         }
     ]
+    assert planner_direct_tool_requests("installed apps", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        }
+    ]
+    for prompt in ("看看正在运行的应用", "show running apps"):
+        assert planner_direct_tool_requests(prompt, allowed_tools) == [
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.running_apps",
+                "input": {},
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+            }
+        ]
     assert planner_tool_requests("帮我找一下机器上有没有 PixelForge", allowed_tools) == [
         {
             "protocol": "json_fallback",
@@ -31266,7 +31334,7 @@ def test_planner_tool_requests_prefetches_text_data_source_for_analysis() -> Non
     ]
 
 
-def test_runtime_execution_skips_prefetch_read_for_builtin_data_analysis() -> None:
+def test_runtime_execution_keeps_prefetch_read_for_builtin_data_analysis() -> None:
     decision = RuntimePlanner().decision(
         "请分析 data/sales.csv 并输出报告",
         allowed_tools=["workspace.read", "data.analyze", "artifact.write"],
@@ -31287,14 +31355,21 @@ def test_runtime_execution_skips_prefetch_read_for_builtin_data_analysis() -> No
         "source_kind": "csv",
     }
     assert envelope is not None
-    assert [request.tool_name for request in envelope.requests] == ["data.analyze"]
+    assert [request.tool_name for request in envelope.requests] == [
+        "workspace.read",
+        "data.analyze",
+    ]
 
     projected_requests = runtime_execution_requests_from_envelope_payload(
         envelope.model_dump(mode="json"),
         allowed_tools=["workspace.read", "data.analyze", "artifact.write"],
     )
-    assert [request["tool"] for request in projected_requests] == ["data.analyze"]
+    assert [request["tool"] for request in projected_requests] == [
+        "workspace.read",
+        "data.analyze",
+    ]
     assert projected_requests[0]["input"]["source_kind"] == "csv"
+    assert projected_requests[1]["input"]["source_kind"] == "csv"
 
 
 def test_planner_tool_requests_prefetches_context_data_source_for_analysis() -> None:

@@ -103,7 +103,23 @@ def planner_execution_tool_requests(
     normalized_requests = _drop_redundant_execution_verification_requests(
         normalized_requests
     )
-    return runtime_execution_verified_tool_requests(normalized_requests, allowed)
+    return _execution_prefix_through_model_followup(
+        runtime_execution_verified_tool_requests(normalized_requests, allowed)
+    )
+
+
+def _execution_prefix_through_model_followup(
+    requests: Iterable[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    executable: list[dict[str, Any]] = []
+    for request in requests:
+        if not isinstance(request, Mapping):
+            continue
+        normalized = dict(request)
+        executable.append(normalized)
+        if normalized.get("continue_to_model"):
+            break
+    return executable
 
 
 def planner_full_plan_execution_tool_requests(

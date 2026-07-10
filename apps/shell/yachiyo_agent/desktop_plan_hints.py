@@ -595,6 +595,14 @@ def _looks_like_current_window_observation(value: str, lowered: str) -> bool:
     return bool(
         re.search(
             r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:打开|启动|切到|聚焦)?\s*[^。！？!?，,]{1,40}?\s*"
+            r"(?:查看|看看|看一下|看下|看|显示|读取)\s*"
+            r"(?:当前|现在|前台|这个|该)\s*(?:窗口|window)$",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
             r"(?:查看|看看|看一下|看下|显示|读取)?\s*"
             r"(?:当前|现在|前台|这个|该)\s*(?:窗口|window)"
             r"\s*(?:是什么|是啥|哪个|什么|标题|名称|名字)?"

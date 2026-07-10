@@ -657,9 +657,16 @@ class TaskIntentRouter:
             str((desktop_discovery or {}).get("action") or "").strip()
             == "read_active_window"
             and ui_inspection is not None
-            and _desktop_window_text_context_hint(text)
         ):
-            desktop_discovery = {}
+            if _desktop_window_text_context_hint(text):
+                desktop_discovery = {}
+            else:
+                ui_inspection = None
+        if str((desktop_discovery or {}).get("action") or "").strip() in {
+            "read_active_window",
+            "read_running_apps",
+        } or _looks_like_installed_apps_request(text, text.lower()):
+            app_management = None
         concrete_app_hint = explicit_capability_app_name or _app_name_hint(text)
         if (
             desktop_discovery is not None
@@ -1522,18 +1529,22 @@ class TaskIntentRouter:
             return _empty_intent("system_control", text)
         if _desktop_ui_field_edit_hint(text):
             return _empty_intent("system_control", text)
-        explicit_known_app = _explicit_known_app_action_target_hint(text)
-        if explicit_known_app and not _is_system_settings_app_label(explicit_known_app):
-            return _empty_intent("system_control", text)
-        app_hint = _app_name_hint(text)
-        app_search_hint = _app_search_hint(text, app_hint)
-        app_hint = app_hint or str(app_search_hint.get("app_name") or "").strip()
-        if app_hint and _app_search_hint(text, app_hint):
-            return _empty_intent("system_control", text)
         hint = system_control_hint(text)
         if not hint:
             return _empty_intent("system_control", text)
+        hint_kind = str(hint.get("kind") or "").strip()
         settings_target = str((hint.get("payload") or {}).get("target") or "").strip()
+        if hint_kind != "settings_open" or settings_target in {"", "系统设置"}:
+            explicit_known_app = _explicit_known_app_action_target_hint(text)
+            if explicit_known_app and not _is_system_settings_app_label(
+                explicit_known_app
+            ):
+                return _empty_intent("system_control", text)
+            app_hint = _app_name_hint(text)
+            app_search_hint = _app_search_hint(text, app_hint)
+            app_hint = app_hint or str(app_search_hint.get("app_name") or "").strip()
+            if app_hint and _app_search_hint(text, app_hint):
+                return _empty_intent("system_control", text)
         if _app_preferences_hint(text) and settings_target in {"", "系统设置"}:
             return _empty_intent("system_control", text)
         return TaskIntentSnapshot(
@@ -1555,6 +1566,12 @@ class TaskIntentRouter:
         text: str,
         metadata: Mapping[str, Any],
     ) -> TaskIntentSnapshot:
+        clean_text = _clean_prompt(text)
+        if _looks_like_running_apps_request(
+            clean_text,
+            clean_text.lower(),
+        ) or _looks_like_installed_apps_request(clean_text, clean_text.lower()):
+            return _empty_intent("web_research", text)
         if _looks_like_archive_extract_request(text):
             return _empty_intent("web_research", text)
         if _explicit_hotkey_request(text):
@@ -3371,6 +3388,14 @@ class RuntimePlanner:
         desktop_discovery = intent.inputs.get("desktop_discovery_hint")
         if not isinstance(desktop_discovery, Mapping):
             desktop_discovery = _desktop_discovery_hint(intent.user_goal)
+        if str((desktop_discovery or {}).get("action") or "").strip() in {
+            "read_active_window",
+            "read_running_apps",
+        } or _looks_like_installed_apps_request(
+            intent.user_goal,
+            intent.user_goal.lower(),
+        ):
+            app_management = None
         control_presence_app_name = (
             str(
                 (
@@ -3515,7 +3540,9 @@ class RuntimePlanner:
             app_name = ""
         if foreground_app_windows_shortcut:
             app_name = ""
-        if desktop_discovery:
+        if desktop_discovery and (
+            app_capability or _is_generic_browser_app_label(app_name)
+        ):
             app_name = ""
         app_management_prepare_mode = str(
             intent.inputs.get("app_management_prepare_mode")
@@ -5739,14 +5766,22 @@ class RuntimePlanner:
             and operation_step is not None
             and not operation_observes_target
         ):
+            submit_tool = _first_allowed(
+                ("desktop.submit_foreground", "desktop.hotkey"),
+                allowed,
+            )
             steps.append(
                 _step(
                     intent,
                     "submit-foreground-ui",
                     "Submit foreground UI",
                     "desktop.ui_operation",
-                    _first_allowed(("desktop.submit_foreground",), allowed),
-                    input_preview={"action": submit_action},
+                    submit_tool,
+                    input_preview=(
+                        {"key": "return", "modifiers": []}
+                        if submit_tool == "desktop.hotkey"
+                        else {"action": submit_action}
+                    ),
                     risk_level="high",
                     approval_required=True,
                     depends_on=["operate-foreground-ui"],
@@ -20588,15 +20623,32 @@ def _explicit_app_action_target_hint(text: str) -> str:
 
 def _explicit_known_app_action_target_hint(text: str) -> str:
     app = _explicit_app_action_target_hint(text)
-    if app and is_legacy_app_name_hint(app):
-        return _canonical_app_name_hint(app)
+    if (
+        app
+        and is_legacy_app_name_hint(app)
+        and not _is_generic_browser_app_label(app)
+    ):
+        return app
     return ""
 
 
 def _app_name_hint(text: str) -> str:
+    system_hint = system_control_hint(text)
+    if str(system_hint.get("kind") or "").strip() == "settings_open":
+        settings_target = str(
+            (system_hint.get("payload") or {}).get("target") or ""
+        ).strip()
+        if settings_target not in {"", "系统设置"}:
+            return ""
+    clean_text = _clean_prompt(text)
+    if _looks_like_running_apps_request(clean_text, clean_text.lower()):
+        return ""
+    app_scoped_current_window = _app_scoped_current_window_app_name_hint(text)
+    if app_scoped_current_window:
+        return app_scoped_current_window
     explicit_generic_named_app = _explicit_generic_named_app_hint(text)
     if explicit_generic_named_app:
-        return _canonical_app_name_hint(explicit_generic_named_app)
+        return _clean_app_name_hint(explicit_generic_named_app)
     explicit_known_app = _explicit_known_app_action_target_hint(text)
     if explicit_known_app:
         return explicit_known_app
@@ -20622,8 +20674,8 @@ def _app_name_hint(text: str) -> str:
     if _foreground_app_search_hint(text):
         return ""
     explicit_app = _explicit_app_action_target_hint(text)
-    if explicit_app:
-        return _canonical_app_name_hint(explicit_app)
+    if explicit_app and not _is_generic_browser_app_label(explicit_app):
+        return explicit_app
     app_click_scope = _app_first_click_scope_hint(text)
     if app_click_scope:
         return str(app_click_scope.get("app_name") or "").strip()
@@ -20711,7 +20763,7 @@ def _app_name_hint(text: str) -> str:
             and not _invalid_app_scoped_followup_app(app)
             and not _is_generic_foreground_app_label(app)
         ):
-            return _canonical_app_name_hint(app)
+            return app
     return ""
 
 
@@ -20825,7 +20877,7 @@ def _app_first_click_scope_hint(text: str) -> dict[str, Any]:
         )
         if _is_generic_foreground_app_label(raw_app):
             continue
-        app_name = _canonical_app_name_hint(raw_app)
+        app_name = _clean_app_name_hint(raw_app)
         if not app_name or _is_generic_foreground_app_label(app_name):
             continue
         raw_target = (
@@ -21033,6 +21085,14 @@ def _clean_app_name_hint(value: str) -> str:
     folder_aliases = {"folder", "folders", "afolder", "directory", "directories", "文件夹", "目录"}
     if compact_app_name_hint(raw_app) in folder_aliases:
         return "Finder"
+    polite_legacy_app = re.sub(
+        r"\s*(?:这个|那个|该|好|可以|行)$",
+        "",
+        raw_app,
+        flags=re.IGNORECASE,
+    ).strip()
+    if polite_legacy_app != raw_app and is_legacy_app_name_hint(polite_legacy_app):
+        return polite_legacy_app.strip(" .，,。")
     if is_legacy_app_name_hint(raw_app):
         return raw_app.strip(" .，,。")
     scoped_raw_app = re.sub(
@@ -21186,6 +21246,7 @@ def _clean_app_name_hint(value: str) -> str:
     app = re.sub(r"\s*(?:在|里|里面|中|上|内)$", "", app).strip(" .，,。")
     app = re.sub(r"\s+(?:app|application)$", "", app, flags=re.IGNORECASE).strip(" .，,。")
     app = re.sub(r"(?:应用(?:程序)?|软件)$", "", app).strip(" .，,。")
+    app = re.sub(r"\s*(?:这个|那个|该)$", "", app).strip(" .，,。")
     app = re.sub(r"^(?:一下|下|这个|那个)\s*", "", app).strip()
     generic = {
         "app",
@@ -21319,7 +21380,13 @@ def _browser_scoped_safe_shortcut_app_candidate(
     for pattern in patterns:
         match = re.search(pattern, value, flags=re.IGNORECASE)
         if match:
-            return _canonical_app_name_hint(_clean_app_name_hint(match.group("app")))
+            app_name = re.sub(
+                r"(?:打开|启动|开启|开|切到|聚焦)(?:起来)?$",
+                "",
+                _clean_app_name_hint(match.group("app")),
+                flags=re.IGNORECASE,
+            ).strip()
+            return _canonical_app_name_hint(app_name)
     return ""
 
 
@@ -27479,17 +27546,42 @@ def _desktop_window_text_context_hint(text: str) -> bool:
     return bool(
         re.search(
             r"(?:读取|查看|看看|看下|读|提取|识别|列出).{0,8}"
-            r"(?:当前|现在|这个|前台)?窗口.{0,6}(?:内容|文本|文字)?",
+            r"(?:当前|现在|这个|前台)?窗口.{0,6}(?:内容|文本|文字)",
             value,
             flags=re.IGNORECASE,
         )
         or re.search(
             r"\b(?:read|extract|show|list|inspect)\s+"
-            r"(?:the\s+)?(?:current|active|foreground|this)\s+window\b",
+            r"(?:the\s+)?(?:current|active|foreground|this)\s+window\s+"
+            r"(?:content|text)\b",
             value,
             flags=re.IGNORECASE,
         )
     )
+
+
+def _app_scoped_current_window_app_name_hint(text: str) -> str:
+    value = _clean_prompt(text)
+    patterns = (
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:打开|启动|切到|聚焦)?\s*(?P<app>[^。！？!?，,]{1,40}?)\s*"
+        r"(?:查看|看看|看一下|看下|看|显示|读取)\s*"
+        r"(?:当前|现在|前台|这个|该)\s*窗口$",
+        r"^(?:please\s+)?(?:open|launch|focus|switch\s+to)?\s*"
+        r"(?P<app_en>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s+"
+        r"(?:show|read|inspect|check|look\s+at)\s+"
+        r"(?:the\s+)?(?:current|active|foreground|this)\s+window$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        app_name = _clean_app_name_hint(
+            match.groupdict().get("app") or match.groupdict().get("app_en") or ""
+        )
+        if app_name and not _is_generic_foreground_app_label(app_name):
+            return app_name
+    return ""
 
 
 def _dynamic_context_browser_app_name_hint(text: str) -> str:
@@ -30778,6 +30870,7 @@ def _looks_like_running_apps_request(value: str, lowered: str) -> bool:
         or re.search(r"(?:现在|当前).{0,8}(?:哪些|什么).{0,8}(?:应用|app|软件|程序).{0,8}(?:开着|打开|运行|在运行)", value, flags=re.IGNORECASE)
         or re.search(r"(?:列|列出|列一下|看看|查看).{0,8}(?:打开|运行|正在运行).{0,8}(?:应用|app|软件|程序)", value, flags=re.IGNORECASE)
         or re.search(r"\b(?:what|which|list|show)\s+(?:apps?|applications?)\s+(?:are\s+)?(?:running|open)\b", lowered)
+        or re.search(r"\b(?:list|show)\s+(?:running|open)\s+(?:apps?|applications?)\b", lowered)
     )
 
 
@@ -30789,6 +30882,7 @@ def _looks_like_installed_apps_request(value: str, lowered: str) -> bool:
         or re.search(r"\bshow\s+installed\s+apps?\b", lowered)
         or re.search(r"\b(?:list|show)\s+all\s+(?:apps?|applications?)\b", lowered)
         or re.search(r"\blist\s+(?:installed|available)\s+(?:apps?|applications?)\b", lowered)
+        or re.fullmatch(r"(?:installed|available)\s+(?:apps?|applications?)", lowered.strip())
     )
 
 

@@ -684,19 +684,25 @@ def _non_executable_runtime_step_ids(
 ) -> set[str]:
     blocked: set[str] = set()
     mapped_requests = [request for request in requests if isinstance(request, Mapping)]
+    requests_by_step: dict[str, list[Mapping[str, Any]]] = {}
     for request in mapped_requests:
         step_id = _text(request.get("step_id") or request.get("planner_step_id"))
-        if not step_id:
+        if step_id:
+            requests_by_step.setdefault(step_id, []).append(request)
+
+    for step_id, step_requests in requests_by_step.items():
+        if any(_request_satisfies_runtime_dependency(request) for request in step_requests):
             continue
-        projected = _tool_request_from_execution_request(request, envelope=envelope)
-        tool_name = _text(projected.get("tool"))
-        if (
-            _request_status_is_non_executable(request)
-            or _request_desktop_route_is_non_executable(request)
-            or not tool_name
-            or (allowed_tools and tool_name not in allowed_tools)
+        if any(
+            _request_is_currently_executable(
+                request,
+                envelope=envelope,
+                allowed_tools=allowed_tools,
+            )
+            for request in step_requests
         ):
-            blocked.add(step_id)
+            continue
+        blocked.add(step_id)
 
     changed = True
     while changed:
@@ -709,6 +715,26 @@ def _non_executable_runtime_step_ids(
                 blocked.add(step_id)
                 changed = True
     return blocked
+
+
+def _request_satisfies_runtime_dependency(request: Mapping[str, Any]) -> bool:
+    return str(request.get("status") or "").strip() in {"completed", "recovered"}
+
+
+def _request_is_currently_executable(
+    request: Mapping[str, Any],
+    *,
+    envelope: Mapping[str, Any],
+    allowed_tools: set[str],
+) -> bool:
+    projected = _tool_request_from_execution_request(request, envelope=envelope)
+    tool_name = _text(projected.get("tool"))
+    return bool(
+        not _request_status_is_non_executable(request)
+        and not _request_desktop_route_is_non_executable(request)
+        and tool_name
+        and (not allowed_tools or tool_name in allowed_tools)
+    )
 
 
 def _request_depends_on_non_executable_step(
@@ -958,6 +984,10 @@ def _execution_request_snapshot(
         step=step,
         runtime_metadata=runtime_metadata,
     )
+    approval_required = bool(
+        request.get("approval_required")
+        or (step.approval_required if step is not None else False)
+    )
     desktop_contract = _desktop_execution_request_contract(
         tool_name=tool_name,
         request_input=request_input,
@@ -1034,10 +1064,7 @@ def _execution_request_snapshot(
         protocol=str(request.get("protocol") or "json_fallback"),
         input=dict(request_input),
         planning_reason=str(request.get("planning_reason") or ""),
-        approval_required=bool(
-            request.get("approval_required")
-            or (step.approval_required if step is not None else False)
-        ),
+        approval_required=approval_required,
         risk_level=str(
             request.get("risk_level")
             or (step.risk_level if step is not None else "")
@@ -1065,9 +1092,17 @@ def _execution_request_snapshot(
         runtime_stage=runtime_metadata["runtime_stage"],
         runtime_role=runtime_metadata["runtime_role"],
         requires_observation=runtime_metadata["requires_observation"],
-        requires_post_action_verification=runtime_metadata[
-            "requires_post_action_verification"
-        ],
+        requires_post_action_verification=bool(
+            runtime_metadata["requires_post_action_verification"]
+            or (
+                approval_required
+                and getattr(
+                    checkpoint_policy,
+                    "requires_post_action_verification",
+                    False,
+                )
+            )
+        ),
         replan_triggers=replan_metadata["replan_triggers"],
         replan_signal_ids=replan_metadata["replan_signal_ids"],
         followup_target=_mapping(request.get("followup_target")),

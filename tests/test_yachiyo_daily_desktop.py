@@ -4378,8 +4378,8 @@ def test_daily_desktop_entrypoint_routes_screen_and_visible_ui_language_to_deskt
         ),
         (
             "read the current window",
-            "desktop.ui_elements",
-            {"role_filter": "text", "limit": 80},
+            "desktop.active_window",
+            {},
         ),
         (
             "点击可见的登录按钮",
