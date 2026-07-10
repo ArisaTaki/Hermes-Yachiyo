@@ -1370,6 +1370,7 @@ def test_ensure_isolated_provider_session_passes_manifest_to_auto_start(
     assert session["running"] is True
     assert session["started"] is True
     assert session["requires_real_virtual_desktop_backend"] is True
+    assert session["provider_manifest"] == "tmp/virtual-provider.manifest.json"
 
 
 def test_annotate_envelope_routes_isolated_preferred_app_open_through_running_provider() -> None:

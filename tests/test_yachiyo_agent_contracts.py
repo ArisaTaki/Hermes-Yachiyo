@@ -4233,6 +4233,7 @@ def test_agent_task_snapshot_projects_desktop_provider_session_recovery() -> Non
                         "running": False,
                         "started": False,
                         "provider_id": "local-isolated-desktop",
+                        "provider_manifest": "tmp/virtual-provider.manifest.json",
                         "reason": "isolated_provider_required",
                         "error": "provider launch failed",
                         "request_ids": ["request-click-export"],
@@ -4241,6 +4242,7 @@ def test_agent_task_snapshot_projects_desktop_provider_session_recovery() -> Non
                         "desktop_session_isolated": True,
                         "foreground_takeover_required": False,
                         "keyboard_mouse_capture_supported": True,
+                        "requires_real_virtual_desktop_backend": True,
                         "supported_tools": [
                             "app.focus_and_click_ui_element",
                             "desktop.ui_elements",
@@ -4302,6 +4304,12 @@ def test_agent_task_snapshot_projects_desktop_provider_session_recovery() -> Non
     assert recovery.recovery_actions[0].input["api_route"] == (
         "/yachiyo/studio/tools/desktop-provider/session/start"
     )
+    assert recovery.recovery_actions[0].input["provider_manifest"] == (
+        "tmp/virtual-provider.manifest.json"
+    )
+    assert recovery.recovery_actions[0].input[
+        "requires_real_virtual_desktop_backend"
+    ] is True
     assert recovery.recovery_actions[0].metadata["runtime_retry_source"] == (
         "desktop_provider_session"
     )
@@ -4335,6 +4343,9 @@ def test_agent_task_snapshot_projects_desktop_provider_session_recovery() -> Non
     ]
     assert session_metadata["desktop_session_isolated"] is True
     assert session_metadata["foreground_takeover_required"] is False
+    assert session_metadata["provider_manifest"] == (
+        "tmp/virtual-provider.manifest.json"
+    )
 
 
 def test_agent_task_snapshot_marks_recovered_runtime_request_after_recovery_success() -> None:

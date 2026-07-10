@@ -48,7 +48,9 @@ export type YachiyoStudioStartPlannerOrchestrationRequest = StartPlannerOrchestr
 export type YachiyoStudioDesktopProviderSessionRequest = {
   host?: string;
   port?: number;
+  provider_manifest?: string;
   provider_id?: string;
+  requires_real_virtual_desktop_backend?: boolean;
   tools?: string[];
 };
 

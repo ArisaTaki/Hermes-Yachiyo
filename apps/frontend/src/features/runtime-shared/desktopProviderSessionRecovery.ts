@@ -4,7 +4,9 @@ import type { DesktopProviderConformanceSnapshot } from './types';
 export type DesktopProviderSessionStartRequest = {
   host?: string;
   port?: number;
+  provider_manifest?: string;
   provider_id?: string;
+  requires_real_virtual_desktop_backend?: boolean;
   tools?: string[];
 };
 
@@ -18,6 +20,7 @@ export type DesktopProviderSessionSnapshot = {
   running?: boolean;
   started?: boolean;
   provider_id?: string;
+  provider_manifest?: string;
   tool_names?: string[];
   desktop_session_kind?: string;
   desktop_session_isolated?: boolean | null;
@@ -62,17 +65,44 @@ export function desktopProviderSessionStartRequestFromAction(
   const input = recordValue(action.input);
   const metadata = recordValue(action.metadata);
   const sandboxProvider = recordValue(action.sandbox_provider);
-  const providerId = stringValue(input.provider_id || metadata.provider_id || sandboxProvider.provider_id);
-  const host = stringValue(input.host || metadata.host || sandboxProvider.host);
-  const port = numberValue(input.port || metadata.port || sandboxProvider.port);
+  const providerSession = recordValue(
+    input.desktop_provider_session || metadata.desktop_provider_session,
+  );
+  const providerId = stringValue(
+    input.provider_id || metadata.provider_id || providerSession.provider_id || sandboxProvider.provider_id,
+  );
+  const providerManifest = stringValue(
+    input.provider_manifest
+      || input.provider_manifest_path
+      || metadata.provider_manifest
+      || metadata.provider_manifest_path
+      || providerSession.provider_manifest
+      || providerSession.provider_manifest_path
+      || sandboxProvider.provider_manifest
+      || sandboxProvider.provider_manifest_path,
+  );
+  const requiresRealBackend = booleanValue(
+    input.requires_real_virtual_desktop_backend,
+    metadata.requires_real_virtual_desktop_backend,
+    providerSession.requires_real_virtual_desktop_backend,
+    sandboxProvider.requires_real_virtual_desktop_backend,
+  );
+  const host = stringValue(input.host || metadata.host || providerSession.host || sandboxProvider.host);
+  const port = numberValue(input.port || metadata.port || providerSession.port || sandboxProvider.port);
   const tools = stringList(input.tools)
     .concat(stringList(input.tool_names))
     .concat(stringList(metadata.tools))
-    .concat(stringList(metadata.tool_names));
+    .concat(stringList(metadata.tool_names))
+    .concat(stringList(providerSession.tools))
+    .concat(stringList(providerSession.tool_names));
   return {
     ...(host ? { host } : {}),
     ...(port !== undefined ? { port } : {}),
     ...(providerId ? { provider_id: providerId } : {}),
+    ...(providerManifest ? { provider_manifest: providerManifest } : {}),
+    ...(requiresRealBackend !== undefined
+      ? { requires_real_virtual_desktop_backend: requiresRealBackend }
+      : {}),
     ...(tools.length ? { tools: Array.from(new Set(tools)) } : {}),
   };
 }
@@ -111,4 +141,16 @@ function numberValue(value: unknown): number | undefined {
   if (typeof value === 'number' && Number.isFinite(value)) return value;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function booleanValue(...values: unknown[]): boolean | undefined {
+  for (const value of values) {
+    if (typeof value === 'boolean') return value;
+    if (value === 1) return true;
+    if (value === 0) return false;
+    const text = stringValue(value).toLowerCase();
+    if (['1', 'true', 'yes', 'on'].includes(text)) return true;
+    if (['0', 'false', 'no', 'off'].includes(text)) return false;
+  }
+  return undefined;
 }

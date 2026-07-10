@@ -523,6 +523,8 @@ def ensure_isolated_desktop_provider_session_for_envelope(
         "reason": "isolated_provider_required" if targets else "",
         "source": "isolated_provider_session_manager",
     }
+    if provider_manifest:
+        base["provider_manifest"] = provider_manifest
     if not targets:
         return _session_not_needed_status(base, status)
     if bool(status.get("running")) and _session_status_supports_targets(

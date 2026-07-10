@@ -1948,6 +1948,9 @@ def _desktop_provider_session_recovery_snapshot(
         "diagnostic_route": "/yachiyo/studio/tools",
         "api_route": "/yachiyo/studio/tools/desktop-provider/session/start",
     }
+    provider_manifest = _first_text(session.get("provider_manifest"))
+    if provider_manifest:
+        action_input["provider_manifest"] = provider_manifest
     if session.get("requires_real_virtual_desktop_backend") is True:
         action_input["requires_real_virtual_desktop_backend"] = True
     session_payload = _desktop_provider_session_public_payload(session)
@@ -2228,6 +2231,7 @@ def _desktop_provider_session_public_payload(
         "needed",
         "auto_start",
         "provider_id",
+        "provider_manifest",
         "url",
         "reason",
         "request_ids",
