@@ -80,6 +80,41 @@ def test_model_output_text_carries_metadata_for_runtime_events() -> None:
     }
 
 
+def test_model_message_helpers_detect_image_input_parts() -> None:
+    assert model_messages.messages_include_image_input(
+        [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Inspect this image"},
+                    {"type": "image_url", "image_url": {"url": "data:image/png;base64,eA=="}},
+                ],
+            }
+        ]
+    )
+    assert model_messages.messages_include_image_input(
+        [{"role": "user", "content": [{"type": "input_image", "image_url": "image-1"}]}]
+    )
+    assert not model_messages.messages_include_image_input(
+        [{"role": "user", "content": "Inspect this image"}]
+    )
+
+
+def test_model_message_helpers_defer_system_generated_followup_contexts() -> None:
+    for marker in (
+        "[OHA 委派结果]",
+        "[Oha-Yachiyo 自动委派 Run 汇总]",
+        "[Oha-Yachiyo 群组上下文]",
+        "[Oha-Yachiyo 群组直接 Agent 汇总]",
+    ):
+        assert model_messages.messages_require_model_first(
+            [{"role": "user", "content": f"{marker}\nContinue the task"}]
+        )
+    assert not model_messages.messages_require_model_first(
+        [{"role": "user", "content": "Open Music"}]
+    )
+
+
 def test_model_message_helpers_coalesce_streaming_text_and_tool_calls() -> None:
     message = model_messages.coalesce_model_message([
         {"type": "response.output_text.delta", "delta": "Read "},

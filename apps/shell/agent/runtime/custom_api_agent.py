@@ -41,6 +41,7 @@ from apps.shell.agent.runtime.followup_content_snapshot import (
     followup_content_snapshots,
     latest_followup_content_snapshot,
 )
+from apps.shell.agent.runtime.model_messages import messages_require_model_first
 from apps.shell.agent.runtime.tool_execution import (
     _discovered_app_name_for_query,
     _discovered_app_resolution_evidence,
@@ -471,6 +472,11 @@ class RuntimeCustomApiAgentLoop:
                     timeline=timeline,
                     run_id=run_id,
                 )
+            elif messages_require_model_first(messages) or bool(
+                isinstance(runtime_execution_metadata, Mapping)
+                and runtime_execution_metadata.get("yachiyo_attachment_input")
+            ):
+                pass
             else:
                 (
                     runtime_planner_decision,
@@ -514,7 +520,10 @@ class RuntimeCustomApiAgentLoop:
                             tool_timeline_start=len(timeline),
                             run_id=run_id,
                         )
-                        if replan_payloads:
+                        if replan_payloads and _planner_replan_context_requested(
+                            default_messages=default_messages,
+                            runtime_execution_metadata=runtime_execution_metadata,
+                        ):
                             self._append_replan_followup_context(
                                 replan_payloads,
                                 allowed_tools=allowed_tools,
@@ -15066,6 +15075,24 @@ def _timeline_has_model_followup_context(
         str(event.get("event") or "").strip() == "agent.model.followup_context"
         for event in timeline[tool_timeline_start:]
         if isinstance(event, Mapping)
+    )
+
+
+def _planner_replan_context_requested(
+    *,
+    default_messages: bool,
+    runtime_execution_metadata: Mapping[str, Any] | None,
+) -> bool:
+    if default_messages:
+        return True
+    if not isinstance(runtime_execution_metadata, Mapping):
+        return False
+    return any(
+        bool(runtime_execution_metadata.get(key))
+        for key in (
+            "runtime_planner_entrypoint",
+            "yachiyo_runtime_planner",
+        )
     )
 
 

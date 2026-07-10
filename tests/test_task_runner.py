@@ -3,6 +3,7 @@ import base64
 import json
 import time
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -141,6 +142,15 @@ async def _wait_for(condition, *, timeout: float = 3.0):
     raise TimeoutError(f"condition not met; last={last!r}")
 
 
+def _task_run_with_status(
+    service: AgentRuntimeService,
+    task_id: str,
+    status: str,
+) -> dict | None:
+    run = service.get_run(service.get_task_run_link(task_id)["run_id"])
+    return run if run["status"] == status else None
+
+
 @pytest.mark.asyncio
 async def test_stop_awaits_in_progress_task_cancellation():
     runner = TaskRunner(AppState())
@@ -235,6 +245,23 @@ async def test_task_runner_executes_daily_desktop_intent_when_model_profile_miss
     session.attach_store(store, load_existing=False)
     open_calls: list[str] = []
 
+    def fake_list_apps(query: str = "", limit: Any = 200) -> dict:
+        return {
+            "ok": True,
+            "action": "desktop.list_apps",
+            "summary": f"Found Music for {query}",
+            "data": {
+                "query": query,
+                "apps": [{"name": "Music", "path": "/Applications/Music.app"}],
+                "best_match": {
+                    "name": "Music",
+                    "path": "/Applications/Music.app",
+                    "match_score": 100,
+                    "match_confidence": "high",
+                },
+            },
+        }
+
     def fake_app_open(app_name: str) -> dict:
         open_calls.append(app_name)
         return {
@@ -244,6 +271,28 @@ async def test_task_runner_executes_daily_desktop_intent_when_model_profile_miss
             "data": {
                 "app_name": app_name,
                 "launch_verified": True,
+            },
+        }
+
+    def fake_inspect_app(
+        app_name: str,
+        *,
+        open_if_needed: Any = True,
+        focus: Any = True,
+        role_filter: str = "",
+        limit: Any = 80,
+    ) -> dict:
+        return {
+            "ok": True,
+            "action": "desktop.inspect_app",
+            "summary": f"Verified {app_name}",
+            "data": {
+                "app_name": app_name,
+                "running": True,
+                "open_if_needed": open_if_needed,
+                "focus": focus,
+                "role_filter": role_filter,
+                "limit": limit,
             },
         }
 
@@ -257,7 +306,9 @@ async def test_task_runner_executes_daily_desktop_intent_when_model_profile_miss
         "apps.shell.agent_runtime.openai_compatible_chat_message",
         lambda *_args, **_kwargs: pytest.fail("daily desktop task should not call model"),
     )
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.list_apps", fake_list_apps)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.inspect_app", fake_inspect_app)
 
     daily_executor = NativeAgentExecutor(
         chat_session=session,
@@ -391,7 +442,7 @@ async def test_task_runner_main_chat_native_tool_approval_roundtrip(tmp_path, mo
     try:
         runner_task = asyncio.create_task(runner._execute_with_state(task.task_id))
         run = await _wait_for(
-            lambda: service.get_run(service.get_task_run_link(task.task_id)["run_id"])
+            lambda: _task_run_with_status(service, task.task_id, "approval_required")
         )
         assert run["status"] == "approval_required"
         assert state.get_task(task.task_id).status == TaskStatus.RUNNING
@@ -510,7 +561,9 @@ async def test_task_runner_main_chat_approval_timeout_clears_chat_and_activity_p
     runner_task: asyncio.Task | None = None
     try:
         runner_task = asyncio.create_task(runner._execute_with_state(task.task_id))
-        run = await _wait_for(lambda: service.get_run(service.get_task_run_link(task.task_id)["run_id"]))
+        run = await _wait_for(
+            lambda: _task_run_with_status(service, task.task_id, "approval_required")
+        )
         assert run["status"] == "approval_required"
 
         waiting_payload = api.get_messages()
@@ -570,7 +623,7 @@ async def test_task_runner_main_chat_auto_delegation_uses_native_runtime(tmp_pat
     state = AppState()
     task = state.create_task(
         task_type=TaskType.GENERAL,
-        description="请让 Research Agent 调研 Native 委派链路，然后给我结论",
+        description="请让 Research Agent 回应 Native 委派验证，然后给我结论",
         chat_session_id=session.session_id,
     )
     user_message_id = session.add_user_message(task.description)
@@ -581,7 +634,7 @@ async def test_task_runner_main_chat_auto_delegation_uses_native_runtime(tmp_pat
         model_calls.append(messages)
         last_content = str(messages[-1]["content"])
         if "# Agent\nName: Research Agent" in last_content:
-            assert "# User Goal\n调研 Native 委派链路" in last_content
+            assert "# User Goal\n请回应 Native 委派链路验证标记" in last_content
             return {"role": "assistant", "content": "Research Agent native delegation result"}
         if "[Oha-Yachiyo 自动委派 Run 汇总]" in last_content:
             assert "Research Agent：已完成" in last_content
@@ -596,7 +649,7 @@ async def test_task_runner_main_chat_auto_delegation_uses_native_runtime(tmp_pat
                 {
                     "action": "run_oha_agent",
                     "agent": "Research Agent",
-                    "goal": "调研 Native 委派链路",
+                    "goal": "请回应 Native 委派链路验证标记",
                 },
                 ensure_ascii=False,
             ),
@@ -938,7 +991,7 @@ async def test_task_runner_direct_group_agent_summary_uses_native_runtime(tmp_pa
             assert "不要再派发新的 Agent 任务" in last_content
             return {"role": "assistant", "content": "主模型整理：Design 的直接执行结果已归档。"}
         assert "# Agent\nName: Design Agent" in last_content
-        assert "# User Goal\n做真实 Native 直接点名验证" in last_content
+        assert "# User Goal\n请回应 Native 验证标记" in last_content
         assert "[Oha-Yachiyo 群组执行约定]" in last_content
         assert "你在群内身份是：Design" in last_content
         return {"role": "assistant", "content": "Design native direct result"}
@@ -975,7 +1028,7 @@ async def test_task_runner_direct_group_agent_summary_uses_native_runtime(tmp_pa
         assert created["ok"] is True
         assert created["session_context"]["conversation_kind"] == "group"
 
-        sent = api.send_message("做真实 Native 直接点名验证", runnable_id=design["agent_id"])
+        sent = api.send_message("请回应 Native 验证标记", runnable_id=design["agent_id"])
         assert sent["ok"] is True
         assert sent["agent_run_id"]
 
@@ -1085,7 +1138,7 @@ async def test_task_runner_direct_group_agent_rejected_summary_uses_native_runti
             assert "不要再派发新的 Agent 任务" in last_content
             return {"role": "assistant", "content": "主模型整理：Design 的审批拒绝已告知用户。"}
         assert "# Agent\nName: Design Agent" in last_content
-        assert "# User Goal\n运行需要审批的终端命令" in last_content
+        assert "# User Goal\n完成需要审批的工具验证" in last_content
         assert any((tool.get("function") or {}).get("name") == "terminal_run" for tool in tools or [])
         return {
             "role": "assistant",
@@ -1145,7 +1198,7 @@ async def test_task_runner_direct_group_agent_rejected_summary_uses_native_runti
         assert created["ok"] is True
         assert created["session_context"]["conversation_kind"] == "group"
 
-        sent = api.send_message("运行需要审批的终端命令", runnable_id=design["agent_id"])
+        sent = api.send_message("完成需要审批的工具验证", runnable_id=design["agent_id"])
         assert sent["ok"] is True
         assert sent["agent_run_id"]
 

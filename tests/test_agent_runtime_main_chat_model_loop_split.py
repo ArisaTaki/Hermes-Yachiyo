@@ -210,7 +210,9 @@ def test_main_chat_model_loop_runner_forwards_runtime_execution_context() -> Non
 
     assert result["status"] == "running"
     assert continue_calls[0]["runtime_execution_envelope"] is envelope
-    assert continue_calls[0]["runtime_execution_metadata"] is metadata
+    forwarded_metadata = continue_calls[0]["runtime_execution_metadata"]
+    assert forwarded_metadata["yachiyo_runtime_planner"] is True
+    assert forwarded_metadata["desktop_execution_policy"]["mode"] == "preview_input"
 
 
 def test_main_chat_model_loop_runner_passes_approval_policy_to_broker() -> None:
@@ -415,14 +417,20 @@ def test_main_chat_model_loop_runner_projects_approval_required_without_bypassin
     )
 
     assert result["status"] == "approval_required"
-    assert state["approval_pause"].calls[0]["pending_approval"] == {
+    pending = state["approval_pause"].calls[0]["pending_approval"]
+    assert {
+        key: value
+        for key, value in pending.items()
+        if key != "runtime_execution_metadata"
+    } == {
         "pending": {"tool": "terminal.run", "approval_id": "approval-1"},
         "model_profile_id": "profile-chat",
         "tool_policy": {"allowed_tools": ["workspace.read"]},
         "workspace_policy": {"default_workdir": "/tmp/project"},
         "runtime_execution_envelope": envelope,
-        "runtime_execution_metadata": metadata,
     }
+    assert pending["runtime_execution_metadata"]["yachiyo_runtime_planner"] is True
+    assert pending["runtime_execution_metadata"]["desktop_execution_policy"]["mode"] == "preview_input"
 
 
 def test_native_runtime_installs_main_chat_model_loop_runner(tmp_path) -> None:

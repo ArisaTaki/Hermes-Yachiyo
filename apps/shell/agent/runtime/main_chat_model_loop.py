@@ -7,7 +7,11 @@ from typing import Any, Callable
 from apps.shell.agent.runtime.errors import AgentApprovalRequired
 from apps.shell.agent.runtime.errors import AgentRuntimeError
 from apps.shell.agent.runtime.events import redact_secrets
-from apps.shell.agent.runtime.model_messages import message_visible_content_text, model_output_metadata
+from apps.shell.agent.runtime.model_messages import (
+    message_visible_content_text,
+    messages_require_model_first,
+    model_output_metadata,
+)
 from apps.shell.yachiyo_agent.entrypoint_tool_selection import (
     planner_first_direct_tool_selection,
 )
@@ -317,6 +321,8 @@ class MainChatModelLoopRunner:
                 return True
             if daily_desktop_requests_can_complete_without_model(requests):
                 return True
+        if messages_require_model_first(messages):
+            return False
         intent_text = _latest_user_intent_text(messages)
         if not intent_text:
             return False

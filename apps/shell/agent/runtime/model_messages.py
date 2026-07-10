@@ -19,6 +19,14 @@ _MODEL_USAGE_KEYS = (
     "cached_tokens",
 )
 
+_MODEL_FIRST_CONTEXT_MARKERS = (
+    "[OHA 委派结果]",
+    "[Oha-Yachiyo 自动委派 Run 汇总]",
+    "[Oha-Yachiyo 群组上下文]",
+    "[Yachiyo 群组上下文]",
+    "[Oha-Yachiyo 群组直接 Agent 汇总]",
+)
+
 
 class ModelOutputText(str):
     def __new__(
@@ -132,6 +140,19 @@ def model_output_completed_payload(
 
 def message_content_part_type(value: Any) -> str:
     return str(message_field(value, "type") or "").strip().lower()
+
+
+def messages_include_image_input(messages: IterableABC[Any]) -> bool:
+    for message in messages:
+        content = message_field(message, "content")
+        if not isinstance(content, (list, tuple)):
+            continue
+        if any(
+            message_content_part_type(part) in {"image", "image_url", "input_image"}
+            for part in content
+        ):
+            return True
+    return False
 
 
 def responses_stream_event_type(value: Any) -> str:
@@ -382,6 +403,18 @@ def message_visible_content_text(content: Any) -> str:
     if refusal is not None:
         return message_text_value(refusal)
     return ""
+
+
+def messages_require_model_first(messages: IterableABC[Any]) -> bool:
+    message_list = list(messages)
+    if messages_include_image_input(message_list):
+        return True
+    for message in reversed(message_list):
+        if str(message_field(message, "role") or "").strip() != "user":
+            continue
+        content = message_visible_content_text(message_field(message, "content"))
+        return any(marker in content for marker in _MODEL_FIRST_CONTEXT_MARKERS)
+    return False
 
 
 def stream_chunk_text(chunk: Any) -> str:
