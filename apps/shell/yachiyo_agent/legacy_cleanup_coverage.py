@@ -318,20 +318,6 @@ PLANNER_OWNED_LEGACY_ENTRYPOINTS: tuple[dict[str, Any], ...] = (
 
 REMAINING_FALLBACK_CONTRACTS: tuple[dict[str, Any], ...] = (
     _fallback_contract(
-        "context_capture_schedule_shapes",
-        "Context capture and scheduling",
-        (
-            "Clipboard or selection transfer plans still use legacy daily response "
-            "composition for note and schedule targets."
-        ),
-        ["把剪贴板内容写进备忘录", "把选中的内容新建为提醒事项"],
-        [
-            "project context-source and destination sequences",
-            "preserve approval and schedule payload boundaries",
-            "remove the matching capture and schedule parser branches",
-        ],
-    ),
-    _fallback_contract(
         "media_audio_shapes",
         "Media playback and system audio",
         (

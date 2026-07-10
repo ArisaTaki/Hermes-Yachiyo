@@ -127,17 +127,16 @@ def test_oha_desktop_agent_release_smoke_covers_product_readiness(
     ] == "planner_covered_compat_cleanup_pending"
     assert section_by_id["studio_tool_catalog"]["report"]["coverage"][
         "planner_covered_fallback_count"
-    ] == 4
+    ] == 3
     assert section_by_id["studio_tool_catalog"]["report"]["coverage"][
         "compatibility_cleanup_pending_count"
-    ] == 4
+    ] == 3
     assert {
         contract["fallback_id"]
         for contract in section_by_id["studio_tool_catalog"]["report"]["coverage"][
             "remaining_fallback_contracts"
         ]
     } == {
-        "context_capture_schedule_shapes",
         "media_audio_shapes",
         "compound_app_action_shapes",
         "generic_app_discovery_legacy_shape",
