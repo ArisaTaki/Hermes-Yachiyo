@@ -22,6 +22,16 @@ from apps.shell.yachiyo_agent.daily_desktop import (
 )
 
 
+def _forbid_legacy_daily_parser(monkeypatch, message: str) -> None:
+    def fail(*_args, **_kwargs):
+        raise AssertionError(message)
+
+    monkeypatch.setattr(
+        "apps.shell.agent.runtime.desktop_intents.daily_desktop_entrypoint_tool_requests",
+        fail,
+    )
+
+
 def test_daily_desktop_product_entrypoints_do_not_enable_legacy_intent_fallback() -> None:
     for path in (
         Path("apps/shell/chat_api.py"),
@@ -2637,7 +2647,8 @@ def test_entrypoint_plan_user_metadata_preserves_legacy_keys_with_plan_aliases()
     }
 
 
-def test_daily_desktop_entrypoint_routes_permission_diagnosis_questions() -> None:
+def test_daily_desktop_entrypoint_routes_permission_diagnosis_questions(monkeypatch) -> None:
+    _forbid_legacy_daily_parser(monkeypatch, "permission diagnosis must be planner-owned")
     for prompt in (
         "为什么不能打开应用？",
         "为什么不能读取屏幕？",
@@ -2664,12 +2675,7 @@ def test_daily_desktop_entrypoint_routes_permission_diagnosis_questions() -> Non
 def test_daily_desktop_entrypoint_routes_polite_app_open_questions_to_desktop_tool(
     monkeypatch,
 ) -> None:
-    monkeypatch.setattr(
-        "apps.shell.agent.runtime.desktop_intents.daily_desktop_entrypoint_tool_requests",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            AssertionError("polite app launch must be planner-owned")
-        ),
-    )
+    _forbid_legacy_daily_parser(monkeypatch, "polite app launch must be planner-owned")
     cases = (
         ("你能帮我打开微信吗", "WeChat"),
         ("能否帮我打开微信", "WeChat"),
@@ -3141,12 +3147,7 @@ def test_daily_desktop_entrypoint_routes_app_status_questions_to_desktop_tool() 
 def test_daily_desktop_entrypoint_routes_polite_focus_and_show_questions_to_desktop_tools(
     monkeypatch,
 ) -> None:
-    monkeypatch.setattr(
-        "apps.shell.agent.runtime.desktop_intents.daily_desktop_entrypoint_tool_requests",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            AssertionError("polite app management must be planner-owned")
-        ),
-    )
+    _forbid_legacy_daily_parser(monkeypatch, "polite app management must be planner-owned")
     cases = (
         ("你能帮我切到Chrome吗", "app.focus", {"app_name": "Google Chrome"}),
         ("能否帮我切到微信", "app.focus", {"app_name": "WeChat"}),
@@ -3438,7 +3439,8 @@ def test_daily_desktop_entrypoint_routes_system_window_hotkeys_and_system_apps()
     ]
 
 
-def test_daily_desktop_entrypoint_routes_running_apps_language() -> None:
+def test_daily_desktop_entrypoint_routes_running_apps_language(monkeypatch) -> None:
+    _forbid_legacy_daily_parser(monkeypatch, "running-app observation must be planner-owned")
     for prompt in ("现在开了哪些应用", "列一下打开的应用"):
         requests = daily_desktop_entrypoint_requests(prompt)
 
@@ -3452,7 +3454,8 @@ def test_daily_desktop_entrypoint_routes_running_apps_language() -> None:
         assert daily_desktop_user_metadata(requests)["daily_desktop_tool"] == "desktop.running_apps"
 
 
-def test_daily_desktop_entrypoint_routes_installed_app_discovery_language() -> None:
+def test_daily_desktop_entrypoint_routes_installed_app_discovery_language(monkeypatch) -> None:
+    _forbid_legacy_daily_parser(monkeypatch, "installed-app discovery must be planner-owned")
     for prompt in ("列出已安装的应用", "有哪些可用 app", "show installed apps"):
         requests = daily_desktop_entrypoint_requests(prompt)
 
@@ -3466,7 +3469,8 @@ def test_daily_desktop_entrypoint_routes_installed_app_discovery_language() -> N
         assert daily_desktop_user_metadata(requests)["daily_desktop_tool"] == "desktop.list_apps"
 
 
-def test_daily_desktop_entrypoint_routes_window_list_language() -> None:
+def test_daily_desktop_entrypoint_routes_window_list_language(monkeypatch) -> None:
+    _forbid_legacy_daily_parser(monkeypatch, "window-list observation must be planner-owned")
     assert daily_desktop_entrypoint_requests("显示当前窗口列表") == [
         {
             "protocol": "json_fallback",
@@ -3496,6 +3500,83 @@ def test_daily_desktop_entrypoint_routes_window_list_language() -> None:
                 "input": {},
             }
         ]
+
+
+def test_daily_desktop_entrypoint_routes_read_only_observation_without_legacy(
+    monkeypatch,
+) -> None:
+    _forbid_legacy_daily_parser(monkeypatch, "read-only observation must be planner-owned")
+    cases = (
+        ("当前窗口是什么", "desktop.active_window", {}),
+        ("看看当前窗口", "desktop.active_window", {}),
+        (
+            "帮我截个屏",
+            "screen.capture",
+            {"reason": "user asked to capture the screen"},
+        ),
+        (
+            "你能看看现在有哪些按钮吗",
+            "desktop.ui_elements",
+            {"role_filter": "button", "limit": 80},
+        ),
+        (
+            "Can you inspect the current UI?",
+            "desktop.ui_elements",
+            {"role_filter": "", "limit": 80},
+        ),
+        (
+            "读取当前窗口内容",
+            "desktop.ui_elements",
+            {"role_filter": "text", "limit": 80},
+        ),
+    )
+
+    for prompt, tool_name, tool_input in cases:
+        requests = daily_desktop_entrypoint_requests(prompt)
+
+        assert requests == [
+            {
+                "protocol": "json_fallback",
+                "tool": tool_name,
+                "input": tool_input,
+            }
+        ]
+        assert daily_desktop_user_metadata(requests) == {
+            "daily_desktop_intent": True,
+            "daily_desktop_source": "daily_desktop_intent",
+            "daily_desktop_planning_reason": "clear_daily_desktop_intent",
+            "daily_desktop_tool": tool_name,
+            "daily_desktop_tools": [tool_name],
+        }
+
+
+def test_observation_compatibility_adapter_rejects_mixed_action_plans() -> None:
+    from apps.shell.yachiyo_agent.daily_desktop import (
+        _legacy_compatible_observation_entrypoint_requests,
+    )
+
+    for action_request in (
+        {"tool": "desktop.safe_type_text", "input": {"text": "hello"}},
+        {
+            "tool": "desktop.click_ui_element",
+            "input": {"target": "login", "role_filter": "button"},
+        },
+    ):
+        requests = [
+            {
+                "tool": "desktop.running_apps",
+                "input": {},
+                "planning_reason": "planner_desktop_operation",
+            },
+            {**action_request, "planning_reason": "planner_desktop_operation"},
+            {
+                "tool": "desktop.ui_elements",
+                "input": {"limit": 80},
+                "planning_reason": "planner_desktop_operation",
+            },
+        ]
+
+        assert _legacy_compatible_observation_entrypoint_requests(requests) == []
 
 
 def test_daily_desktop_entrypoint_routes_screen_and_visible_ui_language_to_desktop_tools() -> None:

@@ -626,7 +626,47 @@ def _planner_owned_legacy_compatible_entrypoint_requests(
     )
     if semantic_ui_requests:
         return semantic_ui_requests
+    observation_requests = _legacy_compatible_observation_entrypoint_requests(
+        planner_requests,
+    )
+    if observation_requests:
+        return observation_requests
     return _legacy_compatible_simple_entrypoint_requests(planner_requests, text=text)
+
+
+_LEGACY_COMPATIBLE_OBSERVATION_TOOLS = frozenset(
+    {
+        "desktop.active_window",
+        "desktop.list_apps",
+        "desktop.permissions",
+        "desktop.running_apps",
+        "desktop.ui_elements",
+        "desktop.windows",
+        "screen.capture",
+    }
+)
+
+
+def _legacy_compatible_observation_entrypoint_requests(
+    requests: Sequence[Mapping[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    items = [dict(request) for request in requests or [] if isinstance(request, Mapping)]
+    if not items:
+        return []
+    if any(
+        str(request.get("planning_reason") or "").strip()
+        != "planner_desktop_operation"
+        for request in items
+    ):
+        return []
+    tools = [str(request.get("tool") or "").strip() for request in items]
+    if any(tool not in _LEGACY_COMPATIBLE_OBSERVATION_TOOLS for tool in tools):
+        return []
+    selected = _legacy_shape_request(items[-1])
+    if str(selected.get("tool") or "").strip() == "desktop.ui_elements":
+        payload = selected.get("input") if isinstance(selected.get("input"), Mapping) else {}
+        selected["input"] = {"role_filter": "", **dict(payload)}
+    return [selected]
 
 
 def _legacy_compatible_media_entrypoint_requests(

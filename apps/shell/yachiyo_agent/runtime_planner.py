@@ -496,6 +496,12 @@ class TaskIntentRouter:
         ):
             return _empty_intent("desktop_operation", text)
         ui_inspection = ui_inspection_hint(text)
+        if (
+            isinstance(ui_inspection, Mapping)
+            and _desktop_window_text_context_hint(text)
+            and not str(ui_inspection.get("role_filter") or "").strip()
+        ):
+            ui_inspection = {**ui_inspection, "role_filter": "text"}
         if not app_capability and isinstance(ui_inspection, Mapping):
             app_capability = _scoped_app_label_capability_hint(
                 str(ui_inspection.get("app_name") or "")
@@ -604,6 +610,13 @@ class TaskIntentRouter:
         if foreground_paste and safe_shortcut is None:
             safe_shortcut = {"action": "paste"}
         desktop_discovery = _desktop_discovery_hint(text)
+        if (
+            str((desktop_discovery or {}).get("action") or "").strip()
+            == "read_active_window"
+            and ui_inspection is not None
+            and _desktop_window_text_context_hint(text)
+        ):
+            desktop_discovery = {}
         concrete_app_hint = _app_name_hint(text)
         if (
             desktop_discovery is not None
@@ -30395,7 +30408,13 @@ def _looks_like_desktop_permissions_request(value: str, lowered: str) -> bool:
     return bool(
         re.search(r"(?:桌面|本地|自动化|辅助功能|屏幕录制|读取屏幕).{0,16}(?:权限|授权|permission)", value, flags=re.IGNORECASE)
         or re.search(r"(?:需要|缺少|检查|诊断|修复).{0,16}(?:权限|授权)", value)
-        or re.search(r"(?:为什么|为何|怎么|why).{0,24}(?:不能|无法|can't|cannot).{0,24}(?:打开|点击|读取屏幕|控制|操作|播放|open|click|control|play)", value, flags=re.IGNORECASE)
+        or re.search(
+            r"(?:为什么|为何|怎么|why).{0,24}(?:不能|无法|can't|cannot)"
+            r".{0,24}(?:打开|点击|读取屏幕|查看屏幕|控制|操作|播放|"
+            r"open|click|control|play)",
+            value,
+            flags=re.IGNORECASE,
+        )
         or re.search(r"\b(?:desktop|local|accessibility|screen recording)\s+permissions?\b", lowered)
     )
 
