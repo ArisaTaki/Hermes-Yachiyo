@@ -571,12 +571,9 @@ def test_managed_external_release_launch_rejects_manifest_mismatch() -> None:
         "url": "http://127.0.0.1:29097",
         "desktop_backend_is_loopback": True,
     }
-    merged = session_module._merge_manifest_launch(manifest, launch)
-
     blockers = session_module._managed_external_provider_release_launch_blockers(
         manifest,
         launch,
-        merged,
     )
 
     assert "managed_external_provider_launch_manifest_mismatch" in blockers
@@ -1015,9 +1012,26 @@ def test_start_manifest_provider_satisfies_real_virtual_backend_contract(
         def __init__(self) -> None:
             payload = {
                 "ok": True,
+                "provider_id": "release-virtual-desktop",
+                "provider_kind": "sandbox_desktop",
                 "url": "http://127.0.0.1:29097",
                 "execute_url": "http://127.0.0.1:29097/tools/execute",
                 "status_url": "http://127.0.0.1:29097/status",
+                "supported_tools": release_tools,
+                "capabilities": [
+                    "virtual_desktop",
+                    "idempotent_tool_requests",
+                ],
+                "authentication_configured": True,
+                "keyboard_mouse_capture_supported": True,
+                "foreground_mutation_supported": True,
+                "desktop_session_kind": "virtual_desktop",
+                "desktop_session_isolated": True,
+                "foreground_takeover_required": False,
+                "desktop_backend_kind": "vnc_virtual_desktop",
+                "desktop_backend_is_loopback": False,
+                "desktop_backend_ready_for_public_release": True,
+                "requires_real_virtual_desktop_backend": False,
             }
             self.stdout = io.StringIO(json.dumps(payload) + "\n")
             self.stderr = io.StringIO("")

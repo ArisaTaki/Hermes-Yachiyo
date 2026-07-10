@@ -145,6 +145,67 @@ def test_ssh_bridge_rewrites_guest_launch_to_host_loopback() -> None:
     assert launch["ssh_bridge"]["credentials_forwarded"] is False
 
 
+def test_ssh_bridge_launch_satisfies_managed_external_release_contract(
+    monkeypatch,
+) -> None:
+    config = _config()
+    manifest = ssh_virtual_desktop_provider_manifest(config)
+    provider = guest.VirtualDesktopGuestProvider(
+        provider_id=config.provider_id,
+        session_id=config.session_id,
+    )
+    monkeypatch.setattr(
+        provider,
+        "attestation",
+        lambda: {
+            "ok": True,
+            "desktop_backend_kind": "macos_virtual_machine",
+            "blocking_conditions": [],
+        },
+    )
+    launch = ssh_bridge_launch_payload(config, provider.status())
+    launch["authentication_configured"] = True
+
+    blockers = session._managed_external_provider_release_launch_blockers(
+        manifest,
+        launch,
+    )
+
+    assert blockers == []
+
+
+def test_managed_external_release_contract_does_not_backfill_runtime_evidence(
+    monkeypatch,
+) -> None:
+    config = _config()
+    manifest = ssh_virtual_desktop_provider_manifest(config)
+    provider = guest.VirtualDesktopGuestProvider(
+        provider_id=config.provider_id,
+        session_id=config.session_id,
+    )
+    monkeypatch.setattr(
+        provider,
+        "attestation",
+        lambda: {
+            "ok": True,
+            "desktop_backend_kind": "macos_virtual_machine",
+            "blocking_conditions": [],
+        },
+    )
+    launch = ssh_bridge_launch_payload(config, provider.status())
+    launch["authentication_configured"] = True
+    launch.pop("supported_tools")
+    launch["capabilities"] = []
+
+    blockers = session._managed_external_provider_release_launch_blockers(
+        manifest,
+        launch,
+    )
+
+    assert "desktop_provider_idempotency_required" in blockers
+    assert "desktop_provider_missing_required_tools" in blockers
+
+
 @pytest.mark.parametrize(
     ("changes", "message"),
     [

@@ -381,7 +381,6 @@ class IsolatedDesktopProviderSessionManager:
                 _managed_external_provider_release_launch_blockers(
                     manifest,
                     launch,
-                    merged_launch,
                 )
                 if requires_real_virtual_desktop_backend
                 else []
@@ -965,21 +964,20 @@ def _merge_manifest_launch(
 def _managed_external_provider_release_launch_blockers(
     manifest: dict[str, Any],
     launch: dict[str, Any],
-    merged_launch: dict[str, Any],
 ) -> list[str]:
     manifest_payload = _provider_runtime_payload(manifest)
     launch_payload = _provider_runtime_payload(launch)
     blockers: list[str] = []
     if not str(
-        merged_launch.get("execute_url")
-        or merged_launch.get("url")
-        or merged_launch.get("endpoint_origin")
+        launch_payload.get("execute_url")
+        or launch_payload.get("url")
+        or launch_payload.get("endpoint_origin")
         or ""
     ).strip():
         blockers.append("managed_external_provider_launch_endpoint_missing")
-    if not str(merged_launch.get("provider_id") or "").strip():
+    if not str(launch_payload.get("provider_id") or "").strip():
         blockers.append("managed_external_provider_launch_provider_id_missing")
-    provider_kind = str(merged_launch.get("provider_kind") or "").strip()
+    provider_kind = str(launch_payload.get("provider_kind") or "").strip()
     if provider_kind.lower().replace("-", "_") != "sandbox_desktop":
         blockers.append("managed_external_provider_launch_provider_kind_invalid")
     mismatched_fields = [
@@ -1008,7 +1006,7 @@ def _managed_external_provider_release_launch_blockers(
             for field in mismatched_fields
         )
     contract_source = {
-        **merged_launch,
+        **launch_payload,
         "configured": True,
         "available": True,
         "adapter_ready": True,
