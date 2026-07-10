@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import re
+import shlex
+import sys
 
 from collections.abc import Mapping
 from pathlib import Path
@@ -102,6 +104,7 @@ from .isolated_provider_session import (
 from .tool_catalog import runtime_tool_catalog_snapshot
 from .virtual_desktop_guest_installer import (
     VirtualDesktopGuestInstallConfig,
+    ensure_virtual_desktop_guest_components,
     install_virtual_desktop_guest,
 )
 from .workflow_run_snapshots import workflow_run_snapshot_from_payload
@@ -1623,9 +1626,42 @@ class LegacyStudioPort:
                 ]
             )
         config_kwargs["ssh_options"] = tuple(ssh_options)
+        install_config = VirtualDesktopGuestInstallConfig(**config_kwargs)
+        try:
+            component_build = ensure_virtual_desktop_guest_components(install_config)
+        except Exception as exc:
+            recovery_actions = (
+                [
+                    {
+                        "id": "reinstall_virtual_desktop_components",
+                        "label": "Reinstall Oha-Yachiyo",
+                    }
+                ]
+                if getattr(sys, "frozen", False)
+                else [
+                    {
+                        "id": "build_virtual_desktop_components",
+                        "label": "Build virtual desktop components",
+                        "command": (
+                            f"{shlex.quote(sys.executable)} "
+                            "scripts/build_virtual_desktop_guest.py"
+                        ),
+                    }
+                ]
+            )
+            return {
+                "ok": False,
+                "status": "component_build_failed",
+                "approval_required": False,
+                "error": redact_api_error_text(exc),
+                "blocking_conditions": [
+                    "virtual_desktop_components_unavailable",
+                ],
+                "recovery_actions": recovery_actions,
+            }
         try:
             provisioned = install_virtual_desktop_guest(
-                VirtualDesktopGuestInstallConfig(**config_kwargs)
+                install_config
             )
         except Exception as exc:
             return {
@@ -1638,6 +1674,7 @@ class LegacyStudioPort:
             **provisioned,
             "status": "provisioned",
             "approval_required": False,
+            "component_build": component_build,
         }
         if payload.get("start_session", True) is not True:
             return result

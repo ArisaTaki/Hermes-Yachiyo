@@ -113,6 +113,18 @@ export type YachiyoStudioVirtualDesktopProvisionSnapshot = {
   running?: boolean;
   started?: boolean;
   session?: YachiyoStudioDesktopProviderSessionSnapshot;
+  component_build?: {
+    ok?: boolean;
+    status?: string;
+    built?: boolean;
+    missing_before?: string[];
+  };
+  blocking_conditions?: string[];
+  recovery_actions?: Array<{
+    id?: string;
+    label?: string;
+    command?: string;
+  }>;
 };
 
 export type YachiyoStudioRunReplanRecoveryActionRequest = {

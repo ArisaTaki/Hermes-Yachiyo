@@ -148,6 +148,7 @@ export function AgentStudioToolsTab({
   const [plannerExecutionLoading, setPlannerExecutionLoading] = useState(false);
   const [providerSessionBusy, setProviderSessionBusy] = useState<'provision' | 'start' | 'stop' | ''>('');
   const [providerSessionError, setProviderSessionError] = useState('');
+  const [providerSessionStatus, setProviderSessionStatus] = useState('');
   const [providerSessionResult, setProviderSessionResult] = useState<YachiyoStudioDesktopProviderSessionSnapshot | null>(null);
   const [providerManifestPath, setProviderManifestPath] = useState(
     readStoredDesktopProviderManifestPath,
@@ -305,6 +306,7 @@ export function AgentStudioToolsTab({
     if (providerSessionBusy) return;
     setProviderSessionBusy('start');
     setProviderSessionError('');
+    setProviderSessionStatus('');
     try {
       const providerManifest = providerManifestPath.trim();
       const result = await startYachiyoStudioDesktopProviderSession(
@@ -330,6 +332,7 @@ export function AgentStudioToolsTab({
     if (providerSessionBusy || !sshTarget || !sessionId || !providerProvisionApproved) return;
     setProviderSessionBusy('provision');
     setProviderSessionError('');
+    setProviderSessionStatus('');
     try {
       const result = await provisionYachiyoStudioVirtualDesktopGuest({
         ssh_target: sshTarget,
@@ -340,6 +343,9 @@ export function AgentStudioToolsTab({
       });
       if (result.provider_manifest) setProviderManifestPath(result.provider_manifest);
       if (result.session) setProviderSessionResult(result.session);
+      if (result.component_build?.built === true) {
+        setProviderSessionStatus('VM Provider components built');
+      }
       if (result.ok !== true) {
         setProviderSessionError(result.error || result.status || 'VM Provider 安装失败');
       } else {
@@ -371,6 +377,7 @@ export function AgentStudioToolsTab({
     if (providerSessionBusy) return;
     setProviderSessionBusy('stop');
     setProviderSessionError('');
+    setProviderSessionStatus('');
     try {
       const result = await stopYachiyoStudioDesktopProviderSession();
       setProviderSessionResult(result);
@@ -445,6 +452,7 @@ export function AgentStudioToolsTab({
           catalog={catalog}
           error={providerSessionError}
           latestResult={providerSessionResult}
+          statusMessage={providerSessionStatus}
           manifestPath={providerManifestPath}
           manifestPickerAvailable={hasDesktopProviderManifestPicker()}
           manifestPicking={providerManifestPicking}
@@ -517,6 +525,7 @@ function DesktopProviderSessionPanel({
   catalog,
   error,
   latestResult,
+  statusMessage,
   manifestPath,
   manifestPickerAvailable,
   manifestPicking,
@@ -538,6 +547,7 @@ function DesktopProviderSessionPanel({
   catalog: ToolCatalogSnapshot;
   error: string;
   latestResult: YachiyoStudioDesktopProviderSessionSnapshot | null;
+  statusMessage: string;
   manifestPath: string;
   manifestPickerAvailable: boolean;
   manifestPicking: boolean;
@@ -704,6 +714,11 @@ function DesktopProviderSessionPanel({
       </div>
       {sessionError ? <div className="notice danger">{sessionError}</div> : null}
       {error ? <div className="notice danger">{error}</div> : null}
+      {statusMessage ? (
+        <div className="notice" data-testid="studio-desktop-provider-provision-status">
+          {statusMessage}
+        </div>
+      ) : null}
       <div className="studio-provider-provision-fields">
         <label>
           <span>VM SSH Target</span>

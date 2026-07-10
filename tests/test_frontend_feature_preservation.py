@@ -3800,6 +3800,8 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "studio-desktop-provider-identity-file",
             "studio-desktop-provider-known-hosts-file",
             "desktopProviderProvisionRequestOptions(providerProvisionOptions)",
+            "data-testid=\"studio-desktop-provider-provision-status\"",
+            "result.component_build?.built === true",
             "data-testid=\"studio-desktop-provider-provision-approval\"",
             "data-testid=\"studio-desktop-provider-provision\"",
             "data-provider-session-manifest={effectiveManifestPath}",

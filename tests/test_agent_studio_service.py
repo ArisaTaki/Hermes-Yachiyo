@@ -3,8 +3,12 @@
 from __future__ import annotations
 
 import json
+import shlex
+import sys
 from pathlib import Path
 from typing import Any
+
+import pytest
 
 from apps.shell.agent.runtime.desktop_execution_providers import (
     LOCAL_DESKTOP_PROVIDER_ID,
@@ -1336,6 +1340,7 @@ def test_legacy_studio_port_provisions_vm_only_after_explicit_approval(
     tmp_path,
 ) -> None:
     install_calls: list[Any] = []
+    build_calls: list[Any] = []
     start_calls: list[dict[str, Any]] = []
     monkeypatch.setattr(
         "apps.shell.yachiyo_agent.legacy_ports.isolated_desktop_provider_session_status",
@@ -1350,6 +1355,15 @@ def test_legacy_studio_port_provisions_vm_only_after_explicit_approval(
             "provider_id": "oha-macos-virtual-desktop",
         }
 
+    def fake_ensure_components(config: Any) -> dict[str, Any]:
+        build_calls.append(config)
+        return {
+            "ok": True,
+            "status": "built",
+            "built": True,
+            "missing_before": ["guest_provider", "host_bridge"],
+        }
+
     def fake_start(request: dict[str, Any]) -> dict[str, Any]:
         start_calls.append(request)
         return {
@@ -1362,6 +1376,10 @@ def test_legacy_studio_port_provisions_vm_only_after_explicit_approval(
     monkeypatch.setattr(
         "apps.shell.yachiyo_agent.legacy_ports.install_virtual_desktop_guest",
         fake_install,
+    )
+    monkeypatch.setattr(
+        "apps.shell.yachiyo_agent.legacy_ports.ensure_virtual_desktop_guest_components",
+        fake_ensure_components,
     )
     monkeypatch.setattr(
         "apps.shell.yachiyo_agent.legacy_ports.start_isolated_desktop_provider_session",
@@ -1391,7 +1409,9 @@ def test_legacy_studio_port_provisions_vm_only_after_explicit_approval(
 
     assert pending["status"] == "approval_required"
     assert pending["approval_required"] is True
+    assert len(build_calls) == 1
     assert len(install_calls) == 1
+    assert build_calls[0] is install_calls[0]
     assert install_calls[0].ssh_target == "yachiyo@192.0.2.10"
     assert install_calls[0].session_id == "vm-session-1"
     assert install_calls[0].identity_file == str(Path.home() / ".ssh/oha-yachiyo")
@@ -1415,12 +1435,53 @@ def test_legacy_studio_port_provisions_vm_only_after_explicit_approval(
     assert install_calls[0].provider_id == "oha-studio-vm"
     assert provisioned["status"] == "running"
     assert provisioned["running"] is True
+    assert provisioned["component_build"]["status"] == "built"
     assert start_calls == [
         {
             "provider_manifest": str(tmp_path / "provider.manifest.json"),
             "requires_real_virtual_desktop_backend": True,
         }
     ]
+
+
+def test_legacy_studio_port_projects_component_build_failure(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "apps.shell.yachiyo_agent.legacy_ports.isolated_desktop_provider_session_status",
+        lambda: {"ok": True, "status": "stopped", "running": False},
+    )
+    monkeypatch.setattr(
+        "apps.shell.yachiyo_agent.legacy_ports.ensure_virtual_desktop_guest_components",
+        lambda _config: (_ for _ in ()).throw(RuntimeError("PyInstaller unavailable")),
+    )
+    monkeypatch.setattr(
+        "apps.shell.yachiyo_agent.legacy_ports.install_virtual_desktop_guest",
+        lambda _config: pytest.fail("install must not run after build failure"),
+    )
+
+    result = LegacyStudioPort(object()).provision_virtual_desktop_guest(
+        {
+            "ssh_target": "yachiyo@192.0.2.10",
+            "session_id": "vm-session-1",
+            "approved": True,
+        }
+    )
+
+    assert result["status"] == "component_build_failed"
+    assert result["approval_required"] is False
+    assert result["blocking_conditions"] == [
+        "virtual_desktop_components_unavailable"
+    ]
+    assert result["recovery_actions"] == [
+        {
+            "id": "build_virtual_desktop_components",
+            "label": "Build virtual desktop components",
+            "command": (
+                f"{shlex.quote(sys.executable)} "
+                "scripts/build_virtual_desktop_guest.py"
+            ),
+        }
+    ]
+    assert "PyInstaller unavailable" in result["error"]
 
 
 def test_legacy_studio_tool_catalog_exposes_local_desktop_provider(monkeypatch) -> None:

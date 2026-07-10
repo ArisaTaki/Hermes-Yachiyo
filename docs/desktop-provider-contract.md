@@ -78,6 +78,8 @@ export OHA_YACHIYO_DESKTOP_PROVIDER_MANIFEST="$PWD/tmp/oha-virtual-desktop-provi
 
 安装版也可以在 `Agent Studio > Tools > Desktop Session` 输入 VM SSH Target 与
 Session ID，显式确认后完成同一安装、manifest 写入和 Session 启动流程。
+源码模式下，如果默认 Guest Provider 或 Host Bridge 尚未生成，Studio 会在这次
+显式确认之后先运行仓库内固定的组件构建脚本；发布包不会运行源码构建器。
 
 发布 CI 可以使用相同安装器对真实 macOS VM 自动收证。配置
 `OHA_YACHIYO_VIRTUAL_DESKTOP_SSH_TARGET`、

@@ -9,6 +9,7 @@ import secrets
 import shlex
 import subprocess
 import sys
+import threading
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
@@ -60,6 +61,7 @@ DEFAULT_REMOTE_TOKEN_SUFFIX = (
 )
 
 CommandRunner = Callable[..., subprocess.CompletedProcess[Any]]
+_COMPONENT_BUILD_LOCK = threading.Lock()
 
 
 @dataclass(frozen=True)
@@ -79,6 +81,98 @@ class VirtualDesktopGuestInstallConfig:
     provider_id: str = DEFAULT_PROVIDER_ID
     identity_file: str = ""
     ssh_options: tuple[str, ...] = ()
+
+
+def ensure_virtual_desktop_guest_components(
+    config: VirtualDesktopGuestInstallConfig,
+    *,
+    runner: CommandRunner = subprocess.run,
+    timeout_seconds: float = 900.0,
+) -> dict[str, Any]:
+    """Build the default source-checkout components after explicit approval."""
+
+    with _COMPONENT_BUILD_LOCK:
+        return _ensure_virtual_desktop_guest_components(
+            config,
+            runner=runner,
+            timeout_seconds=timeout_seconds,
+        )
+
+
+def _ensure_virtual_desktop_guest_components(
+    config: VirtualDesktopGuestInstallConfig,
+    *,
+    runner: CommandRunner,
+    timeout_seconds: float,
+) -> dict[str, Any]:
+
+    provider_binary = Path(config.provider_binary).expanduser().resolve()
+    host_bridge_binary = Path(config.host_bridge_binary).expanduser().resolve()
+    components = {
+        "guest_provider": provider_binary,
+        "host_bridge": host_bridge_binary,
+    }
+    missing_before = [
+        name
+        for name, path in components.items()
+        if not path.is_file() or not os.access(path, os.X_OK)
+    ]
+    if not missing_before:
+        return {
+            "ok": True,
+            "status": "ready",
+            "built": False,
+            "components": {name: str(path) for name, path in components.items()},
+            "missing_before": [],
+        }
+    if getattr(sys, "frozen", False):
+        raise FileNotFoundError(
+            "packaged virtual desktop components are missing: "
+            + ", ".join(missing_before)
+        )
+    if (
+        provider_binary != DEFAULT_PROVIDER_BINARY.resolve()
+        or host_bridge_binary != DEFAULT_HOST_BRIDGE_BINARY.resolve()
+    ):
+        raise FileNotFoundError(
+            "custom virtual desktop components are missing: "
+            + ", ".join(missing_before)
+        )
+
+    build_script = _ROOT / "scripts" / "build_virtual_desktop_guest.py"
+    command = [sys.executable, str(build_script)]
+    completed = runner(
+        command,
+        cwd=_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=timeout_seconds,
+        env=scrubbed_subprocess_env(),
+    )
+    if completed.returncode != 0:
+        output = str(completed.stderr or completed.stdout or "")
+        detail = redact_api_error_text(output[-4000:])
+        message = "virtual desktop component build failed"
+        raise RuntimeError(f"{message}: {detail}" if detail else message)
+
+    missing_after = [
+        name
+        for name, path in components.items()
+        if not path.is_file() or not os.access(path, os.X_OK)
+    ]
+    if missing_after:
+        raise FileNotFoundError(
+            "virtual desktop component build did not create: "
+            + ", ".join(missing_after)
+        )
+    return {
+        "ok": True,
+        "status": "built",
+        "built": True,
+        "components": {name: str(path) for name, path in components.items()},
+        "missing_before": missing_before,
+    }
 
 
 def install_virtual_desktop_guest(
