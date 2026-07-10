@@ -2736,6 +2736,56 @@ def test_legacy_chat_task_starter_planned_timeline_keeps_runtime_planner_sequenc
     }
 
 
+def test_legacy_planned_timeline_parser_is_scoped_to_legacy_metadata(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prefer_legacy = legacy_ports_module._prefer_legacy_planned_timeline_for_metadata
+
+    assert prefer_legacy({"daily_desktop_intent": True}) is True
+    assert prefer_legacy(
+        {
+            "daily_desktop_intent": True,
+            "daily_desktop_source": "daily_desktop_intent",
+        }
+    ) is True
+    assert prefer_legacy(
+        {
+            "daily_desktop_intent": True,
+            "daily_desktop_source": "runtime_planner",
+        }
+    ) is False
+    assert prefer_legacy(
+        {
+            "daily_desktop_intent": True,
+            "daily_desktop_source": "daily_desktop_metadata",
+        }
+    ) is False
+
+    def fail_legacy_parser(*_args: Any, **_kwargs: Any) -> list[dict[str, Any]]:
+        raise AssertionError("runtime planner timeline must not invoke legacy parser")
+
+    monkeypatch.setattr(
+        legacy_ports_module,
+        "daily_desktop_entrypoint_requests",
+        fail_legacy_parser,
+    )
+    starter = LegacyChatTaskStarter(_FakeAppRuntime(), _MainChatPlannerEventRuntime())
+
+    timeline = starter._planner_first_planned_timeline(
+        "打开 PixelForge",
+        metadata={
+            "daily_desktop_intent": True,
+            "daily_desktop_source": "runtime_planner",
+        },
+    )
+
+    assert [event["tool"] for event in timeline] == [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.verify",
+    ]
+
+
 def test_legacy_chat_task_starter_uses_generic_planner_coverage_for_legacy_timeline() -> None:
     starter = LegacyChatTaskStarter(_FakeAppRuntime(), _MainChatPlannerEventRuntime())
     metadata = {"daily_desktop_intent": True, "yachiyo_runtime_planner": True}

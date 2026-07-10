@@ -251,7 +251,23 @@ def _prefer_legacy_planned_timeline_for_metadata(metadata: dict[str, Any] | None
         return False
     if _prefer_execution_requests_for_metadata(metadata):
         return False
-    return bool(metadata.get("daily_desktop_intent"))
+    if not metadata.get("daily_desktop_intent"):
+        return False
+    if metadata.get("daily_desktop_legacy_fallback") is True:
+        return True
+    if metadata.get("entrypoint_plan_legacy_fallback") is True:
+        return True
+    compatibility_boundary = str(
+        metadata.get("daily_desktop_compatibility_boundary") or ""
+    ).strip()
+    if compatibility_boundary == "legacy_daily_desktop_intent":
+        return True
+    source = str(
+        metadata.get("daily_desktop_source")
+        or metadata.get("entrypoint_plan_source")
+        or ""
+    ).strip()
+    return not source or source == "daily_desktop_intent"
 
 
 def _legacy_requests_with_type_sequence_verification(
