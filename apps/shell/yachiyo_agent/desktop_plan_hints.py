@@ -1740,6 +1740,15 @@ def media_action_hint(text: str) -> str:
     if music_app_name_hint(text) and re.search(r"(?:播放|播|放)", str(text or "")):
         return "play"
     if re.search(
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:在|用|通过|打开|启动)\s*[^。！？!?，,]{1,60}?"
+        r"(?:里|中|上|内|里面)?\s*"
+        r"(?:播放|播|放)(?!到|进|在|置|左|右|上|下|大|小|回|前|后)",
+        str(text or "").strip(),
+        flags=re.IGNORECASE,
+    ):
+        return "play"
+    if re.search(
         r"(?:音乐\s*(?:应用|app|软件|播放器)?|播放器|music\s+app|music\s+player)",
         lowered,
         flags=re.IGNORECASE,
