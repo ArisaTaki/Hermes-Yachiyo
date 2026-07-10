@@ -318,20 +318,6 @@ PLANNER_OWNED_LEGACY_ENTRYPOINTS: tuple[dict[str, Any], ...] = (
 
 REMAINING_FALLBACK_CONTRACTS: tuple[dict[str, Any], ...] = (
     _fallback_contract(
-        "foreground_command_shapes",
-        "Foreground app commands",
-        (
-            "Command palette, preferences, fullscreen, and related foreground actions "
-            "still depend on legacy projection."
-        ),
-        ["打开 VS Code 命令面板", "打开 Chrome 设置", "切换全屏"],
-        [
-            "project compound app prepare and shortcut requests",
-            "preserve the existing single and sequence response shapes",
-            "remove the matching foreground-command branches",
-        ],
-    ),
-    _fallback_contract(
         "context_capture_schedule_shapes",
         "Context capture and scheduling",
         (
