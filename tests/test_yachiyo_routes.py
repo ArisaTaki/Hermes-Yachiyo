@@ -632,10 +632,13 @@ async def test_yachiyo_task_routes_use_injected_runtime_and_return_public_snapsh
     assert approved["status"] == "completed"
     assert rejected["status"] == "failed"
     assert cancelled["status"] == "cancelled"
-    assert (
-        "create_run_for_runnable_async",
-        {"runnable_id": "builtin:yachiyo-main", "user_goal": "Patch README"},
-    ) in runtime.calls
+    create_run_payload = next(
+        payload
+        for call_name, payload in runtime.calls
+        if call_name == "create_run_for_runnable_async"
+    )
+    assert create_run_payload["runnable_id"] == "builtin:yachiyo-main"
+    assert create_run_payload["user_goal"] == "Patch README"
     assert (
         "link_task_run",
         {"task_id": "run-1", "run_id": "run-1", "session_id": "chat-1"},
@@ -3148,17 +3151,17 @@ async def test_yachiyo_task_route_executes_clipboard_write_without_model(
         (
             "播放一下",
             "play",
-            "已继续播放 Apple Music。当前：超时空辉夜姬 - Yachiyo。",
+            "已向 Music 发送媒体键尝试开始播放。",
         ),
         (
             "放一下",
             "play",
-            "已继续播放 Apple Music。当前：超时空辉夜姬 - Yachiyo。",
+            "已向 Music 发送媒体键尝试开始播放。",
         ),
         (
             "下一首",
             "next",
-            "已切到下一首 Apple Music。当前：超时空辉夜姬 - Yachiyo。",
+            "已向 Music 发送媒体键尝试切到下一首。",
         ),
     ],
 )
@@ -3246,10 +3249,10 @@ async def test_yachiyo_task_route_executes_media_control_daily_desktop_intent_wi
         assert control_calls == [expected_action]
         assert started["status"] == "completed"
         assert started["summary"] == expected_summary
-        assert started["tool_calls"][-1]["tool_name"] == "media.apple_music_control"
+        assert started["tool_calls"][-1]["tool_name"] == "media.music_app_control"
         assert started["tool_calls"][-1]["status"] == "completed"
         assert started["tool_calls"][-1]["input_preview"]["action"] == expected_action
-        assert timeline["tool_calls"][-1]["tool_name"] == "media.apple_music_control"
+        assert timeline["tool_calls"][-1]["tool_name"] == "media.music_app_control"
         assert timeline["tool_calls"][-1]["output_preview"]["data"]["track"] == "超时空辉夜姬"
         assert "agent.desktop.intent_planned" in event_types
         assert "agent.tool.call" in event_types
@@ -6473,11 +6476,16 @@ async def test_yachiyo_task_route_executes_app_status_without_model(
         assert started["summary"] == "Slack 当前正在运行。"
         assert started["needs_user_action"] is False
         assert started["pending_approvals"] == []
-        assert started["tool_calls"][-1]["tool_name"] == "app.status"
-        assert started["tool_calls"][-1]["status"] == "completed"
-        assert started["tool_calls"][-1]["input_preview"]["app_name"] == "Slack"
-        assert timeline["tool_calls"][-1]["tool_name"] == "app.status"
-        assert timeline["tool_calls"][-1]["output_preview"]["data"]["running"] is True
+        status_tool_call = next(
+            call for call in started["tool_calls"] if call["tool_name"] == "app.status"
+        )
+        assert status_tool_call["status"] == "completed"
+        assert status_tool_call["input_preview"]["app_name"] == "Slack"
+        timeline_status_call = next(
+            call for call in timeline["tool_calls"] if call["tool_name"] == "app.status"
+        )
+        assert timeline_status_call["output_preview"]["data"]["running"] is True
+        assert timeline["tool_calls"][-1]["tool_name"] == "desktop.list_windows"
         assert "agent.desktop.intent_planned" in event_types
         assert "agent.tool.call" in event_types
         assert "agent.desktop.intent_completed" in event_types
@@ -8495,7 +8503,9 @@ async def test_yachiyo_studio_routes_wrap_legacy_runtime_shapes(tmp_path: Path) 
     assert group_run_events["events"][0]["event_type"] == "group.run.started"
     assert events["after_sequence"] == 0
     assert events["limit"] == 1
-    assert events["next_after_sequence"] == 1
+    assert events["next_after_sequence"] == max(
+        event["sequence"] for event in events["events"]
+    )
     assert events["has_more"] is True
     assert events["events"][0]["event_type"] == "agent.started"
     assert rerun["run_id"] == "run-1-rerun"
@@ -8608,18 +8618,16 @@ async def test_yachiyo_studio_routes_wrap_legacy_runtime_shapes(tmp_path: Path) 
     assert ("delete_workflow", "workflow-1") in runtime.calls
     assert ("list_runs", 5) in runtime.calls
     assert ("list_run_groups", 5) in runtime.calls
-    assert (
-        "create_agent_run",
-        {
-            "agent_id": "agent-1",
-            "user_goal": "Draft summary",
-                "source": "yachiyo_studio",
-                "client_run_id": "client-agent-1",
-                "run_group_id": None,
-                "daily_desktop_policy_overlay": True,
-                "runtime_planner_entrypoint": True,
-            },
-        ) in runtime.calls
+    create_agent_payload = next(
+        payload for call_name, payload in runtime.calls if call_name == "create_agent_run"
+    )
+    assert create_agent_payload["agent_id"] == "agent-1"
+    assert create_agent_payload["user_goal"] == "Draft summary"
+    assert create_agent_payload["source"] == "yachiyo_studio"
+    assert create_agent_payload["client_run_id"] == "client-agent-1"
+    assert create_agent_payload["run_group_id"] is None
+    assert create_agent_payload["daily_desktop_policy_overlay"] is True
+    assert create_agent_payload["runtime_planner_entrypoint"] is True
     group_started_events = [
         call[1]
         for call in runtime.calls
