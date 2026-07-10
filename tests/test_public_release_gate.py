@@ -227,6 +227,31 @@ def _write_public_demo_batch_report(
     )
 
 
+def test_public_release_gate_plan_only_does_not_report_zero_progress(tmp_path) -> None:
+    summary = gate.run_public_release_gate(
+        tmp_dir=tmp_path / "gate-plan",
+        include_public_demo=False,
+        include_release_smoke=False,
+        include_diagnostics_bundle=False,
+        plan_only=True,
+    )
+
+    progress = summary["progress"]
+    assert summary["status"] == "planned"
+    assert progress["stage"] == "planned"
+    assert progress["code_completion_percent"] is None
+    assert progress["code_remaining_percent"] is None
+    assert progress["release_evidence_completion_percent"] is None
+    assert progress["release_evidence_remaining_percent"] is None
+    assert progress["publication_completion_percent"] is None
+    assert progress["publication_remaining_percent"] is None
+    assert progress["progress_basis"]["measurement_status"] == "pending_execution"
+    markdown = gate.render_markdown(summary)
+    assert "Core code progress: pending execution" in markdown
+    assert "Publication progress: pending execution" in markdown
+    assert "0.0%" not in markdown
+
+
 def test_public_release_gate_defaults_to_safe_preflight_with_demo_blockers(
     tmp_path,
     monkeypatch,

@@ -358,10 +358,16 @@ def _release_progress_snapshot(
     release_passed = combined_passed
     if release_ready and external_total:
         release_passed += external_total
-    core_completion = _completion_percent(check_passed, check_total)
-    evidence_completion = _completion_percent(evidence_passed, evidence_total)
-    combined_completion = _completion_percent(combined_passed, combined_total)
-    release_completion = _completion_percent(release_passed, release_total)
+    if plan_only:
+        core_completion = None
+        evidence_completion = None
+        combined_completion = None
+        release_completion = None
+    else:
+        core_completion = _completion_percent(check_passed, check_total)
+        evidence_completion = _completion_percent(evidence_passed, evidence_total)
+        combined_completion = _completion_percent(combined_passed, combined_total)
+        release_completion = _completion_percent(release_passed, release_total)
     if plan_only:
         stage = "planned"
     elif release_ready:
@@ -383,20 +389,24 @@ def _release_progress_snapshot(
         "legacy_combined_completion_percent": combined_completion,
         "release_completion_percent": release_completion,
         "publication_completion_percent": release_completion,
-        "code_remaining_percent": round(100.0 - core_completion, 1),
-        "core_code_remaining_percent": round(100.0 - core_completion, 1),
-        "release_evidence_remaining_percent": round(100.0 - evidence_completion, 1),
-        "combined_code_and_evidence_remaining_percent": round(
-            100.0 - combined_completion,
-            1,
+        "code_remaining_percent": _remaining_percent(core_completion),
+        "core_code_remaining_percent": _remaining_percent(core_completion),
+        "release_evidence_remaining_percent": _remaining_percent(
+            evidence_completion
         ),
-        "legacy_combined_remaining_percent": round(100.0 - combined_completion, 1),
-        "release_remaining_percent": round(100.0 - release_completion, 1),
-        "publication_remaining_percent": round(100.0 - release_completion, 1),
+        "combined_code_and_evidence_remaining_percent": _remaining_percent(
+            combined_completion
+        ),
+        "legacy_combined_remaining_percent": _remaining_percent(combined_completion),
+        "release_remaining_percent": _remaining_percent(release_completion),
+        "publication_remaining_percent": _remaining_percent(release_completion),
         "core_code": {"passed": check_passed, "total": check_total},
         "release_evidence": {"passed": evidence_passed, "total": evidence_total},
         "publication": {"passed": release_passed, "total": release_total},
         "progress_basis": {
+            "measurement_status": (
+                "pending_execution" if plan_only else "measured"
+            ),
             "code_completion_percent": "automated_checks_only",
             "release_evidence_completion_percent": "public_demo_plus_release_smoke",
             "release_completion_percent": (
@@ -409,6 +419,12 @@ def _release_progress_snapshot(
         "external_requirements": len(external_requirements),
         "external_blocked": bool(external_requirements),
     }
+
+
+def _remaining_percent(completion: float | None) -> float | None:
+    if completion is None:
+        return None
+    return round(100.0 - completion, 1)
 
 
 def _positive_int(value: Any) -> int:
@@ -1592,20 +1608,20 @@ def render_markdown(summary: Mapping[str, Any]) -> str:
         lines.extend(
             [
                 f"Progress stage: `{progress.get('stage')}`",
-                (
-                    "Core code progress: "
-                    f"{core_percent}% "
-                    f"({core_remaining}% remaining)"
+                _progress_markdown_line(
+                    "Core code progress",
+                    core_percent,
+                    core_remaining,
                 ),
-                (
-                    "Release evidence progress: "
-                    f"{progress.get('release_evidence_completion_percent')}% "
-                    f"({progress.get('release_evidence_remaining_percent')}% remaining)"
+                _progress_markdown_line(
+                    "Release evidence progress",
+                    progress.get("release_evidence_completion_percent"),
+                    progress.get("release_evidence_remaining_percent"),
                 ),
-                (
-                    "Publication progress: "
-                    f"{publication_percent}% "
-                    f"({publication_remaining}% remaining)"
+                _progress_markdown_line(
+                    "Publication progress",
+                    publication_percent,
+                    publication_remaining,
                 ),
             ]
         )
@@ -1711,6 +1727,14 @@ def render_markdown(summary: Mapping[str, Any]) -> str:
             if command:
                 lines.extend(["", "```bash", command, "```", ""])
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _progress_markdown_line(label: str, completion: Any, remaining: Any) -> str:
+    if not isinstance(completion, (int, float)) or isinstance(completion, bool):
+        return f"{label}: pending execution"
+    if not isinstance(remaining, (int, float)) or isinstance(remaining, bool):
+        return f"{label}: {completion}%"
+    return f"{label}: {completion}% ({remaining}% remaining)"
 
 
 def _run_command(command: Sequence[str]) -> subprocess.CompletedProcess[str]:
