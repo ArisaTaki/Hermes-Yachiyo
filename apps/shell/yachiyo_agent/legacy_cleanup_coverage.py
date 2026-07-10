@@ -331,20 +331,6 @@ REMAINING_FALLBACK_CONTRACTS: tuple[dict[str, Any], ...] = (
             "remove the matching media parser branches",
         ],
     ),
-    _fallback_contract(
-        "generic_app_discovery_legacy_shape",
-        "Generic app discovery legacy shape",
-        (
-            "Production entrypoints use dynamic app discovery, while the preserved "
-            "legacy facade still returns a concrete historical app shape."
-        ),
-        ["把浏览器拉起来", "bring browser up"],
-        [
-            "keep product entrypoints on planner-first discovery",
-            "version or retire the concrete legacy facade response shape",
-            "remove generic app aliases from the legacy parser",
-        ],
-    ),
 )
 
 
