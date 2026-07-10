@@ -4,8 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+from pathlib import Path
 import plistlib
 import re
+import subprocess
+import sys
 
 import pytest
 
@@ -3102,6 +3106,24 @@ def test_verifier_requires_release_workflow_signing_path_before_dmg_build(tmp_pa
     assert "macOS release workflow must pass signing state into the Electron DMG build" in messages
     assert "macOS release workflow must use the signed app build path when signing is configured" in messages
     assert "macOS release workflow must import signing material before building the DMG" in messages
+    assert (
+        "macOS release workflow must run the optional real virtual desktop smoke after guest build before signing"
+        in messages
+    )
+    assert "macOS release workflow must accept a dedicated virtual desktop SSH key" in messages
+    assert "macOS release workflow must require pinned virtual desktop SSH host keys" in messages
+    assert (
+        "macOS release workflow must create virtual desktop credentials with private permissions"
+        in messages
+    )
+    assert (
+        "macOS release workflow must enforce SSH host key verification for the virtual desktop"
+        in messages
+    )
+    assert (
+        "macOS release workflow must require a public-release-ready virtual desktop backend"
+        in messages
+    )
 
 
 def test_verifier_requires_release_workflow_first_launch_permission_guidance(tmp_path):
@@ -3138,6 +3160,168 @@ def test_verifier_requires_release_workflow_first_launch_permission_guidance(tmp
     assert "macOS release workflow must document Gatekeeper first-launch handling" in messages
     assert "macOS release workflow must document the notarized Developer ID path" in messages
     assert "macOS release workflow must document screen recording permission setup" in messages
+
+
+def _release_workflow_step_script(step_name: str) -> str:
+    workflow = (verifier.ROOT / verifier.RELEASE_WORKFLOW_FILE).read_text(
+        encoding="utf-8"
+    )
+    marker = f"      - name: {step_name}\n"
+    section = workflow.split(marker, 1)[1].split("\n      - name:", 1)[0]
+    run_block = section.split("        run: |\n", 1)[1]
+    return "\n".join(
+        line[10:] if line.startswith("          ") else line
+        for line in run_block.splitlines()
+    )
+
+
+def _virtual_desktop_workflow_env(tmp_path, **overrides: str) -> dict[str, str]:
+    runner_temp = tmp_path / "runner"
+    runner_temp.mkdir()
+    env = os.environ.copy()
+    env.update(
+        {
+            "PATH": f"{Path(sys.executable).parent}:{env['PATH']}",
+            "OHA_YACHIYO_VIRTUAL_DESKTOP_SSH_TARGET": "",
+            "OHA_YACHIYO_VIRTUAL_DESKTOP_SSH_PRIVATE_KEY": "",
+            "OHA_YACHIYO_VIRTUAL_DESKTOP_SSH_KNOWN_HOSTS": "",
+            "GITHUB_STEP_SUMMARY": str(tmp_path / "summary.md"),
+            "GITHUB_RUN_ID": "12345",
+            "GITHUB_RUN_ATTEMPT": "1",
+            "RUNNER_TEMP": str(runner_temp),
+        }
+    )
+    env.update(overrides)
+    return env
+
+
+def test_virtual_desktop_workflow_step_records_not_configured_without_secrets(tmp_path):
+    script = _release_workflow_step_script(
+        "Run optional real virtual desktop provider smoke"
+    )
+
+    result = subprocess.run(
+        ["bash", "-c", script],
+        cwd=tmp_path,
+        env=_virtual_desktop_workflow_env(tmp_path),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    report = json.loads(
+        (tmp_path / "release" / "virtual-desktop-provider-smoke.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert report["status"] == "not_configured"
+    assert len(report["required_secrets"]) == 3
+
+
+def test_virtual_desktop_workflow_step_rejects_partial_secret_configuration(tmp_path):
+    script = _release_workflow_step_script(
+        "Run optional real virtual desktop provider smoke"
+    )
+
+    result = subprocess.run(
+        ["bash", "-c", script],
+        cwd=tmp_path,
+        env=_virtual_desktop_workflow_env(
+            tmp_path,
+            OHA_YACHIYO_VIRTUAL_DESKTOP_SSH_TARGET="yachiyo@vm.example",
+        ),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert "must be configured together" in result.stderr
+
+
+def test_virtual_desktop_workflow_step_uses_private_files_and_cleans_them(tmp_path):
+    script = _release_workflow_step_script(
+        "Run optional real virtual desktop provider smoke"
+    )
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    mode_report = tmp_path / "modes.txt"
+    fake_python = fake_bin / "python"
+    fake_python.write_text(
+        """#!/usr/bin/env bash
+set -euo pipefail
+command_path="$1"
+shift
+file_mode() {
+  stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1"
+}
+if [[ "${command_path}" == *install_virtual_desktop_guest.py ]]; then
+  identity=""
+  known_hosts=""
+  token=""
+  manifest=""
+  while [[ "$#" -gt 0 ]]; do
+    case "$1" in
+      --identity-file) identity="$2"; shift 2 ;;
+      --local-token-file) token="$2"; shift 2 ;;
+      --manifest-out) manifest="$2"; shift 2 ;;
+      --ssh-option)
+        if [[ "$2" == UserKnownHostsFile=* ]]; then known_hosts="${2#*=}"; fi
+        shift 2
+        ;;
+      *) shift ;;
+    esac
+  done
+  printf '%s %s %s\n' \
+    "$(file_mode "${identity}")" \
+    "$(file_mode "${known_hosts}")" \
+    "$(file_mode "${RUNNER_TEMP}/oha-yachiyo-vm-install.json")" \
+    > "${MOCK_MODE_REPORT}"
+  printf 'token\n' > "${token}"
+  printf '{}\n' > "${manifest}"
+  printf '{"ok":true}\n'
+elif [[ "${command_path}" == *smoke_oha_desktop_agent_release.py ]]; then
+  report=""
+  while [[ "$#" -gt 0 ]]; do
+    if [[ "$1" == "--report-json" ]]; then report="$2"; shift 2; else shift; fi
+  done
+  printf '{"ok":true,"public_release_ready":true}\n' > "${report}"
+else
+  echo "unexpected python command: ${command_path}" >&2
+  exit 2
+fi
+""",
+        encoding="utf-8",
+    )
+    fake_python.chmod(0o755)
+    env = _virtual_desktop_workflow_env(
+        tmp_path,
+        OHA_YACHIYO_VIRTUAL_DESKTOP_SSH_TARGET="yachiyo@vm.example",
+        OHA_YACHIYO_VIRTUAL_DESKTOP_SSH_PRIVATE_KEY="private-key",
+        OHA_YACHIYO_VIRTUAL_DESKTOP_SSH_KNOWN_HOSTS="vm.example ssh-ed25519 AAAA",
+        MOCK_MODE_REPORT=str(mode_report),
+    )
+    env["PATH"] = f"{fake_bin}:{env['PATH']}"
+
+    result = subprocess.run(
+        ["bash", "-c", script],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert mode_report.read_text(encoding="utf-8").strip() == "600 600 600"
+    assert json.loads(
+        (tmp_path / "release" / "virtual-desktop-provider-smoke.json").read_text(
+            encoding="utf-8"
+        )
+    )["public_release_ready"] is True
+    runner_temp = Path(env["RUNNER_TEMP"])
+    assert not any(runner_temp.iterdir())
 
 
 def test_verifier_rejects_legacy_build_metadata_filename(tmp_path):

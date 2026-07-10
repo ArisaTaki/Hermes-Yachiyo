@@ -79,6 +79,14 @@ export OHA_YACHIYO_DESKTOP_PROVIDER_MANIFEST="$PWD/tmp/oha-virtual-desktop-provi
 安装版也可以在 `Agent Studio > Tools > Desktop Session` 输入 VM SSH Target 与
 Session ID，显式确认后完成同一安装、manifest 写入和 Session 启动流程。
 
+发布 CI 可以使用相同安装器对真实 macOS VM 自动收证。配置
+`OHA_YACHIYO_VIRTUAL_DESKTOP_SSH_TARGET`、
+`OHA_YACHIYO_VIRTUAL_DESKTOP_SSH_PRIVATE_KEY` 和
+`OHA_YACHIYO_VIRTUAL_DESKTOP_SSH_KNOWN_HOSTS` 后，release workflow 会固定启用
+`StrictHostKeyChecking=yes`，安装当前 packaged guest，并运行
+`smoke_oha_desktop_agent_release.py --public-release`。报告写入
+`release/virtual-desktop-provider-smoke.json`；凭据、token 和 manifest 不进入 artifact。
+
 安装器会校验传输前后的 SHA256，在 VM 当前用户目录原子安装 Guest Provider，生成
 当前 boot/session marker，并把同一随机 bearer token 分别保存为 Host/Guest 的
 `0600` 文件。Manifest 的 `entrypoint.argv` 会让现有

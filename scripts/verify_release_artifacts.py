@@ -854,6 +854,18 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release packaging docs must document stapled DMG evidence binding",
     ),
     (
+        "真实 macOS VM release smoke",
+        "release packaging docs must document the real virtual desktop release smoke",
+    ),
+    (
+        "OHA_YACHIYO_VIRTUAL_DESKTOP_SSH_KNOWN_HOSTS",
+        "release packaging docs must document pinned virtual desktop SSH host keys",
+    ),
+    (
+        "virtual-desktop-provider-smoke.json",
+        "release packaging docs must document archived virtual desktop smoke evidence",
+    ),
+    (
         "`develop` 分支保留给彻底重构前的旧版发布线，不触发 Oha DMG",
         "release packaging docs must document that legacy develop is not an Oha release branch",
     ),
@@ -1358,6 +1370,38 @@ RELEASE_WORKFLOW_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         "python scripts/build_virtual_desktop_guest.py --clean",
         "macOS release workflow must build the virtual desktop guest provider",
+    ),
+    (
+        "Run optional real virtual desktop provider smoke",
+        "macOS release workflow must expose the real virtual desktop provider smoke",
+    ),
+    (
+        "OHA_YACHIYO_VIRTUAL_DESKTOP_SSH_PRIVATE_KEY",
+        "macOS release workflow must accept a dedicated virtual desktop SSH key",
+    ),
+    (
+        "OHA_YACHIYO_VIRTUAL_DESKTOP_SSH_KNOWN_HOSTS",
+        "macOS release workflow must require pinned virtual desktop SSH host keys",
+    ),
+    (
+        "          umask 077",
+        "macOS release workflow must create virtual desktop credentials with private permissions",
+    ),
+    (
+        "--ssh-option StrictHostKeyChecking=yes",
+        "macOS release workflow must enforce SSH host key verification for the virtual desktop",
+    ),
+    (
+        "python scripts/install_virtual_desktop_guest.py",
+        "macOS release workflow must provision the packaged guest provider before its smoke",
+    ),
+    (
+        "--public-release \\",
+        "macOS release workflow must require a public-release-ready virtual desktop backend",
+    ),
+    (
+        "--report-json release/virtual-desktop-provider-smoke.json",
+        "macOS release workflow must archive real virtual desktop provider smoke evidence",
     ),
     (
         "find dist/electron -path '*/Oha-Yachiyo.app/Contents/Resources'",
@@ -5033,6 +5077,10 @@ def _verify_release_workflow_guards(root: Path) -> list[Finding]:
     write_metadata = workflow.find("Write app build metadata")
     write_metadata_script = workflow.find("python scripts/prepare_app_build_metadata.py")
     build_backend = workflow.find("Build packaged backend")
+    build_virtual_desktop = workflow.find("Build virtual desktop components")
+    virtual_desktop_smoke = workflow.find(
+        "Run optional real virtual desktop provider smoke"
+    )
     build_dmg = workflow.find("Build Electron DMG")
     notarize_dmg = workflow.find("Notarize and staple Developer ID DMG")
     verify_packaged_resources = workflow.find("Verify packaged app resources")
@@ -5139,6 +5187,19 @@ def _verify_release_workflow_guards(root: Path) -> list[Finding]:
             Finding(
                 workflow_path,
                 "macOS release workflow must import signing material before building the DMG",
+            )
+        )
+    if (
+        build_virtual_desktop < 0
+        or virtual_desktop_smoke < 0
+        or signing_import < 0
+        or virtual_desktop_smoke < build_virtual_desktop
+        or virtual_desktop_smoke > signing_import
+    ):
+        findings.append(
+            Finding(
+                workflow_path,
+                "macOS release workflow must run the optional real virtual desktop smoke after guest build before signing",
             )
         )
     if (

@@ -83,6 +83,18 @@ unsigned app directory -> Developer ID sign + timestamp -> DMG -> notarytool sub
 
 成功创建 submission 后，提交结果与 Apple 审计日志分别保存为 `release/notarization.json` 和 `release/notarization-log.json`。stapling 与 Gatekeeper 检查通过后还会生成 `release/notarization-evidence.json`，把 submission id、`Accepted` 状态和最终 stapled DMG 的 SHA256 绑定在一起；三份证据会跟随 CI artifact 上传。release verifier 会把 evidence hash 与 latest JSON 的 `sha256` 交叉校验，因此不能只改 `signing` 标签来伪装成已公证构建。鉴权或网络错误如果没有产生 submission id，job 会以受控错误直接失败。latest JSON 的 `signing` 值为 `developer-id-app-notarized-dmg`；自签名与无签名回退仍分别使用 `self-signed-app-unsigned-dmg` 和 `unsigned`。
 
+## 真实 macOS VM release smoke
+
+release workflow 可以把已打包的 Guest Provider 和 Host Bridge 安装到独立 macOS VM，运行不会抢占 CI host 键鼠的 `--public-release` provider 全链。需要同时配置以下 GitHub Secrets：
+
+```text
+OHA_YACHIYO_VIRTUAL_DESKTOP_SSH_TARGET
+OHA_YACHIYO_VIRTUAL_DESKTOP_SSH_PRIVATE_KEY
+OHA_YACHIYO_VIRTUAL_DESKTOP_SSH_KNOWN_HOSTS
+```
+
+三个 Secrets 全空时，workflow 会写出 `release/virtual-desktop-provider-smoke.json`，状态为 `not_configured`，并继续现有免费发布；只配置其中一部分会直接失败，避免误以为已经收集真实 VM evidence。完整配置时，workflow 使用临时 `0600` 私钥、固定 `BatchMode=yes`、`IdentitiesOnly=yes`、`StrictHostKeyChecking=yes` 和显式 `UserKnownHostsFile`，调用 `install_virtual_desktop_guest.py` 安装当前构建产物，再由 `smoke_oha_desktop_agent_release.py --public-release` 验证 app 发现/打开、UI 读取、click/type/shortcut、结果验证和 provider lifecycle。私钥、known_hosts、token、manifest 与安装报告只保留在 runner 临时目录并在步骤结束时删除；归档内容只有脱敏的 `release/virtual-desktop-provider-smoke.json`。
+
 ## 打包结构
 
 Electron packaged 模式会启动：

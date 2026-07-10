@@ -383,6 +383,81 @@ jobs:
       - name: Build virtual desktop components
         run: python scripts/build_virtual_desktop_guest.py --clean
 
+      - name: Run optional real virtual desktop provider smoke
+        shell: bash
+        env:
+          OHA_YACHIYO_VIRTUAL_DESKTOP_SSH_TARGET: ${{ secrets.OHA_YACHIYO_VIRTUAL_DESKTOP_SSH_TARGET }}
+          OHA_YACHIYO_VIRTUAL_DESKTOP_SSH_PRIVATE_KEY: ${{ secrets.OHA_YACHIYO_VIRTUAL_DESKTOP_SSH_PRIVATE_KEY }}
+          OHA_YACHIYO_VIRTUAL_DESKTOP_SSH_KNOWN_HOSTS: ${{ secrets.OHA_YACHIYO_VIRTUAL_DESKTOP_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          umask 077
+          mkdir -p release
+          configured=0
+          for value in \
+            "${OHA_YACHIYO_VIRTUAL_DESKTOP_SSH_TARGET}" \
+            "${OHA_YACHIYO_VIRTUAL_DESKTOP_SSH_PRIVATE_KEY}" \
+            "${OHA_YACHIYO_VIRTUAL_DESKTOP_SSH_KNOWN_HOSTS}"; do
+            if [[ -n "${value}" ]]; then
+              configured=$((configured + 1))
+            fi
+          done
+          if [[ "${configured}" -eq 0 ]]; then
+            python - <<'PY'
+          import json
+          from pathlib import Path
+
+          payload = {
+              "ok": False,
+              "status": "not_configured",
+              "mode": "real_virtual_desktop_provider",
+              "required_secrets": [
+                  "OHA_YACHIYO_VIRTUAL_DESKTOP_SSH_TARGET",
+                  "OHA_YACHIYO_VIRTUAL_DESKTOP_SSH_PRIVATE_KEY",
+                  "OHA_YACHIYO_VIRTUAL_DESKTOP_SSH_KNOWN_HOSTS",
+              ],
+          }
+          Path("release/virtual-desktop-provider-smoke.json").write_text(
+              json.dumps(payload, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          PY
+            echo "Real virtual desktop provider smoke not configured." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if [[ "${configured}" -ne 3 ]]; then
+            echo "Real virtual desktop provider smoke secrets must be configured together." >&2
+            exit 1
+          fi
+
+          IDENTITY_PATH="${RUNNER_TEMP}/oha-yachiyo-vm-identity"
+          KNOWN_HOSTS_PATH="${RUNNER_TEMP}/oha-yachiyo-vm-known-hosts"
+          TOKEN_PATH="${RUNNER_TEMP}/oha-yachiyo-vm-provider.token"
+          MANIFEST_PATH="${RUNNER_TEMP}/oha-yachiyo-vm-provider.manifest.json"
+          INSTALL_REPORT_PATH="${RUNNER_TEMP}/oha-yachiyo-vm-install.json"
+          trap 'rm -f "${IDENTITY_PATH}" "${KNOWN_HOSTS_PATH}" "${TOKEN_PATH}" "${MANIFEST_PATH}" "${INSTALL_REPORT_PATH}"' EXIT
+          printf '%s\n' "${OHA_YACHIYO_VIRTUAL_DESKTOP_SSH_PRIVATE_KEY}" > "${IDENTITY_PATH}"
+          printf '%s\n' "${OHA_YACHIYO_VIRTUAL_DESKTOP_SSH_KNOWN_HOSTS}" > "${KNOWN_HOSTS_PATH}"
+          chmod 600 "${IDENTITY_PATH}" "${KNOWN_HOSTS_PATH}"
+
+          python scripts/install_virtual_desktop_guest.py \
+            --ssh-target "${OHA_YACHIYO_VIRTUAL_DESKTOP_SSH_TARGET}" \
+            --session-id "github-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            --identity-file "${IDENTITY_PATH}" \
+            --local-token-file "${TOKEN_PATH}" \
+            --manifest-out "${MANIFEST_PATH}" \
+            --ssh-option BatchMode=yes \
+            --ssh-option IdentitiesOnly=yes \
+            --ssh-option StrictHostKeyChecking=yes \
+            --ssh-option "UserKnownHostsFile=${KNOWN_HOSTS_PATH}" \
+            --ssh-option ConnectTimeout=15 \
+            > "${INSTALL_REPORT_PATH}"
+          python scripts/smoke_oha_desktop_agent_release.py \
+            --provider-manifest "${MANIFEST_PATH}" \
+            --public-release \
+            --report-json release/virtual-desktop-provider-smoke.json
+          echo "Real virtual desktop provider smoke passed." >> "$GITHUB_STEP_SUMMARY"
+
       - name: Import macOS signing certificate
         id: macos_signing
         shell: bash
