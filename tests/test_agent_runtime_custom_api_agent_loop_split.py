@@ -23584,14 +23584,6 @@ def test_custom_api_agent_loop_executes_multi_step_daily_desktop_intent_without_
 def test_custom_api_agent_loop_executes_named_app_scope_without_model_or_legacy_rules(
     monkeypatch,
 ) -> None:
-    def fail_legacy_daily_planner(*_args, **_kwargs):
-        raise AssertionError("named app scope should be handled by runtime planner")
-
-    monkeypatch.setattr(
-        "apps.shell.agent.runtime.custom_api_agent.daily_desktop_intent_tool_requests",
-        fail_legacy_daily_planner,
-    )
-
     budget = FakeBudget()
     tool_runs: list[list[dict[str, Any]]] = []
     timeline: list[dict[str, Any]] = []
@@ -23718,16 +23710,6 @@ def test_custom_api_agent_loop_executes_named_app_scope_without_model_or_legacy_
 def test_custom_api_agent_loop_continues_discovered_communication_app_without_model(
     monkeypatch,
 ) -> None:
-    monkeypatch.setattr(
-        custom_api_agent_module,
-        "daily_desktop_intent_tool_requests",
-        lambda *_args, **_kwargs: [],
-    )
-    monkeypatch.setattr(
-        custom_api_agent_module,
-        "daily_desktop_intent_candidates",
-        lambda *_args, **_kwargs: [],
-    )
     budget = FakeBudget()
     tool_runs: list[list[dict[str, Any]]] = []
     timeline: list[dict[str, Any]] = []
@@ -23948,16 +23930,6 @@ def test_custom_api_agent_loop_continues_discovered_communication_app_without_mo
 def test_custom_api_agent_loop_preserves_discovered_app_compose_remaining_requests_on_approval(
     monkeypatch,
 ) -> None:
-    monkeypatch.setattr(
-        custom_api_agent_module,
-        "daily_desktop_intent_tool_requests",
-        lambda *_args, **_kwargs: [],
-    )
-    monkeypatch.setattr(
-        custom_api_agent_module,
-        "daily_desktop_intent_candidates",
-        lambda *_args, **_kwargs: [],
-    )
     budget = FakeBudget()
     timeline: list[dict[str, Any]] = []
     appended_events: list[dict[str, Any]] = []
@@ -24222,16 +24194,6 @@ def test_custom_api_agent_loop_preserves_discovered_app_compose_remaining_reques
 def test_custom_api_agent_loop_completes_resolved_discovered_app_open_without_model_followup(
     monkeypatch,
 ) -> None:
-    monkeypatch.setattr(
-        custom_api_agent_module,
-        "daily_desktop_intent_tool_requests",
-        lambda *_args, **_kwargs: [],
-    )
-    monkeypatch.setattr(
-        custom_api_agent_module,
-        "daily_desktop_intent_candidates",
-        lambda *_args, **_kwargs: [],
-    )
     budget = FakeBudget()
     timeline: list[dict[str, Any]] = []
     appended_events: list[dict[str, Any]] = []
@@ -27274,16 +27236,6 @@ def test_auto_discovered_app_generated_write_followup_returns_to_model() -> None
 def test_custom_api_agent_loop_auto_dispatches_creative_pending_steps(
     monkeypatch,
 ) -> None:
-    monkeypatch.setattr(
-        custom_api_agent_module,
-        "daily_desktop_intent_tool_requests",
-        lambda *_args, **_kwargs: [],
-    )
-    monkeypatch.setattr(
-        custom_api_agent_module,
-        "daily_desktop_intent_candidates",
-        lambda *_args, **_kwargs: [],
-    )
     budget = FakeBudget()
     tool_runs: list[list[dict[str, Any]]] = []
     model_calls: list[list[dict[str, Any]]] = []
@@ -27502,16 +27454,6 @@ def test_runtime_planner_keeps_generic_app_discovery_when_later_ui_tools_unavail
 def test_custom_api_agent_loop_auto_dispatches_generic_discovered_app_pending_steps(
     monkeypatch,
 ) -> None:
-    monkeypatch.setattr(
-        custom_api_agent_module,
-        "daily_desktop_intent_tool_requests",
-        lambda *_args, **_kwargs: [],
-    )
-    monkeypatch.setattr(
-        custom_api_agent_module,
-        "daily_desktop_intent_candidates",
-        lambda *_args, **_kwargs: [],
-    )
     budget = FakeBudget()
     tool_runs: list[list[dict[str, Any]]] = []
     model_calls: list[list[dict[str, Any]]] = []
@@ -28498,17 +28440,7 @@ def test_custom_api_agent_loop_verifies_model_desktop_ui_operation_tool_call() -
 def test_custom_api_agent_loop_prefers_runtime_planner_desktop_before_legacy_rules(
     monkeypatch,
 ) -> None:
-    def fail_legacy_daily_planner(*_args, **_kwargs):
-        raise AssertionError("legacy desktop planner should not run before runtime planner")
-
-    monkeypatch.setattr(
-        "apps.shell.agent.runtime.custom_api_agent.daily_desktop_intent_tool_requests",
-        fail_legacy_daily_planner,
-    )
-    monkeypatch.setattr(
-        "apps.shell.agent.runtime.custom_api_agent.daily_desktop_intent_candidates",
-        fail_legacy_daily_planner,
-    )
+    assert "desktop_intents" not in inspect.getsource(custom_api_agent_module)
     assert "legacy_tool_requests" not in inspect.getsource(
         RuntimeCustomApiAgentLoop._runtime_planner_tool_requests
     )
@@ -28692,19 +28624,6 @@ def test_custom_api_agent_loop_prefers_runtime_planner_desktop_before_legacy_rul
 def test_custom_api_agent_loop_no_plan_does_not_execute_legacy_parser(
     monkeypatch,
 ) -> None:
-    def fail_legacy_daily_planner(*_args, **_kwargs):
-        raise AssertionError("planner misses should not execute legacy desktop requests")
-
-    monkeypatch.setattr(
-        custom_api_agent_module,
-        "daily_desktop_intent_tool_requests",
-        fail_legacy_daily_planner,
-    )
-    monkeypatch.setattr(
-        custom_api_agent_module,
-        "daily_desktop_intent_candidates",
-        lambda *_args, **_kwargs: [],
-    )
     monkeypatch.setattr(
         custom_api_agent_module,
         "planner_first_direct_tool_selection",
@@ -28772,6 +28691,10 @@ def test_custom_api_agent_loop_no_plan_does_not_execute_legacy_parser(
     assert str(result) == "model fallback"
     assert len(model_calls) == 1
     assert tool_runs == []
+
+
+def test_custom_api_agent_loop_does_not_import_legacy_desktop_intents() -> None:
+    assert "desktop_intents" not in inspect.getsource(custom_api_agent_module)
 
 
 def test_runtime_planner_generic_desktop_click_execution_observes_target_before_click() -> None:
@@ -28860,18 +28783,6 @@ def test_runtime_planner_english_click_advice_does_not_extract_fake_app_name() -
 def test_custom_api_agent_loop_observes_generic_desktop_click_target_before_default_click(
     monkeypatch,
 ) -> None:
-    def fail_legacy_daily_planner(*_args, **_kwargs):
-        raise AssertionError("legacy desktop planner should not run for generic observed click")
-
-    monkeypatch.setattr(
-        "apps.shell.agent.runtime.custom_api_agent.daily_desktop_intent_tool_requests",
-        fail_legacy_daily_planner,
-    )
-    monkeypatch.setattr(
-        "apps.shell.agent.runtime.custom_api_agent.daily_desktop_intent_candidates",
-        fail_legacy_daily_planner,
-    )
-
     allowed_tools = ["app.open", "desktop.click_ui_element", "desktop.ui_elements"]
     budget = FakeBudget()
     tool_batches: list[list[dict[str, Any]]] = []
@@ -29034,18 +28945,6 @@ def test_custom_api_agent_loop_observes_generic_desktop_click_target_before_defa
 def test_custom_api_agent_loop_retries_unmatched_ui_elements_with_read_ui_before_click(
     monkeypatch,
 ) -> None:
-    def fail_legacy_daily_planner(*_args, **_kwargs):
-        raise AssertionError("legacy desktop planner should not run for observed click retry")
-
-    monkeypatch.setattr(
-        "apps.shell.agent.runtime.custom_api_agent.daily_desktop_intent_tool_requests",
-        fail_legacy_daily_planner,
-    )
-    monkeypatch.setattr(
-        "apps.shell.agent.runtime.custom_api_agent.daily_desktop_intent_candidates",
-        fail_legacy_daily_planner,
-    )
-
     allowed_tools = [
         "app.open",
         "desktop.click_ui_element",
@@ -29364,18 +29263,6 @@ def test_runtime_planner_generic_desktop_type_with_submit_defers_continuation() 
 def test_custom_api_agent_loop_observes_generic_desktop_type_target_before_default_type(
     monkeypatch,
 ) -> None:
-    def fail_legacy_daily_planner(*_args, **_kwargs):
-        raise AssertionError("legacy desktop planner should not run for generic observed type")
-
-    monkeypatch.setattr(
-        "apps.shell.agent.runtime.custom_api_agent.daily_desktop_intent_tool_requests",
-        fail_legacy_daily_planner,
-    )
-    monkeypatch.setattr(
-        "apps.shell.agent.runtime.custom_api_agent.daily_desktop_intent_candidates",
-        fail_legacy_daily_planner,
-    )
-
     allowed_tools = ["app.open", "desktop.type_into_ui_element", "desktop.ui_elements"]
     budget = FakeBudget()
     tool_batches: list[list[dict[str, Any]]] = []
@@ -29537,18 +29424,6 @@ def test_custom_api_agent_loop_observes_generic_desktop_type_target_before_defau
 def test_custom_api_agent_loop_continues_submit_after_observed_desktop_type(
     monkeypatch,
 ) -> None:
-    def fail_legacy_daily_planner(*_args, **_kwargs):
-        raise AssertionError("legacy desktop planner should not run for observed type continuation")
-
-    monkeypatch.setattr(
-        "apps.shell.agent.runtime.custom_api_agent.daily_desktop_intent_tool_requests",
-        fail_legacy_daily_planner,
-    )
-    monkeypatch.setattr(
-        "apps.shell.agent.runtime.custom_api_agent.daily_desktop_intent_candidates",
-        fail_legacy_daily_planner,
-    )
-
     allowed_tools = [
         "app.open",
         "desktop.type_into_ui_element",
@@ -29714,18 +29589,6 @@ def test_custom_api_agent_loop_continues_submit_after_observed_desktop_type(
 def test_custom_api_agent_loop_executes_runtime_planner_desktop_click_with_ui_verification(
     monkeypatch,
 ) -> None:
-    def fail_legacy_daily_planner(*_args, **_kwargs):
-        raise AssertionError("legacy desktop planner should not run before runtime planner")
-
-    monkeypatch.setattr(
-        "apps.shell.agent.runtime.custom_api_agent.daily_desktop_intent_tool_requests",
-        fail_legacy_daily_planner,
-    )
-    monkeypatch.setattr(
-        "apps.shell.agent.runtime.custom_api_agent.daily_desktop_intent_candidates",
-        fail_legacy_daily_planner,
-    )
-
     budget = FakeBudget()
     tool_runs: list[list[dict[str, Any]]] = []
     timeline: list[dict[str, Any]] = []
@@ -29857,18 +29720,6 @@ def test_custom_api_agent_loop_executes_runtime_planner_desktop_click_with_ui_ve
 def test_custom_api_agent_loop_prefers_runtime_planner_media_before_legacy_rules(
     monkeypatch,
 ) -> None:
-    def fail_legacy_daily_planner(*_args, **_kwargs):
-        raise AssertionError("legacy desktop planner should not run before runtime planner")
-
-    monkeypatch.setattr(
-        "apps.shell.agent.runtime.custom_api_agent.daily_desktop_intent_tool_requests",
-        fail_legacy_daily_planner,
-    )
-    monkeypatch.setattr(
-        "apps.shell.agent.runtime.custom_api_agent.daily_desktop_intent_candidates",
-        fail_legacy_daily_planner,
-    )
-
     budget = FakeBudget()
     tool_runs: list[list[dict[str, Any]]] = []
     timeline: list[dict[str, Any]] = []
@@ -29952,18 +29803,6 @@ def test_custom_api_agent_loop_prefers_runtime_planner_media_before_legacy_rules
 def test_custom_api_agent_loop_executes_runtime_planner_media_app_search_verify(
     monkeypatch,
 ) -> None:
-    def fail_legacy_daily_planner(*_args, **_kwargs):
-        raise AssertionError("legacy desktop planner should not run for planner media app search")
-
-    monkeypatch.setattr(
-        "apps.shell.agent.runtime.custom_api_agent.daily_desktop_intent_tool_requests",
-        fail_legacy_daily_planner,
-    )
-    monkeypatch.setattr(
-        "apps.shell.agent.runtime.custom_api_agent.daily_desktop_intent_candidates",
-        fail_legacy_daily_planner,
-    )
-
     budget = FakeBudget()
     tool_runs: list[list[dict[str, Any]]] = []
     timeline: list[dict[str, Any]] = []
@@ -30186,18 +30025,6 @@ def test_runtime_planner_media_query_execution_observes_results_before_click() -
 def test_custom_api_agent_loop_observes_media_search_results_before_default_click(
     monkeypatch,
 ) -> None:
-    def fail_legacy_daily_planner(*_args, **_kwargs):
-        raise AssertionError("legacy desktop planner should not run for media search observe-click")
-
-    monkeypatch.setattr(
-        "apps.shell.agent.runtime.custom_api_agent.daily_desktop_intent_tool_requests",
-        fail_legacy_daily_planner,
-    )
-    monkeypatch.setattr(
-        "apps.shell.agent.runtime.custom_api_agent.daily_desktop_intent_candidates",
-        fail_legacy_daily_planner,
-    )
-
     allowed_tools = [
         "desktop.list_apps",
         "app.open",
@@ -30441,18 +30268,6 @@ def test_custom_api_agent_loop_observes_media_search_results_before_default_clic
 def test_custom_api_agent_loop_recovers_failed_media_result_click_with_observed_center(
     monkeypatch,
 ) -> None:
-    def fail_legacy_daily_planner(*_args, **_kwargs):
-        raise AssertionError("legacy desktop planner should not run for media result click recovery")
-
-    monkeypatch.setattr(
-        "apps.shell.agent.runtime.custom_api_agent.daily_desktop_intent_tool_requests",
-        fail_legacy_daily_planner,
-    )
-    monkeypatch.setattr(
-        "apps.shell.agent.runtime.custom_api_agent.daily_desktop_intent_candidates",
-        fail_legacy_daily_planner,
-    )
-
     allowed_tools = [
         "desktop.list_apps",
         "app.open",
@@ -30708,18 +30523,6 @@ def test_custom_api_agent_loop_recovers_failed_media_result_click_with_observed_
 def test_custom_api_agent_loop_recovers_failed_media_search_type_with_ui_observation_without_model(
     monkeypatch,
 ) -> None:
-    def fail_legacy_daily_planner(*_args, **_kwargs):
-        raise AssertionError("legacy desktop planner should not run for planner media search recovery")
-
-    monkeypatch.setattr(
-        "apps.shell.agent.runtime.custom_api_agent.daily_desktop_intent_tool_requests",
-        fail_legacy_daily_planner,
-    )
-    monkeypatch.setattr(
-        "apps.shell.agent.runtime.custom_api_agent.daily_desktop_intent_candidates",
-        fail_legacy_daily_planner,
-    )
-
     allowed_tools = [
         "desktop.list_apps",
         "app.open",
@@ -31362,14 +31165,6 @@ def test_auto_discovered_media_playback_followup_clicks_play_without_query() -> 
 def test_custom_api_agent_loop_continues_discovered_media_app_without_model(
     monkeypatch,
 ) -> None:
-    monkeypatch.setattr(
-        "apps.shell.agent.runtime.custom_api_agent.daily_desktop_intent_tool_requests",
-        lambda *_args, **_kwargs: [],
-    )
-    monkeypatch.setattr(
-        "apps.shell.agent.runtime.custom_api_agent.daily_desktop_intent_candidates",
-        lambda *_args, **_kwargs: [],
-    )
     budget = FakeBudget()
     tool_runs: list[list[dict[str, Any]]] = []
     timeline: list[dict[str, Any]] = []
@@ -35518,16 +35313,6 @@ def test_custom_api_agent_loop_preplans_main_chat_message_desktop_intent() -> No
 def test_custom_api_agent_loop_preplans_runtime_browser_research_before_model(
     monkeypatch,
 ) -> None:
-    monkeypatch.setattr(
-        custom_api_agent_module,
-        "daily_desktop_intent_tool_requests",
-        lambda *_args, **_kwargs: [],
-    )
-    monkeypatch.setattr(
-        custom_api_agent_module,
-        "daily_desktop_intent_candidates",
-        lambda *_args, **_kwargs: [],
-    )
     budget = FakeBudget()
     order: list[str] = []
     tool_runs: list[dict[str, Any]] = []
@@ -35662,16 +35447,6 @@ def test_custom_api_agent_loop_preplans_runtime_browser_research_before_model(
 def test_custom_api_agent_loop_writes_web_research_report_to_target_app(
     monkeypatch,
 ) -> None:
-    monkeypatch.setattr(
-        custom_api_agent_module,
-        "daily_desktop_intent_tool_requests",
-        lambda *_args, **_kwargs: [],
-    )
-    monkeypatch.setattr(
-        custom_api_agent_module,
-        "daily_desktop_intent_candidates",
-        lambda *_args, **_kwargs: [],
-    )
     budget = FakeBudget()
     tool_runs: list[dict[str, Any]] = []
     model_calls: list[list[dict[str, Any]]] = []
@@ -35819,16 +35594,6 @@ def test_custom_api_agent_loop_writes_web_research_report_to_target_app(
 def test_custom_api_agent_loop_preserves_runtime_planner_source_on_direct_completion(
     monkeypatch,
 ) -> None:
-    monkeypatch.setattr(
-        custom_api_agent_module,
-        "daily_desktop_intent_tool_requests",
-        lambda *_args, **_kwargs: [],
-    )
-    monkeypatch.setattr(
-        custom_api_agent_module,
-        "daily_desktop_intent_candidates",
-        lambda *_args, **_kwargs: [],
-    )
     budget = FakeBudget()
     timeline: list[dict[str, Any]] = []
 
@@ -36004,17 +35769,18 @@ def test_custom_api_agent_loop_preplans_daily_reminder_without_model() -> None:
     assert timeline[-1]["source"] == "runtime_planner"
 
 
-def test_custom_api_agent_loop_records_unavailable_desktop_intent_when_tool_is_missing() -> None:
+def test_custom_api_agent_loop_routes_missing_media_capability_through_planner_replan() -> None:
     budget = FakeBudget()
-    order: list[str] = []
     timeline: list[dict[str, Any]] = []
     appended_events: list[dict[str, Any]] = []
+    model_calls: list[list[dict[str, Any]]] = []
 
     def run_tool_requests(*_args, **_kwargs):
         raise AssertionError("unavailable desktop intent must not bypass allowed_tools")
 
-    def call_model(*_args, **_kwargs):
-        raise AssertionError("unavailable desktop intent should return a runtime policy summary")
+    def call_model(_base_url, _model, _api_key, messages, **_kwargs):
+        model_calls.append(list(messages))
+        return {"role": "assistant", "content": "当前 Agent 未开启媒体播放能力。"}
 
     loop = RuntimeCustomApiAgentLoop(
         agent_model_config_private=lambda _agent: {
@@ -36062,56 +35828,28 @@ def test_custom_api_agent_loop_records_unavailable_desktop_intent_when_tool_is_m
         run_id="run-missing-tool",
     )
 
-    assert str(result) == (
-        "这个 Agent 当前没有开启 media.apple_music_play，所以不能直接执行「播放 Apple Music」。"
-        "请改用八千代日常入口，或在 Agent Studio 给该 Agent 开启桌面执行能力。"
-        "当前允许的工具：workspace.read。"
+    assert str(result) == "当前 Agent 未开启媒体播放能力。"
+    assert not any(
+        event["event"] == "agent.desktop.intent_unavailable" for event in timeline
     )
-    assert order == []
-    assert timeline[0] == {
-        "event": "agent.desktop.intent_unavailable",
-        "detail": "media.apple_music_play",
-        "tool": "media.apple_music_play",
-        "status": "unavailable",
-        "source": "daily_desktop_intent",
-        "reason": "tool_not_allowed",
-        "blocked_by": "agent_tool_policy",
-        "blocked_summary": (
-            "这个 Agent 当前没有开启 media.apple_music_play，所以不能直接执行「播放 Apple Music」。"
-            "请改用八千代日常入口，或在 Agent Studio 给该 Agent 开启桌面执行能力。"
-            "当前允许的工具：workspace.read。"
-        ),
-        "recovery_actions": [
-            "改用八千代日常入口执行这个桌面指令。",
-            "在 Agent Studio 为该 Agent 开启桌面执行能力。",
-        ],
-        "input_preview": {"query": "超时空辉夜姬"},
-        "allowed_tools": ["workspace.read"],
-    }
-    assert appended_events == [
-        {
-            "run_id": "run-missing-tool",
-            "event_type": "agent.desktop.intent_unavailable",
-            "payload": {
-                "tool": "media.apple_music_play",
-                "status": "unavailable",
-                "source": "daily_desktop_intent",
-                "reason": "tool_not_allowed",
-                "blocked_by": "agent_tool_policy",
-                "blocked_summary": (
-                    "这个 Agent 当前没有开启 media.apple_music_play，所以不能直接执行「播放 Apple Music」。"
-                    "请改用八千代日常入口，或在 Agent Studio 给该 Agent 开启桌面执行能力。"
-                    "当前允许的工具：workspace.read。"
-                ),
-                "recovery_actions": [
-                    "改用八千代日常入口执行这个桌面指令。",
-                    "在 Agent Studio 为该 Agent 开启桌面执行能力。",
-                ],
-                "input_preview": {"query": "超时空辉夜姬"},
-                "allowed_tools": ["workspace.read"],
-            },
-        }
+    replan_events = [
+        event for event in timeline if event["event"] == "agent.replan.requested"
     ]
+    assert len(replan_events) == 1
+    assert replan_events[0]["payload"]["source_step_id"] == "control-media-playback"
+    assert replan_events[0]["payload"]["trigger"] == "tool_unavailable"
+    assert model_calls
+    assert any(
+        message["role"] == "user"
+        and "Runtime replan context" in message["content"]
+        and "enable_tools=media.music_app_open_and_play" in message["content"]
+        for message in model_calls[0]
+    )
+    assert any(
+        event["event_type"] == "agent.replan.requested"
+        and event["payload"]["source_step_id"] == "control-media-playback"
+        for event in appended_events
+    )
 
 
 def test_custom_api_agent_loop_preplans_foreground_hotkey_without_bypassing_runner() -> None:
@@ -36675,16 +36413,6 @@ def test_custom_api_agent_loop_records_desktop_intent_approval_required_before_p
 def test_custom_api_agent_loop_preserves_runtime_planner_source_on_approval_required(
     monkeypatch,
 ) -> None:
-    monkeypatch.setattr(
-        custom_api_agent_module,
-        "daily_desktop_intent_tool_requests",
-        lambda *_args, **_kwargs: [],
-    )
-    monkeypatch.setattr(
-        custom_api_agent_module,
-        "daily_desktop_intent_candidates",
-        lambda *_args, **_kwargs: [],
-    )
     budget = FakeBudget()
     timeline: list[dict[str, Any]] = []
     appended_events: list[dict[str, Any]] = []

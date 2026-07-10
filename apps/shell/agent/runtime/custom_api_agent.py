@@ -11,7 +11,6 @@ from typing import Any, Callable
 from apps.shell.agent.runtime.approval_tool_sets import (
     APPROVAL_PLAN_TOOLS as _DAILY_DESKTOP_APPROVAL_PLAN_TOOLS,
 )
-from apps.shell.agent.runtime.desktop_intents import daily_desktop_intent_candidates
 from apps.shell.agent.runtime.desktop_recovery_metadata import (
     daily_desktop_metadata_tool_request,
 )
@@ -483,18 +482,13 @@ class RuntimeCustomApiAgentLoop:
                     runtime_execution_metadata=runtime_execution_metadata,
                 )
                 if not planned_tool_requests:
-                    daily_unavailable_candidates = daily_desktop_intent_candidates(
-                        planning_context
-                    )
-                    planner_unavailable_payloads = []
-                    if not daily_unavailable_candidates:
-                        planner_unavailable_payloads = (
-                            _runtime_planner_unavailable_failure_payloads(
-                                runtime_planner_decision
-                            )
-                            if runtime_planner_decision is not None
-                            else []
+                    planner_unavailable_payloads = (
+                        _runtime_planner_unavailable_failure_payloads(
+                            runtime_planner_decision
                         )
+                        if runtime_planner_decision is not None
+                        else []
+                    )
                     if planner_unavailable_payloads:
                         self._record_runtime_planner_events(
                             runtime_planner_decision,
@@ -2240,10 +2234,9 @@ class RuntimeCustomApiAgentLoop:
                     and str(direct_tool_request.get("tool") or "").strip()
                     else None
                 )
-                candidates = [direct_candidate] if direct_candidate else daily_desktop_intent_candidates(planning_context)
-                if candidates:
+                if direct_candidate:
                     unavailable_summary = self._record_unavailable_desktop_intent(
-                        candidates[0],
+                        direct_candidate,
                         allowed_tools=allowed_tools,
                         messages=messages,
                         timeline=timeline,
