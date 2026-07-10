@@ -53,6 +53,7 @@ from .execution_strategy import (
 )
 from .desktop_plan_hints import (
     app_management_hint,
+    app_management_tool_candidates,
     app_control_mode,
     app_control_tool_candidates,
     app_foreground_tool_candidates,
@@ -4210,13 +4211,21 @@ class RuntimePlanner:
             requires_approval = action in {"close_window", "quit_app"}
             manage_depends_on = ["discover-desktop-state"]
             if app_name:
+                foreground_prepare_mode = (
+                    "open"
+                    if _explicit_app_prepare_prefix(intent.user_goal)
+                    else "focus"
+                )
                 steps.append(
                     _step(
                         intent,
                         "open-or-focus-app",
                         "Open or focus app",
                         "desktop.app_control",
-                        _first_allowed(app_control_tool_candidates("focus"), allowed),
+                        _first_allowed(
+                            app_control_tool_candidates(foreground_prepare_mode),
+                            allowed,
+                        ),
                         input_preview={"app_name": app_name},
                         depends_on=["discover-desktop-state"],
                         reason="Focus the named app before running the foreground window management action.",
@@ -4536,14 +4545,11 @@ class RuntimePlanner:
             return steps
         if app_management:
             action = str(app_management.get("action") or "").strip()
-            tool_name = {
-                "status": "app.status",
-                "show": "app.show",
-                "hide": "app.hide",
-                "minimize": "app.minimize",
-                "quit": "app.quit",
-            }.get(action)
-            if action == "status" and not _first_allowed((tool_name,), allowed):
+            tool_name = _first_allowed(
+                app_management_tool_candidates(action),
+                allowed,
+            )
+            if action == "status" and not tool_name:
                 verify_tool = _first_allowed(
                     (
                         "desktop.verify",
@@ -4580,6 +4586,11 @@ class RuntimePlanner:
                     )
                     return steps
             is_quit = action == "quit"
+            manage_input_preview = (
+                {}
+                if str(tool_name or "").startswith("desktop.")
+                else {"app_name": app_name}
+            )
             manage_depends_on = ["discover-desktop-state"]
             if app_management_prepare_mode in {"open", "focus"}:
                 steps.append(
@@ -4604,8 +4615,8 @@ class RuntimePlanner:
                     "manage-app",
                     "Manage app",
                     "desktop.app_control",
-                    _first_allowed((tool_name,), allowed) if tool_name else None,
-                    input_preview={"app_name": app_name},
+                    tool_name,
+                    input_preview=manage_input_preview,
                     risk_level="high" if is_quit else "low",
                     approval_required=is_quit,
                     depends_on=manage_depends_on,

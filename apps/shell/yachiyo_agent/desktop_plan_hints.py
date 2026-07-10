@@ -146,7 +146,19 @@ def app_control_mode(text: str) -> str:
 
 
 def app_control_tool_candidates(mode: str) -> tuple[str, ...]:
-    return ("app.focus", "app.open") if mode == "focus" else ("app.open", "app.focus")
+    if mode == "focus":
+        return ("app.focus", "desktop.focus_app", "app.open", "desktop.open_app")
+    return ("app.open", "desktop.open_app", "app.focus", "desktop.focus_app")
+
+
+def app_management_tool_candidates(action: str) -> tuple[str, ...]:
+    return {
+        "status": ("app.status",),
+        "show": ("app.show",),
+        "hide": ("app.hide", "desktop.hide_app"),
+        "minimize": ("app.minimize", "desktop.minimize_window"),
+        "quit": ("app.quit", "desktop.quit_app"),
+    }.get(str(action or "").strip(), ())
 
 
 def app_foreground_tool_candidates(mode: str, action: str) -> tuple[str, ...]:
@@ -708,6 +720,9 @@ def app_management_hint(text: str) -> dict[str, str] | None:
     value = clean(text)
     if foreground_management_hint(value):
         return None
+    compound_hint = _compound_app_management_hint(value)
+    if compound_hint:
+        return compound_hint
     if _looks_like_open_then_foreground_confirmation(value):
         return None
     patterns: tuple[tuple[str, str], ...] = (
@@ -832,6 +847,44 @@ def app_management_hint(text: str) -> dict[str, str] | None:
     return None
 
 
+def _compound_app_management_hint(value: str) -> dict[str, str] | None:
+    patterns = (
+        re.compile(
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:打开|启动|开启|运行|拉起|切到|聚焦)\s*"
+            r"(?P<app>.+?)\s*(?:并且|并|然后|再|接着|之后|随后)\s*"
+            r"(?P<action>隐藏|藏起来|收起来|收起|最小化|退出|关闭|关掉|结束|终止)"
+            r"(?:一下|下)?(?:它|该应用|这个应用)?(?:吗|嘛|呢|吧|么)?[？?]?$",
+            flags=re.IGNORECASE,
+        ),
+        re.compile(
+            r"^(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?"
+            r"(?:open|launch|start|focus|activate|switch\s+to|bring)\s+"
+            r"(?P<app>.+?)(?:\s+up)?\s+(?:and\s+then|then|and)\s+"
+            r"(?P<action>hide|minimi[sz]e|quit|close|exit|terminate)"
+            r"(?:\s+(?:it|the\s+app|that\s+app|this\s+app))?"
+            r"(?:\s+please)?[.!?]*$",
+            flags=re.IGNORECASE,
+        ),
+    )
+    for pattern in patterns:
+        match = pattern.search(value)
+        if not match:
+            continue
+        app_name = _clean_management_app_name_hint(match.group("app"))
+        raw_action = str(match.group("action") or "").lower()
+        if not app_name:
+            return None
+        if re.search(r"(?:隐藏|藏|收|hide)", raw_action, flags=re.IGNORECASE):
+            action = "hide"
+        elif re.search(r"(?:最小化|minimi[sz]e)", raw_action, flags=re.IGNORECASE):
+            action = "minimize"
+        else:
+            action = "quit"
+        return {"action": action, "app_name": app_name}
+    return None
+
+
 def _looks_like_open_then_foreground_confirmation(value: str) -> bool:
     text = clean(value)
     if not text:
@@ -861,6 +914,8 @@ def _looks_like_open_then_foreground_confirmation(value: str) -> bool:
 def foreground_management_hint(text: str) -> dict[str, str] | None:
     value = clean(text)
     lowered = value.lower()
+    if _is_compound_app_window_close_request(value, lowered):
+        return {"action": "close_window", "scope": "window"}
     if _is_show_all_hidden_apps_request(value, lowered):
         return {"action": "show_all_apps", "scope": "desktop"}
     if _is_foreground_window_close_request(value, lowered):
@@ -872,6 +927,25 @@ def foreground_management_hint(text: str) -> dict[str, str] | None:
     if _is_foreground_app_hide_request(value, lowered):
         return {"action": "hide_app", "scope": "app"}
     return None
+
+
+def _is_compound_app_window_close_request(value: str, lowered: str) -> bool:
+    return bool(
+        re.search(
+            r"(?:打开|启动|开启|运行|拉起|切到|聚焦)\s*.+?\s*"
+            r"(?:并且|并|然后|再|接着|之后|随后)\s*"
+            r"(?:关闭|关掉)\s*(?:当前|这个|该)?\s*窗口$",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:open|launch|start|focus|activate|switch\s+to|bring)\s+.+?\s+"
+            r"(?:and\s+then|then|and)\s+close\s+"
+            r"(?:the\s+)?(?:(?:current|active|this)\s+)?window\b",
+            lowered,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def hotkey_hint(text: str) -> dict[str, Any] | None:

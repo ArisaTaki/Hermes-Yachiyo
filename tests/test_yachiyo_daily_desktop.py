@@ -3461,6 +3461,167 @@ def test_daily_desktop_entrypoint_routes_polite_focus_and_show_questions_to_desk
         },
     ]
 
+    assert daily_desktop_entrypoint_requests("open WeChat then hide it") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "WeChat"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.hide",
+            "input": {"app_name": "WeChat"},
+        },
+    ]
+    assert daily_desktop_entrypoint_requests("focus WeChat then hide it") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "WeChat"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.hide",
+            "input": {"app_name": "WeChat"},
+        },
+    ]
+    assert daily_desktop_entrypoint_requests(
+        "open WeChat then hide it",
+        allowed_tools=["app.open"],
+    ) == []
+
+
+def test_daily_desktop_compound_app_timeline_preserves_planner_steps() -> None:
+    timeline = daily_desktop_planned_timeline("open WeChat then hide it")
+
+    assert [event["tool"] for event in timeline] == [
+        "desktop.list_apps",
+        "app.open",
+        "app.hide",
+        "desktop.running_apps",
+    ]
+    assert [event["planning_reason"] for event in timeline] == [
+        "planner_desktop_operation",
+    ] * 4
+    assert [event["source"] for event in timeline] == ["runtime_planner"] * 4
+
+
+def test_daily_desktop_compound_app_projection_supports_tool_aliases() -> None:
+    cases = (
+        (
+            "open WeChat then hide it",
+            [
+                "desktop.list_apps",
+                "desktop.open_app",
+                "desktop.hide_app",
+                "desktop.running_apps",
+            ],
+            [
+                ("desktop.open_app", {"app_name": "WeChat"}),
+                ("desktop.hide_app", {}),
+            ],
+        ),
+        (
+            "focus WeChat then hide it",
+            [
+                "desktop.list_apps",
+                "desktop.focus_app",
+                "desktop.hide_app",
+                "desktop.running_apps",
+            ],
+            [
+                ("desktop.focus_app", {"app_name": "WeChat"}),
+                ("desktop.hide_app", {}),
+            ],
+        ),
+        (
+            "open WeChat then quit it",
+            [
+                "desktop.list_apps",
+                "desktop.open_app",
+                "desktop.quit_app",
+                "desktop.running_apps",
+            ],
+            [
+                ("desktop.open_app", {"app_name": "WeChat"}),
+                ("desktop.quit_app", {}),
+            ],
+        ),
+        (
+            "open WeChat then hide it",
+            ["desktop.list_apps", "app.open", "app.hide", "desktop.active_window"],
+            [
+                ("app.open", {"app_name": "WeChat"}),
+                ("app.hide", {"app_name": "WeChat"}),
+            ],
+        ),
+        (
+            "open WeChat then hide it",
+            ["desktop.list_apps", "app.open", "app.hide", "desktop.windows"],
+            [
+                ("app.open", {"app_name": "WeChat"}),
+                ("app.hide", {"app_name": "WeChat"}),
+            ],
+        ),
+    )
+
+    for prompt, allowed_tools, expected in cases:
+        requests = daily_desktop_entrypoint_requests(
+            prompt,
+            allowed_tools=allowed_tools,
+        )
+
+        assert [
+            (request["tool"], request["input"])
+            for request in requests
+        ] == expected
+
+
+def test_compound_app_projection_rejects_missing_quit_approval() -> None:
+    from apps.shell.yachiyo_agent.daily_desktop import (
+        _legacy_compatible_compound_app_management_entrypoint_requests,
+        daily_desktop_allowed_tools,
+    )
+    from apps.shell.yachiyo_agent.planner_execution import (
+        planner_decision_and_tool_requests,
+    )
+
+    allowed = daily_desktop_allowed_tools()
+    decision, requests = planner_decision_and_tool_requests(
+        "打开 Slack 然后退出",
+        allowed,
+    )
+    projected = _legacy_compatible_compound_app_management_entrypoint_requests(
+        decision,
+        requests,
+        allowed=allowed,
+    )
+    assert [request["tool"] for request in projected] == ["app.open", "app.quit"]
+
+    steps = [
+        step.model_copy(update={"approval_required": False})
+        if step.step_id == "manage-app"
+        else step
+        for step in decision.plan.tool_plan.steps
+    ]
+    unapproved = decision.model_copy(
+        update={
+            "plan": decision.plan.model_copy(
+                update={
+                    "tool_plan": decision.plan.tool_plan.model_copy(
+                        update={"steps": steps}
+                    )
+                }
+            )
+        }
+    )
+
+    assert _legacy_compatible_compound_app_management_entrypoint_requests(
+        unapproved,
+        requests,
+        allowed=allowed,
+    ) == []
+
 
 def test_daily_desktop_entrypoint_routes_current_app_window_control_to_desktop_tools(
     monkeypatch,
@@ -3513,6 +3674,44 @@ def test_daily_desktop_entrypoint_routes_current_app_window_control_to_desktop_t
         {
             "protocol": "json_fallback",
             "tool": "app.focus",
+            "input": {"app_name": "WeChat"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.close_window",
+            "input": {},
+        },
+    ]
+    assert daily_desktop_entrypoint_requests(
+        "open WeChat then close the window",
+        allowed_tools=[
+            "desktop.list_apps",
+            "desktop.open_app",
+            "desktop.close_window",
+        ],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.open_app",
+            "input": {"app_name": "WeChat"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.close_window",
+            "input": {},
+        },
+    ]
+    assert daily_desktop_entrypoint_requests(
+        "focus WeChat then close the window",
+        allowed_tools=[
+            "desktop.list_apps",
+            "desktop.focus_app",
+            "desktop.close_window",
+        ],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.focus_app",
             "input": {"app_name": "WeChat"},
         },
         {

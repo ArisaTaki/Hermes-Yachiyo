@@ -17435,13 +17435,16 @@ def test_runtime_planner_routes_named_app_status_to_app_control() -> None:
 
 def test_runtime_planner_sequences_app_open_or_focus_before_app_management() -> None:
     cases = [
-        ("打开 Slack 然后隐藏", "open", "app.open", "app.hide", False),
-        ("切到 Slack 然后隐藏", "focus", "app.focus", "app.hide", False),
-        ("open Chrome then minimize", "open", "app.open", "app.minimize", False),
-        ("打开 Slack 然后退出", "open", "app.open", "app.quit", True),
+        ("打开 Slack 然后隐藏", "Slack", "open", "app.open", "app.hide", False),
+        ("切到 Slack 然后隐藏", "Slack", "focus", "app.focus", "app.hide", False),
+        ("open Chrome then minimize", "Chrome", "open", "app.open", "app.minimize", False),
+        ("打开 Slack 然后退出", "Slack", "open", "app.open", "app.quit", True),
+        ("open WeChat then hide it", "WeChat", "open", "app.open", "app.hide", False),
+        ("focus WeChat then hide it", "WeChat", "focus", "app.focus", "app.hide", False),
+        ("打开微信然后隐藏它", "微信", "open", "app.open", "app.hide", False),
     ]
 
-    for prompt, prepare_mode, prepare_tool, manage_tool, approval_required in cases:
+    for prompt, app_name, prepare_mode, prepare_tool, manage_tool, approval_required in cases:
         decision = RuntimePlanner().decision(
             prompt,
             allowed_tools=[
@@ -17455,7 +17458,6 @@ def test_runtime_planner_sequences_app_open_or_focus_before_app_management() -> 
             ],
         )
 
-        app_name = "Chrome" if "Chrome" in prompt else "Slack"
         assert decision.selected_intent.kind == "desktop_operation"
         assert decision.selected_intent.inputs["app_name_hint"] == app_name
         assert decision.selected_intent.inputs["app_management_hint"]["app_name"] == app_name

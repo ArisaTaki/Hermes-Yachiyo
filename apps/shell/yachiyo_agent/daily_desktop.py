@@ -20,6 +20,10 @@ from .desktop_execution_policy import (
     desktop_execution_policy_payload,
     desktop_provider_session_auto_start_recommended_for_requests,
 )
+from .desktop_plan_hints import (
+    app_control_tool_candidates,
+    app_management_tool_candidates,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -555,13 +559,17 @@ def daily_desktop_entrypoint_requests(
     allowed_tools: Sequence[str] | None = None,
 ) -> list[dict[str, Any]]:
     allowed = daily_desktop_allowed_tools(allowed_tools)
-    planner_requests = _planner_owned_legacy_compatible_entrypoint_requests(
-        str(text or ""),
-        allowed,
-        metadata=metadata,
+    planner_requests, planner_owned = (
+        _planner_owned_legacy_compatible_entrypoint_projection(
+            str(text or ""),
+            allowed,
+            metadata=metadata,
+        )
     )
     if planner_requests:
         return planner_requests
+    if planner_owned:
+        return []
     from apps.shell.agent.runtime.desktop_intents import (
         daily_desktop_entrypoint_tool_requests,
     )
@@ -579,6 +587,20 @@ def _planner_owned_legacy_compatible_entrypoint_requests(
     *,
     metadata: Mapping[str, Any] | None,
 ) -> list[dict[str, Any]]:
+    requests, _ = _planner_owned_legacy_compatible_entrypoint_projection(
+        text,
+        allowed,
+        metadata=metadata,
+    )
+    return requests
+
+
+def _planner_owned_legacy_compatible_entrypoint_projection(
+    text: str,
+    allowed: Sequence[str],
+    *,
+    metadata: Mapping[str, Any] | None,
+) -> tuple[list[dict[str, Any]], bool]:
     try:
         from .planner_execution import planner_decision_and_tool_requests
 
@@ -589,7 +611,7 @@ def _planner_owned_legacy_compatible_entrypoint_requests(
         )
     except Exception:
         logger.debug("Runtime planner legacy-compatible entrypoint unavailable", exc_info=True)
-        return []
+        return [], False
     context_capture_requests = (
         _legacy_compatible_context_capture_schedule_entrypoint_requests(
             decision,
@@ -598,68 +620,82 @@ def _planner_owned_legacy_compatible_entrypoint_requests(
         )
     )
     if context_capture_requests:
-        return context_capture_requests
+        return context_capture_requests, False
+    compound_app_requests = (
+        _legacy_compatible_compound_app_management_entrypoint_requests(
+            decision,
+            planner_requests,
+            allowed=allowed,
+        )
+    )
+    if compound_app_requests:
+        return compound_app_requests, True
+    if _compound_app_management_projection_signature(decision):
+        return [], True
     media_requests = _legacy_compatible_media_entrypoint_requests(
         planner_requests,
         text=text,
     )
     if media_requests:
-        return media_requests
+        return media_requests, False
     search_requests = _legacy_compatible_search_entrypoint_requests(
         planner_requests,
         text=text,
     )
     if search_requests:
-        return search_requests
+        return search_requests, False
     browser_search_requests = _legacy_compatible_browser_search_entrypoint_requests(
         planner_requests,
         text=text,
     )
     if browser_search_requests:
-        return browser_search_requests
+        return browser_search_requests, False
     browser_internal_page_requests = (
         _legacy_compatible_browser_internal_page_entrypoint_requests(
             planner_requests,
         )
     )
     if browser_internal_page_requests:
-        return browser_internal_page_requests
+        return browser_internal_page_requests, False
     foreground_command_requests = (
         _legacy_compatible_foreground_command_entrypoint_requests(
             planner_requests,
         )
     )
     if foreground_command_requests:
-        return foreground_command_requests
+        return foreground_command_requests, False
     search_box_requests = _legacy_compatible_context_transfer_search_box_requests(
         planner_requests,
         text=text,
     )
     if search_box_requests:
-        return search_box_requests
+        return search_box_requests, False
     browser_click_requests = _legacy_compatible_browser_click_entrypoint_requests(
         planner_requests,
         text=text,
     )
     if browser_click_requests:
-        return browser_click_requests
+        return browser_click_requests, False
     semantic_ui_requests = _legacy_compatible_semantic_ui_entrypoint_requests(
         planner_requests,
         text=text,
     )
     if semantic_ui_requests:
-        return semantic_ui_requests
+        return semantic_ui_requests, False
     foreground_type_requests = _legacy_compatible_foreground_type_entrypoint_requests(
         planner_requests,
     )
     if foreground_type_requests:
-        return foreground_type_requests
+        return foreground_type_requests, False
     observation_requests = _legacy_compatible_observation_entrypoint_requests(
         planner_requests,
     )
     if observation_requests:
-        return observation_requests
-    return _legacy_compatible_simple_entrypoint_requests(planner_requests, text=text)
+        return observation_requests, False
+    return _legacy_compatible_simple_entrypoint_requests(
+        planner_requests,
+        text=text,
+    ), False
 
 
 _LEGACY_COMPATIBLE_OBSERVATION_TOOLS = frozenset(
@@ -938,7 +974,7 @@ def _legacy_compatible_foreground_command_entrypoint_requests(
     visible = _visible_entrypoint_plan_requests(items)
     if _legacy_compatible_command_palette_sequence(visible):
         return [_legacy_shape_request(request) for request in visible]
-    if _legacy_compatible_app_management_sequence(visible):
+    if _legacy_compatible_app_close_window_sequence(visible):
         return [_legacy_shape_request(request) for request in visible]
     return []
 
@@ -1007,22 +1043,129 @@ def _legacy_compatible_command_palette_sequence(
     return True
 
 
-def _legacy_compatible_app_management_sequence(
+def _legacy_compatible_app_close_window_sequence(
     requests: Sequence[Mapping[str, Any]],
 ) -> bool:
     if len(requests) != 2:
         return False
     first, second = requests
-    first_tool = str(first.get("tool") or "").strip()
-    second_tool = str(second.get("tool") or "").strip()
     first_input = first.get("input") if isinstance(first.get("input"), Mapping) else {}
     second_input = second.get("input") if isinstance(second.get("input"), Mapping) else {}
-    app_name = str(first_input.get("app_name") or "").strip()
-    if first_tool not in {"app.focus", "app.open"} or not app_name:
-        return False
-    if second_tool in {"app.hide", "app.minimize", "app.quit"}:
-        return str(second_input.get("app_name") or "").strip() == app_name
-    return second_tool == "desktop.close_window" and not second_input
+    return (
+        str(first.get("tool") or "").strip()
+        in {
+            *app_control_tool_candidates("open"),
+            *app_control_tool_candidates("focus"),
+        }
+        and bool(str(first_input.get("app_name") or "").strip())
+        and str(second.get("tool") or "").strip() == "desktop.close_window"
+        and not second_input
+    )
+
+
+def _legacy_compatible_compound_app_management_entrypoint_requests(
+    decision: Any,
+    requests: Sequence[Mapping[str, Any]] | None,
+    *,
+    allowed: Sequence[str],
+) -> list[dict[str, Any]]:
+    signature = _compound_app_management_projection_signature(decision)
+    if not signature:
+        return []
+    action, prepare_mode, intent_app_name = signature
+    items = [dict(request) for request in requests or [] if isinstance(request, Mapping)]
+    tools = [str(item.get("tool") or "").strip() for item in items]
+    verify_tools = {
+        "desktop.running_apps",
+        "desktop.active_window",
+        "desktop.windows",
+        "desktop.list_windows",
+        "desktop.verify",
+    }
+    if (
+        len(tools) != 4
+        or tools[0] != "desktop.list_apps"
+        or tools[1] not in set(app_control_tool_candidates(prepare_mode))
+        or tools[2] not in set(app_management_tool_candidates(action))
+        or tools[3] not in verify_tools
+    ):
+        return []
+    if any(
+        str(item.get("planning_reason") or "").strip()
+        != "planner_desktop_operation"
+        for item in items
+    ):
+        return []
+    if not set(tools).issubset(set(allowed)):
+        return []
+
+    discovery_input = items[0].get("input")
+    prepare_input = items[1].get("input")
+    manage_input = items[2].get("input")
+    verify_input = items[3].get("input")
+    if not all(
+        isinstance(payload, Mapping)
+        for payload in (discovery_input, prepare_input, manage_input, verify_input)
+    ):
+        return []
+    app_name = str(prepare_input.get("app_name") or "").strip()
+    discovery_query = str(discovery_input.get("query") or "").strip()
+    manage_app_name = str(manage_input.get("app_name") or "").strip()
+    verify_app_name = str(verify_input.get("app_name") or "").strip()
+    if (
+        not app_name
+        or discovery_query not in {intent_app_name, app_name}
+        or discovery_input.get("limit") != 20
+        or (tools[2].startswith("app.") and manage_app_name != app_name)
+        or (tools[2].startswith("desktop.") and bool(manage_input))
+        or (verify_app_name and verify_app_name != app_name)
+    ):
+        return []
+
+    plan = getattr(decision, "plan", None)
+    tool_plan = getattr(plan, "tool_plan", None)
+    steps = list(getattr(tool_plan, "steps", None) or [])
+    if [str(getattr(step, "step_id", "") or "") for step in steps] != [
+        "discover-desktop-state",
+        "open-or-focus-app",
+        "manage-app",
+        "verify-desktop-result",
+    ]:
+        return []
+    if [str(getattr(step, "tool_name", "") or "") for step in steps] != tools:
+        return []
+    if list(getattr(steps[1], "depends_on", None) or []) != ["discover-desktop-state"]:
+        return []
+    if list(getattr(steps[2], "depends_on", None) or []) != ["open-or-focus-app"]:
+        return []
+    if list(getattr(steps[3], "depends_on", None) or []) != ["manage-app"]:
+        return []
+    if bool(getattr(steps[2], "approval_required", False)) != (action == "quit"):
+        return []
+    return [_legacy_shape_request(request) for request in items[1:3]]
+
+
+def _compound_app_management_projection_signature(
+    decision: Any,
+) -> tuple[str, str, str] | None:
+    intent = getattr(decision, "selected_intent", None)
+    intent_inputs = getattr(intent, "inputs", None)
+    if str(getattr(intent, "kind", "") or "").strip() != "desktop_operation" or not isinstance(
+        intent_inputs,
+        Mapping,
+    ):
+        return None
+    management_hint = intent_inputs.get("app_management_hint")
+    if not isinstance(management_hint, Mapping):
+        return None
+    action = str(management_hint.get("action") or "").strip()
+    prepare_mode = str(intent_inputs.get("app_management_prepare_mode") or "").strip()
+    intent_app_name = str(management_hint.get("app_name") or "").strip()
+    if action not in {"hide", "minimize", "quit"}:
+        return None
+    if prepare_mode not in {"open", "focus"} or not intent_app_name:
+        return None
+    return action, prepare_mode, intent_app_name
 
 
 def _legacy_compatible_search_entrypoint_requests(
