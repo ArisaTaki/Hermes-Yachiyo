@@ -17,8 +17,12 @@ from urllib.error import HTTPError
 from urllib.parse import quote_plus, urlparse
 from urllib.request import Request, urlopen
 
+from apps.shell.agent.runtime.app_aliases import APP_ALIASES, compact_app_alias
+
 _ELECTRON_NATIVE_URL_ENV = "OHA_YACHIYO_ELECTRON_NATIVE_URL"
 _ELECTRON_NATIVE_TOKEN_ENV = "OHA_YACHIYO_ELECTRON_NATIVE_TOKEN"
+
+_APP_ALIAS_EXPANSION_PRIMARY_SCORE = 95
 
 _APP_CAPABILITY_QUERY_PROFILES = (
     {
@@ -2923,6 +2927,27 @@ def _installed_app_match_candidates(query_name: str) -> list[dict[str, Any]]:
     query_key = _compact_app_match_name(query)
     if not query_key:
         return []
+    matches = _installed_app_match_candidates_for_query(query)
+    best_primary_score = max(
+        (int(item.get("match_score") or 0) for item in matches),
+        default=0,
+    )
+    alias_query = str(APP_ALIASES.get(compact_app_alias(query)) or "").strip()
+    if (
+        not alias_query
+        or _compact_app_match_name(alias_query) == query_key
+        or best_primary_score >= _APP_ALIAS_EXPANSION_PRIMARY_SCORE
+    ):
+        return matches
+
+    alias_matches = _installed_app_match_candidates_for_query(alias_query)
+    for match in alias_matches:
+        match["matched_query"] = alias_query
+        match["matched_query_source"] = "app_alias"
+    return _merge_installed_app_match_candidates(matches, alias_matches)
+
+
+def _installed_app_match_candidates_for_query(query: str) -> list[dict[str, Any]]:
     matches: list[dict[str, Any]] = []
     for bundle in _iter_installed_app_bundles():
         candidate = bundle.stem
@@ -2961,6 +2986,29 @@ def _installed_app_match_candidates(query_name: str) -> list[dict[str, Any]]:
         matches.append(candidate_payload)
     if not matches:
         return []
+    matches.sort(
+        key=lambda item: (
+            -int(item["match_score"]),
+            len(str(item["name"])),
+            str(item["name"]),
+        )
+    )
+    return matches
+
+
+def _merge_installed_app_match_candidates(
+    primary: list[dict[str, Any]],
+    aliases: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    merged: dict[str, dict[str, Any]] = {}
+    for match in (*primary, *aliases):
+        key = str(match.get("path") or match.get("name") or "").strip()
+        current = merged.get(key)
+        if current is None or int(match.get("match_score") or 0) > int(
+            current.get("match_score") or 0
+        ):
+            merged[key] = match
+    matches = list(merged.values())
     matches.sort(
         key=lambda item: (
             -int(item["match_score"]),
