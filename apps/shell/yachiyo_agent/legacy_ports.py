@@ -909,7 +909,11 @@ class LegacyChatTaskStarter:
             metadata,
         )
         direct_tool_request = explicit_direct_tool_request
-        if direct_tool_request is None and not explicit_runtime_execution_envelope:
+        if (
+            direct_tool_request is None
+            and not explicit_direct_tool_requests
+            and not explicit_runtime_execution_envelope
+        ):
             direct_tool_request = daily_desktop_direct_metadata_request(
                 metadata,
                 allowed_tools=allowed_daily_desktop_tools,
