@@ -14,10 +14,11 @@ from apps.shell.agent.runtime.desktop_recovery_metadata import (
 )
 from apps.shell.agent.tools.policy import DAILY_DESKTOP_TOOL_NAMES
 
+from .app_name_hints import explicit_known_app_action_target_hint
 from .desktop_execution_policy import (
     daily_entrypoint_desktop_execution_policy,
-    desktop_provider_session_auto_start_recommended_for_requests,
     desktop_execution_policy_payload,
+    desktop_provider_session_auto_start_recommended_for_requests,
 )
 
 logger = logging.getLogger(__name__)
@@ -1083,6 +1084,7 @@ _LEGACY_COMPATIBLE_SIMPLE_PLANNER_TOOLS = frozenset(
         "app.open_and_safe_key",
         "app.open_and_safe_scroll",
         "app.open_and_safe_shortcut",
+        "app.show",
         "app.status",
         "browser.open_url",
         "desktop.safe_shortcut",
@@ -1107,7 +1109,7 @@ def _legacy_compatible_simple_request(text: str, request: Mapping[str, Any]) -> 
     if tool_name == "app.status":
         payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
         return bool(str(payload.get("app_name") or "").strip())
-    if tool_name not in {"app.open", "app.focus"}:
+    if tool_name not in {"app.open", "app.focus", "app.show"}:
         return False
     payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
     app_name = str(payload.get("app_name") or "").strip()
@@ -1115,6 +1117,8 @@ def _legacy_compatible_simple_request(text: str, request: Mapping[str, Any]) -> 
         return False
     if _generic_non_app_name(app_name):
         return False
+    if explicit_known_app_action_target_hint(text) == app_name:
+        return True
     return not _app_prompt_has_non_launch_followup(text)
 
 

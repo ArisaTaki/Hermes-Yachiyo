@@ -334,6 +334,9 @@ def test_runtime_planner_routes_polite_unknown_app_open_phrases_to_discovery_cha
     allowed_tools = ["desktop.list_apps", "app.open", "desktop.verify"]
     cases = (
         ("帮我开一下 PixelForge", "PixelForge"),
+        ("帮我开了 PixelForge", "PixelForge"),
+        ("帮我开起来 PixelForge", "PixelForge"),
+        ("把 PixelForge 拉起来", "PixelForge"),
         ("找一下 PixelForge 并打开", "PixelForge"),
         ("please start up PixelForge for me", "PixelForge"),
         ("find PixelForge and open it", "PixelForge"),
@@ -360,6 +363,53 @@ def test_runtime_planner_routes_polite_unknown_app_open_phrases_to_discovery_cha
         assert _step_by_id(decision, "verify-desktop-result").input_preview == {
             "app_name": expected_app,
         }
+
+
+def test_runtime_planner_routes_colloquial_unknown_app_focus_to_discovery_chain() -> None:
+    decision = RuntimePlanner().decision(
+        "bring PixelForge up",
+        allowed_tools=["desktop.list_apps", "app.focus", "desktop.verify"],
+    )
+
+    assert decision.selected_intent.kind == "desktop_operation"
+    assert decision.selected_intent.inputs == {
+        "app_name_hint": "PixelForge",
+        "operation_hint": "focus",
+    }
+    assert [
+        step.tool_name for step in decision.plan.tool_plan.steps
+    ] == ["desktop.list_apps", "app.focus", "desktop.verify"]
+
+    compound = RuntimePlanner().decision(
+        "bring PixelForge up and click export",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.focus_and_click_ui_element",
+            "desktop.ui_elements",
+        ],
+    )
+
+    assert compound.selected_intent.inputs["app_name_hint"] == "PixelForge"
+    assert _step_by_id(compound, "operate-foreground-ui").input_preview == {
+        "app_name": "PixelForge",
+        "target": "export",
+        "role_filter": "button",
+        "click_count": 1,
+        "limit": 80,
+    }
+
+    generic_browser = RuntimePlanner().decision(
+        "把浏览器拉起来",
+        allowed_tools=["desktop.list_apps", "app.open", "desktop.verify"],
+    )
+
+    assert generic_browser.selected_intent.inputs["desktop_discovery_hint"] == {
+        "action": "discover_apps",
+        "query": "browser",
+    }
+    assert [
+        step.tool_name for step in generic_browser.plan.tool_plan.steps
+    ] == ["desktop.list_apps", "app.open", "desktop.verify"]
 
 
 def test_runtime_planner_web_destinations_are_behind_compatibility_boundary() -> None:

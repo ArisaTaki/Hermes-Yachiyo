@@ -30,6 +30,23 @@ def test_daily_desktop_product_entrypoints_do_not_enable_legacy_intent_fallback(
         assert "allow_legacy_fallback=True" not in path.read_text(encoding="utf-8")
 
 
+def test_planner_first_daily_entrypoint_discovers_generic_pull_up_target() -> None:
+    requests = planner_first_daily_desktop_entrypoint_requests(
+        "把浏览器拉起来",
+        allowed_tools=["desktop.list_apps", "app.open", "desktop.verify"],
+        allow_legacy_fallback=False,
+    )
+
+    assert [request["tool"] for request in requests] == [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.verify",
+    ]
+    assert requests[0]["input"] == {"query": "browser", "limit": 20}
+    assert requests[1]["input"]["app_name"] == "<selected app from desktop.list_apps>"
+    assert all(request["source"] == "runtime_planner" for request in requests)
+
+
 def test_daily_desktop_runtime_plan_reuses_one_planner_decision(monkeypatch) -> None:
     calls: list[str] = []
     original_decision = planner_execution_module.RuntimePlanner.decision
@@ -2644,11 +2661,21 @@ def test_daily_desktop_entrypoint_routes_permission_diagnosis_questions() -> Non
         }
 
 
-def test_daily_desktop_entrypoint_routes_polite_app_open_questions_to_desktop_tool() -> None:
+def test_daily_desktop_entrypoint_routes_polite_app_open_questions_to_desktop_tool(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "apps.shell.agent.runtime.desktop_intents.daily_desktop_entrypoint_tool_requests",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("polite app launch must be planner-owned")
+        ),
+    )
     cases = (
         ("你能帮我打开微信吗", "WeChat"),
         ("能否帮我打开微信", "WeChat"),
         ("能否帮我启动备忘录", "Notes"),
+        ("帮我开了微信", "WeChat"),
+        ("帮我开起来微信", "WeChat"),
         ("把微信开了", "WeChat"),
         ("你能启动一下备忘录吗", "Notes"),
         ("打开短信", "Messages"),
@@ -3111,7 +3138,15 @@ def test_daily_desktop_entrypoint_routes_app_status_questions_to_desktop_tool() 
         assert daily_desktop_user_metadata(requests)["daily_desktop_tool"] == "app.status"
 
 
-def test_daily_desktop_entrypoint_routes_polite_focus_and_show_questions_to_desktop_tools() -> None:
+def test_daily_desktop_entrypoint_routes_polite_focus_and_show_questions_to_desktop_tools(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "apps.shell.agent.runtime.desktop_intents.daily_desktop_entrypoint_tool_requests",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("polite app management must be planner-owned")
+        ),
+    )
     cases = (
         ("你能帮我切到Chrome吗", "app.focus", {"app_name": "Google Chrome"}),
         ("能否帮我切到微信", "app.focus", {"app_name": "WeChat"}),
@@ -3136,6 +3171,8 @@ def test_daily_desktop_entrypoint_routes_polite_focus_and_show_questions_to_desk
             }
         ]
         assert daily_desktop_user_metadata(requests)["daily_desktop_tool"] == tool_name
+
+    monkeypatch.undo()
 
     app_window_sequence = daily_desktop_entrypoint_requests("打开微信然后隐藏")
 

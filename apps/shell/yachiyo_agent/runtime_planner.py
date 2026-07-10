@@ -16,6 +16,7 @@ from urllib.parse import quote_plus
 
 from .app_name_hints import (
     compact_app_name_hint,
+    explicit_app_action_target_hint as raw_explicit_app_action_target_hint,
     is_legacy_app_name_hint,
     legacy_app_name_hint,
     supports_new_message_app_hint,
@@ -445,6 +446,8 @@ class TaskIntentRouter:
         ):
             return _empty_intent("desktop_operation", text)
         app_capability = _app_capability_discovery_hint(text)
+        if _explicit_known_app_action_target_hint(text):
+            app_capability = {}
         if not app_capability and _browser_window_desktop_ui_operation_requested(text):
             app_capability = {"query": "browser", "description": "browser"}
         generic_browser_search = _generic_browser_app_search_hint(text)
@@ -481,6 +484,7 @@ class TaskIntentRouter:
             _explicit_system_settings_request(text)
             and not spreadsheet_cell_edit
             and not desktop_ui_field_edit
+            and not _explicit_known_app_action_target_hint(text)
             and not (app_search_app_hint and _app_search_hint(text, app_search_app_hint))
         ):
             return _empty_intent("desktop_operation", text)
@@ -749,6 +753,8 @@ class TaskIntentRouter:
                 "开一下",
                 "开下",
                 "开起来",
+                "拉起来",
+                "拉起",
                 "切到",
                 "聚焦",
                 "点击",
@@ -1444,6 +1450,9 @@ class TaskIntentRouter:
         if _spreadsheet_cell_edit_ui_hint(text):
             return _empty_intent("system_control", text)
         if _desktop_ui_field_edit_hint(text):
+            return _empty_intent("system_control", text)
+        explicit_known_app = _explicit_known_app_action_target_hint(text)
+        if explicit_known_app and not _is_system_settings_app_label(explicit_known_app):
             return _empty_intent("system_control", text)
         app_hint = _app_name_hint(text)
         app_search_hint = _app_search_hint(text, app_hint)
@@ -20446,10 +20455,31 @@ def _explicit_generic_named_app_hint(text: str) -> str:
     return ""
 
 
+def _explicit_app_action_target_hint(text: str) -> str:
+    app = _clean_app_name_hint(raw_explicit_app_action_target_hint(text))
+    if (
+        app
+        and not _invalid_app_scoped_followup_app(app)
+        and not _is_generic_foreground_app_label(app)
+    ):
+        return app
+    return ""
+
+
+def _explicit_known_app_action_target_hint(text: str) -> str:
+    app = _explicit_app_action_target_hint(text)
+    if app and is_legacy_app_name_hint(app):
+        return _canonical_app_name_hint(app)
+    return ""
+
+
 def _app_name_hint(text: str) -> str:
     explicit_generic_named_app = _explicit_generic_named_app_hint(text)
     if explicit_generic_named_app:
         return _canonical_app_name_hint(explicit_generic_named_app)
+    explicit_known_app = _explicit_known_app_action_target_hint(text)
+    if explicit_known_app:
+        return explicit_known_app
     if _looks_like_non_desktop_content_task(text):
         return ""
     if _app_capability_discovery_hint(text):
@@ -20471,6 +20501,9 @@ def _app_name_hint(text: str) -> str:
         return ""
     if _foreground_app_search_hint(text):
         return ""
+    explicit_app = _explicit_app_action_target_hint(text)
+    if explicit_app:
+        return _canonical_app_name_hint(explicit_app)
     app_click_scope = _app_first_click_scope_hint(text)
     if app_click_scope:
         return str(app_click_scope.get("app_name") or "").strip()
@@ -20928,6 +20961,13 @@ def _clean_app_name_hint(value: str) -> str:
         app,
         flags=re.IGNORECASE,
     ).strip(" .，,。")
+    bring_up_match = re.fullmatch(
+        r"bring\s+(?P<app>.+?)\s+up",
+        app,
+        flags=re.IGNORECASE,
+    )
+    if bring_up_match:
+        app = bring_up_match.group("app").strip(" .，,。")
     scoped_called_app_match = re.match(
         r"^(?:一个|一款|这个|那个)?"
         r"(?:(?:我(?:的)?(?:电脑|mac|机器|系统)?|本机|本地)(?:上|里|中|内)?(?:的)?\s*)?"
@@ -23050,7 +23090,7 @@ def _explicit_app_open_request(text: str) -> bool:
         text,
         ("打开", "启动", "开启", "运行", "拉起", "open ", "launch ", "start "),
     ) or bool(
-        re.search(r"(?:开一下|开下|\bstart\s+up\b)", text, flags=re.IGNORECASE)
+        re.search(r"(?:开了|开起来|开一下|开下|\bstart\s+up\b)", text, flags=re.IGNORECASE)
         or re.search(r"开\s+[\w.·-]", text, flags=re.IGNORECASE)
     )
 
@@ -23390,6 +23430,8 @@ def _generic_browser_app_target_requested(text: str) -> bool:
     value = _clean_prompt(text)
     if not value:
         return False
+    if _is_generic_browser_app_label(raw_explicit_app_action_target_hint(value)):
+        return True
     if _explicit_browser_url_hint(value) or _known_web_destination_request_url_hint(value):
         return False
     if _known_web_destination_search_hint(value):
@@ -23723,11 +23765,13 @@ def _browser_family(app_name: str) -> str:
 
 def _app_preferences_hint(text: str) -> dict[str, str]:
     value = _clean_prompt(text)
+    if _explicit_known_app_action_target_hint(value):
+        return {}
     surface = r"(?:偏好设置|设置|preferences|settings)"
     patterns: tuple[tuple[str, str], ...] = (
         (
             r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
-            r"(?P<mode>打开|启动|开启|切到|聚焦)\s*"
+            r"(?P<mode>打开|启动|开启|开了|开起来|切到|聚焦)\s*"
             rf"(?P<app>[\w .·-]{{1,40}}?)\s*(?:的)?\s*(?P<surface>{surface})"
             r"(?:一下|下)?(?:可以吗|好吗|好么|行吗|吗|嘛|吧|呢)?$",
             "",
@@ -23882,6 +23926,13 @@ def _desktop_operation_hint(text: str) -> str:
     app_management = app_management_hint(text)
     if app_management:
         return f"{app_management.get('action')}_app"
+    if re.search(
+        r"^bring\s+[A-Za-z][A-Za-z0-9 ._-]{1,60}?\s+up"
+        r"(?=\s*(?:\b(?:and|then)\b|[.!?]|$))",
+        _clean_prompt(text),
+        flags=re.IGNORECASE,
+    ):
+        return "focus"
     if _contains_any(text, ["click", "点击"]):
         return "click"
     if _contains_any(text, ["type", "input", "输入"]):
@@ -23890,7 +23941,23 @@ def _desktop_operation_hint(text: str) -> str:
         return "create"
     if _contains_any(text, ["play", "播放"]):
         return "play"
-    if _contains_any(text, ["open", "launch", "start up", "打开", "启动", "开一下", "开下"]):
+    if _contains_any(
+        text,
+        [
+            "open",
+            "launch",
+            "start up",
+            "打开",
+            "启动",
+            "开启",
+            "拉起来",
+            "拉起",
+            "开起来",
+            "开了",
+            "开一下",
+            "开下",
+        ],
+    ):
         return "open"
     return ""
 
@@ -25889,7 +25956,7 @@ def _app_command_palette_hint(text: str) -> dict[str, Any]:
 
 def _command_palette_mode(value: str) -> str:
     lowered = str(value or "").strip().lower()
-    if lowered in {"打开", "启动", "开启", "open", "launch", "start"}:
+    if lowered in {"打开", "启动", "开启", "开了", "开起来", "open", "launch", "start"}:
         return "open"
     return "focus"
 
