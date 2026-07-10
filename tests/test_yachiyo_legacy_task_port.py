@@ -1057,15 +1057,13 @@ def test_runtime_planner_covers_migrated_desktop_samples_before_cleanup() -> Non
     assert coverage["legacy_boundary"] == "legacy_daily_desktop_intent"
     assert coverage["planner_owner"] == "runtime_planner"
     assert coverage["total_samples"] == len(prompts)
-    assert coverage["cleanup_readiness"] == "planner_covered_compat_cleanup_pending"
-    assert coverage["remaining_fallback_count"] == 1
-    assert coverage["planner_covered_fallback_count"] == 1
-    assert coverage["compatibility_cleanup_pending_count"] == 1
+    assert coverage["cleanup_readiness"] == "legacy_fallbacks_eliminated"
+    assert coverage["remaining_fallback_count"] == 0
+    assert coverage["planner_covered_fallback_count"] == 0
+    assert coverage["compatibility_cleanup_pending_count"] == 0
     assert {
         contract["fallback_id"] for contract in coverage["remaining_fallback_contracts"]
-    } == {
-        "media_audio_shapes",
-    }
+    } == set()
     assert "context_transfer" in coverage["areas"]
     assert len(sample_contracts) == len(prompts)
     assert "desktop_operation" in coverage["covered_intents"]
@@ -1095,30 +1093,14 @@ def test_runtime_planner_covers_migrated_desktop_samples_before_cleanup() -> Non
     assert legacy_calls == []
 
 
-def test_runtime_planner_reports_remaining_compatibility_fallback_contracts() -> None:
-    legacy_calls: list[dict[str, Any]] = []
-    allowed_tools = daily_desktop_allowed_tools()
+def test_runtime_planner_reports_no_remaining_compatibility_fallback_contracts() -> None:
     coverage = legacy_daily_desktop_cleanup_coverage()
     fallback_contracts = coverage["remaining_fallback_contracts"]
 
-    assert len(fallback_contracts) == 1
-    for contract in fallback_contracts:
-        assert contract["status"] == "planner_covered_compat_cleanup_pending"
-        assert contract["planner_coverage_status"] == "planner_covered"
-        assert contract["cleanup_blocker"] == "legacy_response_shape_compatibility"
-        assert contract["planner_evidence_prompts"] == contract["example_prompts"]
-        for prompt in contract["planner_evidence_prompts"]:
-            selection = planner_first_direct_tool_selection(
-                prompt,
-                allowed_tools,
-                legacy_tool_requests=_recording_legacy_requests(legacy_calls),
-            )
-
-            assert selection.selected_source == "runtime_planner"
-            assert selection.event_payload["legacy_request_count"] == 0
-            assert selection.event_payload["selected_tools"]
-
-    assert legacy_calls == []
+    assert fallback_contracts == ()
+    assert coverage["remaining_fallback_count"] == 0
+    assert coverage["planner_covered_fallback_count"] == 0
+    assert coverage["compatibility_cleanup_pending_count"] == 0
 
 
 def test_planner_first_direct_selection_owns_app_new_item_shortcuts_without_legacy() -> None:

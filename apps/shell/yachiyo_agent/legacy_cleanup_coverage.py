@@ -25,29 +25,6 @@ def _samples(area: str, *prompts: str) -> tuple[LegacyDesktopMigrationSample, ..
     return tuple(LegacyDesktopMigrationSample(prompt, area) for prompt in prompts)
 
 
-def _fallback_contract(
-    fallback_id: str,
-    title: str,
-    reason: str,
-    example_prompts: list[str],
-    required_before_delete: list[str],
-) -> dict[str, Any]:
-    return {
-        "fallback_id": fallback_id,
-        "title": title,
-        "reason": reason,
-        "owner": "runtime_planner",
-        "planner_owner": "runtime_planner",
-        "legacy_boundary": "legacy_daily_desktop_intent",
-        "status": "planner_covered_compat_cleanup_pending",
-        "planner_coverage_status": "planner_covered",
-        "cleanup_blocker": "legacy_response_shape_compatibility",
-        "example_prompts": example_prompts,
-        "planner_evidence_prompts": example_prompts,
-        "required_before_delete": required_before_delete,
-    }
-
-
 AREA_PLANNER_CONTRACTS: dict[str, LegacyDesktopPlannerContract] = {
     "app_launch": LegacyDesktopPlannerContract(
         ("desktop_operation",),
@@ -316,22 +293,7 @@ PLANNER_OWNED_LEGACY_ENTRYPOINTS: tuple[dict[str, Any], ...] = (
 )
 
 
-REMAINING_FALLBACK_CONTRACTS: tuple[dict[str, Any], ...] = (
-    _fallback_contract(
-        "media_audio_shapes",
-        "Media playback and system audio",
-        (
-            "Planner owns media and volume tools, while legacy playback, search, "
-            "control, and audio shapes remain."
-        ),
-        ["播放超时空辉夜姬", "暂停音乐", "把音量调到 30%"],
-        [
-            "project media search and control sequences",
-            "cover generic discovered media apps and system audio",
-            "remove the matching media parser branches",
-        ],
-    ),
-)
+REMAINING_FALLBACK_CONTRACTS: tuple[dict[str, Any], ...] = ()
 
 
 MIGRATED_DAILY_DESKTOP_SAMPLES: tuple[LegacyDesktopMigrationSample, ...] = (

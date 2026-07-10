@@ -124,21 +124,19 @@ def test_oha_desktop_agent_release_smoke_covers_product_readiness(
     ][0]["legacy_shape_preserved"] is True
     assert section_by_id["studio_tool_catalog"]["report"]["coverage"][
         "cleanup_readiness"
-    ] == "planner_covered_compat_cleanup_pending"
+    ] == "legacy_fallbacks_eliminated"
     assert section_by_id["studio_tool_catalog"]["report"]["coverage"][
         "planner_covered_fallback_count"
-    ] == 1
+    ] == 0
     assert section_by_id["studio_tool_catalog"]["report"]["coverage"][
         "compatibility_cleanup_pending_count"
-    ] == 1
+    ] == 0
     assert {
         contract["fallback_id"]
         for contract in section_by_id["studio_tool_catalog"]["report"]["coverage"][
             "remaining_fallback_contracts"
         ]
-    } == {
-        "media_audio_shapes",
-    }
+    } == set()
     assert section_by_id["studio_tool_catalog"]["report"]["checks"][
         "cleanup_lists_planner_owned_entrypoints"
     ] is True

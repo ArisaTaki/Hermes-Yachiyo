@@ -222,7 +222,6 @@ def _tool_catalog_case() -> dict[str, Any]:
         "cleanup_lists_planner_owned_entrypoints": bool(coverage)
         and len(coverage.planner_owned_entrypoints) >= 5,
         "cleanup_lists_remaining_fallbacks": bool(coverage)
-        and len(coverage.remaining_fallback_contracts) > 0
         and len(coverage.remaining_fallback_contracts)
         == coverage.remaining_fallback_count,
         "cleanup_remaining_fallbacks_are_planner_covered": bool(coverage)
