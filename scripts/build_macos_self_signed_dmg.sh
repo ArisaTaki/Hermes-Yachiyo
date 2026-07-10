@@ -7,6 +7,7 @@ OUTPUT_DIR="${ROOT}/dist/electron"
 APP_NAME="${APP_NAME:-Oha-Yachiyo}"
 VOLUME_NAME="${VOLUME_NAME:-Oha-Yachiyo}"
 SIGNING_IDENTITY="${1:-${MACOS_CODESIGN_IDENTITY:-Oha-Yachiyo Self Signed}}"
+SIGNING_MODE="${MACOS_SIGNING_MODE:-}"
 ENTITLEMENTS="${ENTITLEMENTS:-${ROOT}/packaging/entitlements.mac.plist}"
 TMP_BASE="${RUNNER_TEMP:-/tmp}"
 
@@ -19,6 +20,22 @@ if [[ -z "${SIGNING_IDENTITY}" ]]; then
   echo "A code signing identity is required." >&2
   exit 1
 fi
+
+if [[ -z "${SIGNING_MODE}" ]]; then
+  if [[ "${SIGNING_IDENTITY}" == "Developer ID Application:"* ]]; then
+    SIGNING_MODE="developer-id-app-notarized-dmg"
+  else
+    SIGNING_MODE="self-signed-app-unsigned-dmg"
+  fi
+fi
+
+case "${SIGNING_MODE}" in
+  developer-id-app-notarized-dmg|self-signed-app-unsigned-dmg) ;;
+  *)
+    echo "Unsupported macOS signing mode: ${SIGNING_MODE}" >&2
+    exit 1
+    ;;
+esac
 
 npm --prefix "${FRONTEND_DIR}" run build
 
@@ -36,14 +53,18 @@ if [[ -z "${APP_PATH}" ]]; then
   exit 1
 fi
 
-codesign \
-  --deep \
-  --force \
-  --verbose \
-  --options runtime \
-  --entitlements "${ENTITLEMENTS}" \
-  --sign "${SIGNING_IDENTITY}" \
-  "${APP_PATH}"
+codesign_args=(
+  --deep
+  --force
+  --verbose
+  --options runtime
+  --entitlements "${ENTITLEMENTS}"
+  --sign "${SIGNING_IDENTITY}"
+)
+if [[ "${SIGNING_MODE}" == "developer-id-app-notarized-dmg" ]]; then
+  codesign_args+=(--timestamp)
+fi
+codesign "${codesign_args[@]}" "${APP_PATH}"
 codesign --verify --deep --strict --verbose=2 "${APP_PATH}"
 
 VERSION="$(node -e "console.log(require('${FRONTEND_DIR}/package.json').version)")"

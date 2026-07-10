@@ -53,6 +53,36 @@ scripts/build_macos_self_signed_dmg.sh "Oha-Yachiyo Self Signed"
 
 CI 中如果检测到 `MACOS_CODESIGN_CERTIFICATE_BASE64`，会自动导入证书、构建 `.app`、签名 `.app`，再打包未签名 `.dmg`。如果没有配置该 Secret，workflow 会退回完全 unsigned DMG，发布流程不会因此失败。
 
+## Developer ID 与 notarization
+
+面向普通用户的正式分发使用 Apple Developer ID Application 证书、Hardened Runtime、secure timestamp 和 Apple notarization。公证通过后，workflow 会把票据 staple 到 DMG，并用 `stapler validate` 与 Gatekeeper `spctl` 再验证一次。自签名和完全 unsigned 构建仍作为没有 Apple 凭据时的回退，不会被删除。
+
+Developer ID 模式复用以下签名 Secrets；其中 `MACOS_CODESIGN_IDENTITY` 必须是完整的 `Developer ID Application: ...` identity：
+
+```text
+MACOS_CODESIGN_CERTIFICATE_BASE64
+MACOS_CODESIGN_CERTIFICATE_PASSWORD
+MACOS_CODESIGN_IDENTITY
+```
+
+App Store Connect API Key 使用以下 Secrets：
+
+```text
+APPLE_NOTARY_KEY_BASE64
+APPLE_NOTARY_KEY_ID
+APPLE_NOTARY_ISSUER_ID
+```
+
+`APPLE_NOTARY_KEY_BASE64` 是 `.p8` 私钥的 base64 内容；`APPLE_NOTARY_ISSUER_ID` 对 Team API Key 必填，对 Individual API Key 留空。workflow 只把私钥解码到 runner 临时目录，权限设为 `0600`，公证结束后立即删除。密钥不会写入 release metadata、命令输出或应用包。
+
+当 identity 是 Developer ID 时，只要签名证书或 notary key 配置不完整，release job 就会失败，不会静默降级成自签名发布。完整流程是：
+
+```text
+unsigned app directory -> Developer ID sign + timestamp -> DMG -> notarytool submit --wait -> notarytool log -> stapler staple/validate -> spctl
+```
+
+成功创建 submission 后，提交结果与 Apple 审计日志分别保存为 `release/notarization.json` 和 `release/notarization-log.json`，并跟随 CI artifact 上传；鉴权或网络错误如果没有产生 submission id，job 会以受控错误直接失败。latest JSON 的 `signing` 值为 `developer-id-app-notarized-dmg`；自签名与无签名回退仍分别使用 `self-signed-app-unsigned-dmg` 和 `unsigned`。
+
 ## 打包结构
 
 Electron packaged 模式会启动：
@@ -493,4 +523,4 @@ python scripts/verify_release_candidate.py --manual-checks-json tmp/final-rc.jso
 
 `--write-manual-checks-template` 输出的每项都带 `description`、`required_before`、`evidence_prompt`、空 `evidence` 和 `notes`，适合从零开始填写。`--write-manual-checks-draft` 会读取 `--manual-checks-json` 指向的上一轮 RC report 或 evidence JSON，输出同样可编辑、可再喂回 `--manual-checks-json` 的 `{ "checks": [...] }` 草稿；草稿会保留 `automated_rc_gate` evidence，并把仍是 `manual_required` 的项目 `evidence` 留空。`--write-manual-checks-markdown` 会读取同一份 evidence JSON 并输出可读 checklist，列出剩余人工项、下一步动作、可自动收证命令、需要记录的 evidence，以及已通过 / not_applicable 项的 evidence source；签核人也可以勾选并填写这份 Markdown，再用 `--manual-checks-markdown` 作为最终 gate 输入。生成 draft 或 Markdown 时，CLI 会立即打印同一套 progress、remaining ids 和 next actions，因此可以用已有 RC report 快速判断“还差多少”，不必为了看剩余项重跑完整 artifact / UI gate。源 RC report 如果包含已通过的 `electron_ui_smoke`，或把 `release/electron-ui-smoke.json` 作为额外 `--manual-checks-json` 传入，草稿会把通过的脚本列表预填到 `packaged_ui_sampling` 的 `Notes:`，并把 `smoke_chat_image_attachment_ui.mjs` 作为 `chat_native_file_upload` 的辅助 evidence 备注；该 source-level smoke 覆盖桌面 `chooseChatImages` API、hidden input fallback、CDP file input、preview、send、image viewer 和 Run Detail handoff，但仅凭 source-level Electron UI smoke 时，这两项仍保持 `manual_required`，只有 `--run-dmg-chat-native-file-smoke` 或人工 evidence 才会把 packaged `chat_native_file_upload` 标为通过。`tmp/external-integrations-smoke.json` 也可以作为额外 `--manual-checks-json`；完整三项通过会自动完成 `external_integrations_smoke`，失败 report 会让最终 gate 失败，只跑子集会把通过的子项写入 `Notes:` 并继续保留该项为 `manual_required`。Markdown checklist 的填写规则是：保留 ``- [ ] `check_id` `` 表示该项仍是 `manual_required`；改成 ``- [x] `check_id` `` 表示通过，不写显式 `status` 会按 `passed` 解析；需要显式跳过或记录失败时，用 ``- [x] `check_id` - not_applicable`` 或 ``- [x] `check_id` - failed``。所有 `passed`、`failed` 和 `not_applicable` 项都必须填写非空 `Evidence:`，多行 evidence 可放在缩进续行中。`--mark-provider-smoke-not-applicable-if-missing` 可用于 RC report、draft 或 Markdown checklist；它只在 `real_provider_smoke` 仍为 `manual_required` 且当前环境缺少任一 `OHA_YACHIYO_SMOKE_*` 变量时写入 `not_applicable`，不会覆盖已经通过、失败或手工标记的 provider evidence。`--manual-checks-json` 支持顶层 list、`{ "checks": [...] }`，也支持直接传入上一轮 RC report 并读取其中的 `manual_release_candidate_check_statuses`；多份 JSON 会按传入顺序合并，其中 previous RC report 的 `manual_required` 不覆盖已有自动 evidence，后传入的人工 `{ "checks": [...] }` 仍可覆盖先前状态，因此自动 evidence 不需要手工复制到另一个模板文件。`--manual-checks-markdown` 支持脚本生成的 Markdown checklist 格式。每项至少包含 `id`、`status` 和必要时的 `evidence`。`status` 只能是 `manual_required`、`passed`、`failed` 或 `not_applicable`；`passed`、`failed` 和 `not_applicable` 必须带 evidence。未知 id、同一文件内重复 id、非法 status、缺 evidence 或显式 `failed` 都会让 RC gate 失败并写入 `manual_release_candidate_check_findings`。最终发布签核时加 `--require-manual-checks-complete`，任何在自动 evidence 和人工 evidence 合并后仍为 `manual_required` 的检查都会让 RC gate 失败。
 
-后续如果要面向普通用户无 Gatekeeper 警告地分发，需要再补 Apple Developer ID 签名与 notarization；当前链路先保证可重复构建和可安装 DMG。
+代码仓库已经具备 Developer ID 签名、notarization、stapling 和 Gatekeeper 验证路径；真正发布无 Gatekeeper 警告的构建仍需要在 GitHub Secrets 中配置有效的 Apple 凭据，并在 release runner 上留下 Accepted 的 `notarization.json` 与对应审计日志作为证据。

@@ -7,6 +7,8 @@ import json
 import plistlib
 import re
 
+import pytest
+
 from scripts import run_electron_ui_smokes as smoke_runner
 from scripts import verify_release_artifacts as verifier
 
@@ -490,7 +492,14 @@ def test_verifier_binary_mode_scans_legacy_tokens(tmp_path):
     ]
 
 
-def test_verifier_validates_release_latest_json_checksum_contract(tmp_path):
+@pytest.mark.parametrize(
+    "signing_mode",
+    ["self-signed-app-unsigned-dmg", "developer-id-app-notarized-dmg"],
+)
+def test_verifier_validates_release_latest_json_checksum_contract(
+    tmp_path,
+    signing_mode,
+):
     release_dir = tmp_path / "release"
     release_dir.mkdir()
     dmg = release_dir / "Oha-Yachiyo-main-latest.dmg"
@@ -510,7 +519,7 @@ def test_verifier_validates_release_latest_json_checksum_contract(tmp_path):
         "run_number": 1,
         "run_id": "12345",
         "tag": "stable-v0.4.0-build.1-abc1234",
-        "signing": "self-signed-app-unsigned-dmg",
+        "signing": signing_mode,
         "dmg_name": dmg.name,
         "sha256": digest,
         "download_url": f"https://github.example/releases/download/main-latest/{dmg.name}",
@@ -869,6 +878,8 @@ def test_verifier_requires_macos_signing_script_and_entitlements(tmp_path):
         "npx electron-builder --config electron-builder.yml --mac dmg\n",
         encoding="utf-8",
     )
+    notarization_script = tmp_path / verifier.MACOS_NOTARIZATION_SCRIPT_FILE
+    notarization_script.write_text("#!/usr/bin/env bash\necho incomplete\n", encoding="utf-8")
     entitlements = tmp_path / verifier.MACOS_ENTITLEMENTS_FILE
     entitlements.parent.mkdir(parents=True)
     entitlements.write_text("<plist><dict></dict></plist>\n", encoding="utf-8")
@@ -878,9 +889,16 @@ def test_verifier_requires_macos_signing_script_and_entitlements(tmp_path):
 
     assert "macOS signing script must build an unsigned app directory before signing" in messages
     assert "macOS signing script must sign the app with hardened runtime options" in messages
+    assert "macOS signing script must request a secure timestamp for Developer ID releases" in messages
     assert "macOS signing script must apply the checked-in entitlements" in messages
     assert "macOS signing script must verify the signed app bundle" in messages
     assert "macOS signing script must create the unsigned DMG from the signed app bundle" in messages
+    assert "macOS notarization script must submit the DMG with notarytool" in messages
+    assert "macOS notarization script must wait for a final Apple notary result" in messages
+    assert "macOS notarization script must retrieve the Apple notary audit log" in messages
+    assert "macOS notarization script must staple the accepted ticket to the DMG" in messages
+    assert "macOS notarization script must validate the stapled ticket" in messages
+    assert "macOS notarization script must run a Gatekeeper assessment on the DMG" in messages
     assert "macOS entitlements must allow JIT for the Electron runtime" in messages
     assert "macOS entitlements must allow unsigned executable memory for Electron" in messages
     assert "macOS entitlements must disable library validation for packaged native modules" in messages
@@ -2145,7 +2163,7 @@ def test_verifier_requires_release_workflow_guard_before_dependency_install(tmp_
         "          package_scan_paths=(dist/backend)\n"
         "          find dist/electron -path '*/Oha-Yachiyo.app/Contents/Resources'\n"
         "          python scripts/verify_release_artifacts.py --allow-binary \"${package_scan_paths[@]}\"\n"
-        "      - name: Import macOS self-signing certificate\n"
+        "      - name: Import macOS signing certificate\n"
         "        run: echo imported\n"
         "      - name: Build Electron DMG\n"
         "        env:\n"
@@ -2329,7 +2347,7 @@ def test_verifier_requires_release_workflow_release_scan_after_metadata(tmp_path
         "        run: python scripts/verify_release_artifacts.py\n"
         "      - name: Install Python dependencies\n"
         "        run: python -m pip install -e .\n"
-        "      - name: Import macOS self-signing certificate\n"
+        "      - name: Import macOS signing certificate\n"
         "        run: echo imported\n"
         "      - name: Build Electron DMG\n"
         "        env:\n"
@@ -2817,7 +2835,7 @@ def test_verifier_requires_release_workflow_to_publish_metadata_json(tmp_path):
         "        run: python scripts/verify_release_artifacts.py\n"
         "      - name: Install Python dependencies\n"
         "        run: python -m pip install -e .\n"
-        "      - name: Import macOS self-signing certificate\n"
+        "      - name: Import macOS signing certificate\n"
         "        run: echo imported\n"
         "      - name: Build Electron DMG\n"
         "        env:\n"
@@ -2857,7 +2875,7 @@ def test_verifier_requires_release_workflow_to_stage_and_upload_dmg_artifacts(tm
         "        run: python scripts/verify_release_artifacts.py\n"
         "      - name: Install Python dependencies\n"
         "        run: python -m pip install -e .\n"
-        "      - name: Import macOS self-signing certificate\n"
+        "      - name: Import macOS signing certificate\n"
         "        run: echo imported\n"
         "      - name: Build Electron DMG\n"
         "        env:\n"
@@ -2913,7 +2931,7 @@ def test_verifier_requires_release_workflow_latest_json_update_metadata_fields(t
         "        run: python scripts/verify_release_artifacts.py\n"
         "      - name: Install Python dependencies\n"
         "        run: python -m pip install -e .\n"
-        "      - name: Import macOS self-signing certificate\n"
+        "      - name: Import macOS signing certificate\n"
         "        run: echo imported\n"
         "      - name: Build Electron DMG\n"
         "        env:\n"
@@ -2970,7 +2988,7 @@ def test_verifier_requires_release_workflow_signing_path_before_dmg_build(tmp_pa
         "        run: python -m pip install -e .\n"
         "      - name: Build Electron DMG\n"
         "        run: npm --prefix apps/frontend run dist:mac\n"
-        "      - name: Import macOS self-signing certificate\n"
+        "      - name: Import macOS signing certificate\n"
         "        run: echo too-late\n"
         "      - name: Verify packaged app resources\n"
         "        run: |\n"
@@ -3002,7 +3020,7 @@ def test_verifier_requires_release_workflow_first_launch_permission_guidance(tmp
         "        run: python scripts/verify_release_artifacts.py\n"
         "      - name: Install Python dependencies\n"
         "        run: python -m pip install -e .\n"
-        "      - name: Import macOS self-signing certificate\n"
+        "      - name: Import macOS signing certificate\n"
         "        run: echo imported\n"
         "      - name: Build Electron DMG\n"
         "        env:\n"
@@ -3022,7 +3040,7 @@ def test_verifier_requires_release_workflow_first_launch_permission_guidance(tmp
     messages = [finding.message for finding in findings]
 
     assert "macOS release workflow must document Gatekeeper first-launch handling" in messages
-    assert "macOS release workflow must document current notarization status" in messages
+    assert "macOS release workflow must document the notarized Developer ID path" in messages
     assert "macOS release workflow must document screen recording permission setup" in messages
 
 

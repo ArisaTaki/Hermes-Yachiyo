@@ -87,6 +87,7 @@ jobs:
       - name: Run smoke tests
         run: |
           python -m pytest \
+            tests/test_macos_notarization_script.py \
             tests/test_protocol.py \
             tests/test_state.py \
             tests/test_task_runner.py::test_task_runner_main_chat_native_tool_approval_roundtrip \
@@ -382,23 +383,37 @@ jobs:
       - name: Build virtual desktop components
         run: python scripts/build_virtual_desktop_guest.py --clean
 
-      - name: Import macOS self-signing certificate
+      - name: Import macOS signing certificate
         id: macos_signing
         shell: bash
         env:
           MACOS_CODESIGN_CERTIFICATE_BASE64: ${{ secrets.MACOS_CODESIGN_CERTIFICATE_BASE64 }}
           MACOS_CODESIGN_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CODESIGN_CERTIFICATE_PASSWORD }}
           MACOS_CODESIGN_IDENTITY: ${{ secrets.MACOS_CODESIGN_IDENTITY }}
+          APPLE_NOTARY_KEY_BASE64: ${{ secrets.APPLE_NOTARY_KEY_BASE64 }}
+          APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
         run: |
           set -euo pipefail
           if [[ -z "${MACOS_CODESIGN_CERTIFICATE_BASE64}" ]]; then
             echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "developer_id=false" >> "$GITHUB_OUTPUT"
             echo "signing_mode=unsigned" >> "$GITHUB_OUTPUT"
-            echo "No macOS self-signing certificate configured; the DMG will be unsigned." >> "$GITHUB_STEP_SUMMARY"
+            echo "No macOS signing certificate configured; the DMG will be unsigned." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
 
           SIGNING_IDENTITY="${MACOS_CODESIGN_IDENTITY:-Oha-Yachiyo Self Signed}"
+          if [[ "${SIGNING_IDENTITY}" == "Developer ID Application:"* ]]; then
+            DEVELOPER_ID=true
+            SIGNING_MODE=developer-id-app-notarized-dmg
+            if [[ -z "${APPLE_NOTARY_KEY_BASE64}" || -z "${APPLE_NOTARY_KEY_ID}" ]]; then
+              echo "APPLE_NOTARY_KEY_BASE64 and APPLE_NOTARY_KEY_ID are required for Developer ID releases." >&2
+              exit 1
+            fi
+          else
+            DEVELOPER_ID=false
+            SIGNING_MODE=self-signed-app-unsigned-dmg
+          fi
           CERT_PASSWORD="${MACOS_CODESIGN_CERTIFICATE_PASSWORD:-}"
           if [[ -z "${CERT_PASSWORD}" ]]; then
             echo "MACOS_CODESIGN_CERTIFICATE_PASSWORD is required when MACOS_CODESIGN_CERTIFICATE_BASE64 is configured." >&2
@@ -435,22 +450,24 @@ jobs:
               -T /usr/bin/codesign \
               -T /usr/bin/security; then
             echo "macOS Keychain could not import the signing p12." >&2
-            echo "If OpenSSL validation passed but security import failed, regenerate the certificate with the current scripts/create_macos_self_signed_cert.sh and update all MACOS_CODESIGN_* Secrets from the new *.github-secrets.env file." >&2
+            echo "Check that the p12 contains a private key supported by the runner Keychain." >&2
             exit 1
           fi
-          openssl pkcs12 \
-            -in "${CERT_PATH}" \
-            -clcerts \
-            -nokeys \
-            -out "${CERT_PEM_PATH}" \
-            -passin "pass:${CERT_PASSWORD}"
-          openssl x509 -in "${CERT_PEM_PATH}" -out "${CERT_X509_PATH}"
-          sudo security add-trusted-cert \
-            -d \
-            -r trustRoot \
-            -p codeSign \
-            -k /Library/Keychains/System.keychain \
-            "${CERT_X509_PATH}"
+          if [[ "${DEVELOPER_ID}" != "true" ]]; then
+            openssl pkcs12 \
+              -in "${CERT_PATH}" \
+              -clcerts \
+              -nokeys \
+              -out "${CERT_PEM_PATH}" \
+              -passin "pass:${CERT_PASSWORD}"
+            openssl x509 -in "${CERT_PEM_PATH}" -out "${CERT_X509_PATH}"
+            sudo security add-trusted-cert \
+              -d \
+              -r trustRoot \
+              -p codeSign \
+              -k /Library/Keychains/System.keychain \
+              "${CERT_X509_PATH}"
+          fi
           security list-keychains -d user -s "${KEYCHAIN_PATH}" $(security list-keychains -d user | tr -d '"')
           security default-keychain -d user -s "${KEYCHAIN_PATH}"
           security set-key-partition-list \
@@ -464,17 +481,23 @@ jobs:
             echo "No valid macOS code signing identity found after importing the p12." >&2
             exit 1
           fi
+          if ! grep -Fq -- "\"${SIGNING_IDENTITY}\"" <<< "${IDENTITY_OUTPUT}"; then
+            echo "Configured signing identity was not found after importing the p12: ${SIGNING_IDENTITY}" >&2
+            exit 1
+          fi
 
           echo "enabled=true" >> "$GITHUB_OUTPUT"
-          echo "signing_mode=self-signed-app-unsigned-dmg" >> "$GITHUB_OUTPUT"
+          echo "developer_id=${DEVELOPER_ID}" >> "$GITHUB_OUTPUT"
+          echo "signing_mode=${SIGNING_MODE}" >> "$GITHUB_OUTPUT"
           echo "identity=${SIGNING_IDENTITY}" >> "$GITHUB_OUTPUT"
           echo "keychain=${KEYCHAIN_PATH}" >> "$GITHUB_OUTPUT"
-          echo "Imported self-signing certificate identity: ${SIGNING_IDENTITY}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Imported macOS signing certificate identity: ${SIGNING_IDENTITY}" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Build Electron DMG
         shell: bash
         env:
           MACOS_SIGNING_ENABLED: ${{ steps.macos_signing.outputs.enabled }}
+          MACOS_SIGNING_MODE: ${{ steps.macos_signing.outputs.signing_mode }}
           MACOS_CODESIGN_IDENTITY: ${{ steps.macos_signing.outputs.identity }}
         run: |
           set -euo pipefail
@@ -483,6 +506,36 @@ jobs:
           else
             CSC_IDENTITY_AUTO_DISCOVERY=false npm --prefix apps/frontend run dist:mac
           fi
+
+      - name: Notarize and staple Developer ID DMG
+        if: steps.macos_signing.outputs.developer_id == 'true'
+        shell: bash
+        env:
+          APPLE_NOTARY_KEY_BASE64: ${{ secrets.APPLE_NOTARY_KEY_BASE64 }}
+          APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          KEY_PATH="${RUNNER_TEMP}/AuthKey_${APPLE_NOTARY_KEY_ID}.p8"
+          trap 'rm -f "${KEY_PATH}"' EXIT
+          CLEAN_KEY_BASE64="$(printf '%s' "${APPLE_NOTARY_KEY_BASE64}" | tr -d '[:space:]')"
+          if ! printf '%s' "${CLEAN_KEY_BASE64}" | base64 --decode > "${KEY_PATH}" 2>/dev/null; then
+            printf '%s' "${CLEAN_KEY_BASE64}" | base64 -D > "${KEY_PATH}"
+          fi
+          if [[ ! -s "${KEY_PATH}" ]]; then
+            echo "Decoded APPLE_NOTARY_KEY_BASE64 is empty." >&2
+            exit 1
+          fi
+          chmod 600 "${KEY_PATH}"
+
+          shopt -s nullglob
+          dmg_files=(dist/electron/*.dmg)
+          if [[ "${#dmg_files[@]}" -ne 1 ]]; then
+            echo "Expected exactly one DMG for notarization; found ${#dmg_files[@]}." >&2
+            exit 1
+          fi
+          APPLE_NOTARY_KEY_PATH="${KEY_PATH}" \
+            scripts/notarize_macos_dmg.sh "${dmg_files[0]}"
 
       - name: Verify packaged app resources
         shell: bash
@@ -534,6 +587,14 @@ jobs:
           BUILD_LABEL="build.${BUILD_NUMBER}"
           SHORT_SHA="${GITHUB_SHA::7}"
           STAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+          if [[ "${SIGNING_MODE}" == "developer-id-app-notarized-dmg" ]]; then
+            SIGNING_NOTE="本构建使用 Apple Developer ID Application 签名、Hardened Runtime、secure timestamp 和 Apple notarization，并已将公证票据 staple 到 DMG。"
+          elif [[ "${SIGNING_MODE}" == "self-signed-app-unsigned-dmg" ]]; then
+            SIGNING_NOTE="当前免费分发回退链路只自签名 .app，未使用 Apple Developer ID 签名或 notarization，DMG 保持未签名。首次启动仍会显示未知开发者 / Gatekeeper 提示；请在 Finder 中按住 Control 点击应用并选择“打开”，或在系统设置的“隐私与安全性”中允许打开。"
+          else
+            SIGNING_NOTE="本构建未配置 macOS 签名证书，DMG 与应用均为 unsigned；首次启动会显示未知开发者 / Gatekeeper 提示。"
+          fi
 
           if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
             CHANNEL="${{ inputs.channel }}"
@@ -632,7 +693,7 @@ jobs:
 
           $(cat release/changelog.md)
 
-          当前免费分发链路只自签名 .app，未使用 Apple Developer ID 签名或 notarization，DMG 保持未签名，以避免 macOS 在挂载 DMG 前直接拒绝。首次启动应用时仍会显示未知开发者 / Gatekeeper 提示；请在 Finder 中按住 Control 点击应用并选择“打开”，或在系统设置的“隐私与安全性”中允许打开。
+          ${SIGNING_NOTE}
 
           GPT-SoVITS 语音资源包不随应用 DMG 发布；请在独立的“Yachiyo GPT-SoVITS Voice Assets”资源 release 中下载。
 
@@ -654,7 +715,7 @@ jobs:
 
           $(cat release/changelog.md)
 
-          当前免费分发链路只自签名 .app，未使用 Apple Developer ID 签名或 notarization，DMG 保持未签名；macOS 仍会在首次启动应用时显示未知开发者 / Gatekeeper 提示。
+          ${SIGNING_NOTE}
           EOF
 
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"

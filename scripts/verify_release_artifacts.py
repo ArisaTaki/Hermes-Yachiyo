@@ -428,7 +428,11 @@ RELEASE_LATEST_BRANCH_CHANNELS: dict[str, str] = {
     "develop": "experimental",
 }
 RELEASE_LATEST_JSON_RE = re.compile(r"^Oha-Yachiyo-(?P<branch>main|alpha|develop)-latest\.json$")
-RELEASE_LATEST_SIGNING_MODES = {"unsigned", "self-signed-app-unsigned-dmg"}
+RELEASE_LATEST_SIGNING_MODES = {
+    "unsigned",
+    "self-signed-app-unsigned-dmg",
+    "developer-id-app-notarized-dmg",
+}
 RELEASE_SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?$")
 RELEASE_SHA_RE = re.compile(r"^[0-9a-f]{40}$", re.IGNORECASE)
 RELEASE_SHORT_SHA_RE = re.compile(r"^[0-9a-f]{7}$", re.IGNORECASE)
@@ -744,6 +748,7 @@ PACKAGING_CONFIG_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
 )
 RELEASE_WORKFLOW_FILE = Path(".github/workflows/release-macos.yml")
 MACOS_SIGNING_SCRIPT_FILE = Path("scripts/build_macos_self_signed_dmg.sh")
+MACOS_NOTARIZATION_SCRIPT_FILE = Path("scripts/notarize_macos_dmg.sh")
 MACOS_ENTITLEMENTS_FILE = Path("packaging/entitlements.mac.plist")
 MACOS_SIGNING_SCRIPT_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
@@ -753,6 +758,10 @@ MACOS_SIGNING_SCRIPT_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         "--options runtime",
         "macOS signing script must sign the app with hardened runtime options",
+    ),
+    (
+        "--timestamp",
+        "macOS signing script must request a secure timestamp for Developer ID releases",
     ),
     (
         '--entitlements "${ENTITLEMENTS}"',
@@ -765,6 +774,40 @@ MACOS_SIGNING_SCRIPT_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         "hdiutil create",
         "macOS signing script must create the unsigned DMG from the signed app bundle",
+    ),
+)
+MACOS_NOTARIZATION_SCRIPT_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
+    (
+        "xcrun notarytool submit",
+        "macOS notarization script must submit the DMG with notarytool",
+    ),
+    (
+        "--wait",
+        "macOS notarization script must wait for a final Apple notary result",
+    ),
+    (
+        "--output-format json",
+        "macOS notarization script must persist structured submission evidence",
+    ),
+    (
+        "xcrun notarytool log",
+        "macOS notarization script must retrieve the Apple notary audit log",
+    ),
+    (
+        '"${SUBMISSION_STATUS}" != "Accepted"',
+        "macOS notarization script must reject non-Accepted submissions",
+    ),
+    (
+        "xcrun stapler staple",
+        "macOS notarization script must staple the accepted ticket to the DMG",
+    ),
+    (
+        "xcrun stapler validate",
+        "macOS notarization script must validate the stapled ticket",
+    ),
+    (
+        "spctl --assess --type open --context context:primary-signature",
+        "macOS notarization script must run a Gatekeeper assessment on the DMG",
     ),
 )
 MACOS_ENTITLEMENTS_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
@@ -782,6 +825,18 @@ MACOS_ENTITLEMENTS_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     ),
 )
 RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
+    (
+        "Developer ID 与 notarization",
+        "release packaging docs must document the Developer ID notarization path",
+    ),
+    (
+        "APPLE_NOTARY_KEY_BASE64",
+        "release packaging docs must document App Store Connect notarization secrets",
+    ),
+    (
+        "developer-id-app-notarized-dmg",
+        "release packaging docs must document the notarized release signing mode",
+    ),
     (
         "`develop` 分支保留给彻底重构前的旧版发布线，不触发 Oha DMG",
         "release packaging docs must document that legacy develop is not an Oha release branch",
@@ -1245,7 +1300,7 @@ RELEASE_WORKFLOW_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow must publish experimental Oha builds to oha-develop-latest metadata",
     ),
     (
-        "Import macOS self-signing certificate",
+        "Import macOS signing certificate",
         "macOS release workflow must import the signing certificate before building the DMG",
     ),
     (
@@ -1257,12 +1312,24 @@ RELEASE_WORKFLOW_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow must use the signed app build path when signing is configured",
     ),
     (
-        "首次启动应用时仍会显示未知开发者 / Gatekeeper 提示",
+        "scripts/notarize_macos_dmg.sh",
+        "macOS release workflow must notarize and staple Developer ID DMGs",
+    ),
+    (
+        "developer-id-app-notarized-dmg",
+        "macOS release workflow must expose the Developer ID notarized signing mode",
+    ),
+    (
+        "APPLE_NOTARY_KEY_BASE64",
+        "macOS release workflow must accept an App Store Connect notarization key",
+    ),
+    (
+        "未知开发者 / Gatekeeper 提示",
         "macOS release workflow must document Gatekeeper first-launch handling",
     ),
     (
-        "未使用 Apple Developer ID 签名或 notarization",
-        "macOS release workflow must document current notarization status",
+        "Apple Developer ID Application 签名",
+        "macOS release workflow must document the notarized Developer ID path",
     ),
     (
         "屏幕录制权限",
@@ -4405,6 +4472,21 @@ def _verify_macos_signing_guards(root: Path) -> list[Finding]:
             if required_text not in script:
                 findings.append(Finding(script_path, message))
 
+    notarization_script_path = _resolve(root, MACOS_NOTARIZATION_SCRIPT_FILE)
+    try:
+        notarization_script = notarization_script_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        findings.append(
+            Finding(
+                notarization_script_path,
+                f"could not read macOS notarization script: {exc}",
+            )
+        )
+    else:
+        for required_text, message in MACOS_NOTARIZATION_SCRIPT_REQUIRED_TEXT:
+            if required_text not in notarization_script:
+                findings.append(Finding(notarization_script_path, message))
+
     entitlements_path = _resolve(root, MACOS_ENTITLEMENTS_FILE)
     try:
         entitlements = entitlements_path.read_text(encoding="utf-8")
@@ -4776,12 +4858,13 @@ def _verify_release_workflow_guards(root: Path) -> list[Finding]:
                 "macOS release workflow must install frontend dependencies before public release preflight for full demo UI smokes",
             )
         )
-    signing_import = workflow.find("Import macOS self-signing certificate")
+    signing_import = workflow.find("Import macOS signing certificate")
     provider_smoke = workflow.find("provider_smoke_args+=(--run-provider-smoke)")
     write_metadata = workflow.find("Write app build metadata")
     write_metadata_script = workflow.find("python scripts/prepare_app_build_metadata.py")
     build_backend = workflow.find("Build packaged backend")
     build_dmg = workflow.find("Build Electron DMG")
+    notarize_dmg = workflow.find("Notarize and staple Developer ID DMG")
     verify_packaged_resources = workflow.find("Verify packaged app resources")
     prepare_release = workflow.find("Prepare release metadata")
     if (
@@ -4886,6 +4969,19 @@ def _verify_release_workflow_guards(root: Path) -> list[Finding]:
             Finding(
                 workflow_path,
                 "macOS release workflow must import signing material before building the DMG",
+            )
+        )
+    if (
+        build_dmg < 0
+        or notarize_dmg < 0
+        or verify_packaged_resources < 0
+        or notarize_dmg < build_dmg
+        or notarize_dmg > verify_packaged_resources
+    ):
+        findings.append(
+            Finding(
+                workflow_path,
+                "macOS release workflow must notarize Developer ID DMGs after build before packaged resource verification",
             )
         )
     verify_release = workflow.find("Verify packaged release artifacts")
