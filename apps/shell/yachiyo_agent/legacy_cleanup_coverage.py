@@ -360,20 +360,6 @@ REMAINING_FALLBACK_CONTRACTS: tuple[dict[str, Any], ...] = (
         ],
     ),
     _fallback_contract(
-        "foreground_input_shapes",
-        "Foreground input actions",
-        (
-            "Planner owns the foreground input plan, but bare safe-type legacy response "
-            "shapes are not projected yet."
-        ),
-        ["在当前界面输入 hello", "输入 hello"],
-        [
-            "project foreground safe-type requests through the daily adapter",
-            "preserve input policy and post-action verification metadata",
-            "remove the matching foreground input parser branches",
-        ],
-    ),
-    _fallback_contract(
         "context_capture_schedule_shapes",
         "Context capture and scheduling",
         (
