@@ -219,6 +219,7 @@ class DesktopProviderConformanceSnapshot(_PublicSnapshot):
     desktop_session_isolated: bool | None = None
     foreground_takeover_required: bool | None = None
     authentication_configured: bool = False
+    idempotent_tool_requests_supported: bool = False
     desktop_backend_kind: str = ""
     desktop_backend_is_loopback: bool | None = None
     desktop_backend_ready_for_public_release: bool | None = None

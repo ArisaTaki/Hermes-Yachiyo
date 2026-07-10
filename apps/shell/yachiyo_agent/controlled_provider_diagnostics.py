@@ -195,6 +195,11 @@ def controlled_desktop_provider_diagnostics_snapshot(
     supported_tools = (
         _string_list(provider.supported_tools) if configured else []
     ) or _string_list(manifest.get("supported_tools"))
+    capabilities = (
+        _string_list(provider.health.capabilities if provider.health else [])
+        or _string_list(runtime_status.get("capabilities"))
+        or _string_list(manifest.get("capabilities"))
+    )
     authentication_configured = bool(
         provider.authentication_configured
         or runtime_status.get("authentication_configured")
@@ -206,6 +211,7 @@ def controlled_desktop_provider_diagnostics_snapshot(
             "available": provider.available,
             "adapter_ready": provider.adapter_ready,
             "authentication_configured": authentication_configured,
+            "capabilities": capabilities,
             "desktop_session_kind": desktop_session_kind,
             "desktop_session_isolated": desktop_session_isolated,
             "foreground_takeover_required": foreground_takeover_required,
@@ -312,8 +318,7 @@ def controlled_desktop_provider_diagnostics_snapshot(
         ),
         blocking_conditions=blocking_conditions,
         supported_tools=supported_tools,
-        capabilities=_string_list(provider.health.capabilities if provider.health else [])
-        or _string_list(manifest.get("capabilities")),
+        capabilities=capabilities,
         foreground_mutation_supported=foreground_mutation_supported,
         keyboard_mouse_capture_supported=keyboard_mouse_capture_supported,
         desktop_session_kind=desktop_session_kind,

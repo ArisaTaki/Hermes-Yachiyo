@@ -314,6 +314,7 @@ def test_oha_desktop_agent_release_smoke_public_release_requires_real_backend(
     assert readiness["blocking_conditions"] == report["isolated_provider_release_blockers"]
     assert [action["id"] for action in readiness["next_actions"]] == [
         "write_provider_manifest_template",
+        "provision_virtual_desktop_guest",
         "configure_virtual_desktop_provider",
         "attach_real_virtual_desktop_backend",
         "run_public_release_smoke",
@@ -321,6 +322,9 @@ def test_oha_desktop_agent_release_smoke_public_release_requires_real_backend(
     assert readiness["required_commands"]["public_release_smoke"].startswith(
         "python scripts/smoke_oha_desktop_agent_release.py --public-release"
     )
+    assert "run_virtual_desktop_guest_provider.py" in readiness[
+        "required_commands"
+    ]["guest_provider_manifest"]
 
 
 def test_oha_desktop_agent_release_smoke_public_release_accepts_configured_provider(

@@ -115,6 +115,23 @@ def _public_release_next_actions(
                     ),
                 },
                 {
+                    "id": "provision_virtual_desktop_guest",
+                    "title": "Provision the built-in macOS VM guest provider",
+                    "reason": (
+                        "Oha-Yachiyo includes an authenticated guest agent that runs "
+                        "the generic desktop toolset inside a macOS virtual machine."
+                    ),
+                    "command": (
+                        "python scripts/run_virtual_desktop_guest_provider.py "
+                        "--session-id \"$OHA_YACHIYO_VIRTUAL_DESKTOP_SESSION_ID\" "
+                        "--manifest"
+                    ),
+                    "required_environment": [
+                        "OHA_YACHIYO_VIRTUAL_DESKTOP_SESSION_ID",
+                        "OHA_YACHIYO_DESKTOP_PROVIDER_TOKEN",
+                    ],
+                },
+                {
                     "id": "configure_virtual_desktop_provider",
                     "title": "Configure a real virtual desktop provider",
                     "reason": (
@@ -196,6 +213,10 @@ def _public_release_required_commands(provider_manifest: str) -> dict[str, str]:
         "validate_manifest": (
             "python scripts/smoke_oha_desktop_agent_release.py "
             f"--validate-provider-manifest {manifest}"
+        ),
+        "guest_provider_manifest": (
+            "python scripts/run_virtual_desktop_guest_provider.py "
+            "--session-id \"$OHA_YACHIYO_VIRTUAL_DESKTOP_SESSION_ID\" --manifest"
         ),
         "public_release_smoke": _public_release_smoke_command(provider_manifest),
     }

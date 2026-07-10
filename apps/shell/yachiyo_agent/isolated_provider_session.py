@@ -62,6 +62,7 @@ _ENV_KEYS = {
     "OHA_YACHIYO_DESKTOP_PROVIDER_KIND",
     "OHA_YACHIYO_DESKTOP_PROVIDER_ID",
     "OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS",
+    "OHA_YACHIYO_DESKTOP_PROVIDER_CAPABILITIES",
     "OHA_YACHIYO_DESKTOP_PROVIDER_KEYBOARD_MOUSE_CAPTURE_SUPPORTED",
     "OHA_YACHIYO_DESKTOP_PROVIDER_FOREGROUND_MUTATION_SUPPORTED",
     "OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_KIND",
@@ -766,12 +767,14 @@ def _runtime_env_from_launch(launch: dict[str, Any]) -> dict[str, str]:
     launch = _provider_runtime_payload(launch)
     supported_tools = _string_list(launch.get("supported_tools"))
     tools = ",".join(supported_tools) if supported_tools else "desktop.safe_type_text"
+    capabilities = ",".join(_string_list(launch.get("capabilities")))
     env = {
         "OHA_YACHIYO_DESKTOP_PROVIDER_URL": str(
             launch.get("url") or launch.get("endpoint_origin") or ""
         ),
         "OHA_YACHIYO_DESKTOP_PROVIDER_ID": str(launch.get("provider_id") or ""),
         "OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS": tools,
+        "OHA_YACHIYO_DESKTOP_PROVIDER_CAPABILITIES": capabilities,
         "OHA_YACHIYO_DESKTOP_PROVIDER_KEYBOARD_MOUSE_CAPTURE_SUPPORTED": _bool_env_value(
             launch.get("keyboard_mouse_capture_supported"),
             default=True,

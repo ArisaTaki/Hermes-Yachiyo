@@ -1623,6 +1623,7 @@ def _configured_provider_manifest() -> dict[str, Any]:
 def _manifest_provider_static_payload(manifest: Mapping[str, Any]) -> dict[str, Any]:
     safety = _mapping(manifest.get("safety"))
     supported_tools = _string_list(manifest.get("supported_tools"))
+    capabilities = _string_list(manifest.get("capabilities"))
     return {
         "provider_id": str(manifest.get("provider_id") or "").strip(),
         "provider_kind": str(manifest.get("provider_kind") or "sandbox_desktop").strip(),
@@ -1631,6 +1632,7 @@ def _manifest_provider_static_payload(manifest: Mapping[str, Any]) -> dict[str, 
         "diagnostic_route": "/yachiyo/studio/tools",
         "source": "provider_manifest",
         "supported_tools": supported_tools,
+        "capabilities": capabilities,
         "launch_hint": {"isolated_provider": dict(manifest)},
         "foreground_mutation_supported": _optional_bool_value(
             manifest.get("foreground_mutation_supported")
@@ -1718,6 +1720,9 @@ def _provider_env_from_manifest(manifest: Mapping[str, Any]) -> dict[str, str]:
     supported_tools = _string_list(manifest.get("supported_tools"))
     if supported_tools:
         env["OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS"] = ",".join(supported_tools)
+    capabilities = _string_list(manifest.get("capabilities"))
+    if capabilities:
+        env["OHA_YACHIYO_DESKTOP_PROVIDER_CAPABILITIES"] = ",".join(capabilities)
     for env_key, manifest_key in (
         (
             "OHA_YACHIYO_DESKTOP_PROVIDER_KEYBOARD_MOUSE_CAPTURE_SUPPORTED",

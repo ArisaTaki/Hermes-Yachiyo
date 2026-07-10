@@ -66,6 +66,10 @@ _PROVIDER_STATUS_URL_ENV_KEYS = (
     "OHA_YACHIYO_DESKTOP_PROVIDER_STATUS_URL",
     "OHA_YACHIYO_SANDBOX_DESKTOP_PROVIDER_STATUS_URL",
 )
+_PROVIDER_CAPABILITIES_ENV_KEYS = (
+    "OHA_YACHIYO_DESKTOP_PROVIDER_CAPABILITIES",
+    "OHA_YACHIYO_SANDBOX_DESKTOP_PROVIDER_CAPABILITIES",
+)
 _PROVIDER_MANIFEST_ENV_KEYS = (
     "OHA_YACHIYO_DESKTOP_PROVIDER_MANIFEST",
     "OHA_YACHIYO_SANDBOX_DESKTOP_PROVIDER_MANIFEST",
@@ -392,6 +396,7 @@ class HttpDesktopExecutionProviderAdapter:
         status_url: str = "",
         token: str = "",
         supported_tools: Iterable[str] | None = None,
+        capabilities: Iterable[str] | None = None,
         timeout: float = 20.0,
         urlopen: Any | None = None,
         foreground_mutation_supported: bool | None = None,
@@ -418,6 +423,7 @@ class HttpDesktopExecutionProviderAdapter:
         )
         self.token = str(token or "").strip()
         self.supported_tools = _string_list(supported_tools)
+        self.capabilities = _string_list(capabilities)
         self.timeout = max(0.1, float(timeout or 20.0))
         self._urlopen = urlopen or urlopen_with_bundled_ca
         self.foreground_mutation_supported = foreground_mutation_supported
@@ -732,6 +738,7 @@ class HttpDesktopExecutionProviderAdapter:
             status="not_checked",
             blocking_conditions=[],
             supported_tools=self.supported_tools,
+            capabilities=self.capabilities,
             foreground_mutation_supported=self.foreground_mutation_supported,
             keyboard_mouse_capture_supported=self.keyboard_mouse_capture_supported,
             requires_real_sandbox_for=self.requires_real_sandbox_for,
@@ -748,6 +755,7 @@ class HttpDesktopExecutionProviderAdapter:
             ),
         )
         supported_tools = _string_list(health.get("supported_tools")) or self.supported_tools
+        capabilities = _string_list(health.get("capabilities")) or self.capabilities
         keyboard_mouse_capture_supported = _coalesce_optional_bool(
             health.get("keyboard_mouse_capture_supported"),
             self.keyboard_mouse_capture_supported,
@@ -825,6 +833,7 @@ class HttpDesktopExecutionProviderAdapter:
                 or ["desktop_execution_provider_unhealthy"]
             ),
             "supported_tools": supported_tools,
+            "capabilities": capabilities,
             "health": health,
             "endpoint_origin": _url_origin(urlparse(self.execute_url)),
             "endpoint_path": urlparse(self.execute_url).path or _DEFAULT_EXECUTE_PATH,
@@ -1866,6 +1875,9 @@ def _http_desktop_execution_provider_adapter_from_env(
         supported_tools=_string_list(
             _first_env_value(env, ("OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS",))
         ),
+        capabilities=_string_list(
+            _first_env_value(env, _PROVIDER_CAPABILITIES_ENV_KEYS)
+        ),
         timeout=_float_env_value(
             env,
             "OHA_YACHIYO_DESKTOP_PROVIDER_TIMEOUT_SECONDS",
@@ -1983,6 +1995,9 @@ def _provider_env_from_manifest(manifest: Mapping[str, Any]) -> dict[str, str]:
     supported_tools = _string_list(manifest.get("supported_tools"))
     if supported_tools:
         env["OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS"] = ",".join(supported_tools)
+    capabilities = _string_list(manifest.get("capabilities"))
+    if capabilities:
+        env["OHA_YACHIYO_DESKTOP_PROVIDER_CAPABILITIES"] = ",".join(capabilities)
     for env_key, manifest_key in (
         (
             "OHA_YACHIYO_DESKTOP_PROVIDER_KEYBOARD_MOUSE_CAPTURE_SUPPORTED",

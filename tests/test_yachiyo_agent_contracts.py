@@ -7456,6 +7456,10 @@ def test_sandbox_desktop_provider_status_exposes_virtual_provider_contract(
             "available": True,
             "adapter_ready": True,
             "authentication_configured": True,
+            "capabilities": [
+                "virtual_desktop",
+                "idempotent_tool_requests",
+            ],
             "provider_kind": "sandbox_desktop",
             "provider_id": "real-virtual-desktop",
             "status": "available",
@@ -7516,6 +7520,10 @@ def test_sandbox_desktop_provider_status_reads_provider_manifest(
                     "execute": "http://127.0.0.1:29097/tools/execute",
                 },
                 "supported_tools": list(OHA_DESKTOP_AGENT_RELEASE_PROVIDER_TOOLS),
+                "capabilities": [
+                    "virtual_desktop",
+                    "idempotent_tool_requests",
+                ],
                 "keyboard_mouse_capture_supported": True,
                 "foreground_mutation_supported": True,
                 "desktop_session_kind": "virtual_desktop",
@@ -7562,6 +7570,9 @@ def test_sandbox_desktop_provider_status_reads_provider_manifest(
             "desktop_backend_ready_for_public_release": True,
             "requires_real_virtual_desktop_backend": False,
             "supported_tools": env["OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS"].split(","),
+            "capabilities": env[
+                "OHA_YACHIYO_DESKTOP_PROVIDER_CAPABILITIES"
+            ].split(","),
         }
 
     monkeypatch.setattr(
@@ -9003,6 +9014,10 @@ def test_controlled_provider_diagnostics_marks_configured_keyboard_provider_read
         ",".join(OHA_DESKTOP_AGENT_RELEASE_PROVIDER_TOOLS),
     )
     monkeypatch.setenv(
+        "OHA_YACHIYO_DESKTOP_PROVIDER_CAPABILITIES",
+        "virtual_desktop,idempotent_tool_requests",
+    )
+    monkeypatch.setenv(
         "OHA_YACHIYO_DESKTOP_PROVIDER_KEYBOARD_MOUSE_CAPTURE_SUPPORTED",
         "true",
     )
@@ -9104,6 +9119,10 @@ def test_controlled_provider_diagnostics_reads_provider_manifest_before_start(
                     "execute": "http://127.0.0.1:29097/tools/execute",
                 },
                 "supported_tools": list(OHA_DESKTOP_AGENT_RELEASE_PROVIDER_TOOLS),
+                "capabilities": [
+                    "virtual_desktop",
+                    "idempotent_tool_requests",
+                ],
                 "keyboard_mouse_capture_supported": True,
                 "foreground_mutation_supported": True,
                 "desktop_session_kind": "virtual_desktop",

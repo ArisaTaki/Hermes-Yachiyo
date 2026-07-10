@@ -187,6 +187,7 @@ export type DesktopProviderConformanceSnapshot = {
   desktop_session_isolated?: boolean | null;
   foreground_takeover_required?: boolean | null;
   authentication_configured?: boolean;
+  idempotent_tool_requests_supported?: boolean;
   desktop_backend_kind?: string;
   desktop_backend_is_loopback?: boolean | null;
   desktop_backend_ready_for_public_release?: boolean | null;

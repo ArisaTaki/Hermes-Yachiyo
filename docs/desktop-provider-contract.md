@@ -4,6 +4,48 @@ Oha-Yachiyo 的桌面执行层通过一个本地 HTTP provider 接入真实隔�
 
 ## 启动方式
 
+### 内置 macOS VM guest-agent
+
+仓库提供 `scripts/run_virtual_desktop_guest_provider.py`。它必须运行在单独的
+macOS VM guest 内；它复用通用应用发现、Accessibility UI、点击、输入、快捷键和
+验证工具，不包含 Apple Music、Finder 或其他应用白名单。宿主只通过 HTTP contract
+发送工具请求，因此 guest 内的鼠标键盘不会抢占用户当前桌面。
+
+在 VM guest 每次启动后生成与当前 boot session 绑定的 marker，再启动 Provider：
+
+```bash
+export OHA_YACHIYO_VIRTUAL_DESKTOP_SESSION_ID="oha-vm-session-1"
+export OHA_YACHIYO_DESKTOP_PROVIDER_TOKEN="<random-bearer-token>"
+
+python scripts/run_virtual_desktop_guest_provider.py \
+  --session-id "$OHA_YACHIYO_VIRTUAL_DESKTOP_SESSION_ID" \
+  --write-guest-marker "$HOME/Library/Application Support/Oha-Yachiyo/virtual-desktop-guest.json"
+
+python scripts/run_virtual_desktop_guest_provider.py \
+  --host 0.0.0.0 \
+  --port 29097 \
+  --session-id "$OHA_YACHIYO_VIRTUAL_DESKTOP_SESSION_ID" \
+  --guest-marker "$HOME/Library/Application Support/Oha-Yachiyo/virtual-desktop-guest.json"
+```
+
+然后用 VM 工具或 SSH 把 guest 的 `29097` 转发到宿主 loopback，并在宿主配置
+Provider URL 和相同 token。不要把 guest endpoint 直接暴露到公网。内置 guest-agent
+只有在以下 attestation 全部成立时才执行工具或声明 release-ready：Darwin guest、
+当前 boot session 和 `hw.model` 匹配、硬件模型包含虚拟化标识、marker 属于当前用户
+且权限为 `0600`、独立 session id 匹配、
+backend 非 loopback、`desktop_session_isolated=true`、
+`foreground_takeover_required=false`。真实 VM 镜像和端口转发仍由发行环境提供。
+
+可在 guest 内输出对应 manifest：
+
+```bash
+python scripts/run_virtual_desktop_guest_provider.py \
+  --session-id "$OHA_YACHIYO_VIRTUAL_DESKTOP_SESSION_ID" \
+  --manifest
+```
+
+### 外部 Provider
+
 如果 provider 已经运行，可以直接配置：
 
 ```bash
@@ -102,7 +144,7 @@ Studio 和 diagnostics 的公共 `env` 投影不会返回 token。
   "status": "healthy",
   "version": "provider-version",
   "supported_tools": ["desktop.list_apps", "app.open", "desktop.verify"],
-  "capabilities": ["virtual_desktop", "keyboard_mouse_capture", "desktop_control"],
+  "capabilities": ["virtual_desktop", "keyboard_mouse_capture", "desktop_control", "idempotent_tool_requests"],
   "desktop_session_kind": "virtual_desktop",
   "desktop_session_isolated": true,
   "foreground_takeover_required": false,
@@ -118,6 +160,7 @@ Studio 和 diagnostics 的公共 `env` 投影不会返回 token。
 
 - provider configured, available, adapter ready。
 - provider 已配置 Bearer token，`authentication_configured=true`。
+- provider 声明并实现 `idempotent_tool_requests`。
 - session 是 `virtual_desktop` 或 isolated desktop。
 - `foreground_takeover_required=false`。
 - backend 不是 `loopback_session_harness`。
