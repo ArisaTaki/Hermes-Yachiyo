@@ -11,6 +11,8 @@ def system_control_hint(prompt: str) -> dict[str, Any]:
     text = str(prompt or "").strip()
     if not text:
         return {}
+    if browser_tab_audio_control_request(text):
+        return {}
     if _screen_saver_request(text):
         return {"kind": "screen_saver", "payload": {}}
     settings_payload = _settings_open_payload(text)
@@ -25,6 +27,24 @@ def system_control_hint(prompt: str) -> dict[str, Any]:
     if _display_sleep_request(text):
         return {"kind": "display_sleep", "payload": {}}
     return {}
+
+
+def browser_tab_audio_control_request(prompt: str) -> bool:
+    text = str(prompt or "").strip()
+    return bool(
+        re.search(
+            r"(?:静音|取消静音|解除静音).{0,8}(?:当前|这个|本)?(?:标签页|网页|页面)"
+            r"|(?:当前|这个|本)?(?:标签页|网页|页面).{0,8}(?:静音|取消静音|解除静音)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:mute|unmute)\s+(?:the\s+)?(?:current|this)?\s*"
+            r"(?:browser\s+)?(?:tab|web\s*page|page)\b",
+            text,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def system_tool_preview(

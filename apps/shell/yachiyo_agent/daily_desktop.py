@@ -23,7 +23,10 @@ from .desktop_execution_policy import (
 from .desktop_plan_hints import (
     app_control_tool_candidates,
     app_management_tool_candidates,
+    media_non_action_reference_hint,
+    media_playback_hint,
 )
+from .system_plan_hints import browser_tab_audio_control_request, system_control_hint
 
 logger = logging.getLogger(__name__)
 
@@ -601,6 +604,17 @@ def _planner_owned_legacy_compatible_entrypoint_projection(
     *,
     metadata: Mapping[str, Any] | None,
 ) -> tuple[list[dict[str, Any]], bool]:
+    if browser_tab_audio_control_request(text):
+        return [], True
+    if media_non_action_reference_hint(text):
+        return [], True
+    if not allowed:
+        media_hint = media_playback_hint(text)
+        system_hint = system_control_hint(text)
+        if str(media_hint.get("action") or "").strip() or str(
+            system_hint.get("kind") or ""
+        ).strip() == "volume":
+            return [], True
     try:
         from .planner_execution import planner_decision_and_tool_requests
 
@@ -641,12 +655,24 @@ def _planner_owned_legacy_compatible_entrypoint_projection(
         return compound_app_requests, True
     if _compound_app_management_projection_signature(decision):
         return [], True
-    media_requests = _legacy_compatible_media_entrypoint_requests(
+    volume_requests = _legacy_compatible_system_volume_entrypoint_requests(
+        decision,
         planner_requests,
-        text=text,
+        allowed=allowed,
+    )
+    if volume_requests:
+        return volume_requests, True
+    if _system_volume_projection_payload(decision):
+        return [], True
+    media_requests = _legacy_compatible_media_entrypoint_requests(
+        decision,
+        planner_requests,
+        allowed=allowed,
     )
     if media_requests:
-        return media_requests, False
+        return media_requests, True
+    if _media_playback_projection_inputs(decision):
+        return [], True
     search_requests = _legacy_compatible_search_entrypoint_requests(
         planner_requests,
         text=text,
@@ -994,35 +1020,181 @@ def _legacy_compatible_observation_entrypoint_requests(
 
 
 def _legacy_compatible_media_entrypoint_requests(
+    decision: Any,
     requests: Sequence[Mapping[str, Any]] | None,
     *,
-    text: str,
+    allowed: Sequence[str],
 ) -> list[dict[str, Any]]:
-    if not requests:
+    inputs = _media_playback_projection_inputs(decision)
+    if not inputs:
         return []
-    items = [dict(request) for request in requests if isinstance(request, Mapping)]
-    if not items:
+    items = [dict(request) for request in requests or [] if isinstance(request, Mapping)]
+    steps = _matching_planner_projection_steps(
+        decision,
+        items,
+        planning_reason="planner_fallback_media_playback",
+    )
+    if not steps or not {
+        str(item.get("tool") or "").strip() for item in items
+    }.issubset(set(allowed)):
         return []
-    if not any(
-        str(request.get("planning_reason") or "").strip() == "planner_fallback_media_playback"
-        for request in items
+    if any(bool(getattr(step, "approval_required", False)) for step in steps):
+        return []
+
+    step_ids = [str(getattr(step, "step_id", "") or "") for step in steps]
+    if "type-media-search-query" in step_ids:
+        query = str(inputs.get("query") or "").strip()
+        if not query or step_ids != [
+            "discover-media-app",
+            "focus-media-app-search",
+            "type-media-search-query",
+            "submit-media-search",
+            "play-media-search-result",
+            "verify-media-search",
+        ]:
+            return []
+        type_index = step_ids.index("type-media-search-query")
+        type_input = items[type_index].get("input")
+        if not isinstance(type_input, Mapping) or str(
+            type_input.get("text") or ""
+        ).strip() != query:
+            return []
+        if any(_request_has_selected_app_placeholder(request) for request in items):
+            return [_legacy_shape_request(request) for request in items]
+        visible = [
+            request
+            for request in _visible_entrypoint_plan_requests(items)
+            if str(request.get("tool") or "").strip()
+            not in {"desktop.ui_elements", "desktop.active_window", "screen.capture"}
+        ]
+        return [_legacy_shape_request(request) for request in visible]
+
+    if "control-media-playback" not in step_ids:
+        return []
+    control_index = step_ids.index("control-media-playback")
+    control_request = items[control_index]
+    control_input = control_request.get("input")
+    if not isinstance(control_input, Mapping):
+        return []
+    action = str(inputs.get("action") or "").strip()
+    if action and action != "status" and str(control_input.get("action") or action).strip() != action:
+        return []
+    return [_legacy_shape_request(control_request)]
+
+
+def _media_playback_projection_inputs(decision: Any) -> Mapping[str, Any] | None:
+    intent = getattr(decision, "selected_intent", None)
+    inputs = getattr(intent, "inputs", None)
+    if str(getattr(intent, "kind", "") or "").strip() != "media_playback" or not isinstance(
+        inputs,
+        Mapping,
+    ):
+        return None
+    if str(inputs.get("action") or "").strip() not in {
+        "play",
+        "pause",
+        "next",
+        "previous",
+        "status",
+    }:
+        return None
+    return inputs
+
+
+def _legacy_compatible_system_volume_entrypoint_requests(
+    decision: Any,
+    requests: Sequence[Mapping[str, Any]] | None,
+    *,
+    allowed: Sequence[str],
+) -> list[dict[str, Any]]:
+    payload = _system_volume_projection_payload(decision)
+    if not payload:
+        return []
+    items = [dict(request) for request in requests or [] if isinstance(request, Mapping)]
+    steps = _matching_planner_projection_steps(
+        decision,
+        items,
+        planning_reason="planner_fallback_system_control",
+    )
+    if not steps or "system.volume" not in set(allowed):
+        return []
+    if any(bool(getattr(step, "approval_required", False)) for step in steps):
+        return []
+    expected_step_ids = ["control-system-state"]
+    if str(payload.get("action") or "").strip() != "status":
+        expected_step_ids.append("verify-system-state")
+    if [str(getattr(step, "step_id", "") or "") for step in steps] != expected_step_ids:
+        return []
+    if not items or any(
+        str(item.get("tool") or "").strip() != "system.volume" for item in items
     ):
         return []
-    visible = [
-        request
-        for request in _visible_entrypoint_plan_requests(items)
-        if str(request.get("tool") or "").strip() not in {"desktop.ui_elements"}
+    first_input = items[0].get("input")
+    if not isinstance(first_input, Mapping) or dict(first_input) != dict(payload):
+        return []
+    if len(items) == 2:
+        verify_input = items[1].get("input")
+        if not isinstance(verify_input, Mapping) or dict(verify_input) != {
+            "action": "status"
+        }:
+            return []
+    return [_legacy_shape_request(items[0])]
+
+
+def _system_volume_projection_payload(decision: Any) -> Mapping[str, Any] | None:
+    intent = getattr(decision, "selected_intent", None)
+    inputs = getattr(intent, "inputs", None)
+    if str(getattr(intent, "kind", "") or "").strip() != "system_control" or not isinstance(
+        inputs,
+        Mapping,
+    ):
+        return None
+    payload = inputs.get("payload")
+    if str(inputs.get("kind") or "").strip() != "volume" or not isinstance(
+        payload,
+        Mapping,
+    ):
+        return None
+    action = str(payload.get("action") or "").strip()
+    if action not in {"set", "up", "down", "mute", "unmute", "status"}:
+        return None
+    if action == "set":
+        level = payload.get("level")
+        if not isinstance(level, int) or not 0 <= level <= 100:
+            return None
+    return payload
+
+
+def _matching_planner_projection_steps(
+    decision: Any,
+    requests: Sequence[Mapping[str, Any]],
+    *,
+    planning_reason: str,
+) -> list[Any]:
+    if not requests or any(
+        str(request.get("planning_reason") or "").strip() != planning_reason
+        for request in requests
+    ):
+        return []
+    plan = getattr(decision, "plan", None)
+    tool_plan = getattr(plan, "tool_plan", None)
+    steps = [
+        step
+        for step in list(getattr(tool_plan, "steps", None) or [])
+        if str(getattr(step, "tool_name", "") or "").strip()
     ]
-    if not visible:
+    if len(steps) != len(requests):
         return []
-    if any(_request_has_selected_app_placeholder(request) for request in visible):
-        return []
-    tools = [str(request.get("tool") or "").strip() for request in visible]
-    if _legacy_compatible_simple_media_request(tools):
-        return [_legacy_shape_request(visible[0])]
-    if _legacy_compatible_named_music_search_sequence(visible, tools, text=text):
-        return [_legacy_shape_request(request) for request in visible]
-    return []
+    for step, request in zip(steps, requests, strict=True):
+        request_input = request.get("input")
+        if (
+            str(getattr(step, "tool_name", "") or "").strip()
+            != str(request.get("tool") or "").strip()
+            or not isinstance(request_input, Mapping)
+            or dict(getattr(step, "input_preview", None) or {}) != dict(request_input)
+        ):
+            return []
+    return steps
 
 
 def _legacy_compatible_browser_internal_page_entrypoint_requests(
@@ -2022,56 +2194,6 @@ def _app_prompt_has_non_launch_followup(text: str) -> bool:
             r"in|inside|press|click|type|scroll|refresh|tab|page)\b",
             lowered,
         )
-    )
-
-
-def _legacy_compatible_simple_media_request(tools: Sequence[str]) -> bool:
-    return len(tools) == 1 and tools[0] in {
-        "media.apple_music_play",
-        "media.apple_music_status",
-        "media.music_app_open_and_play",
-    }
-
-
-def _legacy_compatible_named_music_search_sequence(
-    requests: Sequence[Mapping[str, Any]],
-    tools: Sequence[str],
-    *,
-    text: str,
-) -> bool:
-    if not _explicit_music_search_play_prompt(text):
-        return False
-    if list(tools) != [
-        "app.open_and_safe_shortcut",
-        "desktop.safe_type_text",
-        "desktop.search_submit",
-        "media.music_app_open_and_play",
-    ] and list(tools) != [
-        "app.focus_and_safe_shortcut",
-        "desktop.safe_type_text",
-        "desktop.search_submit",
-        "media.music_app_open_and_play",
-    ]:
-        return False
-    first_input = requests[0].get("input") if isinstance(requests[0].get("input"), Mapping) else {}
-    final_input = requests[-1].get("input") if isinstance(requests[-1].get("input"), Mapping) else {}
-    first_app = str(first_input.get("app_name") or "").strip()
-    final_app = str(final_input.get("app_name") or "").strip()
-    return bool(first_app and final_app and first_app == final_app and first_app != "Music")
-
-
-def _explicit_music_search_play_prompt(text: str) -> bool:
-    value = str(text or "")
-    has_search = bool(
-        "搜索" in value
-        or "搜" in value
-        or re.search(r"\b(?:search|find)\b", value, flags=re.IGNORECASE)
-    )
-    if not has_search:
-        return False
-    return bool(
-        re.search(r"(?:打开|启动|运行|拉起|开启)", value)
-        or re.search(r"\b(?:open|launch|start)\b", value, flags=re.IGNORECASE)
     )
 
 

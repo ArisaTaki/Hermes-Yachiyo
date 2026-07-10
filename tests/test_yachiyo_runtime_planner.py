@@ -22659,6 +22659,11 @@ def test_runtime_planner_routes_natural_media_controls_to_media_tools() -> None:
         ("切歌", "next"),
         ("跳过这首", "next"),
         ("别放了", "pause"),
+        ("prev track", "previous"),
+        ("stop", "pause"),
+        ("stop playback", "pause"),
+        ("resume", "play"),
+        ("恢复播放", "play"),
     )
     for prompt, action in cases:
         decision = RuntimePlanner().decision(
@@ -22669,9 +22674,18 @@ def test_runtime_planner_routes_natural_media_controls_to_media_tools() -> None:
 
         assert decision.selected_intent.kind == "media_playback"
         assert decision.selected_intent.inputs["action"] == action
+        assert decision.selected_intent.inputs["query"] == ""
         step = _step_by_id(decision, "control-media-playback")
         assert step.tool_name == "media.system_control"
         assert step.input_preview == {"action": action}
+
+    for prompt in ("播放列表", "播放到 30%"):
+        decision = RuntimePlanner().decision(
+            prompt,
+            allowed_tools=["media.system_control", "desktop.running_apps"],
+            metadata={"daily_desktop_intent": True},
+        )
+        assert decision.selected_intent.kind != "media_playback"
 
 
 def test_runtime_planner_keeps_generic_back_to_app_out_of_media_controls() -> None:

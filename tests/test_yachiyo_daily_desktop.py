@@ -7654,7 +7654,10 @@ def test_daily_desktop_entrypoint_routes_spotlight_search_to_shortcut_and_type()
     ]
 
 
-def test_daily_desktop_entrypoint_routes_music_app_playback_questions_to_desktop_tools() -> None:
+def test_daily_desktop_entrypoint_routes_music_app_playback_questions_to_desktop_tools(
+    monkeypatch,
+) -> None:
+    _forbid_legacy_daily_parser(monkeypatch, "media playback must be planner-owned")
     cases = (
         ("打开网易云并播放", "media.music_app_open_and_play", {"app_name": "网易云音乐"}),
         ("可以帮我打开网易云并播放吗", "media.music_app_open_and_play", {"app_name": "网易云音乐"}),
@@ -7725,15 +7728,20 @@ def test_legacy_daily_desktop_intent_prefers_generic_music_app_tool() -> None:
     ]
 
 
-def test_daily_desktop_entrypoint_routes_music_control_language() -> None:
+def test_daily_desktop_entrypoint_routes_music_control_language(monkeypatch) -> None:
+    _forbid_legacy_daily_parser(monkeypatch, "media controls must be planner-owned")
     cases = (
         ("播放继续", {"action": "play"}),
         ("跳过这首", {"action": "next"}),
         ("skip this song", {"action": "next"}),
         ("next media track", {"action": "next"}),
         ("previous media track", {"action": "previous"}),
+        ("prev track", {"action": "previous"}),
+        ("stop", {"action": "pause"}),
+        ("stop playback", {"action": "pause"}),
         ("别放了", {"action": "pause"}),
         ("pause current media", {"action": "pause"}),
+        ("resume", {"action": "play"}),
         ("resume playback", {"action": "play"}),
         ("关掉音乐", {"action": "pause"}),
     )
@@ -7766,8 +7774,8 @@ def test_daily_desktop_entrypoint_routes_music_control_language() -> None:
         assert daily_desktop_entrypoint_requests(prompt) == [
             {
                 "protocol": "json_fallback",
-                "tool": "media.apple_music_control",
-                "input": {"action": action},
+                "tool": "media.music_app_control",
+                "input": {"app_name": "Music", "action": action},
             }
         ]
     for prompt, app_name, action in (
@@ -7794,6 +7802,8 @@ def test_daily_desktop_entrypoint_routes_music_control_language() -> None:
         "查看当前 Apple Music 播放状态",
         "Apple Music 播放进度",
         "Apple Music 在播状态",
+        "what is playing",
+        "what's playing",
     ):
         status_requests = daily_desktop_entrypoint_requests(prompt)
 
@@ -7812,8 +7822,12 @@ def test_daily_desktop_entrypoint_routes_music_control_language() -> None:
             "daily_desktop_tools": ["media.apple_music_status"],
         }
 
+    for prompt in ("播放列表", "播放到 30%"):
+        assert daily_desktop_entrypoint_requests(prompt) == []
 
-def test_daily_desktop_entrypoint_routes_music_app_search_play_sequences() -> None:
+
+def test_daily_desktop_entrypoint_routes_music_app_search_play_sequences(monkeypatch) -> None:
+    _forbid_legacy_daily_parser(monkeypatch, "media search and play must be planner-owned")
     requests = daily_desktop_entrypoint_requests("打开 Spotify 搜索 Taylor Swift 并播放")
 
     assert requests == [
@@ -7846,7 +7860,7 @@ def test_daily_desktop_entrypoint_routes_music_app_search_play_sequences() -> No
     assert direct_play_requests == [
         {
             "protocol": "json_fallback",
-            "tool": "app.focus_and_safe_shortcut",
+            "tool": "app.open_and_safe_shortcut",
             "input": {"app_name": "Spotify", "action": "find"},
         },
         {
@@ -7866,7 +7880,7 @@ def test_daily_desktop_entrypoint_routes_music_app_search_play_sequences() -> No
 
     assert focus_requests[0] == {
         "protocol": "json_fallback",
-        "tool": "app.focus_and_safe_shortcut",
+        "tool": "app.open_and_safe_shortcut",
         "input": {"app_name": "网易云音乐", "action": "find"},
     }
     assert focus_requests[1]["input"] == {"text": "周杰伦"}
@@ -7890,8 +7904,11 @@ def test_daily_desktop_entrypoint_routes_music_app_search_play_sequences() -> No
     assert causative_play_requests[1]["input"] == {"text": "周杰伦"}
 
 
-def test_daily_desktop_entrypoint_routes_colloquial_music_queries_to_apple_music() -> None:
-    cases = (
+def test_daily_desktop_entrypoint_routes_colloquial_music_queries_to_available_app(
+    monkeypatch,
+) -> None:
+    _forbid_legacy_daily_parser(monkeypatch, "colloquial media queries must be planner-owned")
+    generic_cases = (
         ("放点周杰伦", {"query": "周杰伦"}),
         ("播点轻音乐", {"query": "轻音乐"}),
         ("来点轻音乐", {"query": "轻音乐"}),
@@ -7899,27 +7916,46 @@ def test_daily_desktop_entrypoint_routes_colloquial_music_queries_to_apple_music
         ("play some Taylor Swift", {"query": "Taylor Swift"}),
         ("play Some Nights", {"query": "Some Nights"}),
         ("播个超时空辉夜姬", {"query": "超时空辉夜姬"}),
+        ("超时空辉夜姬播放", {"query": "超时空辉夜姬"}),
+        ("周杰伦播放一下", {"query": "周杰伦"}),
+    )
+    explicit_app_cases = (
         ("put some jazz on Apple Music", {"query": "jazz"}),
         ("search Apple Music for Taylor Swift and play it", {"query": "Taylor Swift"}),
         ("Apple Music play Taylor Swift", {"query": "Taylor Swift"}),
         ("play Apple Music Taylor Swift", {"query": "Taylor Swift"}),
         ("打开 Apple Music 搜索超时空辉夜姬并播放", {"query": "超时空辉夜姬"}),
         ("open Apple Music and search Space Oddity and play it", {"query": "Space Oddity"}),
-        ("超时空辉夜姬播放", {"query": "超时空辉夜姬"}),
-        ("周杰伦播放一下", {"query": "周杰伦"}),
     )
 
-    for prompt, tool_input in cases:
+    for prompt, tool_input in generic_cases:
         requests = daily_desktop_entrypoint_requests(prompt)
 
-        assert requests == [
-            {
-                "protocol": "json_fallback",
-                "tool": "media.apple_music_play",
-                "input": tool_input,
-            }
+        assert [request["tool"] for request in requests] == [
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "media.music_app_open_and_play",
+            "desktop.ui_elements",
         ]
-        assert daily_desktop_user_metadata(requests)["daily_desktop_tool"] == "media.apple_music_play"
+        assert requests[0]["input"] == {"query": "music", "limit": 20}
+        assert requests[2]["input"] == {"text": tool_input["query"]}
+        assert requests[4]["input"]["app_name"] == (
+            "<selected app from desktop.list_apps>"
+        )
+
+    for prompt, tool_input in explicit_app_cases:
+        requests = daily_desktop_entrypoint_requests(prompt)
+
+        assert [request["tool"] for request in requests] == [
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "media.music_app_open_and_play",
+        ]
+        assert requests[0]["input"] == {"app_name": "Music", "action": "find"}
+        assert requests[1]["input"] == {"text": tool_input["query"]}
 
     assert daily_desktop_entrypoint_requests("播点音乐") == [
         {
@@ -7930,7 +7966,62 @@ def test_daily_desktop_entrypoint_routes_colloquial_music_queries_to_apple_music
     ]
 
 
-def test_daily_desktop_entrypoint_routes_colloquial_volume_questions_to_desktop_tools() -> None:
+def test_media_and_volume_projection_rejects_tampered_plans(monkeypatch) -> None:
+    from apps.shell.yachiyo_agent.daily_desktop import (
+        _legacy_compatible_media_entrypoint_requests,
+        _legacy_compatible_system_volume_entrypoint_requests,
+        daily_desktop_allowed_tools,
+    )
+    from apps.shell.yachiyo_agent.planner_execution import (
+        planner_decision_and_tool_requests,
+    )
+
+    _forbid_legacy_daily_parser(
+        monkeypatch,
+        "invalid media and volume plans must not reach legacy",
+    )
+    allowed = daily_desktop_allowed_tools()
+    media_decision, media_requests = planner_decision_and_tool_requests(
+        "播放超时空辉夜姬",
+        allowed,
+    )
+    tampered_media = [dict(request) for request in media_requests]
+    tampered_media[2] = {
+        **tampered_media[2],
+        "input": {"text": "different song"},
+    }
+    assert _legacy_compatible_media_entrypoint_requests(
+        media_decision,
+        tampered_media,
+        allowed=allowed,
+    ) == []
+
+    volume_decision, volume_requests = planner_decision_and_tool_requests(
+        "把音量调到 30%",
+        allowed,
+    )
+    tampered_volume = [dict(request) for request in volume_requests]
+    tampered_volume[-1] = {
+        **tampered_volume[-1],
+        "input": {"action": "down"},
+    }
+    assert _legacy_compatible_system_volume_entrypoint_requests(
+        volume_decision,
+        tampered_volume,
+        allowed=allowed,
+    ) == []
+
+    assert daily_desktop_entrypoint_requests(
+        "播放超时空辉夜姬",
+        allowed_tools=["desktop.list_apps"],
+    ) == []
+    assert daily_desktop_entrypoint_requests("静音", allowed_tools=[]) == []
+
+
+def test_daily_desktop_entrypoint_routes_colloquial_volume_questions_to_desktop_tools(
+    monkeypatch,
+) -> None:
+    _forbid_legacy_daily_parser(monkeypatch, "system volume must be planner-owned")
     cases = (
         ("大点声", {"action": "up"}),
         ("大一点声", {"action": "up"}),
@@ -7971,10 +8062,13 @@ def test_daily_desktop_entrypoint_routes_colloquial_volume_questions_to_desktop_
         "取消静音当前标签页",
         "mute current tab",
         "mute this tab",
+        "mute browser tab",
         "unmute current tab",
+        "unmute browser tab",
     ):
         assert daily_desktop_entrypoint_requests(prompt) == []
 
+    monkeypatch.undo()
     assert daily_desktop_entrypoint_requests("当前标签页是什么") == [
         {
             "protocol": "json_fallback",

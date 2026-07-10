@@ -1181,7 +1181,8 @@ def safe_click_hint(text: str) -> dict[str, int | float] | None:
 def media_playback_hint(text: str) -> dict[str, str]:
     action = media_action_hint(text)
     app_name = music_app_name_hint(text)
-    query = media_query_hint(text) if action == "play" else ""
+    control_only = media_control_only_hint(text, action=action)
+    query = media_query_hint(text) if action == "play" and not control_only else ""
     if not app_name and action == "play" and query:
         app_name = media_app_scope_hint(text)
     if not app_name and action == "play" and query:
@@ -1192,8 +1193,20 @@ def media_playback_hint(text: str) -> dict[str, str]:
         "action": action,
         "app_name": app_name,
         "query": query,
-        "control_only": "true" if media_control_only_hint(text, action=action) else "",
+        "control_only": "true" if control_only else "",
     }
+
+
+def media_non_action_reference_hint(text: str) -> bool:
+    value = str(text or "").strip()
+    return bool(
+        re.fullmatch(r"(?:播放列表|播放队列|播放记录)", value, flags=re.IGNORECASE)
+        or re.search(
+            r"(?:播放|播|放)\s*(?:到|至)\s*\d+(?:\.\d+)?\s*%?\s*$",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def media_tool_preview(
@@ -1639,18 +1652,26 @@ def _append_media_app_verify_step(
 
 def media_action_hint(text: str) -> str:
     lowered = str(text or "").lower()
+    if media_non_action_reference_hint(text):
+        return ""
     if contains_any(
         lowered,
         [
             "当前播放",
             "现在播放",
             "正在播放",
+            "当前在播",
+            "现在在播",
+            "在播什么",
             "播放什么",
             "播放状态",
             "播放进度",
             "在播状态",
+            "音乐状态",
             "status",
             "currently playing",
+            "what is playing",
+            "what's playing",
         ],
     ):
         return "status"
@@ -1673,16 +1694,32 @@ def media_action_hint(text: str) -> str:
     ):
         return "next"
     if contains_any(lowered, ["上一首", "上一曲", "previous"]) or re.search(
-        r"\bback\s+(?:one\s+)?(?:track|song)\b",
+        r"\b(?:prev(?:ious)?|back(?:\s+one)?)\s+(?:track|song)\b",
         lowered,
     ):
         return "previous"
     if contains_any(
         lowered,
-        ["暂停", "停一下", "停止", "停止播放", "别放了", "关掉", "pause", "stop playing"],
+        [
+            "暂停",
+            "停一下",
+            "停止",
+            "停止播放",
+            "别放了",
+            "关掉",
+            "pause",
+            "stop playing",
+            "stop playback",
+        ],
+    ) or re.fullmatch(r"\s*stop\s*", lowered) or (
+        re.search(r"\bstop\b", lowered)
+        and bool(music_app_name_hint(text))
     ):
         return "pause"
-    if _media_resume_play_hint(str(text or "")):
+    if _media_resume_play_hint(str(text or "")) or (
+        re.search(r"\bresume\b", lowered)
+        and bool(music_app_name_hint(text))
+    ):
         return "play"
     if re.search(
         r"(?:音乐|歌|歌曲).{0,4}(?:听听|听一下|听下)|"
@@ -1698,18 +1735,52 @@ def media_action_hint(text: str) -> str:
         ["来点", "听点", "听一首", "听首", "想听", "听音乐", "听歌", "listen to music", "put on some music"],
     ):
         return "play"
-    if contains_any(lowered, ["播放", "播", "放", "play"]):
+    if re.search(r"\bplay\b", lowered):
+        return "play"
+    if music_app_name_hint(text) and re.search(r"(?:播放|播|放)", str(text or "")):
+        return "play"
+    if re.search(
+        r"(?:音乐\s*(?:应用|app|软件|播放器)?|播放器|music\s+app|music\s+player)",
+        lowered,
+        flags=re.IGNORECASE,
+    ) and re.search(r"(?:播放|播|放)|\bplay\b", lowered, flags=re.IGNORECASE):
+        return "play"
+    if re.search(r"(?:音乐|歌曲|歌).{0,12}(?:播放|播|放)", lowered) or re.search(
+        r"(?:播放|播|放).{0,12}(?:音乐|歌曲|歌)",
+        lowered,
+    ):
+        return "play"
+    if re.search(
+        r"^(?:(?:你)?(?:能不能|能否|可以|可不可以)?(?:帮我)?|请|麻烦)?(?:直接)?"
+        r"(?:播放|播|放)(?:一下|下|一首|首|个|点|一点)?\s*"
+        r"(?!到|进|在|置|左|右|上|下|大|小|回|前|后)"
+        r"[^。！？!?，,]{1,80}$",
+        str(text or "").strip(),
+        flags=re.IGNORECASE,
+    ):
+        return "play"
+    if re.search(
+        r"[^。！？!?，,]{1,80}(?:播放|播|放)(?:一下|下)?$",
+        str(text or "").strip(),
+        flags=re.IGNORECASE,
+    ):
         return "play"
     return ""
 
 
 def media_control_only_hint(text: str, *, action: str = "") -> bool:
-    lowered = str(text or "").lower()
     if action in {"next", "previous", "pause"}:
-        return not re.search(_MEDIA_APP_NAME_PATTERN, lowered)
+        return not bool(music_app_name_hint(text))
     if action == "play":
-        return _media_resume_play_hint(str(text or "")) or bool(
+        return (
+            _media_resume_play_hint(str(text or ""))
+            or (
+                re.search(r"\bresume\b", str(text or ""), flags=re.IGNORECASE)
+                and bool(music_app_name_hint(text))
+            )
+            or bool(
             re.fullmatch(r"\s*(?:播放|播|放)(?:一下|下)?\s*", str(text or ""), flags=re.IGNORECASE)
+            )
         )
     return False
 
@@ -1719,6 +1790,7 @@ def _media_resume_play_hint(text: str) -> bool:
     lowered = value.lower()
     return bool(
         re.fullmatch(r"(?:播放继续|继续播放|恢复播放|接着播放)", value, flags=re.IGNORECASE)
+        or re.fullmatch(r"resume", lowered)
         or re.search(
             r"(?:继续|恢复|接着).{0,8}(?:当前|现在|正在播放的)?(?:音乐|歌曲|歌|媒体|播放)",
             value,
@@ -1741,7 +1813,12 @@ def _implicit_apple_music_control_hint(text: str, *, action: str = "") -> bool:
 
 
 def music_app_name_hint(text: str) -> str:
-    return legacy_music_app_name_hint(text)
+    app_name = legacy_music_app_name_hint(text)
+    if app_name:
+        return app_name
+    if re.search(r"\bMusic\b", str(text or "")):
+        return "Music"
+    return ""
 
 
 def media_app_scope_hint(text: str) -> str:
@@ -1942,7 +2019,7 @@ def _clean_media_app_scope(value: str) -> str:
 
 def _clean_media_query(value: str) -> str:
     query = clean(value)
-    query = re.sub(r"^some\s+(?=[a-z])", "", query)
+    query = re.sub(r"^some\s+(?=[A-Za-z])", "", query)
     query = re.sub(r"^(?:in|on|with|using)\s+", "", query, flags=re.IGNORECASE)
     query = re.sub(
         r"^(?:打开|启动|找一个|找个|用|在|通过)?\s*"
@@ -1998,6 +2075,12 @@ def _clean_media_query(value: str) -> str:
     )
     query = query.strip(" .，,。")
     query = re.sub(r"(?:吧|嘛|吗|呢|么)$", "", query).strip(" .，,。")
+    if re.fullmatch(
+        r"(?:把|让|请|帮我|麻烦|打开|启动|开启|运行|拉起|直接|\s)+",
+        query,
+        flags=re.IGNORECASE,
+    ):
+        return ""
     return "" if query.lower() in _GENERIC_MUSIC_QUERIES else query
 
 
