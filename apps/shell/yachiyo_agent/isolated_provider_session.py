@@ -285,6 +285,7 @@ class IsolatedDesktopProviderSessionManager:
             manifest: dict[str, Any] = {}
             command: list[str] = []
             start_cwd = self._repo_root
+            launch_timeout_seconds = max(0.1, float(timeout_seconds))
             start_env = scrubbed_subprocess_env()
             requested_tools = sorted(
                 {
@@ -310,6 +311,10 @@ class IsolatedDesktopProviderSessionManager:
                 manifest = _managed_external_provider_manifest(
                     self._repo_root,
                     manifest_path=provider_manifest,
+                )
+                launch_timeout_seconds = _managed_external_provider_launch_timeout(
+                    manifest,
+                    default=launch_timeout_seconds,
                 )
                 provider_token = desktop_provider_token_from_manifest(
                     manifest,
@@ -356,7 +361,7 @@ class IsolatedDesktopProviderSessionManager:
             try:
                 launch = _read_launch_payload(
                     process,
-                    timeout_seconds=timeout_seconds,
+                    timeout_seconds=launch_timeout_seconds,
                     label="managed desktop provider",
                 )
             except Exception as exc:
@@ -895,6 +900,20 @@ def _managed_external_provider_start_cwd(
         manifest_path=manifest_path,
     )
     return resolved_manifest_path.parent if resolved_manifest_path is not None else repo_root
+
+
+def _managed_external_provider_launch_timeout(
+    manifest: dict[str, Any],
+    *,
+    default: float,
+) -> float:
+    entrypoint = _mapping(manifest.get("entrypoint"))
+    raw = entrypoint.get("launch_timeout_seconds")
+    try:
+        configured = float(raw)
+    except (TypeError, ValueError):
+        configured = 0.0
+    return min(120.0, max(0.1, float(default), configured))
 
 
 def _managed_external_provider_manifest(

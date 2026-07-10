@@ -114,6 +114,7 @@ def public_release_gate_checks(
                 "tests/test_release_smoke_summary.py",
                 "tests/test_oha_desktop_agent_release_smoke.py",
                 "tests/test_virtual_desktop_guest_provider.py",
+                "tests/test_virtual_desktop_ssh_bridge.py",
                 "tests/test_oha_parity_summary.py",
                 "tests/test_public_demo_smokes.py",
                 "tests/test_refresh_local_rc_signoff.py",

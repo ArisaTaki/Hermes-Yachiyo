@@ -21,11 +21,15 @@ python scripts/run_virtual_desktop_guest_provider.py \
   --session-id "$OHA_YACHIYO_VIRTUAL_DESKTOP_SESSION_ID" \
   --write-guest-marker "$HOME/Library/Application Support/Oha-Yachiyo/virtual-desktop-guest.json"
 
+# 用 VM 的 secret provisioning 写入同一 token；文件必须属于 guest 用户且权限为 0600。
+# 默认路径：$HOME/Library/Application Support/Oha-Yachiyo/desktop-provider.token
+
 python scripts/run_virtual_desktop_guest_provider.py \
   --host 0.0.0.0 \
   --port 29097 \
   --session-id "$OHA_YACHIYO_VIRTUAL_DESKTOP_SESSION_ID" \
-  --guest-marker "$HOME/Library/Application Support/Oha-Yachiyo/virtual-desktop-guest.json"
+  --guest-marker "$HOME/Library/Application Support/Oha-Yachiyo/virtual-desktop-guest.json" \
+  --token-file "$HOME/Library/Application Support/Oha-Yachiyo/desktop-provider.token"
 ```
 
 然后用 VM 工具或 SSH 把 guest 的 `29097` 转发到宿主 loopback，并在宿主配置
@@ -43,6 +47,30 @@ python scripts/run_virtual_desktop_guest_provider.py \
   --session-id "$OHA_YACHIYO_VIRTUAL_DESKTOP_SESSION_ID" \
   --manifest
 ```
+
+宿主侧可以直接使用内置 SSH lifecycle bridge，不需要另写端口转发脚本。它启动
+guest Provider、建立仅监听 loopback 的 tunnel、重写启动 endpoint，并在 Studio 停止
+session 时一并终止 SSH/guest 进程。Host token 不会转发到 SSH 子进程；guest 只读取
+上面的 `0600` token file。
+
+```bash
+export OHA_YACHIYO_VIRTUAL_DESKTOP_SSH_TARGET="yachiyo@<vm-address>"
+export OHA_YACHIYO_VIRTUAL_DESKTOP_REMOTE_REPO="/Users/yachiyo/Hermes-Yachiyo"
+
+python scripts/run_ssh_virtual_desktop_provider.py \
+  --ssh-target "$OHA_YACHIYO_VIRTUAL_DESKTOP_SSH_TARGET" \
+  --remote-repo "$OHA_YACHIYO_VIRTUAL_DESKTOP_REMOTE_REPO" \
+  --session-id "$OHA_YACHIYO_VIRTUAL_DESKTOP_SESSION_ID" \
+  --manifest > tmp/oha-virtual-desktop-provider.manifest.json
+
+export OHA_YACHIYO_DESKTOP_PROVIDER_MANIFEST="$PWD/tmp/oha-virtual-desktop-provider.manifest.json"
+```
+
+Manifest 的 `entrypoint` 会让现有 `IsolatedDesktopProviderSessionManager` 托管 SSH
+bridge。SSH 必须使用已配置的 key/agent，并启用 host key verification；可通过重复的
+`--ssh-option` 传入现有 OpenSSH 配置项。Bridge 保留本地 `SSH_AUTH_SOCK` 用于认证，
+但强制 `ForwardAgent=no`，不会把本地 SSH agent 转发进 VM。`--remote-repo` 必须是
+guest 内的绝对路径。
 
 ### 外部 Provider
 

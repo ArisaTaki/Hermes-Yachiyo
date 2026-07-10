@@ -122,11 +122,15 @@ def _public_release_next_actions(
                         "the generic desktop toolset inside a macOS virtual machine."
                     ),
                     "command": (
-                        "python scripts/run_virtual_desktop_guest_provider.py "
+                        "python scripts/run_ssh_virtual_desktop_provider.py "
+                        "--ssh-target \"$OHA_YACHIYO_VIRTUAL_DESKTOP_SSH_TARGET\" "
+                        "--remote-repo \"$OHA_YACHIYO_VIRTUAL_DESKTOP_REMOTE_REPO\" "
                         "--session-id \"$OHA_YACHIYO_VIRTUAL_DESKTOP_SESSION_ID\" "
                         "--manifest"
                     ),
                     "required_environment": [
+                        "OHA_YACHIYO_VIRTUAL_DESKTOP_SSH_TARGET",
+                        "OHA_YACHIYO_VIRTUAL_DESKTOP_REMOTE_REPO",
                         "OHA_YACHIYO_VIRTUAL_DESKTOP_SESSION_ID",
                         "OHA_YACHIYO_DESKTOP_PROVIDER_TOKEN",
                     ],
@@ -216,6 +220,12 @@ def _public_release_required_commands(provider_manifest: str) -> dict[str, str]:
         ),
         "guest_provider_manifest": (
             "python scripts/run_virtual_desktop_guest_provider.py "
+            "--session-id \"$OHA_YACHIYO_VIRTUAL_DESKTOP_SESSION_ID\" --manifest"
+        ),
+        "ssh_bridge_manifest": (
+            "python scripts/run_ssh_virtual_desktop_provider.py "
+            "--ssh-target \"$OHA_YACHIYO_VIRTUAL_DESKTOP_SSH_TARGET\" "
+            "--remote-repo \"$OHA_YACHIYO_VIRTUAL_DESKTOP_REMOTE_REPO\" "
             "--session-id \"$OHA_YACHIYO_VIRTUAL_DESKTOP_SESSION_ID\" --manifest"
         ),
         "public_release_smoke": _public_release_smoke_command(provider_manifest),

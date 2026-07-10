@@ -985,6 +985,10 @@ def test_start_manifest_provider_satisfies_real_virtual_backend_contract(
                 "provider_id": "release-virtual-desktop",
                 "provider_kind": "sandbox_desktop",
                 "supported_tools": release_tools,
+                "capabilities": [
+                    "virtual_desktop",
+                    "idempotent_tool_requests",
+                ],
                 "keyboard_mouse_capture_supported": True,
                 "foreground_mutation_supported": True,
                 "desktop_session_kind": "virtual_desktop",
@@ -992,12 +996,12 @@ def test_start_manifest_provider_satisfies_real_virtual_backend_contract(
                 "foreground_takeover_required": False,
                 "desktop_backend_kind": "vnc_virtual_desktop",
                 "desktop_backend_is_loopback": False,
-                    "desktop_backend_ready_for_public_release": True,
-                    "requires_real_virtual_desktop_backend": False,
-                    "authentication": {
-                        "token_env": "TEST_RELEASE_PROVIDER_TOKEN",
-                    },
-                    "entrypoint": {"script": "release_provider.py"},
+                "desktop_backend_ready_for_public_release": True,
+                "requires_real_virtual_desktop_backend": False,
+                "authentication": {
+                    "token_env": "TEST_RELEASE_PROVIDER_TOKEN",
+                },
+                "entrypoint": {"script": "release_provider.py"},
             }
         ),
         encoding="utf-8",
@@ -1061,6 +1065,11 @@ def test_start_manifest_provider_satisfies_real_virtual_backend_contract(
             "desktop_backend_ready_for_public_release": True if configured else None,
             "requires_real_virtual_desktop_backend": False if configured else None,
             "supported_tools": release_tools if configured else [],
+            "capabilities": (
+                ["virtual_desktop", "idempotent_tool_requests"]
+                if configured
+                else []
+            ),
         }
 
     monkeypatch.setattr(session_module.subprocess, "Popen", fake_popen)

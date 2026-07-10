@@ -35,6 +35,9 @@ DEFAULT_PROVIDER_KIND = "sandbox_desktop"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 29097
 DEFAULT_BACKEND_KIND = "macos_virtual_machine"
+DEFAULT_TOKEN_FILE = Path(
+    "~/Library/Application Support/Oha-Yachiyo/desktop-provider.token"
+).expanduser()
 DEFAULT_GUEST_MARKER = Path(
     "~/Library/Application Support/Oha-Yachiyo/virtual-desktop-guest.json"
 ).expanduser()
@@ -471,10 +474,16 @@ def main(argv: list[str] | None = None) -> int:
         marker_path.chmod(0o600)
         print(json.dumps({"ok": True, "marker_path": str(marker_path)}))
         return 0
-    token = str(
-        args.token or os.getenv("OHA_YACHIYO_DESKTOP_PROVIDER_TOKEN", "")
-    ).strip()
     try:
+        token = _desktop_provider_token(
+            direct_token=(
+                args.token or os.getenv("OHA_YACHIYO_DESKTOP_PROVIDER_TOKEN", "")
+            ),
+            token_file=(
+                args.token_file
+                or os.getenv("OHA_YACHIYO_DESKTOP_PROVIDER_TOKEN_FILE", "")
+            ),
+        )
         serve_virtual_desktop_guest_provider(
             host=args.host,
             port=args.port,
@@ -537,11 +546,41 @@ def _hardware_model_is_virtual(value: str) -> bool:
     return "virtual" in str(value or "").strip().lower()
 
 
+def _desktop_provider_token(
+    *,
+    direct_token: str,
+    token_file: str | Path | None,
+) -> str:
+    token = str(direct_token or "").strip()
+    if token:
+        return token
+    raw_path = str(token_file or "").strip()
+    if not raw_path:
+        return ""
+    path = Path(raw_path).expanduser()
+    if path.is_symlink():
+        raise ValueError("desktop provider token file must not be a symlink")
+    token_stat = path.stat()
+    if not stat.S_ISREG(token_stat.st_mode):
+        raise ValueError("desktop provider token file must be a regular file")
+    if token_stat.st_uid != os.getuid():
+        raise ValueError("desktop provider token file owner mismatch")
+    if token_stat.st_mode & 0o077:
+        raise ValueError("desktop provider token file permissions must be 0600")
+    token = path.read_text(encoding="utf-8").strip()
+    if not token:
+        raise ValueError("desktop provider token file is empty")
+    if len(token) > 4096:
+        raise ValueError("desktop provider token file is too large")
+    return token
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--host", default=DEFAULT_HOST)
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument("--token", default="")
+    parser.add_argument("--token-file", default="")
     parser.add_argument("--provider-id", default=DEFAULT_PROVIDER_ID)
     parser.add_argument("--provider-kind", default=DEFAULT_PROVIDER_KIND)
     parser.add_argument("--session-id", required=True)
