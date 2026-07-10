@@ -14,6 +14,9 @@ from apps.shell.agent.runtime.controlled_desktop_provider import ControlledDeskt
 from apps.shell.agent.runtime.desktop_execution_providers import (
     desktop_execution_provider_status_from_env,
 )
+from apps.shell.agent.runtime.desktop_provider_credentials import (
+    desktop_provider_token_from_manifest,
+)
 from apps.shell.agent.runtime.isolated_desktop_provider import IsolatedDesktopProvider
 
 from .contracts import (
@@ -192,11 +195,17 @@ def controlled_desktop_provider_diagnostics_snapshot(
     supported_tools = (
         _string_list(provider.supported_tools) if configured else []
     ) or _string_list(manifest.get("supported_tools"))
+    authentication_configured = bool(
+        provider.authentication_configured
+        or runtime_status.get("authentication_configured")
+        or desktop_provider_token_from_manifest(manifest)
+    )
     provider_contract = virtual_desktop_provider_contract_evidence(
         {
             "configured": configured,
             "available": provider.available,
             "adapter_ready": provider.adapter_ready,
+            "authentication_configured": authentication_configured,
             "desktop_session_kind": desktop_session_kind,
             "desktop_session_isolated": desktop_session_isolated,
             "foreground_takeover_required": foreground_takeover_required,
@@ -272,6 +281,7 @@ def controlled_desktop_provider_diagnostics_snapshot(
         ready=ready,
         release_ready=release_ready,
         configured=configured,
+        authentication_configured=authentication_configured,
         status=status,
         provider_id=_diagnostic_provider_id(
             configured=configured,

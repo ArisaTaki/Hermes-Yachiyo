@@ -403,6 +403,9 @@ function DesktopProviderSessionPanel({
   const running = latestResult ? latestResult.running === true : session.running === true;
   const status = stringValue(session.status) || (running ? 'running' : 'stopped');
   const providerId = stringValue(session.provider_id) || stringValue(diagnostics.provider_id);
+  const authenticationConfigured = optionalBoolean(
+    session.authentication_configured ?? diagnostics.authentication_configured,
+  );
   const url = stringValue(session.url);
   const pid = stringValue(session.pid);
   const command = stringArray(session.command);
@@ -438,6 +441,7 @@ function DesktopProviderSessionPanel({
       data-provider-session-contract-version={providerContractVersion}
       data-provider-session-contract-blockers={providerContractBlockers.join(',')}
       data-provider-session-contract-missing-tools={providerContractMissingTools.join(',')}
+      data-provider-session-authentication-configured={String(authenticationConfigured ?? '')}
       data-provider-session-manifest={effectiveManifestPath}
       data-provider-session-conformance-ready={String(providerConformanceReady ?? '')}
       data-provider-session-conformance-blockers={providerConformanceBlockers.join(',')}
@@ -481,6 +485,14 @@ function DesktopProviderSessionPanel({
             data-provider-session-contract-ok={String(providerContractOk ?? '')}
           >
             {providerContractOk === true ? 'provider contract ready' : 'provider contract blocked'}
+          </span>
+        ) : null}
+        {authenticationConfigured !== null ? (
+          <span
+            className={authenticationConfigured ? 'studio-tool-permission' : 'studio-tool-permission missing'}
+            data-provider-session-authentication-configured={String(authenticationConfigured)}
+          >
+            {authenticationConfigured ? 'authenticated' : 'authentication required'}
           </span>
         ) : null}
         {providerContractBlockers.map((condition) => (
@@ -1097,6 +1109,7 @@ function ToolDetail({
         data-controlled-provider-backend-release-ready={String(providerState.controlledBackendReadyForPublicRelease ?? '')}
         data-controlled-provider-blockers={providerState.controlledBlockingConditions.join(',')}
         data-controlled-provider-configured={String(providerState.controlledConfigured)}
+        data-controlled-provider-authentication-configured={String(providerState.controlledAuthenticationConfigured)}
         data-controlled-provider-env-url={providerState.controlledEnvUrl}
         data-controlled-provider-endpoint-origin={providerState.controlledEndpointOrigin}
         data-controlled-provider-endpoint-path={providerState.controlledEndpointPath}
@@ -1215,6 +1228,16 @@ function ToolDetail({
               {providerState.controlledProviderContractVersion}
             </span>
           ) : null}
+          <span
+            className={providerState.controlledAuthenticationConfigured
+              ? 'studio-tool-permission'
+              : 'studio-tool-permission missing'}
+            data-controlled-provider-authentication-configured={String(
+              providerState.controlledAuthenticationConfigured,
+            )}
+          >
+            {providerState.controlledAuthenticationConfigured ? 'authenticated' : 'authentication required'}
+          </span>
           {providerState.controlledBackendKind ? (
             <span
               className={providerState.controlledBackendIsLoopback === false ? 'studio-tool-permission' : 'studio-tool-permission missing'}
@@ -1400,6 +1423,7 @@ type ToolProviderState = {
   controlledReady: boolean;
   controlledReleaseReady: boolean;
   controlledConfigured: boolean;
+  controlledAuthenticationConfigured: boolean;
   controlledStatus: string;
   controlledReason: string;
   controlledBlockingConditions: string[];
@@ -1468,6 +1492,7 @@ function toolProviderState(tool: ToolCatalogItemSnapshot, catalog: ToolCatalogSn
   const controlledReady = controlledDiagnostics.ready === true;
   const controlledReleaseReady = controlledDiagnostics.release_ready === true;
   const controlledConfigured = controlledDiagnostics.configured === true;
+  const controlledAuthenticationConfigured = controlledDiagnostics.authentication_configured === true;
   const controlledStatus = stringValue(controlledDiagnostics.status);
   const controlledReason = stringValue(controlledDiagnostics.reason);
   const controlledBlockingConditions = stringArray(controlledDiagnostics.blocking_conditions);
@@ -1527,6 +1552,7 @@ function toolProviderState(tool: ToolCatalogItemSnapshot, catalog: ToolCatalogSn
     controlledReady,
     controlledReleaseReady,
     controlledConfigured,
+    controlledAuthenticationConfigured,
     controlledStatus,
     controlledReason,
     controlledBlockingConditions,

@@ -776,6 +776,7 @@ class HttpDesktopExecutionProviderAdapter:
             "adapter_ready": bool(health.get("ok")) if probe_health else True,
             "provider_kind": self.provider_kind,
             "provider_id": self.provider_id,
+            "authentication_configured": bool(self.token),
             "status": (
                 "available"
                 if (not probe_health or bool(health.get("ok")))

@@ -152,6 +152,13 @@ class IsolatedDesktopProviderSessionManager:
                 if self._env
                 else {}
             )
+            if self._env.get(DESKTOP_PROVIDER_TOKEN_ENV) and not provider_status.get(
+                "authentication_configured"
+            ):
+                provider_status = {
+                    **provider_status,
+                    "authentication_configured": True,
+                }
             provider_contract = _provider_contract_evidence_for_status(
                 provider_status,
             )

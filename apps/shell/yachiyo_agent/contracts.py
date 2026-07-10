@@ -218,6 +218,7 @@ class DesktopProviderConformanceSnapshot(_PublicSnapshot):
     desktop_session_kind: str = ""
     desktop_session_isolated: bool | None = None
     foreground_takeover_required: bool | None = None
+    authentication_configured: bool = False
     desktop_backend_kind: str = ""
     desktop_backend_is_loopback: bool | None = None
     desktop_backend_ready_for_public_release: bool | None = None
@@ -230,6 +231,7 @@ class SandboxDesktopProviderSnapshot(_PublicSnapshot):
     provider_kind: DesktopIsolationKind | str = "sandbox_desktop"
     status: str = "provider_required"
     adapter_ready: bool = False
+    authentication_configured: bool = False
     reason: str = ""
     blocking_conditions: list[str] = Field(default_factory=list)
     supported_tools: list[str] = Field(default_factory=list)
@@ -278,6 +280,7 @@ class ControlledDesktopProviderDiagnosticSnapshot(_PublicSnapshot):
     ready: bool = False
     release_ready: bool = False
     configured: bool = False
+    authentication_configured: bool = False
     status: str = "controlled_provider_required"
     provider_id: str = "local-controlled-desktop"
     provider_kind: DesktopIsolationKind | str = "sandbox_desktop"

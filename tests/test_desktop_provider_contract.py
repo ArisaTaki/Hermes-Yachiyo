@@ -12,6 +12,7 @@ def _release_ready_status() -> dict[str, object]:
         "configured": True,
         "available": True,
         "adapter_ready": True,
+        "authentication_configured": True,
         "desktop_session_kind": "virtual_desktop",
         "desktop_session_isolated": True,
         "foreground_takeover_required": False,

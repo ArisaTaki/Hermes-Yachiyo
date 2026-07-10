@@ -6054,6 +6054,7 @@ def test_sandbox_desktop_provider_snapshot_json_shape_is_stable() -> None:
         "provider_kind",
         "status",
         "adapter_ready",
+        "authentication_configured",
         "reason",
         "blocking_conditions",
         "supported_tools",
@@ -6078,6 +6079,7 @@ def test_sandbox_desktop_provider_snapshot_json_shape_is_stable() -> None:
     ]
     assert payload["available"] is False
     assert payload["adapter_ready"] is False
+    assert payload["authentication_configured"] is False
     assert payload["keyboard_mouse_capture_supported"] is None
     assert payload["desktop_session_kind"] == ""
     assert payload["desktop_session_isolated"] is None
@@ -7453,6 +7455,7 @@ def test_sandbox_desktop_provider_status_exposes_virtual_provider_contract(
             "configured": True,
             "available": True,
             "adapter_ready": True,
+            "authentication_configured": True,
             "provider_kind": "sandbox_desktop",
             "provider_id": "real-virtual-desktop",
             "status": "available",
@@ -7522,6 +7525,9 @@ def test_sandbox_desktop_provider_status_reads_provider_manifest(
                 "desktop_backend_is_loopback": False,
                 "desktop_backend_ready_for_public_release": True,
                 "requires_real_virtual_desktop_backend": False,
+                "authentication": {
+                    "token_env": "TEST_RELEASE_PROVIDER_TOKEN",
+                },
             }
         ),
         encoding="utf-8",
@@ -7539,6 +7545,9 @@ def test_sandbox_desktop_provider_status_reads_provider_manifest(
             "configured": True,
             "available": True,
             "adapter_ready": True,
+            "authentication_configured": bool(
+                env.get("OHA_YACHIYO_DESKTOP_PROVIDER_TOKEN")
+            ),
             "provider_kind": "sandbox_desktop",
             "provider_id": env["OHA_YACHIYO_DESKTOP_PROVIDER_ID"],
             "status": "available",
@@ -7561,6 +7570,7 @@ def test_sandbox_desktop_provider_status_reads_provider_manifest(
         fake_provider_status,
     )
     monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_MANIFEST", str(manifest_path))
+    monkeypatch.setenv("TEST_RELEASE_PROVIDER_TOKEN", "release-provider-token")
 
     status = sandbox_desktop_provider_status({"desktop_provider_health_probe": True})
     route = desktop_execution_route_decision(
@@ -9025,6 +9035,10 @@ def test_controlled_provider_diagnostics_marks_configured_keyboard_provider_read
         "OHA_YACHIYO_DESKTOP_PROVIDER_REQUIRES_REAL_VIRTUAL_DESKTOP_BACKEND",
         "false",
     )
+    monkeypatch.setenv(
+        "OHA_YACHIYO_DESKTOP_PROVIDER_TOKEN",
+        "release-provider-token",
+    )
     provider = desktop_execution_provider_status_from_env(probe_health=False)
 
     diagnostics = controlled_desktop_provider_diagnostics_snapshot(
@@ -9099,6 +9113,9 @@ def test_controlled_provider_diagnostics_reads_provider_manifest_before_start(
                 "desktop_backend_is_loopback": False,
                 "desktop_backend_ready_for_public_release": True,
                 "requires_real_virtual_desktop_backend": False,
+                "authentication": {
+                    "token_env": "TEST_RELEASE_PROVIDER_TOKEN",
+                },
                 "entrypoint": {
                     "command": "python provider.py --host 127.0.0.1 --port 0",
                 },
@@ -9112,6 +9129,7 @@ def test_controlled_provider_diagnostics_reads_provider_manifest_before_start(
         encoding="utf-8",
     )
     monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_MANIFEST", str(manifest_path))
+    monkeypatch.setenv("TEST_RELEASE_PROVIDER_TOKEN", "release-provider-token")
 
     diagnostics = controlled_desktop_provider_diagnostics_snapshot()
 

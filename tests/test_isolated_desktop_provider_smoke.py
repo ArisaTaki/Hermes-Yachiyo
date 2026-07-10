@@ -60,6 +60,7 @@ def test_isolated_desktop_provider_smoke_can_use_configured_provider(monkeypatch
             "configured": True,
             "available": True,
             "adapter_ready": True,
+            "authentication_configured": True,
             "provider_id": "real-virtual-desktop",
             "endpoint_origin": "http://127.0.0.1:29093",
             "desktop_session_kind": "virtual_desktop",
@@ -111,7 +112,11 @@ def test_isolated_desktop_provider_smoke_can_use_configured_provider(monkeypatch
 
 def test_isolated_desktop_provider_smoke_executes_manifest_backed_provider(
     tmp_path,
+    monkeypatch,
 ) -> None:
+    provider_token = "manifest-smoke-token"
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_TOKEN", provider_token)
+
     class ReleaseReadyIsolatedProvider(smoke.IsolatedDesktopProvider):
         def status(self) -> dict[str, object]:
             payload = super().status()
@@ -123,6 +128,7 @@ def test_isolated_desktop_provider_smoke_executes_manifest_backed_provider(
                     "desktop_backend_is_loopback": False,
                     "desktop_backend_ready_for_public_release": True,
                     "requires_real_virtual_desktop_backend": False,
+                    "authentication_configured": True,
                 }
             )
             return payload
@@ -137,6 +143,9 @@ def test_isolated_desktop_provider_smoke_executes_manifest_backed_provider(
                     "desktop_backend_is_loopback": False,
                     "desktop_backend_ready_for_public_release": True,
                     "requires_real_virtual_desktop_backend": False,
+                    "authentication": {
+                        "token_env": "OHA_YACHIYO_DESKTOP_PROVIDER_TOKEN",
+                    },
                 }
             )
             safety = dict(payload.get("safety") or {})
@@ -159,8 +168,9 @@ def test_isolated_desktop_provider_smoke_executes_manifest_backed_provider(
     server = smoke.build_isolated_desktop_provider_server(
         host="127.0.0.1",
         port=0,
-        provider=provider,
-        quiet=True,
+            provider=provider,
+            quiet=True,
+            token=provider_token,
     )
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
@@ -274,6 +284,7 @@ def test_isolated_desktop_provider_smoke_can_start_managed_configured_provider(
             "configured": True,
             "available": True,
             "adapter_ready": True,
+            "authentication_configured": True,
             "provider_id": "managed-virtual-desktop",
             "endpoint_origin": "http://127.0.0.1:29093",
             "desktop_session_kind": "virtual_desktop",

@@ -974,6 +974,7 @@ def test_start_manifest_provider_satisfies_real_virtual_backend_contract(
     for key in session_module._ENV_KEYS:
         monkeypatch.delenv(key, raising=False)
     monkeypatch.delenv("OHA_YACHIYO_DESKTOP_PROVIDER_START_COMMAND", raising=False)
+    monkeypatch.setenv("TEST_RELEASE_PROVIDER_TOKEN", "release-provider-token")
     manifest_path = tmp_path / "release-provider-manifest.json"
     provider_script = tmp_path / "release_provider.py"
     provider_script.write_text("# fake release provider\n", encoding="utf-8")
@@ -991,9 +992,12 @@ def test_start_manifest_provider_satisfies_real_virtual_backend_contract(
                 "foreground_takeover_required": False,
                 "desktop_backend_kind": "vnc_virtual_desktop",
                 "desktop_backend_is_loopback": False,
-                "desktop_backend_ready_for_public_release": True,
-                "requires_real_virtual_desktop_backend": False,
-                "entrypoint": {"script": "release_provider.py"},
+                    "desktop_backend_ready_for_public_release": True,
+                    "requires_real_virtual_desktop_backend": False,
+                    "authentication": {
+                        "token_env": "TEST_RELEASE_PROVIDER_TOKEN",
+                    },
+                    "entrypoint": {"script": "release_provider.py"},
             }
         ),
         encoding="utf-8",

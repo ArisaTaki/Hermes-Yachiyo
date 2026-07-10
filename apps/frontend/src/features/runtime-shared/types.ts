@@ -186,6 +186,7 @@ export type DesktopProviderConformanceSnapshot = {
   desktop_session_kind?: string;
   desktop_session_isolated?: boolean | null;
   foreground_takeover_required?: boolean | null;
+  authentication_configured?: boolean;
   desktop_backend_kind?: string;
   desktop_backend_is_loopback?: boolean | null;
   desktop_backend_ready_for_public_release?: boolean | null;
@@ -241,6 +242,7 @@ export type SandboxDesktopProviderSnapshot = {
   provider_kind?: DesktopIsolationKind | string;
   status?: string;
   adapter_ready?: boolean;
+  authentication_configured?: boolean;
   reason?: string;
   blocking_conditions?: string[];
   supported_tools?: string[];
@@ -267,6 +269,7 @@ export type ControlledDesktopProviderDiagnosticSnapshot = {
   ready?: boolean;
   release_ready?: boolean;
   configured?: boolean;
+  authentication_configured?: boolean;
   status?: string;
   provider_id?: string;
   provider_kind?: DesktopIsolationKind | string;

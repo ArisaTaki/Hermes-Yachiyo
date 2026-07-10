@@ -27,6 +27,7 @@ _CHECK_BLOCKERS = {
     "provider_configured": "desktop_execution_provider_not_configured",
     "provider_available": "desktop_execution_provider_unavailable",
     "adapter_ready": "desktop_execution_provider_adapter_unavailable",
+    "authentication_configured": "desktop_provider_authentication_required",
     "desktop_session_isolated": "desktop_session_not_isolated",
     "foreground_takeover_not_required": "foreground_takeover_required",
     "desktop_backend_declared": "desktop_backend_kind_missing",
@@ -332,6 +333,11 @@ def virtual_desktop_provider_conformance_summary(
             if "foreground_takeover_required" in contract
             else status_payload.get("foreground_takeover_required")
         ),
+        "authentication_configured": bool(
+            contract.get("authentication_configured")
+            if "authentication_configured" in contract
+            else status_payload.get("authentication_configured")
+        ),
         "desktop_backend_kind": _first_text(
             contract.get("desktop_backend_kind"),
             status_payload.get("desktop_backend_kind"),
@@ -370,6 +376,7 @@ def virtual_desktop_provider_contract_evidence(
         "provider_configured": status_payload.get("configured") is True,
         "provider_available": bool(status_payload.get("available")),
         "adapter_ready": bool(status_payload.get("adapter_ready")),
+        "authentication_configured": _authentication_configured(status_payload),
         "desktop_session_isolated": _desktop_session_isolated(status_payload),
         "foreground_takeover_not_required": (
             _optional_bool(status_payload.get("foreground_takeover_required")) is False
@@ -438,6 +445,7 @@ def virtual_desktop_provider_contract_evidence(
         "keyboard_mouse_capture_supported": _optional_bool(
             status_payload.get("keyboard_mouse_capture_supported")
         ),
+        "authentication_configured": _authentication_configured(status_payload),
         "desktop_backend_kind": desktop_backend_kind,
         "desktop_backend_is_loopback": _optional_bool(
             status_payload.get("desktop_backend_is_loopback")
@@ -459,6 +467,19 @@ def _desktop_session_isolated(status: Mapping[str, Any]) -> bool:
         "isolated_desktop",
         "virtual_desktop",
     }
+
+
+def _authentication_configured(status: Mapping[str, Any]) -> bool:
+    explicit = _optional_bool(status.get("authentication_configured"))
+    if explicit is not None:
+        return explicit
+    authentication = _mapping(status.get("authentication"))
+    return bool(
+        status.get("token")
+        or status.get("token_env")
+        or authentication.get("token")
+        or authentication.get("token_env")
+    )
 
 
 def _supported_tools(status: Mapping[str, Any]) -> set[str]:
@@ -540,6 +561,13 @@ def _manifest_release_status_payload(manifest: Mapping[str, Any]) -> dict[str, A
         "requires_real_virtual_desktop_backend",
     ):
         payload[key] = manifest.get(key) if key in manifest else safety.get(key)
+    authentication = _mapping(manifest.get("authentication"))
+    payload["authentication_configured"] = bool(
+        manifest.get("token")
+        or manifest.get("token_env")
+        or authentication.get("token")
+        or authentication.get("token_env")
+    )
     return payload
 
 

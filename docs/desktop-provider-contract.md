@@ -117,6 +117,7 @@ Studio 和 diagnostics 的公共 `env` 投影不会返回 token。
 发布级 provider 必须满足 `apps.shell.yachiyo_agent.desktop_provider_contract` 中的 `oha-yachiyo.desktop-provider.v1`：
 
 - provider configured, available, adapter ready。
+- provider 已配置 Bearer token，`authentication_configured=true`。
 - session 是 `virtual_desktop` 或 isolated desktop。
 - `foreground_takeover_required=false`。
 - backend 不是 `loopback_session_harness`。

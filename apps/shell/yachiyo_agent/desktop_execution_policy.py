@@ -16,6 +16,10 @@ from apps.shell.agent.runtime.desktop_execution_providers import (
     desktop_execution_provider_status_from_env,
     local_desktop_execution_provider_status,
 )
+from apps.shell.agent.runtime.desktop_provider_credentials import (
+    DESKTOP_PROVIDER_TOKEN_ENV,
+    desktop_provider_token_from_manifest,
+)
 from apps.shell.yachiyo_agent.desktop_provider_contract import (
     OHA_DESKTOP_AGENT_RELEASE_PROVIDER_TOOLS,
     virtual_desktop_provider_contract_evidence,
@@ -41,6 +45,7 @@ _SANDBOX_DESKTOP_PROVIDER_DEFAULT: dict[str, Any] = {
     "provider_kind": "sandbox_desktop",
     "status": "provider_required",
     "adapter_ready": False,
+    "authentication_configured": False,
     "reason": (
         "No sandbox desktop provider is configured for this runtime yet; "
         "foreground input must stay supervised or use user handoff."
@@ -1444,6 +1449,7 @@ def _sandbox_provider_public_payload(payload: Mapping[str, Any]) -> dict[str, An
         "provider_kind",
         "status",
         "adapter_ready",
+        "authentication_configured",
         "reason",
         "blocking_conditions",
         "supported_tools",
@@ -1751,6 +1757,9 @@ def _provider_env_from_manifest(manifest: Mapping[str, Any]) -> dict[str, str]:
             env[env_key] = value
     if _optional_bool_value(manifest.get("allow_remote")) is True:
         env["OHA_YACHIYO_DESKTOP_PROVIDER_ALLOW_REMOTE"] = "true"
+    provider_token = desktop_provider_token_from_manifest(manifest)
+    if provider_token:
+        env[DESKTOP_PROVIDER_TOKEN_ENV] = provider_token
     return env
 
 
