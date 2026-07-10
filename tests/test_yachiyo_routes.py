@@ -7904,13 +7904,21 @@ async def test_yachiyo_task_route_defaults_launcher_task_to_chat_backed_main_age
     assert started["current_step"] == "准备执行 · 发现已安装应用"
     assert started["recent_events"][0]["event_type"] == "agent.desktop.intent_planned"
     assert started["recent_events"][0]["detail"] == "desktop.list_apps"
-    assert started["recent_events"][0]["payload"] == {
-        "input_preview": {"limit": 20, "query": "Apple Music"},
-        "planning_reason": "planner_fallback_desktop_operation",
-        "source": "runtime_planner",
-        "status": "planned",
-        "tool": "desktop.list_apps",
-    }
+    planned = started["recent_events"][0]["payload"]
+    assert planned["input_preview"] == {"limit": 20, "query": "Apple Music"}
+    assert planned["planning_reason"] == "planner_full_plan_desktop_operation"
+    assert planned["source"] == "runtime_planner"
+    assert planned["status"] == "planned"
+    assert planned["tool"] == "desktop.list_apps"
+    assert planned["step_id"] == "discover-desktop-state"
+    assert planned["capability_id"] == "desktop.app_discovery"
+    assert planned["intent_kind"] == "desktop_operation"
+    assert planned["runtime_doctrine"] == "discover_operate_verify"
+    assert planned["runtime_stage"] == "discover"
+    assert planned["requires_observation"] is True
+    assert planned["replan_triggers"] == ["verification_failed"]
+    assert planned["task_todo"]["tool_name"] == "desktop.list_apps"
+    assert planned["task_checkpoints"][0]["replan_on_failure"] is True
     assert len(app_runtime.chat_calls) == 1
     chat_call = app_runtime.chat_calls[0]
     assert chat_call["session_id"] == "chat-1"
