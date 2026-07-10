@@ -30114,6 +30114,23 @@ def test_planner_desktop_tool_requests_maps_media_playback_plan() -> None:
     ]
 
 
+def test_planner_desktop_tool_requests_maps_start_playing_in_music() -> None:
+    requests = planner_desktop_tool_requests(
+        "start playing in Music",
+        allowed_tools=["media.music_app_open_and_play"],
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "media.music_app_open_and_play",
+            "input": {"app_name": "Music"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+        },
+    ]
+
+
 def test_planner_desktop_tool_requests_verifies_simple_media_playback_when_available() -> None:
     requests = planner_desktop_tool_requests(
         "播放 Spotify",

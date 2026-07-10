@@ -1743,6 +1743,8 @@ def media_action_hint(text: str) -> str:
         ["来点", "听点", "听一首", "听首", "想听", "听音乐", "听歌", "listen to music", "put on some music"],
     ):
         return "play"
+    if re.search(r"\bstart\s+playing\b", lowered):
+        return "play"
     if re.search(r"\bplay\b", lowered):
         return "play"
     if music_app_name_hint(text) and re.search(r"(?:播放|播|放)", str(text or "")):
