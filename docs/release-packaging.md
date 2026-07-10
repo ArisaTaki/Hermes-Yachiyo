@@ -67,10 +67,11 @@ Oha-Yachiyo.app/Contents/Resources/backend/oha-yachiyo-backend
 
 ```text
 Oha-Yachiyo.app/Contents/Resources/desktop-provider/oha-yachiyo-desktop-provider
+Oha-Yachiyo.app/Contents/Resources/desktop-provider/oha-yachiyo-virtual-desktop-bridge
 ```
 
 `scripts/build_virtual_desktop_guest.py` 使用独立 PyInstaller work/dist 目录构建它；
-guest-agent 不要求 VM 保留源码仓库或 Python 环境。详细的 VM marker、token file 和
+guest-agent 与 host-side SSH bridge 都不要求 VM/Host 保留源码仓库或 Python 环境。详细的 VM marker、token file 和
 SSH bridge 部署方式见 `docs/desktop-provider-contract.md`。
 
 打包版默认 Bridge 地址是 `http://127.0.0.1:18420`，开发模式默认是

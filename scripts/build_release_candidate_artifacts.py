@@ -20,6 +20,11 @@ DESKTOP_PROVIDER_ARTIFACT = ROOT / "dist" / "desktop-provider" / (
     if sys.platform.startswith("win")
     else "oha-yachiyo-desktop-provider"
 )
+DESKTOP_BRIDGE_ARTIFACT = ROOT / "dist" / "desktop-provider" / (
+    "oha-yachiyo-virtual-desktop-bridge.exe"
+    if sys.platform.startswith("win")
+    else "oha-yachiyo-virtual-desktop-bridge"
+)
 ELECTRON_DIST_DIR = ROOT / "dist" / "electron"
 
 
@@ -117,6 +122,7 @@ def build_release_candidate_artifacts(
     return {
         "backend": BACKEND_ARTIFACT,
         "desktop_provider": DESKTOP_PROVIDER_ARTIFACT,
+        "desktop_bridge": DESKTOP_BRIDGE_ARTIFACT,
         "dmg": _latest_dmg_artifact(),
         "metadata": BUILD_METADATA_FILE,
     }
@@ -168,6 +174,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     print(f"packaged backend: {artifacts['backend']}")
     print(f"virtual desktop guest provider: {artifacts['desktop_provider']}")
+    print(f"virtual desktop host bridge: {artifacts['desktop_bridge']}")
     print(f"Electron DMG: {artifacts['dmg']}")
     print(f"restored tracked build metadata: {artifacts['metadata']}")
     return 0

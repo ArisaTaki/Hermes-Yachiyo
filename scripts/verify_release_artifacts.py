@@ -105,6 +105,7 @@ DEFAULT_SCAN_PATHS: tuple[Path, ...] = (
     Path("apps/frontend/electron-builder.yml"),
     Path("scripts/build_backend.py"),
     Path("scripts/build_virtual_desktop_guest.py"),
+    Path("scripts/install_virtual_desktop_guest.py"),
     Path("scripts/run_ssh_virtual_desktop_provider.py"),
     Path("scripts/prepare_app_build_metadata.py"),
     Path("scripts/build_release_candidate_artifacts.py"),
@@ -274,6 +275,9 @@ PACKAGED_APP_IDENTIFIER = "io.github.arisataki.oha-yachiyo"
 PACKAGED_BACKEND_RELATIVE_PATH = Path("Contents/Resources/backend/oha-yachiyo-backend")
 PACKAGED_DESKTOP_PROVIDER_RELATIVE_PATH = Path(
     "Contents/Resources/desktop-provider/oha-yachiyo-desktop-provider"
+)
+PACKAGED_DESKTOP_BRIDGE_RELATIVE_PATH = Path(
+    "Contents/Resources/desktop-provider/oha-yachiyo-virtual-desktop-bridge"
 )
 PACKAGED_DESKTOP_PROVIDER_REQUIRED_TOOLS = (
     "desktop.list_apps",
@@ -692,6 +696,10 @@ PACKAGING_CONFIG_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         "../../dist/desktop-provider/oha-yachiyo-desktop-provider",
         "macOS release packaging must include the virtual desktop guest provider",
+    ),
+    (
+        "../../dist/desktop-provider/oha-yachiyo-virtual-desktop-bridge",
+        "macOS release packaging must include the virtual desktop host bridge",
     ),
     (
         "npmRebuild: false",
@@ -3403,6 +3411,14 @@ RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow smoke tests must cover the virtual desktop SSH bridge",
     ),
     (
+        "tests/test_virtual_desktop_guest_installer.py",
+        "macOS release workflow smoke tests must cover virtual desktop guest provisioning",
+    ),
+    (
+        "tests/test_desktop_provider_credentials.py",
+        "macOS release workflow smoke tests must cover desktop provider credentials",
+    ),
+    (
         "tests/test_build_metadata.py",
         "macOS release workflow smoke tests must cover release-like build metadata guards",
     ),
@@ -4521,6 +4537,24 @@ def _verify_packaged_app_bundle(
                 _verify_packaged_desktop_provider_manifest(desktop_provider_path)
             )
 
+        desktop_bridge_path = app_dir / PACKAGED_DESKTOP_BRIDGE_RELATIVE_PATH
+        if not desktop_bridge_path.is_file():
+            findings.append(
+                Finding(
+                    desktop_bridge_path,
+                    "packaged virtual desktop host bridge is missing from app resources",
+                )
+            )
+        elif not os.access(desktop_bridge_path, os.X_OK):
+            findings.append(
+                Finding(
+                    desktop_bridge_path,
+                    "packaged virtual desktop host bridge is not executable",
+                )
+            )
+        else:
+            findings.extend(_verify_packaged_desktop_bridge_cli(desktop_bridge_path))
+
         asar_path = app_dir / PACKAGED_ASAR_RELATIVE_PATH
         if not asar_path.is_file():
             findings.append(Finding(asar_path, "packaged Electron app.asar is missing from app resources"))
@@ -4632,6 +4666,36 @@ def _verify_packaged_desktop_provider_manifest(path: Path) -> list[Finding]:
             )
         )
     return findings
+
+
+def _verify_packaged_desktop_bridge_cli(path: Path) -> list[Finding]:
+    try:
+        completed = subprocess.run(
+            [str(path), "--help"],
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=15,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return [
+            Finding(
+                path,
+                f"packaged virtual desktop host bridge smoke failed: {exc}",
+            )
+        ]
+    help_text = f"{completed.stdout}\n{completed.stderr}"
+    if completed.returncode != 0 or not all(
+        option in help_text
+        for option in ("--ssh-target", "--remote-provider-executable")
+    ):
+        return [
+            Finding(
+                path,
+                "packaged virtual desktop host bridge CLI is invalid",
+            )
+        ]
+    return []
 
 
 def _verify_release_workflow_guards(root: Path) -> list[Finding]:

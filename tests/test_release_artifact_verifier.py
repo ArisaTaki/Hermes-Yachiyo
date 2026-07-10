@@ -1047,6 +1047,8 @@ def _write_packaged_app_bundle(
     backend_mode=0o755,
     desktop_provider_mode=0o755,
     include_desktop_provider=True,
+    desktop_bridge_mode=0o755,
+    include_desktop_bridge=True,
     include_asar=True,
     include_permission_copy=True,
     include_backend_metadata=True,
@@ -1105,6 +1107,16 @@ def _write_packaged_app_bundle(
             encoding="utf-8",
         )
         desktop_provider.chmod(desktop_provider_mode)
+    if include_desktop_bridge:
+        desktop_bridge = app_dir / verifier.PACKAGED_DESKTOP_BRIDGE_RELATIVE_PATH
+        desktop_bridge.parent.mkdir(parents=True, exist_ok=True)
+        desktop_bridge.write_text(
+            "#!/bin/sh\n"
+            "echo 'usage: bridge --ssh-target TARGET "
+            "--remote-provider-executable PATH'\n",
+            encoding="utf-8",
+        )
+        desktop_bridge.chmod(desktop_bridge_mode)
     if include_asar:
         asar = app_dir / verifier.PACKAGED_ASAR_RELATIVE_PATH
         asar.parent.mkdir(parents=True, exist_ok=True)
@@ -1159,6 +1171,7 @@ def test_verifier_reports_incomplete_packaged_app_bundle(tmp_path):
         executable_mode=0o644,
         backend_mode=0o644,
         desktop_provider_mode=0o644,
+        desktop_bridge_mode=0o644,
         include_asar=False,
     )
 
@@ -1176,6 +1189,7 @@ def test_verifier_reports_incomplete_packaged_app_bundle(tmp_path):
     assert "packaged app main executable is not executable" in messages
     assert "packaged backend executable is not executable" in messages
     assert "packaged virtual desktop guest provider is not executable" in messages
+    assert "packaged virtual desktop host bridge is not executable" in messages
     assert verifier.Finding(
         app_dir / verifier.PACKAGED_ASAR_RELATIVE_PATH,
         "packaged Electron app.asar is missing from app resources",
@@ -1258,6 +1272,48 @@ def test_verifier_rejects_packaged_desktop_provider_with_invalid_manifest(tmp_pa
     assert verifier.Finding(
         desktop_provider,
         "packaged virtual desktop guest provider returned invalid manifest JSON",
+    ) in findings
+
+
+def test_verifier_reports_missing_packaged_desktop_bridge(tmp_path):
+    app_dir = _write_packaged_app_bundle(
+        tmp_path,
+        include_desktop_bridge=False,
+    )
+
+    findings = verifier.verify_release_artifacts(
+        root=tmp_path,
+        paths=[],
+        check_required_files=False,
+        check_release_security_guards=False,
+        check_packaged_app_bundle=True,
+        allow_binary_targets=True,
+    )
+
+    assert verifier.Finding(
+        app_dir / verifier.PACKAGED_DESKTOP_BRIDGE_RELATIVE_PATH,
+        "packaged virtual desktop host bridge is missing from app resources",
+    ) in findings
+
+
+def test_verifier_rejects_packaged_desktop_bridge_with_invalid_cli(tmp_path):
+    app_dir = _write_packaged_app_bundle(tmp_path)
+    desktop_bridge = app_dir / verifier.PACKAGED_DESKTOP_BRIDGE_RELATIVE_PATH
+    desktop_bridge.write_text("#!/bin/sh\nexit 2\n", encoding="utf-8")
+    desktop_bridge.chmod(0o755)
+
+    findings = verifier.verify_release_artifacts(
+        root=tmp_path,
+        paths=[],
+        check_required_files=False,
+        check_release_security_guards=False,
+        check_packaged_app_bundle=True,
+        allow_binary_targets=True,
+    )
+
+    assert verifier.Finding(
+        desktop_bridge,
+        "packaged virtual desktop host bridge CLI is invalid",
     ) in findings
 
 

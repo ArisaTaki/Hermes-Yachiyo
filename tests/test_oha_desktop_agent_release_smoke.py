@@ -328,6 +328,9 @@ def test_oha_desktop_agent_release_smoke_public_release_requires_real_backend(
     assert "run_ssh_virtual_desktop_provider.py" in readiness[
         "required_commands"
     ]["ssh_bridge_manifest"]
+    assert "install_virtual_desktop_guest.py" in readiness[
+        "required_commands"
+    ]["install_guest"]
 
 
 def test_oha_desktop_agent_release_smoke_public_release_accepts_configured_provider(

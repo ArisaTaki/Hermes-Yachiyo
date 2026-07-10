@@ -58,27 +58,28 @@ session 时一并终止 SSH/guest 进程。Host token 不会转发到 SSH 子进
 ```bash
 python scripts/build_virtual_desktop_guest.py --clean
 # dist/desktop-provider/oha-yachiyo-desktop-provider
+# dist/desktop-provider/oha-yachiyo-virtual-desktop-bridge
 ```
 
-`scripts/build_release_candidate_artifacts.py` 会自动构建该文件，并放入
-`Oha-Yachiyo.app/Contents/Resources/desktop-provider/`。将它复制到 VM，例如
-`/usr/local/bin/oha-yachiyo-desktop-provider`，并保持可执行权限。
+`scripts/build_release_candidate_artifacts.py` 会自动构建这两个文件，并放入
+`Oha-Yachiyo.app/Contents/Resources/desktop-provider/`。Host Bridge 与 Guest Provider
+都不依赖源码仓库或系统 Python。
 
 ```bash
 export OHA_YACHIYO_VIRTUAL_DESKTOP_SSH_TARGET="yachiyo@<vm-address>"
-export OHA_YACHIYO_VIRTUAL_DESKTOP_REMOTE_EXECUTABLE="/usr/local/bin/oha-yachiyo-desktop-provider"
 
-python scripts/run_ssh_virtual_desktop_provider.py \
+python scripts/install_virtual_desktop_guest.py \
   --ssh-target "$OHA_YACHIYO_VIRTUAL_DESKTOP_SSH_TARGET" \
-  --remote-provider-executable "$OHA_YACHIYO_VIRTUAL_DESKTOP_REMOTE_EXECUTABLE" \
   --session-id "$OHA_YACHIYO_VIRTUAL_DESKTOP_SESSION_ID" \
-  --manifest > tmp/oha-virtual-desktop-provider.manifest.json
+  --manifest-out tmp/oha-virtual-desktop-provider.manifest.json
 
 export OHA_YACHIYO_DESKTOP_PROVIDER_MANIFEST="$PWD/tmp/oha-virtual-desktop-provider.manifest.json"
 ```
 
-Manifest 的 `entrypoint` 会让现有 `IsolatedDesktopProviderSessionManager` 托管 SSH
-bridge。SSH 必须使用已配置的 key/agent，并启用 host key verification；可通过重复的
+安装器会校验传输前后的 SHA256，在 VM 当前用户目录原子安装 Guest Provider，生成
+当前 boot/session marker，并把同一随机 bearer token 分别保存为 Host/Guest 的
+`0600` 文件。Manifest 的 `entrypoint.argv` 会让现有
+`IsolatedDesktopProviderSessionManager` 托管已打包的 Host Bridge。SSH 必须使用已配置的 key/agent，并启用 host key verification；可通过重复的
 `--ssh-option` 传入现有 OpenSSH 配置项。Bridge 保留本地 `SSH_AUTH_SOCK` 用于认证，
 但强制 `ForwardAgent=no`，不会把本地 SSH agent 转发进 VM。`--remote-repo` 必须是
 guest 内的绝对路径，仅用于开发期源码模式；发布模式优先使用

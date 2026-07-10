@@ -291,6 +291,8 @@ jobs:
             tests/test_build_virtual_desktop_guest.py \
             tests/test_virtual_desktop_guest_provider.py \
             tests/test_virtual_desktop_ssh_bridge.py \
+            tests/test_virtual_desktop_guest_installer.py \
+            tests/test_desktop_provider_credentials.py \
             tests/test_build_metadata.py \
             tests/test_prepare_app_build_metadata.py \
             tests/test_release_candidate_verifier.py \
@@ -376,7 +378,7 @@ jobs:
       - name: Build packaged backend
         run: python scripts/build_backend.py --clean
 
-      - name: Build virtual desktop guest provider
+      - name: Build virtual desktop components
         run: python scripts/build_virtual_desktop_guest.py --clean
 
       - name: Import macOS self-signing certificate

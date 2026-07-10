@@ -40,6 +40,10 @@ def _packaged_config() -> SshVirtualDesktopBridgeConfig:
         remote_repo="",
         session_id="vm-session-1",
         remote_provider_executable="/usr/local/bin/oha-yachiyo-desktop-provider",
+        host_bridge_executable=(
+            "/Applications/Oha-Yachiyo.app/Contents/Resources/desktop-provider/"
+            "oha-yachiyo-virtual-desktop-bridge"
+        ),
         local_port=39097,
     )
 
@@ -83,10 +87,12 @@ def test_ssh_virtual_desktop_manifest_passes_static_contract() -> None:
 
 def test_packaged_ssh_manifest_omits_source_repo_requirement() -> None:
     manifest = ssh_virtual_desktop_provider_manifest(_packaged_config())
-    args = manifest["entrypoint"]["args"]
+    argv = manifest["entrypoint"]["argv"]
 
-    assert "--remote-provider-executable" in args
-    assert "--remote-repo" not in args
+    assert argv[0].endswith("oha-yachiyo-virtual-desktop-bridge")
+    assert "--remote-provider-executable" in argv
+    assert "--remote-repo" not in argv
+    assert "script" not in manifest["entrypoint"]
     assert manifest["ssh_bridge"]["remote_repo"] == ""
 
 

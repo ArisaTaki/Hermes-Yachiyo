@@ -35,6 +35,8 @@ extraResources:
     to: backend/oha-yachiyo-backend
   - from: ../../dist/desktop-provider/oha-yachiyo-desktop-provider
     to: desktop-provider/oha-yachiyo-desktop-provider
+  - from: ../../dist/desktop-provider/oha-yachiyo-virtual-desktop-bridge
+    to: desktop-provider/oha-yachiyo-virtual-desktop-bridge
   - from: ../../assets
     to: assets
     filter:
