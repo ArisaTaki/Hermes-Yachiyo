@@ -927,16 +927,22 @@ def _desktop_execution_session_mode(
     requests: list[Any],
     session: Any | None,
 ) -> str | None:
-    session_mode = _desktop_execution_session_mode_from_session(session)
-    if session_mode:
-        return session_mode
+    session_in_use = bool(
+        _field(session, "needed")
+        or _field(session, "running")
+        or _field(session, "started")
+    )
+    if session_in_use:
+        session_mode = _desktop_execution_session_mode_from_session(session)
+        if session_mode:
+            return session_mode
     for item in [envelope, *requests]:
         route = _field(item, "desktop_execution_route")
         provider = _field(item, "sandbox_provider")
         mode = _desktop_execution_session_mode_from_route_provider(route, provider)
         if mode:
             return mode
-    return None
+    return _desktop_execution_session_mode_from_session(session)
 
 
 def _desktop_execution_session_mode_from_session(session: Any | None) -> str | None:

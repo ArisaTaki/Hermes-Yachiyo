@@ -22,6 +22,7 @@ from apps.shell.agent.runtime.main_chat_config import MAIN_CHAT_DESKTOP_AGENT_IN
 from apps.shell.agent.runtime.approval_snapshots import public_pending_approval
 from apps.shell.agent.runtime.desktop_execution_providers import (
     LOCAL_DESKTOP_PROVIDER_ID,
+    LOCAL_DESKTOP_PROVIDER_KIND,
     desktop_execution_provider_registry_from_env,
     desktop_execution_provider_status_from_env,
     local_desktop_execution_provider_status,
@@ -6737,7 +6738,7 @@ def test_isolated_provider_session_annotation_readies_readonly_discovery_loop(
         assert request["desktop_execution_route"]["can_execute"] is True
 
 
-def test_agent_studio_route_blocks_keyboard_mouse_without_controlled_provider(
+def test_agent_studio_route_uses_local_provider_for_keyboard_mouse_by_default(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("OHA_YACHIYO_DESKTOP_PROVIDER_URL", raising=False)
@@ -6755,11 +6756,12 @@ def test_agent_studio_route_blocks_keyboard_mouse_without_controlled_provider(
         metadata=with_agent_studio_desktop_execution_policy({"source": "studio"}),
     )
 
-    assert route["status"] == "sandbox_keyboard_mouse_provider_required"
-    assert route["can_execute"] is False
-    assert route["sandbox_required"] is True
-    assert route["fallback_mode"] == "supervised_live"
-    assert route["blocking_conditions"] == ["sandbox_keyboard_mouse_provider_required"]
+    assert route["status"] == "provider_ready"
+    assert route["can_execute"] is True
+    assert route["selected_provider_kind"] == LOCAL_DESKTOP_PROVIDER_KIND
+    assert route["sandbox_required"] is False
+    assert route["requires_user_foreground_session"] is True
+    assert route["blocking_conditions"] == []
 
 
 def test_agent_studio_route_blocks_keyboard_mouse_without_isolated_session() -> None:
@@ -6828,7 +6830,7 @@ def test_desktop_policy_prefer_isolated_routes_keyboard_mouse_without_extra_meta
     assert route["blocking_conditions"] == ["sandbox_desktop_session_required"]
 
 
-def test_daily_policy_blocks_app_launch_through_user_foreground_provider() -> None:
+def test_daily_policy_allows_app_launch_through_user_foreground_provider() -> None:
     provider = {
         "available": True,
         "adapter_ready": True,
@@ -6864,11 +6866,11 @@ def test_daily_policy_blocks_app_launch_through_user_foreground_provider() -> No
         },
     )
 
-    assert route["status"] == "sandbox_desktop_session_required"
-    assert route["can_execute"] is False
+    assert route["status"] == "provider_ready"
+    assert route["can_execute"] is True
     assert route["selected_provider_id"] == "foreground-control"
     assert route["user_foreground_takeover_risk"] is True
-    assert route["blocking_conditions"] == ["sandbox_desktop_session_required"]
+    assert route["blocking_conditions"] == []
     assert explicit_route["status"] == "provider_ready"
     assert explicit_route["can_execute"] is True
     assert explicit_route["foreground_takeover_allowed"] is True
@@ -6929,7 +6931,7 @@ def test_daily_policy_can_auto_start_provider_for_keyboard_mouse(
     assert "auto-start the isolated desktop provider" in route["reason"]
 
 
-def test_daily_entrypoint_desktop_execution_policy_defaults_to_input_preview() -> None:
+def test_daily_entrypoint_desktop_execution_policy_defaults_to_direct_desktop() -> None:
     policy = daily_entrypoint_desktop_execution_policy(surface="bubble")
     metadata = with_daily_entrypoint_desktop_execution_policy(
         {"source": "launcher"},
@@ -6949,20 +6951,21 @@ def test_daily_entrypoint_desktop_execution_policy_defaults_to_input_preview() -
         "input": {"text": "hello"},
     }
 
-    assert policy["mode"] == "preview_input"
-    assert policy["prefer_isolated_desktop"] is True
-    assert policy["avoid_user_foreground_takeover"] is True
-    assert policy["require_sandbox_for_keyboard_mouse"] is True
+    assert policy["mode"] == "supervised_live"
+    assert policy["allow_live_foreground"] is True
+    assert policy["prefer_isolated_desktop"] is False
+    assert policy["avoid_user_foreground_takeover"] is False
+    assert policy["require_sandbox_for_keyboard_mouse"] is False
     assert (
         desktop_provider_session_auto_start_recommended_for_requests([request])
-        is True
+        is False
     )
     assert policy["allow_media_control"] is True
-    assert metadata["desktop_execution_policy"]["mode"] == "preview_input"
+    assert metadata["desktop_execution_policy"]["mode"] == "supervised_live"
     assert metadata["desktop_execution_policy"]["source"] == "daily_bubble"
-    assert metadata["desktop_execution_policy"]["prefer_isolated_desktop"] is True
-    assert metadata["desktop_execution_policy"]["avoid_user_foreground_takeover"] is True
-    assert metadata["desktop_execution_policy"]["require_sandbox_for_keyboard_mouse"] is True
+    assert metadata["desktop_execution_policy"]["prefer_isolated_desktop"] is False
+    assert metadata["desktop_execution_policy"]["avoid_user_foreground_takeover"] is False
+    assert metadata["desktop_execution_policy"]["require_sandbox_for_keyboard_mouse"] is False
     assert explicit["desktop_execution_policy"] == {"mode": "supervised_live"}
     assert live_foreground["desktop_execution_policy"]["mode"] == "allow"
     assert live_foreground["desktop_execution_policy"]["allow_live_foreground"] is True
@@ -7307,15 +7310,13 @@ def test_daily_desktop_runtime_execution_envelope_uses_daily_policy_for_strategy
     )
 
     request_policy = envelope["requests"][0]["desktop_execution_policy"]
-    assert request_policy["mode"] == "preview_input"
-    assert request_policy["prefer_isolated_desktop"] is True
-    assert envelope["execution_strategy"]["preferred_environment"] == (
-        "isolated_desktop"
-    )
+    assert request_policy["mode"] == "supervised_live"
+    assert request_policy["prefer_isolated_desktop"] is False
+    assert envelope["execution_strategy"]["preferred_environment"] == "user_foreground"
     assert envelope["execution_strategy"]["keyboard_mouse_step_count"] >= 1
-    assert (
-        envelope["execution_strategy"]["foreground_takeover_allowed"] is False
-    )
+    assert envelope["execution_strategy"]["foreground_takeover_allowed"] is True
+    assert envelope["execution_strategy"]["sandbox_required"] is False
+    assert envelope["execution_strategy"]["provider_auto_start_recommended"] is False
 
 
 def test_daily_desktop_direct_metadata_request_carries_daily_policy() -> None:
@@ -7333,11 +7334,11 @@ def test_daily_desktop_direct_metadata_request_carries_daily_policy() -> None:
     assert request is not None
     policy = request["desktop_execution_policy"]
     assert request["tool"] == "app.focus_and_safe_shortcut"
-    assert policy["mode"] == "preview_input"
+    assert policy["mode"] == "supervised_live"
     assert policy["source"] == "daily_live2d"
-    assert policy["prefer_isolated_desktop"] is True
-    assert policy["avoid_user_foreground_takeover"] is True
-    assert policy["require_sandbox_for_keyboard_mouse"] is True
+    assert policy["prefer_isolated_desktop"] is False
+    assert policy["avoid_user_foreground_takeover"] is False
+    assert policy["require_sandbox_for_keyboard_mouse"] is False
 
 
 def test_daily_desktop_direct_metadata_request_preserves_explicit_policy() -> None:
@@ -7373,9 +7374,9 @@ def test_agent_studio_desktop_execution_policy_requests_provider_health_probe() 
     )
 
     assert metadata["desktop_execution_policy"]["mode"] == "supervised_live"
-    assert metadata["desktop_execution_policy"]["prefer_isolated_desktop"] is True
-    assert metadata["desktop_execution_policy"]["avoid_user_foreground_takeover"] is True
-    assert metadata["desktop_execution_policy"]["require_sandbox_for_keyboard_mouse"] is True
+    assert metadata["desktop_execution_policy"]["prefer_isolated_desktop"] is False
+    assert metadata["desktop_execution_policy"]["avoid_user_foreground_takeover"] is False
+    assert metadata["desktop_execution_policy"]["require_sandbox_for_keyboard_mouse"] is False
     assert metadata["desktop_provider_health_probe"] is True
     assert metadata["desktop_provider_route_readonly"] is True
     assert metadata["desktop_provider_route_foreground"] is True
@@ -9316,21 +9317,21 @@ def test_controlled_provider_diagnostics_requires_isolated_desktop_session(
     assert "sandbox_desktop_session_required" in diagnostics.blocking_conditions
 
 
-def test_runtime_tool_catalog_marks_local_provider_input_tools_as_sandbox_required() -> None:
+def test_runtime_tool_catalog_marks_local_provider_input_tools_as_direct_ready() -> None:
     catalog = runtime_tool_catalog_snapshot(
         sandbox_provider=local_desktop_execution_provider_status()
     )
     tools = {tool.tool_name: tool for tool in catalog.tools}
 
     assert catalog.sandbox_provider is not None
-    assert catalog.sandbox_provider.keyboard_mouse_capture_supported is False
-    assert "desktop.safe_type_text" in catalog.sandbox_provider.requires_real_sandbox_for
+    assert catalog.sandbox_provider.keyboard_mouse_capture_supported is True
+    assert catalog.sandbox_provider.requires_real_sandbox_for == []
     assert tools["app.open"].provider_ready is True
     assert tools["app.open"].requires_user_foreground_session is True
     assert tools["app.open"].user_foreground_takeover_risk is True
-    assert tools["desktop.safe_type_text"].provider_supported is False
+    assert tools["desktop.safe_type_text"].provider_supported is True
     assert "desktop.safe_type_text" in (
-        catalog.capabilities["foreground_input"].provider_blocked_tools
+        catalog.capabilities["foreground_input"].provider_ready_tools
     )
     assert "app.focus" in (
         catalog.capabilities["foreground_activation"].provider_ready_tools
@@ -9469,7 +9470,7 @@ def test_desktop_execution_envelope_keeps_blocked_verification_non_executable() 
     )
 
 
-def test_runtime_planner_execution_strategy_prefers_isolated_desktop_for_daily_keyboard_mouse() -> None:
+def test_runtime_planner_execution_strategy_prefers_direct_desktop_for_daily_keyboard_mouse() -> None:
     tools = runtime_execution_tool_names(
         intent_kind="desktop_operation",
         prefer_low_level=True,
@@ -9487,18 +9488,18 @@ def test_runtime_planner_execution_strategy_prefers_isolated_desktop_for_daily_k
     strategy = decision.plan.execution_strategy
 
     assert strategy is not None
-    assert strategy.preferred_environment == "isolated_desktop"
+    assert strategy.preferred_environment == "user_foreground"
     assert strategy.interaction_mode == "foreground"
-    assert strategy.policy_mode == "preview_input"
-    assert strategy.isolated_desktop_preferred is True
-    assert strategy.foreground_takeover_allowed is False
-    assert strategy.user_foreground_takeover_risk is False
-    assert strategy.sandbox_required is True
+    assert strategy.policy_mode == "allow"
+    assert strategy.isolated_desktop_preferred is False
+    assert strategy.foreground_takeover_allowed is True
+    assert strategy.user_foreground_takeover_risk is True
+    assert strategy.sandbox_required is False
     assert strategy.provider_auto_start_recommended is False
     assert strategy.local_foreground_fallback_allowed is False
     assert strategy.keyboard_mouse_step_count >= 1
     assert "keyboard_mouse_capture_planned" in strategy.reasons
-    assert "do_not_take_over_user_foreground_session" in strategy.mitigations
+    assert "apply_risk_policy_before_keyboard_mouse" in strategy.mitigations
 
     envelope = runtime_execution_envelope_from_decision(
         decision,
@@ -9509,8 +9510,8 @@ def test_runtime_planner_execution_strategy_prefers_isolated_desktop_for_daily_k
     assert envelope is not None
     assert envelope.execution_strategy is not None
     assert envelope.execution_strategy.strategy_id == strategy.strategy_id
-    assert envelope.execution_strategy.preferred_environment == "isolated_desktop"
-    assert envelope.execution_strategy.sandbox_required is True
+    assert envelope.execution_strategy.preferred_environment == "user_foreground"
+    assert envelope.execution_strategy.sandbox_required is False
     assert envelope.execution_strategy.provider_auto_start_recommended is False
 
 
@@ -9527,11 +9528,11 @@ def test_runtime_execution_strategy_marks_explicit_live_foreground_risk() -> Non
     strategy = decision.plan.execution_strategy
 
     assert strategy is not None
-    assert strategy.preferred_environment == "isolated_desktop"
+    assert strategy.preferred_environment == "user_foreground"
     assert strategy.interaction_mode == "foreground"
     assert strategy.foreground_takeover_allowed is True
     assert strategy.user_foreground_takeover_risk is True
-    assert strategy.sandbox_required is True
+    assert strategy.sandbox_required is False
     assert strategy.provider_auto_start_recommended is False
     assert strategy.local_foreground_fallback_allowed is False
     assert "user_foreground_takeover_allowed" in strategy.reasons
@@ -9551,17 +9552,17 @@ def test_runtime_execution_strategy_allows_low_risk_app_activation_fallback() ->
     strategy = decision.plan.execution_strategy
 
     assert strategy is not None
-    assert strategy.preferred_environment == "isolated_desktop"
+    assert strategy.preferred_environment == "user_foreground"
     assert strategy.interaction_mode == "foreground"
     assert strategy.keyboard_mouse_step_count == 0
-    assert strategy.user_foreground_takeover_risk is False
+    assert strategy.user_foreground_takeover_risk is True
     assert strategy.sandbox_required is False
     assert strategy.provider_auto_start_recommended is False
     assert strategy.local_foreground_fallback_allowed is True
     assert "local_low_risk_foreground_fallback_allowed" in strategy.reasons
 
 
-def test_runtime_execution_envelope_blocks_keyboard_mouse_without_controlled_provider(
+def test_runtime_execution_envelope_routes_keyboard_mouse_to_local_provider(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("OHA_YACHIYO_DESKTOP_PROVIDER_URL", raising=False)
@@ -9592,13 +9593,16 @@ def test_runtime_execution_envelope_blocks_keyboard_mouse_without_controlled_pro
     )
     assert input_request.sandbox_provider is not None
     assert input_request.sandbox_provider.provider_id == LOCAL_DESKTOP_PROVIDER_ID
-    assert input_request.sandbox_provider.keyboard_mouse_capture_supported is False
+    assert input_request.sandbox_provider.keyboard_mouse_capture_supported is True
     assert input_request.desktop_execution_route is not None
     assert (
         input_request.desktop_execution_route.status
-        == "sandbox_keyboard_mouse_provider_required"
+        == "provider_ready"
     )
-    assert input_request.desktop_execution_route.can_execute is False
+    assert input_request.desktop_execution_route.can_execute is True
+    assert input_request.desktop_execution_route.selected_provider_kind == (
+        LOCAL_DESKTOP_PROVIDER_KIND
+    )
 
 
 def test_runtime_tool_catalog_surfaces_restricted_plugin_metadata_and_uninstall() -> None:

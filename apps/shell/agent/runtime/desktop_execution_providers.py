@@ -127,7 +127,7 @@ _SIMULATED_DESKTOP_PROVIDER_ENV_ALLOW_KEYS = (
 )
 LOCAL_DESKTOP_PROVIDER_ID = "local-native-desktop"
 LOCAL_DESKTOP_PROVIDER_KIND = "local_desktop"
-LOCAL_DESKTOP_PROVIDER_TOOLS = (
+LOCAL_DESKTOP_PROVIDER_BASE_TOOLS = (
     "desktop.permissions",
     "desktop.permission_preflight",
     "desktop.active_window",
@@ -197,7 +197,11 @@ KEYBOARD_MOUSE_CAPTURE_TOOL_NAMES = (
     "desktop.close_window",
     "desktop.quit_app",
 )
-LOCAL_DESKTOP_PROVIDER_REQUIRES_SANDBOX_TOOLS = KEYBOARD_MOUSE_CAPTURE_TOOL_NAMES
+LOCAL_DESKTOP_PROVIDER_TOOLS = (
+    *LOCAL_DESKTOP_PROVIDER_BASE_TOOLS,
+    *KEYBOARD_MOUSE_CAPTURE_TOOL_NAMES,
+)
+LOCAL_DESKTOP_PROVIDER_REQUIRES_SANDBOX_TOOLS: tuple[str, ...] = ()
 LOCAL_DESKTOP_DIRECT_FALLBACK_TOOLS = frozenset(
     {
         "desktop.active_window",
@@ -966,7 +970,7 @@ class HttpDesktopExecutionProviderAdapter:
 
 
 class LocalDesktopExecutionProviderAdapter:
-    """Routes low-risk desktop actions through the local structured tool broker."""
+    """Routes direct desktop actions through the local structured tool broker."""
 
     provider_kind = LOCAL_DESKTOP_PROVIDER_KIND
 
@@ -1042,7 +1046,11 @@ class LocalDesktopExecutionProviderAdapter:
         tool_result.setdefault("action", tool_name)
         tool_result.setdefault(
             "local_desktop_provider",
-            self._provider_context(approved=approved, transport=transport),
+            self._provider_context(
+                tool_name,
+                approved=approved,
+                transport=transport,
+            ),
         )
         tool_result.setdefault(
             "desktop_execution_evidence",
@@ -1145,7 +1153,13 @@ class LocalDesktopExecutionProviderAdapter:
             )
         return None
 
-    def _provider_context(self, *, approved: bool, transport: str) -> dict[str, Any]:
+    def _provider_context(
+        self,
+        tool_name: str,
+        *,
+        approved: bool,
+        transport: str,
+    ) -> dict[str, Any]:
         return {
             "provider_id": self.provider_id,
             "provider_kind": self.provider_kind,
@@ -1154,7 +1168,7 @@ class LocalDesktopExecutionProviderAdapter:
             "transport": transport,
             "desktop_session_kind": "user_foreground",
             "desktop_session_isolated": False,
-            "keyboard_mouse_capture": False,
+            "keyboard_mouse_capture": tool_name in KEYBOARD_MOUSE_CAPTURE_TOOL_NAMES,
         }
 
     def _execution_evidence(
@@ -1174,7 +1188,7 @@ class LocalDesktopExecutionProviderAdapter:
             "ok": result.get("ok") is True,
             "effect": _local_desktop_effect(tool_name),
             "user_foreground_session": True,
-            "keyboard_mouse_capture": False,
+            "keyboard_mouse_capture": tool_name in KEYBOARD_MOUSE_CAPTURE_TOOL_NAMES,
             "permission_error": bool(result.get("permission_error")),
             "fallback_used": bool(result.get("fallback_used")),
         }
@@ -1222,6 +1236,14 @@ def _local_desktop_effect(tool_name: str) -> str:
         if clean_tool in {"app.focus", "desktop.focus_app"}:
             return "app_focus"
         return "app_launch"
+    if clean_tool in KEYBOARD_MOUSE_CAPTURE_TOOL_NAMES:
+        if "click" in clean_tool:
+            return "foreground_click"
+        if "type" in clean_tool:
+            return "foreground_type"
+        if "scroll" in clean_tool:
+            return "foreground_scroll"
+        return "foreground_keyboard"
     if clean_tool in {"desktop.list_apps", "desktop.running_apps"}:
         return "desktop_app_discovery"
     return "desktop_observation"
@@ -1260,8 +1282,8 @@ def local_desktop_execution_provider_status(
         "provider_id": LOCAL_DESKTOP_PROVIDER_ID,
         "status": "available",
         "reason": (
-            "Local desktop provider is available for low-risk discovery, app launch, "
-            "focus, and media control tools."
+            "Direct desktop execution is available through the local structured tool "
+            "broker. Risky actions remain subject to runtime approval and policy gates."
         ),
         "blocking_conditions": blockers,
         "supported_tools": tools,
@@ -1275,8 +1297,8 @@ def local_desktop_execution_provider_status(
                 "desktop_discovery",
                 "app_launch",
                 "foreground_activation",
+                "keyboard_mouse_capture",
                 "media_control",
-                "no_keyboard_mouse_capture",
             ],
             "desktop_session_kind": "user_foreground",
             "desktop_session_isolated": False,
@@ -1284,10 +1306,14 @@ def local_desktop_execution_provider_status(
         },
         "source": "runtime_local",
         "foreground_mutation_supported": True,
-        "keyboard_mouse_capture_supported": False,
+        "keyboard_mouse_capture_supported": True,
         "desktop_session_kind": "user_foreground",
         "desktop_session_isolated": False,
         "foreground_takeover_required": True,
+        "desktop_backend_kind": "local_native_desktop",
+        "desktop_backend_is_loopback": False,
+        "desktop_backend_ready_for_public_release": True,
+        "requires_real_virtual_desktop_backend": False,
         "requires_real_sandbox_for": list(LOCAL_DESKTOP_PROVIDER_REQUIRES_SANDBOX_TOOLS),
     }
 

@@ -306,19 +306,20 @@ def daily_entrypoint_desktop_execution_policy(
     *,
     surface: str = "chat",
 ) -> dict[str, Any]:
-    """Default Chat/Bubble/Live2D policy: execute tools, but avoid user foreground takeover."""
+    """Default Chat/Bubble/Live2D policy: execute on the user's desktop."""
 
     clean_surface = str(surface or "chat").strip() or "chat"
     return {
-        "mode": "preview_input",
-        "prefer_isolated_desktop": True,
-        "avoid_user_foreground_takeover": True,
-        "require_sandbox_for_keyboard_mouse": True,
+        "mode": "supervised_live",
+        "allow_live_foreground": True,
+        "prefer_isolated_desktop": False,
+        "avoid_user_foreground_takeover": False,
+        "require_sandbox_for_keyboard_mouse": False,
         "allow_media_control": True,
         "source": f"daily_{clean_surface}",
         "reason": (
-            "Daily entrypoints should use structured desktop tools by default; "
-            "keyboard and mouse capture still requires an isolated desktop provider."
+            "Daily entrypoints use the local structured desktop provider by default; "
+            "an isolated desktop remains an optional execution mode."
         ),
     }
 
@@ -464,6 +465,8 @@ def desktop_provider_session_auto_start_recommended_for_requests(
         if not isinstance(request, Mapping):
             continue
         if bool(request.get("approval_required")):
+            continue
+        if user_foreground_takeover_allowed(request):
             continue
         tool_name = _request_tool_name(request)
         if not tool_name:
@@ -701,13 +704,13 @@ def agent_studio_desktop_execution_policy() -> dict[str, Any]:
     return {
         "mode": "supervised_live",
         "allow_live_foreground": True,
-        "prefer_isolated_desktop": True,
-        "avoid_user_foreground_takeover": True,
-        "require_sandbox_for_keyboard_mouse": True,
+        "prefer_isolated_desktop": False,
+        "avoid_user_foreground_takeover": False,
+        "require_sandbox_for_keyboard_mouse": False,
         "source": "agent_studio",
         "reason": (
-            "Agent Studio is the supervised desktop execution and debugging surface; "
-            "keyboard/mouse actions prefer an isolated desktop provider."
+            "Agent Studio uses direct local desktop execution by default while keeping "
+            "the isolated desktop provider available as an optional mode."
         ),
     }
 
@@ -848,6 +851,10 @@ def desktop_execution_route_decision(
         "prefer_isolated_desktop",
         "avoid_user_foreground_takeover",
         "require_sandbox_for_keyboard_mouse",
+    ) or _desktop_provider_session_isolation_requested(decision_context)
+    direct_desktop_preferred = bool(
+        not isolated_desktop_preferred
+        and (foreground_takeover_allowed or policy_mode == "allow")
     )
     isolation = str(mode_payload.get("isolation") or "none").strip() or "none"
     execution_mode_name = str(mode_payload.get("mode") or "tool_native").strip()
@@ -888,6 +895,32 @@ def desktop_execution_route_decision(
             "reason": "No executable tool was selected.",
             "blocking_conditions": ["missing_tool"],
         }
+    local_provider = _local_desktop_provider_payload(decision_context)
+    if (
+        local_provider
+        and direct_desktop_preferred
+        and sandbox_desktop_provider_can_execute_tool(local_provider, clean_tool)
+        and (
+            is_readonly_desktop_provider_tool(clean_tool)
+            or foreground_required
+            or execution_mode_name == "supervised_live"
+            or is_local_low_risk_foreground_tool(clean_tool)
+        )
+    ):
+        local_route = _sandbox_route_decision(
+            route,
+            local_provider,
+            clean_tool,
+            decision_context,
+        )
+        return _route_with_ready_reason(
+            local_route,
+            (
+                _readonly_desktop_provider_route_reason(local_provider)
+                if is_readonly_desktop_provider_tool(clean_tool)
+                else _foreground_desktop_provider_route_reason(local_provider)
+            ),
+        )
     if _running_isolated_sandbox_provider_can_execute(sandbox_provider, clean_tool):
         sandbox_route = _sandbox_route_decision(
             route,
@@ -899,9 +932,9 @@ def desktop_execution_route_decision(
             sandbox_route,
             _desktop_provider_ready_reason(sandbox_provider),
         )
-    local_provider = _local_desktop_provider_payload(decision_context)
     if (
         local_provider
+        and not isolated_desktop_preferred
         and _local_desktop_fallback_allowed(sandbox_provider, clean_tool)
         and is_readonly_desktop_provider_tool(clean_tool)
         and sandbox_desktop_provider_can_execute_tool(local_provider, clean_tool)
@@ -918,6 +951,7 @@ def desktop_execution_route_decision(
         )
     if (
         local_provider
+        and not isolated_desktop_preferred
         and _local_desktop_fallback_allowed(sandbox_provider, clean_tool)
         and _local_low_risk_foreground_tool_allowed(clean_tool, decision_context)
         and sandbox_desktop_provider_can_execute_tool(local_provider, clean_tool)
@@ -1150,13 +1184,62 @@ def local_low_risk_foreground_tool_allowed(
 
 
 def user_foreground_takeover_allowed(metadata: Mapping[str, Any] | None) -> bool:
-    return _metadata_truthy(
-        metadata,
+    policy: dict[str, Any] = {}
+    if isinstance(metadata, Mapping):
+        for key in (
+            "desktop_execution_policy",
+            "yachiyo_desktop_execution_policy",
+            "desktop_interaction_policy",
+        ):
+            policy = desktop_execution_policy_payload(metadata.get(key))
+            if policy:
+                break
+    isolated_keys = (
+        "prefer_isolated_desktop",
+        "avoid_user_foreground_takeover",
+        "require_sandbox_for_keyboard_mouse",
+        "desktop_provider_session_strict_foreground",
+        "desktop_provider_session_enforce_foreground",
+        "require_desktop_provider_for_foreground",
+        "require_isolated_desktop_for_foreground",
+    )
+    if (
+        _desktop_provider_session_isolation_requested(metadata)
+        or _metadata_truthy(metadata, *isolated_keys)
+        or _metadata_truthy(
+            policy,
+            *isolated_keys,
+        )
+    ):
+        return False
+    foreground_keys = (
         "allow_user_foreground_takeover",
         "desktop_allow_user_foreground_takeover",
         "allow_nonisolated_desktop_provider",
         "allow_live_foreground",
     )
+    return _metadata_truthy(metadata, *foreground_keys) or _metadata_truthy(
+        policy,
+        *foreground_keys,
+    )
+
+
+def _desktop_provider_session_isolation_requested(
+    metadata: Mapping[str, Any] | None,
+) -> bool:
+    if not isinstance(metadata, Mapping):
+        return False
+    session = metadata.get("desktop_provider_session")
+    if isinstance(session, Mapping) and bool(session.get("needed")):
+        session_kind = str(session.get("desktop_session_kind") or "").strip()
+        return bool(
+            _optional_bool_value(session.get("desktop_session_isolated")) is True
+            or session_kind in {"isolated_desktop", "sandbox_desktop", "virtual_desktop"}
+        )
+    nested_metadata = metadata.get("metadata")
+    if isinstance(nested_metadata, Mapping) and nested_metadata is not metadata:
+        return _desktop_provider_session_isolation_requested(nested_metadata)
+    return False
 
 
 def _desktop_provider_session_auto_start_requested(

@@ -291,6 +291,41 @@ def test_default_desktop_provider_registry_routes_low_risk_tools_to_local_broker
     assert calls == [("app.open", {"app_name": "Music"}, False)]
 
 
+def test_default_desktop_provider_registry_routes_constrained_input_to_local_broker() -> None:
+    calls: list[tuple[str, dict[str, Any], bool]] = []
+
+    class FakeBroker:
+        def call(
+            self,
+            name: str,
+            payload: dict[str, Any],
+            *,
+            approved: bool = False,
+        ) -> dict[str, Any]:
+            calls.append((name, payload, approved))
+            return {"ok": True, "action": name, "data": {"text": payload.get("text")}}
+
+    registry = desktop_execution_provider_registry_from_env({})
+    tool_request = _local_tool_request("desktop.safe_type_text", {"text": "hello"})
+
+    result = registry.execute_if_routed(
+        "desktop.safe_type_text",
+        {"text": "hello"},
+        tool_request=tool_request,
+        broker=FakeBroker(),
+    )
+
+    assert result is not None
+    assert result["ok"] is True
+    assert result["desktop_execution_provider"]["provider_kind"] == (
+        LOCAL_DESKTOP_PROVIDER_KIND
+    )
+    assert result["local_desktop_provider"]["keyboard_mouse_capture"] is True
+    assert result["desktop_execution_evidence"]["effect"] == "foreground_type"
+    assert result["desktop_execution_evidence"]["keyboard_mouse_capture"] is True
+    assert calls == [("desktop.safe_type_text", {"text": "hello"}, False)]
+
+
 def test_local_provider_route_ignores_unselected_loopback_session() -> None:
     calls: list[tuple[str, dict[str, Any], bool]] = []
 
@@ -661,7 +696,7 @@ def test_env_control_provider_can_block_keyboard_mouse_until_sandbox_ready(
     assert route["status"] == "sandbox_keyboard_mouse_provider_required"
 
 
-def test_local_desktop_provider_status_routes_safe_app_activation(monkeypatch) -> None:
+def test_local_desktop_provider_status_routes_direct_desktop_actions(monkeypatch) -> None:
     monkeypatch.delenv("OHA_YACHIYO_DESKTOP_PROVIDER_URL", raising=False)
     monkeypatch.delenv("OHA_YACHIYO_SANDBOX_DESKTOP_PROVIDER_URL", raising=False)
     monkeypatch.delenv("OHA_YACHIYO_DESKTOP_PROVIDER_EXECUTE_URL", raising=False)
@@ -682,9 +717,28 @@ def test_local_desktop_provider_status_routes_safe_app_activation(monkeypatch) -
             "desktop_provider_local_native": True,
         },
     )
-    unsupported_input_route = desktop_execution_route_decision(
+    direct_input_route = desktop_execution_route_decision(
         "desktop.safe_type_text",
-        policy={"mode": "preview_input"},
+        policy={"mode": "supervised_live", "allow_live_foreground": True},
+        execution_mode={
+            "mode": "supervised_live",
+            "foreground_control": True,
+            "keyboard_mouse_capture": True,
+            "sandbox_recommended": True,
+            "isolation": "none",
+        },
+        metadata={
+            "desktop_provider_route_foreground": True,
+            "desktop_provider_local_native": True,
+        },
+    )
+    isolated_input_route = desktop_execution_route_decision(
+        "desktop.safe_type_text",
+        policy={
+            "mode": "sandbox_preferred",
+            "prefer_isolated_desktop": True,
+            "require_sandbox_for_keyboard_mouse": True,
+        },
         execution_mode={
             "mode": "supervised_live",
             "foreground_control": True,
@@ -719,10 +773,10 @@ def test_local_desktop_provider_status_routes_safe_app_activation(monkeypatch) -
     assert provider["provider_id"] == LOCAL_DESKTOP_PROVIDER_ID
     assert "app.open" in provider["supported_tools"]
     assert "desktop.inspect_app" in provider["supported_tools"]
-    assert "desktop.safe_type_text" not in provider["supported_tools"]
+    assert "desktop.safe_type_text" in provider["supported_tools"]
     assert provider["foreground_mutation_supported"] is True
-    assert provider["keyboard_mouse_capture_supported"] is False
-    assert "desktop.safe_type_text" in provider["requires_real_sandbox_for"]
+    assert provider["keyboard_mouse_capture_supported"] is True
+    assert provider["requires_real_sandbox_for"] == []
     assert route["status"] == "provider_ready"
     assert route["selected_provider_kind"] == LOCAL_DESKTOP_PROVIDER_KIND
     assert route["selected_provider_id"] == LOCAL_DESKTOP_PROVIDER_ID
@@ -746,10 +800,14 @@ def test_local_desktop_provider_status_routes_safe_app_activation(monkeypatch) -
         "provider. It does not request keyboard or mouse capture, but it "
         "observes the user's desktop session."
     )
-    assert unsupported_input_route["status"] == "sandbox_keyboard_mouse_provider_required"
-    assert unsupported_input_route["blocking_conditions"] == [
-        "sandbox_keyboard_mouse_provider_required"
-    ]
+    assert direct_input_route["status"] == "provider_ready"
+    assert direct_input_route["selected_provider_kind"] == LOCAL_DESKTOP_PROVIDER_KIND
+    assert direct_input_route["keyboard_mouse_capture_supported"] is True
+    assert direct_input_route["requires_user_foreground_session"] is True
+    assert direct_input_route["user_foreground_takeover_risk"] is True
+    assert isolated_input_route["status"] == "sandbox_desktop_session_required"
+    assert isolated_input_route["selected_provider_kind"] == LOCAL_DESKTOP_PROVIDER_KIND
+    assert isolated_input_route["can_execute"] is False
 
 
 def test_configured_sandbox_provider_wins_over_local_desktop_fallback(monkeypatch) -> None:

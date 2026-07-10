@@ -65,13 +65,13 @@ def execution_strategy_snapshot(
         foreground_control_count=foreground_control_count,
         keyboard_mouse_count=keyboard_mouse_count,
     )
-    if sandbox_recommended_count:
+    if sandbox_recommended_count and not foreground_takeover_allowed:
         isolated_desktop_preferred = True
     sandbox_required = bool(
         keyboard_mouse_count
         and (
             _strategy_truthy(decision_context, "require_sandbox_for_keyboard_mouse")
-            or sandbox_recommended_count
+            or (sandbox_recommended_count and not foreground_takeover_allowed)
             or not foreground_takeover_allowed
         )
     )
@@ -314,7 +314,7 @@ def _execution_strategy_mitigations(
     if interaction_mode in {"foreground", "handoff"}:
         mitigations.append("verify_after_desktop_action")
     if keyboard_mouse_count:
-        mitigations.append("require_sandbox_or_approval_for_keyboard_mouse")
+        mitigations.append("apply_risk_policy_before_keyboard_mouse")
     if not foreground_takeover_allowed:
         mitigations.append("do_not_take_over_user_foreground_session")
     if provider_auto_start_recommended:

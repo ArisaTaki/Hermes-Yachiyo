@@ -1177,17 +1177,15 @@ def test_legacy_runtime_readiness_exposes_local_desktop_provider(monkeypatch) ->
     assert provider["provider_kind"] == LOCAL_DESKTOP_PROVIDER_KIND
     assert provider["provider_id"] == LOCAL_DESKTOP_PROVIDER_ID
     assert provider["status"] == "available"
-    assert provider["keyboard_mouse_capture_supported"] is False
-    assert "desktop.safe_type_text" in provider["requires_real_sandbox_for"]
+    assert provider["keyboard_mouse_capture_supported"] is True
+    assert provider["requires_real_sandbox_for"] == []
     assert "app.open" in readiness["capabilities"]["desktop_provider_supported_tools"]
     assert "desktop.inspect_app" in readiness["capabilities"]["desktop_provider_supported_tools"]
     assert (
         readiness["capabilities"]["desktop_provider_keyboard_mouse_capture_supported"]
-        is False
+        is True
     )
-    assert "desktop.safe_type_text" in (
-        readiness["capabilities"]["desktop_provider_requires_real_sandbox_for"]
-    )
+    assert readiness["capabilities"]["desktop_provider_requires_real_sandbox_for"] == []
 
 
 def test_yachiyo_agent_service_starts_replan_recovery_action_from_chat_task() -> None:
@@ -2441,8 +2439,8 @@ def test_yachiyo_chat_execution_uses_local_provider_for_app_open(
     )
     assert requests["app.open"].desktop_execution_route.can_execute is True
     assert requests["app.open"].desktop_execution_route.sandbox_required is False
-    assert requests["app.open"].desktop_execution_route.isolated_desktop_preferred is True
-    assert requests["app.open"].desktop_execution_route.foreground_takeover_allowed is False
+    assert requests["app.open"].desktop_execution_route.isolated_desktop_preferred is False
+    assert requests["app.open"].desktop_execution_route.foreground_takeover_allowed is True
     assert requests["app.open"].desktop_execution_route.blocking_conditions == []
     assert requests["desktop.list_apps"].desktop_execution_route is not None
     assert requests["desktop.list_apps"].desktop_execution_route.status == (
@@ -2576,8 +2574,8 @@ def test_yachiyo_chat_execution_uses_local_provider_for_music_playback(
     )
     assert playback_request.desktop_execution_route.can_execute is True
     assert playback_request.desktop_execution_route.sandbox_required is False
-    assert playback_request.desktop_execution_route.isolated_desktop_preferred is True
-    assert playback_request.desktop_execution_route.foreground_takeover_allowed is False
+    assert playback_request.desktop_execution_route.isolated_desktop_preferred is False
+    assert playback_request.desktop_execution_route.foreground_takeover_allowed is True
     assert playback_request.desktop_execution_route.blocking_conditions == []
     assert requests["desktop.active_window"].desktop_execution_route is not None
     assert requests["desktop.active_window"].desktop_execution_route.status == (
@@ -2741,7 +2739,15 @@ def test_agent_studio_service_projects_provider_session_recovery_without_autosta
             "app.focus_and_click_ui_element",
             "desktop.ui_elements",
         ],
-        metadata={"surface": "studio"},
+        metadata={
+            "surface": "studio",
+            "desktop_execution_policy": {
+                "mode": "sandbox_preferred",
+                "prefer_isolated_desktop": True,
+                "avoid_user_foreground_takeover": True,
+                "require_sandbox_for_keyboard_mouse": True,
+            },
+        },
     )
 
     operation_request = next(
@@ -2766,14 +2772,14 @@ def test_agent_studio_service_projects_provider_session_recovery_without_autosta
     assert envelope.desktop_provider_session["auto_start"] is False
     assert envelope.desktop_provider_session["running"] is False
     assert envelope.task_progress is not None
-    assert envelope.task_progress.status == "provider_required"
+    assert envelope.task_progress.status == "waiting_provider"
     assert envelope.task_progress.needs_user_action is True
-    assert envelope.task_progress.needs_replan is True
+    assert envelope.task_progress.needs_replan is False
     assert envelope.task_progress.desktop_provider_session_needed is True
     assert envelope.task_progress.desktop_provider_session_running is False
     assert envelope.task_progress.desktop_provider_session_needs_user_action is True
-    assert envelope.task_progress.desktop_provider_session_needs_replan is True
-    assert "desktop provider required" in envelope.task_progress.progress_text
+    assert envelope.task_progress.desktop_provider_session_needs_replan is False
+    assert "waiting desktop provider" in envelope.task_progress.progress_text
     assert operation_request.desktop_provider_session["needed"] is True
     assert operation_request.desktop_execution_route is not None
     assert operation_request.desktop_execution_route.can_execute is False
@@ -2873,7 +2879,15 @@ def test_agent_studio_service_probes_desktop_provider_health_for_execution(
             "app.focus_and_click_ui_element",
             "desktop.ui_elements",
         ],
-        metadata={"surface": "studio"},
+        metadata={
+            "surface": "studio",
+            "desktop_execution_policy": {
+                "mode": "sandbox_preferred",
+                "prefer_isolated_desktop": True,
+                "avoid_user_foreground_takeover": True,
+                "require_sandbox_for_keyboard_mouse": True,
+            },
+        },
     )
 
     operation_request = next(
@@ -2977,7 +2991,15 @@ def test_agent_studio_service_routes_readonly_desktop_discovery_through_provider
             "desktop.ui_elements",
             "app.focus_and_click_ui_element",
         ],
-        metadata={"surface": "studio"},
+        metadata={
+            "surface": "studio",
+            "desktop_execution_policy": {
+                "mode": "sandbox_preferred",
+                "prefer_isolated_desktop": True,
+                "avoid_user_foreground_takeover": True,
+                "require_sandbox_for_keyboard_mouse": True,
+            },
+        },
     )
 
     discovery_request = next(
@@ -2999,7 +3021,8 @@ def test_agent_studio_service_routes_readonly_desktop_discovery_through_provider
         "sandbox_desktop"
     )
     assert operation_request.desktop_execution_route is not None
-    assert operation_request.desktop_execution_route.status == "supervised_live"
+    assert operation_request.desktop_execution_route.status == "sandbox_tool_not_supported"
+    assert operation_request.desktop_execution_route.can_execute is False
     assert envelope.sandbox_provider is not None
     assert envelope.sandbox_provider.provider_id == "local-headless-desktop"
     projected = runtime_execution_requests_from_envelope_payload(
@@ -3029,7 +3052,15 @@ def test_yachiyo_chat_entrypoint_routes_provider_supported_desktop_actions(
         StartChatTaskRequest(
             prompt="在 PixelForge 点击 Export",
             conversation_id="chat-1",
-            metadata={"launcher_mode": "bubble"},
+            metadata={
+                "launcher_mode": "bubble",
+                "desktop_execution_policy": {
+                    "mode": "sandbox_preferred",
+                    "prefer_isolated_desktop": True,
+                    "avoid_user_foreground_takeover": True,
+                    "require_sandbox_for_keyboard_mouse": True,
+                },
+            },
             allowed_tools=[
                 "desktop.list_apps",
                 "app.focus_and_click_ui_element",
@@ -3057,7 +3088,7 @@ def test_yachiyo_chat_entrypoint_routes_provider_supported_desktop_actions(
     assert request_payload["metadata"]["desktop_provider_route_readonly"] is True
     assert request_payload["metadata"]["desktop_provider_route_foreground"] is True
     assert request_payload["metadata"]["desktop_execution_policy"]["mode"] == (
-        "preview_input"
+        "sandbox_preferred"
     )
     assert start_calls == []
     assert operation_request["desktop_execution_route"]["status"] == "sandbox_ready"
@@ -3099,7 +3130,15 @@ def test_yachiyo_chat_entrypoint_auto_starts_isolated_provider_for_input(
         StartChatTaskRequest(
             prompt="在 PixelForge 点击 Export",
             conversation_id="chat-1",
-            metadata={"launcher_mode": "bubble"},
+            metadata={
+                "launcher_mode": "bubble",
+                "desktop_execution_policy": {
+                    "mode": "sandbox_preferred",
+                    "prefer_isolated_desktop": True,
+                    "avoid_user_foreground_takeover": True,
+                    "require_sandbox_for_keyboard_mouse": True,
+                },
+            },
             allowed_tools=[
                 "desktop.list_apps",
                 "app.focus_and_click_ui_element",
@@ -3416,7 +3455,7 @@ def test_yachiyo_chat_entrypoint_uses_local_provider_for_music_playback(
     )
 
 
-def test_yachiyo_chat_entrypoint_surfaces_partial_blocked_desktop_plan(
+def test_yachiyo_chat_entrypoint_prefers_direct_desktop_over_optional_loopback_vm(
     monkeypatch,
 ) -> None:
     monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_URL", "http://127.0.0.1:19093")
@@ -3451,75 +3490,35 @@ def test_yachiyo_chat_entrypoint_surfaces_partial_blocked_desktop_plan(
 
     request_payload = port.calls[0][1]
     direct_tools = [request["tool"] for request in request_payload["direct_tool_requests"]]
-    blocked_tools = [
-        request["tool"] for request in request_payload["blocked_direct_tool_requests"]
-    ]
+    direct_requests = request_payload["direct_tool_requests"]
 
-    assert direct_tools == ["desktop.list_apps"]
-    assert "media.music_app_open_and_play" in blocked_tools
-    assert "desktop.safe_type_text" in blocked_tools
-    assert request_payload["metadata"]["yachiyo_runtime_blocked"] is True
-    assert request_payload["metadata"]["desktop_provider_session_auto_start"] is True
-    assert request_payload["metadata"]["yachiyo_blocked_execution_requests"] == (
-        blocked_tools
+    assert direct_tools == [
+        "desktop.list_apps",
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "media.music_app_open_and_play",
+        "desktop.ui_elements",
+    ]
+    assert "blocked_direct_tool_requests" not in request_payload
+    assert request_payload["metadata"].get("yachiyo_runtime_blocked") is not True
+    assert all(
+        request["desktop_execution_route"]["status"] == "provider_ready"
+        and request["desktop_execution_route"]["selected_provider_kind"]
+        == LOCAL_DESKTOP_PROVIDER_KIND
+        for request in direct_requests
     )
+    session = request_payload["runtime_execution_envelope"]["desktop_provider_session"]
+    assert session["needed"] is False
+    assert session["started"] is False
+    assert session["running"] is False
     assert task.runtime_debug is not None
-    assert task.runtime_debug.blocked_runtime_request_count >= 1
-    assert task.runtime_debug.blocked_direct_request_count == len(blocked_tools)
-    assert "desktop.safe_type_text" in task.runtime_debug.blocked_runtime_request_tools
-    assert task.runtime_debug.latest_blocked_request_tool_name in blocked_tools
-    assert task.runtime_debug.latest_blocked_request_status in {
-        "provider_ready",
-        "provider_required",
-        "real_virtual_desktop_provider_required",
-    }
-    assert task.runtime_debug.needs_user_action is True
-    assert task.runtime_debug.needs_replan is True
-    assert "runtime_blockers" in task.runtime_debug.debug_surfaces
-    assert task.task_core is not None
-    blocked_todos = [
-        todo
-        for todo in task.task_core.todos
-        if todo.tool_name in set(blocked_tools)
-    ]
-    assert blocked_todos
-    assert all(todo.status == "blocked" for todo in blocked_todos)
-    blocked_step_ids = {todo.step_id for todo in blocked_todos}
-    assert any(
-        signal.trigger == "runtime_blocked"
-        and signal.source_step_id in blocked_step_ids
-        for signal in task.task_core.replan_signals
-    )
-    assert task.task_progress is not None
-    assert task.task_progress.needs_replan is True
-    assert set(task.task_progress.blocked_step_ids).issuperset(blocked_step_ids)
-    blocked_timeline_events = [
-        event
-        for event in task.recent_events
-        if event.payload.get("source") == "runtime_blocked_direct_request"
-    ]
-    assert any(
-        event.event_type == "agent.task.todo.updated"
-        and event.payload.get("status") == "blocked"
-        for event in blocked_timeline_events
-    )
-    assert any(
-        event.event_type == "agent.task.checkpoint.updated"
-        and event.payload.get("status") == "blocked"
-        for event in blocked_timeline_events
-    )
-    assert any(
-        event.event_type == "agent.replan.requested"
-        and event.payload.get("trigger") == "runtime_blocked"
-        for event in blocked_timeline_events
-    )
-    runtime_blocked_recoveries = [
-        recovery
-        for recovery in task.replan_recoveries
-        if recovery.trigger == "runtime_blocked"
-    ]
-    assert runtime_blocked_recoveries
-    assert any(recovery.recovery_actions for recovery in runtime_blocked_recoveries)
+    assert task.runtime_debug.blocked_runtime_request_count == 0
+    assert task.runtime_debug.blocked_direct_request_count == 0
+    assert task.runtime_debug.desktop_provider_session_needed is False
+    assert task.runtime_debug.desktop_execution_session_mode == "user_foreground"
+    assert task.runtime_debug.desktop_execution_session_label == "real desktop foreground"
+    assert task.runtime_debug.needs_replan is False
 
 
 def test_yachiyo_chat_entrypoint_does_not_direct_execute_blocked_provider_route(
@@ -3584,7 +3583,15 @@ def test_yachiyo_chat_entrypoint_does_not_direct_execute_blocked_provider_route(
         StartChatTaskRequest(
             prompt="在 PixelForge 点击 Export",
             conversation_id="chat-1",
-            metadata={"launcher_mode": "bubble"},
+            metadata={
+                "launcher_mode": "bubble",
+                "desktop_execution_policy": {
+                    "mode": "sandbox_preferred",
+                    "prefer_isolated_desktop": True,
+                    "avoid_user_foreground_takeover": True,
+                    "require_sandbox_for_keyboard_mouse": True,
+                },
+            },
             allowed_tools=[
                 "app.focus_and_click_ui_element",
                 "desktop.ui_elements",
