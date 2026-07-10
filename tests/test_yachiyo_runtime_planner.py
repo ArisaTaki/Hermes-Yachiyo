@@ -16254,6 +16254,20 @@ def test_runtime_planner_discovers_generic_music_app_before_acting() -> None:
     )
 
 
+def test_runtime_planner_keeps_chat_status_meta_text_out_of_executor_intents() -> None:
+    for prompt in (
+        "已经取消但消息状态还没刷新",
+        "message status is still stale after cancel",
+    ):
+        decision = RuntimePlanner().decision(prompt)
+
+        assert decision.selected_intent.kind == "general"
+
+    code_change = RuntimePlanner().decision("修复消息状态取消后不同步的问题")
+
+    assert code_change.selected_intent.kind == "code_task"
+
+
 def test_runtime_planner_keeps_app_name_before_chinese_followup_capture() -> None:
     decision = RuntimePlanner().decision(
         "打开 Apple Music，然后看看界面",

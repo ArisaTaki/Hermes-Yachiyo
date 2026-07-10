@@ -125,6 +125,8 @@ class TaskIntentRouter:
     ) -> list[TaskIntentSnapshot]:
         text = _clean_prompt(prompt)
         metadata = metadata or {}
+        if _chat_status_meta_text_hint(text) and not _code_task_write_requested(text):
+            return []
         invalid_palette_reason = _invalid_command_palette_request_reason(text)
         if invalid_palette_reason:
             return [
