@@ -124,19 +124,29 @@ def test_oha_desktop_agent_release_smoke_covers_product_readiness(
     ][0]["legacy_shape_preserved"] is True
     assert section_by_id["studio_tool_catalog"]["report"]["coverage"][
         "cleanup_readiness"
-    ] == "legacy_fallbacks_eliminated"
+    ] == "planner_covered_compat_cleanup_pending"
     assert section_by_id["studio_tool_catalog"]["report"]["coverage"][
         "planner_covered_fallback_count"
-    ] == 0
+    ] == 9
     assert section_by_id["studio_tool_catalog"]["report"]["coverage"][
         "compatibility_cleanup_pending_count"
-    ] == 0
+    ] == 9
     assert {
         contract["fallback_id"]
         for contract in section_by_id["studio_tool_catalog"]["report"]["coverage"][
             "remaining_fallback_contracts"
         ]
-    } == set()
+    } == {
+        "permission_diagnostics_shape",
+        "finder_file_action_shapes",
+        "browser_navigation_shapes",
+        "foreground_command_shapes",
+        "desktop_observation_ui_shapes",
+        "context_capture_schedule_shapes",
+        "media_audio_shapes",
+        "compound_app_action_shapes",
+        "generic_app_discovery_legacy_shape",
+    }
     assert section_by_id["studio_tool_catalog"]["report"]["checks"][
         "cleanup_lists_planner_owned_entrypoints"
     ] is True

@@ -316,7 +316,134 @@ PLANNER_OWNED_LEGACY_ENTRYPOINTS: tuple[dict[str, Any], ...] = (
 )
 
 
-REMAINING_FALLBACK_CONTRACTS: tuple[dict[str, Any], ...] = ()
+REMAINING_FALLBACK_CONTRACTS: tuple[dict[str, Any], ...] = (
+    _fallback_contract(
+        "permission_diagnostics_shape",
+        "Desktop permission diagnostics",
+        (
+            "Planner owns the permission probe, but the daily facade still relies on "
+            "the legacy response projection."
+        ),
+        ["需要什么权限", "为什么不能控制桌面"],
+        [
+            "add planner-forbidden daily facade tests",
+            "project desktop.permissions through the compatibility adapter",
+            "remove the matching legacy permission-intent branches",
+        ],
+    ),
+    _fallback_contract(
+        "finder_file_action_shapes",
+        "Finder file actions",
+        (
+            "Finder shortcuts are planner-owned, while several legacy single-action "
+            "shapes are not projected yet."
+        ),
+        ["Finder 快速查看选中项", "Finder 新建文件夹"],
+        [
+            "project Finder safe-shortcut requests without legacy parsing",
+            "cover quick look, create, rename, parent, info, and copy actions",
+            "remove the matching Finder parser branches",
+        ],
+    ),
+    _fallback_contract(
+        "browser_navigation_shapes",
+        "Browser navigation and utilities",
+        (
+            "Planner owns browser shortcuts and inspection, but the daily legacy "
+            "shapes remain the compatibility path."
+        ),
+        ["刷新当前网页", "打开浏览器历史记录"],
+        [
+            "project browser shortcut and current-page requests",
+            "add planner-forbidden browser facade coverage",
+            "remove the matching browser utility branches",
+        ],
+    ),
+    _fallback_contract(
+        "foreground_command_shapes",
+        "Foreground app commands",
+        (
+            "Command palette, preferences, fullscreen, and related foreground actions "
+            "still depend on legacy projection."
+        ),
+        ["打开 VS Code 命令面板", "打开 Chrome 设置", "切换全屏"],
+        [
+            "project compound app prepare and shortcut requests",
+            "preserve the existing single and sequence response shapes",
+            "remove the matching foreground-command branches",
+        ],
+    ),
+    _fallback_contract(
+        "desktop_observation_ui_shapes",
+        "Desktop observation and UI operations",
+        (
+            "Planner observation tools are available, but several legacy observation "
+            "and semantic UI shapes remain."
+        ),
+        ["当前窗口是什么", "显示 Slack 窗口列表", "读取当前界面元素"],
+        [
+            "project observation-only requests through the daily adapter",
+            "cover window, screen, UI read, click, and type shapes",
+            "remove the matching observation and UI parser branches",
+        ],
+    ),
+    _fallback_contract(
+        "context_capture_schedule_shapes",
+        "Context capture and scheduling",
+        (
+            "Clipboard or selection transfer plans still use legacy daily response "
+            "composition for note and schedule targets."
+        ),
+        ["把剪贴板内容写进备忘录", "把选中的内容新建为提醒事项"],
+        [
+            "project context-source and destination sequences",
+            "preserve approval and schedule payload boundaries",
+            "remove the matching capture and schedule parser branches",
+        ],
+    ),
+    _fallback_contract(
+        "media_audio_shapes",
+        "Media playback and system audio",
+        (
+            "Planner owns media and volume tools, while legacy playback, search, "
+            "control, and audio shapes remain."
+        ),
+        ["播放超时空辉夜姬", "暂停音乐", "把音量调到 30%"],
+        [
+            "project media search and control sequences",
+            "cover generic discovered media apps and system audio",
+            "remove the matching media parser branches",
+        ],
+    ),
+    _fallback_contract(
+        "compound_app_action_shapes",
+        "Compound app actions",
+        (
+            "Planner creates the full app action sequence, but the daily facade still "
+            "delegates legacy sequence shaping."
+        ),
+        ["打开微信然后隐藏", "切到微信然后隐藏"],
+        [
+            "project multi-action app sequences in order",
+            "preserve per-step approval and verification metadata",
+            "remove the matching compound app parser branches",
+        ],
+    ),
+    _fallback_contract(
+        "generic_app_discovery_legacy_shape",
+        "Generic app discovery legacy shape",
+        (
+            "Production entrypoints use dynamic app discovery, while the preserved "
+            "legacy facade still returns a concrete historical app shape."
+        ),
+        ["把浏览器拉起来", "bring browser up"],
+        [
+            "keep product entrypoints on planner-first discovery",
+            "version or retire the concrete legacy facade response shape",
+            "remove generic app aliases from the legacy parser",
+        ],
+    ),
+)
 
 
 MIGRATED_DAILY_DESKTOP_SAMPLES: tuple[LegacyDesktopMigrationSample, ...] = (

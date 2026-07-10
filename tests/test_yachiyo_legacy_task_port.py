@@ -1057,13 +1057,23 @@ def test_runtime_planner_covers_migrated_desktop_samples_before_cleanup() -> Non
     assert coverage["legacy_boundary"] == "legacy_daily_desktop_intent"
     assert coverage["planner_owner"] == "runtime_planner"
     assert coverage["total_samples"] == len(prompts)
-    assert coverage["cleanup_readiness"] == "legacy_fallbacks_eliminated"
-    assert coverage["remaining_fallback_count"] == 0
-    assert coverage["planner_covered_fallback_count"] == 0
-    assert coverage["compatibility_cleanup_pending_count"] == 0
+    assert coverage["cleanup_readiness"] == "planner_covered_compat_cleanup_pending"
+    assert coverage["remaining_fallback_count"] == 9
+    assert coverage["planner_covered_fallback_count"] == 9
+    assert coverage["compatibility_cleanup_pending_count"] == 9
     assert {
         contract["fallback_id"] for contract in coverage["remaining_fallback_contracts"]
-    } == set()
+    } == {
+        "permission_diagnostics_shape",
+        "finder_file_action_shapes",
+        "browser_navigation_shapes",
+        "foreground_command_shapes",
+        "desktop_observation_ui_shapes",
+        "context_capture_schedule_shapes",
+        "media_audio_shapes",
+        "compound_app_action_shapes",
+        "generic_app_discovery_legacy_shape",
+    }
     assert "context_transfer" in coverage["areas"]
     assert len(sample_contracts) == len(prompts)
     assert "desktop_operation" in coverage["covered_intents"]
@@ -1093,12 +1103,13 @@ def test_runtime_planner_covers_migrated_desktop_samples_before_cleanup() -> Non
     assert legacy_calls == []
 
 
-def test_runtime_planner_has_no_remaining_fallback_contracts_after_compat_cleanup() -> None:
+def test_runtime_planner_reports_remaining_compatibility_fallback_contracts() -> None:
     legacy_calls: list[dict[str, Any]] = []
+    allowed_tools = daily_desktop_allowed_tools()
     coverage = legacy_daily_desktop_cleanup_coverage()
     fallback_contracts = coverage["remaining_fallback_contracts"]
 
-    assert fallback_contracts == ()
+    assert len(fallback_contracts) == 9
     for contract in fallback_contracts:
         assert contract["status"] == "planner_covered_compat_cleanup_pending"
         assert contract["planner_coverage_status"] == "planner_covered"
