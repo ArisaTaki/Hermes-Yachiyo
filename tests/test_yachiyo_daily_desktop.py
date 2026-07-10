@@ -3579,6 +3579,107 @@ def test_observation_compatibility_adapter_rejects_mixed_action_plans() -> None:
         assert _legacy_compatible_observation_entrypoint_requests(requests) == []
 
 
+def test_daily_desktop_entrypoint_routes_foreground_safe_type_without_legacy(
+    monkeypatch,
+) -> None:
+    _forbid_legacy_daily_parser(monkeypatch, "foreground safe type must be planner-owned")
+    for prompt in (
+        "在当前界面输入 hello",
+        "输入 hello",
+        "在当前输入框输入 hello",
+        "在当前输入框输入文本 hello",
+        "输入文本 hello",
+        "type hello in current input",
+        "type hello into the foreground text box",
+    ):
+        requests = daily_desktop_entrypoint_requests(prompt)
+
+        assert requests == [
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.safe_type_text",
+                "input": {"text": "hello"},
+            }
+        ]
+        assert daily_desktop_user_metadata(requests)["daily_desktop_tool"] == (
+            "desktop.safe_type_text"
+        )
+
+
+def test_foreground_type_compatibility_adapter_rejects_mixed_action_plans() -> None:
+    from apps.shell.yachiyo_agent.daily_desktop import (
+        _legacy_compatible_foreground_type_entrypoint_requests,
+    )
+
+    base_requests = [
+        {
+            "tool": "desktop.running_apps",
+            "input": {},
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "hello"},
+            "planning_reason": "planner_desktop_operation",
+        },
+    ]
+    for action_request in (
+        {"tool": "desktop.submit_foreground", "input": {"action": "send"}},
+        {
+            "tool": "desktop.click_ui_element",
+            "input": {"target": "send", "role_filter": "button"},
+        },
+    ):
+        requests = [
+            *base_requests,
+            {**action_request, "planning_reason": "planner_desktop_operation"},
+            {
+                "tool": "desktop.ui_elements",
+                "input": {"limit": 80},
+                "planning_reason": "planner_desktop_operation",
+            },
+        ]
+
+        assert _legacy_compatible_foreground_type_entrypoint_requests(requests) == []
+
+    for tool_name in (
+        "app.focus_and_safe_type_text",
+        "app.open_and_safe_type_text",
+    ):
+        app_scoped_requests = [
+            {
+                "tool": "desktop.list_apps",
+                "input": {"query": "Slack", "limit": 20},
+                "planning_reason": "planner_desktop_operation",
+            },
+            {
+                "tool": tool_name,
+                "input": {"app_name": "Slack", "text": "hello"},
+                "planning_reason": "planner_desktop_operation",
+            },
+            {
+                "tool": "desktop.ui_elements",
+                "input": {"app_name": "Slack"},
+                "planning_reason": "planner_desktop_operation",
+            },
+        ]
+
+        assert _legacy_compatible_foreground_type_entrypoint_requests(
+            app_scoped_requests
+        ) == []
+
+
+def test_safe_type_text_hint_rejects_destination_without_content() -> None:
+    from apps.shell.yachiyo_agent.desktop_plan_hints import safe_type_text_hint
+
+    for prompt in (
+        "type in current input",
+        "type into the foreground text box",
+        "fill into the current input field",
+    ):
+        assert safe_type_text_hint(prompt) == ""
+
+
 def test_daily_desktop_entrypoint_routes_screen_and_visible_ui_language_to_desktop_tools() -> None:
     cases = (
         (

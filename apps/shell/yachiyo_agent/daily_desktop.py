@@ -626,6 +626,11 @@ def _planner_owned_legacy_compatible_entrypoint_requests(
     )
     if semantic_ui_requests:
         return semantic_ui_requests
+    foreground_type_requests = _legacy_compatible_foreground_type_entrypoint_requests(
+        planner_requests,
+    )
+    if foreground_type_requests:
+        return foreground_type_requests
     observation_requests = _legacy_compatible_observation_entrypoint_requests(
         planner_requests,
     )
@@ -645,6 +650,40 @@ _LEGACY_COMPATIBLE_OBSERVATION_TOOLS = frozenset(
         "screen.capture",
     }
 )
+
+
+def _legacy_compatible_foreground_type_entrypoint_requests(
+    requests: Sequence[Mapping[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    items = [dict(request) for request in requests or [] if isinstance(request, Mapping)]
+    if not items:
+        return []
+    if any(
+        str(request.get("planning_reason") or "").strip()
+        != "planner_desktop_operation"
+        for request in items
+    ):
+        return []
+    tools = [str(request.get("tool") or "").strip() for request in items]
+    if tools.count("desktop.safe_type_text") != 1 or any(
+        tool
+        not in {
+            "desktop.running_apps",
+            "desktop.safe_type_text",
+            "desktop.ui_elements",
+        }
+        for tool in tools
+    ):
+        return []
+    selected = next(
+        request
+        for request in items
+        if str(request.get("tool") or "").strip() == "desktop.safe_type_text"
+    )
+    payload = selected.get("input") if isinstance(selected.get("input"), Mapping) else {}
+    if not str(payload.get("text") or "").strip():
+        return []
+    return [_legacy_shape_request(selected)]
 
 
 def _legacy_compatible_observation_entrypoint_requests(

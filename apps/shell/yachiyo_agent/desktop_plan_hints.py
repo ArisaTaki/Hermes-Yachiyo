@@ -384,6 +384,22 @@ def safe_type_text_hint(text: str) -> str:
             typed_text,
             flags=re.IGNORECASE,
         ).strip()
+        if re.fullmatch(
+            r"(?:in|into)\s+(?:the\s+)?"
+            r"(?:(?:current|active|foreground)\s+)?"
+            r"(?:input|input\s+field|field|text\s+box)",
+            typed_text,
+            flags=re.IGNORECASE,
+        ):
+            continue
+        typed_text = re.sub(
+            r"\s+(?:in|into)\s+(?:the\s+)?"
+            r"(?:(?:current|active|foreground)\s+)?"
+            r"(?:input|input\s+field|field|text\s+box)$",
+            "",
+            typed_text,
+            flags=re.IGNORECASE,
+        ).strip()
         if _looks_like_non_content_type_text(typed_text):
             continue
         if typed_text:
