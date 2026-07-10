@@ -408,6 +408,24 @@ class _ReplanRecoveryStudioPort(_FakeStudioExecutionPort):
         )
 
 
+class _BlockedReplanRecoveryStudioPort(_ReplanRecoveryStudioPort):
+    def get_run_timeline(self, run_id: str) -> dict[str, Any]:
+        self.calls.append(("get_run_timeline", run_id))
+        return self._blocked_payload()
+
+    def get_group_run(self, group_run_id: str) -> dict[str, Any]:
+        self.calls.append(("get_group_run", group_run_id))
+        return self._blocked_payload(group_run_id=group_run_id)
+
+    @staticmethod
+    def _blocked_payload(**overrides: Any) -> dict[str, Any]:
+        payload = _replan_recovery_task_payload(task_id="task-1", **overrides)
+        action = payload["events"][1]["payload"]["metadata"]["recovery_actions"][0]
+        action["approval_required"] = True
+        action["approval_status"] = "pending"
+        return payload
+
+
 class _MetadataOnlyReplanRecoveryStudioPort(_ReplanRecoveryStudioPort):
     def get_run_timeline(self, run_id: str) -> dict[str, Any]:
         self.calls.append(("get_run_timeline", run_id))
@@ -1491,6 +1509,74 @@ def test_yachiyo_agent_service_auto_starts_next_safe_replan_continuation() -> No
     assert request["direct_tool_requests"][0]["approval_required"] is False
 
 
+def test_yachiyo_agent_service_returns_started_replan_continuation_result() -> None:
+    port = _ReplanRecoveryTaskRuntimePort()
+    service = YachiyoAgentService(port)
+
+    result = service.start_next_replan_continuation_result(
+        "task-1",
+        {"conversation_id": "chat-1"},
+    )
+
+    assert result.started is True
+    assert result.item is not None
+    assert result.item.task_id == "recovery-task-1"
+    assert result.continuation is None
+    assert [name for name, _payload in port.calls] == [
+        "get_task_timeline",
+        "start_chat_task",
+    ]
+
+
+def test_yachiyo_agent_service_returns_blocked_replan_continuation_result() -> None:
+    class _RecordingService(YachiyoAgentService):
+        def __init__(self, port: Any) -> None:
+            super().__init__(port)
+            self.plan_requests: list[dict[str, Any]] = []
+
+        def plan_next_replan_continuation(
+            self,
+            task_id: str,
+            request: dict[str, Any] | None = None,
+        ) -> Any:
+            self.plan_requests.append(dict(request or {}))
+            return super().plan_next_replan_continuation(task_id, request)
+
+    port = _DeferredReplanRecoveryTaskRuntimePort()
+    service = _RecordingService(port)
+
+    result = service.start_next_replan_continuation_result(
+        "task-1",
+        {"conversation_id": "chat-1"},
+    )
+
+    assert result.started is False
+    assert result.item is None
+    assert result.continuation is not None
+    assert result.continuation.approval_required is True
+    assert result.continuation.auto_start_eligible is False
+    assert result.continuation.auto_start_blockers == [
+        "approval_required",
+        "deferred_tool_not_auto_safe",
+    ]
+    assert result.continuation.tool_name == "desktop.list_apps"
+    assert [name for name, _payload in port.calls] == [
+        "get_task_timeline",
+        "get_task_timeline",
+    ]
+    assert service.plan_requests == [
+        {
+            "conversation_id": "chat-1",
+            "auto_start_only": True,
+        },
+        {
+            "conversation_id": "chat-1",
+            "include_manual": True,
+            "auto_start_only": False,
+        },
+    ]
+
+
 def test_yachiyo_agent_service_plans_runtime_blocked_direct_replan_continuation() -> None:
     port = _RuntimeBlockedDirectReplanTaskRuntimePort()
     service = YachiyoAgentService(port)
@@ -1704,6 +1790,95 @@ def test_agent_studio_service_auto_starts_next_safe_replan_continuation() -> Non
         "safe_low_risk_replan_continuation"
     )
     assert request["direct_tool_requests"][0]["tool"] == "desktop.list_apps"
+
+
+def test_agent_studio_service_returns_started_replan_continuation_result() -> None:
+    port = _ReplanRecoveryStudioPort()
+    service = AgentStudioService(port)
+
+    result = service.start_next_replan_continuation_result(
+        "run-1",
+        {"agent_id": "agent-1", "client_run_id": "client-auto-1"},
+    )
+
+    assert result.started is True
+    assert result.item is not None
+    assert result.item.run_id == "studio-recovery-run"
+    assert result.continuation is None
+    assert [name for name, _payload in port.calls] == [
+        "get_run_timeline",
+        "start_agent_run",
+    ]
+
+
+def test_agent_studio_service_returns_started_group_replan_continuation_result() -> None:
+    class _GroupReplanRecoveryStudioPort(_ReplanRecoveryStudioPort):
+        def get_group_run(self, group_run_id: str) -> dict[str, Any]:
+            self.calls.append(("get_group_run", group_run_id))
+            return _replan_recovery_task_payload(
+                task_id="task-1",
+                group_run_id=group_run_id,
+            )
+
+    port = _GroupReplanRecoveryStudioPort()
+    service = AgentStudioService(port)
+
+    result = service.start_next_group_replan_continuation_result(
+        "group-run-1",
+        {"agent_id": "agent-1", "client_run_id": "client-group-auto-1"},
+    )
+
+    assert result.started is True
+    assert result.item is not None
+    assert result.item.run_id == "studio-recovery-run"
+    assert result.continuation is None
+    assert [name for name, _payload in port.calls] == [
+        "get_group_run",
+        "start_agent_run",
+    ]
+
+
+def test_agent_studio_service_returns_blocked_replan_continuation_result() -> None:
+    port = _BlockedReplanRecoveryStudioPort()
+    service = AgentStudioService(port)
+
+    result = service.start_next_replan_continuation_result(
+        "run-1",
+        {"agent_id": "agent-1", "client_run_id": "client-auto-1"},
+    )
+
+    assert result.started is False
+    assert result.item is None
+    assert result.continuation is not None
+    assert result.continuation.approval_required is True
+    assert result.continuation.auto_start_eligible is False
+    assert result.continuation.auto_start_blockers == ["approval_required"]
+    assert [name for name, _payload in port.calls] == [
+        "get_run_timeline",
+        "get_run_timeline",
+    ]
+
+
+def test_agent_studio_service_returns_blocked_group_replan_continuation_result() -> None:
+    port = _BlockedReplanRecoveryStudioPort()
+    service = AgentStudioService(port)
+
+    result = service.start_next_group_replan_continuation_result(
+        "group-run-1",
+        {"agent_id": "agent-1", "client_run_id": "client-group-auto-1"},
+    )
+
+    assert result.started is False
+    assert result.item is None
+    assert result.continuation is not None
+    assert result.continuation.source_group_run_id == "group-run-1"
+    assert result.continuation.approval_required is True
+    assert result.continuation.auto_start_eligible is False
+    assert result.continuation.auto_start_blockers == ["approval_required"]
+    assert [name for name, _payload in port.calls] == [
+        "get_group_run",
+        "get_group_run",
+    ]
 
 
 def test_yachiyo_agent_service_attaches_runtime_planner_metadata_to_chat_task(

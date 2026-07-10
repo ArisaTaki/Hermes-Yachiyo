@@ -16,7 +16,7 @@ from apps.bridge.routes.yachiyo_models import (
 from apps.bridge.routes.yachiyo_services import (
     agent_service,
     bad_request,
-    blocked_replan_continuation_response,
+    replan_continuation_response,
     snapshot,
 )
 from apps.shell.agent_runtime import AgentRuntimeError
@@ -77,31 +77,12 @@ async def start_next_replan_continuation(
     http_request: Request | None = None,
 ) -> dict[str, Any]:
     try:
-        service = agent_service(http_request)
-        payload = request.model_dump(exclude_none=True)
-        task_snapshot = await asyncio.to_thread(
-            service.start_next_replan_continuation,
+        result = await asyncio.to_thread(
+            agent_service(http_request).start_next_replan_continuation_result,
             task_id,
-            payload,
+            request.model_dump(exclude_none=True),
         )
-        if task_snapshot is None:
-            manual_payload = {
-                **payload,
-                "include_manual": True,
-                "auto_start_only": False,
-            }
-            continuation = await asyncio.to_thread(
-                service.plan_next_replan_continuation,
-                task_id,
-                manual_payload,
-            )
-            return {
-                "started": False,
-                "task": None,
-                "reason": "no_auto_start_eligible_replan_continuation",
-                **blocked_replan_continuation_response(continuation),
-            }
-        return {"started": True, "task": snapshot(task_snapshot)}
+        return replan_continuation_response(result, item_key="task")
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Task 不存在") from exc
     except (AgentRuntimeError, ValueError) as exc:

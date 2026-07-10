@@ -175,6 +175,7 @@ from .replans import (
     task_replan_run_event_payload,
     task_replan_timeline_event,
 )
+from .replan_continuation_results import ReplanContinuationStartResult
 from .runtime_progress import (
     public_runtime_tool_result_events,
     public_task_replan_events_for_tool_result,
@@ -283,6 +284,7 @@ __all__ = [
     "PublicRunEvent",
     "ReadinessSnapshot",
     "ReplanContinuationSnapshot",
+    "ReplanContinuationStartResult",
     "ReplanRecoveryActionSnapshot",
     "ReplanRecoverySnapshot",
     "ReplanSignalSnapshot",

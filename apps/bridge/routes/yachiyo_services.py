@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import HTTPException, Request
 
@@ -11,6 +11,9 @@ from apps.shell.yachiyo_agent import (
     AgentStudioService,
     ChatTaskLifecycleProjector,
     YachiyoAgentService,
+)
+from apps.shell.yachiyo_agent.replan_continuation_results import (
+    ReplanContinuationStartResult,
 )
 from apps.shell.yachiyo_agent.legacy_ports import (
     LegacyChatTaskStarter,
@@ -62,28 +65,37 @@ def snapshot(model: Any) -> dict[str, Any]:
     return model.model_dump(mode="json")
 
 
-def blocked_replan_continuation_response(continuation: Any | None) -> dict[str, Any]:
-    if continuation is None:
-        return {}
-    payload = snapshot(continuation)
-    return {
-        "continuation": payload,
-        "manual_start_available": True,
-        "approval_required": bool(getattr(continuation, "approval_required", False)),
-        "auto_start_eligible": bool(
-            getattr(continuation, "auto_start_eligible", False)
-        ),
-        "auto_start_reason": str(
-            getattr(continuation, "auto_start_reason", "")
-            or "manual_replan_continuation_required"
-        ),
-        "auto_start_blockers": list(
-            getattr(continuation, "auto_start_blockers", []) or []
-        ),
-        "replan_request_id": str(getattr(continuation, "request_id", "") or ""),
-        "action_id": getattr(continuation, "action_id", None),
-        "tool_name": str(getattr(continuation, "tool_name", "") or ""),
+def replan_continuation_response(
+    result: ReplanContinuationStartResult,
+    *,
+    item_key: Literal["task", "run"],
+) -> dict[str, Any]:
+    if result.item is not None:
+        return {"started": True, item_key: snapshot(result.item)}
+
+    response: dict[str, Any] = {
+        "started": False,
+        item_key: None,
+        "reason": "no_auto_start_eligible_replan_continuation",
     }
+    continuation = result.continuation
+    if continuation is None:
+        return response
+    response.update(
+        {
+            "continuation": snapshot(continuation),
+            "manual_start_available": True,
+            "approval_required": continuation.approval_required,
+            "auto_start_eligible": continuation.auto_start_eligible,
+            "auto_start_reason": continuation.auto_start_reason
+            or "manual_replan_continuation_required",
+            "auto_start_blockers": list(continuation.auto_start_blockers),
+            "replan_request_id": continuation.request_id,
+            "action_id": continuation.action_id,
+            "tool_name": continuation.tool_name,
+        }
+    )
+    return response
 
 
 def bad_request(exc: Exception) -> HTTPException:

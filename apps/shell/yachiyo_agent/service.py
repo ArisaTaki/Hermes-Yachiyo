@@ -34,6 +34,7 @@ from .event_page_windows import (
 from .desktop_execution_policy import with_daily_entrypoint_desktop_execution_policy
 from .planner_projection import planner_enriched_chat_request
 from .ports import ChatTaskStarter, RuntimePort, TaskLifecycleProjector
+from .replan_continuation_results import ReplanContinuationStartResult
 from .runtime_execution import runtime_execution_envelope_from_decision
 from .runtime_planner import RuntimePlanner
 from .runtime_progress import ProgressEventScope, public_runtime_tool_result_events
@@ -219,6 +220,28 @@ class YachiyoAgentService:
 
         return self.start_chat_task(
             _chat_start_payload_from_replan_continuation(continuation)
+        )
+
+    def start_next_replan_continuation_result(
+        self,
+        task_id: str,
+        request: Mapping[str, Any] | None = None,
+    ) -> ReplanContinuationStartResult:
+        payload = _request_payload(request or {})
+        task = self.start_next_replan_continuation(task_id, payload)
+        continuation = None
+        if task is None:
+            continuation = self.plan_next_replan_continuation(
+                task_id,
+                {
+                    **payload,
+                    "include_manual": True,
+                    "auto_start_only": False,
+                },
+            )
+        return ReplanContinuationStartResult(
+            item=task,
+            continuation=continuation,
         )
 
     def plan_next_replan_continuation(

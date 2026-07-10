@@ -78,6 +78,7 @@ from .isolated_provider_session import (
 )
 from .memories import memory_snapshot_from_payload
 from .ports import StudioPort
+from .replan_continuation_results import ReplanContinuationStartResult
 from .planner_projection import runtime_planner_metadata
 from .runtime_execution import (
     runtime_execution_envelope_from_decision,
@@ -1054,6 +1055,28 @@ class AgentStudioService:
             return None
         return self.start_agent_run(_agent_start_payload_from_replan_continuation(continuation))
 
+    def start_next_replan_continuation_result(
+        self,
+        run_id: str,
+        request: Mapping[str, Any] | None = None,
+    ) -> ReplanContinuationStartResult:
+        payload = _request_payload(request or {})
+        run = self.start_next_replan_continuation(run_id, payload)
+        continuation = None
+        if run is None:
+            continuation = self.plan_next_replan_continuation(
+                run_id,
+                {
+                    **payload,
+                    "include_manual": True,
+                    "auto_start_only": False,
+                },
+            )
+        return ReplanContinuationStartResult(
+            item=run,
+            continuation=continuation,
+        )
+
     def plan_next_replan_continuation(
         self,
         run_id: str,
@@ -1239,6 +1262,28 @@ class AgentStudioService:
         if continuation is None:
             return None
         return self.start_agent_run(_agent_start_payload_from_replan_continuation(continuation))
+
+    def start_next_group_replan_continuation_result(
+        self,
+        group_run_id: str,
+        request: Mapping[str, Any] | None = None,
+    ) -> ReplanContinuationStartResult:
+        payload = _request_payload(request or {})
+        run = self.start_next_group_replan_continuation(group_run_id, payload)
+        continuation = None
+        if run is None:
+            continuation = self.plan_next_group_replan_continuation(
+                group_run_id,
+                {
+                    **payload,
+                    "include_manual": True,
+                    "auto_start_only": False,
+                },
+            )
+        return ReplanContinuationStartResult(
+            item=run,
+            continuation=continuation,
+        )
 
     def plan_next_group_replan_continuation(
         self,
