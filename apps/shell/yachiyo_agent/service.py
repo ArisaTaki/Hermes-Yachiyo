@@ -33,7 +33,7 @@ from .event_page_windows import (
 )
 from .desktop_execution_policy import with_daily_entrypoint_desktop_execution_policy
 from .planner_projection import planner_enriched_chat_request
-from .ports import ChatTaskStarter, RuntimePort
+from .ports import ChatTaskStarter, RuntimePort, TaskLifecycleProjector
 from .runtime_execution import runtime_execution_envelope_from_decision
 from .runtime_planner import RuntimePlanner
 from .runtime_progress import ProgressEventScope, public_runtime_tool_result_events
@@ -52,9 +52,11 @@ class YachiyoAgentService:
         self,
         runtime_port: RuntimePort,
         chat_task_starter: ChatTaskStarter | None = None,
+        task_lifecycle_projector: TaskLifecycleProjector | None = None,
     ) -> None:
         self._runtime_port = runtime_port
         self._chat_task_starter = chat_task_starter
+        self._task_lifecycle_projector = task_lifecycle_projector
 
     def readiness(self) -> ReadinessSnapshot:
         return readiness_snapshot_from_payload(self._runtime_port.readiness())
@@ -373,21 +375,40 @@ class YachiyoAgentService:
         task_id: str,
         decision: ApprovalDecision | Mapping[str, Any] | None = None,
     ) -> AgentTaskSnapshot:
-        return agent_task_snapshot_from_payload(
+        task = agent_task_snapshot_from_payload(
             self._runtime_port.approve(task_id, _optional_request_payload(decision))
         )
+        return self._project_terminal_task(task_id, task)
 
     def reject(
         self,
         task_id: str,
         decision: ApprovalDecision | Mapping[str, Any] | str | None = None,
     ) -> AgentTaskSnapshot:
-        return agent_task_snapshot_from_payload(
+        task = agent_task_snapshot_from_payload(
             self._runtime_port.reject(task_id, _rejection_payload(decision))
         )
+        return self._project_terminal_task(task_id, task)
 
     def cancel(self, task_id: str) -> AgentTaskSnapshot:
-        return agent_task_snapshot_from_payload(self._runtime_port.cancel(task_id))
+        task = agent_task_snapshot_from_payload(self._runtime_port.cancel(task_id))
+        return self._project_terminal_task(task_id, task)
+
+    def _project_terminal_task(
+        self,
+        task_id: str,
+        task_snapshot: AgentTaskSnapshot,
+    ) -> AgentTaskSnapshot:
+        if (
+            self._task_lifecycle_projector is None
+            or task_snapshot.status not in {"completed", "failed", "cancelled"}
+        ):
+            return task_snapshot
+        try:
+            self._task_lifecycle_projector.project_terminal_task(task_id, task_snapshot)
+        except Exception:
+            pass
+        return task_snapshot
 
     def _start_payload_with_planner_events(
         self,

@@ -137,6 +137,7 @@ from .daily_desktop import (
     direct_browser_entrypoint_requests,
     entrypoint_plan_user_metadata,
 )
+from .chat_task_projection import ChatTaskLifecycleProjector
 from .links import studio_run_url
 from .capability_registry import (
     capability_definition_map,
@@ -219,6 +220,7 @@ __all__ = [
     "ChatRunnableCatalogSnapshot",
     "ChatRunnableParticipantSnapshot",
     "ChatRunnableSnapshot",
+    "ChatTaskLifecycleProjector",
     "ControlledDesktopProviderDiagnosticSnapshot",
     "DesktopExecutionLoopSnapshot",
     "clear_desktop_permission_probe_cache",

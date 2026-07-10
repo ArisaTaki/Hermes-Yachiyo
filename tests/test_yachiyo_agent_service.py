@@ -168,6 +168,14 @@ class _FakeChatTaskStarter:
         )
 
 
+class _FakeTaskLifecycleProjector:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, Any]] = []
+
+    def project_terminal_task(self, task_id: str, task_snapshot: Any) -> None:
+        self.calls.append((task_id, task_snapshot))
+
+
 class _BareStartTaskRuntimePort(_FakeRuntimePort):
     def __init__(self, *, existing_planner_events: bool = False) -> None:
         super().__init__()
@@ -4713,7 +4721,8 @@ def test_yachiyo_agent_service_preserves_group_target_when_starting_chat_task() 
 
 def test_yachiyo_agent_service_delegates_approval_and_cancel_to_runtime_port() -> None:
     port = _FakeRuntimePort()
-    service = YachiyoAgentService(port)
+    projector = _FakeTaskLifecycleProjector()
+    service = YachiyoAgentService(port, task_lifecycle_projector=projector)
 
     approved = service.approve(
         "task-1",
@@ -4761,6 +4770,11 @@ def test_yachiyo_agent_service_delegates_approval_and_cancel_to_runtime_port() -
         ),
         ("cancel", "task-1"),
     ]
+    assert [(task_id, task.status) for task_id, task in projector.calls] == [
+        ("task-1", "completed"),
+        ("task-2", "failed"),
+        ("task-1", "cancelled"),
+    ]
 
 
 def test_yachiyo_agent_service_keeps_string_reject_reason_compatible() -> None:
@@ -4773,6 +4787,26 @@ def test_yachiyo_agent_service_keeps_string_reject_reason_compatible() -> None:
     assert port.calls == [
         ("reject", {"task_id": "task-2", "decision": {"approved": False, "reason": "No"}})
     ]
+
+
+def test_yachiyo_agent_service_does_not_project_non_terminal_approval() -> None:
+    class _WaitingApprovalRuntimePort(_FakeRuntimePort):
+        def approve(
+            self,
+            task_id: str,
+            decision: dict[str, Any] | None = None,
+        ) -> dict[str, Any]:
+            self.calls.append(("approve", {"task_id": task_id, "decision": decision}))
+            return _task_payload(task_id=task_id, status="approval_required")
+
+    port = _WaitingApprovalRuntimePort()
+    projector = _FakeTaskLifecycleProjector()
+    service = YachiyoAgentService(port, task_lifecycle_projector=projector)
+
+    task = service.approve("task-1")
+
+    assert task.status == "waiting_approval"
+    assert projector.calls == []
 
 
 def _runtime_progress_tool_request(

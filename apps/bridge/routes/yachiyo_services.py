@@ -7,7 +7,11 @@ from typing import Any
 from fastapi import HTTPException, Request
 
 from apps.bridge.deps import get_runtime
-from apps.shell.yachiyo_agent import AgentStudioService, YachiyoAgentService
+from apps.shell.yachiyo_agent import (
+    AgentStudioService,
+    ChatTaskLifecycleProjector,
+    YachiyoAgentService,
+)
 from apps.shell.yachiyo_agent.legacy_ports import (
     LegacyChatTaskStarter,
     LegacyRuntimePort,
@@ -46,6 +50,7 @@ def agent_service(request: Request | None = None) -> YachiyoAgentService:
     return YachiyoAgentService(
         LegacyRuntimePort(runtime),
         chat_task_starter=LegacyChatTaskStarter(app_runtime, runtime),
+        task_lifecycle_projector=ChatTaskLifecycleProjector(app_runtime),
     )
 
 

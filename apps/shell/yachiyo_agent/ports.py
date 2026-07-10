@@ -53,6 +53,10 @@ class ChatTaskStarter(Protocol):
     def start_chat_task(self, request: dict[str, Any]) -> dict[str, Any] | None: ...
 
 
+class TaskLifecycleProjector(Protocol):
+    def project_terminal_task(self, task_id: str, task_snapshot: Any) -> None: ...
+
+
 class StudioPort(Protocol):
     def list_agents(self) -> list[dict[str, Any]] | Mapping[str, Any]: ...
 
