@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any
 
 from apps.shell.chat_api import ChatAPI
@@ -1590,6 +1591,38 @@ class LegacyStudioPort:
             "ssh_target": ssh_target,
             "session_id": session_id,
         }
+        for key in (
+            "remote_provider_executable",
+            "remote_guest_marker",
+            "remote_token_file",
+            "provider_id",
+        ):
+            value = str(payload.get(key) or "").strip()
+            if value:
+                config_kwargs[key] = value
+        for key in ("local_port", "guest_port"):
+            value = payload.get(key)
+            if value is not None:
+                config_kwargs[key] = int(value)
+
+        identity_file = str(payload.get("identity_file") or "").strip()
+        if identity_file:
+            config_kwargs["identity_file"] = str(
+                Path(identity_file).expanduser()
+            )
+        ssh_options = ["BatchMode=yes"]
+        if identity_file:
+            ssh_options.append("IdentitiesOnly=yes")
+        known_hosts_file = str(payload.get("known_hosts_file") or "").strip()
+        if known_hosts_file:
+            resolved_known_hosts = str(Path(known_hosts_file).expanduser())
+            ssh_options.extend(
+                [
+                    "StrictHostKeyChecking=yes",
+                    f"UserKnownHostsFile={resolved_known_hosts}",
+                ]
+            )
+        config_kwargs["ssh_options"] = tuple(ssh_options)
         try:
             provisioned = install_virtual_desktop_guest(
                 VirtualDesktopGuestInstallConfig(**config_kwargs)

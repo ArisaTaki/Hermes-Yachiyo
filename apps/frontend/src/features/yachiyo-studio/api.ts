@@ -89,6 +89,14 @@ export type YachiyoStudioDesktopProviderSessionSnapshot = {
 export type YachiyoStudioVirtualDesktopProvisionRequest = {
   ssh_target: string;
   session_id: string;
+  identity_file?: string;
+  known_hosts_file?: string;
+  remote_provider_executable?: string;
+  remote_guest_marker?: string;
+  remote_token_file?: string;
+  local_port?: number;
+  guest_port?: number;
+  provider_id?: string;
   approved: boolean;
   start_session?: boolean;
 };

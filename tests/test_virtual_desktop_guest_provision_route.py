@@ -37,6 +37,14 @@ async def test_virtual_desktop_provision_handler_delegates_public_contract(
     body = VirtualDesktopGuestProvisionBody(
         ssh_target="yachiyo@192.0.2.10",
         session_id="vm-session-1",
+        identity_file="~/.ssh/oha-yachiyo",
+        known_hosts_file="~/.ssh/known_hosts",
+        remote_provider_executable="~/Library/Application Support/Oha-Yachiyo/bin/provider",
+        remote_guest_marker="~/Library/Application Support/Oha-Yachiyo/guest.json",
+        remote_token_file="~/Library/Application Support/Oha-Yachiyo/provider.token",
+        local_port=29100,
+        guest_port=29101,
+        provider_id="oha-studio-vm",
         approved=True,
     )
 
@@ -47,6 +55,14 @@ async def test_virtual_desktop_provision_handler_delegates_public_contract(
         {
             "ssh_target": "yachiyo@192.0.2.10",
             "session_id": "vm-session-1",
+            "identity_file": "~/.ssh/oha-yachiyo",
+            "known_hosts_file": "~/.ssh/known_hosts",
+            "remote_provider_executable": "~/Library/Application Support/Oha-Yachiyo/bin/provider",
+            "remote_guest_marker": "~/Library/Application Support/Oha-Yachiyo/guest.json",
+            "remote_token_file": "~/Library/Application Support/Oha-Yachiyo/provider.token",
+            "local_port": 29100,
+            "guest_port": 29101,
+            "provider_id": "oha-studio-vm",
             "approved": True,
             "start_session": True,
         }
@@ -70,6 +86,30 @@ def test_virtual_desktop_provision_contract_rejects_unsafe_overrides(
                 "ssh_target": "yachiyo@192.0.2.10",
                 "session_id": "vm-session-1",
                 "approved": True,
+                field: value,
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("identity_file", "relative/id_ed25519"),
+        ("known_hosts_file", "known_hosts"),
+        ("remote_provider_executable", "bin/provider"),
+        ("remote_guest_marker", "guest.json"),
+        ("remote_token_file", "provider.token"),
+    ],
+)
+def test_virtual_desktop_provision_contract_requires_scoped_paths(
+    field: str,
+    value: str,
+) -> None:
+    with pytest.raises(ValueError):
+        VirtualDesktopGuestProvisionBody.model_validate(
+            {
+                "ssh_target": "yachiyo@192.0.2.10",
+                "session_id": "vm-session-1",
                 field: value,
             }
         )

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 from apps.shell.agent.runtime.desktop_execution_providers import (
@@ -1374,7 +1375,18 @@ def test_legacy_studio_port_provisions_vm_only_after_explicit_approval(
 
     pending = port.provision_virtual_desktop_guest(request)
     provisioned = port.provision_virtual_desktop_guest(
-        {**request, "approved": True}
+        {
+            **request,
+            "approved": True,
+            "identity_file": "~/.ssh/oha-yachiyo",
+            "known_hosts_file": "~/.ssh/known_hosts",
+            "remote_provider_executable": "~/Library/Application Support/Oha-Yachiyo/bin/provider",
+            "remote_guest_marker": "~/Library/Application Support/Oha-Yachiyo/guest.json",
+            "remote_token_file": "~/Library/Application Support/Oha-Yachiyo/provider.token",
+            "local_port": 29100,
+            "guest_port": 29101,
+            "provider_id": "oha-studio-vm",
+        }
     )
 
     assert pending["status"] == "approval_required"
@@ -1382,6 +1394,25 @@ def test_legacy_studio_port_provisions_vm_only_after_explicit_approval(
     assert len(install_calls) == 1
     assert install_calls[0].ssh_target == "yachiyo@192.0.2.10"
     assert install_calls[0].session_id == "vm-session-1"
+    assert install_calls[0].identity_file == str(Path.home() / ".ssh/oha-yachiyo")
+    assert install_calls[0].ssh_options == (
+        "BatchMode=yes",
+        "IdentitiesOnly=yes",
+        "StrictHostKeyChecking=yes",
+        f"UserKnownHostsFile={Path.home() / '.ssh/known_hosts'}",
+    )
+    assert install_calls[0].remote_provider_executable == (
+        "~/Library/Application Support/Oha-Yachiyo/bin/provider"
+    )
+    assert install_calls[0].remote_guest_marker == (
+        "~/Library/Application Support/Oha-Yachiyo/guest.json"
+    )
+    assert install_calls[0].remote_token_file == (
+        "~/Library/Application Support/Oha-Yachiyo/provider.token"
+    )
+    assert install_calls[0].local_port == 29100
+    assert install_calls[0].guest_port == 29101
+    assert install_calls[0].provider_id == "oha-studio-vm"
     assert provisioned["status"] == "running"
     assert provisioned["running"] is True
     assert start_calls == [

@@ -13,6 +13,7 @@ import {
   startYachiyoStudioPlannerOrchestration,
   stopYachiyoStudioDesktopProviderSession,
   type YachiyoStudioDesktopProviderSessionSnapshot,
+  type YachiyoStudioVirtualDesktopProvisionRequest,
 } from '../../yachiyo-studio/api';
 import type {
   LegacyCleanupCoverageSnapshot,
@@ -36,6 +37,84 @@ const emptyCatalog: ToolCatalogSnapshot = {
 const DESKTOP_PROVIDER_MANIFEST_STORAGE_KEY = 'oha-yachiyo.desktop-provider-manifest';
 const DESKTOP_PROVIDER_SSH_TARGET_STORAGE_KEY = 'oha-yachiyo.desktop-provider-ssh-target';
 const DESKTOP_PROVIDER_SESSION_ID_STORAGE_KEY = 'oha-yachiyo.desktop-provider-session-id';
+
+type DesktopProviderProvisionOptions = {
+  guestPort: string;
+  identityFile: string;
+  knownHostsFile: string;
+  localPort: string;
+  providerId: string;
+  remoteGuestMarker: string;
+  remoteProviderExecutable: string;
+  remoteTokenFile: string;
+};
+
+const emptyDesktopProviderProvisionOptions: DesktopProviderProvisionOptions = {
+  guestPort: '',
+  identityFile: '',
+  knownHostsFile: '',
+  localPort: '',
+  providerId: '',
+  remoteGuestMarker: '',
+  remoteProviderExecutable: '',
+  remoteTokenFile: '',
+};
+
+const desktopProviderProvisionFields: Array<{
+  key: keyof DesktopProviderProvisionOptions;
+  label: string;
+  placeholder?: string;
+  testId: string;
+  type?: 'number' | 'text';
+}> = [
+  {
+    key: 'identityFile',
+    label: 'SSH Identity File',
+    placeholder: '~/.ssh/id_ed25519',
+    testId: 'studio-desktop-provider-identity-file',
+  },
+  {
+    key: 'knownHostsFile',
+    label: 'Known Hosts File',
+    placeholder: '~/.ssh/known_hosts',
+    testId: 'studio-desktop-provider-known-hosts-file',
+  },
+  {
+    key: 'localPort',
+    label: 'Host Port',
+    placeholder: '29097',
+    testId: 'studio-desktop-provider-local-port',
+    type: 'number',
+  },
+  {
+    key: 'guestPort',
+    label: 'Guest Port',
+    placeholder: '29097',
+    testId: 'studio-desktop-provider-guest-port',
+    type: 'number',
+  },
+  {
+    key: 'providerId',
+    label: 'Provider ID',
+    testId: 'studio-desktop-provider-id',
+  },
+  {
+    key: 'remoteProviderExecutable',
+    label: 'Remote Provider',
+    placeholder: '~/Library/Application Support/Oha-Yachiyo/bin/oha-yachiyo-desktop-provider',
+    testId: 'studio-desktop-provider-remote-executable',
+  },
+  {
+    key: 'remoteGuestMarker',
+    label: 'Guest Marker',
+    testId: 'studio-desktop-provider-remote-marker',
+  },
+  {
+    key: 'remoteTokenFile',
+    label: 'Guest Token File',
+    testId: 'studio-desktop-provider-remote-token-file',
+  },
+];
 
 type AgentStudioToolsTabProps = {
   catalog: ToolCatalogSnapshot | null;
@@ -79,6 +158,9 @@ export function AgentStudioToolsTab({
   );
   const [providerProvisionSessionId, setProviderProvisionSessionId] = useState(
     () => readStoredValue(DESKTOP_PROVIDER_SESSION_ID_STORAGE_KEY, 'oha-yachiyo-vm'),
+  );
+  const [providerProvisionOptions, setProviderProvisionOptions] = useState(
+    emptyDesktopProviderProvisionOptions,
   );
   const [providerProvisionApproved, setProviderProvisionApproved] = useState(false);
   const legacyCleanupCoverage = catalog.legacy_cleanup_coverage || null;
@@ -252,6 +334,7 @@ export function AgentStudioToolsTab({
       const result = await provisionYachiyoStudioVirtualDesktopGuest({
         ssh_target: sshTarget,
         session_id: sessionId,
+        ...desktopProviderProvisionRequestOptions(providerProvisionOptions),
         approved: true,
         start_session: true,
       });
@@ -366,12 +449,17 @@ export function AgentStudioToolsTab({
           manifestPickerAvailable={hasDesktopProviderManifestPicker()}
           manifestPicking={providerManifestPicking}
           provisionApproved={providerProvisionApproved}
+          provisionOptions={providerProvisionOptions}
           provisionSessionId={providerProvisionSessionId}
           provisionTarget={providerProvisionTarget}
           onChooseManifest={() => void handleProviderManifestChoose()}
           onManifestPathChange={setProviderManifestPath}
           onProvision={() => void handleProviderProvision()}
           onProvisionApprovedChange={setProviderProvisionApproved}
+          onProvisionOptionsChange={(key, value) => setProviderProvisionOptions((current) => ({
+            ...current,
+            [key]: value,
+          }))}
           onProvisionSessionIdChange={setProviderProvisionSessionId}
           onProvisionTargetChange={setProviderProvisionTarget}
           onStart={() => void handleProviderSessionStart()}
@@ -433,12 +521,14 @@ function DesktopProviderSessionPanel({
   manifestPickerAvailable,
   manifestPicking,
   provisionApproved,
+  provisionOptions,
   provisionSessionId,
   provisionTarget,
   onChooseManifest,
   onManifestPathChange,
   onProvision,
   onProvisionApprovedChange,
+  onProvisionOptionsChange,
   onProvisionSessionIdChange,
   onProvisionTargetChange,
   onStart,
@@ -452,12 +542,14 @@ function DesktopProviderSessionPanel({
   manifestPickerAvailable: boolean;
   manifestPicking: boolean;
   provisionApproved: boolean;
+  provisionOptions: DesktopProviderProvisionOptions;
   provisionSessionId: string;
   provisionTarget: string;
   onChooseManifest: () => void;
   onManifestPathChange: (value: string) => void;
   onProvision: () => void;
   onProvisionApprovedChange: (value: boolean) => void;
+  onProvisionOptionsChange: (key: keyof DesktopProviderProvisionOptions, value: string) => void;
   onProvisionSessionIdChange: (value: string) => void;
   onProvisionTargetChange: (value: string) => void;
   onStart: () => void;
@@ -639,6 +731,28 @@ function DesktopProviderSessionPanel({
           />
         </label>
       </div>
+      <details className="studio-provider-provision-advanced">
+        <summary>Advanced SSH</summary>
+        <div className="studio-provider-provision-fields">
+          {desktopProviderProvisionFields.map((field) => (
+            <label key={field.key}>
+              <span>{field.label}</span>
+              <input
+                className="hy-input"
+                data-testid={field.testId}
+                disabled={Boolean(busy) || running}
+                max={field.type === 'number' ? 65535 : undefined}
+                min={field.type === 'number' ? 1 : undefined}
+                onChange={(event) => onProvisionOptionsChange(field.key, event.target.value)}
+                placeholder={field.placeholder}
+                spellCheck={false}
+                type={field.type || 'text'}
+                value={provisionOptions[field.key]}
+              />
+            </label>
+          ))}
+        </div>
+      </details>
       <label
         className="agent-checkbox-row studio-provider-provision-approval"
         data-testid="studio-desktop-provider-provision-approval"
@@ -737,6 +851,39 @@ function readStoredDesktopProviderManifestPath(): string {
   } catch {
     return '';
   }
+}
+
+function desktopProviderProvisionRequestOptions(
+  options: DesktopProviderProvisionOptions,
+): Partial<YachiyoStudioVirtualDesktopProvisionRequest> {
+  const localPort = desktopProviderProvisionPort(options.localPort, 'Host Port');
+  const guestPort = desktopProviderProvisionPort(options.guestPort, 'Guest Port');
+  return {
+    ...(options.identityFile.trim() ? { identity_file: options.identityFile.trim() } : {}),
+    ...(options.knownHostsFile.trim() ? { known_hosts_file: options.knownHostsFile.trim() } : {}),
+    ...(options.providerId.trim() ? { provider_id: options.providerId.trim() } : {}),
+    ...(options.remoteGuestMarker.trim()
+      ? { remote_guest_marker: options.remoteGuestMarker.trim() }
+      : {}),
+    ...(options.remoteProviderExecutable.trim()
+      ? { remote_provider_executable: options.remoteProviderExecutable.trim() }
+      : {}),
+    ...(options.remoteTokenFile.trim()
+      ? { remote_token_file: options.remoteTokenFile.trim() }
+      : {}),
+    ...(localPort !== undefined ? { local_port: localPort } : {}),
+    ...(guestPort !== undefined ? { guest_port: guestPort } : {}),
+  };
+}
+
+function desktopProviderProvisionPort(value: string, label: string): number | undefined {
+  const cleanValue = value.trim();
+  if (!cleanValue) return undefined;
+  const port = Number(cleanValue);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error(`${label} must be between 1 and 65535`);
+  }
+  return port;
 }
 
 function storeDesktopProviderManifestPath(value: string): void {

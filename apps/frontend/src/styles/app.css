@@ -15562,6 +15562,22 @@ button.activity-item {
   min-width: 0;
 }
 
+.studio-provider-provision-advanced {
+  min-width: 0;
+}
+
+.studio-provider-provision-advanced > summary {
+  color: var(--hy-muted);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  margin-bottom: 0;
+}
+
+.studio-provider-provision-advanced[open] > summary {
+  margin-bottom: 7px;
+}
+
 .studio-provider-provision-approval {
   margin: 0;
 }

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class TaskApprovalRequest(BaseModel):
@@ -81,8 +81,44 @@ class VirtualDesktopGuestProvisionBody(BaseModel):
 
     ssh_target: str = Field(..., min_length=1, max_length=500)
     session_id: str = Field(..., min_length=1, max_length=160)
+    identity_file: str | None = Field(default=None, max_length=4000)
+    known_hosts_file: str | None = Field(default=None, max_length=4000)
+    remote_provider_executable: str | None = Field(default=None, max_length=4000)
+    remote_guest_marker: str | None = Field(default=None, max_length=4000)
+    remote_token_file: str | None = Field(default=None, max_length=4000)
+    local_port: int | None = Field(default=None, ge=1, le=65535)
+    guest_port: int | None = Field(default=None, ge=1, le=65535)
+    provider_id: str | None = Field(default=None, max_length=160)
     approved: bool = False
     start_session: bool = True
+
+    @field_validator("identity_file", "known_hosts_file")
+    @classmethod
+    def validate_local_ssh_path(cls, value: str | None) -> str | None:
+        clean_value = str(value or "").strip()
+        if not clean_value:
+            return None
+        if any(character in clean_value for character in ("\x00", "\n", "\r")):
+            raise ValueError("SSH paths must not contain control characters")
+        if not (clean_value.startswith("/") or clean_value.startswith("~/")):
+            raise ValueError("SSH paths must be absolute or home-relative")
+        return clean_value
+
+    @field_validator(
+        "remote_provider_executable",
+        "remote_guest_marker",
+        "remote_token_file",
+    )
+    @classmethod
+    def validate_remote_guest_path(cls, value: str | None) -> str | None:
+        clean_value = str(value or "").strip()
+        if not clean_value:
+            return None
+        if any(character in clean_value for character in ("\x00", "\n", "\r")):
+            raise ValueError("remote guest paths must not contain control characters")
+        if not (clean_value.startswith("/") or clean_value.startswith("~/")):
+            raise ValueError("remote guest paths must be absolute or home-relative")
+        return clean_value
 
 
 class PlanTaskBody(BaseModel):
