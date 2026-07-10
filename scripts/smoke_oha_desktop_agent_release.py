@@ -347,6 +347,10 @@ def _provider_session_observability_case() -> dict[str, Any]:
 
 
 def _legacy_facade_planner_ownership_case() -> dict[str, Any]:
+    from apps.shell.agent.runtime import (
+        desktop_intents as legacy_desktop_intents_module,
+    )
+
     cases = [
         {
             "id": "media_playback",
@@ -555,7 +559,9 @@ def _legacy_facade_planner_ownership_case() -> dict[str, Any]:
         },
     ]
     legacy_calls: list[dict[str, Any]] = []
-    original_legacy_parser = daily_desktop_module.daily_desktop_entrypoint_tool_requests
+    original_legacy_parser = (
+        legacy_desktop_intents_module.daily_desktop_entrypoint_tool_requests
+    )
 
     def fail_legacy_parser(context: str, allowed_tools: Sequence[str], **_kwargs: Any) -> list[dict[str, Any]]:
         legacy_calls.append(
@@ -567,7 +573,7 @@ def _legacy_facade_planner_ownership_case() -> dict[str, Any]:
         raise AssertionError("legacy daily desktop parser should not own planner-compatible entrypoints")
 
     results: list[dict[str, Any]] = []
-    daily_desktop_module.daily_desktop_entrypoint_tool_requests = fail_legacy_parser
+    legacy_desktop_intents_module.daily_desktop_entrypoint_tool_requests = fail_legacy_parser
     try:
         for case in cases:
             error = ""
@@ -590,7 +596,7 @@ def _legacy_facade_planner_ownership_case() -> dict[str, Any]:
                 }
             )
     finally:
-        daily_desktop_module.daily_desktop_entrypoint_tool_requests = original_legacy_parser
+        legacy_desktop_intents_module.daily_desktop_entrypoint_tool_requests = original_legacy_parser
 
     checks = {
         "legacy_parser_not_called": legacy_calls == [],

@@ -2220,7 +2220,7 @@ def test_daily_desktop_entrypoint_requests_use_planner_for_compatible_media(monk
         raise AssertionError("legacy desktop media parser should not own compatible media playback")
 
     monkeypatch.setattr(
-        "apps.shell.yachiyo_agent.daily_desktop.daily_desktop_entrypoint_tool_requests",
+        "apps.shell.agent.runtime.desktop_intents.daily_desktop_entrypoint_tool_requests",
         fail_legacy,
     )
 
@@ -2256,7 +2256,7 @@ def test_daily_desktop_entrypoint_requests_use_planner_for_simple_app_and_file(m
         raise AssertionError("legacy desktop parser should not own compatible app/file entrypoints")
 
     monkeypatch.setattr(
-        "apps.shell.yachiyo_agent.daily_desktop.daily_desktop_entrypoint_tool_requests",
+        "apps.shell.agent.runtime.desktop_intents.daily_desktop_entrypoint_tool_requests",
         fail_legacy,
     )
 
@@ -2326,7 +2326,7 @@ def test_daily_desktop_entrypoint_requests_use_planner_for_direct_browser_naviga
         raise AssertionError("legacy desktop parser should not own compatible browser navigation")
 
     monkeypatch.setattr(
-        "apps.shell.yachiyo_agent.daily_desktop.daily_desktop_entrypoint_tool_requests",
+        "apps.shell.agent.runtime.desktop_intents.daily_desktop_entrypoint_tool_requests",
         fail_legacy,
     )
 
@@ -2372,7 +2372,7 @@ def test_daily_desktop_entrypoint_requests_use_planner_for_safe_app_actions(monk
         raise AssertionError("legacy desktop parser should not own compatible app-scoped actions")
 
     monkeypatch.setattr(
-        "apps.shell.yachiyo_agent.daily_desktop.daily_desktop_entrypoint_tool_requests",
+        "apps.shell.agent.runtime.desktop_intents.daily_desktop_entrypoint_tool_requests",
         fail_legacy,
     )
 

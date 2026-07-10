@@ -553,10 +553,6 @@ def daily_desktop_entrypoint_requests(
     metadata: Mapping[str, Any] | None = None,
     allowed_tools: Sequence[str] | None = None,
 ) -> list[dict[str, Any]]:
-    from apps.shell.agent.runtime.desktop_intents import (
-        daily_desktop_entrypoint_tool_requests,
-    )
-
     allowed = daily_desktop_allowed_tools(allowed_tools)
     planner_requests = _planner_owned_legacy_compatible_entrypoint_requests(
         str(text or ""),
@@ -565,6 +561,10 @@ def daily_desktop_entrypoint_requests(
     )
     if planner_requests:
         return planner_requests
+    from apps.shell.agent.runtime.desktop_intents import (
+        daily_desktop_entrypoint_tool_requests,
+    )
+
     return daily_desktop_entrypoint_tool_requests(
         str(text or ""),
         allowed,
