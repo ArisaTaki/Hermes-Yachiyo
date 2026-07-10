@@ -334,7 +334,32 @@ class IsolatedDesktopProviderSessionManager:
                     timeout_seconds=timeout_seconds,
                     manifest_path=manifest_path,
                 )
-            env = _runtime_env_from_launch(_merge_manifest_launch(manifest, launch))
+            merged_launch = _merge_manifest_launch(manifest, launch)
+            release_blockers = (
+                _managed_external_provider_release_launch_blockers(
+                    manifest,
+                    launch,
+                    merged_launch,
+                )
+                if requires_real_virtual_desktop_backend
+                else []
+            )
+            if release_blockers:
+                _terminate_process(process)
+                return _managed_external_provider_start_failed_status(
+                    failure_request,
+                    RuntimeError(
+                        "managed desktop provider failed release startup validation"
+                    ),
+                    repo_root=self._repo_root,
+                    manifest=manifest,
+                    command=command,
+                    start_cwd=start_cwd,
+                    timeout_seconds=timeout_seconds,
+                    manifest_path=manifest_path,
+                    blocking_conditions=release_blockers,
+                )
+            env = _runtime_env_from_launch(merged_launch)
             self._process = process
             self._command = command
             self._env = env
@@ -863,6 +888,88 @@ def _merge_manifest_launch(
     if launch_payload.get("url") and "status_url" not in launch_payload:
         payload.pop("status_url", None)
     return payload
+
+
+def _managed_external_provider_release_launch_blockers(
+    manifest: dict[str, Any],
+    launch: dict[str, Any],
+    merged_launch: dict[str, Any],
+) -> list[str]:
+    manifest_payload = _provider_runtime_payload(manifest)
+    launch_payload = _provider_runtime_payload(launch)
+    blockers: list[str] = []
+    if not str(
+        merged_launch.get("execute_url")
+        or merged_launch.get("url")
+        or merged_launch.get("endpoint_origin")
+        or ""
+    ).strip():
+        blockers.append("managed_external_provider_launch_endpoint_missing")
+    if not str(merged_launch.get("provider_id") or "").strip():
+        blockers.append("managed_external_provider_launch_provider_id_missing")
+    provider_kind = str(merged_launch.get("provider_kind") or "").strip()
+    if provider_kind.lower().replace("-", "_") != "sandbox_desktop":
+        blockers.append("managed_external_provider_launch_provider_kind_invalid")
+    mismatched_fields = [
+        field
+        for field in (
+            "provider_id",
+            "provider_kind",
+            "desktop_session_kind",
+            "desktop_session_isolated",
+            "foreground_takeover_required",
+            "desktop_backend_kind",
+            "desktop_backend_is_loopback",
+            "desktop_backend_ready_for_public_release",
+            "requires_real_virtual_desktop_backend",
+        )
+        if _provider_launch_field_conflicts(
+            manifest_payload,
+            launch_payload,
+            field,
+        )
+    ]
+    if mismatched_fields:
+        blockers.append("managed_external_provider_launch_manifest_mismatch")
+        blockers.extend(
+            f"managed_external_provider_launch_{field}_mismatch"
+            for field in mismatched_fields
+        )
+    contract_source = {
+        **merged_launch,
+        "configured": True,
+        "available": True,
+        "adapter_ready": True,
+    }
+    contract = virtual_desktop_provider_contract_evidence(
+        contract_source,
+        required_tools=OHA_DESKTOP_AGENT_RELEASE_PROVIDER_TOOLS,
+    )
+    blockers.extend(_string_list(contract.get("blocking_conditions")))
+    return _unique_strings(blockers)
+
+
+def _provider_launch_field_conflicts(
+    manifest: dict[str, Any],
+    launch: dict[str, Any],
+    field: str,
+) -> bool:
+    if field not in manifest or field not in launch:
+        return False
+    manifest_value = manifest.get(field)
+    launch_value = launch.get(field)
+    if manifest_value in (None, "", [], {}) or launch_value in (
+        None,
+        "",
+        [],
+        {},
+    ):
+        return False
+    if isinstance(manifest_value, bool) or isinstance(launch_value, bool):
+        return _optional_bool(manifest_value) != _optional_bool(launch_value)
+    return str(manifest_value).strip().lower().replace("-", "_") != str(
+        launch_value
+    ).strip().lower().replace("-", "_")
 
 
 def _provider_runtime_payload(config: dict[str, Any]) -> dict[str, Any]:
@@ -1709,6 +1816,7 @@ def _managed_external_provider_start_failed_status(
     command: list[str] | None = None,
     start_cwd: Path | None = None,
     timeout_seconds: float = 0.0,
+    blocking_conditions: list[str] | None = None,
 ) -> dict[str, Any]:
     manifest_payload = _provider_runtime_payload(manifest or {})
     provider_manifest_evidence = _provider_manifest_evidence_for_manifest(
@@ -1743,7 +1851,12 @@ def _managed_external_provider_start_failed_status(
         or "managed-external-desktop"
     ).strip()
     source["provider_id"] = provider_id
-    blockers = _string_list(source.get("blocking_conditions"))
+    blockers = _unique_strings(
+        [
+            *_string_list(source.get("blocking_conditions")),
+            *_string_list(blocking_conditions),
+        ]
+    )
     for blocker in (
         "managed_external_provider_start_failed",
         "configured_virtual_desktop_provider_start_failed",
@@ -2059,6 +2172,18 @@ def _string_list(value: Any) -> list[str]:
     else:
         raw = []
     return [str(item or "").strip() for item in raw if str(item or "").strip()]
+
+
+def _unique_strings(values: list[str]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for value in values:
+        item = str(value or "").strip()
+        if not item or item in seen:
+            continue
+        seen.add(item)
+        result.append(item)
+    return result
 
 
 _SESSION_MANAGER = IsolatedDesktopProviderSessionManager()

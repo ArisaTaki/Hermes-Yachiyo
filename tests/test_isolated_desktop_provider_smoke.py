@@ -241,6 +241,7 @@ def test_isolated_desktop_provider_smoke_can_start_managed_configured_provider(
     monkeypatch,
 ) -> None:
     state = {"started": False, "stopped": False}
+    start_requests: list[dict[str, Any]] = []
 
     class FakeRegistry:
         def execute_if_routed(
@@ -303,7 +304,8 @@ def test_isolated_desktop_provider_smoke_can_start_managed_configured_provider(
     monkeypatch.setattr(
         smoke,
         "start_isolated_desktop_provider_session",
-        lambda request=None: state.update(started=True)
+        lambda request=None: start_requests.append(dict(request or {}))
+        or state.update(started=True)
         or {
             "ok": True,
             "started": True,
@@ -327,6 +329,12 @@ def test_isolated_desktop_provider_smoke_can_start_managed_configured_provider(
     assert evidence["desktop_backend_ready_for_public_release"] is True
     assert evidence["provider_contract"]["ok"] is True
     assert evidence["provider_conformance"]["public_release_ready"] is True
+    assert start_requests == [
+        {
+            "tools": list(smoke.SMOKE_TOOLS),
+            "requires_real_virtual_desktop_backend": True,
+        }
+    ]
 
 
 def test_isolated_desktop_provider_smoke_reports_managed_start_failure(
@@ -393,6 +401,26 @@ def test_isolated_desktop_provider_smoke_reports_managed_start_failure(
             "reason": "managed_external_provider_start_failed",
             "error": "managed desktop provider launch failed",
             "provider_id": "managed-external-desktop",
+            "desktop_session_kind": "virtual_desktop",
+            "desktop_session_isolated": True,
+            "foreground_takeover_required": False,
+            "desktop_backend_kind": "loopback_session_harness",
+            "desktop_backend_is_loopback": True,
+            "desktop_backend_ready_for_public_release": False,
+            "requires_real_virtual_desktop_backend": True,
+            "provider_status": {
+                "configured": True,
+                "available": False,
+                "adapter_ready": False,
+                "status": "start_failed",
+                "desktop_session_kind": "virtual_desktop",
+                "desktop_session_isolated": True,
+                "foreground_takeover_required": False,
+                "desktop_backend_kind": "loopback_session_harness",
+                "desktop_backend_is_loopback": True,
+                "desktop_backend_ready_for_public_release": False,
+                "requires_real_virtual_desktop_backend": True,
+            },
             "provider_contract": provider_contract,
             "provider_conformance": provider_conformance,
         },
@@ -404,5 +432,17 @@ def test_isolated_desktop_provider_smoke_reports_managed_start_failure(
     assert evidence["reason"] == "managed_external_provider_start_failed"
     assert evidence["managed_provider_started"] is False
     assert evidence["managed_provider_session"]["status"] == "start_failed"
+    assert evidence["status"]["status"] == "start_failed"
+    assert evidence["status"]["configured"] is True
+    assert evidence["desktop_session_kind"] == "virtual_desktop"
+    assert evidence["desktop_session_isolated"] is True
+    assert evidence["foreground_takeover_required"] is False
+    assert evidence["desktop_backend_kind"] == "loopback_session_harness"
+    assert evidence["desktop_backend_is_loopback"] is True
+    assert evidence["desktop_backend_ready_for_public_release"] is False
+    assert evidence["requires_real_virtual_desktop_backend"] is True
+    assert evidence["checks"]["provider_configured"] is True
+    assert evidence["checks"]["provider_available"] is False
+    assert evidence["checks"]["provider_backend_ready_for_public_release"] is False
     assert evidence["provider_contract"] == provider_contract
     assert evidence["provider_conformance"] == provider_conformance

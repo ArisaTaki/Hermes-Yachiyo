@@ -412,6 +412,125 @@ def test_start_isolated_provider_session_surfaces_managed_external_start_failure
     assert "OHA_YACHIYO_DESKTOP_PROVIDER_URL" not in session_module.os.environ
 
 
+def test_managed_external_release_start_rejects_unattested_launch(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    for key in session_module._ENV_KEYS:
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.delenv("OHA_YACHIYO_DESKTOP_PROVIDER_MANIFEST", raising=False)
+    monkeypatch.setenv(
+        "OHA_YACHIYO_DESKTOP_PROVIDER_START_COMMAND",
+        "python -m incomplete_virtual_desktop_provider",
+    )
+    monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_START_CWD", str(tmp_path))
+    processes: list[Any] = []
+
+    class FakeProcess:
+        pid = 5454
+
+        def __init__(self) -> None:
+            self.stdout = io.StringIO(
+                json.dumps(
+                    {
+                        "ok": True,
+                        "url": "http://127.0.0.1:29097",
+                        "execute_url": "http://127.0.0.1:29097/tools/execute",
+                    }
+                )
+                + "\n"
+            )
+            self.stderr = io.StringIO("")
+            self.terminated = False
+
+        def poll(self) -> int | None:
+            return 0 if self.terminated else None
+
+        def terminate(self) -> None:
+            self.terminated = True
+
+        def wait(self, timeout: float | None = None) -> int:
+            self.terminated = True
+            return 0
+
+        def kill(self) -> None:
+            self.terminated = True
+
+    def fake_popen(command: list[str], **_: Any) -> FakeProcess:
+        process = FakeProcess()
+        processes.append(process)
+        return process
+
+    monkeypatch.setattr(session_module.subprocess, "Popen", fake_popen)
+    manager = IsolatedDesktopProviderSessionManager(repo_root=Path("/repo"))
+    monkeypatch.setattr(
+        manager,
+        "status",
+        lambda probe_health=True: {
+            "ok": True,
+            "status": "stopped",
+            "running": False,
+        },
+    )
+
+    started = manager.start_managed_external(
+        tools=list(OHA_DESKTOP_AGENT_RELEASE_PROVIDER_TOOLS),
+        requires_real_virtual_desktop_backend=True,
+    )
+
+    assert processes[0].terminated is True
+    assert started["ok"] is False
+    assert started["status"] == "start_failed"
+    assert "managed_external_provider_launch_provider_id_missing" in started[
+        "blocking_conditions"
+    ]
+    assert "managed_external_provider_launch_provider_kind_invalid" in started[
+        "blocking_conditions"
+    ]
+    assert "desktop_backend_kind_missing" in started["blocking_conditions"]
+    assert "desktop_backend_not_release_ready" in started["blocking_conditions"]
+    assert "real_virtual_desktop_backend_required" in started["blocking_conditions"]
+    assert started["provider_conformance"]["public_release_ready"] is False
+    assert "OHA_YACHIYO_DESKTOP_PROVIDER_URL" not in session_module.os.environ
+
+
+def test_managed_external_release_launch_rejects_manifest_mismatch() -> None:
+    manifest = {
+        "provider_id": "release-provider",
+        "provider_kind": "sandbox_desktop",
+        "supported_tools": list(OHA_DESKTOP_AGENT_RELEASE_PROVIDER_TOOLS),
+        "keyboard_mouse_capture_supported": True,
+        "desktop_session_kind": "virtual_desktop",
+        "desktop_session_isolated": True,
+        "foreground_takeover_required": False,
+        "desktop_backend_kind": "vnc_virtual_desktop",
+        "desktop_backend_is_loopback": False,
+        "desktop_backend_ready_for_public_release": True,
+        "requires_real_virtual_desktop_backend": False,
+    }
+    launch = {
+        "ok": True,
+        "provider_id": "different-provider",
+        "provider_kind": "sandbox_desktop",
+        "url": "http://127.0.0.1:29097",
+        "desktop_backend_is_loopback": True,
+    }
+    merged = session_module._merge_manifest_launch(manifest, launch)
+
+    blockers = session_module._managed_external_provider_release_launch_blockers(
+        manifest,
+        launch,
+        merged,
+    )
+
+    assert "managed_external_provider_launch_manifest_mismatch" in blockers
+    assert "managed_external_provider_launch_provider_id_mismatch" in blockers
+    assert "managed_external_provider_launch_desktop_backend_is_loopback_mismatch" in (
+        blockers
+    )
+    assert "loopback_desktop_backend" in blockers
+
+
 def test_start_isolated_provider_session_requires_real_virtual_backend(
     monkeypatch,
 ) -> None:

@@ -111,10 +111,23 @@ def _run_configured_provider_smoke() -> dict[str, Any]:
     if _configured_provider_needs_start(status) and _managed_provider_start_configured():
         try:
             managed_session = start_isolated_desktop_provider_session(
-                {"tools": list(SMOKE_TOOLS)}
+                {
+                    "tools": list(SMOKE_TOOLS),
+                    "requires_real_virtual_desktop_backend": True,
+                }
             )
             stop_managed_session = bool(managed_session.get("started"))
             if managed_session.get("ok") is False:
+                failed_provider_status = managed_session.get("provider_status")
+                status = {
+                    **dict(status),
+                    **(
+                        dict(failed_provider_status)
+                        if isinstance(failed_provider_status, Mapping)
+                        else {}
+                    ),
+                    **managed_session,
+                }
                 return _provider_status_only_report(
                     status,
                     reason=str(
