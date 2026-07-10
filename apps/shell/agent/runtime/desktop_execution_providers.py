@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from collections.abc import Iterable, Mapping
@@ -464,6 +465,10 @@ class HttpDesktopExecutionProviderAdapter:
         broker: Any,
         approved: bool = False,
     ) -> dict[str, Any]:
+        provider_request_id = _desktop_provider_request_id(
+            tool_name,
+            tool_request,
+        )
         request_payload = {
             "tool": tool_name,
             "input": dict(payload),
@@ -475,10 +480,12 @@ class HttpDesktopExecutionProviderAdapter:
                 "provider_id": self.provider_id,
             },
         }
+        if provider_request_id:
+            request_payload["request_id"] = provider_request_id
         request = Request(
             self.execute_url,
             data=json.dumps(request_payload, ensure_ascii=False).encode("utf-8"),
-            headers=self._headers(),
+            headers=self._headers(provider_request_id=provider_request_id),
             method="POST",
         )
         try:
@@ -488,9 +495,17 @@ class HttpDesktopExecutionProviderAdapter:
                 )
                 raw_body = response.read()
         except (OSError, urlerror.URLError, TimeoutError) as exc:
-            return self._transport_failure(tool_name, exc)
+            return self._transport_failure(
+                tool_name,
+                exc,
+                provider_request_id=provider_request_id,
+            )
         except Exception as exc:
-            return self._transport_failure(tool_name, exc)
+            return self._transport_failure(
+                tool_name,
+                exc,
+                provider_request_id=provider_request_id,
+            )
 
         try:
             decoded = (
@@ -500,7 +515,12 @@ class HttpDesktopExecutionProviderAdapter:
             )
             response_payload = json.loads(decoded) if decoded.strip() else {}
         except (TypeError, ValueError) as exc:
-            return self._transport_failure(tool_name, exc, status_code=status_code)
+            return self._transport_failure(
+                tool_name,
+                exc,
+                status_code=status_code,
+                provider_request_id=provider_request_id,
+            )
 
         result = (
             response_payload.get("result")
@@ -513,9 +533,14 @@ class HttpDesktopExecutionProviderAdapter:
         tool_result = dict(result)
         tool_result.setdefault("ok", 200 <= status_code < 400 if status_code else True)
         tool_result.setdefault("tool", tool_name)
+        if provider_request_id:
+            tool_result.setdefault("provider_request_id", provider_request_id)
         tool_result.setdefault(
             "desktop_execution_provider_transport",
-            self._transport_metadata(status_code=status_code),
+            self._transport_metadata(
+                status_code=status_code,
+                provider_request_id=provider_request_id,
+            ),
         )
         return tool_result
 
@@ -688,7 +713,7 @@ class HttpDesktopExecutionProviderAdapter:
             **backend_status,
         )
 
-    def _headers(self) -> dict[str, str]:
+    def _headers(self, *, provider_request_id: str = "") -> dict[str, str]:
         headers = {
             "Content-Type": "application/json",
             "Accept": "application/json",
@@ -696,6 +721,8 @@ class HttpDesktopExecutionProviderAdapter:
         }
         if self.token:
             headers["Authorization"] = f"Bearer {self.token}"
+        if provider_request_id:
+            headers["Idempotency-Key"] = provider_request_id
         return headers
 
     def configured_status(self, *, probe_health: bool = False) -> dict[str, Any]:
@@ -820,6 +847,7 @@ class HttpDesktopExecutionProviderAdapter:
         exc: Exception,
         *,
         status_code: int = 0,
+        provider_request_id: str = "",
     ) -> dict[str, Any]:
         return {
             "ok": False,
@@ -835,6 +863,7 @@ class HttpDesktopExecutionProviderAdapter:
             "desktop_execution_provider_transport": self._transport_metadata(
                 status_code=status_code,
                 error=redact_api_error_text(exc),
+                provider_request_id=provider_request_id,
             ),
             "hint": (
                 "Check that the sandbox/headless desktop provider is running on a "
@@ -847,6 +876,7 @@ class HttpDesktopExecutionProviderAdapter:
         *,
         status_code: int = 0,
         error: str = "",
+        provider_request_id: str = "",
     ) -> dict[str, Any]:
         parsed = urlparse(self.execute_url)
         payload: dict[str, Any] = {
@@ -859,6 +889,8 @@ class HttpDesktopExecutionProviderAdapter:
             payload["status_code"] = status_code
         if error:
             payload["error"] = error
+        if provider_request_id:
+            payload["request_id"] = provider_request_id
         return payload
 
     def _health_payload(
@@ -1757,6 +1789,50 @@ def _route_provider_kind(route: Mapping[str, Any]) -> str:
 
 def _clean_provider_kind(value: Any) -> str:
     return str(value or "").strip().lower().replace("-", "_")
+
+
+def _desktop_provider_request_id(
+    tool_name: str,
+    tool_request: Mapping[str, Any],
+) -> str:
+    identity = {
+        key: str(tool_request.get(key) or "").strip()
+        for key in (
+            "provider_request_id",
+            "tool_call_id",
+            "replan_recovery_action_id",
+            "action_id",
+            "request_id",
+        )
+        if str(tool_request.get(key) or "").strip()
+    }
+    step_id = str(tool_request.get("step_id") or "").strip()
+    step_scope = {
+        key: str(tool_request.get(key) or "").strip()
+        for key in (
+            "run_id",
+            "task_id",
+            "client_task_id",
+            "plan_id",
+            "decision_id",
+        )
+        if str(tool_request.get(key) or "").strip()
+    }
+    if not identity and step_id and step_scope:
+        identity = {**step_scope, "step_id": step_id}
+    if not identity:
+        return ""
+    canonical = json.dumps(
+        {
+            "tool": str(tool_name or "").strip(),
+            "identity": identity,
+        },
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:32]
+    return f"oha-desktop-{digest}"
 
 
 def _http_desktop_execution_provider_adapter_from_env(

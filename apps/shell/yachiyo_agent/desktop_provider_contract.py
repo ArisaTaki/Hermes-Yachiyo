@@ -95,6 +95,7 @@ def virtual_desktop_provider_manifest_template(
             "isolated_desktop",
             "virtual_desktop",
             "sandbox_desktop_session",
+            "idempotent_tool_requests",
             "permission_diagnostics",
         ],
         "foreground_mutation_supported": True,

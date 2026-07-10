@@ -153,6 +153,7 @@ def test_virtual_desktop_provider_manifest_template_matches_release_contract() -
     assert template["authentication"] == {
         "token_env": "OHA_YACHIYO_DESKTOP_PROVIDER_TOKEN"
     }
+    assert "idempotent_tool_requests" in template["capabilities"]
 
     evidence = virtual_desktop_provider_contract_evidence(
         {

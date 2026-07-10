@@ -40,6 +40,7 @@ class FakeResponse:
 
 def _sandbox_tool_request() -> dict[str, Any]:
     return {
+        "request_id": "runtime-request-1",
         "tool": "desktop.safe_type_text",
         "input": {"text": "hello"},
         "desktop_execution_route": {
@@ -108,6 +109,29 @@ def test_provider_manifest_token_env_configures_http_adapter(
     assert env["OHA_YACHIYO_DESKTOP_PROVIDER_TOKEN"] == "manifest-token"
 
 
+def test_desktop_provider_request_id_is_stable_for_runtime_identity() -> None:
+    first = provider_module._desktop_provider_request_id(
+        "desktop.safe_type_text",
+        {"request_id": "runtime-request-1"},
+    )
+    repeated = provider_module._desktop_provider_request_id(
+        "desktop.safe_type_text",
+        {"request_id": "runtime-request-1"},
+    )
+    different = provider_module._desktop_provider_request_id(
+        "desktop.safe_type_text",
+        {"request_id": "runtime-request-2"},
+    )
+
+    assert first.startswith("oha-desktop-")
+    assert repeated == first
+    assert different != first
+    assert provider_module._desktop_provider_request_id(
+        "desktop.safe_type_text",
+        {},
+    ) == ""
+
+
 def test_desktop_provider_registry_from_env_routes_tool_to_local_http_provider() -> None:
     requests: list[dict[str, Any]] = []
 
@@ -150,6 +174,15 @@ def test_desktop_provider_registry_from_env_routes_tool_to_local_http_provider()
     assert result["desktop_execution_provider_transport"]["endpoint_path"] == "/tools/execute"
     assert requests[0]["url"] == "http://127.0.0.1:19091/tools/execute"
     assert requests[0]["headers"]["Authorization"] == "Bearer secret-token"
+    request_headers = {
+        str(key).lower(): value for key, value in requests[0]["headers"].items()
+    }
+    provider_request_id = requests[0]["payload"]["request_id"]
+    assert request_headers["idempotency-key"] == provider_request_id
+    assert result["provider_request_id"] == provider_request_id
+    assert result["desktop_execution_provider_transport"]["request_id"] == (
+        provider_request_id
+    )
     assert requests[0]["timeout"] == 3.5
     assert requests[0]["payload"]["tool"] == "desktop.safe_type_text"
     assert requests[0]["payload"]["approved"] is True
@@ -533,6 +566,9 @@ def test_desktop_provider_transport_failure_stays_structured() -> None:
     assert result["blocked_by_desktop_execution_provider"] is True
     assert result["desktop_execution_provider_routed"] is True
     assert result["desktop_execution_provider"]["adapter_registered"] is True
+    assert result["desktop_execution_provider_transport"]["request_id"].startswith(
+        "oha-desktop-"
+    )
 
 
 def test_sandbox_desktop_provider_status_reads_runtime_env(monkeypatch) -> None:

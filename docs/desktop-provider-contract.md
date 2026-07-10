@@ -131,6 +131,7 @@ Studio 和 diagnostics 的公共 `env` 投影不会返回 token。
 
 ```json
 {
+  "request_id": "oha-desktop-<stable-id>",
   "tool": "desktop.list_apps",
   "input": {"query": "Apple Music", "limit": 20},
   "approved": true,
@@ -142,6 +143,12 @@ Studio 和 diagnostics 的公共 `env` 投影不会返回 token。
   }
 }
 ```
+
+当 Runtime tool request 已有 `request_id`、`tool_call_id`、replan action id，或
+`plan_id + step_id` 时，Oha-Yachiyo 会生成稳定的 provider `request_id`，同时发送
+同值的 `Idempotency-Key` header。Provider 应在自己的 desktop session 内按该 id
+缓存已完成结果；相同 id 的重试不得再次执行点击、输入、快捷键或提交动作。若同一
+id 收到不一致 payload，Provider 应返回冲突错误而不是执行第二次。
 
 返回值可以是 tool result object，或 `{ "result": { ... } }`。发布 smoke 会检查每个 result：
 
