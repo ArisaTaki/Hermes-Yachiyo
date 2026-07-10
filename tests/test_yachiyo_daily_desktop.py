@@ -2716,7 +2716,10 @@ def test_daily_desktop_entrypoint_routes_polite_app_open_questions_to_desktop_to
         assert daily_desktop_user_metadata(requests)["daily_desktop_tool"] == "app.open"
 
 
-def test_daily_desktop_entrypoint_routes_finder_quick_look_to_app_safe_shortcut() -> None:
+def test_daily_desktop_entrypoint_routes_finder_quick_look_to_app_safe_shortcut(
+    monkeypatch,
+) -> None:
+    _forbid_legacy_daily_parser(monkeypatch, "Finder quick look must be planner-owned")
     cases = (
         ("打开Finder然后按空格", "app.open_and_safe_shortcut"),
         ("Finder按空格", "app.focus_and_safe_shortcut"),
@@ -2736,7 +2739,10 @@ def test_daily_desktop_entrypoint_routes_finder_quick_look_to_app_safe_shortcut(
         assert daily_desktop_user_metadata(requests)["daily_desktop_tool"] == tool_name
 
 
-def test_daily_desktop_entrypoint_routes_finder_new_folder_to_app_safe_shortcut() -> None:
+def test_daily_desktop_entrypoint_routes_finder_new_folder_to_app_safe_shortcut(
+    monkeypatch,
+) -> None:
+    _forbid_legacy_daily_parser(monkeypatch, "Finder new folder must be planner-owned")
     cases = (
         ("打开访达新建文件夹", "app.open_and_safe_shortcut"),
         ("打开 Finder 新建文件夹", "app.open_and_safe_shortcut"),
@@ -2757,11 +2763,13 @@ def test_daily_desktop_entrypoint_routes_finder_new_folder_to_app_safe_shortcut(
         ]
         assert daily_desktop_user_metadata(requests)["daily_desktop_tool"] == tool_name
 
+    monkeypatch.undo()
     assert daily_desktop_entrypoint_requests("Chrome 新建文件夹") == []
     assert daily_desktop_entrypoint_requests("新建文件夹") == []
 
 
-def test_daily_desktop_entrypoint_routes_finder_item_safe_shortcuts() -> None:
+def test_daily_desktop_entrypoint_routes_finder_item_safe_shortcuts(monkeypatch) -> None:
+    _forbid_legacy_daily_parser(monkeypatch, "Finder item actions must be planner-owned")
     cases = (
         ("打开 Finder 重命名选中文件", "app.open_and_safe_shortcut", "rename_selected"),
         ("Finder 重命名选中文件", "app.focus_and_safe_shortcut", "rename_selected"),
@@ -2790,12 +2798,18 @@ def test_daily_desktop_entrypoint_routes_finder_item_safe_shortcuts() -> None:
         ]
         assert daily_desktop_user_metadata(requests)["daily_desktop_tool"] == tool_name
 
+    monkeypatch.undo()
     assert daily_desktop_entrypoint_requests("重命名当前选中的文件") == []
     assert daily_desktop_entrypoint_requests("Finder 删除选中文件") == []
     assert daily_desktop_entrypoint_requests("Finder 把选中文件移到废纸篓") == []
+    assert daily_desktop_entrypoint_requests("Finder 移动选中文件到桌面") == []
+    assert daily_desktop_entrypoint_requests("Finder move selected file to Desktop") == []
 
 
-def test_daily_desktop_entrypoint_routes_finder_special_locations_to_app_safe_shortcuts() -> None:
+def test_daily_desktop_entrypoint_routes_finder_special_locations_to_app_safe_shortcuts(
+    monkeypatch,
+) -> None:
+    _forbid_legacy_daily_parser(monkeypatch, "Finder locations must be planner-owned")
     cases = (
         ("打开隔空投送", "app.open_and_safe_shortcut", "finder_airdrop"),
         ("打开 AirDrop", "app.open_and_safe_shortcut", "finder_airdrop"),
@@ -2817,6 +2831,7 @@ def test_daily_desktop_entrypoint_routes_finder_special_locations_to_app_safe_sh
             }
         ]
 
+    monkeypatch.undo()
     assert daily_desktop_entrypoint_requests("打开网络设置") == [
         {
             "protocol": "json_fallback",

@@ -2204,6 +2204,22 @@ class TaskIntentRouter:
         scoped_operation = _app_scoped_safe_operation_hint(text)
         if scoped_operation and not _file_duplicate_hint(text):
             return _empty_intent("file_organization", text)
+        scoped_shortcut = safe_shortcut_hint(text)
+        if (
+            str((scoped_shortcut or {}).get("action") or "").strip()
+            in {
+                "copy",
+                "finder_get_info",
+                "finder_quick_look",
+                "new_folder",
+                "parent_folder",
+                "rename_selected",
+            }
+            and _is_finder_app_name(
+                _app_scoped_safe_shortcut_app_name_hint(text, scoped_shortcut)
+            )
+        ):
+            return _empty_intent("file_organization", text)
         if _explicit_app_open_request(text) and _app_capability_discovery_hint(text):
             return _empty_intent("file_organization", text)
         if _looks_like_external_docs_lookup(text):

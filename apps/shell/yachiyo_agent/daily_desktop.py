@@ -1136,7 +1136,10 @@ def _legacy_finder_action_shape(text: str, request: dict[str, Any]) -> dict[str,
     payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
     if str(payload.get("app_name") or "").strip() != "Finder":
         return request
-    if str(payload.get("action") or "").strip() not in _LEGACY_COMPATIBLE_FINDER_ACTIONS:
+    if (
+        str(payload.get("action") or "").strip()
+        not in _LEGACY_FINDER_FOCUS_SHAPE_ACTIONS
+    ):
         return request
     if str(request.get("tool") or "").strip() != "app.open_and_safe_shortcut":
         return request
@@ -1217,8 +1220,13 @@ _LEGACY_COMPATIBLE_APP_ACTIONS = frozenset(
         "copy",
         "escape",
         "find",
+        "finder_airdrop",
         "finder_get_info",
+        "finder_network",
+        "finder_quick_look",
+        "finder_recents",
         "focus_address_bar",
+        "new_folder",
         "new_event",
         "new_message",
         "new_note",
@@ -1243,6 +1251,20 @@ _LEGACY_COMPATIBLE_CREATION_ACTION_APPS = {
 }
 
 _LEGACY_COMPATIBLE_FINDER_ACTIONS = frozenset(
+    {
+        "copy",
+        "finder_airdrop",
+        "finder_get_info",
+        "finder_network",
+        "finder_quick_look",
+        "finder_recents",
+        "new_folder",
+        "parent_folder",
+        "rename_selected",
+    }
+)
+
+_LEGACY_FINDER_FOCUS_SHAPE_ACTIONS = frozenset(
     {"copy", "finder_get_info", "parent_folder", "rename_selected"}
 )
 
