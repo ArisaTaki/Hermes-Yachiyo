@@ -66,6 +66,7 @@ export type YachiyoStudioDesktopProviderSessionSnapshot = {
   stopped?: boolean;
   pid?: number | null;
   provider_id?: string;
+  provider_manifest?: string;
   url?: string;
   command?: string[];
   env?: Record<string, string>;

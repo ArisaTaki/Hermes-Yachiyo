@@ -1,5 +1,10 @@
 import { type FormEvent, useEffect, useMemo, useState } from 'react';
 
+import { UiIcon } from '../../../components/UiIcon';
+import {
+  chooseDesktopProviderManifest,
+  hasDesktopProviderManifestPicker,
+} from '../../../lib/bridge';
 import {
   planYachiyoStudioExecution,
   planYachiyoStudioTask,
@@ -26,6 +31,8 @@ const emptyCatalog: ToolCatalogSnapshot = {
   tools: [],
   capabilities: {},
 };
+
+const DESKTOP_PROVIDER_MANIFEST_STORAGE_KEY = 'oha-yachiyo.desktop-provider-manifest';
 
 type AgentStudioToolsTabProps = {
   catalog: ToolCatalogSnapshot | null;
@@ -60,6 +67,10 @@ export function AgentStudioToolsTab({
   const [providerSessionBusy, setProviderSessionBusy] = useState<'start' | 'stop' | ''>('');
   const [providerSessionError, setProviderSessionError] = useState('');
   const [providerSessionResult, setProviderSessionResult] = useState<YachiyoStudioDesktopProviderSessionSnapshot | null>(null);
+  const [providerManifestPath, setProviderManifestPath] = useState(
+    readStoredDesktopProviderManifestPath,
+  );
+  const [providerManifestPicking, setProviderManifestPicking] = useState(false);
   const legacyCleanupCoverage = catalog.legacy_cleanup_coverage || null;
 
   useEffect(() => {
@@ -68,6 +79,15 @@ export function AgentStudioToolsTab({
       tools.some((tool) => tool.tool_name === current) ? current : tools[0]?.tool_name || ''
     ));
   }, [catalog.tools]);
+
+  useEffect(() => {
+    const configuredPath = desktopProviderManifestPathFromCatalog(catalog);
+    if (configuredPath) setProviderManifestPath((current) => current || configuredPath);
+  }, [catalog.controlled_provider_diagnostics]);
+
+  useEffect(() => {
+    storeDesktopProviderManifestPath(providerManifestPath);
+  }, [providerManifestPath]);
 
   const capabilityOptions = useMemo(() => {
     const ids = new Set<string>();
@@ -186,13 +206,35 @@ export function AgentStudioToolsTab({
     setProviderSessionBusy('start');
     setProviderSessionError('');
     try {
-      const result = await startYachiyoStudioDesktopProviderSession();
+      const providerManifest = providerManifestPath.trim();
+      const result = await startYachiyoStudioDesktopProviderSession(
+        providerManifest
+          ? {
+            provider_manifest: providerManifest,
+            requires_real_virtual_desktop_backend: true,
+          }
+          : {},
+      );
       setProviderSessionResult(result);
       onReload();
     } catch (error) {
       setProviderSessionError(errorMessage(error));
     } finally {
       setProviderSessionBusy('');
+    }
+  }
+
+  async function handleProviderManifestChoose() {
+    if (providerManifestPicking || providerSessionBusy) return;
+    setProviderManifestPicking(true);
+    setProviderSessionError('');
+    try {
+      const selectedPath = await chooseDesktopProviderManifest();
+      if (selectedPath) setProviderManifestPath(selectedPath);
+    } catch (error) {
+      setProviderSessionError(errorMessage(error));
+    } finally {
+      setProviderManifestPicking(false);
     }
   }
 
@@ -274,6 +316,11 @@ export function AgentStudioToolsTab({
           catalog={catalog}
           error={providerSessionError}
           latestResult={providerSessionResult}
+          manifestPath={providerManifestPath}
+          manifestPickerAvailable={hasDesktopProviderManifestPicker()}
+          manifestPicking={providerManifestPicking}
+          onChooseManifest={() => void handleProviderManifestChoose()}
+          onManifestPathChange={setProviderManifestPath}
           onStart={() => void handleProviderSessionStart()}
           onStop={() => void handleProviderSessionStop()}
         />
@@ -329,6 +376,11 @@ function DesktopProviderSessionPanel({
   catalog,
   error,
   latestResult,
+  manifestPath,
+  manifestPickerAvailable,
+  manifestPicking,
+  onChooseManifest,
+  onManifestPathChange,
   onStart,
   onStop,
 }: {
@@ -336,6 +388,11 @@ function DesktopProviderSessionPanel({
   catalog: ToolCatalogSnapshot;
   error: string;
   latestResult: YachiyoStudioDesktopProviderSessionSnapshot | null;
+  manifestPath: string;
+  manifestPickerAvailable: boolean;
+  manifestPicking: boolean;
+  onChooseManifest: () => void;
+  onManifestPathChange: (value: string) => void;
   onStart: () => void;
   onStop: () => void;
 }) {
@@ -358,6 +415,13 @@ function DesktopProviderSessionPanel({
   const providerContractVersion = stringValue(providerContract.contract_version);
   const providerContractBlockers = stringArray(providerContract.blocking_conditions);
   const providerContractMissingTools = stringArray(providerContract.missing_required_tools);
+  const providerConformance = Object.keys(objectRecord(session.provider_conformance)).length
+    ? objectRecord(session.provider_conformance)
+    : objectRecord(diagnostics.provider_conformance);
+  const providerConformanceReady = optionalBoolean(providerConformance.public_release_ready);
+  const providerConformanceBlockers = stringArray(providerConformance.release_blocking_conditions);
+  const providerConformanceMissingTools = stringArray(providerConformance.missing_required_tools);
+  const effectiveManifestPath = stringValue(session.provider_manifest) || manifestPath.trim();
   return (
     <section
       className="studio-tool-inspector-section"
@@ -374,6 +438,10 @@ function DesktopProviderSessionPanel({
       data-provider-session-contract-version={providerContractVersion}
       data-provider-session-contract-blockers={providerContractBlockers.join(',')}
       data-provider-session-contract-missing-tools={providerContractMissingTools.join(',')}
+      data-provider-session-manifest={effectiveManifestPath}
+      data-provider-session-conformance-ready={String(providerConformanceReady ?? '')}
+      data-provider-session-conformance-blockers={providerConformanceBlockers.join(',')}
+      data-provider-session-conformance-missing-tools={providerConformanceMissingTools.join(',')}
       data-testid="studio-desktop-provider-session"
     >
       <div className="studio-tool-inspector-heading">
@@ -433,12 +501,65 @@ function DesktopProviderSessionPanel({
             {toolName}
           </span>
         ))}
+        {providerConformanceReady !== null ? (
+          <span
+            className={providerConformanceReady ? 'studio-tool-permission' : 'studio-tool-permission missing'}
+            data-provider-session-conformance-ready={String(providerConformanceReady)}
+          >
+            {providerConformanceReady ? 'public release ready' : 'public release blocked'}
+          </span>
+        ) : null}
+        {providerConformanceBlockers.map((condition) => (
+          <span
+            className="studio-tool-permission missing"
+            data-provider-session-conformance-blocker={condition}
+            key={`session-provider-conformance-${condition}`}
+          >
+            {runtimeBlockingLabel(condition)}
+          </span>
+        ))}
+        {providerConformanceMissingTools.map((toolName) => (
+          <span
+            className="studio-tool-permission missing"
+            data-provider-session-conformance-missing-tool={toolName}
+            key={`session-provider-conformance-tool-${toolName}`}
+          >
+            {toolName}
+          </span>
+        ))}
         {!providerId && !url && !pid ? (
           <span className="studio-tool-permission missing">isolated provider stopped</span>
         ) : null}
       </div>
       {sessionError ? <div className="notice danger">{sessionError}</div> : null}
       {error ? <div className="notice danger">{error}</div> : null}
+      <div className="studio-provider-manifest-field">
+        <label htmlFor="studio-desktop-provider-manifest">Provider manifest</label>
+        <span className="studio-provider-manifest-control">
+          <input
+            className="hy-input"
+            data-testid="studio-desktop-provider-manifest"
+            disabled={Boolean(busy) || running}
+            id="studio-desktop-provider-manifest"
+            onChange={(event) => onManifestPathChange(event.target.value)}
+            placeholder="/path/to/provider.manifest.json"
+            spellCheck={false}
+            type="text"
+            value={manifestPath}
+          />
+          <button
+            aria-label="选择 Provider Manifest"
+            className="hy-icon-btn"
+            data-testid="studio-desktop-provider-manifest-choose"
+            disabled={!manifestPickerAvailable || manifestPicking || Boolean(busy) || running}
+            onClick={onChooseManifest}
+            title={manifestPickerAvailable ? '选择 Provider Manifest' : '输入 Provider Manifest 路径'}
+            type="button"
+          >
+            <UiIcon name="folder" />
+          </button>
+        </span>
+      </div>
       <div className="studio-planner-actions">
         <button
           type="button"
@@ -446,7 +567,8 @@ function DesktopProviderSessionPanel({
           disabled={Boolean(busy) || running}
           onClick={onStart}
         >
-          {busy === 'start' ? '启动中' : '启动'}
+          <UiIcon name="provider" />
+          <span>{busy === 'start' ? '启动中' : '启动'}</span>
         </button>
         <button
           type="button"
@@ -454,11 +576,44 @@ function DesktopProviderSessionPanel({
           disabled={Boolean(busy) || !running}
           onClick={onStop}
         >
-          {busy === 'stop' ? '停止中' : '停止'}
+          <UiIcon name="stop" />
+          <span>{busy === 'stop' ? '停止中' : '停止'}</span>
         </button>
       </div>
     </section>
   );
+}
+
+function desktopProviderManifestPathFromCatalog(catalog: ToolCatalogSnapshot): string {
+  const diagnostics = objectRecord(catalog.controlled_provider_diagnostics);
+  const readiness = objectRecord(diagnostics.public_release_readiness);
+  const session = objectRecord(diagnostics.session_manager);
+  return stringValue(
+    readiness.provider_manifest
+    || session.provider_manifest
+    || objectRecord(diagnostics.env).OHA_YACHIYO_DESKTOP_PROVIDER_MANIFEST,
+  );
+}
+
+function readStoredDesktopProviderManifestPath(): string {
+  try {
+    return window.localStorage.getItem(DESKTOP_PROVIDER_MANIFEST_STORAGE_KEY) || '';
+  } catch {
+    return '';
+  }
+}
+
+function storeDesktopProviderManifestPath(value: string): void {
+  try {
+    const cleanValue = value.trim();
+    if (cleanValue) {
+      window.localStorage.setItem(DESKTOP_PROVIDER_MANIFEST_STORAGE_KEY, cleanValue);
+    } else {
+      window.localStorage.removeItem(DESKTOP_PROVIDER_MANIFEST_STORAGE_KEY);
+    }
+  } catch {
+    // Local persistence is optional; the manifest remains usable for this session.
+  }
 }
 
 function LegacyCleanupCoveragePanel({

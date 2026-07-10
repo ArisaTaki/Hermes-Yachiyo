@@ -139,6 +139,7 @@ declare global {
       cancelAppUpdateDownload?: () => Promise<{ ok?: boolean; cancelled?: boolean; error?: string }>;
       chooseAvatarImage?: () => Promise<AvatarImageSelection | string | null>;
       chooseChatImages?: () => Promise<ChatImageSelection[]>;
+      chooseDesktopProviderManifest?: () => Promise<string | null>;
       chooseLive2DArchive?: () => Promise<string | null>;
       chooseLive2DModelDirectory?: () => Promise<string | null>;
       chooseTtsVoiceArchive?: () => Promise<string | null>;
@@ -384,6 +385,17 @@ export async function chooseChatImages(): Promise<ChatImageSelection[]> {
 
 export function canChooseChatImages(): boolean {
   return Boolean(window.ohaDesktop?.chooseChatImages);
+}
+
+export async function chooseDesktopProviderManifest(): Promise<string | null> {
+  if (!window.ohaDesktop?.chooseDesktopProviderManifest) {
+    throw new Error('当前环境没有桌面文件选择器入口，请输入 Provider Manifest 路径');
+  }
+  return window.ohaDesktop.chooseDesktopProviderManifest();
+}
+
+export function hasDesktopProviderManifestPicker(): boolean {
+  return Boolean(window.ohaDesktop?.chooseDesktopProviderManifest);
 }
 
 export async function chooseLive2DArchive(): Promise<string | null> {

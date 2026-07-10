@@ -16,6 +16,7 @@ type ChatImageSelection = AvatarImageSelection & { mime_type?: string; size?: nu
 contextBridge.exposeInMainWorld('ohaDesktop', {
   chooseAvatarImage: () => ipcRenderer.invoke('oha:chooseAvatarImage') as Promise<AvatarImageSelection | null>,
   chooseChatImages: () => ipcRenderer.invoke('oha:chooseChatImages') as Promise<ChatImageSelection[]>,
+  chooseDesktopProviderManifest: () => ipcRenderer.invoke('oha:chooseDesktopProviderManifest') as Promise<string | null>,
   chooseLive2DArchive: () => ipcRenderer.invoke('oha:chooseLive2DArchive') as Promise<string | null>,
   chooseLive2DModelDirectory: () => ipcRenderer.invoke('oha:chooseLive2DModelDirectory') as Promise<string | null>,
   chooseTtsVoiceArchive: () => ipcRenderer.invoke('oha:chooseTtsVoiceArchive') as Promise<string | null>,

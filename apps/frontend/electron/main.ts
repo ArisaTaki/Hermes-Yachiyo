@@ -3396,6 +3396,15 @@ ipcMain.handle('oha:chooseSkillSources', (event) => showOpenDialogPathsForSender
     { name: '所有文件', extensions: ['*'] },
   ],
 }));
+ipcMain.handle('oha:chooseDesktopProviderManifest', (event) => showOpenDialogForSender(event, {
+  title: '选择桌面 Provider Manifest',
+  defaultPath: app.getPath('home'),
+  properties: ['openFile'],
+  filters: [
+    { name: 'Provider Manifest', extensions: ['json'] },
+    { name: '所有文件', extensions: ['*'] },
+  ],
+}));
 ipcMain.handle('oha:openPath', async (_event, value: unknown) => {
   const targetPath = typeof value === 'string' ? value.trim() : '';
   if (!targetPath) throw new Error('路径不能为空');

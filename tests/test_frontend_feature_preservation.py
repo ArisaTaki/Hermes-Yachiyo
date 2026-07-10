@@ -3155,6 +3155,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "stopYachiyoStudioDesktopProviderSession",
             "provider_contract?: Record<string, unknown>;",
             "provider_conformance?: DesktopProviderConformanceSnapshot | null;",
+            "provider_manifest?: string;",
             "desktop_backend_kind?: string;",
             "desktop_backend_is_loopback?: boolean | null;",
             "requires_real_virtual_desktop_backend?: boolean | null;",
@@ -3780,6 +3781,14 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "data-testid=\"studio-desktop-provider-session\"",
             "startYachiyoStudioDesktopProviderSession",
             "stopYachiyoStudioDesktopProviderSession",
+            "chooseDesktopProviderManifest",
+            "hasDesktopProviderManifestPicker",
+            "provider_manifest: providerManifest",
+            "requires_real_virtual_desktop_backend: true",
+            "data-testid=\"studio-desktop-provider-manifest\"",
+            "data-testid=\"studio-desktop-provider-manifest-choose\"",
+            "data-provider-session-manifest={effectiveManifestPath}",
+            "data-provider-session-conformance-ready={String(providerConformanceReady ?? '')}",
             "data-controlled-provider-command={providerState.controlledCommand.join(' ')}",
             "data-controlled-provider-backend-kind={providerState.controlledBackendKind}",
             "data-controlled-provider-backend-is-loopback={String(providerState.controlledBackendIsLoopback ?? '')}",
@@ -3804,6 +3813,8 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "data-provider-session-contract-version={providerContractVersion}",
             "data-provider-session-contract-blockers={providerContractBlockers.join(',')}",
             "data-provider-session-contract-missing-tools={providerContractMissingTools.join(',')}",
+            "data-provider-session-conformance-blockers={providerConformanceBlockers.join(',')}",
+            "data-provider-session-conformance-missing-tools={providerConformanceMissingTools.join(',')}",
             "data-controlled-provider-session-kind={providerState.controlledSessionKind}",
             "data-controlled-provider-session-isolated={String(providerState.controlledSessionIsolated)}",
             "data-controlled-provider-takeover-required={String(providerState.controlledForegroundTakeoverRequired)}",
@@ -3834,6 +3845,30 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "data-testid=\"studio-tool-diagnostic-route\"",
             "schemaPropertyRows",
             "studio-tool-risk",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/lib/bridge.ts",
+        [
+            "chooseDesktopProviderManifest?: () => Promise<string | null>;",
+            "export async function chooseDesktopProviderManifest(): Promise<string | null>",
+            "window.ohaDesktop.chooseDesktopProviderManifest()",
+            "export function hasDesktopProviderManifestPicker(): boolean",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/electron/preload.cts",
+        [
+            "chooseDesktopProviderManifest: () =>",
+            "oha:chooseDesktopProviderManifest",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/electron/main.ts",
+        [
+            "ipcMain.handle('oha:chooseDesktopProviderManifest'",
+            "选择桌面 Provider Manifest",
+            "{ name: 'Provider Manifest', extensions: ['json'] }",
         ],
     )
     _assert_not_contains(
