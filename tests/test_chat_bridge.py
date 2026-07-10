@@ -1201,8 +1201,19 @@ def test_chat_bridge_quick_message_discovers_data_source_with_main_chat_tools(
             "agent.plan.selection",
         )
         assert selection_event["payload"]["selection_source"] == "runtime_planner"
-        assert selection_event["payload"]["selected_tools"] == ["workspace.list"]
+        assert selection_event["payload"]["selected_tools"] == [
+            "workspace.list",
+            "python.run",
+            "artifact.write",
+        ]
         assert selection_event["payload"]["planner_request_count"] == 1
+        assert selection_event["payload"]["selected_request_count"] == 3
+        assert selection_event["payload"]["plan_tools"] == [
+            "workspace.list",
+            "python.run",
+            "artifact.write",
+        ]
+        assert selection_event["payload"]["plan_step_count"] == 3
         event = _agent_task_event(
             result["agent_task"],
             "agent.desktop.intent_planned",
@@ -1210,9 +1221,9 @@ def test_chat_bridge_quick_message_discovers_data_source_with_main_chat_tools(
         )
         assert event["payload"]["tool"] == "workspace.list"
         assert event["payload"]["source"] == "runtime_planner"
-        assert event["payload"]["planning_reason"] == "planner_prefetch_data_source"
+        assert event["payload"]["planning_reason"] == "planner_full_plan_data_analysis"
         assert event["payload"]["input_preview"] == {"path": "Downloads"}
-        assert event["payload"]["continue_to_model"] is True
+        assert "continue_to_model" not in event["payload"]
     finally:
         store.close()
 
