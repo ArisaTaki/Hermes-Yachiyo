@@ -470,7 +470,11 @@ class TaskIntentRouter:
         ):
             return _empty_intent("desktop_operation", text)
         app_capability = _app_capability_discovery_hint(text)
-        if _explicit_known_app_action_target_hint(text):
+        explicit_capability_app_name = _app_capability_explicit_app_name_hint(
+            text,
+            app_capability,
+        )
+        if explicit_capability_app_name:
             app_capability = {}
         if not app_capability and _browser_window_desktop_ui_operation_requested(text):
             app_capability = {"query": "browser", "description": "browser"}
@@ -656,7 +660,7 @@ class TaskIntentRouter:
             and _desktop_window_text_context_hint(text)
         ):
             desktop_discovery = {}
-        concrete_app_hint = _app_name_hint(text)
+        concrete_app_hint = explicit_capability_app_name or _app_name_hint(text)
         if (
             desktop_discovery is not None
             and str((desktop_discovery or {}).get("action") or "").strip() == "discover_apps"
@@ -966,11 +970,15 @@ class TaskIntentRouter:
             or _foreground_submit_app_name_hint(text, foreground_submit_action)
             or dynamic_context_transfer.get("app_name")
             or app_type_scope.get("app_name")
+            or explicit_capability_app_name
             or ("" if dynamic_context_transfer else _foreground_compose_app_name_hint(text))
             or ("" if app_capability else _app_name_hint(text))
             or ""
         ).strip()
-        direct_app_name_hint = "" if app_capability else _app_name_hint(text)
+        direct_app_name_hint = (
+            explicit_capability_app_name
+            or ("" if app_capability else _app_name_hint(text))
+        )
         if (
             direct_app_name_hint
             and _is_generic_foreground_app_label(app_name_hint)
@@ -29682,6 +29690,47 @@ def _app_capability_discovery_hint(text: str) -> dict[str, str]:
                 "description": _clean_app_capability_description(raw),
             }
     return {}
+
+
+def _app_capability_explicit_app_name_hint(
+    text: str,
+    capability_hint: Mapping[str, Any] | None,
+) -> str:
+    if not isinstance(capability_hint, Mapping):
+        return ""
+    description = str(capability_hint.get("description") or "").strip()
+    if not description:
+        return ""
+    capability = re.escape(description)
+    suffix = (
+        r"(?:编辑器|阅读器|查看器|浏览器|应用(?:程序)?|app|软件|客户端|工具|程序|窗口)"
+    )
+    patterns = (
+        rf"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        rf"(?:打开|启动|开启|运行|拉起|使用|用)\s*"
+        rf"(?:一个|一款|任意|任何|默认|可用|合适|适合)?\s*"
+        rf"{capability}\s*{suffix}\s+"
+        rf"(?:叫|名为|名字是)?\s*(?P<app>[^。！？!?，,]{{1,60}})$",
+        rf"^(?:(?:can|could|would)\s+you\s+)?(?:please\s+)?"
+        rf"(?:open|launch|start|use)\s+"
+        rf"(?:an?|any|some|default|available|suitable)?\s*"
+        rf"{capability}\s*"
+        rf"(?:app|application|client|tool|program|software|editor|viewer)\s+"
+        rf"(?:(?:called|named)\s+)?(?P<app>[^.!?,]{{1,60}})$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, _clean_prompt(text), flags=re.IGNORECASE)
+        if not match:
+            continue
+        app_name = _clean_app_name_hint(match.group("app"))
+        if not app_name or re.match(
+            r"^(?:并|然后|再|接着|之后|随后|and|then)\b",
+            app_name,
+            flags=re.IGNORECASE,
+        ):
+            return ""
+        return _canonical_app_name_hint(app_name)
+    return ""
 
 
 def _running_scoped_app_capability_hint(text: str) -> dict[str, str]:

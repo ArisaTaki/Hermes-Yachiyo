@@ -13674,6 +13674,20 @@ def test_runtime_planner_discovers_chinese_generic_editor_apps_before_acting() -
             _selected_discovered_app_open_chain(query)
         )
 
+    for prompt, app_name in (
+        ("打开图片查看器 Preview", "Preview"),
+        ("打开 PDF 阅读器 Preview", "Preview"),
+        ("打开代码编辑器 Xcode", "Xcode"),
+        ("打开文本编辑器 TextEdit", "TextEdit"),
+    ):
+        decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+
+        assert decision.selected_intent.inputs["app_name_hint"] == app_name
+        assert "desktop_discovery_hint" not in decision.selected_intent.inputs
+        assert _step_by_id(decision, "open-or-focus-app").input_preview == {
+            "app_name": app_name,
+        }
+
     assert RuntimePlanner().decision(
         "用 Excel 分析 data/sales.csv 并输出报告",
         allowed_tools=allowed_tools,

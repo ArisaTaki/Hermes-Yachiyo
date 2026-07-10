@@ -621,6 +621,15 @@ def _planner_owned_legacy_compatible_entrypoint_projection(
     )
     if context_capture_requests:
         return context_capture_requests, False
+    generic_app_requests = _legacy_compatible_generic_app_discovery_entrypoint_requests(
+        decision,
+        planner_requests,
+        allowed=allowed,
+    )
+    if generic_app_requests:
+        return generic_app_requests, True
+    if _generic_app_discovery_projection_query(decision):
+        return [], True
     compound_app_requests = (
         _legacy_compatible_compound_app_management_entrypoint_requests(
             decision,
@@ -857,6 +866,109 @@ def _legacy_compatible_foreground_type_entrypoint_requests(
     if not str(payload.get("text") or "").strip():
         return []
     return [_legacy_shape_request(selected)]
+
+
+def _legacy_compatible_generic_app_discovery_entrypoint_requests(
+    decision: Any,
+    requests: Sequence[Mapping[str, Any]] | None,
+    *,
+    allowed: Sequence[str],
+) -> list[dict[str, Any]]:
+    query = _generic_app_discovery_projection_query(decision)
+    if not query:
+        return []
+    items = [dict(request) for request in requests or [] if isinstance(request, Mapping)]
+    tools = [str(item.get("tool") or "").strip() for item in items]
+    verify_tools = {
+        "desktop.verify",
+        "desktop.active_window",
+        "desktop.windows",
+        "desktop.list_windows",
+        "desktop.ui_elements",
+        "screen.capture",
+    }
+    if (
+        len(tools) not in {2, 3}
+        or tools[0] != "desktop.list_apps"
+        or tools[1] not in {
+            *app_control_tool_candidates("open"),
+            *app_control_tool_candidates("focus"),
+        }
+        or (len(tools) == 3 and tools[2] not in verify_tools)
+        or not set(tools).issubset(set(allowed))
+    ):
+        return []
+    if any(
+        str(item.get("planning_reason") or "").strip()
+        != "planner_desktop_operation"
+        for item in items
+    ):
+        return []
+
+    discovery_input = items[0].get("input")
+    select_input = items[1].get("input")
+    verify_input = items[2].get("input") if len(items) == 3 else {}
+    if not all(
+        isinstance(payload, Mapping)
+        for payload in (discovery_input, select_input, verify_input)
+    ):
+        return []
+    if (
+        dict(discovery_input) != {"query": query, "limit": 20}
+        or str(select_input.get("app_name") or "").strip()
+        != "<selected app from desktop.list_apps>"
+        or str(select_input.get("selection_source") or "").strip()
+        != "desktop.list_apps"
+        or str(select_input.get("query") or "").strip() != query
+        or bool(verify_input)
+    ):
+        return []
+
+    plan = getattr(decision, "plan", None)
+    tool_plan = getattr(plan, "tool_plan", None)
+    steps = list(getattr(tool_plan, "steps", None) or [])
+    expected_step_ids = [
+        "discover_apps-desktop-state",
+        "open-selected-discovered-app",
+    ]
+    if len(items) == 3:
+        expected_step_ids.append("verify-desktop-result")
+    if [str(getattr(step, "step_id", "") or "") for step in steps] != expected_step_ids:
+        return []
+    if [str(getattr(step, "tool_name", "") or "") for step in steps] != tools:
+        return []
+    if list(getattr(steps[1], "depends_on", None) or []) != [
+        "discover_apps-desktop-state"
+    ]:
+        return []
+    if len(steps) == 3 and list(getattr(steps[2], "depends_on", None) or []) != [
+        "open-selected-discovered-app"
+    ]:
+        return []
+    if any(bool(getattr(step, "approval_required", False)) for step in steps):
+        return []
+    return [_legacy_shape_request(request) for request in items]
+
+
+def _generic_app_discovery_projection_query(decision: Any) -> str:
+    intent = getattr(decision, "selected_intent", None)
+    inputs = getattr(intent, "inputs", None)
+    if str(getattr(intent, "kind", "") or "").strip() != "desktop_operation" or not isinstance(
+        inputs,
+        Mapping,
+    ):
+        return ""
+    discovery_hint = inputs.get("desktop_discovery_hint")
+    if not isinstance(discovery_hint, Mapping):
+        return ""
+    query = str(discovery_hint.get("query") or "").strip()
+    if (
+        str(discovery_hint.get("action") or "").strip() != "discover_apps"
+        or str(inputs.get("operation_hint") or "").strip() != "discover_apps"
+        or str(inputs.get("app_name_hint") or "").strip()
+    ):
+        return ""
+    return query
 
 
 def _legacy_compatible_observation_entrypoint_requests(

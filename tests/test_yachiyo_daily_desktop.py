@@ -57,6 +57,141 @@ def test_planner_first_daily_entrypoint_discovers_generic_pull_up_target() -> No
     assert all(request["source"] == "runtime_planner" for request in requests)
 
 
+def test_daily_desktop_entrypoint_projects_generic_app_discovery_without_legacy(
+    monkeypatch,
+) -> None:
+    _forbid_legacy_daily_parser(
+        monkeypatch,
+        "generic app discovery must be planner-owned",
+    )
+    cases = (
+        ("把浏览器拉起来", "browser", "app.open"),
+        ("bring browser up", "browser", "app.focus"),
+        ("打开文本编辑器", "document", "app.open"),
+        ("打开代码编辑器", "code", "app.open"),
+        ("打开表格应用", "spreadsheet", "app.open"),
+        ("打开图片查看器", "image", "app.open"),
+        ("打开 PDF 阅读器", "pdf", "app.open"),
+    )
+
+    for prompt, query, action_tool in cases:
+        requests = daily_desktop_entrypoint_requests(prompt)
+
+        assert requests == [
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.list_apps",
+                "input": {"query": query, "limit": 20},
+            },
+            {
+                "protocol": "json_fallback",
+                "tool": action_tool,
+                "input": {
+                    "app_name": "<selected app from desktop.list_apps>",
+                    "selection_source": "desktop.list_apps",
+                    "query": query,
+                },
+            },
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.verify",
+                "input": {},
+            },
+        ]
+
+    assert daily_desktop_entrypoint_requests(
+        "把浏览器拉起来",
+        allowed_tools=["desktop.list_apps"],
+    ) == []
+
+    assert daily_desktop_entrypoint_requests(
+        "把浏览器拉起来",
+        allowed_tools=["desktop.list_apps", "desktop.open_app"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "browser", "limit": 20},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.open_app",
+            "input": {
+                "app_name": "<selected app from desktop.list_apps>",
+                "selection_source": "desktop.list_apps",
+                "query": "browser",
+            },
+        },
+    ]
+    assert daily_desktop_entrypoint_requests(
+        "bring browser up",
+        allowed_tools=["desktop.list_apps", "desktop.focus_app"],
+    )[1] == {
+        "protocol": "json_fallback",
+        "tool": "desktop.focus_app",
+        "input": {
+            "app_name": "<selected app from desktop.list_apps>",
+            "selection_source": "desktop.list_apps",
+            "query": "browser",
+        },
+    }
+    assert [
+        request["tool"]
+        for request in daily_desktop_entrypoint_requests(
+            "打开图片查看器",
+            allowed_tools=[
+                "desktop.list_apps",
+                "desktop.open_app",
+                "desktop.active_window",
+            ],
+        )
+    ] == ["desktop.list_apps", "desktop.open_app", "desktop.active_window"]
+
+    for prompt, app_name in (
+        ("打开图片查看器 Preview", "Preview"),
+        ("打开 PDF 阅读器 Preview", "Preview"),
+        ("打开代码编辑器 Xcode", "Xcode"),
+        ("打开文本编辑器 TextEdit", "TextEdit"),
+    ):
+        assert daily_desktop_entrypoint_requests(prompt) == [
+            {
+                "protocol": "json_fallback",
+                "tool": "app.open",
+                "input": {"app_name": app_name},
+            }
+        ]
+
+
+def test_generic_app_discovery_projection_rejects_tampered_selection() -> None:
+    from apps.shell.yachiyo_agent.daily_desktop import (
+        _legacy_compatible_generic_app_discovery_entrypoint_requests,
+        daily_desktop_allowed_tools,
+    )
+    from apps.shell.yachiyo_agent.planner_execution import (
+        planner_decision_and_tool_requests,
+    )
+
+    allowed = daily_desktop_allowed_tools()
+    decision, requests = planner_decision_and_tool_requests(
+        "打开图片查看器",
+        allowed,
+    )
+    tampered = [dict(request) for request in requests]
+    tampered[1] = {
+        **tampered[1],
+        "input": {
+            **tampered[1]["input"],
+            "selection_source": "user_supplied_app_name",
+        },
+    }
+
+    assert _legacy_compatible_generic_app_discovery_entrypoint_requests(
+        decision,
+        tampered,
+        allowed=allowed,
+    ) == []
+
+
 def test_daily_desktop_runtime_plan_reuses_one_planner_decision(monkeypatch) -> None:
     calls: list[str] = []
     original_decision = planner_execution_module.RuntimePlanner.decision
@@ -2692,7 +2827,6 @@ def test_daily_desktop_entrypoint_routes_polite_app_open_questions_to_desktop_to
         ("打开磁盘工具", "Disk Utility"),
         ("打开控制台", "Console"),
         ("打开字体册", "Font Book"),
-        ("打开图片查看器", "Preview"),
         ("打开系统信息", "System Information"),
         ("打开脚本编辑器", "Script Editor"),
         ("打开语音备忘录", "Voice Memos"),
