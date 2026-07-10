@@ -332,20 +332,6 @@ REMAINING_FALLBACK_CONTRACTS: tuple[dict[str, Any], ...] = (
         ],
     ),
     _fallback_contract(
-        "compound_app_action_shapes",
-        "Compound app actions",
-        (
-            "Planner creates the full app action sequence, but the daily facade still "
-            "delegates legacy sequence shaping."
-        ),
-        ["打开微信然后隐藏", "切到微信然后隐藏"],
-        [
-            "project multi-action app sequences in order",
-            "preserve per-step approval and verification metadata",
-            "remove the matching compound app parser branches",
-        ],
-    ),
-    _fallback_contract(
         "generic_app_discovery_legacy_shape",
         "Generic app discovery legacy shape",
         (
