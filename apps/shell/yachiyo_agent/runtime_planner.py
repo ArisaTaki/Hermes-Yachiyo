@@ -3717,6 +3717,26 @@ class RuntimePlanner:
             safe_type_text = ""
         if _text_hint_is_ui_target_tail(intent.user_goal, safe_type_text, click_target):
             safe_type_text = ""
+        if (
+            hotkey
+            and _explicit_hotkey_request(intent.user_goal)
+            and not _contains_any(
+                intent.user_goal,
+                (
+                    "输入",
+                    "键入",
+                    "填写",
+                    "粘贴",
+                    "type ",
+                    "type:",
+                    "input ",
+                    "paste ",
+                    "enter text",
+                    "write text",
+                ),
+            )
+        ):
+            safe_type_text = ""
         foreground_submit_action = str(
             intent.inputs.get("foreground_submit_action_hint")
             or _foreground_submit_action_hint(intent.user_goal)

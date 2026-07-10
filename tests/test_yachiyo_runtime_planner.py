@@ -32063,6 +32063,23 @@ def test_planner_tool_requests_maps_explicit_hotkey_plan() -> None:
     ]
 
 
+def test_planner_tool_requests_does_not_type_hotkey_location_tail() -> None:
+    requests = planner_tool_requests(
+        "press enter in current window",
+        allowed_tools=["desktop.hotkey", "desktop.safe_type_text"],
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.hotkey",
+            "input": {"key": "return", "modifiers": []},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_hotkey",
+        }
+    ]
+
+
 def test_planner_tool_requests_preserves_hotkey_type_return_sequence() -> None:
     requests = planner_tool_requests(
         "按 Command+L，再输入 github.com，再按回车",
