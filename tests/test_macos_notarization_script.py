@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -110,6 +111,20 @@ def test_notarization_script_persists_log_and_staples_accepted_dmg(tmp_path):
     assert json.loads(
         (tmp_path / "release" / "notarization-log.json").read_text(encoding="utf-8")
     )["status"] == "Accepted"
+    evidence = json.loads(
+        (tmp_path / "release" / "notarization-evidence.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert evidence == {
+        "schema_version": 1,
+        "status": "Accepted",
+        "submission_id": "submission-123",
+        "dmg_name": "Oha-Yachiyo.dmg",
+        "dmg_sha256": hashlib.sha256(b"fake dmg").hexdigest(),
+        "submission_file": "notarization.json",
+        "log_file": "notarization-log.json",
+    }
     assert (tmp_path / "events.log").read_text(encoding="utf-8").splitlines() == [
         "submit",
         "log",
@@ -128,6 +143,7 @@ def test_notarization_script_rejects_invalid_submission_before_stapling(tmp_path
         "submit",
         "log",
     ]
+    assert not (tmp_path / "release" / "notarization-evidence.json").exists()
 
 
 def test_notarization_script_reports_malformed_submit_output_without_traceback(tmp_path):

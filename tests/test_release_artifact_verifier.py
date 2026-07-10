@@ -527,6 +527,30 @@ def test_verifier_validates_release_latest_json_checksum_contract(
         "published_at": "2026-06-12T00:00:00Z",
         "changelog": {"sections": []},
     }
+    if signing_mode == "developer-id-app-notarized-dmg":
+        submission_id = "12345678-1234-1234-1234-123456789abc"
+        (release_dir / "notarization.json").write_text(
+            json.dumps({"id": submission_id, "status": "Accepted"}),
+            encoding="utf-8",
+        )
+        (release_dir / "notarization-log.json").write_text(
+            json.dumps({"jobId": submission_id, "status": "Accepted"}),
+            encoding="utf-8",
+        )
+        (release_dir / "notarization-evidence.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "status": "Accepted",
+                    "submission_id": submission_id,
+                    "dmg_name": dmg.name,
+                    "dmg_sha256": digest,
+                    "submission_file": "notarization.json",
+                    "log_file": "notarization-log.json",
+                }
+            ),
+            encoding="utf-8",
+        )
     (release_dir / "Oha-Yachiyo-main-latest.json").write_text(
         json.dumps(metadata),
         encoding="utf-8",
@@ -541,6 +565,78 @@ def test_verifier_validates_release_latest_json_checksum_contract(
     )
 
     assert findings == []
+
+
+def test_verifier_requires_complete_notarization_evidence_for_developer_id_release(tmp_path):
+    release_dir = tmp_path / "release"
+    release_dir.mkdir()
+    metadata_path = release_dir / "Oha-Yachiyo-main-latest.json"
+
+    findings = verifier._verify_release_notarization_evidence(
+        release_dir,
+        metadata_path,
+        {"signing": "developer-id-app-notarized-dmg"},
+    )
+
+    assert findings == [
+        verifier.Finding(
+            release_dir / "notarization.json",
+            "release notarization submission evidence is missing",
+        ),
+        verifier.Finding(
+            release_dir / "notarization-log.json",
+            "release notarization audit log is missing",
+        ),
+        verifier.Finding(
+            release_dir / "notarization-evidence.json",
+            "release notarization DMG evidence is missing",
+        ),
+    ]
+
+
+def test_verifier_rejects_mismatched_notarization_evidence(tmp_path):
+    release_dir = tmp_path / "release"
+    release_dir.mkdir()
+    metadata_path = release_dir / "Oha-Yachiyo-main-latest.json"
+    (release_dir / "notarization.json").write_text(
+        json.dumps({"id": "submission-1", "status": "Invalid"}),
+        encoding="utf-8",
+    )
+    (release_dir / "notarization-log.json").write_text(
+        json.dumps({"jobId": "submission-2", "status": "Invalid"}),
+        encoding="utf-8",
+    )
+    (release_dir / "notarization-evidence.json").write_text(
+        json.dumps(
+            {
+                "status": "Invalid",
+                "submission_id": "submission-3",
+                "dmg_sha256": "f" * 64,
+                "submission_file": "wrong.json",
+                "log_file": "wrong-log.json",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    findings = verifier._verify_release_notarization_evidence(
+        release_dir,
+        metadata_path,
+        {
+            "signing": "developer-id-app-notarized-dmg",
+            "sha256": "a" * 64,
+        },
+    )
+    messages = [finding.message for finding in findings]
+
+    assert "release notarization submission status must be Accepted" in messages
+    assert "release notarization audit log status must be Accepted" in messages
+    assert "release notarization audit log jobId must match submission id" in messages
+    assert "release notarization DMG evidence status must be Accepted" in messages
+    assert "release notarization DMG evidence submission_id must match submission id" in messages
+    assert "release notarization DMG evidence must reference notarization.json" in messages
+    assert "release notarization DMG evidence must reference notarization-log.json" in messages
+    assert "release notarization DMG evidence hash must match latest JSON sha256" in messages
 
 
 def test_verifier_reports_release_latest_json_metadata_mismatches(tmp_path):

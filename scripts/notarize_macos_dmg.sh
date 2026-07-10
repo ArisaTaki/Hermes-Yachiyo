@@ -8,6 +8,7 @@ ISSUER_ID="${APPLE_NOTARY_ISSUER_ID:-}"
 OUTPUT_DIR="${NOTARIZATION_OUTPUT_DIR:-release}"
 SUBMISSION_PATH="${OUTPUT_DIR}/notarization.json"
 LOG_PATH="${OUTPUT_DIR}/notarization-log.json"
+EVIDENCE_PATH="${OUTPUT_DIR}/notarization-evidence.json"
 TIMEOUT="${APPLE_NOTARY_TIMEOUT:-30m}"
 
 if [[ "$(uname -s)" != "Darwin" ]]; then
@@ -82,5 +83,38 @@ fi
 xcrun stapler staple "${DMG_PATH}"
 xcrun stapler validate "${DMG_PATH}"
 spctl --assess --type open --context context:primary-signature --verbose=2 "${DMG_PATH}"
+
+python3 - \
+  "${DMG_PATH}" \
+  "${SUBMISSION_ID}" \
+  "${SUBMISSION_PATH}" \
+  "${LOG_PATH}" \
+  "${EVIDENCE_PATH}" <<'PY'
+import hashlib
+import json
+from pathlib import Path
+import sys
+
+dmg_path = Path(sys.argv[1])
+submission_path = Path(sys.argv[3])
+log_path = Path(sys.argv[4])
+evidence_path = Path(sys.argv[5])
+hasher = hashlib.sha256()
+with dmg_path.open("rb") as source:
+    for chunk in iter(lambda: source.read(1024 * 1024), b""):
+        hasher.update(chunk)
+payload = {
+    "schema_version": 1,
+    "status": "Accepted",
+    "submission_id": sys.argv[2],
+    "dmg_name": dmg_path.name,
+    "dmg_sha256": hasher.hexdigest(),
+    "submission_file": submission_path.name,
+    "log_file": log_path.name,
+}
+temporary_path = evidence_path.with_suffix(f"{evidence_path.suffix}.tmp")
+temporary_path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+temporary_path.replace(evidence_path)
+PY
 
 echo "Notarized and stapled ${DMG_PATH} (submission ${SUBMISSION_ID})."

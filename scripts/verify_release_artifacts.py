@@ -438,6 +438,10 @@ RELEASE_SHA_RE = re.compile(r"^[0-9a-f]{40}$", re.IGNORECASE)
 RELEASE_SHORT_SHA_RE = re.compile(r"^[0-9a-f]{7}$", re.IGNORECASE)
 RELEASE_PUBLISHED_AT_RE = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$")
 RELEASE_SOURCE_BRANCH_RE = re.compile(r"^[A-Za-z0-9._/-]+$")
+RELEASE_NOTARIZATION_ID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
 PACKAGED_UI_E2E_REQUIRED_SELECTORS: tuple[str, ...] = (
     "chat-image-file-input",
     "chat-header-image-attach-button",
@@ -809,6 +813,14 @@ MACOS_NOTARIZATION_SCRIPT_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "spctl --assess --type open --context context:primary-signature",
         "macOS notarization script must run a Gatekeeper assessment on the DMG",
     ),
+    (
+        'EVIDENCE_PATH="${OUTPUT_DIR}/notarization-evidence.json"',
+        "macOS notarization script must persist final stapled DMG evidence",
+    ),
+    (
+        '"dmg_sha256": hasher.hexdigest()',
+        "macOS notarization evidence must bind the final stapled DMG hash",
+    ),
 )
 MACOS_ENTITLEMENTS_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
@@ -836,6 +848,10 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         "developer-id-app-notarized-dmg",
         "release packaging docs must document the notarized release signing mode",
+    ),
+    (
+        "notarization-evidence.json",
+        "release packaging docs must document stapled DMG evidence binding",
     ),
     (
         "`develop` 分支保留给彻底重构前的旧版发布线，不触发 Oha DMG",
@@ -3983,6 +3999,13 @@ def _verify_release_directory_artifacts(root: Path, scan_paths: Sequence[Path | 
                 findings.append(Finding(metadata_path, "release latest JSON must be an object"))
                 continue
             findings.extend(_verify_release_latest_json_metadata(metadata_path, metadata))
+            findings.extend(
+                _verify_release_notarization_evidence(
+                    release_dir,
+                    metadata_path,
+                    metadata,
+                )
+            )
             dmg_name = str(metadata.get("dmg_name") or "").strip()
             if not dmg_name:
                 findings.append(Finding(metadata_path, "release latest JSON must include dmg_name"))
@@ -4024,6 +4047,153 @@ def _verify_release_directory_artifacts(root: Path, scan_paths: Sequence[Path | 
                 continue
             if actual_sha != expected_sha:
                 findings.append(Finding(dmg_path, "release latest DMG content does not match latest JSON sha256"))
+    return findings
+
+
+def _read_release_json_object(
+    path: Path,
+    label: str,
+) -> tuple[dict[str, object] | None, list[Finding]]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return None, [Finding(path, f"{label} could not be parsed: {exc.__class__.__name__}")]
+    if not isinstance(payload, dict):
+        return None, [Finding(path, f"{label} must be an object")]
+    return payload, []
+
+
+def _verify_release_notarization_evidence(
+    release_dir: Path,
+    metadata_path: Path,
+    metadata: dict[str, object],
+) -> list[Finding]:
+    if metadata.get("signing") != "developer-id-app-notarized-dmg":
+        return []
+
+    findings: list[Finding] = []
+    submission_path = release_dir / "notarization.json"
+    log_path = release_dir / "notarization-log.json"
+    evidence_path = release_dir / "notarization-evidence.json"
+    required_files = (
+        (submission_path, "release notarization submission evidence is missing"),
+        (log_path, "release notarization audit log is missing"),
+        (evidence_path, "release notarization DMG evidence is missing"),
+    )
+    for path, message in required_files:
+        if not path.is_file():
+            findings.append(Finding(path, message))
+    if findings:
+        return findings
+
+    submission, submission_findings = _read_release_json_object(
+        submission_path,
+        "release notarization submission evidence",
+    )
+    audit_log, log_findings = _read_release_json_object(
+        log_path,
+        "release notarization audit log",
+    )
+    evidence, evidence_findings = _read_release_json_object(
+        evidence_path,
+        "release notarization DMG evidence",
+    )
+    findings.extend(submission_findings)
+    findings.extend(log_findings)
+    findings.extend(evidence_findings)
+    if submission is None or audit_log is None or evidence is None:
+        return findings
+
+    submission_id = str(submission.get("id") or "").strip()
+    if not submission_id:
+        findings.append(Finding(submission_path, "release notarization submission must include id"))
+    elif not RELEASE_NOTARIZATION_ID_RE.fullmatch(submission_id):
+        findings.append(
+            Finding(
+                submission_path,
+                "release notarization submission id must be an Apple UUID",
+            )
+        )
+    if submission.get("status") != "Accepted":
+        findings.append(
+            Finding(
+                submission_path,
+                "release notarization submission status must be Accepted",
+            )
+        )
+    if audit_log.get("status") != "Accepted":
+        findings.append(
+            Finding(
+                log_path,
+                "release notarization audit log status must be Accepted",
+            )
+        )
+    if submission_id and audit_log.get("jobId") != submission_id:
+        findings.append(
+            Finding(
+                log_path,
+                "release notarization audit log jobId must match submission id",
+            )
+        )
+    if evidence.get("schema_version") != 1:
+        findings.append(
+            Finding(
+                evidence_path,
+                "release notarization DMG evidence schema_version must be 1",
+            )
+        )
+    if evidence.get("status") != "Accepted":
+        findings.append(
+            Finding(
+                evidence_path,
+                "release notarization DMG evidence status must be Accepted",
+            )
+        )
+    if submission_id and evidence.get("submission_id") != submission_id:
+        findings.append(
+            Finding(
+                evidence_path,
+                "release notarization DMG evidence submission_id must match submission id",
+            )
+        )
+    evidence_dmg_name = str(evidence.get("dmg_name") or "")
+    if Path(evidence_dmg_name).name != evidence_dmg_name or not evidence_dmg_name.endswith(".dmg"):
+        findings.append(
+            Finding(
+                evidence_path,
+                "release notarization DMG evidence dmg_name must be a DMG filename",
+            )
+        )
+    archive_filename = str(audit_log.get("archiveFilename") or "")
+    if archive_filename and evidence_dmg_name != archive_filename:
+        findings.append(
+            Finding(
+                evidence_path,
+                "release notarization DMG evidence dmg_name must match audit log archiveFilename",
+            )
+        )
+    if evidence.get("submission_file") != submission_path.name:
+        findings.append(
+            Finding(
+                evidence_path,
+                "release notarization DMG evidence must reference notarization.json",
+            )
+        )
+    if evidence.get("log_file") != log_path.name:
+        findings.append(
+            Finding(
+                evidence_path,
+                "release notarization DMG evidence must reference notarization-log.json",
+            )
+        )
+    expected_sha = str(metadata.get("sha256") or "").strip().lower()
+    if evidence.get("dmg_sha256") != expected_sha:
+        findings.append(
+            Finding(
+                evidence_path,
+                "release notarization DMG evidence hash must match latest JSON sha256",
+            )
+        )
     return findings
 
 

@@ -81,7 +81,7 @@ APPLE_NOTARY_ISSUER_ID
 unsigned app directory -> Developer ID sign + timestamp -> DMG -> notarytool submit --wait -> notarytool log -> stapler staple/validate -> spctl
 ```
 
-成功创建 submission 后，提交结果与 Apple 审计日志分别保存为 `release/notarization.json` 和 `release/notarization-log.json`，并跟随 CI artifact 上传；鉴权或网络错误如果没有产生 submission id，job 会以受控错误直接失败。latest JSON 的 `signing` 值为 `developer-id-app-notarized-dmg`；自签名与无签名回退仍分别使用 `self-signed-app-unsigned-dmg` 和 `unsigned`。
+成功创建 submission 后，提交结果与 Apple 审计日志分别保存为 `release/notarization.json` 和 `release/notarization-log.json`。stapling 与 Gatekeeper 检查通过后还会生成 `release/notarization-evidence.json`，把 submission id、`Accepted` 状态和最终 stapled DMG 的 SHA256 绑定在一起；三份证据会跟随 CI artifact 上传。release verifier 会把 evidence hash 与 latest JSON 的 `sha256` 交叉校验，因此不能只改 `signing` 标签来伪装成已公证构建。鉴权或网络错误如果没有产生 submission id，job 会以受控错误直接失败。latest JSON 的 `signing` 值为 `developer-id-app-notarized-dmg`；自签名与无签名回退仍分别使用 `self-signed-app-unsigned-dmg` 和 `unsigned`。
 
 ## 打包结构
 
