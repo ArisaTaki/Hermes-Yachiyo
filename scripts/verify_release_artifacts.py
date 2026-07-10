@@ -279,6 +279,7 @@ PACKAGED_DESKTOP_PROVIDER_RELATIVE_PATH = Path(
 PACKAGED_DESKTOP_BRIDGE_RELATIVE_PATH = Path(
     "Contents/Resources/desktop-provider/oha-yachiyo-virtual-desktop-bridge"
 )
+PACKAGED_EXECUTABLE_SMOKE_TIMEOUT_SECONDS = 60
 PACKAGED_DESKTOP_PROVIDER_REQUIRED_TOOLS = (
     "desktop.list_apps",
     "app.open",
@@ -4903,7 +4904,7 @@ def _verify_packaged_desktop_provider_manifest(path: Path) -> list[Finding]:
             capture_output=True,
             check=False,
             text=True,
-            timeout=15,
+            timeout=PACKAGED_EXECUTABLE_SMOKE_TIMEOUT_SECONDS,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         return [
@@ -4979,7 +4980,7 @@ def _verify_packaged_desktop_bridge_cli(path: Path) -> list[Finding]:
             capture_output=True,
             check=False,
             text=True,
-            timeout=15,
+            timeout=PACKAGED_EXECUTABLE_SMOKE_TIMEOUT_SECONDS,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         return [

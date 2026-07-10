@@ -970,6 +970,41 @@ def test_verifier_requires_packaging_macos_entitlements_and_usage_descriptions(t
     assert "macOS release packaging must include microphone permission copy" in messages
 
 
+def test_packaged_onefile_cli_smokes_allow_cold_start_time(monkeypatch, tmp_path):
+    provider = tmp_path / "oha-yachiyo-desktop-provider"
+    bridge = tmp_path / "oha-yachiyo-virtual-desktop-bridge"
+    provider.write_bytes(b"provider")
+    bridge.write_bytes(b"bridge")
+    timeouts = []
+
+    def fake_run(command, **kwargs):
+        timeouts.append(kwargs["timeout"])
+        if "--manifest" in command:
+            stdout = json.dumps(
+                {
+                    "ok": True,
+                    "desktop_session_kind": "virtual_desktop",
+                    "capabilities": ["idempotent_tool_requests"],
+                    "supported_tools": list(
+                        verifier.PACKAGED_DESKTOP_PROVIDER_REQUIRED_TOOLS
+                    ),
+                }
+            )
+        else:
+            stdout = "--ssh-target --remote-provider-executable"
+        return subprocess.CompletedProcess(command, 0, stdout=stdout, stderr="")
+
+    monkeypatch.setattr(verifier.subprocess, "run", fake_run)
+
+    assert verifier._verify_packaged_desktop_provider_manifest(provider) == []
+    assert verifier._verify_packaged_desktop_bridge_cli(bridge) == []
+    assert timeouts == [
+        verifier.PACKAGED_EXECUTABLE_SMOKE_TIMEOUT_SECONDS,
+        verifier.PACKAGED_EXECUTABLE_SMOKE_TIMEOUT_SECONDS,
+    ]
+    assert verifier.PACKAGED_EXECUTABLE_SMOKE_TIMEOUT_SECONDS == 60
+
+
 def test_verifier_requires_macos_signing_script_and_entitlements(tmp_path):
     script = tmp_path / verifier.MACOS_SIGNING_SCRIPT_FILE
     script.parent.mkdir(parents=True)
