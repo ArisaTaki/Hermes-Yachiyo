@@ -235,8 +235,8 @@ def _retry_from_observation_request(
         _runtime_request_value(request, "tool_name"),
         _runtime_request_value(request, "tool"),
     )
-    retry_input = _mapping(retry.get("input")) or _mapping(
-        _runtime_request_value(request, "input")
+    retry_input = _mapping(_runtime_request_value(request, "input")) or _mapping(
+        retry.get("input")
     )
     payload = dict(retry)
     payload.update(
