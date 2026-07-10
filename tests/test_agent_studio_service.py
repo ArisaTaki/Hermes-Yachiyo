@@ -1097,8 +1097,8 @@ def test_agent_studio_service_maps_agent_group_workflow_snapshots() -> None:
     assert len(tool_catalog.legacy_cleanup_coverage.planner_owned_entrypoints) >= 5
     assert tool_catalog.legacy_cleanup_coverage.planner_owned_entrypoints[0].owner == "runtime_planner"
     assert tool_catalog.legacy_cleanup_coverage.planner_owned_entrypoints[0].legacy_shape_preserved is True
-    assert len(tool_catalog.legacy_cleanup_coverage.remaining_fallback_contracts) == 7
-    assert tool_catalog.legacy_cleanup_coverage.remaining_fallback_count == 7
+    assert len(tool_catalog.legacy_cleanup_coverage.remaining_fallback_contracts) == 6
+    assert tool_catalog.legacy_cleanup_coverage.remaining_fallback_count == 6
     assert restricted_plugins[0].plugin_id == "notes"
     assert installed_plugin.plugin_id == "desk"
     assert installed_plugin.enabled is True

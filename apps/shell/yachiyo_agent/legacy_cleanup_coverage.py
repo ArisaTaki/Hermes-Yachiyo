@@ -318,20 +318,6 @@ PLANNER_OWNED_LEGACY_ENTRYPOINTS: tuple[dict[str, Any], ...] = (
 
 REMAINING_FALLBACK_CONTRACTS: tuple[dict[str, Any], ...] = (
     _fallback_contract(
-        "finder_file_action_shapes",
-        "Finder file actions",
-        (
-            "Finder shortcuts are planner-owned, while several legacy single-action "
-            "shapes are not projected yet."
-        ),
-        ["Finder 快速查看选中项", "Finder 新建文件夹"],
-        [
-            "project Finder safe-shortcut requests without legacy parsing",
-            "cover quick look, create, rename, parent, info, and copy actions",
-            "remove the matching Finder parser branches",
-        ],
-    ),
-    _fallback_contract(
         "browser_navigation_shapes",
         "Browser navigation and utilities",
         (
