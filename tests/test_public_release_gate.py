@@ -452,7 +452,7 @@ def test_public_release_gate_passes_when_full_release_smoke_is_present(
     assert summary["ok"] is True
     assert summary["release_ready"] is True
     assert summary["status"] == "ready"
-    assert summary["include_isolated_provider_smoke"] is True
+    assert summary["include_isolated_provider_smoke"] is False
     assert summary["release_blocker_count"] == 0
     assert summary["next_actions"] == []
     assert summary["progress"]["stage"] == "ready"
@@ -463,7 +463,7 @@ def test_public_release_gate_passes_when_full_release_smoke_is_present(
         for command in commands
         if "scripts/smoke_oha_desktop_agent_release.py" in command
     )
-    assert "--run-isolated-provider-smoke" in oha_product_command
+    assert "--skip-isolated-provider-smoke" in oha_product_command
 
 
 def test_public_release_gate_reports_failed_checks(tmp_path, monkeypatch):

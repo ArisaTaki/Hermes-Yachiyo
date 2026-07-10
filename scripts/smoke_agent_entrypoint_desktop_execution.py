@@ -20,6 +20,7 @@ from apps.shell.agent.tools import desktop as desktop_tools
 from apps.shell.agent_runtime import AgentRuntimeService
 from apps.shell.credential_store import MemoryCredentialStore
 from apps.shell.yachiyo_agent.desktop_execution_policy import (
+    daily_entrypoint_desktop_execution_policy,
     desktop_provider_session_auto_start_recommended_for_requests,
 )
 
@@ -1208,28 +1209,47 @@ def run_smoke(*, workdir: Path | None = None) -> dict[str, Any]:
     checks = {
         "all_cases_passed": all(case.get("ok") is True for case in cases),
         "model_never_called": model_call_count == 0,
-        "daily_app_open_recommends_provider_session": (
+        "daily_app_open_uses_direct_desktop": (
             desktop_provider_session_auto_start_recommended_for_requests(
-                [{"tool": "app.open", "input": {"app_name": "PixelForge"}}]
+                [
+                    {
+                        "tool": "app.open",
+                        "input": {"app_name": "PixelForge"},
+                        "desktop_execution_policy": (
+                            daily_entrypoint_desktop_execution_policy()
+                        ),
+                    }
+                ]
             )
-            is True
+            is False
         ),
-        "daily_media_playback_recommends_provider_session": (
+        "daily_media_playback_uses_direct_desktop": (
             desktop_provider_session_auto_start_recommended_for_requests(
                 [
                     {
                         "tool": "media.music_app_open_and_play",
                         "input": {"app_name": "Music"},
+                        "desktop_execution_policy": (
+                            daily_entrypoint_desktop_execution_policy()
+                        ),
                     }
                 ]
             )
-            is True
+            is False
         ),
-        "daily_keyboard_mouse_recommends_provider": (
+        "daily_keyboard_mouse_uses_direct_desktop": (
             desktop_provider_session_auto_start_recommended_for_requests(
-                [{"tool": "desktop.safe_type_text", "input": {"text": "hello"}}]
+                [
+                    {
+                        "tool": "desktop.safe_type_text",
+                        "input": {"text": "hello"},
+                        "desktop_execution_policy": (
+                            daily_entrypoint_desktop_execution_policy()
+                        ),
+                    }
+                ]
             )
-            is True
+            is False
         ),
     }
     return {

@@ -171,7 +171,7 @@ export function desktopProviderReadinessSummary(
   const adapterReady = booleanValue(provider?.adapter_ready);
   const ready = booleanValue(capabilities.desktop_provider_ready)
     || (available && adapterReady);
-  const providerLabel = providerKind === 'local_desktop' ? '本地桌面 provider' : '隔离桌面 provider';
+  const providerLabel = providerKind === 'local_desktop' ? 'Direct Desktop' : '可选隔离桌面 Provider';
   const inputSandboxLimited = ready
     && keyboardMouseCaptureKnown
     && !keyboardMouseCaptureSupported

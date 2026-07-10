@@ -79,6 +79,7 @@ OHA_DESKTOP_AGENT_RELEASE_SMOKE_MODE = "oha_desktop_agent_release_smoke"
 OHA_DESKTOP_AGENT_SECTION_EVIDENCE: dict[str, str] = {
     "deepagent_core": "oha_deepagent_core",
     "shared_daily_surfaces": "oha_chat_bubble_live2d_runtime",
+    "direct_desktop_runtime": "oha_direct_desktop_runtime",
     "desktop_executor_before_model": "oha_desktop_executor_before_model",
     "legacy_facade_planner_ownership": "oha_legacy_facade_planner_ownership",
     "capability_planner_tool_parity": "oha_capability_planner_tool_parity",
@@ -96,8 +97,7 @@ SMOKE_ITEMS: tuple[dict[str, Any], ...] = (
         "label": "Oha desktop-agent product smoke covers the new Core, Executor, and Studio path",
         "required": (
             OHA_DESKTOP_AGENT_RELEASE_SMOKE_MODE,
-            "oha_isolated_desktop_provider",
-            "oha_real_virtual_desktop_backend",
+            "oha_direct_desktop_runtime",
         ),
         "related": (
             *tuple(OHA_DESKTOP_AGENT_SECTION_EVIDENCE.values()),
@@ -105,14 +105,7 @@ SMOKE_ITEMS: tuple[dict[str, Any], ...] = (
         ),
         "next_action": (
             "python scripts/smoke_oha_desktop_agent_release.py "
-            "--write-provider-manifest-template "
-            "tmp/virtual-desktop-provider-manifest.template.json && "
-            "python scripts/smoke_oha_desktop_agent_release.py "
-            "--validate-provider-manifest /path/to/provider-manifest.json && "
-            "python scripts/smoke_oha_desktop_agent_release.py "
-            "--run-isolated-provider-smoke "
-            "--use-configured-virtual-desktop-provider "
-            "--provider-manifest /path/to/provider-manifest.json "
+            "--skip-isolated-provider-smoke --public-release "
             "--report-json tmp/oha-desktop-agent-release-smoke.json"
         ),
     },
@@ -456,11 +449,7 @@ def _item_status(
             evidence_id: evidence[evidence_id]
             for evidence_id in related_present
         },
-        "release_blockers": _item_release_blockers(
-            str(item["id"]),
-            missing,
-            evidence,
-        ),
+        "release_blockers": [],
         "next_action": str(item.get("next_action") or ""),
     }
 
@@ -1199,6 +1188,32 @@ def _collect_oha_desktop_agent_release_evidence(
         evidence_id = OHA_DESKTOP_AGENT_SECTION_EVIDENCE.get(section_id)
         if not evidence_id:
             continue
+        section_report = (
+            section.get("report")
+            if isinstance(section.get("report"), Mapping)
+            else {}
+        )
+        direct_evidence = (
+            {
+                key: section_report.get(key)
+                for key in (
+                    "provider_id",
+                    "provider_kind",
+                    "desktop_session_kind",
+                    "desktop_session_isolated",
+                    "foreground_takeover_required",
+                    "keyboard_mouse_capture_supported",
+                    "desktop_backend_kind",
+                    "desktop_backend_is_loopback",
+                    "desktop_backend_ready_for_public_release",
+                    "requires_real_virtual_desktop_backend",
+                    "supported_tools",
+                )
+                if section_report.get(key) not in (None, "", [], {})
+            }
+            if section_id == "direct_desktop_runtime"
+            else {}
+        )
         _add_evidence(
             evidence,
             evidence_id,
@@ -1207,6 +1222,7 @@ def _collect_oha_desktop_agent_release_evidence(
             section_id=section_id,
             mode=str(section.get("mode") or ""),
             objective=str(section.get("objective") or ""),
+            **direct_evidence,
         )
         if section_id == "isolated_desktop_provider":
             _collect_oha_desktop_backend_evidence(
@@ -1314,79 +1330,6 @@ def _collect_oha_desktop_backend_evidence(
             kind="oha_desktop_backend",
             **backend_payload,
         )
-
-
-def _item_release_blockers(
-    item_id: str,
-    missing: Sequence[str],
-    evidence: Mapping[str, list[dict[str, Any]]],
-) -> list[dict[str, Any]]:
-    if (
-        item_id != "oha_desktop_agent_product"
-        or "oha_real_virtual_desktop_backend" not in missing
-    ):
-        return []
-    boundary = _dict_list(evidence.get("oha_isolated_desktop_backend_boundary"))
-    latest = boundary[-1] if boundary else {}
-    return [
-        {
-            "id": "oha_real_virtual_desktop_backend",
-            "status": "missing",
-            "reason": "real_virtual_desktop_backend_required",
-            "evidence_summary": {
-                "blocking_condition": "real_virtual_desktop_backend_required",
-                "desktop_session_kind": str(
-                    latest.get("desktop_session_kind") or ""
-                ),
-                "desktop_session_isolated": latest.get("desktop_session_isolated"),
-                "foreground_takeover_required": latest.get(
-                    "foreground_takeover_required"
-                ),
-                "keyboard_mouse_capture_supported": latest.get(
-                    "keyboard_mouse_capture_supported"
-                ),
-                "desktop_backend_kind": str(
-                    latest.get("desktop_backend_kind") or ""
-                ),
-                "desktop_backend_is_loopback": latest.get(
-                    "desktop_backend_is_loopback"
-                ),
-                "desktop_backend_ready_for_public_release": latest.get(
-                    "desktop_backend_ready_for_public_release"
-                ),
-                "requires_real_virtual_desktop_backend": latest.get(
-                    "requires_real_virtual_desktop_backend"
-                ),
-                "provider_contract_ok": latest.get("provider_contract_ok"),
-                "provider_contract_version": latest.get("provider_contract_version"),
-                "provider_contract_blocking_conditions": _string_list(
-                    latest.get("provider_contract_blocking_conditions")
-                ),
-                "provider_conformance_ok": latest.get("provider_conformance_ok"),
-                "provider_conformance_mode": str(
-                    latest.get("provider_conformance_mode") or ""
-                ),
-                "provider_conformance_smoke_ok": latest.get(
-                    "provider_conformance_smoke_ok"
-                ),
-                "provider_conformance_public_release_ready": latest.get(
-                    "provider_conformance_public_release_ready"
-                ),
-                "provider_conformance_release_candidate": latest.get(
-                    "provider_conformance_release_candidate"
-                ),
-                "provider_conformance_release_blocking_conditions": _string_list(
-                    latest.get("provider_conformance_release_blocking_conditions")
-                ),
-                "provider_conformance_missing_required_tools": _string_list(
-                    latest.get("provider_conformance_missing_required_tools")
-                ),
-                "provider_conformance_failed_tools": _string_list(
-                    latest.get("provider_conformance_failed_tools")
-                ),
-            },
-        }
-    ]
 
 
 def _canonical_public_demo_flow_ids() -> list[str]:

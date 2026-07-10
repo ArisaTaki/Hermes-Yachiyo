@@ -15,6 +15,13 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from apps.shell.yachiyo_agent import RuntimePlanner
+from apps.shell.agent.runtime.desktop_execution_providers import (
+    LOCAL_DESKTOP_PROVIDER_ID,
+    LOCAL_DESKTOP_PROVIDER_KIND,
+    DesktopExecutionProviderRegistry,
+    LocalDesktopExecutionProviderAdapter,
+    local_desktop_execution_provider_status,
+)
 from apps.shell.yachiyo_agent import daily_desktop as daily_desktop_module
 from apps.shell.yachiyo_agent.desktop_provider_contract import (
     VIRTUAL_DESKTOP_PROVIDER_TEMPLATE_BASE_URL,
@@ -26,8 +33,12 @@ from apps.shell.yachiyo_agent.desktop_provider_release_readiness import (
     public_release_readiness_snapshot,
 )
 from apps.shell.yachiyo_agent.desktop_execution_policy import (
+    agent_studio_desktop_execution_policy,
+    daily_entrypoint_desktop_execution_policy,
+    desktop_execution_route_decision,
     desktop_provider_session_auto_start_recommended_for_requests,
 )
+from apps.shell.yachiyo_agent.policy import desktop_tool_execution_mode_for_input
 from apps.shell.yachiyo_agent.daily_desktop import (
     daily_desktop_direct_metadata_request,
     daily_desktop_allowed_tools,
@@ -175,25 +186,187 @@ def _shared_surface_case() -> dict[str, Any]:
         and isinstance(direct_recovery_request.get("desktop_execution_policy"), dict)
         else {}
     )
-    checks["direct_recovery_keeps_daily_sandbox_policy"] = (
+    checks["direct_recovery_keeps_daily_direct_policy"] = (
         bool(direct_recovery_request)
-        and direct_policy.get("mode") == "preview_input"
-        and direct_policy.get("prefer_isolated_desktop") is True
-        and direct_policy.get("avoid_user_foreground_takeover") is True
-        and direct_policy.get("require_sandbox_for_keyboard_mouse") is True
+        and direct_policy.get("mode") == "supervised_live"
+        and direct_policy.get("allow_live_foreground") is True
+        and direct_policy.get("prefer_isolated_desktop") is False
+        and direct_policy.get("avoid_user_foreground_takeover") is False
+        and direct_policy.get("require_sandbox_for_keyboard_mouse") is False
     )
-    checks["direct_recovery_recommends_provider_session"] = (
+    checks["direct_recovery_does_not_require_provider_session"] = (
         bool(direct_recovery_request)
         and desktop_provider_session_auto_start_recommended_for_requests(
             [direct_recovery_request]
         )
-        is True
+        is False
     )
     return {
         "id": "chat_bubble_live2d_shared_runtime",
         "ok": all(checks.values()),
         "cases": cases,
         "direct_recovery_request": direct_recovery_request,
+        "checks": checks,
+    }
+
+
+def _direct_desktop_runtime_case() -> dict[str, Any]:
+    provider = local_desktop_execution_provider_status()
+    daily_policy = daily_entrypoint_desktop_execution_policy(surface="chat")
+    studio_policy = agent_studio_desktop_execution_policy()
+    route_metadata = {
+        "desktop_provider_local_native": True,
+        "desktop_provider_route_readonly": True,
+        "desktop_provider_route_foreground": True,
+    }
+    route_inputs = {
+        "desktop.list_apps": {},
+        "app.open": {"app_name": "PixelForge"},
+        "desktop.safe_type_text": {"text": "hello"},
+        "desktop.click_ui_element": {"label": "Export"},
+    }
+    routes = {
+        tool_name: desktop_execution_route_decision(
+            tool_name,
+            policy=daily_policy,
+            execution_mode=desktop_tool_execution_mode_for_input(
+                tool_name,
+                input_preview,
+            ),
+            metadata=route_metadata,
+        )
+        for tool_name, input_preview in route_inputs.items()
+    }
+    isolated_route = desktop_execution_route_decision(
+        "desktop.safe_type_text",
+        policy={
+            "mode": "sandbox_preferred",
+            "prefer_isolated_desktop": True,
+            "avoid_user_foreground_takeover": True,
+            "require_sandbox_for_keyboard_mouse": True,
+        },
+        execution_mode=desktop_tool_execution_mode_for_input(
+            "desktop.safe_type_text",
+            {"text": "hello"},
+        ),
+        metadata=route_metadata,
+    )
+    broker_calls: list[dict[str, Any]] = []
+
+    class FakeBroker:
+        def call(
+            self,
+            name: str,
+            payload: dict[str, Any],
+            *,
+            approved: bool = False,
+        ) -> dict[str, Any]:
+            broker_calls.append(
+                {"tool": name, "input": dict(payload), "approved": approved}
+            )
+            return {"ok": True, "action": name, "data": dict(payload)}
+
+    registry = DesktopExecutionProviderRegistry(
+        [LocalDesktopExecutionProviderAdapter()]
+    )
+    input_result = registry.execute_if_routed(
+        "desktop.safe_type_text",
+        {"text": "hello"},
+        tool_request={
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "hello"},
+            "desktop_execution_route": routes["desktop.safe_type_text"],
+            "sandbox_provider": provider,
+        },
+        broker=FakeBroker(),
+    )
+    catalog = runtime_tool_catalog_snapshot(sandbox_provider=provider)
+    catalog_tools = {tool.tool_name: tool for tool in catalog.tools}
+    checks = {
+        "daily_policy_defaults_to_direct_desktop": (
+            daily_policy.get("mode") == "supervised_live"
+            and daily_policy.get("allow_live_foreground") is True
+            and daily_policy.get("prefer_isolated_desktop") is False
+            and daily_policy.get("require_sandbox_for_keyboard_mouse") is False
+        ),
+        "studio_policy_defaults_to_direct_desktop": (
+            studio_policy.get("mode") == "supervised_live"
+            and studio_policy.get("allow_live_foreground") is True
+            and studio_policy.get("prefer_isolated_desktop") is False
+            and studio_policy.get("require_sandbox_for_keyboard_mouse") is False
+        ),
+        "local_provider_is_release_capable": (
+            provider.get("available") is True
+            and provider.get("adapter_ready") is True
+            and provider.get("provider_kind") == LOCAL_DESKTOP_PROVIDER_KIND
+            and provider.get("provider_id") == LOCAL_DESKTOP_PROVIDER_ID
+            and provider.get("keyboard_mouse_capture_supported") is True
+            and provider.get("desktop_backend_ready_for_public_release") is True
+            and provider.get("requires_real_virtual_desktop_backend") is False
+        ),
+        "direct_routes_cover_discover_operate_input": all(
+            route.get("status") == "provider_ready"
+            and route.get("can_execute") is True
+            and route.get("selected_provider_kind") == LOCAL_DESKTOP_PROVIDER_KIND
+            and route.get("selected_provider_id") == LOCAL_DESKTOP_PROVIDER_ID
+            for route in routes.values()
+        ),
+        "constrained_input_executes_through_local_broker": (
+            isinstance(input_result, dict)
+            and input_result.get("ok") is True
+            and input_result.get("desktop_execution_evidence", {}).get(
+                "keyboard_mouse_capture"
+            )
+            is True
+            and broker_calls
+            == [
+                {
+                    "tool": "desktop.safe_type_text",
+                    "input": {"text": "hello"},
+                    "approved": False,
+                }
+            ]
+        ),
+        "risk_policy_still_distinguishes_approval": (
+            catalog_tools["desktop.safe_type_text"].risk_level == "low"
+            and catalog_tools["desktop.safe_type_text"].approval_required is False
+            and desktop_tool_execution_mode_for_input(
+                "desktop.click_ui_element",
+                {"label": "Export"},
+            ).approval_recommended
+            is True
+            and catalog_tools["desktop.submit_foreground"].risk_level == "high"
+            and catalog_tools["desktop.submit_foreground"].approval_required is True
+        ),
+        "isolated_desktop_remains_explicit_opt_in": (
+            isolated_route.get("isolated_desktop_preferred") is True
+            and isolated_route.get("can_execute") is False
+            and isolated_route.get("status") == "sandbox_desktop_session_required"
+        ),
+    }
+    return {
+        "id": "direct_desktop_runtime",
+        "ok": all(checks.values()),
+        "provider_id": provider.get("provider_id"),
+        "provider_kind": provider.get("provider_kind"),
+        "desktop_session_kind": provider.get("desktop_session_kind"),
+        "desktop_session_isolated": provider.get("desktop_session_isolated"),
+        "foreground_takeover_required": provider.get("foreground_takeover_required"),
+        "keyboard_mouse_capture_supported": provider.get(
+            "keyboard_mouse_capture_supported"
+        ),
+        "desktop_backend_kind": provider.get("desktop_backend_kind"),
+        "desktop_backend_is_loopback": provider.get("desktop_backend_is_loopback"),
+        "desktop_backend_ready_for_public_release": provider.get(
+            "desktop_backend_ready_for_public_release"
+        ),
+        "requires_real_virtual_desktop_backend": provider.get(
+            "requires_real_virtual_desktop_backend"
+        ),
+        "supported_tools": provider.get("supported_tools", []),
+        "routes": routes,
+        "isolated_opt_in_route": isolated_route,
+        "broker_calls": broker_calls,
         "checks": checks,
     }
 
@@ -678,6 +851,11 @@ def _build_sections(
             _shared_surface_case,
         ),
         _run_section(
+            "direct_desktop_runtime",
+            "Direct local desktop execution is the default while isolated desktop remains optional.",
+            _direct_desktop_runtime_case,
+        ),
+        _run_section(
             "desktop_executor_before_model",
             "Desktop discover/operate/verify runs before model fallback.",
             lambda: smoke_agent_entrypoint_desktop_execution.run_smoke(
@@ -758,6 +936,7 @@ def run_smoke(
     run_isolated_provider_smoke: bool = True,
     use_configured_virtual_desktop_provider: bool = False,
     provider_manifest: Path | None = None,
+    public_release_required: bool = False,
     require_public_release_backend: bool = False,
 ) -> dict[str, Any]:
     with tempfile.TemporaryDirectory(prefix="oha-desktop-agent-release-smoke-") as temp_dir:
@@ -772,6 +951,10 @@ def run_smoke(
             provider_manifest=provider_manifest,
         )
     failed = [section for section in sections if section.get("ok") is not True]
+    direct_desktop_backend = _direct_desktop_backend_summary(sections)
+    direct_desktop_release_ready = bool(
+        direct_desktop_backend.get("release_ready") is True
+    )
     isolated_provider_backend = _isolated_provider_backend_summary(sections)
     configured_virtual_desktop_provider_requested = bool(
         use_configured_virtual_desktop_provider or provider_manifest is not None
@@ -804,6 +987,10 @@ def run_smoke(
         ),
         "covers_chat_bubble_live2d": any(
             section["id"] == "shared_daily_surfaces" for section in sections
+        ),
+        "covers_direct_desktop_runtime": any(
+            section["id"] == "direct_desktop_runtime" and section.get("ok") is True
+            for section in sections
         ),
         "covers_agent_studio": any(
             section["id"] == "agent_studio_orchestration" for section in sections
@@ -842,26 +1029,48 @@ def run_smoke(
         and configured_virtual_desktop_provider_requested
         and not isolated_provider_release_blockers
     )
+    public_release_ready = bool(
+        all(checks.values())
+        and direct_desktop_release_ready
+        and (
+            isolated_provider_release_ready
+            if require_public_release_backend
+            else True
+        )
+    )
     public_release_readiness = public_release_readiness_snapshot(
         run_isolated_provider_smoke=run_isolated_provider_smoke,
         configured_virtual_desktop_provider_requested=(
             configured_virtual_desktop_provider_requested
         ),
         provider_manifest=provider_manifest,
-        release_ready=isolated_provider_release_ready,
-        release_blockers=isolated_provider_release_blockers,
-        backend=isolated_provider_backend,
-    )
-    public_release_ready = (
-        all(checks.values())
-        and (isolated_provider_release_ready if require_public_release_backend else False)
+        release_ready=public_release_ready,
+        release_blockers=(
+            isolated_provider_release_blockers
+            if require_public_release_backend
+            else (
+                []
+                if direct_desktop_release_ready
+                else ["direct_desktop_runtime_not_ready"]
+            )
+        ),
+        backend=(
+            isolated_provider_backend
+            if require_public_release_backend
+            else direct_desktop_backend
+        ),
+        isolated_desktop_required=require_public_release_backend,
     )
     return {
         "ok": all(checks.values()),
         "mode": "oha_desktop_agent_release_smoke",
-        "public_release_required": bool(require_public_release_backend),
+        "public_release_required": bool(
+            public_release_required or require_public_release_backend
+        ),
         "public_release_ready": public_release_ready,
         "public_release_readiness": public_release_readiness,
+        "direct_desktop_release_ready": direct_desktop_release_ready,
+        "direct_desktop_backend": direct_desktop_backend,
         "section_count": len(sections),
         "failed_sections": [str(section["id"]) for section in failed],
         "checks": checks,
@@ -888,6 +1097,46 @@ def run_smoke(
         "isolated_provider_release_blockers": isolated_provider_release_blockers,
         "isolated_provider_backend": isolated_provider_backend,
         "sections": sections,
+    }
+
+
+def _direct_desktop_backend_summary(
+    sections: Sequence[dict[str, Any]],
+) -> dict[str, Any]:
+    section = next(
+        (
+            candidate
+            for candidate in sections
+            if candidate.get("id") == "direct_desktop_runtime"
+        ),
+        {},
+    )
+    report = section.get("report") if isinstance(section.get("report"), dict) else {}
+    if not report:
+        return {}
+    return {
+        "release_ready": section.get("ok") is True,
+        "provider_id": str(report.get("provider_id") or ""),
+        "provider_kind": str(report.get("provider_kind") or ""),
+        "desktop_session_kind": str(report.get("desktop_session_kind") or ""),
+        "desktop_session_isolated": report.get("desktop_session_isolated"),
+        "foreground_takeover_required": report.get("foreground_takeover_required"),
+        "keyboard_mouse_capture_supported": report.get(
+            "keyboard_mouse_capture_supported"
+        ),
+        "desktop_backend_kind": str(report.get("desktop_backend_kind") or ""),
+        "desktop_backend_is_loopback": report.get("desktop_backend_is_loopback"),
+        "desktop_backend_ready_for_public_release": report.get(
+            "desktop_backend_ready_for_public_release"
+        ),
+        "requires_real_virtual_desktop_backend": report.get(
+            "requires_real_virtual_desktop_backend"
+        ),
+        "supported_tools": [
+            str(item)
+            for item in report.get("supported_tools") or []
+            if str(item or "").strip()
+        ],
     }
 
 
@@ -1094,6 +1343,10 @@ def _compact_stdout_summary(payload: dict[str, Any]) -> dict[str, Any]:
         "public_release_readiness": dict(
             payload.get("public_release_readiness") or {}
         ),
+        "direct_desktop_release_ready": bool(
+            payload.get("direct_desktop_release_ready") is True
+        ),
+        "direct_desktop_backend": dict(payload.get("direct_desktop_backend") or {}),
         "section_count": int(payload.get("section_count") or len(sections)),
         "failed_sections": [
             str(section)
@@ -1179,12 +1432,19 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--public-release",
+        dest="public_release_required",
+        action="store_true",
+        help=(
+            "Require the default Direct Desktop product path to be release-ready."
+        ),
+    )
+    parser.add_argument(
         "--require-public-release-backend",
         dest="require_public_release_backend",
         action="store_true",
         help=(
-            "Fail unless the isolated desktop provider smoke uses a real, "
-            "public-release-ready virtual desktop backend."
+            "Additionally require the optional isolated desktop provider to use a "
+            "real, public-release-ready virtual desktop backend."
         ),
     )
     parser.add_argument(
@@ -1260,6 +1520,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.use_configured_virtual_desktop_provider
         ),
         provider_manifest=args.provider_manifest,
+        public_release_required=bool(args.public_release_required),
         require_public_release_backend=bool(args.require_public_release_backend),
     )
     if args.report_json is not None:

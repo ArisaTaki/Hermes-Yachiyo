@@ -54,6 +54,8 @@ def public_release_gate_checks(
     source_capabilities_json = tmp_dir / "rc-verification-source-capabilities.json"
     if include_isolated_provider_smoke or provider_manifest is not None:
         oha_release_smoke_command.append("--run-isolated-provider-smoke")
+    else:
+        oha_release_smoke_command.append("--skip-isolated-provider-smoke")
     if provider_manifest is not None:
         oha_release_smoke_command.extend(
             [
@@ -197,7 +199,6 @@ def run_public_release_gate(
     )
     effective_include_isolated_provider_smoke = (
         include_isolated_provider_smoke
-        or require_release_ready
         or resolved_provider_manifest is not None
     )
     checks = public_release_gate_checks(

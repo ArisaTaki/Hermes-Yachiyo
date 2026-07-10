@@ -259,10 +259,10 @@ def test_release_smoke_summary_passes_with_required_evidence(tmp_path, monkeypat
     oha_item = next(item for item in summary["items"] if item["id"] == "oha_desktop_agent_product")
     assert oha_item["present_evidence_ids"] == [
         release_smoke.OHA_DESKTOP_AGENT_RELEASE_SMOKE_MODE,
-        "oha_isolated_desktop_provider",
-        "oha_real_virtual_desktop_backend",
+        "oha_direct_desktop_runtime",
     ]
     assert "oha_deepagent_core" in oha_item["related_evidence_ids"]
+    assert "oha_direct_desktop_runtime" in oha_item["related_evidence_ids"]
     assert "oha_isolated_desktop_provider" in oha_item["related_evidence_ids"]
     assert "oha_isolated_desktop_backend_boundary" in oha_item["related_evidence_ids"]
 
@@ -321,7 +321,7 @@ def test_release_smoke_summary_requires_agent_studio_planner_orchestration(
     ]
 
 
-def test_release_smoke_summary_requires_isolated_desktop_provider_section(
+def test_release_smoke_summary_treats_isolated_desktop_provider_as_optional(
     tmp_path,
     monkeypatch,
 ):
@@ -339,23 +339,50 @@ def test_release_smoke_summary_requires_isolated_desktop_provider_section(
 
     summary = release_smoke.summarize_release_smoke([report_path])
 
-    assert "oha_desktop_agent_product" in summary["missing_item_ids"]
+    assert "oha_desktop_agent_product" not in summary["missing_item_ids"]
     oha_item = next(item for item in summary["items"] if item["id"] == "oha_desktop_agent_product")
     assert oha_item["present_evidence_ids"] == [
         release_smoke.OHA_DESKTOP_AGENT_RELEASE_SMOKE_MODE,
-        "oha_real_virtual_desktop_backend",
+        "oha_direct_desktop_runtime",
     ]
-    assert oha_item["missing_evidence_ids"] == ["oha_isolated_desktop_provider"]
+    assert oha_item["missing_evidence_ids"] == []
+    assert oha_item["release_blockers"] == []
+
+
+def test_release_smoke_summary_requires_direct_desktop_runtime_section(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(release_smoke, "ROOT", tmp_path)
+    report_path = tmp_path / "tmp" / "oha-without-direct-desktop.json"
+    payload = _oha_desktop_agent_release_smoke_report()
+    payload["sections"] = [
+        section
+        for section in payload["sections"]
+        if section["id"] != "direct_desktop_runtime"
+    ]
+    payload["section_count"] = len(payload["sections"])
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    summary = release_smoke.summarize_release_smoke([report_path])
+
+    assert "oha_desktop_agent_product" in summary["missing_item_ids"]
+    oha_item = next(
+        item for item in summary["items"] if item["id"] == "oha_desktop_agent_product"
+    )
+    assert oha_item["present_evidence_ids"] == [
+        release_smoke.OHA_DESKTOP_AGENT_RELEASE_SMOKE_MODE,
+    ]
+    assert oha_item["missing_evidence_ids"] == ["oha_direct_desktop_runtime"]
     action = next(
         item for item in summary["next_actions"] if item["id"] == "oha_desktop_agent_product"
     )
-    assert "--run-isolated-provider-smoke" in action["command"]
-    assert "--use-configured-virtual-desktop-provider" in action["command"]
-    assert "--write-provider-manifest-template" in action["command"]
-    assert "--validate-provider-manifest" in action["command"]
+    assert "--skip-isolated-provider-smoke" in action["command"]
+    assert "--public-release" in action["command"]
 
 
-def test_release_smoke_summary_requires_real_virtual_desktop_backend(
+def test_release_smoke_summary_does_not_require_real_virtual_desktop_backend(
     tmp_path,
     monkeypatch,
 ):
@@ -386,34 +413,23 @@ def test_release_smoke_summary_requires_real_virtual_desktop_backend(
 
     summary = release_smoke.summarize_release_smoke([report_path])
 
-    assert "oha_desktop_agent_product" in summary["missing_item_ids"]
+    assert "oha_desktop_agent_product" not in summary["missing_item_ids"]
     oha_item = next(
         item for item in summary["items"] if item["id"] == "oha_desktop_agent_product"
     )
     assert oha_item["present_evidence_ids"] == [
         release_smoke.OHA_DESKTOP_AGENT_RELEASE_SMOKE_MODE,
-        "oha_isolated_desktop_provider",
+        "oha_direct_desktop_runtime",
     ]
-    assert oha_item["missing_evidence_ids"] == ["oha_real_virtual_desktop_backend"]
-    assert oha_item["release_blockers"][0]["reason"] == (
-        "real_virtual_desktop_backend_required"
-    )
-    action = next(
-        item for item in summary["next_actions"] if item["id"] == "oha_desktop_agent_product"
-    )
-    assert action["release_blockers"][0]["evidence_summary"][
-        "desktop_backend_kind"
-    ] == "loopback_session_harness"
-    assert action["release_blockers"][0]["evidence_summary"][
-        "provider_contract_ok"
-    ] is False
-    assert "loopback_desktop_backend" in action["release_blockers"][0][
-        "evidence_summary"
-    ]["provider_contract_blocking_conditions"]
-    assert "--use-configured-virtual-desktop-provider" in action["command"]
+    assert oha_item["missing_evidence_ids"] == []
+    assert oha_item["release_blockers"] == []
+    assert "oha_isolated_desktop_provider" in oha_item["related_evidence_ids"]
+    assert "oha_isolated_desktop_backend_boundary" in oha_item[
+        "related_evidence_ids"
+    ]
 
 
-def test_release_smoke_summary_requires_verified_desktop_provider_contract(
+def test_release_smoke_summary_keeps_unverified_optional_provider_non_blocking(
     tmp_path,
     monkeypatch,
 ):
@@ -435,23 +451,19 @@ def test_release_smoke_summary_requires_verified_desktop_provider_contract(
 
     summary = release_smoke.summarize_release_smoke([report_path])
 
-    assert "oha_desktop_agent_product" in summary["missing_item_ids"]
+    assert "oha_desktop_agent_product" not in summary["missing_item_ids"]
     oha_item = next(
         item for item in summary["items"] if item["id"] == "oha_desktop_agent_product"
     )
     assert oha_item["present_evidence_ids"] == [
         release_smoke.OHA_DESKTOP_AGENT_RELEASE_SMOKE_MODE,
-        "oha_isolated_desktop_provider",
+        "oha_direct_desktop_runtime",
     ]
-    assert oha_item["missing_evidence_ids"] == ["oha_real_virtual_desktop_backend"]
-    evidence_summary = oha_item["release_blockers"][0]["evidence_summary"]
-    assert evidence_summary["provider_contract_ok"] is None
-    assert evidence_summary["provider_contract_blocking_conditions"] == [
-        "virtual_desktop_provider_contract_not_ready"
-    ]
+    assert oha_item["missing_evidence_ids"] == []
+    assert oha_item["release_blockers"] == []
 
 
-def test_release_smoke_summary_requires_provider_conformance_public_release_ready(
+def test_release_smoke_summary_keeps_optional_provider_conformance_non_blocking(
     tmp_path,
     monkeypatch,
 ):
@@ -497,18 +509,12 @@ def test_release_smoke_summary_requires_provider_conformance_public_release_read
     oha_item = next(
         item for item in summary["items"] if item["id"] == "oha_desktop_agent_product"
     )
-    assert oha_item["status"] == "missing"
-    assert oha_item["missing_evidence_ids"] == ["oha_real_virtual_desktop_backend"]
-    evidence_summary = oha_item["release_blockers"][0]["evidence_summary"]
-    assert evidence_summary["provider_contract_ok"] is True
-    assert evidence_summary["provider_conformance_ok"] is False
-    assert evidence_summary["provider_conformance_public_release_ready"] is False
-    assert evidence_summary["provider_conformance_release_blocking_conditions"] == [
-        "real_virtual_desktop_backend_required"
-    ]
+    assert oha_item["status"] == "passed"
+    assert oha_item["missing_evidence_ids"] == []
+    assert oha_item["release_blockers"] == []
 
 
-def test_release_smoke_summary_requires_no_user_foreground_takeover(
+def test_release_smoke_summary_allows_direct_user_foreground_takeover(
     tmp_path,
     monkeypatch,
 ):
@@ -542,18 +548,12 @@ def test_release_smoke_summary_requires_no_user_foreground_takeover(
     oha_item = next(
         item for item in summary["items"] if item["id"] == "oha_desktop_agent_product"
     )
-    assert oha_item["status"] == "missing"
-    assert oha_item["missing_evidence_ids"] == ["oha_real_virtual_desktop_backend"]
-    evidence_summary = oha_item["release_blockers"][0]["evidence_summary"]
-    assert evidence_summary["desktop_session_kind"] == "virtual_desktop"
-    assert evidence_summary["desktop_session_isolated"] is True
-    assert evidence_summary["foreground_takeover_required"] is True
-    assert "foreground_takeover_required" in evidence_summary[
-        "provider_contract_blocking_conditions"
-    ]
+    assert oha_item["status"] == "passed"
+    assert oha_item["missing_evidence_ids"] == []
+    assert oha_item["release_blockers"] == []
 
 
-def test_release_smoke_summary_keeps_backend_blocker_when_release_smoke_fails(
+def test_release_smoke_summary_reports_direct_smoke_failure_without_vm_blocker(
     tmp_path,
     monkeypatch,
 ):
@@ -584,12 +584,9 @@ def test_release_smoke_summary_keeps_backend_blocker_when_release_smoke_fails(
     action = next(
         item for item in summary["next_actions"] if item["id"] == "oha_desktop_agent_product"
     )
-    evidence_summary = action["release_blockers"][0]["evidence_summary"]
-    assert evidence_summary["desktop_backend_kind"] == "loopback_session_harness"
-    assert evidence_summary["provider_contract_ok"] is False
-    assert "loopback_desktop_backend" in evidence_summary[
-        "provider_contract_blocking_conditions"
-    ]
+    assert action.get("release_blockers", []) == []
+    assert "--skip-isolated-provider-smoke" in action["command"]
+    assert "--public-release" in action["command"]
 
 
 def test_release_smoke_summary_reports_missing_items_and_next_actions(

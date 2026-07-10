@@ -50,6 +50,10 @@ def test_oha_desktop_agent_release_smoke_covers_product_readiness(
     assert report["isolated_provider_dev_smoke_ready"] is True
     assert report["isolated_provider_release_ready"] is False
     assert report["isolated_provider_release_blockers"] == []
+    assert report["direct_desktop_release_ready"] is True
+    assert report["public_release_ready"] is True
+    assert report["public_release_readiness"]["ready"] is True
+    assert report["public_release_readiness"]["blocking_conditions"] == []
     assert report["failed_sections"] == []
     assert report["checks"] == {
         "all_sections_passed": True,
@@ -58,6 +62,7 @@ def test_oha_desktop_agent_release_smoke_covers_product_readiness(
         "covers_desktop_provider_execution_loop": True,
         "covers_legacy_facade_planner_ownership": True,
         "covers_chat_bubble_live2d": True,
+        "covers_direct_desktop_runtime": True,
         "covers_agent_studio": True,
         "covers_groups_workflow": True,
         "covers_approval_gate": True,
@@ -78,22 +83,29 @@ def test_oha_desktop_agent_release_smoke_covers_product_readiness(
         "all_use_runtime_planner"
     ] is True
     assert section_by_id["shared_daily_surfaces"]["report"]["checks"][
-        "direct_recovery_keeps_daily_sandbox_policy"
+        "direct_recovery_keeps_daily_direct_policy"
     ] is True
     assert section_by_id["shared_daily_surfaces"]["report"]["checks"][
-        "direct_recovery_recommends_provider_session"
+        "direct_recovery_does_not_require_provider_session"
     ] is True
     assert section_by_id["shared_daily_surfaces"]["report"]["direct_recovery_request"][
         "desktop_execution_policy"
-    ]["avoid_user_foreground_takeover"] is True
+    ]["avoid_user_foreground_takeover"] is False
+    assert section_by_id["direct_desktop_runtime"]["ok"] is True
+    assert section_by_id["direct_desktop_runtime"]["report"]["checks"][
+        "constrained_input_executes_through_local_broker"
+    ] is True
+    assert section_by_id["direct_desktop_runtime"]["report"]["provider_kind"] == (
+        "local_desktop"
+    )
     assert section_by_id["desktop_executor_before_model"]["report"]["checks"][
         "model_never_called"
     ] is True
     assert section_by_id["desktop_executor_before_model"]["report"]["checks"][
-        "daily_app_open_recommends_provider_session"
+        "daily_app_open_uses_direct_desktop"
     ] is True
     assert section_by_id["desktop_executor_before_model"]["report"]["checks"][
-        "daily_media_playback_recommends_provider_session"
+        "daily_media_playback_uses_direct_desktop"
     ] is True
     assert section_by_id["desktop_provider_execution_loop"]["report"]["checks"][
         "provider_executes_sandbox_ready_request"
@@ -320,7 +332,8 @@ def test_oha_desktop_agent_release_smoke_public_release_requires_real_backend(
         "run_public_release_smoke",
     ]
     assert readiness["required_commands"]["public_release_smoke"].startswith(
-        "python scripts/smoke_oha_desktop_agent_release.py --public-release"
+        "python scripts/smoke_oha_desktop_agent_release.py "
+        "--require-public-release-backend"
     )
     assert "run_virtual_desktop_guest_provider.py" in readiness[
         "required_commands"
@@ -388,8 +401,8 @@ def test_oha_desktop_agent_release_smoke_public_release_accepts_configured_provi
             "title": "Run public release smoke",
             "reason": "This is the release gate for desktop-agent provider readiness.",
             "command": (
-                "python scripts/smoke_oha_desktop_agent_release.py "
-                "--public-release "
+                    "python scripts/smoke_oha_desktop_agent_release.py "
+                    "--require-public-release-backend "
                 "--report-json tmp/oha-desktop-agent-public-release-smoke.json"
             ),
         }
@@ -438,6 +451,8 @@ def test_oha_desktop_agent_release_smoke_cli_writes_report(
         "public_release_required": False,
         "public_release_ready": False,
         "public_release_readiness": {},
+        "direct_desktop_release_ready": False,
+        "direct_desktop_backend": {},
         "section_count": 0,
         "failed_sections": [],
         "checks": {"all_sections_passed": True},
@@ -615,7 +630,7 @@ def test_oha_desktop_agent_release_smoke_cli_passes_configured_provider_flag(
     assert captured_kwargs["use_configured_virtual_desktop_provider"] is True
 
 
-def test_oha_desktop_agent_release_smoke_cli_public_release_requires_backend(
+def test_oha_desktop_agent_release_smoke_cli_explicit_backend_flag_requires_backend(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -647,7 +662,7 @@ def test_oha_desktop_agent_release_smoke_cli_public_release_requires_backend(
 
     exit_code = smoke.main(
         [
-            "--public-release",
+            "--require-public-release-backend",
             "--report-json",
             str(tmp_path / "oha-release-smoke.json"),
         ]
@@ -656,6 +671,43 @@ def test_oha_desktop_agent_release_smoke_cli_public_release_requires_backend(
     assert exit_code == 1
     assert captured_kwargs["run_isolated_provider_smoke"] is True
     assert captured_kwargs["require_public_release_backend"] is True
+
+
+def test_oha_desktop_agent_release_smoke_cli_public_release_uses_direct_desktop(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    captured_kwargs: dict[str, object] = {}
+
+    def fake_run_smoke(**kwargs):
+        captured_kwargs.update(kwargs)
+        return {
+            "ok": True,
+            "mode": "oha_desktop_agent_release_smoke",
+            "public_release_required": True,
+            "public_release_ready": True,
+            "direct_desktop_release_ready": True,
+            "section_count": 0,
+            "failed_sections": [],
+            "checks": {"covers_direct_desktop_runtime": True},
+            "sections": [],
+        }
+
+    monkeypatch.setattr(smoke, "run_smoke", fake_run_smoke)
+
+    exit_code = smoke.main(
+        [
+            "--public-release",
+            "--skip-isolated-provider-smoke",
+            "--report-json",
+            str(tmp_path / "oha-release-smoke.json"),
+        ]
+    )
+
+    assert exit_code == 0
+    assert captured_kwargs["run_isolated_provider_smoke"] is False
+    assert captured_kwargs["public_release_required"] is True
+    assert captured_kwargs["require_public_release_backend"] is False
 
 
 def test_oha_desktop_agent_release_smoke_cli_passes_provider_manifest(

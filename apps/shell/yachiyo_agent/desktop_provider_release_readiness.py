@@ -16,13 +16,14 @@ def public_release_readiness_snapshot(
     release_ready: bool,
     release_blockers: Sequence[str] = (),
     backend: Mapping[str, Any] | None = None,
+    isolated_desktop_required: bool = True,
 ) -> dict[str, Any]:
     """Return machine-readable readiness evidence and next actions."""
 
     clean_manifest = _clean_provider_manifest(provider_manifest)
     backend_payload = dict(backend or {})
     blockers = _unique_strings(release_blockers)
-    if not release_ready and not blockers:
+    if not release_ready and not blockers and isolated_desktop_required:
         blockers = _public_release_advisory_blockers(
             configured_virtual_desktop_provider_requested=(
                 configured_virtual_desktop_provider_requested
@@ -30,11 +31,14 @@ def public_release_readiness_snapshot(
             backend=backend_payload,
         )
     if (
-        not release_ready
+        isolated_desktop_required
+        and not release_ready
         and not configured_virtual_desktop_provider_requested
         and "virtual_desktop_provider_not_configured" not in blockers
     ):
         blockers.append("virtual_desktop_provider_not_configured")
+    if not release_ready and not blockers:
+        blockers.append("direct_desktop_runtime_not_ready")
     return {
         "ready": bool(release_ready),
         "backend_ready": bool(release_ready),
@@ -45,6 +49,8 @@ def public_release_readiness_snapshot(
         "blocking_conditions": blockers,
         "backend": backend_payload,
         "next_actions": _public_release_next_actions(
+            release_ready=release_ready,
+            isolated_desktop_required=isolated_desktop_required,
             run_isolated_provider_smoke=run_isolated_provider_smoke,
             configured_virtual_desktop_provider_requested=(
                 configured_virtual_desktop_provider_requested
@@ -52,7 +58,10 @@ def public_release_readiness_snapshot(
             provider_manifest=clean_manifest,
             blockers=blockers,
         ),
-        "required_commands": _public_release_required_commands(clean_manifest),
+        "required_commands": _public_release_required_commands(
+            clean_manifest,
+            isolated_desktop_required=isolated_desktop_required,
+        ),
     }
 
 
@@ -85,6 +94,8 @@ def _backend_release_blockers(backend: Mapping[str, Any]) -> list[str]:
 
 def _public_release_next_actions(
     *,
+    release_ready: bool,
+    isolated_desktop_required: bool,
     run_isolated_provider_smoke: bool,
     configured_virtual_desktop_provider_requested: bool,
     provider_manifest: str,
@@ -92,13 +103,27 @@ def _public_release_next_actions(
 ) -> list[dict[str, Any]]:
     actions: list[dict[str, Any]] = []
     blocker_set = set(blockers)
+    if not isolated_desktop_required:
+        if release_ready:
+            return actions
+        return [
+            {
+                "id": "run_public_release_smoke",
+                "title": "Run Direct Desktop release smoke",
+                "reason": "The default Direct Desktop runtime path is not release-ready.",
+                "command": _public_release_smoke_command(""),
+            }
+        ]
     if not run_isolated_provider_smoke:
         actions.append(
             {
                 "id": "run_isolated_provider_smoke",
                 "title": "Run isolated provider smoke",
                 "reason": "Public release requires provider runtime evidence.",
-                "command": _public_release_smoke_command(provider_manifest),
+                "command": _public_release_smoke_command(
+                    provider_manifest,
+                    isolated_desktop_required=True,
+                ),
             }
         )
     if not configured_virtual_desktop_provider_requested:
@@ -198,13 +223,24 @@ def _public_release_next_actions(
             "id": "run_public_release_smoke",
             "title": "Run public release smoke",
             "reason": "This is the release gate for desktop-agent provider readiness.",
-            "command": _public_release_smoke_command(provider_manifest),
+            "command": _public_release_smoke_command(
+                provider_manifest,
+                isolated_desktop_required=True,
+            ),
         }
     )
     return actions
 
 
-def _public_release_required_commands(provider_manifest: str) -> dict[str, str]:
+def _public_release_required_commands(
+    provider_manifest: str,
+    *,
+    isolated_desktop_required: bool,
+) -> dict[str, str]:
+    if not isolated_desktop_required:
+        return {
+            "public_release_smoke": _public_release_smoke_command(""),
+        }
     manifest = provider_manifest or "tmp/oha-virtual-desktop-provider.manifest.json"
     return {
         "write_manifest_template": (
@@ -232,15 +268,27 @@ def _public_release_required_commands(provider_manifest: str) -> dict[str, str]:
             "\"$OHA_YACHIYO_VIRTUAL_DESKTOP_REMOTE_EXECUTABLE\" "
             "--session-id \"$OHA_YACHIYO_VIRTUAL_DESKTOP_SESSION_ID\" --manifest"
         ),
-        "public_release_smoke": _public_release_smoke_command(provider_manifest),
+        "public_release_smoke": _public_release_smoke_command(
+            provider_manifest,
+            isolated_desktop_required=True,
+        ),
     }
 
 
-def _public_release_smoke_command(provider_manifest: str) -> str:
+def _public_release_smoke_command(
+    provider_manifest: str,
+    *,
+    isolated_desktop_required: bool = False,
+) -> str:
     manifest_part = f" --provider-manifest {provider_manifest}" if provider_manifest else ""
+    release_flag = (
+        "--require-public-release-backend"
+        if isolated_desktop_required
+        else "--public-release"
+    )
     return (
         "python scripts/smoke_oha_desktop_agent_release.py "
-        f"--public-release{manifest_part} "
+        f"{release_flag}{manifest_part} "
         "--report-json tmp/oha-desktop-agent-public-release-smoke.json"
     )
 

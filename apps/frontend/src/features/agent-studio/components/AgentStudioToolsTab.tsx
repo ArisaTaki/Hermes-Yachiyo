@@ -618,7 +618,7 @@ function DesktopProviderSessionPanel({
       data-testid="studio-desktop-provider-session"
     >
       <div className="studio-tool-inspector-heading">
-        <h3>Desktop Session</h3>
+        <h3>Optional Isolated Session</h3>
         <span>{status}</span>
       </div>
       <div className="studio-tool-pill-row">
@@ -709,7 +709,7 @@ function DesktopProviderSessionPanel({
           </span>
         ))}
         {!providerId && !url && !pid ? (
-          <span className="studio-tool-permission missing">isolated provider stopped</span>
+          <span className="studio-tool-permission">optional isolated provider stopped</span>
         ) : null}
       </div>
       {sessionError ? <div className="notice danger">{sessionError}</div> : null}
@@ -1516,16 +1516,16 @@ function ToolDetail({
             </span>
           ) : null}
           <span
-            className={providerState.controlledReleaseReady ? 'studio-tool-permission' : 'studio-tool-permission missing'}
+            className="studio-tool-permission"
             data-controlled-provider-release-ready={String(providerState.controlledReleaseReady)}
           >
-            {providerState.controlledReleaseReady ? 'release provider ready' : 'release provider blocked'}
+            {providerState.controlledReleaseReady ? 'optional isolated ready' : 'optional isolated not configured'}
           </span>
           <span
-            className={providerState.controlledPublicReleaseReady ? 'studio-tool-permission' : 'studio-tool-permission missing'}
+            className="studio-tool-permission"
             data-controlled-provider-public-release-ready={String(providerState.controlledPublicReleaseReady)}
           >
-            {providerState.controlledPublicReleaseReady ? 'public release ready' : 'public release blocked'}
+            {providerState.controlledPublicReleaseReady ? 'isolated conformance ready' : 'isolated conformance optional'}
           </span>
           {providerState.controlledProviderContractVersion ? (
             <span

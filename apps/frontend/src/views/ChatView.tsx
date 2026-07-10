@@ -470,7 +470,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
           || `已启动恢复动作：${action.label || result.title || result.prompt}`,
         );
       } else if (result.mode === 'desktop_provider_session') {
-        setStatus(result.statusMessage || '已请求启动隔离桌面 Provider');
+        setStatus(result.statusMessage || '已请求启动可选隔离桌面 Provider');
       } else if (result.fallbackResult === false) {
         setStatus('权限恢复动作提交失败');
       }
