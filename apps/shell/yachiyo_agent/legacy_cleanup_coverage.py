@@ -318,20 +318,6 @@ PLANNER_OWNED_LEGACY_ENTRYPOINTS: tuple[dict[str, Any], ...] = (
 
 REMAINING_FALLBACK_CONTRACTS: tuple[dict[str, Any], ...] = (
     _fallback_contract(
-        "permission_diagnostics_shape",
-        "Desktop permission diagnostics",
-        (
-            "Planner owns the permission probe, but the daily facade still relies on "
-            "the legacy response projection."
-        ),
-        ["需要什么权限", "为什么不能控制桌面"],
-        [
-            "add planner-forbidden daily facade tests",
-            "project desktop.permissions through the compatibility adapter",
-            "remove the matching legacy permission-intent branches",
-        ],
-    ),
-    _fallback_contract(
         "finder_file_action_shapes",
         "Finder file actions",
         (
@@ -374,17 +360,17 @@ REMAINING_FALLBACK_CONTRACTS: tuple[dict[str, Any], ...] = (
         ],
     ),
     _fallback_contract(
-        "desktop_observation_ui_shapes",
-        "Desktop observation and UI operations",
+        "foreground_input_shapes",
+        "Foreground input actions",
         (
-            "Planner observation tools are available, but several legacy observation "
-            "and semantic UI shapes remain."
+            "Planner owns the foreground input plan, but bare safe-type legacy response "
+            "shapes are not projected yet."
         ),
-        ["当前窗口是什么", "显示 Slack 窗口列表", "读取当前界面元素"],
+        ["在当前界面输入 hello", "输入 hello"],
         [
-            "project observation-only requests through the daily adapter",
-            "cover window, screen, UI read, click, and type shapes",
-            "remove the matching observation and UI parser branches",
+            "project foreground safe-type requests through the daily adapter",
+            "preserve input policy and post-action verification metadata",
+            "remove the matching foreground input parser branches",
         ],
     ),
     _fallback_contract(

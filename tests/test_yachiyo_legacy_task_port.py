@@ -1058,17 +1058,16 @@ def test_runtime_planner_covers_migrated_desktop_samples_before_cleanup() -> Non
     assert coverage["planner_owner"] == "runtime_planner"
     assert coverage["total_samples"] == len(prompts)
     assert coverage["cleanup_readiness"] == "planner_covered_compat_cleanup_pending"
-    assert coverage["remaining_fallback_count"] == 9
-    assert coverage["planner_covered_fallback_count"] == 9
-    assert coverage["compatibility_cleanup_pending_count"] == 9
+    assert coverage["remaining_fallback_count"] == 8
+    assert coverage["planner_covered_fallback_count"] == 8
+    assert coverage["compatibility_cleanup_pending_count"] == 8
     assert {
         contract["fallback_id"] for contract in coverage["remaining_fallback_contracts"]
     } == {
-        "permission_diagnostics_shape",
         "finder_file_action_shapes",
         "browser_navigation_shapes",
         "foreground_command_shapes",
-        "desktop_observation_ui_shapes",
+        "foreground_input_shapes",
         "context_capture_schedule_shapes",
         "media_audio_shapes",
         "compound_app_action_shapes",
@@ -1109,7 +1108,7 @@ def test_runtime_planner_reports_remaining_compatibility_fallback_contracts() ->
     coverage = legacy_daily_desktop_cleanup_coverage()
     fallback_contracts = coverage["remaining_fallback_contracts"]
 
-    assert len(fallback_contracts) == 9
+    assert len(fallback_contracts) == 8
     for contract in fallback_contracts:
         assert contract["status"] == "planner_covered_compat_cleanup_pending"
         assert contract["planner_coverage_status"] == "planner_covered"
