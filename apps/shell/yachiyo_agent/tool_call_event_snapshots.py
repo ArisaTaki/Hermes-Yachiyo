@@ -552,7 +552,7 @@ def tool_status_from_event_payload(event_type: str, payload: Mapping[str, Any]) 
     if is_desktop_intent_event(event_type, "unavailable"):
         return "blocked"
     if is_desktop_permission_recovery_event(event_type):
-        return _text(payload.get("status")) or "blocked"
+        return "failed"
     if is_desktop_intent_event(event_type, "completed"):
         result = payload.get("result")
         if isinstance(result, Mapping):

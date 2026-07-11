@@ -264,6 +264,51 @@ def test_tool_call_payload_from_event_projects_desktop_result_status() -> None:
     assert waiting["tool_name"] == "terminal.run"
 
 
+def test_permission_recovery_event_preserves_failed_tool_lifecycle_status() -> None:
+    calls = tool_call_snapshots_from_events(
+        [
+            PublicRunEvent(
+                run_id="run-permission-recovery",
+                sequence=1,
+                event_type="agent.tool.call",
+                detail="screen.capture",
+                payload={
+                    "tool": "screen.capture",
+                    "input_preview": {"reason": "capture screen"},
+                    "result": {
+                        "ok": False,
+                        "permission_error": True,
+                        "permission_targets": ["screen_recording"],
+                    },
+                },
+            ),
+            PublicRunEvent(
+                run_id="run-permission-recovery",
+                sequence=2,
+                event_type="agent.desktop.permission_recovery",
+                detail="screen.capture",
+                payload={
+                    "tool": "screen.capture",
+                    "status": "permission_recovery_available",
+                    "input_preview": {"reason": "capture screen"},
+                    "permission_targets": ["screen_recording"],
+                    "recovery_actions": [
+                        {
+                            "label": "Open screen recording settings",
+                            "tool": "system.settings_open",
+                        }
+                    ],
+                },
+            ),
+        ]
+    )
+
+    assert len(calls) == 1
+    assert calls[0].status == "failed"
+    assert calls[0].output_preview["permission_targets"] == ["screen_recording"]
+    assert calls[0].output_preview["recovery_actions"][0]["tool"] == "system.settings_open"
+
+
 def test_tool_call_status_from_event_type_covers_terminal_approval_aliases() -> None:
     assert tool_status_from_event_type("tool.approval_timeout") == "expired"
     assert tool_status_from_event_type("agent.tool.approval_cancelled") == "cancelled"

@@ -7917,6 +7917,8 @@ def _with_permission_metadata(action: str, payload: dict[str, Any]) -> dict[str,
         payload["missing_permissions"] = missing_permissions
     if permission_targets:
         payload["permission_targets"] = permission_targets
+    if action == "screen.capture" and permission_targets:
+        payload["recovery_requires_user_targets"] = permission_targets
     recovery_hints = _permission_recovery_hints_for_targets(permission_targets)
     if recovery_hints:
         payload["recovery_hints"] = recovery_hints

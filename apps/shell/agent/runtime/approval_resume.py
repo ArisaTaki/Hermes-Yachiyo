@@ -253,6 +253,7 @@ class ApprovalResumeCoordinator:
             "source": "runtime_planner",
             "tools": tools,
             "result": result_text,
+            "summary": result_text,
         }
         context.timeline.append(
             self._timeline(

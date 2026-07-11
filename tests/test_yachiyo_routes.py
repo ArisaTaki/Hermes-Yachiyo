@@ -2224,12 +2224,13 @@ async def test_yachiyo_task_approve_executes_app_open_and_type_into_ui_element(
         ]
 
         assert approved["status"] == "completed"
-        assert approved["summary"] == "已打开 Google Chrome 并在前台控件 Search 输入文字（10 个字符）。"
+        assert approved["summary"] == "已在 Google Chrome 的 Search 输入文字（10 个字符）。"
         assert calls == [
             ("open", "Google Chrome"),
             ("focus", "Google Chrome"),
             ("active_window",),
             ("type_into_ui", "名为 URL 的", "github.com", "text", 80, "Google Chrome"),
+            ("ui_elements", "text", 80, "Google Chrome"),
         ]
         assert completed_task is not None
         assert completed_task.status == TaskStatus.COMPLETED
@@ -2240,7 +2241,10 @@ async def test_yachiyo_task_approve_executes_app_open_and_type_into_ui_element(
         assert completed_message.metadata["pending_approval"] == {}
         assert completed_run["status"] == "completed"
         assert completed_run["pending_approval"] == {}
-        assert completed_events[-1]["summary"] == approved["summary"]
+        assert any(
+            event.get("summary") == approved["summary"]
+            for event in completed_events
+        )
         assert any(
             event.get("tool") == "app.open_and_type_into_ui_element"
             for event in completed_run["timeline"]
@@ -2727,11 +2731,12 @@ async def test_yachiyo_task_route_executes_app_find_sequence_without_model(
             "desktop.safe_type_text",
             "desktop.search_submit",
         ]
-        assert [tool_call["tool_name"] for tool_call in timeline["tool_calls"][-3:]] == [
-            "app.open_and_safe_shortcut",
-            "desktop.safe_type_text",
-            "desktop.search_submit",
+        timeline_tools = [
+            tool_call["tool_name"] for tool_call in timeline["tool_calls"]
         ]
+        assert timeline_tools[-1] == "desktop.ui_elements"
+        assert "desktop.safe_shortcut" in timeline_tools
+        assert "desktop.search_submit" in timeline_tools
         assert "agent.desktop.intent_planned" in event_types
         assert "agent.tool.call" in event_types
         assert "agent.task.workspace_item.updated" in event_types

@@ -744,6 +744,7 @@ def _cdp_unavailable(action: str, detail: Any = None) -> dict[str, Any]:
         "fallback_used": False,
         "missing_permissions": ["chrome_cdp"],
         "permission_targets": ["chrome_cdp"],
+        "recovery_requires_user_targets": ["chrome_cdp"],
         "recovery_hints": [
             (
                 "启动 Chrome DevTools/CDP，或在 Native Agent diagnostics 里配置 "

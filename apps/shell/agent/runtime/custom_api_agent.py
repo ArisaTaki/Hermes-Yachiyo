@@ -845,10 +845,11 @@ class RuntimeCustomApiAgentLoop:
                     tool_timeline_start=tool_timeline_start,
                     run_id=run_id,
                 )
-                if replan_payloads and _timeline_has_permission_recovery_signal(
+                permission_recovery_detected = _timeline_has_permission_recovery_signal(
                     timeline,
                     tool_timeline_start,
-                ):
+                )
+                if replan_payloads and permission_recovery_detected:
                     replan_payloads = []
                 self._record_runtime_planner_task_progress_events(
                     runtime_planner_decision,
@@ -869,6 +870,15 @@ class RuntimeCustomApiAgentLoop:
                     timeline,
                     tool_timeline_start=tool_timeline_start,
                 )
+                if permission_recovery_detected and not auto_permission_recovery_requests:
+                    direct_result = self._direct_daily_desktop_sequence_result(
+                        execution_tool_requests,
+                        timeline,
+                        tool_timeline_start=tool_timeline_start,
+                        run_id=run_id,
+                    )
+                    if direct_result:
+                        return direct_result
                 if auto_permission_recovery_requests:
                     recovery_timeline_start = self._run_auto_runtime_planner_requests(
                         auto_permission_recovery_requests,
@@ -4911,6 +4921,7 @@ class RuntimeCustomApiAgentLoop:
             if (
                 result.get("ok") is False
                 and planned_tool not in _DIRECT_DAILY_SEQUENCE_CONTEXT_TOOLS
+                and not _has_permission_recovery_signal(result)
             ):
                 remaining_requests = planned_tool_requests[request_index:]
                 if completed_steps and _all_noncritical_daily_desktop_observations(
@@ -17706,9 +17717,15 @@ def _auto_direct_permission_recovery_requests(
         )
         if not _has_permission_recovery_signal(enriched_result):
             continue
+        user_recovery_targets = set(
+            _string_list(enriched_result.get("recovery_requires_user_targets"))
+        )
         for action in _recovery_actions(enriched_result):
             tool_name = str(action.get("tool") or "").strip()
             if not tool_name or tool_name not in allowed:
+                continue
+            permission_target = str(action.get("permission_target") or "").strip()
+            if permission_target and permission_target in user_recovery_targets:
                 continue
             risk_level = str(action.get("risk_level") or "low").strip().lower()
             if risk_level and risk_level != "low":
@@ -17735,7 +17752,6 @@ def _auto_direct_permission_recovery_requests(
             label = str(action.get("label") or "").strip()
             if label:
                 request["recovery_action_label"] = label
-            permission_target = str(action.get("permission_target") or "").strip()
             if permission_target:
                 request["permission_target"] = permission_target
             if risk_level:
