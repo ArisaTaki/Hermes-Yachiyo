@@ -1159,7 +1159,6 @@ def _external_isolated_desktop_provider_session_status() -> dict[str, Any]:
         and is_candidate
         and str(provider_status.get("source") or "").strip() == "provider_manifest"
     ):
-        _apply_runtime_env(manifest_env)
         env_snapshot = dict(manifest_env)
         source = "provider_manifest"
     if (
@@ -1187,7 +1186,6 @@ def _external_isolated_desktop_provider_session_status() -> dict[str, Any]:
                 probe_health=True,
             )
             if _external_status_is_isolated_provider_candidate(provider_status):
-                _apply_runtime_env(manifest_env)
                 env_snapshot = dict(manifest_env)
                 source = "provider_manifest"
             else:

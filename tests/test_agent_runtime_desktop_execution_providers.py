@@ -13,6 +13,8 @@ from apps.shell.agent.runtime.desktop_execution_providers import (
     LOCAL_DESKTOP_PROVIDER_KIND,
     desktop_execution_provider_status_from_env,
     desktop_execution_provider_registry_from_env,
+    local_desktop_execution_provider_status,
+    local_desktop_execution_runtime_probe,
 )
 from apps.shell.yachiyo_agent.desktop_execution_policy import (
     desktop_execution_route_decision,
@@ -427,6 +429,66 @@ def test_local_provider_direct_fallback_executes_low_risk_discovery(
         "query": "Music",
     }
     assert calls == [("Music", 5)]
+
+
+def test_local_provider_status_does_not_claim_release_readiness_without_runtime_probe() -> None:
+    status = local_desktop_execution_provider_status()
+
+    assert status["available"] is True
+    assert status["adapter_ready"] is True
+    assert status["status"] == "available"
+    assert status["health"]["status"] == "available_unverified"
+    assert status["health"]["checked"] is False
+    assert status["health"]["ok"] is False
+    assert status["desktop_backend_ready_for_public_release"] is False
+    assert status["blocking_conditions"] == []
+    assert status["health"]["blocking_conditions"] == [
+        "local_desktop_runtime_not_checked"
+    ]
+
+
+def test_local_provider_probe_separates_release_evidence_from_host_permissions() -> None:
+    calls: list[str] = []
+
+    class FakeBroker:
+        def call(
+            self,
+            name: str,
+            payload: dict[str, Any],
+            *,
+            approved: bool = False,
+        ) -> dict[str, Any]:
+            calls.append(name)
+            assert approved is False
+            if name == "desktop.permissions":
+                return {
+                    "ok": True,
+                    "action": name,
+                    "data": {
+                        "ready": False,
+                        "missing_permissions": {
+                            "foreground_input": ["accessibility"],
+                        },
+                        "runtime_blocking_conditions": {},
+                    },
+                }
+            assert name == "desktop.list_apps"
+            assert payload == {"query": "", "limit": 1}
+            return {"ok": True, "action": name, "data": {"apps": []}}
+
+    probe = local_desktop_execution_runtime_probe(broker=FakeBroker())
+    status = local_desktop_execution_provider_status(runtime_probe=probe)
+
+    assert calls == ["desktop.permissions", "desktop.list_apps"]
+    assert probe["ok"] is True
+    assert probe["host_ready"] is False
+    assert probe["missing_permissions"] == ["accessibility"]
+    assert probe["blocking_conditions"] == ["local_desktop_permissions_required"]
+    assert status["desktop_backend_ready_for_public_release"] is True
+    assert status["status"] == "available"
+    assert status["health"]["status"] == "permission_required"
+    assert status["health"]["checked"] is True
+    assert status["health"]["ok"] is False
 
 
 def test_desktop_provider_status_from_env_reports_unchecked_local_provider() -> None:

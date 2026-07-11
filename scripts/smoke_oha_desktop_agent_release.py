@@ -21,6 +21,7 @@ from apps.shell.agent.runtime.desktop_execution_providers import (
     DesktopExecutionProviderRegistry,
     LocalDesktopExecutionProviderAdapter,
     local_desktop_execution_provider_status,
+    local_desktop_execution_runtime_probe,
 )
 from apps.shell.yachiyo_agent import daily_desktop as daily_desktop_module
 from apps.shell.yachiyo_agent.desktop_provider_contract import (
@@ -211,7 +212,8 @@ def _shared_surface_case() -> dict[str, Any]:
 
 
 def _direct_desktop_runtime_case() -> dict[str, Any]:
-    provider = local_desktop_execution_provider_status()
+    runtime_probe = local_desktop_execution_runtime_probe()
+    provider = local_desktop_execution_provider_status(runtime_probe=runtime_probe)
     daily_policy = daily_entrypoint_desktop_execution_policy(surface="chat")
     studio_policy = agent_studio_desktop_execution_policy()
     route_metadata = {
@@ -304,6 +306,13 @@ def _direct_desktop_runtime_case() -> dict[str, Any]:
             and provider.get("desktop_backend_ready_for_public_release") is True
             and provider.get("requires_real_virtual_desktop_backend") is False
         ),
+        "production_broker_probe_verified": (
+            runtime_probe.get("checked") is True
+            and runtime_probe.get("ok") is True
+            and runtime_probe.get("broker_dispatch_verified") is True
+            and runtime_probe.get("permission_probe_checked") is True
+            and runtime_probe.get("discovery_verified") is True
+        ),
         "direct_routes_cover_discover_operate_input": all(
             route.get("status") == "provider_ready"
             and route.get("can_execute") is True
@@ -364,6 +373,7 @@ def _direct_desktop_runtime_case() -> dict[str, Any]:
             "requires_real_virtual_desktop_backend"
         ),
         "supported_tools": provider.get("supported_tools", []),
+        "runtime_probe": runtime_probe,
         "routes": routes,
         "isolated_opt_in_route": isolated_route,
         "broker_calls": broker_calls,

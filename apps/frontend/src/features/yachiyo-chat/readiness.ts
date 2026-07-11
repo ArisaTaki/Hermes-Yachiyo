@@ -69,11 +69,15 @@ export function chatDesktopPermissionNotice(
   const blocking = desktopRuntimeBlockingIssues(readiness);
   const toolReadiness = desktopToolReadinessSummary(readiness);
   const providerReadiness = desktopProviderReadinessSummary(readiness);
+  const providerNeedsAttention = Boolean(
+    providerReadiness.provider_id && !providerReadiness.ready,
+  );
   if (
     !missing.length
     && !blocking.length
     && !toolReadiness.degraded.length
     && !toolReadiness.unavailable.length
+    && !providerNeedsAttention
   ) return null;
   const labels = missing.map((issue) => issue.label);
   const blockerLabels = blocking.map((issue) => issue.label);
@@ -169,9 +173,16 @@ export function desktopProviderReadinessSummary(
   ]);
   const available = booleanValue(provider?.available);
   const adapterReady = booleanValue(provider?.adapter_ready);
-  const ready = booleanValue(capabilities.desktop_provider_ready)
-    || (available && adapterReady);
-  const providerLabel = providerKind === 'local_desktop' ? 'Direct Desktop' : '可选隔离桌面 Provider';
+  const health = recordValue(provider?.health);
+  const healthChecked = booleanValue(health?.checked);
+  const healthOk = booleanValue(health?.ok);
+  const healthStatus = stringValue(health?.status);
+  const backendReleaseReady = booleanValue(provider?.desktop_backend_ready_for_public_release);
+  const localProvider = providerKind === 'local_desktop';
+  const ready = localProvider
+    ? available && adapterReady && healthChecked && healthOk && backendReleaseReady
+    : booleanValue(capabilities.desktop_provider_ready) || (available && adapterReady);
+  const providerLabel = localProvider ? 'Direct Desktop' : '可选隔离桌面 Provider';
   const inputSandboxLimited = ready
     && keyboardMouseCaptureKnown
     && !keyboardMouseCaptureSupported
@@ -181,7 +192,11 @@ export function desktopProviderReadinessSummary(
       ? `${providerLabel} 已就绪${supportedTools.length ? `，支持 ${formatDesktopToolList(toolDisplayLabels(supportedTools))}` : ''}；点击、输入和快捷键仍需要真实沙盒或受监管控制通道${controlledCommand.length ? `，可在 Agent Studio 启动 ${controlledProviderId || 'controlled provider'}。` : '。'}`
       : `${providerLabel} 已就绪${supportedTools.length ? `，支持 ${formatDesktopToolList(toolDisplayLabels(supportedTools))}` : ''}。`
     : providerId || status
-      ? `${providerLabel} 未就绪；前台点击、输入或快捷键会保持预览、审批或转入 Agent Studio。`
+      ? localProvider
+        ? healthStatus === 'permission_required'
+          ? `${providerLabel} 运行时已安装，但当前主机权限或桌面会话未就绪。`
+          : `${providerLabel} 运行时已安装，但尚未通过生产 Broker 与权限检查。`
+        : `${providerLabel} 未就绪；前台点击、输入或快捷键会保持预览、审批或转入 Agent Studio。`
       : '';
   return {
     ready,

@@ -10,16 +10,19 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
-from apps.shell.chat_api import ChatAPI
-from apps.shell.agent.runtime.callbacks import supports_keyword
 from apps.shell.agent.runtime.approval_tool_sets import (
     APPROVAL_PLAN_TOOLS as _APPROVAL_PLAN_TOOLS,
     SAFE_SHORTCUT_APPROVAL_TOOLS as _SAFE_SHORTCUT_APPROVAL_TOOLS,
+)
+from apps.shell.agent.runtime.callbacks import supports_keyword
+from apps.shell.agent.runtime.desktop_execution_providers import (
+    local_desktop_execution_runtime_probe,
 )
 from apps.shell.agent.runtime.direct_request_policy import (
     approval_required_policy_from_direct_requests,
 )
 from apps.shell.agent.runtime.errors import AgentRuntimeError
+from apps.shell.chat_api import ChatAPI
 from packages.security import redact_api_error_text
 
 from .daily_desktop import (
@@ -1541,6 +1544,7 @@ class LegacyStudioPort:
             {
                 "desktop_provider_health_probe": True,
                 "desktop_provider_local_native": True,
+                "local_desktop_runtime_probe": local_desktop_execution_runtime_probe(),
             }
         )
         return runtime_tool_catalog_snapshot(

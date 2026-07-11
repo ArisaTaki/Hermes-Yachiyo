@@ -9153,6 +9153,8 @@ def test_controlled_provider_diagnostics_reads_provider_manifest_before_start(
 
     diagnostics = controlled_desktop_provider_diagnostics_snapshot()
 
+    assert "OHA_YACHIYO_DESKTOP_PROVIDER_URL" not in os.environ
+    assert "OHA_YACHIYO_DESKTOP_PROVIDER_EXECUTE_URL" not in os.environ
     assert diagnostics.configured is True
     assert diagnostics.source == "provider_manifest"
     assert diagnostics.status == "virtual_desktop_provider_contract_required"

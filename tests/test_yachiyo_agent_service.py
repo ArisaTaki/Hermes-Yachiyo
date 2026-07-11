@@ -1164,6 +1164,18 @@ def test_legacy_runtime_readiness_exposes_local_desktop_provider(monkeypatch) ->
         "apps.shell.yachiyo_agent.legacy_tasks.desktop_runtime_blocking_conditions_by_capability",
         lambda: {},
     )
+    monkeypatch.setattr(
+        "apps.shell.yachiyo_agent.legacy_tasks.local_desktop_execution_runtime_probe",
+        lambda: {
+            "checked": True,
+            "ok": True,
+            "broker_dispatch_verified": True,
+            "permission_probe_checked": True,
+            "discovery_verified": True,
+            "host_ready": True,
+            "blocking_conditions": [],
+        },
+    )
 
     class Runtime:
         def list_runnables(self) -> dict[str, Any]:
@@ -1186,6 +1198,46 @@ def test_legacy_runtime_readiness_exposes_local_desktop_provider(monkeypatch) ->
         is True
     )
     assert readiness["capabilities"]["desktop_provider_requires_real_sandbox_for"] == []
+
+
+def test_legacy_runtime_readiness_does_not_report_direct_desktop_ready_without_permissions(
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv("OHA_YACHIYO_DESKTOP_PROVIDER_URL", raising=False)
+    monkeypatch.delenv("OHA_YACHIYO_SANDBOX_DESKTOP_PROVIDER_URL", raising=False)
+    monkeypatch.setattr(
+        "apps.shell.yachiyo_agent.legacy_tasks.desktop_permission_missing_by_capability",
+        lambda: {"foreground_input": ["accessibility"]},
+    )
+    monkeypatch.setattr(
+        "apps.shell.yachiyo_agent.legacy_tasks.desktop_runtime_blocking_conditions_by_capability",
+        lambda: {},
+    )
+    monkeypatch.setattr(
+        "apps.shell.yachiyo_agent.legacy_tasks.local_desktop_execution_runtime_probe",
+        lambda: {
+            "checked": True,
+            "ok": True,
+            "broker_dispatch_verified": True,
+            "permission_probe_checked": True,
+            "discovery_verified": True,
+            "host_ready": False,
+            "missing_permissions": ["accessibility"],
+            "blocking_conditions": ["local_desktop_permissions_required"],
+        },
+    )
+
+    class Runtime:
+        def list_runnables(self) -> dict[str, Any]:
+            return {"runnables": []}
+
+    readiness = LegacyRuntimePort(Runtime()).readiness()
+    provider = readiness["capabilities"]["sandbox_provider"]
+
+    assert readiness["capabilities"]["desktop_provider_ready"] is False
+    assert provider["status"] == "available"
+    assert provider["health"]["status"] == "permission_required"
+    assert provider["health"]["ok"] is False
 
 
 def test_yachiyo_agent_service_starts_replan_recovery_action_from_chat_task() -> None:

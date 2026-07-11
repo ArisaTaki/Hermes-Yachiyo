@@ -1239,9 +1239,7 @@ def test_isolated_provider_session_status_can_use_manifest_endpoint(
         assert status["env"]["OHA_YACHIYO_DESKTOP_PROVIDER_BACKEND_KIND"] == (
             "vnc_virtual_desktop"
         )
-        assert session_module.os.environ["OHA_YACHIYO_DESKTOP_PROVIDER_EXECUTE_URL"] == (
-            "http://127.0.0.1:29096/tools/execute"
-        )
+        assert "OHA_YACHIYO_DESKTOP_PROVIDER_EXECUTE_URL" not in session_module.os.environ
     finally:
         for key in session_module._ENV_KEYS:
             session_module.os.environ.pop(key, None)
@@ -1326,9 +1324,7 @@ def test_isolated_provider_session_status_keeps_manifest_selected_env(
         assert status["env"]["OHA_YACHIYO_DESKTOP_PROVIDER_BACKEND_KIND"] == (
             "vnc_virtual_desktop"
         )
-        assert session_module.os.environ[
-            "OHA_YACHIYO_DESKTOP_PROVIDER_EXECUTE_URL"
-        ] == "http://127.0.0.1:29101/tools/execute"
+        assert "OHA_YACHIYO_DESKTOP_PROVIDER_EXECUTE_URL" not in session_module.os.environ
     finally:
         for key in session_module._ENV_KEYS:
             session_module.os.environ.pop(key, None)

@@ -3049,6 +3049,15 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "controlled_desktop_provider_id",
             "controlled_provider_id",
             "keyboard_mouse_capture_supported",
+            "const healthChecked = booleanValue(health?.checked)",
+            "const healthOk = booleanValue(health?.ok)",
+            (
+                "const backendReleaseReady = booleanValue("
+                "provider?.desktop_backend_ready_for_public_release)"
+            ),
+            "available && adapterReady && healthChecked && healthOk && backendReleaseReady",
+            "providerReadiness.provider_id && !providerReadiness.ready",
+            "${providerLabel} 运行时已安装，但当前主机权限或桌面会话未就绪",
             "const permissionRecoveryHints",
             "const blockingConditionRecoveryHints",
             "desktop_session_locked: '桌面会话已锁定'",

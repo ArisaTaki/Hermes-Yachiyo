@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from scripts import smoke_oha_desktop_agent_release as smoke
 
 
@@ -28,6 +30,35 @@ def _fake_dev_isolated_provider_report() -> dict[str, object]:
             ],
         },
     }
+
+
+@pytest.fixture(autouse=True)
+def _verified_direct_runtime_probe(monkeypatch) -> None:
+    monkeypatch.setattr(
+        smoke,
+        "local_desktop_execution_runtime_probe",
+        lambda: {
+            "checked": True,
+            "ok": True,
+            "broker_dispatch_verified": True,
+            "permission_probe_checked": True,
+            "discovery_verified": True,
+            "host_ready": True,
+            "required_capabilities": [
+                "desktop_execution",
+                "active_window",
+                "app_control",
+                "foreground_activation",
+                "foreground_input",
+            ],
+            "missing_permissions": [],
+            "runtime_blocking_conditions": [],
+            "blocking_conditions": [],
+            "permission_action": "desktop.permissions",
+            "discovery_action": "desktop.list_apps",
+            "error": "",
+        },
+    )
 
 
 def test_oha_desktop_agent_release_smoke_covers_product_readiness(
@@ -183,6 +214,45 @@ def test_oha_desktop_agent_release_smoke_covers_product_readiness(
     assert section_by_id["isolated_desktop_provider"]["report"][
         "foreground_takeover_required"
     ] is False
+
+
+def test_oha_desktop_agent_release_smoke_rejects_unverified_direct_runtime(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        smoke,
+        "local_desktop_execution_runtime_probe",
+        lambda: {
+            "checked": False,
+            "ok": False,
+            "broker_dispatch_verified": False,
+            "permission_probe_checked": False,
+            "discovery_verified": False,
+            "host_ready": False,
+            "blocking_conditions": ["local_desktop_runtime_not_checked"],
+        },
+        raising=False,
+    )
+    monkeypatch.setattr(
+        smoke.smoke_isolated_desktop_provider,
+        "run_smoke",
+        lambda **_kwargs: _fake_dev_isolated_provider_report(),
+    )
+
+    report = smoke.run_smoke(
+        workdir=tmp_path / "oha-release-smoke",
+        run_isolated_provider_smoke=False,
+        public_release_required=True,
+    )
+
+    direct = next(
+        section for section in report["sections"] if section["id"] == "direct_desktop_runtime"
+    )
+    assert direct["ok"] is False
+    assert direct["report"]["checks"]["production_broker_probe_verified"] is False
+    assert report["direct_desktop_release_ready"] is False
+    assert report["public_release_ready"] is False
 
 
 def test_oha_desktop_agent_release_smoke_can_include_isolated_provider(

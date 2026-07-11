@@ -1516,13 +1516,17 @@ function ToolDetail({
             </span>
           ) : null}
           <span
-            className="studio-tool-permission"
+            className={providerState.controlledReleaseReady
+              ? 'studio-tool-permission'
+              : 'studio-tool-permission missing'}
             data-controlled-provider-release-ready={String(providerState.controlledReleaseReady)}
           >
             {providerState.controlledReleaseReady ? 'optional isolated ready' : 'optional isolated not configured'}
           </span>
           <span
-            className="studio-tool-permission"
+            className={providerState.controlledPublicReleaseReady
+              ? 'studio-tool-permission'
+              : 'studio-tool-permission missing'}
             data-controlled-provider-public-release-ready={String(providerState.controlledPublicReleaseReady)}
           >
             {providerState.controlledPublicReleaseReady ? 'isolated conformance ready' : 'isolated conformance optional'}

@@ -1863,7 +1863,13 @@ def _manifest_bool_env(manifest: Mapping[str, Any], key: str) -> str:
 def _local_desktop_provider_payload(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
     if not _metadata_truthy(metadata, *_LOCAL_DESKTOP_PROVIDER_KEYS):
         return {}
-    return local_desktop_execution_provider_status()
+    runtime_probe = (
+        metadata.get("local_desktop_runtime_probe")
+        if isinstance(metadata, Mapping)
+        and isinstance(metadata.get("local_desktop_runtime_probe"), Mapping)
+        else None
+    )
+    return local_desktop_execution_provider_status(runtime_probe=runtime_probe)
 
 
 def _sandbox_route_decision(

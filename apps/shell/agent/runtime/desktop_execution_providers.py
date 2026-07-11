@@ -7,6 +7,7 @@ import json
 import os
 from collections.abc import Iterable, Mapping
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any, Protocol
 from urllib import error as urlerror
 from urllib.parse import urlparse
@@ -202,6 +203,13 @@ LOCAL_DESKTOP_PROVIDER_TOOLS = (
     *KEYBOARD_MOUSE_CAPTURE_TOOL_NAMES,
 )
 LOCAL_DESKTOP_PROVIDER_REQUIRES_SANDBOX_TOOLS: tuple[str, ...] = ()
+LOCAL_DESKTOP_RUNTIME_REQUIRED_CAPABILITIES = (
+    "desktop_execution",
+    "active_window",
+    "app_control",
+    "foreground_activation",
+    "foreground_input",
+)
 LOCAL_DESKTOP_DIRECT_FALLBACK_TOOLS = frozenset(
     {
         "desktop.active_window",
@@ -1271,9 +1279,54 @@ def desktop_execution_provider_registry_from_env(
 def local_desktop_execution_provider_status(
     *,
     supported_tools: Iterable[str] | None = None,
+    runtime_probe: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     tools = _string_list(supported_tools) or list(LOCAL_DESKTOP_PROVIDER_TOOLS)
-    blockers: list[str] = []
+    probe = dict(runtime_probe) if isinstance(runtime_probe, Mapping) else {}
+    checked = probe.get("checked") is True
+    release_ready = checked and probe.get("ok") is True
+    host_ready = release_ready and probe.get("host_ready") is True
+    blockers = _string_list(probe.get("blocking_conditions"))
+    if not checked:
+        blockers = ["local_desktop_runtime_not_checked"]
+    provider_blockers = blockers if checked else []
+    health_status = (
+        "ready"
+        if host_ready
+        else (
+            "permission_required"
+            if release_ready
+            else "runtime_unavailable" if checked else "available_unverified"
+        )
+    )
+    reason = (
+        "Direct desktop execution was verified through the production tool broker "
+        "and the current host permission probes."
+        if host_ready
+        else (
+            "Direct desktop execution is installed and its production broker path was "
+            "verified, but the current host still needs desktop permissions or runtime "
+            "recovery."
+            if release_ready
+            else (
+                "Direct desktop execution is installed, but its production broker and "
+                "permission path has not been verified yet."
+                if not checked
+                else "Direct desktop runtime verification failed."
+            )
+        )
+    )
+    health_capabilities = [
+        "desktop_discovery",
+        "app_launch",
+        "foreground_activation",
+        "keyboard_mouse_capture",
+        "media_control",
+    ]
+    if probe.get("broker_dispatch_verified") is True:
+        health_capabilities.append("production_tool_broker")
+    if probe.get("permission_probe_checked") is True:
+        health_capabilities.append("permission_diagnostics")
     return {
         "configured": True,
         "available": True,
@@ -1281,30 +1334,33 @@ def local_desktop_execution_provider_status(
         "provider_kind": LOCAL_DESKTOP_PROVIDER_KIND,
         "provider_id": LOCAL_DESKTOP_PROVIDER_ID,
         "status": "available",
-        "reason": (
-            "Direct desktop execution is available through the local structured tool "
-            "broker. Risky actions remain subject to runtime approval and policy gates."
-        ),
-        "blocking_conditions": blockers,
+        "reason": reason,
+        "blocking_conditions": provider_blockers,
         "supported_tools": tools,
         "health": {
-            "ok": True,
-            "checked": True,
-            "status": "ready",
+            "ok": host_ready,
+            "checked": checked,
+            "status": health_status,
+            "provider_kind": LOCAL_DESKTOP_PROVIDER_KIND,
+            "provider_id": LOCAL_DESKTOP_PROVIDER_ID,
             "blocking_conditions": blockers,
             "supported_tools": tools,
-            "capabilities": [
-                "desktop_discovery",
-                "app_launch",
-                "foreground_activation",
-                "keyboard_mouse_capture",
-                "media_control",
-            ],
+            "capabilities": health_capabilities,
             "desktop_session_kind": "user_foreground",
             "desktop_session_isolated": False,
             "foreground_takeover_required": True,
+            "foreground_mutation_supported": True,
+            "keyboard_mouse_capture_supported": True,
+            "desktop_backend_kind": "local_native_desktop",
+            "desktop_backend_is_loopback": False,
+            "desktop_backend_ready_for_public_release": release_ready,
+            "requires_real_virtual_desktop_backend": False,
+            "requires_real_sandbox_for": list(
+                LOCAL_DESKTOP_PROVIDER_REQUIRES_SANDBOX_TOOLS
+            ),
+            "error": str(probe.get("error") or ""),
         },
-        "source": "runtime_local",
+        "source": "runtime_local_probe" if checked else "runtime_local",
         "foreground_mutation_supported": True,
         "keyboard_mouse_capture_supported": True,
         "desktop_session_kind": "user_foreground",
@@ -1312,9 +1368,117 @@ def local_desktop_execution_provider_status(
         "foreground_takeover_required": True,
         "desktop_backend_kind": "local_native_desktop",
         "desktop_backend_is_loopback": False,
-        "desktop_backend_ready_for_public_release": True,
+        "desktop_backend_ready_for_public_release": release_ready,
         "requires_real_virtual_desktop_backend": False,
         "requires_real_sandbox_for": list(LOCAL_DESKTOP_PROVIDER_REQUIRES_SANDBOX_TOOLS),
+    }
+
+
+def local_desktop_execution_runtime_probe(
+    *,
+    broker: Any | None = None,
+) -> dict[str, Any]:
+    """Exercise the production broker and permission diagnostics without input mutation."""
+
+    temporary_root: TemporaryDirectory[str] | None = None
+    if broker is None:
+        from apps.shell.agent.tools.broker import ToolBroker
+
+        temporary_root = TemporaryDirectory(prefix="oha-direct-desktop-probe-")
+        broker = ToolBroker(
+            {
+                "default_workdir": str(Path.cwd()),
+                "readable_scopes": ["."],
+                "writable_scopes": [],
+            },
+            Path(temporary_root.name),
+        )
+    permission_result: dict[str, Any] = {}
+    discovery_result: dict[str, Any] = {}
+    error = ""
+    try:
+        call = getattr(broker, "call", None)
+        if not callable(call):
+            raise TypeError("production tool broker does not expose call()")
+        permission_payload = call("desktop.permissions", {}, approved=False)
+        discovery_payload = call(
+            "desktop.list_apps",
+            {"query": "", "limit": 1},
+            approved=False,
+        )
+        if isinstance(permission_payload, Mapping):
+            permission_result = dict(permission_payload)
+        if isinstance(discovery_payload, Mapping):
+            discovery_result = dict(discovery_payload)
+    except Exception as exc:
+        error = redact_api_error_text(exc)
+    finally:
+        if temporary_root is not None:
+            temporary_root.cleanup()
+
+    permission_data = (
+        permission_result.get("data")
+        if isinstance(permission_result.get("data"), Mapping)
+        else {}
+    )
+    missing_by_capability = (
+        permission_data.get("missing_permissions")
+        if isinstance(permission_data.get("missing_permissions"), Mapping)
+        else {}
+    )
+    blocking_by_capability = (
+        permission_data.get("runtime_blocking_conditions")
+        if isinstance(permission_data.get("runtime_blocking_conditions"), Mapping)
+        else {}
+    )
+    required_missing = _capability_issue_list(
+        missing_by_capability,
+        LOCAL_DESKTOP_RUNTIME_REQUIRED_CAPABILITIES,
+    )
+    required_blockers = _capability_issue_list(
+        blocking_by_capability,
+        LOCAL_DESKTOP_RUNTIME_REQUIRED_CAPABILITIES,
+    )
+    permission_probe_checked = (
+        permission_result.get("ok") is True
+        and permission_result.get("action") == "desktop.permissions"
+        and isinstance(permission_data.get("ready"), bool)
+    )
+    discovery_verified = (
+        discovery_result.get("ok") is True
+        and discovery_result.get("action") == "desktop.list_apps"
+    )
+    broker_dispatch_verified = permission_probe_checked and bool(discovery_result)
+    checked = broker_dispatch_verified and not error
+    probe_ok = checked and discovery_verified
+    host_ready = probe_ok and not required_missing and not required_blockers
+    blockers: list[str] = []
+    if not broker_dispatch_verified:
+        blockers.append("local_desktop_runtime_broker_unavailable")
+    if not permission_probe_checked:
+        blockers.append("local_desktop_permission_probe_failed")
+    if not discovery_verified:
+        blockers.append("local_desktop_discovery_probe_failed")
+    if required_missing:
+        blockers.append("local_desktop_permissions_required")
+    if required_blockers:
+        blockers.append("local_desktop_runtime_blocked")
+    if not checked and not blockers:
+        blockers.append("local_desktop_runtime_not_checked")
+    return {
+        "checked": checked,
+        "ok": probe_ok,
+        "broker_dispatch_verified": broker_dispatch_verified,
+        "permission_probe_checked": permission_probe_checked,
+        "discovery_verified": discovery_verified,
+        "host_ready": host_ready,
+        "required_capabilities": list(LOCAL_DESKTOP_RUNTIME_REQUIRED_CAPABILITIES),
+        "missing_permissions": required_missing,
+        "runtime_blocking_conditions": required_blockers,
+        "blocking_conditions": blockers,
+        "permission_action": str(permission_result.get("action") or ""),
+        "discovery_action": str(discovery_result.get("action") or ""),
+        "error": error,
     }
 
 
@@ -2370,6 +2534,17 @@ def _unique_strings(values: Iterable[Any]) -> list[str]:
         if text and text not in items:
             items.append(text)
     return items
+
+
+def _capability_issue_list(
+    issues_by_capability: Mapping[str, Any],
+    capability_ids: Iterable[str],
+) -> list[str]:
+    return _unique_strings(
+        issue
+        for capability_id in capability_ids
+        for issue in _string_list(issues_by_capability.get(capability_id))
+    )
 
 
 def _clean_base_url(value: str) -> str:

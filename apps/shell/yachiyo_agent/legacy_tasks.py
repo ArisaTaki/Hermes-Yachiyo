@@ -5,6 +5,9 @@ from __future__ import annotations
 import inspect
 from typing import Any
 
+from apps.shell.agent.runtime.desktop_execution_providers import (
+    local_desktop_execution_runtime_probe,
+)
 from apps.shell.agent.runtime.errors import AgentRuntimeError
 
 from .desktop_permissions import (
@@ -91,6 +94,20 @@ def _planner_metadata_with_desktop_readiness(metadata: dict[str, Any]) -> dict[s
         if blocking_conditions:
             enriched["desktop_blocking_conditions_by_capability"] = blocking_conditions
     return enriched
+
+
+def _desktop_provider_runtime_ready(provider: dict[str, Any]) -> bool:
+    if not provider.get("available") or not provider.get("adapter_ready"):
+        return False
+    if str(provider.get("provider_kind") or "") != "local_desktop":
+        return True
+    health = provider.get("health")
+    return bool(
+        isinstance(health, dict)
+        and health.get("checked") is True
+        and health.get("ok") is True
+        and provider.get("desktop_backend_ready_for_public_release") is True
+    )
 
 
 def _daily_entrypoint_surface(metadata: dict[str, Any]) -> str:
@@ -273,6 +290,7 @@ class LegacyRuntimePort:
             {
                 "desktop_provider_health_probe": True,
                 "desktop_provider_local_native": True,
+                "local_desktop_runtime_probe": local_desktop_execution_runtime_probe(),
             }
         )
         return {
@@ -282,9 +300,8 @@ class LegacyRuntimePort:
                 "tasks": True,
                 "runnables": len(payload.get("runnables") or []),
                 "sandbox_provider": sandbox_provider,
-                "desktop_provider_ready": bool(
-                    sandbox_provider.get("available")
-                    and sandbox_provider.get("adapter_ready")
+                "desktop_provider_ready": _desktop_provider_runtime_ready(
+                    sandbox_provider
                 ),
                 "desktop_provider_supported_tools": list(
                     sandbox_provider.get("supported_tools") or []
