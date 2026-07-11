@@ -21,6 +21,7 @@ from typing import Any, Sequence
 
 _SOURCE_REVISION_SUBPROCESS_POPEN = subprocess.Popen
 _ISOLATED_SMOKE_SUBPROCESS_RUN = subprocess.run
+_MANAGED_SUBPROCESS_POPEN = subprocess.Popen
 _DESKTOP_PROVIDER_ENV_PREFIXES = (
     "OHA_YACHIYO_DESKTOP_PROVIDER",
     "OHA_YACHIYO_SANDBOX_DESKTOP_PROVIDER",
@@ -3592,6 +3593,12 @@ def _allocate_loopback_port() -> int:
 
 def _terminate_process(process: subprocess.Popen[str], timeout_seconds: float = 5.0) -> None:
     if process.poll() is not None:
+        # Every managed Popen starts a new session, so the leader PID remains
+        # the process-group ID even when descendants outlive the leader.
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+        except (AttributeError, ProcessLookupError, PermissionError):
+            pass
         return
     try:
         process_group_id = os.getpgid(process.pid)
@@ -4369,7 +4376,7 @@ def verify_packaged_backend_bridge_smoke(
                 "OHA_YACHIYO_BRIDGE_ACCESS_LOG": "0",
             }
             try:
-                process = subprocess.Popen(
+                process = _MANAGED_SUBPROCESS_POPEN(
                     [str(absolute_backend)],
                     cwd=str(absolute_backend.parent),
                     env=env,
@@ -4466,7 +4473,7 @@ def verify_dmg_app_startup(
                     "OHA_YACHIYO_HOME": str(Path(home_dir) / ".oha-yachiyo"),
                     "OHA_YACHIYO_BRIDGE_URL": bridge_url,
                 }
-                process = subprocess.Popen(
+                process = _MANAGED_SUBPROCESS_POPEN(
                     [str(executable_path)],
                     cwd=str(app_path),
                     env=env,
@@ -4609,7 +4616,7 @@ def verify_dmg_screen_recording_probe(
                     "OHA_YACHIYO_HOME": str(Path(home_dir) / ".oha-yachiyo"),
                     "OHA_YACHIYO_BRIDGE_URL": bridge_url,
                 }
-                process = subprocess.Popen(
+                process = _MANAGED_SUBPROCESS_POPEN(
                     [str(launch_executable_path)],
                     cwd=str(launch_app_path),
                     env=env,
@@ -4752,7 +4759,7 @@ def verify_dmg_ui_sampling_smoke(
                     "OHA_YACHIYO_HOME": str(Path(home_dir) / ".oha-yachiyo"),
                     "OHA_YACHIYO_BRIDGE_URL": bridge_url,
                 }
-                process = subprocess.Popen(
+                process = _MANAGED_SUBPROCESS_POPEN(
                     [
                         str(executable_path),
                         f"--remote-debugging-port={debug_port}",

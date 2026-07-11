@@ -1717,7 +1717,7 @@ def test_release_candidate_verifier_reports_planner_runtime_tool_parity_smoke(
     assert "planner runtime tool parity smoke: passed" in output
     assert (
         "Native Agent capability matrix: incomplete "
-        "(26/28 required capabilities passed; 3 optional opt-in pending)"
+        "(27/29 required capabilities passed; 3 optional opt-in pending)"
     ) in output
     assert "- missing[provider]:" not in output
     assert "- missing[packaged]: packaged_backend_bridge_identity, packaged_app_bridge_isolation" in output
@@ -4666,6 +4666,43 @@ def test_release_candidate_verifier_terminates_packaged_app_process_group(monkey
     assert process.terminated is False
 
 
+def test_release_candidate_verifier_terminates_process_group_after_leader_exits(
+    monkeypatch,
+):
+    signals: list[tuple[int, int]] = []
+
+    class FakeProcess:
+        pid = 12345
+        returncode = 0
+        terminated = False
+
+        def poll(self):
+            return self.returncode
+
+        def terminate(self):
+            self.terminated = True
+
+        def wait(self, timeout=None):
+            return self.returncode
+
+        def kill(self):
+            raise AssertionError("the exited process leader must not be killed directly")
+
+    def fail_getpgid(_pid):
+        raise AssertionError(
+            "the exited process leader no longer has a discoverable group"
+        )
+
+    monkeypatch.setattr(rc.os, "getpgid", fail_getpgid)
+    monkeypatch.setattr(rc.os, "killpg", lambda pgid, sig: signals.append((pgid, sig)))
+
+    process = FakeProcess()
+    rc._terminate_process(process)
+
+    assert signals == [(12345, rc.signal.SIGTERM)]
+    assert process.terminated is False
+
+
 def test_release_candidate_verifier_runs_packaged_backend_bridge_smoke(
     tmp_path, monkeypatch, capsys
 ):
@@ -4734,7 +4771,7 @@ def test_release_candidate_verifier_runs_packaged_backend_bridge_smoke(
     monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
     monkeypatch.setattr(rc, "_run_source_revision_git_command", fake_source_revision_run)
     monkeypatch.setattr(rc, "_allocate_loopback_port", lambda: 49124)
-    monkeypatch.setattr(rc.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(rc, "_MANAGED_SUBPROCESS_POPEN", fake_popen)
     monkeypatch.setattr(rc.urllib.request, "urlopen", lambda url, timeout: FakeResponse())
 
     assert rc.verify_release_candidate(
@@ -4868,7 +4905,7 @@ def test_release_candidate_verifier_runs_dmg_app_startup_smoke(
     monkeypatch.setattr(rc, "_run_source_revision_git_command", fake_source_revision_run)
     monkeypatch.setattr(rc, "_allocate_loopback_port", lambda: 49123)
     monkeypatch.setattr(rc.subprocess, "run", fake_run)
-    monkeypatch.setattr(rc.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(rc, "_MANAGED_SUBPROCESS_POPEN", fake_popen)
     monkeypatch.setattr(rc.urllib.request, "urlopen", lambda url, timeout: FakeResponse())
 
     assert rc.verify_release_candidate(
@@ -5080,7 +5117,7 @@ def test_release_candidate_verifier_runs_dmg_screen_recording_probe(
     monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
     monkeypatch.setattr(rc, "_allocate_loopback_port", lambda: 49124)
     monkeypatch.setattr(rc.subprocess, "run", fake_run)
-    monkeypatch.setattr(rc.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(rc, "_MANAGED_SUBPROCESS_POPEN", fake_popen)
     monkeypatch.setattr(rc.urllib.request, "urlopen", fake_urlopen)
 
     assert rc.verify_release_candidate(
@@ -5246,7 +5283,11 @@ def test_release_candidate_verifier_keeps_bridge_evidence_when_dmg_screen_probe_
     monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
     monkeypatch.setattr(rc, "_allocate_loopback_port", lambda: 49126)
     monkeypatch.setattr(rc.subprocess, "run", fake_run)
-    monkeypatch.setattr(rc.subprocess, "Popen", lambda *_args, **_kwargs: FakeProcess())
+    monkeypatch.setattr(
+        rc,
+        "_MANAGED_SUBPROCESS_POPEN",
+        lambda *_args, **_kwargs: FakeProcess(),
+    )
     monkeypatch.setattr(rc.urllib.request, "urlopen", fake_urlopen)
 
     assert rc.verify_release_candidate(
@@ -5412,7 +5453,7 @@ def test_release_candidate_verifier_runs_dmg_ui_sampling_smoke(
     monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
     monkeypatch.setattr(rc, "_allocate_loopback_port", lambda: next(ports))
     monkeypatch.setattr(rc.subprocess, "run", fake_run)
-    monkeypatch.setattr(rc.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(rc, "_MANAGED_SUBPROCESS_POPEN", fake_popen)
     monkeypatch.setattr(rc.urllib.request, "urlopen", lambda url, timeout: FakeResponse())
 
     assert rc.verify_release_candidate(
@@ -5728,7 +5769,7 @@ def test_release_candidate_dmg_app_startup_smoke_requires_executable(
 
     monkeypatch.setattr(rc.sys, "platform", "darwin")
     monkeypatch.setattr(rc.subprocess, "run", fake_run)
-    monkeypatch.setattr(rc.subprocess, "Popen", fail_popen)
+    monkeypatch.setattr(rc, "_MANAGED_SUBPROCESS_POPEN", fail_popen)
 
     findings, bridge_statuses = rc.verify_dmg_app_startup(
         tmp_path,
