@@ -95,6 +95,20 @@ def test_virtual_desktop_guest_status_and_manifest_are_release_contract_ready(
     assert manifest_contract["ok"] is True
 
 
+def test_virtual_desktop_guest_manifest_command_does_not_require_session_id(
+    capsys,
+) -> None:
+    exit_code = guest.main(["--manifest"])
+    manifest = json.loads(capsys.readouterr().out)
+
+    assert exit_code == 0
+    assert virtual_desktop_provider_manifest_contract_evidence(manifest)["ok"] is True
+
+    with pytest.raises(SystemExit) as exc_info:
+        guest.main([])
+    assert exc_info.value.code == 2
+
+
 def test_virtual_desktop_guest_refuses_tools_without_attestation(tmp_path: Path) -> None:
     provider = guest.VirtualDesktopGuestProvider(
         session_id="guest-session-1",

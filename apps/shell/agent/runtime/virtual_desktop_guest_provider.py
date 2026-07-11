@@ -425,7 +425,10 @@ def serve_virtual_desktop_guest_provider(
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = _parser().parse_args(argv)
+    parser = _parser()
+    args = parser.parse_args(argv)
+    if not str(args.session_id or "").strip() and not args.manifest:
+        parser.error("the following arguments are required: --session-id")
     provider = VirtualDesktopGuestProvider(
         provider_id=args.provider_id,
         provider_kind=args.provider_kind,
@@ -583,7 +586,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--token-file", default="")
     parser.add_argument("--provider-id", default=DEFAULT_PROVIDER_ID)
     parser.add_argument("--provider-kind", default=DEFAULT_PROVIDER_KIND)
-    parser.add_argument("--session-id", required=True)
+    parser.add_argument("--session-id", default="")
     parser.add_argument("--guest-marker", default=str(DEFAULT_GUEST_MARKER))
     parser.add_argument("--backend-kind", default=DEFAULT_BACKEND_KIND)
     parser.add_argument("--tool", action="append", default=[])
