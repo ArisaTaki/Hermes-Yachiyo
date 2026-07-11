@@ -690,7 +690,7 @@ class ModelProfileService:
         used_names.add(key)
         return candidate
 
-    def _row_to_source(self, row: sqlite3.Row, *, include_secret: bool = False) -> dict[str, Any]:
+    def _row_to_source(self, row: sqlite3.Row) -> dict[str, Any]:
         adapter = resolve_provider_adapter(row["provider"], row["base_url"])
         source = {
             "source_id": row["source_id"],
@@ -713,12 +713,9 @@ class ModelProfileService:
             "can_use_as_native": adapter["can_use_as_native"],
             "api_key_name": adapter["api_key_name"],
         }
-        if include_secret:
-            source["credential_ref"] = row["credential_ref"]
-            source["api_key"] = self._read_credential(str(row["credential_ref"] or "")) or str(row["api_key"] or "")
         return source
 
-    def _row_to_profile(self, row: sqlite3.Row, *, include_secret: bool = False) -> dict[str, Any]:
+    def _row_to_profile(self, row: sqlite3.Row) -> dict[str, Any]:
         source = None
         if row["source_id"]:
             source_row = self._conn.execute(
@@ -726,7 +723,7 @@ class ModelProfileService:
                 (row["source_id"],),
             ).fetchone()
             if source_row is not None:
-                source = self._row_to_source(source_row, include_secret=include_secret)
+                source = self._row_to_source(source_row)
         profile_enabled = bool(row["enabled"])
         source_enabled = bool(source.get("enabled", True)) if source else True
         adapter = resolve_provider_adapter(
@@ -761,15 +758,6 @@ class ModelProfileService:
             "can_use_as_native": adapter["can_use_as_native"],
             "api_key_name": adapter["api_key_name"],
         }
-        if include_secret:
-            profile["credential_ref"] = row["credential_ref"]
-            if source:
-                profile["source_credential_ref"] = source.get("credential_ref", "")
-            profile["api_key"] = (
-                source.get("api_key", "")
-                if source
-                else self._read_credential(str(row["credential_ref"] or "")) or str(row["api_key"] or "")
-            )
         return profile
 
     def list_profiles(self) -> dict[str, Any]:
@@ -870,13 +858,23 @@ class ModelProfileService:
             row = self._conn.execute("SELECT * FROM model_sources WHERE source_id=?", (source_id,)).fetchone()
             if row is None:
                 raise KeyError(source_id)
-            source = self._row_to_source(row, include_secret=True)
+            source = self._row_to_source(row)
             source["models"] = self._list_source_profiles_locked(source_id)["profiles"]
-            return source
+            credential_ref = str(row["credential_ref"] or "").strip()
+            legacy_api_key = str(row["api_key"] or "").strip()
+
+        source["credential_ref"] = credential_ref
+        source["api_key"] = self._read_credential(credential_ref) or legacy_api_key
+        return source
 
     def update_source(self, source_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         with self._lock:
-            current = self._get_source_private_locked(source_id)
+            current = self._get_source_locked(source_id)
+            row = self._conn.execute(
+                "SELECT credential_ref FROM model_sources WHERE source_id=?",
+                (source_id,),
+            ).fetchone()
+            credential_ref = str(row["credential_ref"] or "").strip() if row else ""
             next_source = {**current, **{key: value for key, value in payload.items() if key != "api_key"}}
             if "capability" in payload:
                 next_source["capability"] = _normalize_capability(str(payload.get("capability") or "chat"))
@@ -889,7 +887,6 @@ class ModelProfileService:
             ).fetchone()
             if mismatched is not None:
                 raise ModelProfileError("提供商源类型不能与已登记模型类型不一致")
-            credential_ref = str(current.get("credential_ref") or "").strip()
             if "api_key" in payload and str(payload.get("api_key") or "").strip():
                 credential_ref = credential_ref or self._credential_ref("model_sources", source_id)
                 self._store_credential(credential_ref, str(payload.get("api_key") or "").strip())
@@ -914,15 +911,6 @@ class ModelProfileService:
             )
             self._conn.commit()
             return self._get_source_locked(source_id)
-
-    def _get_source_private_locked(self, source_id: str) -> dict[str, Any]:
-        """内部方法，调用时必须已持有 self._lock"""
-        row = self._conn.execute("SELECT * FROM model_sources WHERE source_id=?", (source_id,)).fetchone()
-        if row is None:
-            raise KeyError(source_id)
-        source = self._row_to_source(row, include_secret=True)
-        source["models"] = self._list_source_profiles_locked(source_id)["profiles"]
-        return source
 
     def delete_source(self, source_id: str) -> dict[str, Any]:
         with self._lock:
@@ -1465,18 +1453,44 @@ class ModelProfileService:
 
     def get_profile_private(self, profile_id: str) -> dict[str, Any]:
         with self._lock:
-            return self._get_profile_private_locked(profile_id)
+            row = self._conn.execute(
+                "SELECT * FROM model_profiles WHERE profile_id=?",
+                (profile_id,),
+            ).fetchone()
+            if row is None:
+                raise KeyError(profile_id)
+            profile = self._row_to_profile(row)
+            credential_ref = str(row["credential_ref"] or "").strip()
+            legacy_api_key = str(row["api_key"] or "").strip()
+            source_credential_ref = ""
+            if row["source_id"]:
+                source_row = self._conn.execute(
+                    "SELECT credential_ref, api_key FROM model_sources WHERE source_id=?",
+                    (row["source_id"],),
+                ).fetchone()
+                if source_row is not None:
+                    source_credential_ref = str(
+                        source_row["credential_ref"] or ""
+                    ).strip()
+                    legacy_api_key = str(source_row["api_key"] or "").strip()
 
-    def _get_profile_private_locked(self, profile_id: str) -> dict[str, Any]:
-        """内部方法，调用时必须已持有 self._lock"""
-        row = self._conn.execute("SELECT * FROM model_profiles WHERE profile_id=?", (profile_id,)).fetchone()
-        if row is None:
-            raise KeyError(profile_id)
-        return self._row_to_profile(row, include_secret=True)
+        profile["credential_ref"] = credential_ref
+        if source_credential_ref:
+            profile["source_credential_ref"] = source_credential_ref
+        secret_ref = source_credential_ref or credential_ref
+        profile["api_key"] = self._read_credential(secret_ref) or legacy_api_key
+        return profile
 
     def update_profile(self, profile_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         with self._lock:
-            current = self._get_profile_private_locked(profile_id)
+            current = self._get_profile_locked(profile_id)
+            row = self._conn.execute(
+                "SELECT credential_ref FROM model_profiles WHERE profile_id=?",
+                (profile_id,),
+            ).fetchone()
+            current_credential_ref = (
+                str(row["credential_ref"] or "").strip() if row else ""
+            )
             next_profile = {**current, **{key: value for key, value in payload.items() if key != "api_key"}}
             if "capability" in payload:
                 next_profile["capability"] = _normalize_capability(str(payload.get("capability") or "chat"))
@@ -1487,15 +1501,13 @@ class ModelProfileService:
                 source = self._get_source_locked(next_source_id)
                 if str(source.get("capability") or "chat") != str(next_profile.get("capability") or "chat"):
                     raise ModelProfileError("模型类型必须与提供商源类型一致")
-            credential_ref = "" if next_source_id else str(current.get("credential_ref") or "").strip()
-            current_api_key = "" if next_source_id else str(current.get("api_key") or "").strip()
-            if not next_source_id and "api_key" in payload and str(payload.get("api_key") or "").strip():
-                current_api_key = str(payload.get("api_key") or "").strip()
-            if not next_source_id and current_api_key:
+            credential_ref = "" if next_source_id else current_credential_ref
+            next_api_key = str(payload.get("api_key") or "").strip()
+            if not next_source_id and next_api_key:
                 credential_ref = credential_ref or self._credential_ref("model_profiles", profile_id)
-                self._store_credential(credential_ref, current_api_key)
-            if next_source_id and str(current.get("credential_ref") or "").strip():
-                self._delete_credential(str(current.get("credential_ref") or ""))
+                self._store_credential(credential_ref, next_api_key)
+            if next_source_id and current_credential_ref:
+                self._delete_credential(current_credential_ref)
             profile_enabled = next_profile.get("enabled", True)
             if "enabled" not in payload and "profile_enabled" in current:
                 profile_enabled = current.get("profile_enabled", True)

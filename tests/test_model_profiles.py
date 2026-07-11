@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import ssl
+import threading
 
 import pytest
 
@@ -27,6 +28,20 @@ def make_profile_service(tmp_path) -> ModelProfileService:
         workspace_dir=tmp_path / "profiles",
         credential_store=MemoryCredentialStore(),
     )
+
+
+class _BlockingCredentialStore(MemoryCredentialStore):
+    def __init__(self) -> None:
+        super().__init__()
+        self.block_reads = False
+        self.read_started = threading.Event()
+        self.release_read = threading.Event()
+
+    def get(self, ref: str) -> str:
+        if self.block_reads:
+            self.read_started.set()
+            self.release_read.wait(timeout=5)
+        return super().get(ref)
 
 
 def _vision_challenge():
@@ -81,6 +96,93 @@ def test_model_profile_crud_redacts_and_preserves_api_key(tmp_path):
         assert row["credential_ref"] == f"model_profile:{profile['profile_id']}:api_key"
     finally:
         service.close()
+
+
+def test_private_profile_keychain_read_does_not_block_public_profile_reads(tmp_path):
+    credentials = _BlockingCredentialStore()
+    service = ModelProfileService(
+        db_path=tmp_path / "model-profiles.db",
+        workspace_dir=tmp_path / "profiles",
+        credential_store=credentials,
+    )
+    profile = service.create_profile(
+        {
+            "name": "Blocking Keychain",
+            "capability": "chat",
+            "base_url": "https://api.example.test/v1",
+            "model": "demo-model",
+            "api_key": "sk-secret",
+        }
+    )
+    credentials.block_reads = True
+    private_done = threading.Event()
+    public_done = threading.Event()
+
+    def read_private() -> None:
+        service.get_profile_private(profile["profile_id"])
+        private_done.set()
+
+    def read_public() -> None:
+        service.get_profile(profile["profile_id"])
+        public_done.set()
+
+    private_thread = threading.Thread(target=read_private)
+    public_thread = threading.Thread(target=read_public)
+    try:
+        private_thread.start()
+        assert credentials.read_started.wait(timeout=1)
+        public_thread.start()
+        assert public_done.wait(timeout=1)
+    finally:
+        credentials.release_read.set()
+        private_thread.join(timeout=2)
+        public_thread.join(timeout=2)
+        service.close()
+
+    assert private_done.is_set()
+
+
+def test_private_source_keychain_read_does_not_block_public_source_reads(tmp_path):
+    credentials = _BlockingCredentialStore()
+    service = ModelProfileService(
+        db_path=tmp_path / "model-sources.db",
+        workspace_dir=tmp_path / "sources",
+        credential_store=credentials,
+    )
+    source = service.create_source(
+        {
+            "name": "Blocking Source Keychain",
+            "capability": "chat",
+            "base_url": "https://api.example.test/v1",
+            "api_key": "sk-source-secret",
+        }
+    )
+    credentials.block_reads = True
+    private_done = threading.Event()
+    public_done = threading.Event()
+
+    def read_private() -> None:
+        service.get_source_private(source["source_id"])
+        private_done.set()
+
+    def read_public() -> None:
+        service.get_source(source["source_id"])
+        public_done.set()
+
+    private_thread = threading.Thread(target=read_private)
+    public_thread = threading.Thread(target=read_public)
+    try:
+        private_thread.start()
+        assert credentials.read_started.wait(timeout=1)
+        public_thread.start()
+        assert public_done.wait(timeout=1)
+    finally:
+        credentials.release_read.set()
+        private_thread.join(timeout=2)
+        public_thread.join(timeout=2)
+        service.close()
+
+    assert private_done.is_set()
 
 
 def test_model_profile_defaults_validate_capability(tmp_path):
