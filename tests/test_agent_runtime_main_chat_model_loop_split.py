@@ -212,7 +212,7 @@ def test_main_chat_model_loop_runner_forwards_runtime_execution_context() -> Non
     assert continue_calls[0]["runtime_execution_envelope"] is envelope
     forwarded_metadata = continue_calls[0]["runtime_execution_metadata"]
     assert forwarded_metadata["yachiyo_runtime_planner"] is True
-    assert forwarded_metadata["desktop_execution_policy"]["mode"] == "preview_input"
+    assert forwarded_metadata["desktop_execution_policy"]["mode"] == "supervised_live"
 
 
 def test_main_chat_model_loop_runner_passes_approval_policy_to_broker() -> None:
@@ -275,6 +275,104 @@ def test_main_chat_model_loop_runner_treats_runtime_envelope_as_direct_without_p
     assert [event_type for event_type, _payload in state["events"]] == [
         "model.output.completed"
     ]
+
+
+def test_main_chat_model_loop_runner_does_not_read_profile_for_direct_task() -> None:
+    runner, state = _runner()
+    runner._compile_agent_runtime = lambda _agent: {
+        "tool_policy": {
+            "allowed_tools": ["desktop.list_apps", "app.open", "desktop.verify"]
+        },
+        "workspace_policy": {"default_workdir": "/tmp/project"},
+    }
+    runner._model_profile_config_private = lambda _profile_id: (_ for _ in ()).throw(
+        AssertionError("direct desktop task must not resolve model credentials")
+    )
+    runner._continue_custom_api_agent = lambda *_args, **_kwargs: "已打开 Calculator。"
+
+    result = runner.execute(
+        "run-1",
+        [{"role": "user", "content": "请打开计算器"}],
+    )
+
+    assert result["status"] == "running"
+    assert result["result"] == "已打开 Calculator。"
+    assert [event_type for event_type, _payload in state["events"]] == [
+        "model.output.completed"
+    ]
+
+
+@pytest.mark.parametrize(
+    "request_kwargs",
+    [
+        {"direct_tool_request": {"tool": "app.open"}},
+        {"direct_tool_requests": [{"tool": "app.open"}]},
+    ],
+)
+def test_main_chat_model_loop_runner_does_not_read_profile_for_explicit_direct_task(
+    request_kwargs: dict[str, Any],
+) -> None:
+    runner, state = _runner()
+    runner._compile_agent_runtime = lambda _agent: {
+        "tool_policy": {"allowed_tools": ["app.open"]},
+        "workspace_policy": {"default_workdir": "/tmp/project"},
+    }
+    runner._model_profile_config_private = lambda _profile_id: (_ for _ in ()).throw(
+        AssertionError("direct desktop task must not resolve model credentials")
+    )
+    runner._continue_custom_api_agent = lambda *_args, **_kwargs: "opened"
+
+    result = runner.execute(
+        "run-1",
+        [{"role": "user", "content": "打开计算器"}],
+        **request_kwargs,
+    )
+
+    assert result["status"] == "running"
+    assert result["result"] == "opened"
+    assert [event_type for event_type, _payload in state["events"]] == [
+        "model.output.completed"
+    ]
+
+
+@pytest.mark.parametrize(
+    "request_kwargs",
+    [
+        {
+            "direct_tool_request": {
+                "tool": "clipboard.read",
+                "continue_to_model": True,
+            }
+        },
+        {
+            "direct_tool_requests": [
+                {"tool": "clipboard.read", "continue_to_model": True}
+            ]
+        },
+    ],
+)
+def test_main_chat_model_loop_runner_requires_profile_for_explicit_model_followup(
+    request_kwargs: dict[str, Any],
+) -> None:
+    runner, _state = _runner()
+    runner._default_profile_id = lambda: ""
+    runner._compile_agent_runtime = lambda _agent: {
+        "tool_policy": {"allowed_tools": ["clipboard.read"]},
+        "workspace_policy": {"default_workdir": "/tmp/project"},
+    }
+    runner._continue_custom_api_agent = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+        AssertionError("model-followup requests must not bypass profile readiness")
+    )
+
+    with pytest.raises(
+        agent_runtime.AgentRuntimeError,
+        match="native_agent_not_ready:chat_model_profile_required",
+    ):
+        runner.execute(
+            "run-1",
+            [{"role": "user", "content": "读取剪贴板并总结"}],
+            **request_kwargs,
+        )
 
 
 def test_main_chat_model_loop_runner_uses_runtime_planner_without_profile_before_legacy(
@@ -430,7 +528,10 @@ def test_main_chat_model_loop_runner_projects_approval_required_without_bypassin
         "runtime_execution_envelope": envelope,
     }
     assert pending["runtime_execution_metadata"]["yachiyo_runtime_planner"] is True
-    assert pending["runtime_execution_metadata"]["desktop_execution_policy"]["mode"] == "preview_input"
+    assert (
+        pending["runtime_execution_metadata"]["desktop_execution_policy"]["mode"]
+        == "supervised_live"
+    )
 
 
 def test_main_chat_model_loop_runner_reports_provider_blocker_without_chat_profile() -> None:

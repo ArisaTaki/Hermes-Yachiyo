@@ -172,7 +172,7 @@ class MainChatModelLoopRunner:
             raise self._error_type("native_agent_not_ready:chat_model_profile_required")
         model_config = (
             self._model_profile_config_private(default_profile_id)
-            if default_profile_id
+            if default_profile_id and not direct_daily_desktop_intent
             else {}
         )
         if not direct_daily_desktop_intent:
@@ -336,13 +336,18 @@ class MainChatModelLoopRunner:
         runtime_execution_envelope: dict[str, Any] | None = None,
         runtime_execution_metadata: dict[str, Any] | None = None,
     ) -> bool:
-        if any(
-            isinstance(request, dict) and str(request.get("tool") or "").strip()
+        explicit_requests = [
+            request
             for request in direct_tool_requests or []
+            if isinstance(request, dict) and str(request.get("tool") or "").strip()
+        ]
+        if (
+            isinstance(direct_tool_request, dict)
+            and str(direct_tool_request.get("tool") or "").strip()
         ):
-            return True
-        if isinstance(direct_tool_request, dict) and str(direct_tool_request.get("tool") or "").strip():
-            return True
+            explicit_requests.append(direct_tool_request)
+        if explicit_requests:
+            return daily_desktop_requests_can_complete_without_model(explicit_requests)
         for requests in (
             runtime_execution_requests_from_envelope_payload(
                 runtime_execution_envelope,
