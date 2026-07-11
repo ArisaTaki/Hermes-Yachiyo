@@ -17707,6 +17707,8 @@ def _auto_direct_permission_recovery_requests(
         result = event.get("result") if isinstance(event.get("result"), Mapping) else {}
         if not result or result.get("approval_required"):
             continue
+        if result.get("ok") is True and result.get("verification_failed") is not True:
+            continue
         input_preview = (
             event.get("input_preview") if isinstance(event.get("input_preview"), Mapping) else {}
         )

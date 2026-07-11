@@ -278,6 +278,7 @@ def _private_runtime_loop(
     *,
     allowed_tools: list[str] | None = None,
     append_run_event=None,
+    call_model=None,
     run_tool_requests=None,
 ) -> RuntimeCustomApiAgentLoop:
     return RuntimeCustomApiAgentLoop(
@@ -293,7 +294,7 @@ def _private_runtime_loop(
         operating_doctrine="",
         memory_tool_names=set(),
         future_task_tool_names=set(),
-        call_model=lambda *_args, **_kwargs: {},
+        call_model=call_model or (lambda *_args, **_kwargs: {}),
         coalesce_model_message=lambda value: value,
         message_visible_content_text=lambda _message: "",
         model_message_metadata=lambda _message: {},
@@ -33833,6 +33834,146 @@ def test_direct_desktop_permission_recovery_runs_allowed_recovery_action() -> No
         and event["payload"]["tool"] == "system.settings_open"
         for event in run_events
     )
+
+
+def test_successful_app_open_with_degraded_verify_skips_permission_recovery() -> None:
+    tool_order: list[str] = []
+    timeline: list[dict[str, Any]] = []
+
+    def run_tool_requests(
+        tool_requests,
+        _allowed_tools,
+        _broker,
+        _messages,
+        timeline_arg,
+        _artifacts,
+        **_kwargs,
+    ) -> None:
+        for request in tool_requests:
+            tool_name = str(request.get("tool") or "")
+            payload = request.get("input") if isinstance(request.get("input"), dict) else {}
+            tool_order.append(tool_name)
+            if tool_name == "desktop.list_apps":
+                result = {
+                    "ok": True,
+                    "summary": "Found Calculator",
+                    "data": {"matches": [{"name": "Calculator"}]},
+                }
+            elif tool_name == "app.open":
+                result = {
+                    "ok": True,
+                    "summary": "Opened Calculator",
+                    "data": {"app_name": "Calculator", "launch_verified": True},
+                }
+            elif tool_name == "desktop.verify":
+                result = {
+                    "ok": True,
+                    "summary": (
+                        "Inspected Calculator: limited to menu-level UI; "
+                        "foreground action is not ready"
+                    ),
+                    "data": {"app_name": "Calculator", "foreground_ready": False},
+                    "permission_error": True,
+                    "permission_targets": ["accessibility"],
+                    "recovery_actions": [
+                        {
+                            "label": "Open Accessibility settings",
+                            "tool": "system.settings_open",
+                            "input": {"target": "Accessibility Permission"},
+                            "permission_target": "accessibility",
+                            "risk_level": "low",
+                        }
+                    ],
+                }
+            else:
+                raise AssertionError(
+                    f"successful app activation must not run recovery tool: {tool_name}"
+                )
+            timeline_arg.append(
+                _timeline(
+                    "agent.tool.call",
+                    tool_name,
+                    input_preview=payload,
+                    result=result,
+                )
+            )
+
+    loop = _private_runtime_loop(
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open",
+            "desktop.verify",
+            "system.settings_open",
+        ],
+        call_model=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("successful app activation must not call the model")
+        ),
+        run_tool_requests=run_tool_requests,
+    )
+
+    result = loop.run(
+        {"agent_id": MAIN_CHAT_AGENT_ID, "name": "Yachiyo"},
+        "请打开计算器",
+        broker={"broker": True},
+        timeline=timeline,
+        artifacts=[],
+        run_id="run-open-calculator-degraded-verify",
+    )
+
+    assert str(result) == "已打开 Calculator。"
+    assert tool_order == ["desktop.list_apps", "app.open", "desktop.verify"]
+    planned_events = [
+        event for event in timeline if event.get("event") == "agent.desktop.intent_planned"
+    ]
+    assert [event.get("source") for event in planned_events] == [
+        "runtime_planner",
+        "runtime_planner",
+        "runtime_verification",
+    ]
+    assert [event.get("planning_reason") for event in planned_events] == [
+        "planner_full_plan_desktop_operation",
+        "planner_full_plan_desktop_operation",
+        "planner_full_plan_desktop_operation",
+    ]
+    assert not any(
+        event.get("planning_reason") == "planner_direct_permission_recovery_action"
+        for event in timeline
+    )
+
+
+def test_explicit_verification_failure_still_allows_permission_recovery() -> None:
+    requests = custom_api_agent_module._auto_direct_permission_recovery_requests(
+        [],
+        ["system.settings_open"],
+        [
+            _timeline(
+                "agent.tool.call",
+                "desktop.verify",
+                input_preview={"app_name": "Calculator"},
+                result={
+                    "ok": True,
+                    "verification_failed": True,
+                    "permission_error": True,
+                    "permission_targets": ["accessibility"],
+                    "recovery_actions": [
+                        {
+                            "label": "Open Accessibility settings",
+                            "tool": "system.settings_open",
+                            "input": {"target": "Accessibility Permission"},
+                            "permission_target": "accessibility",
+                            "risk_level": "low",
+                        }
+                    ],
+                },
+            )
+        ],
+        tool_timeline_start=0,
+    )
+
+    assert len(requests) == 1
+    assert requests[0]["tool"] == "system.settings_open"
+    assert requests[0]["permission_recovery"] is True
+    assert requests[0]["recovery_source_tool"] == "desktop.verify"
 
 
 def test_direct_desktop_permission_recovery_preserves_approval_gate() -> None:
