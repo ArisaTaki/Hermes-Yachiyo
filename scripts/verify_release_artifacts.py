@@ -695,6 +695,7 @@ PACKAGED_INFO_REQUIRED_PERMISSION_KEYS: tuple[tuple[str, str], ...] = (
     ("NSDocumentsFolderUsageDescription", "packaged app Info.plist must include Documents folder permission copy"),
     ("NSDownloadsFolderUsageDescription", "packaged app Info.plist must include Downloads folder permission copy"),
     ("NSMicrophoneUsageDescription", "packaged app Info.plist must include microphone permission copy"),
+    ("NSScreenCaptureUsageDescription", "packaged app Info.plist must include Screen Recording permission copy"),
 )
 TRACKED_GENERATED_PATHS: tuple[str, ...] = (
     "apps/frontend/.vite",
@@ -749,6 +750,10 @@ PACKAGING_CONFIG_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         "NSMicrophoneUsageDescription",
         "macOS release packaging must include microphone permission copy",
+    ),
+    (
+        "NSScreenCaptureUsageDescription",
+        "macOS release packaging must include Screen Recording permission copy",
     ),
 )
 RELEASE_WORKFLOW_FILE = Path(".github/workflows/release-macos.yml")

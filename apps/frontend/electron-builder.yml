@@ -60,6 +60,7 @@ mac:
     NSDocumentsFolderUsageDescription: Oha-Yachiyo 需要访问用户选择的项目文件和资源目录。
     NSDownloadsFolderUsageDescription: Oha-Yachiyo 需要访问用户选择导入的下载资源。
     NSMicrophoneUsageDescription: Oha-Yachiyo 的语音相关功能可能需要访问麦克风输入。
+    NSScreenCaptureUsageDescription: Oha-Yachiyo 需要读取当前屏幕内容，用于执行和验证用户明确要求的桌面操作。
 
 dmg:
   artifactName: Oha-Yachiyo-${version}-${arch}.${ext}

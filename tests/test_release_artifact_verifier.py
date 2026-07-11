@@ -968,6 +968,7 @@ def test_verifier_requires_packaging_macos_entitlements_and_usage_descriptions(t
     assert "macOS release packaging must include Documents folder permission copy" in messages
     assert "macOS release packaging must include Downloads folder permission copy" in messages
     assert "macOS release packaging must include microphone permission copy" in messages
+    assert "macOS release packaging must include Screen Recording permission copy" in messages
 
 
 def test_packaged_onefile_cli_smokes_allow_cold_start_time(monkeypatch, tmp_path):
@@ -1227,6 +1228,7 @@ def _write_packaged_app_bundle(
                 "NSDocumentsFolderUsageDescription": "Oha-Yachiyo 需要访问用户选择的项目文件。",
                 "NSDownloadsFolderUsageDescription": "Oha-Yachiyo 需要访问用户选择导入的下载资源。",
                 "NSMicrophoneUsageDescription": "Oha-Yachiyo 的语音相关功能可能需要访问麦克风输入。",
+                "NSScreenCaptureUsageDescription": "Oha-Yachiyo 需要读取当前屏幕内容。",
             }
         )
     (contents / "Info.plist").write_bytes(plistlib.dumps(info))
@@ -1366,6 +1368,7 @@ def test_verifier_reports_packaged_app_missing_permission_copy(tmp_path):
     assert "packaged app Info.plist must include Documents folder permission copy" in messages
     assert "packaged app Info.plist must include Downloads folder permission copy" in messages
     assert "packaged app Info.plist must include microphone permission copy" in messages
+    assert "packaged app Info.plist must include Screen Recording permission copy" in messages
 
 
 def test_verifier_reports_packaged_backend_missing_build_metadata(tmp_path):
