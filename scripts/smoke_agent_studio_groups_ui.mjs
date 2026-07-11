@@ -677,7 +677,7 @@ async function main() {
     const editor = document.querySelector('[data-testid="agent-group-editor"]');
     setNativeValue(editor.querySelector('[data-testid="agent-group-description"]'), ${JSON.stringify(UPDATED_DESCRIPTION)});
     setNativeValue(editor.querySelector('[data-testid="agent-group-default-model"]'), 'profile-agent-studio-groups-smoke-edited');
-    setNativeValue(editor.querySelector('[data-testid="agent-group-tool-policy"]'), 'policy-agent-studio-groups-smoke-edited');
+    setNativeValue(editor.querySelector('[data-testid="agent-group-tool-policy-custom"]'), 'policy-agent-studio-groups-smoke-edited');
     document.querySelector('[data-testid="agent-group-save"]').click();
   })();
   \`, true);
@@ -706,7 +706,7 @@ async function main() {
     setNativeValue(nameInput, ${JSON.stringify(CREATED_GROUP_NAME)});
     setNativeValue(editor.querySelector('[data-testid="agent-group-description"]'), 'Created by Agent Studio Groups Electron smoke');
     setNativeValue(editor.querySelector('[data-testid="agent-group-default-model"]'), 'profile-agent-studio-groups-smoke');
-    setNativeValue(editor.querySelector('[data-testid="agent-group-tool-policy"]'), 'policy-agent-studio-groups-smoke');
+    setNativeValue(editor.querySelector('[data-testid="agent-group-tool-policy-custom"]'), 'policy-agent-studio-groups-smoke');
     document.querySelector('[data-testid="agent-group-member-picker"] [data-agent-id="${AGENT_ID}"] input').click();
   })();
   \`, true);
