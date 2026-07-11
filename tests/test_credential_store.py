@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+import threading
 
 import pytest
 
+from apps.shell import credential_store
 from apps.shell.credential_store import (
     CredentialStoreError,
     DevFileCredentialStore,
@@ -166,3 +168,122 @@ def test_dev_file_credential_store_available_only_for_development(monkeypatch, t
         assert store.get("ref") == "secret"
     finally:
         store.close()
+
+
+class _FakeFunction:
+    def __init__(self, return_value: int = 0) -> None:
+        self.argtypes = None
+        self.restype = None
+        self.return_value = return_value
+        self.side_effect = None
+        self.calls: list[tuple[object, ...]] = []
+
+    def __call__(self, *args: object) -> int:
+        self.calls.append(args)
+        if self.side_effect is not None:
+            return self.side_effect(*args)
+        return self.return_value
+
+
+class _FakeLibrary:
+    def __init__(self) -> None:
+        self._functions: dict[str, _FakeFunction] = {}
+
+    def __getattr__(self, name: str) -> _FakeFunction:
+        return self._functions.setdefault(name, _FakeFunction())
+
+
+def _keychain_store(monkeypatch: pytest.MonkeyPatch, security: _FakeLibrary):
+    core_foundation = _FakeLibrary()
+
+    def load_library(path: str) -> _FakeLibrary:
+        return core_foundation if "CoreFoundation" in path else security
+
+    monkeypatch.setattr(credential_store.sys, "platform", "darwin")
+    monkeypatch.setattr(credential_store.ctypes.cdll, "LoadLibrary", load_library)
+    return credential_store.KeychainCredentialStore()
+
+
+def _configure_noninteractive_find(security: _FakeLibrary) -> None:
+    def get_policy(pointer: object) -> int:
+        pointer._obj.value = 1
+        return 0
+
+    security.SecKeychainGetUserInteractionAllowed.side_effect = get_policy
+    security.SecKeychainFindGenericPassword.return_value = -25300
+
+
+def test_keychain_store_scopes_noninteractive_access(monkeypatch: pytest.MonkeyPatch) -> None:
+    security = _FakeLibrary()
+    _configure_noninteractive_find(security)
+    store = _keychain_store(monkeypatch, security)
+
+    assert store.get("profile:test:api_key") == ""
+
+    function = security.SecKeychainSetUserInteractionAllowed
+    assert function.argtypes == [credential_store.ctypes.c_ubyte]
+    assert function.restype is credential_store.ctypes.c_int32
+    assert function.calls == [(0,), (1,)]
+
+
+def test_keychain_store_rejects_interaction_policy_read_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    security = _FakeLibrary()
+    security.SecKeychainGetUserInteractionAllowed.return_value = -25291
+    store = _keychain_store(monkeypatch, security)
+
+    with pytest.raises(
+        credential_store.CredentialStoreError,
+        match="read interaction policy failed with OSStatus -25291",
+    ):
+        store.get("profile:test:api_key")
+    assert security.SecKeychainSetUserInteractionAllowed.calls == []
+
+
+def test_keychain_store_serializes_process_global_interaction_policy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    security = _FakeLibrary()
+    _configure_noninteractive_find(security)
+    first_find_started = threading.Event()
+    second_find_started = threading.Event()
+    release_first_find = threading.Event()
+    find_count = 0
+    find_count_lock = threading.Lock()
+
+    def find(*_args: object) -> int:
+        nonlocal find_count
+        with find_count_lock:
+            find_count += 1
+            current = find_count
+        if current == 1:
+            first_find_started.set()
+            release_first_find.wait(timeout=2)
+        else:
+            second_find_started.set()
+        return -25300
+
+    security.SecKeychainFindGenericPassword.side_effect = find
+    first_store = _keychain_store(monkeypatch, security)
+    second_store = _keychain_store(monkeypatch, security)
+    first = threading.Thread(target=first_store.get, args=("first",))
+    second = threading.Thread(target=second_store.get, args=("second",))
+
+    first.start()
+    assert first_find_started.wait(timeout=1)
+    second.start()
+    assert not second_find_started.wait(timeout=0.1)
+    release_first_find.set()
+    first.join(timeout=1)
+    second.join(timeout=1)
+
+    assert not first.is_alive()
+    assert not second.is_alive()
+    assert second_find_started.is_set()
+    assert security.SecKeychainSetUserInteractionAllowed.calls == [
+        (0,),
+        (1,),
+        (0,),
+        (1,),
+    ]

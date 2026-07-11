@@ -11,6 +11,8 @@ import json
 import os
 import sys
 import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Protocol
 
@@ -142,6 +144,7 @@ class KeychainCredentialStore:
 
     _ERR_SEC_SUCCESS = 0
     _ERR_SEC_ITEM_NOT_FOUND = -25300
+    _interaction_lock = threading.RLock()
 
     def __init__(self, service_name: str = "oha-yachiyo.model-profiles") -> None:
         if sys.platform != "darwin":
@@ -190,8 +193,37 @@ class KeychainCredentialStore:
         self._security.SecKeychainItemDelete.restype = ctypes.c_int32
         self._security.SecKeychainItemFreeContent.argtypes = [ctypes.c_void_p, ctypes.c_void_p]
         self._security.SecKeychainItemFreeContent.restype = ctypes.c_int32
+        self._security.SecKeychainGetUserInteractionAllowed.argtypes = [
+            ctypes.POINTER(ctypes.c_ubyte)
+        ]
+        self._security.SecKeychainGetUserInteractionAllowed.restype = ctypes.c_int32
+        self._security.SecKeychainSetUserInteractionAllowed.argtypes = [ctypes.c_ubyte]
+        self._security.SecKeychainSetUserInteractionAllowed.restype = ctypes.c_int32
         self._core_foundation.CFRelease.argtypes = [ctypes.c_void_p]
         self._core_foundation.CFRelease.restype = None
+
+    @contextmanager
+    def _noninteractive_access(self) -> Iterator[None]:
+        # This legacy policy is process-global. Serialize all store instances
+        # and restore the prior value immediately after each operation.
+        with self._interaction_lock:
+            previous = ctypes.c_ubyte(0)
+            status = self._security.SecKeychainGetUserInteractionAllowed(
+                ctypes.byref(previous)
+            )
+            if status != self._ERR_SEC_SUCCESS:
+                raise self._status_error("read interaction policy", status)
+            status = self._security.SecKeychainSetUserInteractionAllowed(0)
+            if status != self._ERR_SEC_SUCCESS:
+                raise self._status_error("disable interactive access", status)
+            try:
+                yield
+            finally:
+                status = self._security.SecKeychainSetUserInteractionAllowed(
+                    previous.value
+                )
+                if status != self._ERR_SEC_SUCCESS:
+                    raise self._status_error("restore interaction policy", status)
 
     def _status_error(self, operation: str, status: int) -> CredentialStoreError:
         return CredentialStoreError(f"Keychain {operation} failed with OSStatus {status}")
@@ -226,58 +258,61 @@ class KeychainCredentialStore:
                 self._security.SecKeychainItemFreeContent(None, password_data)
 
     def get(self, ref: str) -> str:
-        secret, item_ref = self._find(ref)
-        if item_ref is not None:
-            self._core_foundation.CFRelease(item_ref)
-        return secret
+        with self._noninteractive_access():
+            secret, item_ref = self._find(ref)
+            if item_ref is not None:
+                self._core_foundation.CFRelease(item_ref)
+            return secret
 
     def set(self, ref: str, secret: str) -> None:
-        existing_secret, item_ref = self._find(ref)
-        del existing_secret
-        secret_bytes = secret.encode("utf-8")
-        if item_ref is not None:
-            try:
-                status = self._security.SecKeychainItemModifyAttributesAndData(
-                    item_ref,
-                    None,
-                    len(secret_bytes),
-                    ctypes.c_char_p(secret_bytes),
-                )
-            finally:
-                self._core_foundation.CFRelease(item_ref)
-            if status != self._ERR_SEC_SUCCESS:
-                raise self._status_error("update", status)
-            return
+        with self._noninteractive_access():
+            existing_secret, item_ref = self._find(ref)
+            del existing_secret
+            secret_bytes = secret.encode("utf-8")
+            if item_ref is not None:
+                try:
+                    status = self._security.SecKeychainItemModifyAttributesAndData(
+                        item_ref,
+                        None,
+                        len(secret_bytes),
+                        ctypes.c_char_p(secret_bytes),
+                    )
+                finally:
+                    self._core_foundation.CFRelease(item_ref)
+                if status != self._ERR_SEC_SUCCESS:
+                    raise self._status_error("update", status)
+                return
 
-        service = self.service_name.encode("utf-8")
-        account = ref.encode("utf-8")
-        new_item_ref = ctypes.c_void_p()
-        status = self._security.SecKeychainAddGenericPassword(
-            None,
-            len(service),
-            service,
-            len(account),
-            account,
-            len(secret_bytes),
-            ctypes.c_char_p(secret_bytes),
-            ctypes.byref(new_item_ref),
-        )
-        if new_item_ref.value:
-            self._core_foundation.CFRelease(new_item_ref)
-        if status != self._ERR_SEC_SUCCESS:
-            raise self._status_error("add", status)
+            service = self.service_name.encode("utf-8")
+            account = ref.encode("utf-8")
+            new_item_ref = ctypes.c_void_p()
+            status = self._security.SecKeychainAddGenericPassword(
+                None,
+                len(service),
+                service,
+                len(account),
+                account,
+                len(secret_bytes),
+                ctypes.c_char_p(secret_bytes),
+                ctypes.byref(new_item_ref),
+            )
+            if new_item_ref.value:
+                self._core_foundation.CFRelease(new_item_ref)
+            if status != self._ERR_SEC_SUCCESS:
+                raise self._status_error("add", status)
 
     def delete(self, ref: str) -> None:
-        secret, item_ref = self._find(ref)
-        del secret
-        if item_ref is None:
-            return
-        try:
-            status = self._security.SecKeychainItemDelete(item_ref)
-        finally:
-            self._core_foundation.CFRelease(item_ref)
-        if status not in {self._ERR_SEC_SUCCESS, self._ERR_SEC_ITEM_NOT_FOUND}:
-            raise self._status_error("delete", status)
+        with self._noninteractive_access():
+            secret, item_ref = self._find(ref)
+            del secret
+            if item_ref is None:
+                return
+            try:
+                status = self._security.SecKeychainItemDelete(item_ref)
+            finally:
+                self._core_foundation.CFRelease(item_ref)
+            if status not in {self._ERR_SEC_SUCCESS, self._ERR_SEC_ITEM_NOT_FOUND}:
+                raise self._status_error("delete", status)
 
     def close(self) -> None:
         return None
