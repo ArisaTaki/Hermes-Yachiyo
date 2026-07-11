@@ -969,6 +969,7 @@ def desktop_execution_route_decision(
     if (
         foreground_provider_requested
         and foreground_required
+        and not direct_desktop_preferred
         and not bool(sandbox_provider.get("available"))
     ):
         sandbox_route = _sandbox_route_decision(
@@ -1037,6 +1038,7 @@ def desktop_execution_route_decision(
     if (
         foreground_provider_requested
         and (foreground_required or execution_mode_name == "supervised_live")
+        and not direct_desktop_preferred
         and _sandbox_provider_requires_keyboard_mouse_sandbox(
             sandbox_provider,
             clean_tool,
@@ -1058,6 +1060,7 @@ def desktop_execution_route_decision(
     if (
         foreground_provider_requested
         and (foreground_required or execution_mode_name == "supervised_live")
+        and not direct_desktop_preferred
         and _sandbox_provider_requires_isolated_foreground_session(
             sandbox_provider,
             clean_tool,

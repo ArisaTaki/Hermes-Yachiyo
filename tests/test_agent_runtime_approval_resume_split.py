@@ -16,6 +16,175 @@ def test_approval_resume_coordinator_remains_exported_from_legacy_module() -> No
     assert agent_runtime.ApprovalResumeCoordinator is ApprovalResumeCoordinator
 
 
+def test_approval_resume_completes_single_runtime_planner_desktop_action_without_model() -> None:
+    context = ToolApprovalResumeContext(
+        run_id="run-submit",
+        timeline=[],
+        artifacts=[],
+        broker={"broker": True},
+        allowed_tools=["desktop.submit_foreground", "desktop.ui_elements"],
+        budget={"events": 4},
+        messages=[{"role": "assistant", "content": "Need approval"}],
+        tool_request={
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "send"},
+            "source": "runtime_planner",
+        },
+        tool_name="desktop.submit_foreground",
+        input_preview={"action": "send"},
+        remaining_requests=[
+            {
+                "tool": "desktop.ui_elements",
+                "input": {},
+                "runtime_stage": "verify",
+            }
+        ],
+        next_iteration=2,
+    )
+
+    def submit_foreground(
+        tool_request: dict[str, Any],
+        _allowed_tools: list[str],
+        _broker: Any,
+        timeline: list[dict[str, Any]],
+        **_kwargs: Any,
+    ) -> dict[str, Any]:
+        result = {
+            "ok": True,
+            "action": "desktop.submit_foreground",
+            "summary": "Submitted foreground send action",
+            "data": {"submit_action": "send"},
+        }
+        timeline.append(
+            _timeline(
+                "agent.tool.call",
+                str(tool_request.get("tool") or ""),
+                result=result,
+            )
+        )
+        return result
+
+    def verify_foreground(
+        requests: list[dict[str, Any]],
+        _allowed_tools: list[str],
+        _broker: Any,
+        _messages: list[dict[str, Any]],
+        timeline: list[dict[str, Any]],
+        _artifacts: list[dict[str, Any]],
+        **_kwargs: Any,
+    ) -> None:
+        assert requests[0]["tool"] == "desktop.ui_elements"
+        timeline.append(
+            _timeline(
+                "agent.tool.call",
+                "desktop.ui_elements",
+                runtime_stage="verify",
+                result={
+                    "ok": True,
+                    "action": "desktop.ui_elements",
+                    "summary": "Read foreground UI",
+                },
+            )
+        )
+
+    coordinator = ApprovalResumeCoordinator(
+        call_agent_tool=submit_foreground,
+        fatal_tool_failure_detail=lambda *_args: "",
+        append_tool_result_message=_append_tool_result_message,
+        run_tool_requests=verify_foreground,
+        timeline_factory=_timeline,
+        continue_custom_api_agent=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("single direct desktop action should not call the model")
+        ),
+    )
+
+    result = coordinator.continue_custom_api_agent_after_approved_tool({}, context)
+
+    assert result == "已确认发送前台内容。"
+    completion = next(
+        event for event in context.timeline if event["event"] == "agent.desktop.intent_completed"
+    )
+    assert completion["tools"] == ["desktop.submit_foreground"]
+
+
+def test_approval_resume_does_not_complete_from_stale_success_after_current_failure() -> None:
+    context = ToolApprovalResumeContext(
+        run_id="run-blocked-submit",
+        timeline=[
+            _timeline(
+                "agent.tool.call",
+                "app.open",
+                runtime_stage="operate",
+                result={
+                    "ok": True,
+                    "action": "app.open",
+                    "data": {"app_name": "Notes"},
+                },
+            )
+        ],
+        artifacts=[],
+        broker={"broker": True},
+        allowed_tools=["desktop.submit_foreground"],
+        budget={"events": 4},
+        messages=[{"role": "assistant", "content": "Need approval"}],
+        tool_request={
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "send"},
+            "source": "runtime_planner",
+            "step_id": "submit-foreground-ui",
+            "replan_triggers": ["verification_failed"],
+        },
+        tool_name="desktop.submit_foreground",
+        input_preview={"action": "send"},
+        remaining_requests=[],
+        next_iteration=2,
+    )
+    continuation_calls: list[bool] = []
+
+    def blocked_submit(
+        tool_request: dict[str, Any],
+        _allowed_tools: list[str],
+        _broker: Any,
+        timeline: list[dict[str, Any]],
+        **_kwargs: Any,
+    ) -> dict[str, Any]:
+        result = {
+            "ok": False,
+            "status": "provider_required",
+            "blocked_by_desktop_execution_policy": True,
+            "summary": "Desktop provider is required",
+        }
+        timeline.append(
+            _timeline(
+                "agent.tool.skipped",
+                str(tool_request.get("tool") or ""),
+                result=result,
+            )
+        )
+        return result
+
+    def continue_after_replan(*_args: Any, **_kwargs: Any) -> str:
+        continuation_calls.append(True)
+        return "Replanned after the blocked action."
+
+    coordinator = ApprovalResumeCoordinator(
+        call_agent_tool=blocked_submit,
+        fatal_tool_failure_detail=lambda *_args: "",
+        append_tool_result_message=_append_tool_result_message,
+        run_tool_requests=_run_remaining_tool_requests,
+        timeline_factory=_timeline,
+        continue_custom_api_agent=continue_after_replan,
+    )
+
+    result = coordinator.continue_custom_api_agent_after_approved_tool({}, context)
+
+    assert result == "Replanned after the blocked action."
+    assert continuation_calls == [True]
+    assert not any(
+        event["event"] == "agent.desktop.intent_completed" for event in context.timeline
+    )
+
+
 def test_approval_resume_records_runtime_task_progress_events() -> None:
     task_core = {
         "core_id": "core-approval",

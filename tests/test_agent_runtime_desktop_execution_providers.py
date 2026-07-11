@@ -872,6 +872,59 @@ def test_local_desktop_provider_status_routes_direct_desktop_actions(monkeypatch
     assert isolated_input_route["can_execute"] is False
 
 
+def test_live_foreground_policy_falls_back_when_isolated_provider_is_unavailable(
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv("OHA_YACHIYO_DESKTOP_PROVIDER_URL", raising=False)
+    monkeypatch.delenv("OHA_YACHIYO_SANDBOX_DESKTOP_PROVIDER_URL", raising=False)
+    monkeypatch.delenv("OHA_YACHIYO_DESKTOP_PROVIDER_EXECUTE_URL", raising=False)
+    monkeypatch.delenv("OHA_YACHIYO_SANDBOX_DESKTOP_PROVIDER_EXECUTE_URL", raising=False)
+
+    route = desktop_execution_route_decision(
+        "desktop.submit_foreground",
+        policy={
+            "mode": "supervised_live",
+            "allow_live_foreground": True,
+            "prefer_isolated_desktop": False,
+            "avoid_user_foreground_takeover": False,
+            "require_sandbox_for_keyboard_mouse": False,
+        },
+        execution_mode={
+            "mode": "supervised_live",
+            "foreground_control": True,
+            "keyboard_mouse_capture": True,
+            "sandbox_recommended": True,
+            "isolation": "none",
+        },
+        metadata={"desktop_provider_route_foreground": True},
+    )
+    strict_route = desktop_execution_route_decision(
+        "desktop.submit_foreground",
+        policy={
+            "mode": "supervised_live",
+            "allow_live_foreground": True,
+            "avoid_user_foreground_takeover": True,
+            "require_sandbox_for_keyboard_mouse": True,
+        },
+        execution_mode={
+            "mode": "supervised_live",
+            "foreground_control": True,
+            "keyboard_mouse_capture": True,
+            "sandbox_recommended": True,
+            "isolation": "none",
+        },
+        metadata={"desktop_provider_route_foreground": True},
+    )
+
+    assert route["status"] == "supervised_live"
+    assert route["can_execute"] is True
+    assert route["sandbox_required"] is False
+    assert route["selected_provider_kind"] == "none"
+    assert strict_route["can_execute"] is False
+    assert strict_route["sandbox_required"] is True
+    assert strict_route["blocking_conditions"]
+
+
 def test_configured_sandbox_provider_wins_over_local_desktop_fallback(monkeypatch) -> None:
     monkeypatch.delenv("OHA_YACHIYO_DESKTOP_PROVIDER_URL", raising=False)
     monkeypatch.delenv("OHA_YACHIYO_SANDBOX_DESKTOP_PROVIDER_URL", raising=False)

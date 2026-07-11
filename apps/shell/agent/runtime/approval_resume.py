@@ -214,13 +214,17 @@ class ApprovalResumeCoordinator:
             raise AgentRuntimeError(
                 "Approval resume coordinator is missing custom API continuation"
             )
+        resume_timeline_start = len(context.timeline)
         try:
             handoff = self.continuation_handoff_after_approved_tool(agent, context)
         except AgentRuntimeError:
             if not _approval_resume_has_pending_replan_request(context):
                 raise
             handoff = ToolApprovalContinuationHandoff.from_context(agent, context)
-        direct_result = _daily_desktop_resume_result_after_remaining_tools(context)
+        direct_result = _daily_desktop_resume_result_after_remaining_tools(
+            context,
+            resume_timeline_start=resume_timeline_start,
+        )
         if direct_result:
             self._record_daily_desktop_completion(context, direct_result)
             return direct_result
@@ -240,16 +244,9 @@ class ApprovalResumeCoordinator:
         ):
             return
         tools = [
-            str(event.get("detail") or "").strip()
-            for event in context.timeline
-            if isinstance(event, Mapping)
-            and str(event.get("event") or event.get("event_type") or "").strip()
-            == "agent.tool.call"
-            and isinstance(event.get("result"), Mapping)
-            and event["result"].get("ok") is True
-            and str(event.get("source") or "").strip()
-            != "runtime_post_action_auto_verify"
-            and str(event.get("detail") or "").strip()
+            str(event.get("detail") or event["result"].get("tool") or "").strip()
+            for event in _daily_desktop_successful_action_events(context.timeline)
+            if str(event.get("detail") or event["result"].get("tool") or "").strip()
         ]
         payload = {
             "tool": context.tool_name,
@@ -534,7 +531,11 @@ def _resumable_remaining_requests(
 
 
 def _approval_resume_has_pending_replan_request(context: ToolApprovalResumeContext) -> bool:
-    for event in reversed(context.timeline):
+    return _approval_resume_events_have_pending_replan_request(context.timeline)
+
+
+def _approval_resume_events_have_pending_replan_request(events: Any) -> bool:
+    for event in reversed(list(events or [])):
         if not isinstance(event, Mapping):
             continue
         event_type = str(event.get("event") or event.get("event_type") or "").strip()
@@ -549,19 +550,20 @@ def _approval_resume_has_pending_replan_request(context: ToolApprovalResumeConte
 
 def _daily_desktop_resume_result_after_remaining_tools(
     context: ToolApprovalResumeContext,
+    *,
+    resume_timeline_start: int = 0,
 ) -> str:
     if not _daily_desktop_resume_context(context):
         return ""
+    current_events = context.timeline[max(0, int(resume_timeline_start or 0)) :]
+    if _approval_resume_events_have_pending_replan_request(current_events):
+        return ""
+    if not _daily_desktop_successful_action_events(current_events):
+        return ""
     phrases: list[str] = []
     seen: set[str] = set()
-    for event in context.timeline:
-        if not isinstance(event, Mapping):
-            continue
-        if str(event.get("event") or event.get("event_type") or "").strip() != "agent.tool.call":
-            continue
-        result = event.get("result")
-        if not isinstance(result, Mapping) or result.get("ok") is not True:
-            continue
+    for event in _daily_desktop_successful_action_events(context.timeline):
+        result = event["result"]
         tool_name = str(event.get("detail") or result.get("tool") or "").strip()
         phrase = _daily_desktop_tool_result_phrase(tool_name, result)
         if not phrase or phrase in seen:
@@ -571,9 +573,29 @@ def _daily_desktop_resume_result_after_remaining_tools(
     return " ".join(phrases).strip()
 
 
+def _daily_desktop_successful_action_events(events: Any) -> list[Mapping[str, Any]]:
+    successful: list[Mapping[str, Any]] = []
+    for event in events or []:
+        if not isinstance(event, Mapping):
+            continue
+        if str(event.get("event") or event.get("event_type") or "").strip() != "agent.tool.call":
+            continue
+        if str(event.get("source") or "").strip() == "runtime_post_action_auto_verify":
+            continue
+        if str(event.get("runtime_stage") or "").strip() in {
+            "discover",
+            "observe",
+            "verify",
+        }:
+            continue
+        result = event.get("result")
+        if not isinstance(result, Mapping) or result.get("ok") is not True:
+            continue
+        successful.append(event)
+    return successful
+
+
 def _daily_desktop_resume_context(context: ToolApprovalResumeContext) -> bool:
-    if not context.remaining_requests:
-        return False
     source = str(context.tool_request.get("source") or "").strip()
     if source not in {"daily_desktop_intent", "runtime_planner", "daily_desktop_metadata"}:
         return False
@@ -592,7 +614,8 @@ def _daily_desktop_tool_name(tool_name: str) -> bool:
 
 def _daily_desktop_tool_result_phrase(tool_name: str, result: Mapping[str, Any]) -> str:
     clean_tool = str(tool_name or result.get("action") or "").strip()
-    action = str(result.get("action") or clean_tool).strip()
+    reported_action = str(result.get("action") or "").strip()
+    action = reported_action or clean_tool
     data = result.get("data") if isinstance(result.get("data"), Mapping) else {}
     if clean_tool in {
         "app.open_and_type_into_ui_element",
@@ -650,6 +673,15 @@ def _daily_desktop_tool_result_phrase(tool_name: str, result: Mapping[str, Any])
         return f"已聚焦 {app_name}。" if app_name else ""
     if clean_tool == "desktop.quit_app" or action == "desktop.quit_app":
         return "已请求退出当前应用。"
+    if clean_tool == "desktop.submit_foreground" or action == "desktop.submit_foreground":
+        submit_action = str(
+            data.get("submit_action") or result.get("submit_action") or ""
+        ).strip()
+        if submit_action == "send":
+            return "已确认发送前台内容。"
+        return "已执行前台提交操作。"
+    if reported_action:
+        return str(result.get("summary") or "").strip()
     return ""
 
 
