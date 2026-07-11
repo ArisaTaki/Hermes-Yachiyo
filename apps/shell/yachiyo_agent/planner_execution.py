@@ -100,6 +100,9 @@ def planner_execution_tool_requests(
         allowed,
     )
     normalized_requests = _scope_desktop_app_verification_requests(normalized_requests)
+    normalized_requests = _defer_dependent_same_app_foreground_verification(
+        normalized_requests
+    )
     normalized_requests = _drop_redundant_execution_verification_requests(
         normalized_requests
     )
@@ -154,6 +157,9 @@ def planner_full_plan_execution_tool_requests(
         allowed,
     )
     normalized_requests = _scope_desktop_app_verification_requests(normalized_requests)
+    normalized_requests = _defer_dependent_same_app_foreground_verification(
+        normalized_requests
+    )
     return runtime_execution_verified_tool_requests(normalized_requests, allowed)
 
 
@@ -1234,6 +1240,112 @@ def _scope_desktop_app_verification_requests(
             }
         )
     return normalized
+
+
+def _defer_dependent_same_app_foreground_verification(
+    requests: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    requests_by_step_id = {
+        step_id: request
+        for request in requests
+        for step_id in [
+            str(request.get("step_id") or request.get("planner_step_id") or "").strip()
+        ]
+        if step_id
+    }
+    if not requests_by_step_id:
+        return requests
+
+    deferred_step_ids: set[str] = set()
+    for request in requests:
+        if not _is_desktop_app_verification_request(request):
+            continue
+        payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+        app_name = str(payload.get("app_name") or "").strip()
+        if not app_name:
+            continue
+        target_step_ids = _dependent_same_app_foreground_step_ids(
+            request,
+            requests_by_step_id,
+            app_name,
+        )
+        direct_dependencies = set(_string_list(request.get("depends_on")))
+        deferred_step_ids.update(
+            step_id
+            for step_id in target_step_ids
+            if step_id not in direct_dependencies
+        )
+    if not deferred_step_ids:
+        return requests
+    return [
+        {
+            **request,
+            "requires_post_action_verification": False,
+        }
+        if str(
+            request.get("step_id") or request.get("planner_step_id") or ""
+        ).strip()
+        in deferred_step_ids
+        else request
+        for request in requests
+    ]
+
+
+def _dependent_same_app_foreground_step_ids(
+    verification: Mapping[str, Any],
+    requests_by_step_id: Mapping[str, Mapping[str, Any]],
+    app_name: str,
+) -> list[str]:
+    pending = list(reversed(_string_list(verification.get("depends_on"))))
+    visited: set[str] = set()
+    foreground_step_ids: list[str] = []
+    while pending:
+        step_id = pending.pop()
+        if step_id in visited:
+            continue
+        visited.add(step_id)
+        request = requests_by_step_id.get(step_id)
+        if not isinstance(request, Mapping):
+            continue
+        payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+        request_app_name = str(payload.get("app_name") or "").strip()
+        if request_app_name and not _desktop_scope_matches(
+            {"app_name": app_name},
+            {"app_name": request_app_name},
+        ):
+            continue
+        tool_name = str(request.get("tool") or "").strip()
+        if (
+            not request_app_name
+            and _tool_continues_foreground_operation_chain(tool_name)
+            and (
+                tool_name == "desktop.hotkey"
+                or (
+                    tool_name == "desktop.safe_shortcut"
+                    and str(payload.get("action") or "").strip()
+                    in {
+                        "application_windows",
+                        "force_quit_dialog",
+                        "lock_screen",
+                        "mission_control",
+                        "spotlight_search",
+                        "switch_next_app",
+                        "switch_previous_app",
+                    }
+                )
+            )
+        ):
+            continue
+        if (
+            request.get("requires_post_action_verification") is True
+            and (
+                _tool_changes_unknown_app_foreground_state(tool_name)
+                or _tool_continues_foreground_operation_chain(tool_name)
+            )
+        ):
+            foreground_step_ids.append(step_id)
+        pending.extend(reversed(_string_list(request.get("depends_on"))))
+    return foreground_step_ids
 
 
 def _is_desktop_app_verification_request(request: Mapping[str, Any]) -> bool:

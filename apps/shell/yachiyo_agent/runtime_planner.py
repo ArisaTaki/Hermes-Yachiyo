@@ -448,7 +448,7 @@ class TaskIntentRouter:
         text: str,
         metadata: Mapping[str, Any],
     ) -> TaskIntentSnapshot:
-        if _explicit_browser_url_hint(text):
+        if _explicit_browser_url_hint(text) and not type_into_ui_hint(text):
             return _empty_intent("desktop_operation", text)
         if _chat_status_meta_text_hint(text):
             return _empty_intent("desktop_operation", text)
@@ -2671,6 +2671,8 @@ class TaskIntentRouter:
         )
 
     def _schedule_intent(self, text: str, metadata: Mapping[str, Any]) -> TaskIntentSnapshot:
+        if _direct_web_search_query(text):
+            return _empty_intent("schedule", text)
         scheduled_runnable = scheduled_runnable_payload(text)
         scoped_new_item = _app_scoped_safe_operation_hint(text)
         scoped_action = str(
@@ -13022,10 +13024,16 @@ def _select_intent_for_allowed_tools(
         return selected
     if selected.kind != "desktop_operation":
         return selected
-    if not (
+    generic_browser_discovery = (
         isinstance(selected.inputs.get("generic_browser_discovery_hint"), Mapping)
         and isinstance(selected.inputs.get("app_search_hint"), Mapping)
-    ):
+    )
+    generic_desktop_fallback = not any(
+        value
+        for key, value in selected.inputs.items()
+        if key != "preflight_ui_before_action"
+    )
+    if not (generic_browser_discovery or generic_desktop_fallback):
         return selected
     for candidate in candidates[1:]:
         if candidate.kind != "web_research":
@@ -28332,7 +28340,7 @@ def _direct_web_search_query(text: str) -> str:
         r"(?:新标签页?|新标签|new\s+tab)?\s*)?"
         r"(?:并|然后|再)?\s*(?:搜索|搜一下|搜|查找|查询|查一下|查查|检索)\s*(?P<query>[^。！？!?]+)$",
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
-        r"(?:搜索|查找|查询|检索|找一下|找下|查一下|查查|查(?!看))\s*"
+        r"(?:搜索|搜一下|查找|查询|检索|找一下|找下|查一下|查查|查(?!看))\s*"
         r"(?P<query>[^。！？!?]+)$",
         r"^(?:(?:please|can\s+you|could\s+you|would\s+you)\s+)?"
         r"search\s+"
@@ -28361,10 +28369,15 @@ def _direct_web_search_query(text: str) -> str:
 def _looks_like_local_search_query(query: str) -> bool:
     if _looks_like_external_docs_subject(query):
         return False
+    clean_query = _clean_prompt(query)
+    lowered = clean_query.lower()
     return bool(
-        context_source_hint(query)
-        or data_source_hint(query)
-        or data_source_scope_hint(query)
+        context_source_hint(clean_query)
+        or data_source_hint(clean_query)
+        or data_source_scope_hint(clean_query)
+        or _looks_like_running_apps_request(clean_query, lowered)
+        or _looks_like_installed_apps_request(clean_query, lowered)
+        or _is_system_settings_app_label(clean_query)
     )
 
 
@@ -30891,6 +30904,7 @@ def _looks_like_running_apps_request(value: str, lowered: str) -> bool:
         re.search(r"(?:现在|当前).{0,8}(?:开了|打开|运行).{0,8}(?:哪些|什么).{0,8}(?:应用|app|软件|程序)", value, flags=re.IGNORECASE)
         or re.search(r"(?:现在|当前).{0,8}(?:哪些|什么).{0,8}(?:应用|app|软件|程序).{0,8}(?:开着|打开|运行|在运行)", value, flags=re.IGNORECASE)
         or re.search(r"(?:列|列出|列一下|看看|查看).{0,8}(?:打开|运行|正在运行).{0,8}(?:应用|app|软件|程序)", value, flags=re.IGNORECASE)
+        or re.search(r"(?:搜索|搜一下|查找).{0,8}(?:当前|正在|运行中).{0,8}(?:应用|app|软件|程序)", value, flags=re.IGNORECASE)
         or re.search(r"\b(?:what|which|list|show)\s+(?:apps?|applications?)\s+(?:are\s+)?(?:running|open)\b", lowered)
         or re.search(r"\b(?:list|show)\s+(?:running|open)\s+(?:apps?|applications?)\b", lowered)
     )
@@ -30911,6 +30925,7 @@ def _looks_like_installed_apps_request(value: str, lowered: str) -> bool:
 def _local_app_discovery_query(text: str) -> str:
     value = _clean_prompt(text)
     patterns = (
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:搜索|搜一下|查找)\s*(?P<app>[^。！？!?，,]{1,40}?)(?P<local_label>这个应用|应用|软件|程序|app|application)?$",
         r"(?:机器|电脑|mac|系统|本机|本地).{0,8}(?:有没有|是否有|有无|装了|安装了|有没有安装)\s*(?P<app>[^。！？!?，,]+)",
         r"(?:有没有|是否有|有无|装了|安装了|有没有安装).{0,8}(?P<app>[\w .·-]{2,40})(?:\s*(?:这个|这款|这个应用|这个软件|app|application|应用|软件))?$",
         r"\b(?:is|do\s+i\s+have|have)\s+(?P<app_en>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s+(?:installed|on\s+(?:this\s+)?mac|on\s+(?:this\s+)?machine)\b",
@@ -30925,6 +30940,11 @@ def _local_app_discovery_query(text: str) -> str:
             or ""
         )
         app = _clean_app_name_hint(raw_app)
+        if (
+            "local_label" in match.groupdict()
+            and not _is_system_settings_app_label(app)
+        ):
+            continue
         if (
             app
             and not _is_generic_foreground_app_label(app)
