@@ -2357,6 +2357,7 @@ class MainWindowAPI:
                 "command": "native:model-profile:test:chat",
                 "needs_env_refresh": False,
             }
+            self._refresh_runtime_executor()
             payload["connection_validation"] = self._record_connection_validation(payload)
             return payload
 
@@ -2365,6 +2366,7 @@ class MainWindowAPI:
             result = service.test_profile(profile_id)
         except (KeyError, ModelProfileError) as exc:
             result = {"ok": False, "success": False, "message": redact_api_error_text(exc)}
+        self._refresh_runtime_executor()
 
         elapsed = round(time.monotonic() - started_at, 2)
         message = _compact_command_output(str(result.get("message") or ""))
@@ -2505,6 +2507,19 @@ class MainWindowAPI:
             elapsed_seconds=result.get("elapsed_seconds"),
         )
 
+    def _refresh_runtime_executor(self) -> dict[str, Any]:
+        fallback = {
+            "updated": False,
+            "executor": "unknown",
+            "previous_executor": None,
+            "reason": "refresh_failed",
+        }
+        try:
+            return self._runtime.refresh_task_runner_executor()
+        except Exception as exc:
+            logger.warning("刷新 Chat TaskRunner 执行器失败: %s", exc)
+            return fallback
+
     def get_native_configuration(self) -> Dict[str, Any]:
         """Read Native ModelProfile configuration through the legacy endpoint shape."""
         service = get_model_profile_service()
@@ -2643,6 +2658,9 @@ class MainWindowAPI:
         except (KeyError, ValueError) as exc:
             return {"ok": False, "error": redact_api_error_text(exc)}
 
+        chat_configuration_changed = bool(
+            chat_profile_id or provider or model or base_url or api_key
+        )
         defaults = service.get_defaults()
         if provider or model or base_url or api_key:
             existing_id = str(defaults.get("chat") or "").strip()
@@ -2679,6 +2697,9 @@ class MainWindowAPI:
                     }
                 )
             service.set_defaults({"chat": str(profile["profile_id"])})
+
+        if chat_configuration_changed:
+            self._refresh_runtime_executor()
 
         has_vision_changes = any(
             key in changes
@@ -3062,16 +3083,7 @@ class MainWindowAPI:
     def recheck_native_agent(self) -> Dict[str, Any]:
         """Compatibility recheck endpoint for Native Agent readiness."""
         logger.info("手动触发 Native Agent 就绪状态重检...")
-        executor_refresh = {
-            "updated": False,
-            "executor": "unknown",
-            "previous_executor": None,
-            "reason": "refresh_failed",
-        }
-        try:
-            executor_refresh = self._runtime.refresh_task_runner_executor()
-        except Exception as exc:
-            logger.warning("重新检测 Native Agent 状态失败: %s", exc)
+        executor_refresh = self._refresh_runtime_executor()
 
         data = self.get_dashboard_data()
         data["executor_refresh"] = executor_refresh

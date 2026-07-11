@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import sqlite3
+from collections.abc import Callable
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from apps.bridge.deps import get_runtime
 from apps.shell.model_profiles import ModelProfileError, get_model_profile_service
 from apps.shell.provider_catalog_sync import (
     list_provider_catalog_adapters,
@@ -18,6 +21,7 @@ from apps.shell.provider_catalog_sync import (
 from packages.security import redact_api_error_detail
 
 router = APIRouter(prefix="/ui", tags=["Model Profiles"])
+logger = logging.getLogger(__name__)
 
 
 class ModelProfileRequest(BaseModel):
@@ -79,6 +83,32 @@ def _bad_request(exc: Exception) -> HTTPException:
     return HTTPException(status_code=400, detail=redact_api_error_detail(exc))
 
 
+def _refresh_task_runner_executor() -> dict[str, Any]:
+    try:
+        result = get_runtime().refresh_task_runner_executor()
+    except Exception as exc:
+        logger.warning("刷新 Chat TaskRunner 执行器失败", exc_info=True)
+        return {
+            "updated": False,
+            "executor": "unknown",
+            "previous_executor": None,
+            "reason": str(exc),
+        }
+    reason = str(result.get("reason") or "").strip()
+    if reason and reason != "task_runner_not_started":
+        logger.warning("刷新 Chat TaskRunner 执行器未完成: %s", reason)
+    return result
+
+
+async def _run_model_profile_mutation(
+    operation: Callable[..., dict[str, Any]],
+    *args: Any,
+) -> dict[str, Any]:
+    result = await asyncio.to_thread(operation, *args)
+    await asyncio.to_thread(_refresh_task_runner_executor)
+    return result
+
+
 @router.get("/model-profiles")
 async def list_model_profiles() -> dict[str, Any]:
     return await asyncio.to_thread(get_model_profile_service().list_profiles)
@@ -112,7 +142,10 @@ async def sync_model_provider_capabilities(request: ProviderCatalogSyncRequest) 
 @router.post("/model-sources")
 async def create_model_source(request: ModelSourceRequest) -> dict[str, Any]:
     try:
-        return await asyncio.to_thread(get_model_profile_service().create_source, _payload(request))
+        return await _run_model_profile_mutation(
+            get_model_profile_service().create_source,
+            _payload(request),
+        )
     except sqlite3.IntegrityError as exc:
         raise _bad_request(ModelProfileError("提供商源 ID 在当前类型下必须唯一")) from exc
     except ModelProfileError as exc:
@@ -130,7 +163,11 @@ async def get_model_source(source_id: str) -> dict[str, Any]:
 @router.patch("/model-sources/{source_id}")
 async def update_model_source(source_id: str, request: ModelSourceRequest) -> dict[str, Any]:
     try:
-        return await asyncio.to_thread(get_model_profile_service().update_source, source_id, _payload(request))
+        return await _run_model_profile_mutation(
+            get_model_profile_service().update_source,
+            source_id,
+            _payload(request),
+        )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="模型提供商源不存在") from exc
     except sqlite3.IntegrityError as exc:
@@ -141,13 +178,16 @@ async def update_model_source(source_id: str, request: ModelSourceRequest) -> di
 
 @router.delete("/model-sources/{source_id}")
 async def delete_model_source(source_id: str) -> dict[str, Any]:
-    return await asyncio.to_thread(get_model_profile_service().delete_source, source_id)
+    return await _run_model_profile_mutation(
+        get_model_profile_service().delete_source,
+        source_id,
+    )
 
 
 @router.post("/model-sources/{source_id}/test")
 async def test_model_source(source_id: str, request: ModelSourceTestRequest | None = None) -> dict[str, Any]:
     try:
-        return await asyncio.to_thread(
+        return await _run_model_profile_mutation(
             get_model_profile_service().test_source,
             source_id,
             _payload(request) if request is not None else {},
@@ -159,7 +199,10 @@ async def test_model_source(source_id: str, request: ModelSourceTestRequest | No
 @router.post("/model-sources/{source_id}/models/fetch")
 async def fetch_model_source_models(source_id: str) -> dict[str, Any]:
     try:
-        return await asyncio.to_thread(get_model_profile_service().fetch_source_models, source_id)
+        return await _run_model_profile_mutation(
+            get_model_profile_service().fetch_source_models,
+            source_id,
+        )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="模型提供商源不存在") from exc
     except ModelProfileError as exc:
@@ -179,7 +222,10 @@ async def create_model_source_profile(source_id: str, request: ModelProfileReque
     try:
         payload = _payload(request)
         payload["source_id"] = source_id
-        return await asyncio.to_thread(get_model_profile_service().create_profile, payload)
+        return await _run_model_profile_mutation(
+            get_model_profile_service().create_profile,
+            payload,
+        )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="模型提供商源不存在") from exc
     except sqlite3.IntegrityError as exc:
@@ -191,7 +237,7 @@ async def create_model_source_profile(source_id: str, request: ModelProfileReque
 @router.post("/model-sources/{source_id}/models/test-and-save")
 async def test_and_save_model_source_profile(source_id: str, request: ModelProfileRequest) -> dict[str, Any]:
     try:
-        return await asyncio.to_thread(
+        return await _run_model_profile_mutation(
             get_model_profile_service().test_and_save_profile,
             source_id,
             _payload(request),
@@ -207,7 +253,10 @@ async def test_and_save_model_source_profile(source_id: str, request: ModelProfi
 @router.post("/model-profiles")
 async def create_model_profile(request: ModelProfileRequest) -> dict[str, Any]:
     try:
-        return await asyncio.to_thread(get_model_profile_service().create_profile, _payload(request))
+        return await _run_model_profile_mutation(
+            get_model_profile_service().create_profile,
+            _payload(request),
+        )
     except sqlite3.IntegrityError as exc:
         raise _bad_request(ModelProfileError("Profile 名称必须唯一")) from exc
     except ModelProfileError as exc:
@@ -217,7 +266,10 @@ async def create_model_profile(request: ModelProfileRequest) -> dict[str, Any]:
 @router.patch("/model-profiles/defaults")
 async def update_model_profile_defaults(request: ModelProfileDefaultsRequest) -> dict[str, Any]:
     try:
-        return await asyncio.to_thread(get_model_profile_service().set_defaults, _payload(request))
+        return await _run_model_profile_mutation(
+            get_model_profile_service().set_defaults,
+            _payload(request),
+        )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="模型 Profile 不存在") from exc
     except ModelProfileError as exc:
@@ -227,7 +279,10 @@ async def update_model_profile_defaults(request: ModelProfileDefaultsRequest) ->
 @router.post("/model-profiles/tts/sync")
 async def sync_tts_provider(request: TtsProviderSyncRequest) -> dict[str, Any]:
     try:
-        return await asyncio.to_thread(get_model_profile_service().sync_tts_provider, _payload(request))
+        return await _run_model_profile_mutation(
+            get_model_profile_service().sync_tts_provider,
+            _payload(request),
+        )
     except sqlite3.IntegrityError as exc:
         raise _bad_request(ModelProfileError("TTS 语音源名称必须唯一")) from exc
     except ModelProfileError as exc:
@@ -245,7 +300,11 @@ async def get_model_profile(profile_id: str) -> dict[str, Any]:
 @router.patch("/model-profiles/{profile_id}")
 async def update_model_profile(profile_id: str, request: ModelProfileRequest) -> dict[str, Any]:
     try:
-        return await asyncio.to_thread(get_model_profile_service().update_profile, profile_id, _payload(request))
+        return await _run_model_profile_mutation(
+            get_model_profile_service().update_profile,
+            profile_id,
+            _payload(request),
+        )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="模型 Profile 不存在") from exc
     except sqlite3.IntegrityError as exc:
@@ -256,12 +315,18 @@ async def update_model_profile(profile_id: str, request: ModelProfileRequest) ->
 
 @router.delete("/model-profiles/{profile_id}")
 async def delete_model_profile(profile_id: str) -> dict[str, Any]:
-    return await asyncio.to_thread(get_model_profile_service().delete_profile, profile_id)
+    return await _run_model_profile_mutation(
+        get_model_profile_service().delete_profile,
+        profile_id,
+    )
 
 
 @router.post("/model-profiles/{profile_id}/test")
 async def test_model_profile(profile_id: str) -> dict[str, Any]:
     try:
-        return await asyncio.to_thread(get_model_profile_service().test_profile, profile_id)
+        return await _run_model_profile_mutation(
+            get_model_profile_service().test_profile,
+            profile_id,
+        )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="模型 Profile 不存在") from exc

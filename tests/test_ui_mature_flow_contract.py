@@ -462,6 +462,12 @@ def test_activity_store_bridge_contract_preserves_feed_detail_and_delete(monkeyp
 
 def test_model_profiles_bridge_contract_preserves_profile_lifecycle(monkeypatch):
     calls: list[tuple[str, dict]] = []
+    executor_refreshes: list[bool] = []
+
+    class FakeRuntime:
+        def refresh_task_runner_executor(self):
+            executor_refreshes.append(True)
+            return {"updated": True, "executor": "NativeAgentExecutor"}
 
     class FakeModelProfileService:
         def list_profiles(self):
@@ -519,6 +525,7 @@ def test_model_profiles_bridge_contract_preserves_profile_lifecycle(monkeypatch)
             return {"ok": True, "profile_id": profile_id}
 
     monkeypatch.setattr(model_profiles, "get_model_profile_service", lambda: FakeModelProfileService())
+    monkeypatch.setattr(model_profiles, "get_runtime", lambda: FakeRuntime())
 
     listed = asyncio.run(model_profiles.list_model_profiles())
     created = asyncio.run(
@@ -562,6 +569,7 @@ def test_model_profiles_bridge_contract_preserves_profile_lifecycle(monkeypatch)
     assert defaults == {"ok": True, "defaults": {"chat": "profile-chat", "vision": "profile-vision"}}
     assert tested["profile"]["status"] == "available"
     assert deleted == {"ok": True, "profile_id": "profile-chat"}
+    assert len(executor_refreshes) == 5
     assert calls == [
         ("list_profiles", {}),
         (
@@ -586,6 +594,12 @@ def test_model_profiles_bridge_contract_preserves_profile_lifecycle(monkeypatch)
 
 def test_model_profiles_bridge_contract_preserves_source_lifecycle(monkeypatch):
     calls: list[tuple[str, dict]] = []
+    executor_refreshes: list[bool] = []
+
+    class FakeRuntime:
+        def refresh_task_runner_executor(self):
+            executor_refreshes.append(True)
+            return {"updated": True, "executor": "NativeAgentExecutor"}
 
     class FakeModelProfileService:
         def list_sources(self):
@@ -648,6 +662,7 @@ def test_model_profiles_bridge_contract_preserves_source_lifecycle(monkeypatch):
             return {"ok": True, "source_id": source_id}
 
     monkeypatch.setattr(model_profiles, "get_model_profile_service", lambda: FakeModelProfileService())
+    monkeypatch.setattr(model_profiles, "get_runtime", lambda: FakeRuntime())
 
     listed = asyncio.run(model_profiles.list_model_sources())
     created = asyncio.run(
@@ -697,6 +712,7 @@ def test_model_profiles_bridge_contract_preserves_source_lifecycle(monkeypatch):
     assert tested["source"]["source_id"] == "source-openai"
     assert models["models"] == [{"id": "gpt-test", "name": "GPT Test"}]
     assert deleted == {"ok": True, "source_id": "source-openai"}
+    assert len(executor_refreshes) == 5
     assert calls == [
         ("list_sources", {}),
         (
@@ -726,6 +742,41 @@ def test_model_profiles_bridge_contract_preserves_source_lifecycle(monkeypatch):
         ("fetch_source_models", {"source_id": "source-openai"}),
         ("delete_source", {"source_id": "source-openai"}),
     ]
+
+
+def test_model_profile_mutation_logs_executor_refresh_timeout(monkeypatch, caplog):
+    class FakeModelProfileService:
+        def create_profile(self, payload):
+            return {"profile_id": "profile-timeout", **payload}
+
+    class FakeRuntime:
+        def refresh_task_runner_executor(self):
+            return {
+                "updated": False,
+                "executor": "NativeAgentUnavailableExecutor",
+                "previous_executor": "NativeAgentUnavailableExecutor",
+                "reason": "timeout",
+            }
+
+    monkeypatch.setattr(
+        model_profiles,
+        "get_model_profile_service",
+        lambda: FakeModelProfileService(),
+    )
+    monkeypatch.setattr(model_profiles, "get_runtime", lambda: FakeRuntime())
+
+    with caplog.at_level("WARNING"):
+        result = asyncio.run(
+            model_profiles.create_model_profile(
+                model_profiles.ModelProfileRequest(
+                    name="Timeout Profile",
+                    capability="chat",
+                )
+            )
+        )
+
+    assert result["profile_id"] == "profile-timeout"
+    assert "刷新 Chat TaskRunner 执行器未完成: timeout" in caplog.text
 
 
 def test_run_detail_approval_bridge_contract_preserves_approve_reject_and_cancel(monkeypatch):

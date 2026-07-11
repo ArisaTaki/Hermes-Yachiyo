@@ -1,9 +1,15 @@
 """Runtime tests for the native TaskRunner adapter."""
 
-from apps.core.executor import NativeAgentExecutor, SimulatedExecutor
+import asyncio
+
+from apps.bridge.routes import model_profiles as model_profile_routes
+from apps.core.executor import NativeAgentExecutor, NativeAgentUnavailableExecutor, SimulatedExecutor
 from apps.core.runtime import AppRuntime
 from apps.core.task_runner import TaskRunner
+from apps.shell.agent.runtime.run_readiness import native_agent_readiness
 from apps.shell.config import AppConfig
+from apps.shell.credential_store import MemoryCredentialStore
+from apps.shell.model_profiles import ModelProfileService
 
 
 def _make_runtime(tmp_path, monkeypatch):
@@ -40,6 +46,62 @@ def test_refresh_task_runner_executor_updates_existing_runner(tmp_path, monkeypa
     assert result["previous_executor"] == "SimulatedExecutor"
     assert result["executor"] == "NativeAgentExecutor"
     assert runner.executor.name == "NativeAgentExecutor"
+
+
+def test_profile_test_route_replaces_stale_unavailable_executor(tmp_path, monkeypatch):
+    runtime = _make_runtime(tmp_path, monkeypatch)
+    profile_service = ModelProfileService(
+        db_path=tmp_path / "profiles.db",
+        workspace_dir=tmp_path / "profiles",
+        credential_store=MemoryCredentialStore(),
+    )
+    try:
+        profile = profile_service.create_profile(
+            {
+                "name": "Runtime Refresh",
+                "capability": "chat",
+                "provider": "openai_compatible",
+                "base_url": "https://api.example.test/v1",
+                "model": "demo-model",
+                "api_key": "sk-test-secret",
+            }
+        )
+        profile_service.set_defaults({"chat": profile["profile_id"]})
+        monkeypatch.setattr(
+            runtime,
+            "native_agent_readiness",
+            lambda: native_agent_readiness(
+                profile_service_factory=lambda: profile_service,
+                supports_openai_compatible_api=lambda provider: provider == "openai_compatible",
+                redact_error=str,
+            ),
+        )
+        monkeypatch.setattr(
+            "apps.shell.model_profiles.openai_compatible_chat",
+            lambda *_args, **_kwargs: "OK",
+        )
+        monkeypatch.setattr(
+            model_profile_routes,
+            "get_model_profile_service",
+            lambda: profile_service,
+        )
+        monkeypatch.setattr(model_profile_routes, "get_runtime", lambda: runtime)
+
+        runtime._task_runner = TaskRunner(
+            runtime.state,
+            executor=NativeAgentUnavailableExecutor("profile unavailable"),
+        )
+        assert isinstance(runtime.task_runner.executor, NativeAgentUnavailableExecutor)
+
+        result = asyncio.run(
+            model_profile_routes.test_model_profile(profile["profile_id"])
+        )
+
+        assert result["success"] is True
+        assert profile_service.get_profile(profile["profile_id"])["status"] == "available"
+        assert isinstance(runtime.task_runner.executor, NativeAgentExecutor)
+    finally:
+        profile_service.close()
 
 
 def test_start_does_not_require_native_agent_readiness(tmp_path, monkeypatch):

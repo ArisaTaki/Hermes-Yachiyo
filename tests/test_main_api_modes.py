@@ -77,6 +77,7 @@ class _RuntimeStub:
         self.chat_session = ChatSession(session_id="main-api")
         self.chat_session.attach_store(store, load_existing=False)
         self.task_runner = None
+        self.executor_refresh_count = 0
 
     def get_status(self):
         return {
@@ -97,6 +98,7 @@ class _RuntimeStub:
         return get_native_agent_readiness()
 
     def refresh_task_runner_executor(self):
+        self.executor_refresh_count += 1
         return {
             "updated": True,
             "executor": "NativeAgentExecutor",
@@ -247,6 +249,7 @@ def test_native_connection_test_uses_default_chat_profile(tmp_path, monkeypatch)
         assert result["command"] == "native:model-profile:test:chat"
         assert result["profile"]["profile_id"] == profile["profile_id"]
         assert result["connection_validation"]["verified"] is True
+        assert runtime.executor_refresh_count == 1
         assert (tmp_path / "yachiyo-config" / "native_connection.json").exists()
         assert "sk-test-secret" not in str(result)
     finally:
@@ -386,6 +389,7 @@ def test_update_native_configuration_creates_default_profile_without_plaintext_s
         assert row["api_key"] == ""
         assert row["credential_ref"] == f"model_profile:{profile_id}:api_key"
         assert "sk-test-secret" not in str(result)
+        assert runtime.executor_refresh_count == 1
     finally:
         profile_service.close()
         store.close()
@@ -409,6 +413,7 @@ def test_update_native_configuration_sets_existing_profile_defaults(tmp_path, mo
 
         assert result["ok"] is True
         assert profile_service.get_defaults()["chat"] == profile["profile_id"]
+        assert runtime.executor_refresh_count == 1
     finally:
         profile_service.close()
         store.close()
