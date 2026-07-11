@@ -80,6 +80,36 @@ def test_native_agent_readiness_projects_model_profile_state() -> None:
     assert unsupported["capabilities"]["model"] is False
 
 
+def test_native_agent_readiness_does_not_resolve_model_secret() -> None:
+    class StartupProfileService:
+        def get_defaults(self) -> dict[str, str]:
+            return {"chat": "chat-1"}
+
+        def get_profile(self, profile_id: str) -> dict[str, object]:
+            assert profile_id == "chat-1"
+            return {
+                "enabled": True,
+                "status": "available",
+                "capability": "chat",
+                "provider": "openai_compatible",
+                "base_url": "https://api.example.test/v1",
+                "model": "demo-model",
+                "api_key_configured": True,
+            }
+
+        def get_profile_private(self, _profile_id: str) -> dict[str, object]:
+            raise AssertionError("startup readiness must not read the model secret")
+
+    readiness = native_agent_readiness(
+        profile_service_factory=StartupProfileService,
+        supports_openai_compatible_api=lambda provider: provider == "openai_compatible",
+        redact_error=str,
+    )
+
+    assert readiness["ready"] is True
+    assert readiness["profile_id"] == "chat-1"
+
+
 def test_run_readiness_validator_projects_workflow_agent_node() -> None:
     validator = _validator(
         agents={

@@ -24,7 +24,12 @@ def native_agent_readiness(
                 reason="model_profile_required",
                 message="请先配置并选择默认对话模型。",
             )
-        profile = profile_service.get_profile_private(profile_id)
+        get_profile = getattr(profile_service, "get_profile", None)
+        profile = (
+            get_profile(profile_id)
+            if callable(get_profile)
+            else profile_service.get_profile_private(profile_id)
+        )
     except KeyError:
         return native_agent_not_ready(
             reason="model_profile_required",
@@ -45,7 +50,14 @@ def native_agent_readiness(
         reason = "默认模型不是对话模型。"
     elif not supports_openai_compatible_api(str(profile.get("provider") or "openai_compatible")):
         reason = "Native Agent 当前仅支持 OpenAI-compatible 对话模型。"
-    elif not all(str(profile.get(key) or "").strip() for key in ("base_url", "model", "api_key")):
+    elif not (
+        all(str(profile.get(key) or "").strip() for key in ("base_url", "model"))
+        and (
+            bool(profile.get("api_key_configured"))
+            if "api_key_configured" in profile
+            else bool(str(profile.get("api_key") or "").strip())
+        )
+    ):
         reason = "默认对话模型配置不完整。"
 
     ready = not reason
