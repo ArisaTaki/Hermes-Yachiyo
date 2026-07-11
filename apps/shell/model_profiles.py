@@ -1549,7 +1549,20 @@ class ModelProfileService:
         return {"ok": True}
 
     def test_profile(self, profile_id: str) -> dict[str, Any]:
-        profile = self.get_profile_private(profile_id)
+        try:
+            profile = self.get_profile_private(profile_id)
+        except ModelProfileError as exc:
+            detail = redact_api_error_text(exc)
+            message = (
+                "模型凭据不可访问，请在模型配置中重新保存 API Key 后重试。"
+                f"技术信息：{detail}"
+            )
+            return self._record_test_result(
+                profile_id,
+                ok=False,
+                message=message,
+                extra={"failure_stage": "credential_access"},
+            )
         result = self._test_profile_payload(
             {
                 "provider": profile.get("provider"),

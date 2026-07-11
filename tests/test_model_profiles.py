@@ -10,7 +10,7 @@ import threading
 import pytest
 
 from apps.shell.agent_runtime import AgentRuntimeService
-from apps.shell.credential_store import MemoryCredentialStore
+from apps.shell.credential_store import CredentialStoreError, MemoryCredentialStore
 from apps.shell.model_profiles import (
     OPENAI_COMPATIBLE_CHAT_TIMEOUT_SECONDS,
     ModelProfileError,
@@ -42,6 +42,13 @@ class _BlockingCredentialStore(MemoryCredentialStore):
             self.read_started.set()
             self.release_read.wait(timeout=5)
         return super().get(ref)
+
+
+class _FailingReadCredentialStore(MemoryCredentialStore):
+    def get(self, ref: str) -> str:
+        raise CredentialStoreError(
+            "Keychain find failed with OSStatus -25293 sk-read-secret123456"
+        )
 
 
 def _vision_challenge():
@@ -679,6 +686,48 @@ def test_model_profile_test_updates_status(monkeypatch, tmp_path):
         assert result["ok"] is True
         assert tested["status"] == "available"
         assert tested["last_tested_at"]
+    finally:
+        service.close()
+
+
+def test_model_profile_test_records_credential_access_failure(tmp_path):
+    service = ModelProfileService(
+        db_path=tmp_path / "model-profiles.db",
+        workspace_dir=tmp_path / "profiles",
+        credential_store=_FailingReadCredentialStore(),
+    )
+    source = service.create_source(
+        {
+            "name": "Unavailable Keychain",
+            "capability": "chat",
+            "base_url": "https://api.example.test/v1",
+            "api_key": "sk-secret",
+        }
+    )
+    profile = service.create_profile(
+        {
+            "source_id": source["source_id"],
+            "name": "Unavailable Keychain Chat",
+            "capability": "chat",
+            "model": "demo-model",
+        }
+    )
+    try:
+        result = service.test_profile(profile["profile_id"])
+        tested_profile = service.get_profile(profile["profile_id"])
+        tested_source = service.get_source(source["source_id"])
+
+        assert result["ok"] is False
+        assert result["success"] is False
+        assert result["failure_stage"] == "credential_access"
+        assert "模型凭据不可访问" in result["message"]
+        assert "OSStatus -25293" in result["message"]
+        assert tested_profile["status"] == "failed"
+        assert tested_profile["last_error"] == result["message"]
+        assert tested_source["status"] == "failed"
+        assert tested_source["last_error"] == result["message"]
+        assert "sk-secret" not in repr(result)
+        assert "sk-read-secret123456" not in repr(result)
     finally:
         service.close()
 
