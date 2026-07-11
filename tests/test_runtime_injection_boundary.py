@@ -18,6 +18,7 @@ ALLOWED_RUNTIME_ACCESSOR_CALLS = {
     ("apps/core/executor.py", "_oha_delegation_catalog_context", "get_agent_runtime_service"),
     ("apps/core/executor.py", "_run_oha_delegation", "get_agent_runtime_service"),
     ("apps/core/executor.py", "NativeAgentExecutor._runtime_service", "get_native_run_engine"),
+    ("apps/core/runtime.py", "AppRuntime.get_agent_runtime_service", "get_agent_runtime_service"),
     ("apps/shell/agent_runtime.py", "get_agent_runtime_service", "get_native_run_engine"),
     ("apps/shell/chat_api.py", "ChatAPI._agent_runtime_service", "get_agent_runtime_service"),
 }

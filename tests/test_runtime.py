@@ -73,6 +73,17 @@ def test_stop_closes_injected_native_runtime_service(tmp_path, monkeypatch):
     assert closed_global == [True]
 
 
+def test_runtime_exposes_global_native_runtime_service(tmp_path, monkeypatch):
+    runtime = _make_runtime(tmp_path, monkeypatch)
+    service = object()
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_agent_runtime_service",
+        lambda: service,
+    )
+
+    assert runtime.get_agent_runtime_service() is service
+
+
 def test_runtime_exposes_and_closes_activity_store(tmp_path, monkeypatch):
     import apps.core.activity_store as activity_store_mod
 

@@ -78,6 +78,14 @@ class AppRuntime:
         """任务调度器（启动后才有）"""
         return self._task_runner
 
+    def get_agent_runtime_service(self) -> Any:
+        service = getattr(self, "agent_runtime_service", None)
+        if service is not None:
+            return service
+        from apps.shell.agent_runtime import get_agent_runtime_service
+
+        return get_agent_runtime_service()
+
     def start(self) -> None:
         """启动运行时"""
         if self._running:
