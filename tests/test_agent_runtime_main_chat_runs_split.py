@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+from copy import deepcopy
 from typing import Any
 
+import pytest
+
 from apps.shell import agent_runtime
+from apps.shell.agent.runtime.errors import AgentRuntimeError
+from apps.shell.agent.runtime.events import RuntimeTaskEventRecorder
 from apps.shell.agent.runtime.main_chat_runs import MainChatRunLifecycle
 from apps.shell.agent_runtime import AgentRuntimeService
 from apps.shell.credential_store import MemoryCredentialStore
@@ -22,15 +28,32 @@ class FakeTaskRunLinks:
 class FakeTaskEvents:
     def __init__(self) -> None:
         self.events: list[tuple[str, dict[str, Any]]] = []
+        self.fences: list[dict[str, Any]] = []
 
     def started(self, run_id: str, **payload: Any) -> None:
         self.events.append(("started", {"run_id": run_id, **payload}))
 
-    def completed(self, run_id: str, **payload: Any) -> None:
+    def completed(self, run_id: str, **payload: Any) -> dict[str, Any]:
+        self.fences.append(
+            {
+                key: payload.pop(key)
+                for key in ("expected_status", "expected_updated_at")
+                if key in payload
+            }
+        )
         self.events.append(("completed", {"run_id": run_id, **payload}))
+        return {"event_type": "run.completed"}
 
-    def failed(self, run_id: str, **payload: Any) -> None:
+    def failed(self, run_id: str, **payload: Any) -> dict[str, Any]:
+        self.fences.append(
+            {
+                key: payload.pop(key)
+                for key in ("expected_status", "expected_updated_at")
+                if key in payload
+            }
+        )
         self.events.append(("failed", {"run_id": run_id, **payload}))
+        return {"event_type": "run.failed"}
 
 
 def _timeline(event: str, detail: str = "", **extra: Any) -> dict[str, Any]:
@@ -93,6 +116,72 @@ def test_main_chat_run_lifecycle_projects_task_events() -> None:
             },
         ),
     ]
+
+
+def test_main_chat_run_lifecycle_complete_preserves_pending_approval() -> None:
+    for status in ("approval_required", "running"):
+        run = {
+            "run_id": f"run-{status}",
+            "kind": "main_chat_run",
+            "status": status,
+            "result": "等待审批",
+            "pending_approval": {
+                "approval_id": f"approval-{status}",
+                "tool": "desktop.verify",
+            },
+            "timeline": [],
+        }
+        events = FakeTaskEvents()
+        lifecycle = MainChatRunLifecycle(
+            main_chat_agent_id="builtin:yachiyo-main",
+            insert_run=lambda **_payload: {},
+            link_task_run=lambda **_payload: None,
+            get_run=lambda _run_id, current=run: current,
+            update_run=lambda *_args, **_payload: (_ for _ in ()).throw(
+                AssertionError("pending approval must not be completed")
+            ),
+            task_run_links=FakeTaskRunLinks(),
+            task_events=events,
+            timeline_factory=_timeline,
+            redact_secrets=str,
+            final_statuses={"completed", "failed", "cancelled"},
+        )
+
+        preserved = lifecycle.complete(run["run_id"], "model says done")
+
+        assert preserved == run
+        assert events.events == []
+
+
+def test_main_chat_run_lifecycle_complete_preserves_awaiting_user() -> None:
+    run = {
+        "run_id": "run-awaiting-user",
+        "kind": "main_chat_run",
+        "status": "awaiting_user",
+        "result": "请问要整理哪个目录？",
+        "pending_approval": {},
+        "timeline": [],
+    }
+    events = FakeTaskEvents()
+    lifecycle = MainChatRunLifecycle(
+        main_chat_agent_id="builtin:yachiyo-main",
+        insert_run=lambda **_payload: {},
+        link_task_run=lambda **_payload: None,
+        get_run=lambda _run_id: run,
+        update_run=lambda *_args, **_payload: pytest.fail(
+            "awaiting_user must not be completed"
+        ),
+        task_run_links=FakeTaskRunLinks(),
+        task_events=events,
+        timeline_factory=_timeline,
+        redact_secrets=str,
+        final_statuses={"completed", "failed", "cancelled"},
+    )
+
+    preserved = lifecycle.complete(run["run_id"], "model says done")
+
+    assert preserved == run
+    assert events.events == []
 
 
 def test_main_chat_run_lifecycle_records_runtime_context_on_start() -> None:
@@ -303,6 +392,225 @@ def test_main_chat_run_lifecycle_keeps_terminal_run_idempotent() -> None:
     assert lifecycle.complete("run-1", "late") is run
     assert lifecycle.fail("run-1", "late") is run
     assert events.events == []
+
+
+def test_main_chat_completion_cas_preserves_approval_created_during_completion() -> None:
+    events = FakeTaskEvents()
+    current = {
+        "run_id": "run-race",
+        "status": "running",
+        "result": "",
+        "pending_approval": {},
+        "timeline": [],
+        "updated_at": "2026-07-11T10:00:00+00:00",
+    }
+
+    def update_run(_run_id: str, **payload: Any) -> dict[str, Any] | None:
+        assert payload["expected_status"] == "running"
+        assert payload["expected_updated_at"] == "2026-07-11T10:00:00+00:00"
+        assert payload["expected_pending_approval_absent"] is True
+        current.update(
+            status="approval_required",
+            result="等待审批：desktop.verify",
+            pending_approval={
+                "approval_id": "approval-new",
+                "tool": "desktop.verify",
+            },
+            updated_at="2026-07-11T10:00:01+00:00",
+        )
+        return None
+
+    lifecycle = MainChatRunLifecycle(
+        main_chat_agent_id="builtin:yachiyo-main",
+        insert_run=lambda **_payload: current,
+        link_task_run=lambda **_payload: None,
+        get_run=lambda _run_id: dict(current),
+        update_run=update_run,
+        task_run_links=FakeTaskRunLinks(),
+        task_events=events,
+        timeline_factory=_timeline,
+        redact_secrets=str,
+        final_statuses={"completed", "failed", "cancelled"},
+    )
+
+    preserved = lifecycle.complete("run-race", "model says done")
+
+    assert preserved["status"] == "approval_required"
+    assert preserved["pending_approval"]["approval_id"] == "approval-new"
+    assert events.events == []
+
+
+def test_main_chat_failure_cas_preserves_concurrent_cancellation() -> None:
+    events = FakeTaskEvents()
+    current = {
+        "run_id": "run-fail-race",
+        "status": "running",
+        "result": "",
+        "pending_approval": {},
+        "timeline": [],
+        "updated_at": "2026-07-11T10:00:00+00:00",
+    }
+
+    def update_run(_run_id: str, **payload: Any) -> dict[str, Any] | None:
+        assert payload["expected_status"] == "running"
+        assert payload["expected_updated_at"] == "2026-07-11T10:00:00+00:00"
+        assert payload["expected_pending_approval_absent"] is True
+        current.update(
+            status="cancelled",
+            result="cancelled by user",
+            updated_at="2026-07-11T10:00:01+00:00",
+        )
+        return None
+
+    lifecycle = MainChatRunLifecycle(
+        main_chat_agent_id="builtin:yachiyo-main",
+        insert_run=lambda **_payload: current,
+        link_task_run=lambda **_payload: None,
+        get_run=lambda _run_id: dict(current),
+        update_run=update_run,
+        task_run_links=FakeTaskRunLinks(),
+        task_events=events,
+        timeline_factory=_timeline,
+        redact_secrets=str,
+        final_statuses={"completed", "failed", "cancelled"},
+    )
+
+    preserved = lifecycle.fail("run-fail-race", "late model failure")
+
+    assert preserved["status"] == "cancelled"
+    assert preserved["result"] == "cancelled by user"
+    assert events.events == []
+
+
+def test_main_chat_failure_cas_preserves_concurrent_approval() -> None:
+    events = FakeTaskEvents()
+    current = {
+        "run_id": "run-fail-approval-race",
+        "status": "running",
+        "result": "",
+        "pending_approval": {},
+        "timeline": [],
+        "updated_at": "2026-07-11T10:00:00+00:00",
+    }
+
+    def update_run(_run_id: str, **_payload: Any) -> None:
+        current.update(
+            status="approval_required",
+            result="waiting for approval",
+            pending_approval={
+                "approval_id": "approval-during-fail",
+                "tool": "terminal.run",
+            },
+            updated_at="2026-07-11T10:00:01+00:00",
+        )
+        return None
+
+    lifecycle = MainChatRunLifecycle(
+        main_chat_agent_id="builtin:yachiyo-main",
+        insert_run=lambda **_payload: current,
+        link_task_run=lambda **_payload: None,
+        get_run=lambda _run_id: dict(current),
+        update_run=update_run,
+        task_run_links=FakeTaskRunLinks(),
+        task_events=events,
+        timeline_factory=_timeline,
+        redact_secrets=str,
+        final_statuses={"completed", "failed", "cancelled"},
+    )
+
+    preserved = lifecycle.fail("run-fail-approval-race", "late model failure")
+
+    assert preserved["status"] == "approval_required"
+    assert preserved["pending_approval"]["approval_id"] == "approval-during-fail"
+    assert events.events == []
+
+
+def test_main_chat_failure_rolls_back_row_and_events_when_second_event_fails() -> None:
+    run = {
+        "run_id": "run-fail-atomic",
+        "kind": "main_chat_run",
+        "status": "running",
+        "result": "",
+        "pending_approval": None,
+        "timeline": [],
+        "updated_at": "version-1",
+    }
+    appended_events: list[str] = []
+
+    @contextmanager
+    def transaction_scope() -> Any:
+        run_snapshot = deepcopy(run)
+        events_snapshot = list(appended_events)
+        try:
+            yield
+        except BaseException:
+            run.clear()
+            run.update(run_snapshot)
+            appended_events[:] = events_snapshot
+            raise
+
+    def update_run(_run_id: str, **payload: Any) -> dict[str, Any] | None:
+        if run["status"] != payload.pop("expected_status"):
+            return None
+        if run["updated_at"] != payload.pop("expected_updated_at"):
+            return None
+        payload.pop("expected_pending_approval_absent")
+        run.update(payload)
+        run["updated_at"] = "version-2"
+        return dict(run)
+
+    def append_run_event(
+        _run_id: str,
+        event_type: str,
+        _payload: dict[str, Any],
+        **fence: Any,
+    ) -> dict[str, Any] | None:
+        assert fence == {
+            "expected_status": "failed",
+            "expected_updated_at": "version-2",
+        }
+        appended_events.append(event_type)
+        if len(appended_events) == 2:
+            return None
+        return {"event_type": event_type}
+
+    lifecycle = MainChatRunLifecycle(
+        main_chat_agent_id="builtin:yachiyo-main",
+        insert_run=lambda **_payload: run,
+        link_task_run=lambda **_payload: None,
+        get_run=lambda _run_id: dict(run),
+        update_run=update_run,
+        task_run_links=FakeTaskRunLinks(),
+        task_events=RuntimeTaskEventRecorder(append_run_event=append_run_event),
+        append_run_event=append_run_event,
+        timeline_factory=_timeline,
+        redact_secrets=str,
+        final_statuses={"completed", "failed", "cancelled"},
+        transaction_scope=transaction_scope,
+    )
+
+    with pytest.raises(AgentRuntimeError, match="run_event_fence_mismatch"):
+        lifecycle.fail(
+            run["run_id"],
+            "model failed",
+            timeline=[
+                _timeline("model.request.failed", "model failed"),
+            ],
+            run_events=[
+                ("model.request.failed", {"error": "model failed"}),
+            ],
+        )
+
+    assert run == {
+        "run_id": "run-fail-atomic",
+        "kind": "main_chat_run",
+        "status": "running",
+        "result": "",
+        "pending_approval": None,
+        "timeline": [],
+        "updated_at": "version-1",
+    }
+    assert appended_events == []
 
 
 def test_native_runtime_installs_main_chat_run_lifecycle(tmp_path) -> None:

@@ -19,7 +19,7 @@ from __future__ import annotations
 import logging
 import re
 import time
-from typing import TYPE_CHECKING, Any, Dict
+from typing import TYPE_CHECKING, Any, Dict, Mapping
 
 from apps.core.activity_store import get_activity_store
 from apps.shell.chat_api import ChatAPI
@@ -302,12 +302,21 @@ def planned_agent_task_snapshot_for_quick_message(
         if candidates is not None
         else _desktop_candidates_for_quick_message(text)
     )
-    if not candidates:
+    full_runtime_execution_envelope = daily_desktop_runtime_execution_envelope(
+        text,
+        metadata=metadata,
+        allowed_tools=allowed_tools,
+    )
+    blocked_plan = _quick_message_envelope_has_blocked_tool_plan(
+        full_runtime_execution_envelope
+    )
+    if not candidates and not blocked_plan:
         return None
-    request = candidates[0]
-    tool_name = str(request.get("tool") or "").strip()
-    if not tool_name:
-        return None
+    if candidates:
+        request = candidates[0]
+        tool_name = str(request.get("tool") or "").strip()
+        if not tool_name:
+            return None
     planner_timeline, planner_metadata = _planner_trace_for_quick_message(
         text,
         candidates,
@@ -321,11 +330,6 @@ def planned_agent_task_snapshot_for_quick_message(
     if not timeline:
         return None
     task_metadata = {**dict(metadata or {}), **planner_metadata}
-    full_runtime_execution_envelope = daily_desktop_runtime_execution_envelope(
-        text,
-        metadata=metadata,
-        allowed_tools=allowed_tools,
-    )
     if full_runtime_execution_envelope:
         task_metadata["yachiyo_execution_envelope"] = full_runtime_execution_envelope
     runtime_execution_envelope = (
@@ -350,6 +354,29 @@ def planned_agent_task_snapshot_for_quick_message(
     return snapshot
 
 
+def _quick_message_envelope_has_blocked_tool_plan(
+    envelope: Mapping[str, Any] | None,
+) -> bool:
+    if not isinstance(envelope, Mapping):
+        return False
+    intent_kind = str(envelope.get("intent_kind") or "").strip()
+    if not intent_kind or intent_kind in {"general", "conversation"}:
+        return False
+    task_core = envelope.get("task_core")
+    if not isinstance(task_core, Mapping):
+        return False
+    todos = task_core.get("todos")
+    return bool(
+        isinstance(todos, list)
+        and any(
+            isinstance(todo, Mapping)
+            and str(todo.get("status") or "").strip() == "blocked"
+            and not str(todo.get("tool_name") or "").strip()
+            for todo in todos
+        )
+    )
+
+
 def _planner_trace_for_quick_message(
     text: str,
     candidates: list[dict[str, Any]],
@@ -357,10 +384,11 @@ def _planner_trace_for_quick_message(
     allowed_tools: list[str] | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    if not any(
+    has_runtime_planner_candidate = any(
         str(candidate.get("source") or "") == "runtime_planner"
         for candidate in candidates
-    ):
+    )
+    if candidates and not has_runtime_planner_candidate:
         return [], {}
     trace_allowed_tools = allowed_tools or daily_desktop_allowed_tools()
     try:
@@ -373,7 +401,37 @@ def _planner_trace_for_quick_message(
         logger.debug("Launcher planner trace preview unavailable", exc_info=True)
         return [], {}
     if not planned_requests:
-        return [], {}
+        steps = list(
+            getattr(
+                getattr(getattr(decision, "plan", None), "tool_plan", None),
+                "steps",
+                [],
+            )
+            or []
+        )
+        blocked_plan = any(
+            str(getattr(step, "status", "") or "").strip() == "unavailable"
+            and not str(getattr(step, "tool_name", "") or "").strip()
+            for step in steps
+        )
+        intent_kind = str(
+            getattr(getattr(decision, "selected_intent", None), "kind", "") or ""
+        ).strip()
+        if candidates or not blocked_plan or intent_kind in {"", "general", "conversation"}:
+            return [], {}
+        selection_payload = planner_selection_payload(
+            decision=decision,
+            planner_requests=[],
+            legacy_requests=[],
+            selected_requests=[],
+            selected_source="runtime_planner",
+            selected_reason="runtime_planner_blocked_by_tool_policy",
+            metadata=metadata,
+        )
+        return [
+            *planner_timeline_events(decision),
+            planner_selection_timeline_event(selection_payload),
+        ], runtime_planner_metadata(decision, allowed_tools=trace_allowed_tools)
     candidate_tools = [
         str(candidate.get("tool") or "").strip()
         for candidate in candidates

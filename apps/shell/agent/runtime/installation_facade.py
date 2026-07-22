@@ -72,6 +72,10 @@ from apps.shell.agent.runtime.shutdown import RuntimeShutdownService
 from apps.shell.agent.runtime.skill_import_service import RuntimeSkillImportService
 from apps.shell.agent.runtime.skill_install_service import RuntimeSkillInstallService
 from apps.shell.agent.runtime.skill_sync_service import RuntimeSkillSyncService
+from apps.shell.agent.runtime.startup_reconciliation import RuntimeStartupReconciler
+from apps.shell.agent.runtime.tool_brokers import (
+    close_run_owned_browser_target_best_effort,
+)
 from apps.shell.agent.runtime.tooling import build_runtime_tooling_stack
 from apps.shell.agent.runtime.workflow_approval_execution import RuntimeWorkflowApprovalExecutionService
 from apps.shell.agent.runtime.workflow_runs import RuntimeWorkflowRunAsyncCoordinator, RuntimeWorkflowRunCoordinator
@@ -247,6 +251,11 @@ class RuntimeInstallationFacadeMixin:
                 **kwargs,
             ),
             project_agent_run_group_if_root=lambda result: self._project_agent_run_group_if_root(result),
+            project_agent_run_failure=lambda run_id, exc, **kwargs: self.agent_run_outcomes.failed(
+                run_id,
+                exc,
+                **kwargs,
+            ),
             resolve_runnable=lambda **kwargs: self.resolve_runnable(**kwargs),
             update_run=lambda run_id, **kwargs: self._update_run(run_id, **kwargs),
             runtime_agent_timeline=self.runtime_agent_timeline,
@@ -271,6 +280,11 @@ class RuntimeInstallationFacadeMixin:
             trust_workspace_from_policy=self._trust_workspace_from_policy,
             profile_service_factory=model_provider.profile_service,
             workspace_status=model_provider.workspace_status,
+            run_start_lock=self._db_lock,
+            client_request_id_from_payload=(
+                self.run_request_parser.client_request_id_from_payload
+            ),
+            transaction_scope=self._conn.transaction,
         )
         self.agent_run_async_coordinator = setup.agent_run_async_coordinator
         self.agent_model_tester = setup.agent_model_tester
@@ -329,6 +343,11 @@ class RuntimeInstallationFacadeMixin:
             tool_requests_from_message=self._tool_requests_from_message,
             run_tool_requests=self._run_tool_requests,
             desktop_provider_registry=default_desktop_execution_provider_registry(),
+            execution_lease_checker=getattr(
+                getattr(self, "runs", None),
+                "assert_bound_async_execution_active",
+                None,
+            ),
         )
         self._install_runtime_tooling(tooling_stack.tooling)
         self.tool_operations = tooling_stack.tool_operations
@@ -358,9 +377,14 @@ class RuntimeInstallationFacadeMixin:
             timeline_factory=runtime_timeline_factory,
             memory_context_limit=MEMORY_CONTEXT_LIMIT,
             runtime_task_model_events=self.runtime_task_model_events,
+            get_run=self.get_run,
             update_run=self._update_run,
+            project_agent_run_group_if_root=lambda run: self._update_agent_run_group_if_root(
+                run
+            ),
             model_output_metadata=model_output_metadata,
             redact_secrets=redact_secrets,
+            transaction_scope=self._conn.transaction,
             tool_brokers=self.tool_brokers,
             agent_desk_context=build_agent_desk_context,
         )
@@ -369,6 +393,9 @@ class RuntimeInstallationFacadeMixin:
             timeline_factory=runtime_timeline_factory,
             append_run_event=self.append_run_event,
             update_run=self._update_run,
+            get_run=self.get_run,
+            get_run_group=self.get_run_group,
+            update_run_group=self._update_run_group,
             snapshots=self.approval_snapshots,
             call_agent_tool=self._call_agent_tool,
             fatal_tool_failure_detail=self._fatal_tool_failure_detail,
@@ -376,6 +403,8 @@ class RuntimeInstallationFacadeMixin:
             run_tool_requests=self._run_tool_requests,
             claim_pending_approval=self.run_approvals.claim_pending_approval,
             continue_custom_api_agent=self._run_custom_api_agent,
+            event_buffer_scope=self.run_timeline.buffer_events,
+            transaction_scope=self._conn.transaction,
         )
         self._install_runtime_approval_services(approval_services)
         self.agent_run_executor = RuntimeAgentRunExecutor(
@@ -383,6 +412,7 @@ class RuntimeInstallationFacadeMixin:
             continue_custom_api_agent=self._run_custom_api_agent,
             agent_run_outcomes=self.agent_run_outcomes,
             approval_pause=self.approval_pause,
+            list_run_events=self.list_run_events,
         )
 
     def _install_runtime_approval_runtime_services(self) -> None:
@@ -390,6 +420,11 @@ class RuntimeInstallationFacadeMixin:
         setup = build_runtime_approval_runtime_services(
             get_run=lambda run_id: self.get_run(run_id),
             pending_approval_private=lambda run_id: self.runs.pending_approval_private(run_id),
+            assert_approval_resume_active=(
+                self.run_approvals.assert_approval_resume_active
+            ),
+            claim_pending_rejection=self.run_approvals.claim_pending_rejection,
+            claim_pending_timeout=self.run_approvals.claim_pending_timeout,
             approvals=self.approvals,
             project_child_run_transition=lambda result: self._project_child_run_transition(result),
             project_cancelled_workflow_group_if_root=lambda run, result: self._project_cancelled_workflow_group_if_root(
@@ -418,10 +453,31 @@ class RuntimeInstallationFacadeMixin:
                 context,
                 result_text,
             ),
-            approve_workflow_run=lambda run: self._approve_workflow_run_approval(run),
-            approve_main_chat_run=lambda run: self._approve_main_chat_run_approval(run),
+            project_main_chat_failed=lambda context, safe_error: self._project_main_chat_approval_resume_failed(
+                context,
+                safe_error,
+            ),
+            approve_workflow_run=lambda run, **kwargs: self._approve_workflow_run_approval(
+                run,
+                **kwargs,
+            ),
+            approve_main_chat_run=lambda run, **kwargs: self._approve_main_chat_run_approval(
+                run,
+                **kwargs,
+            ),
             execution_lock=self._approval_execution_lock,
             execution_in_progress=self._approval_execution_in_progress,
+            transaction_scope=self._conn.transaction,
+            close_run_owned_browser_target=lambda run: (
+                close_run_owned_browser_target_best_effort(
+                    run,
+                    tool_brokers=self.tool_brokers,
+                    workspace_policy=self._default_workspace_policy(),
+                )
+            ),
+            project_agent_run_group_if_root=lambda run: (
+                self._update_agent_run_group_if_root(run)
+            ),
         )
         self._install_runtime_approval_transitions(setup.approval_transitions)
         self._install_runtime_tool_approval_resume(setup.tool_approval_resume)
@@ -457,6 +513,11 @@ class RuntimeInstallationFacadeMixin:
                 main_chat_pending_approval=self._main_chat_pending_approval,
                 approval_pause=self.approval_pause,
                 terminal_run_or_none=self.terminal_run_resolver.terminal_run_or_none,
+                fail_main_chat_run=self.main_chat_runs.fail,
+                transaction_scope=self._conn.transaction,
+                resolve_initial_model_plan=(
+                    self.custom_api_agent_loop.resolve_initial_model_plan
+                ),
             )
         )
 
@@ -483,6 +544,11 @@ class RuntimeInstallationFacadeMixin:
             run_by_client_request_id=self._run_by_client_request_id,
             client_request_id_from_payload=self.run_request_parser.client_request_id_from_payload,
             workflow_path=self._workflow_path,
+            run_group_attachment_transaction=getattr(
+                getattr(self, "_conn", None),
+                "transaction",
+                None,
+            ),
         )
         self._install_runtime_workflow_planning_services(workflow_planning_services)
         self.workflow_run_coordinator = RuntimeWorkflowRunCoordinator(
@@ -496,7 +562,9 @@ class RuntimeInstallationFacadeMixin:
             validate_workflow_agent_run_readiness=lambda nodes: self._validate_workflow_agent_run_readiness(nodes),
             starter=self.workflow_run_starter,
             start_projector=self.workflow_run_start_projector,
-            append_run_event=lambda run_id, event_type, payload: self.append_run_event(run_id, event_type, payload),
+            append_run_event=lambda run_id, event_type, payload, **kwargs: self.append_run_event(
+                run_id, event_type, payload, **kwargs
+            ),
             continue_workflow_run=lambda run, workflow, **kwargs: self._continue_workflow_run(
                 run,
                 workflow,
@@ -536,14 +604,18 @@ class RuntimeInstallationFacadeMixin:
             get_current_run=lambda run_id: self.get_run(run_id),
             pending_approval_private=lambda run_id: self.runs.pending_approval_private(run_id),
             get_run=lambda run_id: self.get_run(run_id),
+            get_run_group=lambda run_group_id: self.get_run_group(run_group_id),
             merge_workflow_child_run_outcome=lambda timeline, artifacts, child_run, label: (
                 self._merge_workflow_child_run_outcome(timeline, artifacts, child_run, label)
             ),
             timeline_factory=runtime_timeline_factory,
-            append_run_event=lambda run_id, event_type, payload: self.append_run_event(run_id, event_type, payload),
+            append_run_event=lambda run_id, event_type, payload, **kwargs: self.append_run_event(
+                run_id, event_type, payload, **kwargs
+            ),
             update_run=lambda run_id, **kwargs: self._update_run(run_id, **kwargs),
             update_run_group=lambda run_group_id, **kwargs: self._update_run_group(run_group_id, **kwargs),
             approve_workflow_node=lambda run_id, **kwargs: self.approvals.approve_workflow_node(run_id, **kwargs),
+            transaction_scope=self._conn.transaction,
         )
         self._install_runtime_workflow_execution_services(workflow_execution_services)
         self.workflow_run_async_coordinator = RuntimeWorkflowRunAsyncCoordinator(
@@ -557,7 +629,9 @@ class RuntimeInstallationFacadeMixin:
             validate_workflow_agent_run_readiness=lambda nodes: self._validate_workflow_agent_run_readiness(nodes),
             starter=self.workflow_run_starter,
             start_projector=self.workflow_run_start_projector,
-            append_run_event=lambda run_id, event_type, payload: self.append_run_event(run_id, event_type, payload),
+            append_run_event=lambda run_id, event_type, payload, **kwargs: self.append_run_event(
+                run_id, event_type, payload, **kwargs
+            ),
             update_run=lambda run_id, **kwargs: self._update_run(run_id, **kwargs),
             continue_workflow_run=lambda run, workflow, **kwargs: self._continue_workflow_run(
                 run,
@@ -666,13 +740,26 @@ class RuntimeInstallationFacadeMixin:
                 **kwargs,
             ),
             timeline_factory=runtime_timeline_factory,
-            append_run_event=lambda run_id, event_type, payload: self.append_run_event(run_id, event_type, payload),
+            append_run_event=lambda run_id, event_type, payload, **kwargs: self.append_run_event(
+                run_id, event_type, payload, **kwargs
+            ),
             update_run=lambda run_id, **kwargs: self._update_run(run_id, **kwargs),
             update_run_group=lambda run_group_id, **kwargs: self._update_run_group(run_group_id, **kwargs),
             update_agent_run_group_if_root=lambda run: self._update_agent_run_group_if_root(run),
             mark_parent_workflows_child_running=lambda run: self._mark_parent_workflows_child_running(run),
             resume_parent_workflows_after_child_update=lambda run: self._resume_parent_workflows_after_child_update(run),
             get_run=lambda run_id: self.get_run(run_id),
+            get_run_group=lambda run_group_id: self.get_run_group(run_group_id),
+            complete_main_chat_run=lambda run_id, result: self.main_chat_runs.complete(
+                run_id,
+                result,
+            ),
+            fail_main_chat_run=lambda run_id, error, **kwargs: self.main_chat_runs.fail(
+                run_id,
+                error,
+                **kwargs,
+            ),
+            transaction_scope=self._conn.transaction,
         )
         self._install_runtime_workflow_transition_services(workflow_transition_services)
 
@@ -685,10 +772,11 @@ class RuntimeInstallationFacadeMixin:
             RuntimeRunCancellationService(
                 get_run=lambda run_id: self.get_run(run_id),
                 update_run=lambda run_id, **kwargs: self._update_run(run_id, **kwargs),
-                append_run_event=lambda run_id, event_type, payload: self.append_run_event(
+                append_run_event=lambda run_id, event_type, payload, **kwargs: self.append_run_event(
                     run_id,
                     event_type,
                     payload,
+                    **kwargs,
                 ),
                 timeline_factory=runtime_timeline_factory,
                 workflow_cancellation=self.workflow_cancellation,
@@ -701,6 +789,17 @@ class RuntimeInstallationFacadeMixin:
                 ),
                 project_child_run_transition=lambda result: self._project_child_run_transition(result),
                 final_statuses=FINAL_RUN_STATUSES,
+                close_run_owned_browser_target=lambda run: (
+                    close_run_owned_browser_target_best_effort(
+                        run,
+                        tool_brokers=self.tool_brokers,
+                        workspace_policy=self._default_workspace_policy(),
+                    )
+                ),
+                transaction_scope=self._conn.transaction,
+                project_agent_run_group_if_root=lambda run: (
+                    self._update_agent_run_group_if_root(run)
+                ),
             )
         )
         self._install_runtime_run_rerun(
@@ -741,6 +840,12 @@ class RuntimeInstallationFacadeMixin:
                 error_type=AgentRuntimeError,
             )
         )
+        provider_owner_token = str(
+            getattr(self, "_desktop_provider_session_owner_token", "") or ""
+        ).strip()
+        if not provider_owner_token:
+            provider_owner_token = f"agent-runtime:{uuid4().hex}"
+            self._desktop_provider_session_owner_token = provider_owner_token
         self._install_runtime_shutdown(
             RuntimeShutdownService(
                 conn=self._conn,
@@ -751,10 +856,22 @@ class RuntimeInstallationFacadeMixin:
                 cancel_terminal_process_groups=cancel_terminal_process_groups,
                 ensure_row_factory=lambda: self._ensure_row_factory(),
                 cancel_run=lambda run_id: self.cancel_run(run_id),
+                release_desktop_provider_session_owner=(
+                    lambda owner_token=provider_owner_token: (
+                        _release_desktop_provider_session_owner(owner_token)
+                    )
+                ),
+                close_desktop_execution_providers=(
+                    lambda: self.tool_call_executor.close()
+                ),
             )
         )
 
     def _install_runtime_post_db_support_services(self, *, seed_templates: bool) -> None:
+        self.runtime_startup_reconciler = RuntimeStartupReconciler(
+            self._conn,
+            self._db_lock,
+        )
         self.workspace_policy_service = RuntimeWorkspacePolicyService(
             conn=self._conn,
             agent_workspaces_dir=self.agent_workspaces_dir,
@@ -963,3 +1080,13 @@ class RuntimeInstallationFacadeMixin:
 
     def _install_runtime_shutdown(self, shutdown: Any) -> None:
         self.runtime_shutdown = shutdown
+
+
+def _release_desktop_provider_session_owner(owner_token: str) -> dict[str, Any]:
+    # Keep the desktop shell dependency lazy so the core Runtime remains
+    # importable in headless/service-only environments.
+    from apps.shell.yachiyo_agent.isolated_provider_session import (
+        release_isolated_desktop_provider_session_owner,
+    )
+
+    return release_isolated_desktop_provider_session_owner(owner_token)

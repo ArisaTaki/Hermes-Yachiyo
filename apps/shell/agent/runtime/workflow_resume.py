@@ -4,6 +4,30 @@ from __future__ import annotations
 
 from typing import Any
 
+from apps.shell.agent.runtime.errors import AgentRuntimeError
+
+
+def _normalize_group_status(value: Any) -> str:
+    status = str(value or "").strip().casefold()
+    return "cancelled" if status == "canceled" else status
+
+
+def _workflow_group_projection_matches(
+    group: dict[str, Any],
+    *,
+    status: str,
+    summary: str,
+) -> bool:
+    return (
+        _normalize_group_status(group.get("status"))
+        == _normalize_group_status(status)
+        and str(group.get("summary") or "") == summary
+    )
+
+
+def _workflow_group_status_is_terminal(value: Any) -> bool:
+    return _normalize_group_status(value) in {"completed", "failed", "cancelled"}
+
 
 class RunTransitionProjectionCoordinator:
     """Projects cross-run state transitions after a Run changes state."""
@@ -16,12 +40,14 @@ class RunTransitionProjectionCoordinator:
         workflow_run_is_group_root: Any,
         update_run_group: Any,
         get_run: Any,
+        get_run_group: Any | None = None,
     ) -> None:
         self._update_agent_run_group_if_root = update_agent_run_group_if_root
         self._resume_parent_workflows_after_child_update = resume_parent_workflows_after_child_update
         self._workflow_run_is_group_root = workflow_run_is_group_root
         self._update_run_group = update_run_group
         self._get_run = get_run
+        self._get_run_group = get_run_group
 
     def project_child_run_transition(self, result: dict[str, Any]) -> dict[str, Any]:
         self._update_agent_run_group_if_root(result)
@@ -39,15 +65,60 @@ class RunTransitionProjectionCoordinator:
         self,
         run: dict[str, Any],
         result: dict[str, Any],
-    ) -> dict[str, Any]:
+    ) -> dict[str, Any] | None:
         if not self._workflow_run_is_group_root(run):
             return result
-        self._update_run_group(
-            str(run.get("run_group_id") or ""),
+        run_group_id = str(run.get("run_group_id") or "")
+        if self._get_run_group is None:
+            # Compatibility for injected legacy ports. Production always
+            # supplies a fresh group reader and therefore uses the CAS path.
+            self._update_run_group(
+                run_group_id,
+                status="cancelled",
+                summary=str(result.get("result") or ""),
+            )
+            return self._get_run(str(run.get("run_id") or result.get("run_id") or ""))
+        try:
+            group = self._get_run_group(run_group_id)
+        except KeyError as exc:
+            raise AgentRuntimeError("run_group_projection_cas_lost") from exc
+        target_summary = str(result.get("result") or "")
+        if _workflow_group_projection_matches(
+            group,
             status="cancelled",
-            summary=str(result.get("result") or ""),
+            summary=target_summary,
+        ):
+            return self._get_run(str(run.get("run_id") or result.get("run_id") or ""))
+        if _workflow_group_status_is_terminal(group.get("status")):
+            raise AgentRuntimeError("run_group_terminal_outcome_conflict")
+        group_status = str(group.get("status") or "").strip()
+        group_updated_at = str(group.get("updated_at") or "")
+        if not group_status or not group_updated_at:
+            raise AgentRuntimeError("run_group_projection_cas_lost")
+        updated_group = self._update_run_group(
+            run_group_id,
+            status="cancelled",
+            summary=target_summary,
+            expected_status=group_status,
+            expected_updated_at=group_updated_at,
         )
-        return self._get_run(str(run.get("run_id") or result.get("run_id") or ""))
+        if updated_group is not None:
+            return self._get_run(
+                str(run.get("run_id") or result.get("run_id") or "")
+            )
+        try:
+            winner = self._get_run_group(run_group_id)
+        except KeyError as exc:
+            raise AgentRuntimeError("run_group_projection_cas_lost") from exc
+        if _workflow_group_projection_matches(
+            winner,
+            status="cancelled",
+            summary=target_summary,
+        ):
+            return self._get_run(str(run.get("run_id") or result.get("run_id") or ""))
+        if _workflow_group_status_is_terminal(winner.get("status")):
+            raise AgentRuntimeError("run_group_terminal_outcome_conflict")
+        raise AgentRuntimeError("run_group_projection_cas_lost")
 
 
 class WorkflowParentRunLocator:
@@ -105,10 +176,10 @@ class WorkflowParentRunLocator:
         except KeyError:
             return False
         child_run_ids = [str(item) for item in group.get("child_run_ids") or [] if str(item)]
-        return (
-            group.get("source") == "workflow"
-            or child_run_ids[:1] == [workflow_run.get("run_id")]
-        )
+        # ``source`` classifies the group; it does not identify its owner.
+        # Nested Workflow Runs share the parent's group, so only the first
+        # persisted member may project the group lifecycle.
+        return child_run_ids[:1] == [str(workflow_run.get("run_id") or "")]
 
 
 class WorkflowResumePlanner:

@@ -12,6 +12,10 @@ from urllib.parse import urlparse
 from apps.shell.agent.runtime.controlled_desktop_provider import (
     CONTROLLED_DESKTOP_PROVIDER_TOOLS,
 )
+from apps.shell.agent.runtime.cua_background_provider import (
+    CUA_BACKGROUND_PROVIDER_KIND,
+    cua_background_provider_status,
+)
 from apps.shell.agent.runtime.desktop_execution_providers import (
     desktop_execution_provider_status_from_env,
     local_desktop_execution_provider_status,
@@ -262,6 +266,21 @@ _LOCAL_LOW_RISK_FOREGROUND_TOOLS = frozenset(
     }
 )
 
+# These semantic media tools currently contain local fallbacks that can open or
+# focus a real app (for example Apple Music search after a library miss).  When
+# a daily surface requests the background lane, keep the whole semantic action
+# on that lane instead of letting its nominal ``tool_native`` classification
+# bypass desktop routing.  A background adapter may advertise a verified
+# composite later; primitive-only adapters must fail closed.
+_BACKGROUND_MEDIA_PROVIDER_TOOLS = frozenset(
+    {
+        "media.apple_music_open_and_play",
+        "media.apple_music_control",
+        "media.music_app_open_and_play",
+        "media.music_app_control",
+    }
+)
+
 _USER_FOREGROUND_TAKEOVER_TOOLS = frozenset(
     {
         *_KEYBOARD_MOUSE_CAPTURE_TOOLS,
@@ -306,20 +325,21 @@ def daily_entrypoint_desktop_execution_policy(
     *,
     surface: str = "chat",
 ) -> dict[str, Any]:
-    """Default Chat/Bubble/Live2D policy: execute on the user's desktop."""
+    """Default Chat/Bubble/Live2D policy: avoid taking over the user's desktop."""
 
     clean_surface = str(surface or "chat").strip() or "chat"
     return {
-        "mode": "supervised_live",
-        "allow_live_foreground": True,
+        "mode": "preview_input",
+        "allow_live_foreground": False,
+        "prefer_background_desktop": True,
         "prefer_isolated_desktop": False,
-        "avoid_user_foreground_takeover": False,
+        "avoid_user_foreground_takeover": True,
         "require_sandbox_for_keyboard_mouse": False,
         "allow_media_control": True,
         "source": f"daily_{clean_surface}",
         "reason": (
-            "Daily entrypoints use the local structured desktop provider by default; "
-            "an isolated desktop remains an optional execution mode."
+            "Daily entrypoints prefer a background or isolated desktop provider; "
+            "the user's foreground session requires explicit permission."
         ),
     }
 
@@ -438,11 +458,11 @@ _APPROVAL_FIRST_KEYBOARD_MOUSE_TOOLS = frozenset(
 def desktop_provider_session_auto_start_recommended_for_requests(
     requests: Any,
 ) -> bool:
-    """Return true when daily entrypoint requests should prefer an isolated session.
+    """Return true only when a request needs the managed isolated session.
 
-    Daily app-open, focus, media, and input actions should execute without taking
-    over the user's foreground desktop; approval-first UI actions still wait for
-    explicit user approval before starting a provider session.
+    Background Cua requests are intentionally excluded because their MCP adapter
+    owns a separate lazy lifecycle. Approval-first UI actions still wait for
+    explicit user approval before an isolated provider session can start.
     """
 
     if isinstance(requests, Mapping):
@@ -468,6 +488,12 @@ def desktop_provider_session_auto_start_recommended_for_requests(
             continue
         if user_foreground_takeover_allowed(request):
             continue
+        if _request_prefers_background_desktop(request):
+            # The Cua MCP adapter owns its own lazy background lifecycle.  Sending
+            # this request to the isolated-provider session manager would start a
+            # different provider and can turn a missing background component into
+            # an unrelated foreground/sandbox recovery flow.
+            continue
         tool_name = _request_tool_name(request)
         if not tool_name:
             continue
@@ -487,6 +513,37 @@ def desktop_provider_session_auto_start_recommended_for_requests(
         if tool_name in _USER_FOREGROUND_TAKEOVER_TOOLS:
             return True
     return False
+
+
+def _request_prefers_background_desktop(request: Mapping[str, Any]) -> bool:
+    route = request.get("desktop_execution_route")
+    if isinstance(route, Mapping):
+        provider_kind = str(
+            route.get("selected_provider_kind")
+            or route.get("provider_kind")
+            or ""
+        ).strip()
+        if provider_kind == CUA_BACKGROUND_PROVIDER_KIND:
+            return True
+        if route.get("background_desktop_preferred") is True:
+            return True
+    for key in (
+        "sandbox_provider",
+        "desktop_execution_provider",
+        "sandbox_desktop_provider",
+        "desktop_sandbox_provider",
+    ):
+        provider = request.get(key)
+        if isinstance(provider, Mapping) and str(
+            provider.get("provider_kind") or ""
+        ).strip() == CUA_BACKGROUND_PROVIDER_KIND:
+            return True
+    policy = desktop_execution_policy_payload(request.get("desktop_execution_policy"))
+    if not policy:
+        policy = desktop_execution_policy_payload(
+            request.get("yachiyo_desktop_execution_policy")
+        )
+    return policy.get("prefer_background_desktop") is True
 
 
 def _execution_strategy_recommends_provider_auto_start(
@@ -703,14 +760,14 @@ def agent_studio_desktop_execution_policy() -> dict[str, Any]:
 
     return {
         "mode": "supervised_live",
-        "allow_live_foreground": True,
-        "prefer_isolated_desktop": False,
-        "avoid_user_foreground_takeover": False,
-        "require_sandbox_for_keyboard_mouse": False,
+        "allow_live_foreground": False,
+        "prefer_isolated_desktop": True,
+        "avoid_user_foreground_takeover": True,
+        "require_sandbox_for_keyboard_mouse": True,
         "source": "agent_studio",
         "reason": (
-            "Agent Studio uses direct local desktop execution by default while keeping "
-            "the isolated desktop provider available as an optional mode."
+            "Agent Studio is the supervised desktop execution and debugging surface; "
+            "keyboard/mouse actions prefer an isolated desktop provider."
         ),
     }
 
@@ -728,28 +785,73 @@ def sandbox_desktop_provider_status(
         "probe_desktop_provider_health",
         "sandbox_provider_health_probe",
     )
-    provider = _sandbox_provider_payload(metadata) or _sandbox_provider_payload_from_env(
-        probe_health=should_probe_health,
-    ) or _sandbox_provider_payload_from_manifest(
-        probe_health=should_probe_health,
-    ) or _local_desktop_provider_payload(metadata)
+    explicit_provider = _sandbox_provider_payload(metadata)
+    background_requested = _background_desktop_provider_requested(metadata)
+    explicit_provider_kind = str(
+        explicit_provider.get("provider_kind") or ""
+    ).strip()
+    # Daily requests select the background lane before local or VM providers.
+    # A persisted local-provider snapshot must not silently override that choice.
+    if background_requested and explicit_provider_kind in {"", "local_desktop"}:
+        explicit_provider = {}
+    configured_isolated_provider: dict[str, Any] = {}
+    if not explicit_provider:
+        configured_isolated_provider = (
+            _sandbox_provider_payload_from_env(probe_health=should_probe_health)
+            or _sandbox_provider_payload_from_manifest(probe_health=should_probe_health)
+        )
+    if explicit_provider:
+        provider = explicit_provider
+    elif background_requested:
+        background_provider = _background_desktop_provider_payload(
+            metadata,
+            probe_health=should_probe_health,
+        )
+        isolated_provider_ready = (
+            str(configured_isolated_provider.get("provider_kind") or "").strip()
+            == "sandbox_desktop"
+            and bool(configured_isolated_provider.get("available"))
+            and bool(configured_isolated_provider.get("adapter_ready"))
+        )
+        provider = (
+            background_provider
+            if bool(background_provider.get("available"))
+            and bool(background_provider.get("adapter_ready"))
+            else (
+                configured_isolated_provider
+                if isolated_provider_ready
+                else background_provider
+            )
+        )
+    else:
+        provider = configured_isolated_provider or _local_desktop_provider_payload(metadata)
     if provider:
-        payload = {**_SANDBOX_DESKTOP_PROVIDER_DEFAULT, **provider}
-        payload["available"] = bool(payload.get("available"))
-        payload["adapter_ready"] = bool(payload.get("adapter_ready"))
-        if payload["available"]:
-            if str(payload.get("status") or "").strip() == "provider_required":
-                payload["status"] = "available"
-            payload["blocking_conditions"] = _string_list(provider.get("blocking_conditions"))
-        else:
-            blockers = _string_list(payload.get("blocking_conditions"))
-            payload["blocking_conditions"] = blockers or ["sandbox_desktop_provider_required"]
-        payload["supported_tools"] = _string_list(payload.get("supported_tools"))
-        payload["recommended_for"] = _string_list(payload.get("recommended_for"))
-        payload["health"] = _health_payload(provider.get("health"))
-        payload["provider_contract"] = _provider_contract_payload(payload)
-        return _sandbox_provider_public_payload(payload)
+        return _normalized_sandbox_desktop_provider_status(provider)
     return dict(_SANDBOX_DESKTOP_PROVIDER_DEFAULT)
+
+
+def _normalized_sandbox_desktop_provider_status(
+    provider: Mapping[str, Any],
+) -> dict[str, Any]:
+    payload = {**_SANDBOX_DESKTOP_PROVIDER_DEFAULT, **dict(provider)}
+    payload["available"] = bool(payload.get("available"))
+    payload["adapter_ready"] = bool(payload.get("adapter_ready"))
+    if payload["available"]:
+        if str(payload.get("status") or "").strip() == "provider_required":
+            payload["status"] = "available"
+        payload["blocking_conditions"] = _string_list(
+            provider.get("blocking_conditions")
+        )
+    else:
+        blockers = _string_list(payload.get("blocking_conditions"))
+        payload["blocking_conditions"] = blockers or [
+            "sandbox_desktop_provider_required"
+        ]
+    payload["supported_tools"] = _string_list(payload.get("supported_tools"))
+    payload["recommended_for"] = _string_list(payload.get("recommended_for"))
+    payload["health"] = _health_payload(provider.get("health"))
+    payload["provider_contract"] = _provider_contract_payload(payload)
+    return _sandbox_provider_public_payload(payload)
 
 
 def desktop_execution_policy_mode(policy: Mapping[str, Any] | str | None) -> str:
@@ -814,10 +916,13 @@ def desktop_execution_route_decision(
     policy_mode = desktop_execution_policy_mode(policy_payload)
     mode_payload = _execution_mode_payload(execution_mode)
     decision_context = _route_policy_metadata_context(policy_payload, metadata)
-    sandbox_provider = sandbox_desktop_provider_status(metadata)
-    foreground_takeover_allowed = user_foreground_takeover_allowed(
-        decision_context
-    ) or policy_payload.get("allow_live_foreground") is True
+    foreground_takeover_allowed = (
+        user_foreground_takeover_allowed(metadata)
+        or user_foreground_takeover_allowed(
+            {"desktop_execution_policy": policy_payload}
+        )
+        or policy_payload.get("allow_live_foreground") is True
+    )
     readonly_provider_requested = (
         desktop_readonly_provider_route_requested(metadata)
         or _metadata_truthy(
@@ -831,6 +936,7 @@ def desktop_execution_route_decision(
         desktop_foreground_provider_route_requested(metadata)
         or _metadata_truthy(
             policy_payload,
+            "prefer_background_desktop",
             "prefer_isolated_desktop",
             "avoid_user_foreground_takeover",
             "require_sandbox_for_keyboard_mouse",
@@ -846,18 +952,64 @@ def desktop_execution_route_decision(
         str(policy_payload.get("mode") or "").strip().lower().replace("-", "_")
         == "sandbox_preferred"
     )
+    background_desktop_preferred = _metadata_truthy(
+        decision_context,
+        "prefer_background_desktop",
+    )
+    # Route evaluation stays side-effect free unless the execution boundary
+    # explicitly requests a provider liveness probe.  Planning and projection
+    # paths call this function too, so inferring a probe from the policy alone
+    # would perform network I/O while merely describing a route.
+    should_probe_provider_health = _metadata_truthy(
+        decision_context,
+        "desktop_provider_health_probe",
+        "probe_desktop_provider_health",
+        "sandbox_provider_health_probe",
+    )
+    sandbox_provider = sandbox_desktop_provider_status(
+        decision_context,
+        probe_health=should_probe_provider_health,
+    )
+    if (
+        str(sandbox_provider.get("provider_kind") or "").strip()
+        == CUA_BACKGROUND_PROVIDER_KIND
+        and not sandbox_desktop_provider_can_execute_tool(
+            sandbox_provider,
+            clean_tool,
+        )
+    ):
+        # Provider choice is per capability, not merely per availability.  A
+        # healthy but intentionally narrow background lane must not shadow a
+        # configured isolated provider that can execute this particular tool.
+        isolated_fallback = _configured_isolated_provider_for_tool(
+            decision_context,
+            clean_tool,
+        )
+        if isolated_fallback:
+            sandbox_provider = isolated_fallback
+    local_fallback_provider_required = _metadata_truthy(
+        policy_payload,
+        "require_background_provider_for_local_fallback_tools",
+    )
     isolated_desktop_preferred = _metadata_truthy(
         decision_context,
         "prefer_isolated_desktop",
-        "avoid_user_foreground_takeover",
         "require_sandbox_for_keyboard_mouse",
     ) or _desktop_provider_session_isolation_requested(decision_context)
     direct_desktop_preferred = bool(
-        not isolated_desktop_preferred
+        not background_desktop_preferred
+        and not isolated_desktop_preferred
         and (foreground_takeover_allowed or policy_mode == "allow")
     )
     isolation = str(mode_payload.get("isolation") or "none").strip() or "none"
     execution_mode_name = str(mode_payload.get("mode") or "tool_native").strip()
+    structured_apple_music_control_allowed = bool(
+        clean_tool == "media.apple_music_control"
+        and policy_payload.get("allow_media_control") is True
+        and execution_mode_name == "tool_native"
+        and isolation == "process"
+        and not foreground_required
+    )
     route = {
         "route_id": f"desktop-route:{clean_tool or 'tool'}",
         "tool_name": clean_tool,
@@ -868,15 +1020,20 @@ def desktop_execution_route_decision(
         "can_execute": True,
         "can_auto_start": True,
         "sandbox_required": False,
+        "background_desktop_preferred": background_desktop_preferred,
         "isolated_desktop_preferred": isolated_desktop_preferred,
         "foreground_takeover_allowed": foreground_takeover_allowed,
         "desktop_execution_session_policy": (
             "explicit_user_foreground"
             if foreground_takeover_allowed
             else (
-                "isolated_preferred"
-                if isolated_desktop_preferred
-                else "structured_runtime"
+                "background_preferred"
+                if background_desktop_preferred
+                else (
+                    "isolated_preferred"
+                    if isolated_desktop_preferred
+                    else "structured_runtime"
+                )
             )
         ),
         "user_foreground_takeover_risk": False,
@@ -895,6 +1052,28 @@ def desktop_execution_route_decision(
             "reason": "No executable tool was selected.",
             "blocking_conditions": ["missing_tool"],
         }
+
+    if background_desktop_preferred and (
+        (
+            clean_tool in _BACKGROUND_MEDIA_PROVIDER_TOOLS
+            and not structured_apple_music_control_allowed
+        )
+        or (
+            local_fallback_provider_required
+            and is_local_low_risk_foreground_tool(clean_tool)
+        )
+    ):
+        # Do not execute the legacy local media implementation under a
+        # background-first policy: several of its error/search paths call
+        # app.open/app.focus and would contend with the user's foreground.
+        # _sandbox_route_decision also preserves a user-handoff fallback for a
+        # missing/primitive-only Cua provider.
+        return _sandbox_route_decision(
+            route,
+            sandbox_provider,
+            clean_tool,
+            decision_context,
+        )
     local_provider = _local_desktop_provider_payload(decision_context)
     if (
         local_provider
@@ -934,6 +1113,7 @@ def desktop_execution_route_decision(
         )
     if (
         local_provider
+        and not background_desktop_preferred
         and not isolated_desktop_preferred
         and _local_desktop_fallback_allowed(sandbox_provider, clean_tool)
         and is_readonly_desktop_provider_tool(clean_tool)
@@ -951,6 +1131,7 @@ def desktop_execution_route_decision(
         )
     if (
         local_provider
+        and not background_desktop_preferred
         and not isolated_desktop_preferred
         and _local_desktop_fallback_allowed(sandbox_provider, clean_tool)
         and _local_low_risk_foreground_tool_allowed(clean_tool, decision_context)
@@ -978,12 +1159,22 @@ def desktop_execution_route_decision(
             clean_tool,
             decision_context,
         )
-        if _desktop_provider_session_auto_start_requested(decision_context):
+        if (
+            str(sandbox_provider.get("provider_kind") or "").strip()
+            != CUA_BACKGROUND_PROVIDER_KIND
+            and _desktop_provider_session_auto_start_requested(decision_context)
+        ):
+            provider_description = (
+                "background desktop provider"
+                if str(sandbox_provider.get("provider_kind") or "").strip()
+                == CUA_BACKGROUND_PROVIDER_KIND
+                else "isolated desktop provider"
+            )
             return _route_with_provider_auto_start(
                 sandbox_route,
                 reason=(
-                    "Foreground desktop action should auto-start the isolated "
-                    "desktop provider instead of taking over the user's session."
+                    f"Foreground desktop action should auto-start the {provider_description} "
+                    "instead of taking over the user's session."
                 ),
             )
         return sandbox_route
@@ -1006,6 +1197,8 @@ def desktop_execution_route_decision(
         readonly_provider_requested
         and is_readonly_desktop_provider_tool(clean_tool)
         and _desktop_provider_session_auto_start_requested(decision_context)
+        and str(sandbox_provider.get("provider_kind") or "").strip()
+        != CUA_BACKGROUND_PROVIDER_KIND
     ):
         sandbox_route = _sandbox_route_decision(
             route,
@@ -1019,6 +1212,21 @@ def desktop_execution_route_decision(
                 "Readonly desktop discovery should use the configured isolated "
                 "desktop provider when it can be auto-started."
             ),
+        )
+    if (
+        readonly_provider_requested
+        and is_readonly_desktop_provider_tool(clean_tool)
+        and not direct_desktop_preferred
+    ):
+        # A background/isolated observation request must never fall through to
+        # the local broker merely because the selected provider is partial.
+        # That would mix the agent-owned target with the user's foreground
+        # desktop and invalidate every later verifier.
+        return _sandbox_route_decision(
+            route,
+            sandbox_provider,
+            clean_tool,
+            decision_context,
         )
     if (
         foreground_provider_requested
@@ -1272,6 +1480,40 @@ def sandbox_desktop_provider_can_execute_tool(
     return not supported_tools or str(tool_name or "").strip() in supported_tools
 
 
+def _configured_isolated_provider_for_tool(
+    metadata: Mapping[str, Any] | None,
+    tool_name: str,
+) -> dict[str, Any]:
+    should_probe_health = _metadata_truthy(
+        metadata,
+        "desktop_provider_health_probe",
+        "probe_desktop_provider_health",
+        "sandbox_provider_health_probe",
+    )
+    candidate = _sandbox_provider_payload_from_env(
+        probe_health=should_probe_health,
+    ) or _sandbox_provider_payload_from_manifest(
+        probe_health=should_probe_health,
+    )
+    if not candidate:
+        return {}
+    provider = _normalized_sandbox_desktop_provider_status(candidate)
+    provider_kind = str(provider.get("provider_kind") or "").strip()
+    session_kind = str(provider.get("desktop_session_kind") or "").strip()
+    isolated = bool(
+        _optional_bool_value(provider.get("desktop_session_isolated")) is True
+        or provider_kind in {"sandbox_desktop", "isolated_desktop", "virtual_desktop"}
+        or session_kind in {"sandbox_desktop", "isolated_desktop", "virtual_desktop"}
+    )
+    if (
+        not isolated
+        or provider_kind in {CUA_BACKGROUND_PROVIDER_KIND, "local_desktop"}
+        or not sandbox_desktop_provider_can_execute_tool(provider, tool_name)
+    ):
+        return {}
+    return provider
+
+
 def with_daily_entrypoint_desktop_execution_policy(
     metadata: Mapping[str, Any] | None,
     *,
@@ -1288,6 +1530,7 @@ def with_daily_entrypoint_desktop_execution_policy(
             **daily_entrypoint_desktop_execution_policy(surface=surface),
             "mode": "allow",
             "allow_live_foreground": True,
+            "prefer_background_desktop": False,
             "prefer_isolated_desktop": False,
             "avoid_user_foreground_takeover": False,
             "require_sandbox_for_keyboard_mouse": False,
@@ -1313,11 +1556,25 @@ def runtime_execution_envelope_with_desktop_execution_policy(
     clean_policy = desktop_execution_policy_payload(policy)
     if not clean_policy:
         return payload
+    inherited_envelope_policy = not _has_desktop_execution_policy(payload)
     _ensure_canonical_desktop_execution_policy(payload, clean_policy)
+    effective_policy = (
+        desktop_execution_policy_payload(payload.get("desktop_execution_policy"))
+        or clean_policy
+    )
+    if inherited_envelope_policy:
+        # An aggregate route projected before the task policy existed is only
+        # cached execution context, not immutable planner authority.  Keeping it
+        # can filter requests before the execution boundary gets a chance to
+        # route them against the inherited policy.
+        payload.pop("desktop_execution_route", None)
     requests = payload.get("requests")
     if isinstance(requests, list):
         payload["requests"] = [
-            _runtime_execution_request_with_desktop_execution_policy(request, clean_policy)
+            _runtime_execution_request_with_desktop_execution_policy(
+                request,
+                effective_policy,
+            )
             if isinstance(request, Mapping)
             else request
             for request in requests
@@ -1341,7 +1598,14 @@ def _runtime_execution_request_with_desktop_execution_policy(
     policy: Mapping[str, Any],
 ) -> dict[str, Any]:
     payload = dict(request)
+    inherited_request_policy = not _has_desktop_execution_policy(payload)
     _ensure_canonical_desktop_execution_policy(payload, policy)
+    if inherited_request_policy:
+        # A route without a request policy was evaluated in a different
+        # context. Drop only that derived snapshot; tool, input, dependency,
+        # approval, and explicit provider authority remain unchanged. The
+        # execution boundary will recompute the route from the inherited policy.
+        payload.pop("desktop_execution_route", None)
     return payload
 
 
@@ -1366,6 +1630,7 @@ def _sandbox_provider_payload(
         return {}
     explicit_provider: dict[str, Any] = {}
     for key in (
+        "desktop_execution_provider",
         "sandbox_desktop_provider",
         "sandbox_provider",
         "desktop_sandbox_provider",
@@ -1388,6 +1653,39 @@ def _sandbox_provider_payload(
     if isinstance(nested_metadata, Mapping) and nested_metadata is not metadata:
         return _sandbox_provider_payload(nested_metadata)
     return {}
+
+
+def _background_desktop_provider_payload(
+    metadata: Mapping[str, Any] | None,
+    *,
+    probe_health: bool = False,
+) -> dict[str, Any]:
+    if not _background_desktop_provider_requested(metadata):
+        return {}
+    provider_status = cua_background_provider_status(probe_health=probe_health)
+    return {
+        **provider_status,
+        "provider_kind": CUA_BACKGROUND_PROVIDER_KIND,
+        "recommended_for": ["background_control", "keyboard_mouse_capture"],
+        "diagnostic_route": "/yachiyo/studio/tools",
+        "source": str(provider_status.get("source") or "cua_driver_discovery"),
+    }
+
+
+def _background_desktop_provider_requested(
+    metadata: Mapping[str, Any] | None,
+) -> bool:
+    if not isinstance(metadata, Mapping):
+        return False
+    if _metadata_truthy(metadata, "prefer_background_desktop"):
+        return True
+    for key in ("desktop_execution_policy", "desktop_execution_route", "metadata"):
+        nested = metadata.get(key)
+        if nested is metadata or not isinstance(nested, Mapping):
+            continue
+        if _background_desktop_provider_requested(nested):
+            return True
+    return False
 
 
 def _sandbox_provider_payload_with_session_context(
@@ -1886,6 +2184,8 @@ def _sandbox_route_decision(
     ]
     provider_kind = str(sandbox_provider.get("provider_kind") or "sandbox_desktop")
     provider_id = str(sandbox_provider.get("provider_id") or "")
+    background_provider = provider_kind == CUA_BACKGROUND_PROVIDER_KIND
+    blocked_fallback_mode = "user_handoff" if background_provider else "supervised_live"
     provider_context = _desktop_provider_route_context(sandbox_provider, tool_name)
     if _desktop_route_requires_real_virtual_backend(metadata):
         provider_context["requires_real_virtual_desktop_backend"] = True
@@ -1897,8 +2197,8 @@ def _sandbox_route_decision(
             "status": "provider_required",
             "can_execute": False,
             "can_auto_start": False,
-            "sandbox_required": True,
-            "fallback_mode": "supervised_live",
+            "sandbox_required": not background_provider,
+            "fallback_mode": blocked_fallback_mode,
             "reason": str(sandbox_provider.get("reason") or ""),
             "blocking_conditions": blockers,
             **provider_context,
@@ -1913,7 +2213,7 @@ def _sandbox_route_decision(
             "can_execute": False,
             "can_auto_start": False,
             "sandbox_required": True,
-            "fallback_mode": "supervised_live",
+            "fallback_mode": blocked_fallback_mode,
             "reason": (
                 "Current desktop provider can open or focus apps, but keyboard and "
                 "mouse capture must run through a real sandbox/control provider."
@@ -1929,9 +2229,9 @@ def _sandbox_route_decision(
             "status": "sandbox_tool_not_supported",
             "can_execute": False,
             "can_auto_start": False,
-            "sandbox_required": True,
-            "fallback_mode": "supervised_live",
-            "reason": "Sandbox provider is available but does not support this tool.",
+            "sandbox_required": not background_provider,
+            "fallback_mode": blocked_fallback_mode,
+            "reason": "Desktop provider is available but does not support this tool.",
             "blocking_conditions": ["sandbox_tool_not_supported"],
             **provider_context,
         }
@@ -1948,7 +2248,7 @@ def _sandbox_route_decision(
             "can_execute": False,
             "can_auto_start": False,
             "sandbox_required": True,
-            "fallback_mode": "supervised_live",
+            "fallback_mode": blocked_fallback_mode,
             "reason": (
                 "Current desktop provider is a loopback or simulated harness. "
                 "Real desktop execution requires a non-loopback virtual desktop "
@@ -1974,7 +2274,7 @@ def _sandbox_route_decision(
             "can_execute": False,
             "can_auto_start": False,
             "sandbox_required": True,
-            "fallback_mode": "supervised_live",
+            "fallback_mode": blocked_fallback_mode,
             "reason": (
                 "Current desktop provider uses the user's foreground session; "
                 "this foreground action must run inside an isolated desktop session "
@@ -1991,9 +2291,9 @@ def _sandbox_route_decision(
             "status": "sandbox_adapter_required",
             "can_execute": False,
             "can_auto_start": False,
-            "sandbox_required": True,
-            "fallback_mode": "supervised_live",
-            "reason": "Sandbox provider is available but no executable adapter is registered yet.",
+            "sandbox_required": not background_provider,
+            "fallback_mode": blocked_fallback_mode,
+            "reason": "Desktop provider is available but no executable adapter is registered yet.",
             "blocking_conditions": ["sandbox_desktop_adapter_required"],
             **provider_context,
         }
@@ -2059,6 +2359,13 @@ def _desktop_provider_route_context(
     tool_name: str = "",
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {}
+    provider_readiness_status = str(sandbox_provider.get("status") or "").strip()
+    if provider_readiness_status:
+        # Route status answers "may this tool execute?" while provider
+        # readiness answers "has the selected adapter been probed yet?".
+        # Keeping both prevents side-effect-free planning from turning an
+        # unprobed provider into a permanent execution blocker.
+        payload["provider_readiness_status"] = provider_readiness_status
     for key in (
         "foreground_mutation_supported",
         "keyboard_mouse_capture_supported",
@@ -2292,6 +2599,23 @@ def _sandbox_provider_requires_isolated_foreground_session(
         return False
     if _optional_bool_value(sandbox_provider.get("foreground_takeover_required")) is True:
         return True
+    if (
+        _optional_bool_value(sandbox_provider.get("foreground_takeover_required"))
+        is False
+        and _optional_bool_value(sandbox_provider.get("desktop_session_isolated"))
+        is False
+        and (
+            str(sandbox_provider.get("provider_kind") or "").strip()
+            == "background_desktop"
+            and str(sandbox_provider.get("desktop_session_kind") or "").strip()
+            == "background_desktop"
+        )
+    ):
+        if clean_tool not in _KEYBOARD_MOUSE_CAPTURE_TOOLS:
+            return False
+        return _optional_bool_value(
+            sandbox_provider.get("keyboard_mouse_capture_supported")
+        ) is not True
     if _optional_bool_value(sandbox_provider.get("desktop_session_isolated")) is True:
         return False
     session_kind = str(sandbox_provider.get("desktop_session_kind") or "").strip()
@@ -2312,19 +2636,16 @@ def _sandbox_route_requires_isolated_foreground_session(
 ) -> bool:
     if not bool(provider_context.get("user_foreground_takeover_risk")):
         return False
-    clean_tool = str(route.get("tool_name") or "").strip()
-    provider_kind = str(route.get("selected_provider_kind") or "").strip()
-    if (
-        provider_kind == "local_desktop"
-        and clean_tool in _LOCAL_LOW_RISK_FOREGROUND_TOOLS
-    ):
-        return False
     if bool(route.get("foreground_takeover_allowed")):
         return False
     requested_mode = (
         str(route.get("requested_mode") or "").strip().lower().replace("-", "_")
     )
-    return bool(route.get("isolated_desktop_preferred")) or requested_mode == "sandbox_preferred"
+    return (
+        bool(route.get("background_desktop_preferred"))
+        or bool(route.get("isolated_desktop_preferred"))
+        or requested_mode == "sandbox_preferred"
+    )
 
 
 def _tool_can_take_over_user_foreground(tool_name: str) -> bool:
@@ -2346,7 +2667,7 @@ def _execution_mode_payload(value: Mapping[str, Any] | Any | None) -> dict[str, 
 
 
 def _provider_id_for_isolation(isolation: str) -> str:
-    if isolation in {"process", "browser_profile", "headless"}:
+    if isolation in {"process", "browser_profile", "browser_target", "headless"}:
         return isolation
     return ""
 

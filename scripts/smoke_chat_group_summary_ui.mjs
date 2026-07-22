@@ -36,6 +36,11 @@ const bridgeState = {
   followupPayload: null,
   groupSummaryStatus: 'idle',
   messagesBySession: new Map([[MAIN_SESSION_ID, []]]),
+  failNextGroupSessionLoad: false,
+  skipNextMainSessionDelay: false,
+  sessionLoadCompletions: [],
+  sessionLoadFailures: [],
+  timeoutNextGroupSessionLoads: 0,
 };
 
 const agentRunnable = {
@@ -715,6 +720,26 @@ async function startMockBridge() {
         sendJson(response, 200, messagesPayload());
         return;
       }
+      if (request.method === 'GET' && url.pathname === '/__smoke/session-switch-state') {
+        sendJson(response, 200, {
+          current_session_id: bridgeState.currentSessionId,
+          session_load_completions: bridgeState.sessionLoadCompletions,
+          session_load_failures: bridgeState.sessionLoadFailures,
+          timeout_group_loads_remaining: bridgeState.timeoutNextGroupSessionLoads,
+        });
+        return;
+      }
+      if (request.method === 'POST' && url.pathname === '/__smoke/fail-next-group-session-load') {
+        bridgeState.failNextGroupSessionLoad = true;
+        sendJson(response, 200, { ok: true });
+        return;
+      }
+      if (request.method === 'POST' && url.pathname === '/__smoke/timeout-next-group-session-loads') {
+        bridgeState.skipNextMainSessionDelay = true;
+        bridgeState.timeoutNextGroupSessionLoads = 2;
+        sendJson(response, 200, { ok: true });
+        return;
+      }
       if (request.method === 'POST' && url.pathname === '/ui/chat/groups') {
         const body = await readRequestJson(request);
         bridgeState.groupCreatePayload = body;
@@ -755,7 +780,27 @@ async function startMockBridge() {
       }
       if (request.method === 'POST' && url.pathname === '/ui/chat/sessions/load') {
         const body = await readRequestJson(request);
-        bridgeState.currentSessionId = String(body.session_id || bridgeState.currentSessionId);
+        const targetSessionId = String(body.session_id || bridgeState.currentSessionId);
+        if (targetSessionId === GROUP_SESSION_ID && bridgeState.failNextGroupSessionLoad) {
+          bridgeState.failNextGroupSessionLoad = false;
+          bridgeState.sessionLoadFailures.push(targetSessionId);
+          sendJson(response, 500, { ok: false, error: 'planned group session switch failure' });
+          return;
+        }
+        if (targetSessionId === GROUP_SESSION_ID && bridgeState.timeoutNextGroupSessionLoads > 0) {
+          bridgeState.timeoutNextGroupSessionLoads -= 1;
+          await new Promise((resolve) => setTimeout(resolve, 350));
+        }
+        if (
+          bridgeState.groupCreated
+          && targetSessionId === MAIN_SESSION_ID
+          && !bridgeState.skipNextMainSessionDelay
+        ) {
+          await new Promise((resolve) => setTimeout(resolve, 350));
+        }
+        if (targetSessionId === MAIN_SESSION_ID) bridgeState.skipNextMainSessionDelay = false;
+        bridgeState.currentSessionId = targetSessionId;
+        bridgeState.sessionLoadCompletions.push(targetSessionId);
         sendJson(response, 200, { ok: true, session_id: bridgeState.currentSessionId });
         return;
       }
@@ -992,8 +1037,10 @@ async function main() {
       (async () => {
         const input = document.querySelector('[data-testid="chat-group-avatar-file-input"]');
         if (!input) throw new Error('chat group avatar file input not found');
-        const blob = await fetch(${JSON.stringify(GROUP_AVATAR_DATA_URL)}).then((response) => response.blob());
-        const file = new File([blob], 'group-avatar.svg', { type: 'image/svg+xml' });
+        const dataUrl = ${JSON.stringify(GROUP_AVATAR_DATA_URL)};
+        const payload = dataUrl.slice(dataUrl.indexOf(',') + 1);
+        const bytes = Uint8Array.from(atob(payload), (character) => character.charCodeAt(0));
+        const file = new File([bytes], 'group-avatar.svg', { type: 'image/svg+xml' });
         const transfer = new DataTransfer();
         transfer.items.add(file);
         Object.defineProperty(input, 'files', { configurable: true, value: transfer.files });
@@ -1045,6 +1092,125 @@ async function main() {
     && !document.body.textContent.includes('正在加载对话')
   ), 'created group empty conversation settled');
   console.log('[electron-smoke] group created');
+  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"chat-session-tab-agents\\"]').click()", true);
+  await waitFor(win, () => Array.from(document.querySelectorAll('.chat-item')).some((node) => node.textContent.includes('Main chat')), 'main session switch target');
+  await win.webContents.executeJavaScript("Array.from(document.querySelectorAll('.chat-item')).find((node) => node.textContent.includes('Main chat')).click()", true);
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  await waitFor(win, () => {
+    const create = document.querySelector('[data-testid="chat-session-tab-create"]');
+    const newConversation = document.querySelector('.chat-header button[aria-label="新对话"]');
+    const remove = document.querySelector('.chat-header button[aria-label^="删除"]');
+    const groupSettings = document.querySelector('[data-testid="chat-group-settings"]');
+    return create?.disabled && newConversation?.disabled && remove?.disabled && groupSettings?.disabled;
+  }, 'destructive conversation controls locked during switch');
+  console.log('[electron-smoke] destructive conversation controls lock during mutation');
+  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"chat-session-tab-groups\\"]').click()", true);
+  await waitFor(win, () => Array.from(document.querySelectorAll('.chat-item')).some((node) => node.textContent.includes(${JSON.stringify(GROUP_NAME)})), 'group session switch target');
+  await win.webContents.executeJavaScript(\`
+    (() => {
+      const target = Array.from(document.querySelectorAll('.chat-item'))
+        .find((node) => node.textContent.includes(${JSON.stringify(GROUP_NAME)}));
+      if (!target) throw new Error('missing group session switch target');
+      target.click();
+    })();
+  \`, true);
+  await waitFor(win, async () => {
+    const bridge = new URLSearchParams(window.location.search).get('bridge');
+    const state = await fetch(bridge + '/__smoke/session-switch-state').then((response) => response.json());
+    const completions = state.session_load_completions || [];
+    return state.current_session_id === ${JSON.stringify(GROUP_SESSION_ID)}
+      && completions.length >= 2
+      && completions[completions.length - 2] === ${JSON.stringify(MAIN_SESSION_ID)}
+      && completions[completions.length - 1] === ${JSON.stringify(GROUP_SESSION_ID)};
+  }, 'latest rapid session switch wins');
+  await waitFor(win, () => document.querySelector('.chat-header')?.textContent.includes(${JSON.stringify(GROUP_NAME)}), 'latest rapid session switch rendered');
+  console.log('[electron-smoke] rapid session switches preserve latest target');
+  await win.webContents.executeJavaScript(
+    ${JSON.stringify(`window.location.hash = '#/chat?session_id=${encodeURIComponent(MAIN_SESSION_ID)}'`)},
+    true
+  );
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  await win.webContents.executeJavaScript(
+    ${JSON.stringify(`window.location.hash = '#/chat?session_id=${encodeURIComponent(GROUP_SESSION_ID)}'`)},
+    true
+  );
+  await waitFor(win, async () => {
+    const bridge = new URLSearchParams(window.location.search).get('bridge');
+    const state = await fetch(bridge + '/__smoke/session-switch-state').then((response) => response.json());
+    const completions = state.session_load_completions || [];
+    return state.current_session_id === ${JSON.stringify(GROUP_SESSION_ID)}
+      && completions.length >= 4
+      && completions[completions.length - 2] === ${JSON.stringify(MAIN_SESSION_ID)}
+      && completions[completions.length - 1] === ${JSON.stringify(GROUP_SESSION_ID)}
+      && document.querySelectorAll('[data-message-id^="local:"]').length === 0;
+  }, 'latest route handoff wins without optimistic message leak');
+  console.log('[electron-smoke] route handoff delegates to the serialized session switch state machine');
+  await requestBridgeJson('/__smoke/fail-next-group-session-load', 'POST');
+  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"chat-session-tab-agents\\"]').click()", true);
+  await waitFor(win, () => Array.from(document.querySelectorAll('.chat-item')).some((node) => node.textContent.includes('Main chat')), 'failed-switch main target');
+  await win.webContents.executeJavaScript("Array.from(document.querySelectorAll('.chat-item')).find((node) => node.textContent.includes('Main chat')).click()", true);
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"chat-session-tab-groups\\"]').click()", true);
+  await waitFor(win, () => Array.from(document.querySelectorAll('.chat-item')).some((node) => node.textContent.includes(${JSON.stringify(GROUP_NAME)})), 'failed-switch group target');
+  await win.webContents.executeJavaScript(\`
+    Array.from(document.querySelectorAll('.chat-item'))
+      .find((node) => node.textContent.includes(${JSON.stringify(GROUP_NAME)}))?.click();
+  \`, true);
+  await waitFor(win, async () => {
+    const bridge = new URLSearchParams(window.location.search).get('bridge');
+    const state = await fetch(bridge + '/__smoke/session-switch-state').then((response) => response.json());
+    const failures = state.session_load_failures || [];
+    return state.current_session_id === ${JSON.stringify(MAIN_SESSION_ID)}
+      && failures[failures.length - 1] === ${JSON.stringify(GROUP_SESSION_ID)}
+      && !document.querySelector('.chat-header')?.textContent.includes(${JSON.stringify(GROUP_NAME)})
+      && !document.querySelector('[data-testid="chat-composer-input"]')?.disabled
+      && !document.body.textContent.includes('正在加载对话');
+  }, 'failed latest switch restores authoritative main session');
+  console.log('[electron-smoke] failed latest switch restored authoritative server session');
+  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"chat-session-tab-groups\\"]').click()", true);
+  await waitFor(win, () => Array.from(document.querySelectorAll('.chat-item')).some((node) => node.textContent.includes(${JSON.stringify(GROUP_NAME)})), 'restore group target');
+  await win.webContents.executeJavaScript(\`
+    Array.from(document.querySelectorAll('.chat-item'))
+      .find((node) => node.textContent.includes(${JSON.stringify(GROUP_NAME)}))?.click();
+  \`, true);
+  await waitFor(win, () => document.querySelector('.chat-header')?.textContent.includes(${JSON.stringify(GROUP_NAME)}), 'group restored after failed switch');
+  await loadChat(win, { chatRequestTimeoutMs: '120' });
+  await requestBridgeJson('/__smoke/timeout-next-group-session-loads', 'POST');
+  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"chat-session-tab-agents\\"]').click()", true);
+  await waitFor(win, () => Array.from(document.querySelectorAll('.chat-item')).some((node) => node.textContent.includes('Main chat')), 'timeout main target');
+  await win.webContents.executeJavaScript("Array.from(document.querySelectorAll('.chat-item')).find((node) => node.textContent.includes('Main chat')).click()", true);
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"chat-session-tab-groups\\"]').click()", true);
+  await waitFor(win, () => Array.from(document.querySelectorAll('.chat-item')).some((node) => node.textContent.includes(${JSON.stringify(GROUP_NAME)})), 'timeout group target');
+  await win.webContents.executeJavaScript(\`
+    Array.from(document.querySelectorAll('.chat-item'))
+      .find((node) => node.textContent.includes(${JSON.stringify(GROUP_NAME)}))?.click();
+  \`, true);
+  await waitFor(win, async () => {
+    const bridge = new URLSearchParams(window.location.search).get('bridge');
+    const state = await fetch(bridge + '/__smoke/session-switch-state').then((response) => response.json());
+    const form = document.querySelector('.chat-input-area');
+    const input = document.querySelector('[data-testid="chat-composer-input"]');
+    const attach = document.querySelector('[data-testid="chat-composer-image-attach-button"]');
+    const send = document.querySelector('[data-testid="chat-composer-send"]');
+    return state.timeout_group_loads_remaining === 0
+      && form?.getAttribute('data-conversation-transition-locked') === 'true'
+      && input?.disabled
+      && attach?.disabled
+      && send?.disabled;
+  }, 'double timeout locks composer');
+  console.log('[electron-smoke] double timeout keeps composer locked');
+  await win.webContents.executeJavaScript(\`
+    Array.from(document.querySelectorAll('.chat-item'))
+      .find((node) => node.textContent.includes(${JSON.stringify(GROUP_NAME)}))?.click();
+  \`, true);
+  await waitFor(win, () => {
+    const form = document.querySelector('.chat-input-area');
+    const input = document.querySelector('[data-testid="chat-composer-input"]');
+    return document.querySelector('.chat-header')?.textContent.includes(${JSON.stringify(GROUP_NAME)})
+      && form?.getAttribute('data-conversation-transition-locked') === 'false'
+      && !input?.disabled;
+  }, 'composer unlocks after confirmed retry');
   await win.webContents.executeJavaScript(\`
     (() => {
       const input = document.querySelector('[data-testid="chat-composer-input"]');
@@ -1074,7 +1240,6 @@ async function main() {
   await waitFor(win, () => {
     const summary = document.querySelector('[data-testid="chat-message-summary-status"]');
     const summaryMessage = document.querySelector('[data-message-id="chat-group-ui-main-summary-message"]');
-    const openSummary = summaryMessage?.querySelector('[data-testid="chat-message-open-run-detail"]');
     return summary
       && summary.getAttribute('data-summary-task-id') === ${JSON.stringify(SUMMARY_TASK_ID)}
       && summary.getAttribute('data-run-group-id') === ${JSON.stringify(RUN_GROUP_ID)}
@@ -1083,7 +1248,7 @@ async function main() {
       && summary.textContent.includes('主模型已整理')
       && !summary.textContent.includes('等待主模型整理')
       && summaryMessage?.textContent.includes(${JSON.stringify(GROUP_SUMMARY_RESULT)})
-      && openSummary
+      && !summaryMessage?.querySelector('[data-testid="chat-message-open-run-detail"]')
       && document.body.textContent.includes('Group UI Agent accepted the task')
       && !document.body.textContent.includes('oha.group_dispatch')
       && !document.body.textContent.includes('<oha_group_dispatch>')
@@ -1102,20 +1267,16 @@ async function main() {
       && document.body.textContent.includes(${JSON.stringify(GROUP_NAME)});
   }, 'launcher task handoff highlights group summary message');
   console.log('[electron-smoke] launcher task handoff highlighted group summary');
-  await win.webContents.executeJavaScript("document.querySelector('[data-message-id=\\"chat-group-ui-main-summary-message\\"] [data-testid=\\"chat-message-open-run-detail\\"]').click()", true);
-  await waitForSummaryRunDetail(win);
-  console.log('[electron-smoke] group summary Run Detail replay verified');
   await loadChat(win);
   await waitFor(win, () => {
     const summaryMessage = document.querySelector('[data-message-id="chat-group-ui-main-summary-message"]');
-    const openSummary = summaryMessage?.querySelector('[data-testid="chat-message-open-run-detail"]');
     return summaryMessage?.textContent.includes(${JSON.stringify(GROUP_SUMMARY_RESULT)})
       && document.body.textContent.includes('Group UI Agent accepted the task')
-      && openSummary
+      && !summaryMessage?.querySelector('[data-testid="chat-message-open-run-detail"]')
       && !document.body.textContent.includes('oha.group_dispatch')
       && !document.body.textContent.includes('<oha_group_dispatch>')
       && !document.body.textContent.includes('run_oha_agent');
-  }, 'group summary chat restored after Run Detail');
+  }, 'group summary chat retained without Run Detail CTA');
   await win.webContents.executeJavaScript(\`
     (() => {
       const input = document.querySelector('[data-testid="chat-composer-input"]');
@@ -1138,42 +1299,6 @@ async function main() {
       && document.body.textContent.includes(${JSON.stringify(GROUP_FOLLOWUP_TEXT)});
   }, 'group follow-up status');
   console.log('[electron-smoke] group follow-up status rendered');
-  await waitFor(win, () => {
-    const row = document.querySelector('[data-testid="chat-message-activity-row"]');
-    const openRun = document.querySelector('[data-testid="chat-message-activity-open-run-detail"]');
-    return row?.getAttribute('data-activity-status') === 'completed'
-      && row?.getAttribute('data-run-id') === ${JSON.stringify(GROUP_AGENT_RUN_ID)}
-      && row?.getAttribute('data-run-status') === 'completed'
-      && row.textContent.includes('Group UI Agent')
-      && openRun?.getAttribute('data-run-id') === ${JSON.stringify(GROUP_AGENT_RUN_ID)}
-      && openRun?.getAttribute('data-run-status') === 'completed'
-      && openRun.textContent.includes('Agent Studio');
-  }, 'group activity Run Detail action');
-  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"chat-message-activity-open-run-detail\\"]').click()", true);
-  await waitFor(win, () => {
-    const detail = document.querySelector('[data-testid="agent-run-detail"]');
-    const result = document.querySelector('[data-testid="agent-run-detail-result"]');
-    const events = Array.from(document.querySelectorAll('[data-testid="agent-run-detail-execution-event"]'));
-    const eventTypes = events.map((node) => node.getAttribute('data-run-event'));
-    const outputEvent = events.find((node) => node.getAttribute('data-run-event') === 'model.output.completed');
-    const completedEvent = events.find((node) => node.getAttribute('data-run-event') === 'agent.run.completed');
-    return window.location.hash.includes(${JSON.stringify(GROUP_AGENT_RUN_ID)})
-      && detail?.getAttribute('data-run-id') === ${JSON.stringify(GROUP_AGENT_RUN_ID)}
-      && detail?.getAttribute('data-run-kind') === 'agent_run'
-      && detail?.getAttribute('data-run-status') === 'completed'
-      && detail?.getAttribute('data-run-group-id') === ${JSON.stringify(RUN_GROUP_ID)}
-      && detail?.getAttribute('data-task-id') === ${JSON.stringify(GROUP_AGENT_TASK_ID)}
-      && detail?.getAttribute('data-session-id') === ${JSON.stringify(GROUP_SESSION_ID)}
-      && result?.textContent.includes(${JSON.stringify(GROUP_AGENT_RESULT)})
-      && eventTypes.includes('agent.run.started')
-      && eventTypes.includes('model.output.completed')
-      && eventTypes.includes('agent.run.completed')
-      && outputEvent?.textContent.includes(${JSON.stringify(GROUP_AGENT_RESULT)})
-      && completedEvent?.textContent.includes(${JSON.stringify(GROUP_AGENT_RESULT)})
-      && events.length >= 4
-      && events.every((node) => node.getAttribute('data-run-event-run-id') === ${JSON.stringify(GROUP_AGENT_RUN_ID)});
-  }, 'group activity Run Detail handoff');
-  console.log('[electron-smoke] group Run Detail handoff verified');
   clearTimeout(watchdog);
   await win.close();
   app.quit();

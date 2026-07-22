@@ -120,3 +120,43 @@ def test_run_group_repository_lifecycle_and_child_membership() -> None:
     conn.execute("DELETE FROM runs WHERE run_id=?", ("run-1",))
     repo.remove_run_ids(group_id, {"run-1"})
     assert conn.execute("SELECT COUNT(*) AS count FROM run_groups").fetchone()["count"] == 0
+
+
+def test_run_group_repository_transition_cas_preserves_terminal_winner() -> None:
+    conn = _connect_groups_db()
+    now_values = iter(
+        [
+            "2026-07-12T10:00:00Z",
+            "2026-07-12T10:01:00Z",
+            "2026-07-12T10:02:00Z",
+        ]
+    )
+    repo = RunGroupRepository(
+        conn,
+        ensure_row_factory=lambda: None,
+        row_to_run_group=_row_to_group,
+        row_to_run=_row_to_run,
+        now=lambda: next(now_values),
+        json_dump=_json_dump,
+        redact_secrets=str,
+    )
+    running = repo.insert(title="CAS group", source="workflow")
+    cancelled = repo.update(
+        running["run_group_id"],
+        status="cancelled",
+        summary="cancel wins",
+    )
+
+    stale = repo.update(
+        running["run_group_id"],
+        status="approval_required",
+        summary="stale approval",
+        expected_status="running",
+        expected_updated_at=running["updated_at"],
+    )
+
+    assert cancelled is not None
+    assert stale is None
+    current = repo.get(running["run_group_id"])
+    assert current["status"] == "cancelled"
+    assert current["summary"] == "cancel wins"

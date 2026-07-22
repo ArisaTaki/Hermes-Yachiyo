@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import queue
 import sqlite3
 import ssl
 import threading
@@ -49,6 +50,279 @@ class _FailingReadCredentialStore(MemoryCredentialStore):
         raise CredentialStoreError(
             "Keychain find failed with OSStatus -25293 sk-read-secret123456"
         )
+
+
+class _CredentialRotationStore(MemoryCredentialStore):
+    """Deterministic Keychain double; never talks to the host Keychain."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.locked_refs: set[str] = set()
+        self.fail_new_writes = False
+        self.set_attempts: list[tuple[str, str]] = []
+        self.delete_attempts: list[str] = []
+
+    def set(self, ref: str, secret: str) -> None:
+        self.set_attempts.append((ref, secret))
+        if ref in self.locked_refs:
+            raise CredentialStoreError(
+                f"Keychain update failed with OSStatus -25293 {secret}"
+            )
+        if self.fail_new_writes and self.locked_refs:
+            # Model an ambiguous native failure where the item was created
+            # before Security.framework reported the error.
+            super().set(ref, secret)
+            raise CredentialStoreError(
+                f"Keychain add failed with OSStatus -25293 {secret}"
+            )
+        super().set(ref, secret)
+
+    def delete(self, ref: str) -> None:
+        self.delete_attempts.append(ref)
+        if ref in self.locked_refs:
+            raise CredentialStoreError(
+                "Keychain delete failed with OSStatus -25293"
+            )
+        super().delete(ref)
+
+    def value_for_test(self, ref: str) -> str:
+        return self._values.get(ref, "")
+
+
+class _LockOrderCredentialStore(MemoryCredentialStore):
+    def __init__(self, order: queue.Queue[str], main_thread_id: int) -> None:
+        super().__init__()
+        self._order = order
+        self._main_thread_id = main_thread_id
+
+    def _record_worker_effect(self) -> None:
+        if threading.get_ident() != self._main_thread_id:
+            self._order.put("credential")
+
+    def set(self, ref: str, secret: str) -> None:
+        self._record_worker_effect()
+        super().set(ref, secret)
+
+    def delete(self, ref: str) -> None:
+        self._record_worker_effect()
+        super().delete(ref)
+
+
+class _ObservedServiceLock:
+    def __init__(
+        self,
+        lock: threading.RLock,
+        order: queue.Queue[str],
+        main_thread_id: int,
+    ) -> None:
+        self._lock = lock
+        self._order = order
+        self._main_thread_id = main_thread_id
+
+    def acquire(self, blocking: bool = True, timeout: float = -1) -> bool:
+        if threading.get_ident() != self._main_thread_id:
+            self._order.put("lock")
+        if timeout == -1:
+            return self._lock.acquire(blocking)
+        return self._lock.acquire(blocking, timeout)
+
+    def release(self) -> None:
+        self._lock.release()
+
+    def __enter__(self):
+        self.acquire()
+        return self
+
+    def __exit__(self, *_args) -> None:
+        self.release()
+
+
+class _ObservedConnection:
+    def __init__(
+        self,
+        connection: sqlite3.Connection,
+        order: queue.Queue[str],
+        main_thread_id: int,
+    ) -> None:
+        self._connection = connection
+        self._order = order
+        self._main_thread_id = main_thread_id
+
+    def execute(self, *args, **kwargs):
+        if threading.get_ident() != self._main_thread_id:
+            self._order.put("database")
+        return self._connection.execute(*args, **kwargs)
+
+    def __getattr__(self, name: str):
+        return getattr(self._connection, name)
+
+
+class _CommitFaultConnection:
+    """SQLite proxy that fails the next commit before or after durability."""
+
+    def __init__(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        persist_before_error: bool,
+    ) -> None:
+        self._connection = connection
+        self._persist_before_error = persist_before_error
+        self._armed = True
+
+    def commit(self) -> None:
+        if not self._armed:
+            self._connection.commit()
+            return
+        self._armed = False
+        if self._persist_before_error:
+            self._connection.commit()
+        raise sqlite3.OperationalError("forced commit outcome unknown")
+
+    def __getattr__(self, name: str):
+        return getattr(self._connection, name)
+
+
+class _CredentialRefRotatingReadStore(MemoryCredentialStore):
+    def __init__(self) -> None:
+        super().__init__()
+        self.blocked_ref = ""
+        self.first_read_started = threading.Event()
+        self.release_first_read = threading.Event()
+        self.get_refs: list[str] = []
+        self._first_read_claimed = False
+        self._claim_lock = threading.Lock()
+
+    def arm(self, ref: str) -> None:
+        self.blocked_ref = ref
+
+    def get(self, ref: str) -> str:
+        self.get_refs.append(ref)
+        should_block = False
+        with self._claim_lock:
+            if ref == self.blocked_ref and not self._first_read_claimed:
+                self._first_read_claimed = True
+                should_block = True
+        if should_block:
+            self.first_read_started.set()
+            self.release_first_read.wait(timeout=5)
+        return super().get(ref)
+
+
+class _OwnershipTrackingLock:
+    """RLock proxy exposing whether the current thread owns the service lock."""
+
+    def __init__(self, lock: threading.RLock) -> None:
+        self._lock = lock
+        self._state_lock = threading.Lock()
+        self._owner: int | None = None
+        self._depth = 0
+
+    def acquire(self, blocking: bool = True, timeout: float = -1) -> bool:
+        if timeout == -1:
+            acquired = self._lock.acquire(blocking)
+        else:
+            acquired = self._lock.acquire(blocking, timeout)
+        if acquired:
+            thread_id = threading.get_ident()
+            with self._state_lock:
+                if self._owner == thread_id:
+                    self._depth += 1
+                else:
+                    self._owner = thread_id
+                    self._depth = 1
+        return acquired
+
+    def release(self) -> None:
+        thread_id = threading.get_ident()
+        with self._state_lock:
+            assert self._owner == thread_id
+            self._depth -= 1
+            if self._depth == 0:
+                self._owner = None
+        self._lock.release()
+
+    def owned_by_current_thread(self) -> bool:
+        with self._state_lock:
+            return self._owner == threading.get_ident() and self._depth > 0
+
+    def __enter__(self):
+        self.acquire()
+        return self
+
+    def __exit__(self, *_args) -> None:
+        self.release()
+
+
+class _WriteOwnershipObservedConnection:
+    """SQLite proxy recording lock ownership at each write and commit."""
+
+    _WRITE_PREFIXES = ("DELETE", "INSERT", "REPLACE", "UPDATE")
+
+    def __init__(
+        self,
+        connection: sqlite3.Connection,
+        service_lock: _OwnershipTrackingLock,
+        armed: threading.Event,
+    ) -> None:
+        self._connection = connection
+        self._service_lock = service_lock
+        self._armed = armed
+        self.observations: list[tuple[str, bool]] = []
+
+    def execute(self, sql: str, *args, **kwargs):
+        statement = str(sql or "").lstrip().upper()
+        if self._armed.is_set() and statement.startswith(self._WRITE_PREFIXES):
+            self.observations.append(
+                ("execute", self._service_lock.owned_by_current_thread())
+            )
+        return self._connection.execute(sql, *args, **kwargs)
+
+    def commit(self) -> None:
+        if self._armed.is_set():
+            self.observations.append(
+                ("commit", self._service_lock.owned_by_current_thread())
+            )
+        self._connection.commit()
+
+    def __getattr__(self, name: str):
+        return getattr(self._connection, name)
+
+
+class _BlockingModelCall:
+    """Network-free model double that lets a credential rotate mid-request."""
+
+    def __init__(self) -> None:
+        self.started = threading.Event()
+        self.release = threading.Event()
+        self.api_keys: list[str] = []
+
+    def __call__(
+        self,
+        _base_url: str,
+        _model: str,
+        api_key: str,
+        _messages: list[dict],
+    ) -> str:
+        self.api_keys.append(api_key)
+        self.started.set()
+        if not self.release.wait(timeout=5):
+            raise AssertionError("test did not release the fake model request")
+        return "OK"
+
+
+def _credential_row(db_path, table: str, id_column: str, row_id: str) -> sqlite3.Row:
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        row = conn.execute(
+            f"SELECT api_key, credential_ref FROM {table} WHERE {id_column}=?",
+            (row_id,),
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row is not None
+    return row
 
 
 def _vision_challenge():
@@ -101,6 +375,833 @@ def test_model_profile_crud_redacts_and_preserves_api_key(tmp_path):
         assert row is not None
         assert row["api_key"] == ""
         assert row["credential_ref"] == f"model_profile:{profile['profile_id']}:api_key"
+    finally:
+        service.close()
+
+
+def test_update_standalone_profile_rotates_inaccessible_credential_ref(tmp_path):
+    db_path = tmp_path / "model-profiles.db"
+    credentials = _CredentialRotationStore()
+    service = ModelProfileService(
+        db_path=db_path,
+        workspace_dir=tmp_path / "profiles",
+        credential_store=credentials,
+    )
+    replacement = "sk-profile-replacement-secret123456"
+    try:
+        profile = service.create_profile(
+            {
+                "name": "Standalone",
+                "capability": "chat",
+                "base_url": "https://api.example.test/v1",
+                "model": "demo-model",
+                "api_key": "sk-profile-original-secret123456",
+            }
+        )
+        original_row = _credential_row(
+            db_path,
+            "model_profiles",
+            "profile_id",
+            profile["profile_id"],
+        )
+        original_ref = str(original_row["credential_ref"])
+        credentials.locked_refs.add(original_ref)
+
+        updated = service.update_profile(
+            profile["profile_id"],
+            {"api_key": replacement},
+        )
+        rotated_row = _credential_row(
+            db_path,
+            "model_profiles",
+            "profile_id",
+            profile["profile_id"],
+        )
+        rotated_ref = str(rotated_row["credential_ref"])
+
+        assert rotated_ref
+        assert rotated_ref != original_ref
+        assert rotated_row["api_key"] == ""
+        assert credentials.value_for_test(rotated_ref) == replacement
+        assert updated["api_key_configured"] is True
+        assert "api_key" not in updated
+        assert replacement not in repr(updated)
+        assert replacement not in repr(tuple(rotated_row))
+    finally:
+        service.close()
+
+
+def test_update_source_rotates_inaccessible_credential_ref(tmp_path):
+    db_path = tmp_path / "model-sources.db"
+    credentials = _CredentialRotationStore()
+    service = ModelProfileService(
+        db_path=db_path,
+        workspace_dir=tmp_path / "sources",
+        credential_store=credentials,
+    )
+    replacement = "sk-source-replacement-secret123456"
+    try:
+        source = service.create_source(
+            {
+                "name": "Gateway",
+                "capability": "chat",
+                "base_url": "https://api.example.test/v1",
+                "api_key": "sk-source-original-secret123456",
+            }
+        )
+        original_row = _credential_row(
+            db_path,
+            "model_sources",
+            "source_id",
+            source["source_id"],
+        )
+        original_ref = str(original_row["credential_ref"])
+        credentials.locked_refs.add(original_ref)
+
+        updated = service.update_source(
+            source["source_id"],
+            {"api_key": replacement},
+        )
+        rotated_row = _credential_row(
+            db_path,
+            "model_sources",
+            "source_id",
+            source["source_id"],
+        )
+        rotated_ref = str(rotated_row["credential_ref"])
+
+        assert rotated_ref
+        assert rotated_ref != original_ref
+        assert rotated_row["api_key"] == ""
+        assert credentials.value_for_test(rotated_ref) == replacement
+        assert updated["api_key_configured"] is True
+        assert "api_key" not in updated
+        assert replacement not in repr(updated)
+        assert replacement not in repr(tuple(rotated_row))
+    finally:
+        service.close()
+
+
+def test_update_source_preserves_old_ref_when_rotated_credential_write_fails(tmp_path):
+    db_path = tmp_path / "model-sources.db"
+    credentials = _CredentialRotationStore()
+    service = ModelProfileService(
+        db_path=db_path,
+        workspace_dir=tmp_path / "sources",
+        credential_store=credentials,
+    )
+    replacement = "sk-source-write-failure-secret123456"
+    try:
+        source = service.create_source(
+            {
+                "name": "Gateway",
+                "capability": "chat",
+                "base_url": "https://api.example.test/v1",
+                "api_key": "sk-source-original-secret123456",
+            }
+        )
+        original_row = _credential_row(
+            db_path,
+            "model_sources",
+            "source_id",
+            source["source_id"],
+        )
+        original_ref = str(original_row["credential_ref"])
+        original_secret = credentials.value_for_test(original_ref)
+        credentials.locked_refs.add(original_ref)
+        credentials.fail_new_writes = True
+
+        with pytest.raises(ModelProfileError) as error:
+            service.update_source(source["source_id"], {"api_key": replacement})
+
+        persisted_row = _credential_row(
+            db_path,
+            "model_sources",
+            "source_id",
+            source["source_id"],
+        )
+        attempted_rotated_refs = {
+            ref for ref, _secret in credentials.set_attempts if ref != original_ref
+        }
+
+        assert attempted_rotated_refs
+        assert persisted_row["credential_ref"] == original_ref
+        assert persisted_row["api_key"] == ""
+        assert credentials.value_for_test(original_ref) == original_secret
+        assert original_ref not in credentials.delete_attempts
+        assert all(
+            credentials.value_for_test(ref) == ""
+            for ref in attempted_rotated_refs
+        )
+        assert attempted_rotated_refs.issubset(credentials.delete_attempts)
+        assert replacement not in str(error.value)
+    finally:
+        service.close()
+
+
+def test_update_standalone_profile_cleans_rotated_ref_when_db_write_fails(tmp_path):
+    db_path = tmp_path / "model-profiles.db"
+    credentials = _CredentialRotationStore()
+    service = ModelProfileService(
+        db_path=db_path,
+        workspace_dir=tmp_path / "profiles",
+        credential_store=credentials,
+    )
+    replacement = "sk-profile-db-failure-secret123456"
+    try:
+        profile = service.create_profile(
+            {
+                "name": "Standalone",
+                "capability": "chat",
+                "base_url": "https://api.example.test/v1",
+                "model": "demo-model",
+                "api_key": "sk-profile-original-secret123456",
+            }
+        )
+        original_row = _credential_row(
+            db_path,
+            "model_profiles",
+            "profile_id",
+            profile["profile_id"],
+        )
+        original_ref = str(original_row["credential_ref"])
+        original_secret = credentials.value_for_test(original_ref)
+        credentials.locked_refs.add(original_ref)
+        service._conn.execute(
+            """
+            CREATE TRIGGER fail_profile_credential_rotation
+            BEFORE UPDATE OF credential_ref ON model_profiles
+            WHEN NEW.credential_ref <> OLD.credential_ref
+            BEGIN
+                SELECT RAISE(ABORT, 'forced credential-ref DB failure');
+            END
+            """
+        )
+        service._conn.commit()
+
+        with pytest.raises((sqlite3.DatabaseError, ModelProfileError)):
+            service.update_profile(profile["profile_id"], {"api_key": replacement})
+
+        persisted_row = _credential_row(
+            db_path,
+            "model_profiles",
+            "profile_id",
+            profile["profile_id"],
+        )
+        attempted_rotated_refs = {
+            ref for ref, _secret in credentials.set_attempts if ref != original_ref
+        }
+
+        assert len(attempted_rotated_refs) == 1
+        rotated_ref = attempted_rotated_refs.pop()
+        assert persisted_row["credential_ref"] == original_ref
+        assert persisted_row["api_key"] == ""
+        assert credentials.value_for_test(original_ref) == original_secret
+        assert original_ref not in credentials.delete_attempts
+        assert rotated_ref in credentials.delete_attempts
+        assert credentials.value_for_test(rotated_ref) == ""
+    finally:
+        service.close()
+
+
+@pytest.mark.parametrize("record_kind", ["source", "profile"])
+@pytest.mark.parametrize("persist_before_error", [False, True])
+def test_credential_rotation_cleanup_respects_commit_outcome_unknown(
+    tmp_path,
+    record_kind: str,
+    persist_before_error: bool,
+):
+    """Never delete a staged secret that an outcome-unknown commit references."""
+
+    db_path = tmp_path / f"model-{record_kind}-commit-fault.db"
+    credentials = _CredentialRotationStore()
+    service = ModelProfileService(
+        db_path=db_path,
+        workspace_dir=tmp_path / f"{record_kind}-commit-fault",
+        credential_store=credentials,
+    )
+    original_secret = f"{record_kind}-original-test-secret"
+    replacement_secret = f"{record_kind}-replacement-test-secret"
+    if record_kind == "source":
+        table = "model_sources"
+        id_column = "source_id"
+        record = service.create_source(
+            {
+                "name": "Commit Fault Source",
+                "capability": "chat",
+                "base_url": "https://api.example.test/v1",
+                "api_key": original_secret,
+            }
+        )
+        update = service.update_source
+    else:
+        table = "model_profiles"
+        id_column = "profile_id"
+        record = service.create_profile(
+            {
+                "name": "Commit Fault Profile",
+                "capability": "chat",
+                "base_url": "https://api.example.test/v1",
+                "model": "demo-model",
+                "api_key": original_secret,
+            }
+        )
+        update = service.update_profile
+
+    record_id = str(record[id_column])
+    original_row = _credential_row(db_path, table, id_column, record_id)
+    original_ref = str(original_row["credential_ref"])
+    service._conn = _CommitFaultConnection(
+        service._conn,
+        persist_before_error=persist_before_error,
+    )
+
+    try:
+        with pytest.raises(sqlite3.OperationalError, match="commit outcome unknown"):
+            update(record_id, {"api_key": replacement_secret})
+
+        persisted_row = _credential_row(db_path, table, id_column, record_id)
+        staged_refs = {
+            ref for ref, _secret in credentials.set_attempts if ref != original_ref
+        }
+        assert len(staged_refs) == 1
+        staged_ref = staged_refs.pop()
+        assert credentials.value_for_test(original_ref) == original_secret
+        assert original_ref not in credentials.delete_attempts
+
+        if persist_before_error:
+            assert persisted_row["credential_ref"] == staged_ref
+            assert credentials.value_for_test(staged_ref) == replacement_secret
+            assert staged_ref not in credentials.delete_attempts
+        else:
+            assert persisted_row["credential_ref"] == original_ref
+            assert credentials.value_for_test(staged_ref) == ""
+            assert staged_ref in credentials.delete_attempts
+    finally:
+        service.close()
+
+
+@pytest.mark.parametrize(
+    "operation",
+    ["create_source", "create_profile", "delete_profile"],
+)
+def test_model_profile_mutations_acquire_service_lock_before_effects(
+    tmp_path,
+    operation: str,
+):
+    order: queue.Queue[str] = queue.Queue()
+    main_thread_id = threading.get_ident()
+    credentials = _LockOrderCredentialStore(order, main_thread_id)
+    service = ModelProfileService(
+        db_path=tmp_path / "model-profiles.db",
+        workspace_dir=tmp_path / "profiles",
+        credential_store=credentials,
+    )
+    profile_to_delete = None
+    if operation == "delete_profile":
+        profile_to_delete = service.create_profile(
+            {
+                "name": "Delete Me",
+                "capability": "chat",
+                "base_url": "https://api.example.test/v1",
+                "model": "demo-model",
+                "api_key": "sk-delete-lock-secret123456",
+            }
+        )
+
+    service._conn = _ObservedConnection(service._conn, order, main_thread_id)
+    service._lock = _ObservedServiceLock(service._lock, order, main_thread_id)
+    worker_started = threading.Event()
+    worker_done = threading.Event()
+    worker_errors: list[BaseException] = []
+
+    def mutate() -> None:
+        worker_started.set()
+        try:
+            if operation == "create_source":
+                service.create_source(
+                    {
+                        "name": "Locked Source",
+                        "capability": "chat",
+                        "base_url": "https://api.example.test/v1",
+                        "api_key": "sk-source-lock-secret123456",
+                    }
+                )
+            elif operation == "create_profile":
+                service.create_profile(
+                    {
+                        "name": "Locked Profile",
+                        "capability": "chat",
+                        "base_url": "https://api.example.test/v1",
+                        "model": "demo-model",
+                        "api_key": "sk-profile-lock-secret123456",
+                    }
+                )
+            else:
+                assert profile_to_delete is not None
+                service.delete_profile(profile_to_delete["profile_id"])
+        except BaseException as exc:  # surfaced on the main test thread below
+            worker_errors.append(exc)
+        finally:
+            worker_done.set()
+
+    worker = threading.Thread(target=mutate)
+    first_event = ""
+    started = False
+    try:
+        with service._lock:
+            worker.start()
+            started = worker_started.wait(timeout=1)
+            try:
+                first_event = order.get(timeout=1)
+            except queue.Empty:
+                first_event = "timeout"
+        assert worker_done.wait(timeout=2)
+        worker.join(timeout=1)
+
+        assert started is True
+        assert not worker.is_alive()
+        assert worker_errors == []
+        assert first_event == "lock"
+    finally:
+        if worker.is_alive():
+            worker.join(timeout=2)
+        service.close()
+
+
+@pytest.mark.parametrize("private_reader", ["source", "profile"])
+def test_private_reads_retry_when_source_credential_ref_rotates(
+    tmp_path,
+    private_reader: str,
+):
+    db_path = tmp_path / "model-profiles.db"
+    credentials = _CredentialRefRotatingReadStore()
+    service = ModelProfileService(
+        db_path=db_path,
+        workspace_dir=tmp_path / "profiles",
+        credential_store=credentials,
+    )
+    source = service.create_source(
+        {
+            "name": "Rotating Source",
+            "capability": "chat",
+            "base_url": "https://api.example.test/v1",
+            "api_key": "sk-source-old-secret123456",
+        }
+    )
+    profile = service.create_profile(
+        {
+            "source_id": source["source_id"],
+            "name": "Rotating Profile",
+            "capability": "chat",
+            "model": "demo-model",
+        }
+    )
+    original_ref = str(
+        _credential_row(
+            db_path,
+            "model_sources",
+            "source_id",
+            source["source_id"],
+        )["credential_ref"]
+    )
+    credentials.arm(original_ref)
+    private_result: list[dict] = []
+    private_errors: list[BaseException] = []
+    private_done = threading.Event()
+    public_done = threading.Event()
+
+    def read_private() -> None:
+        try:
+            if private_reader == "source":
+                private_result.append(service.get_source_private(source["source_id"]))
+            else:
+                private_result.append(service.get_profile_private(profile["profile_id"]))
+        except BaseException as exc:
+            private_errors.append(exc)
+        finally:
+            private_done.set()
+
+    def read_public() -> None:
+        if private_reader == "source":
+            service.get_source(source["source_id"])
+        else:
+            service.get_profile(profile["profile_id"])
+        public_done.set()
+
+    private_thread = threading.Thread(target=read_private)
+    public_thread = threading.Thread(target=read_public)
+    public_started = False
+    replacement = "sk-source-new-secret123456"
+    public_completed_while_keychain_blocked = False
+    try:
+        private_thread.start()
+        assert credentials.first_read_started.wait(timeout=1)
+        public_thread.start()
+        public_started = True
+        public_completed_while_keychain_blocked = public_done.wait(timeout=1)
+        service.update_source(source["source_id"], {"api_key": replacement})
+    finally:
+        credentials.release_first_read.set()
+        private_thread.join(timeout=2)
+        if public_started:
+            public_thread.join(timeout=2)
+
+    try:
+        rotated_ref = str(
+            _credential_row(
+                db_path,
+                "model_sources",
+                "source_id",
+                source["source_id"],
+            )["credential_ref"]
+        )
+        assert public_completed_while_keychain_blocked is True
+        assert private_done.is_set()
+        assert not private_thread.is_alive()
+        assert not public_thread.is_alive()
+        assert private_errors == []
+        assert len(private_result) == 1
+        assert rotated_ref != original_ref
+        assert private_result[0]["api_key"] == replacement
+        result_ref_key = (
+            "credential_ref" if private_reader == "source" else "source_credential_ref"
+        )
+        assert private_result[0][result_ref_key] == rotated_ref
+        assert credentials.get_refs[0] == original_ref
+        assert rotated_ref in credentials.get_refs[1:]
+    finally:
+        service.close()
+
+
+def test_explicit_source_api_key_update_resets_source_and_child_profiles(tmp_path):
+    service = make_profile_service(tmp_path)
+    try:
+        source = service.create_source(
+            {
+                "name": "Reset Source",
+                "capability": "chat",
+                "base_url": "https://api.example.test/v1",
+                "api_key": "sk-source-old-secret123456",
+            }
+        )
+        profiles = [
+            service.create_profile(
+                {
+                    "source_id": source["source_id"],
+                    "name": f"Child {index}",
+                    "capability": "chat",
+                    "model": f"demo-model-{index}",
+                }
+            )
+            for index in range(2)
+        ]
+        service._conn.execute(
+            "UPDATE model_sources SET status='failed', last_error='stale source error', last_tested_at='old' WHERE source_id=?",
+            (source["source_id"],),
+        )
+        service._conn.execute(
+            "UPDATE model_profiles SET status='available', last_error='stale profile error', last_tested_at='old' WHERE source_id=?",
+            (source["source_id"],),
+        )
+        service._conn.commit()
+
+        service.update_source(
+            source["source_id"],
+            {"api_key": "sk-source-new-secret123456"},
+        )
+
+        reset_source = service.get_source(source["source_id"])
+        reset_profiles = [
+            service.get_profile(profile["profile_id"])
+            for profile in profiles
+        ]
+        assert reset_source["status"] == "untested"
+        assert reset_source["last_error"] == ""
+        assert all(profile["status"] == "untested" for profile in reset_profiles)
+        assert all(profile["last_error"] == "" for profile in reset_profiles)
+    finally:
+        service.close()
+
+
+def test_explicit_standalone_profile_api_key_update_resets_only_that_profile(tmp_path):
+    service = make_profile_service(tmp_path)
+    try:
+        target = service.create_profile(
+            {
+                "name": "Reset Target",
+                "capability": "chat",
+                "base_url": "https://api.example.test/v1",
+                "model": "demo-model-target",
+                "api_key": "sk-target-old-secret123456",
+            }
+        )
+        unrelated = service.create_profile(
+            {
+                "name": "Unrelated",
+                "capability": "chat",
+                "base_url": "https://api.example.test/v1",
+                "model": "demo-model-unrelated",
+                "api_key": "sk-unrelated-secret123456",
+            }
+        )
+        service._conn.execute(
+            "UPDATE model_profiles SET status='failed', last_error='stale target error', last_tested_at='old' WHERE profile_id=?",
+            (target["profile_id"],),
+        )
+        service._conn.execute(
+            "UPDATE model_profiles SET status='available', last_error='unrelated error', last_tested_at='old' WHERE profile_id=?",
+            (unrelated["profile_id"],),
+        )
+        service._conn.commit()
+
+        service.update_profile(
+            target["profile_id"],
+            {"api_key": "sk-target-new-secret123456"},
+        )
+
+        reset_target = service.get_profile(target["profile_id"])
+        unchanged = service.get_profile(unrelated["profile_id"])
+        assert reset_target["status"] == "untested"
+        assert reset_target["last_error"] == ""
+        assert unchanged["status"] == "available"
+        assert unchanged["last_error"] == "unrelated error"
+    finally:
+        service.close()
+
+
+@pytest.mark.parametrize("record_kind", ["source", "profile"])
+def test_connection_test_result_writes_hold_service_lock(
+    monkeypatch,
+    tmp_path,
+    record_kind: str,
+):
+    """A completed network test must join the credential-rotation transaction lock."""
+
+    service = make_profile_service(tmp_path)
+    if record_kind == "source":
+        record = service.create_source(
+            {
+                "name": "Lock Source",
+                "capability": "chat",
+                "base_url": "https://api.example.test/v1",
+                "api_key": "sk-source-lock-secret123456",
+            }
+        )
+        run_test = lambda: service.test_source(
+            record["source_id"],
+            {"model": "demo-model"},
+        )
+    else:
+        record = service.create_profile(
+            {
+                "name": "Lock Profile",
+                "capability": "chat",
+                "base_url": "https://api.example.test/v1",
+                "model": "demo-model",
+                "api_key": "sk-profile-lock-secret123456",
+            }
+        )
+        run_test = lambda: service.test_profile(record["profile_id"])
+
+    armed = threading.Event()
+    tracked_lock = _OwnershipTrackingLock(service._lock)
+    observed_connection = _WriteOwnershipObservedConnection(
+        service._conn,
+        tracked_lock,
+        armed,
+    )
+    service._lock = tracked_lock
+    service._conn = observed_connection
+
+    def model_call(*_args, **_kwargs) -> str:
+        armed.set()
+        return "OK"
+
+    monkeypatch.setattr(
+        "apps.shell.model_profiles.openai_compatible_chat",
+        model_call,
+    )
+    try:
+        result = run_test()
+
+        assert result["ok"] is True
+        assert observed_connection.observations
+        assert all(
+            lock_owned
+            for _operation, lock_owned in observed_connection.observations
+        ), observed_connection.observations
+    finally:
+        service.close()
+
+
+def test_source_test_discards_success_from_rotated_credential_generation(
+    monkeypatch,
+    tmp_path,
+):
+    service = make_profile_service(tmp_path)
+    source = service.create_source(
+        {
+            "name": "Stale Source Test",
+            "capability": "chat",
+            "base_url": "https://api.example.test/v1",
+            "api_key": "sk-source-old-generation123456",
+        }
+    )
+    model_call = _BlockingModelCall()
+    monkeypatch.setattr(
+        "apps.shell.model_profiles.openai_compatible_chat",
+        model_call,
+    )
+    results: list[dict] = []
+    errors: list[BaseException] = []
+
+    def test_connection() -> None:
+        try:
+            results.append(
+                service.test_source(
+                    source["source_id"],
+                    {"model": "demo-model"},
+                )
+            )
+        except BaseException as exc:  # surfaced on the main test thread below
+            errors.append(exc)
+
+    worker = threading.Thread(target=test_connection)
+    try:
+        worker.start()
+        assert model_call.started.wait(timeout=1)
+        service.update_source(
+            source["source_id"],
+            {"api_key": "sk-source-new-generation123456"},
+        )
+    finally:
+        model_call.release.set()
+        worker.join(timeout=2)
+
+    try:
+        assert not worker.is_alive()
+        assert errors == []
+        assert len(results) == 1
+        assert model_call.api_keys == ["sk-source-old-generation123456"]
+        assert results[0]["ok"] is False
+        assert "配置" in results[0]["message"]
+        assert "变化" in results[0]["message"]
+        assert (
+            "重测" in results[0]["message"]
+            or "重新测试" in results[0]["message"]
+        )
+        assert results[0]["source"]["status"] == "untested"
+        assert service.get_source(source["source_id"])["status"] == "untested"
+    finally:
+        service.close()
+
+
+def test_profile_test_discards_success_from_rotated_credential_generation(
+    monkeypatch,
+    tmp_path,
+):
+    service = make_profile_service(tmp_path)
+    profile = service.create_profile(
+        {
+            "name": "Stale Profile Test",
+            "capability": "chat",
+            "base_url": "https://api.example.test/v1",
+            "model": "demo-model",
+            "api_key": "sk-profile-old-generation123456",
+        }
+    )
+    model_call = _BlockingModelCall()
+    monkeypatch.setattr(
+        "apps.shell.model_profiles.openai_compatible_chat",
+        model_call,
+    )
+    results: list[dict] = []
+    errors: list[BaseException] = []
+
+    def test_connection() -> None:
+        try:
+            results.append(service.test_profile(profile["profile_id"]))
+        except BaseException as exc:  # surfaced on the main test thread below
+            errors.append(exc)
+
+    worker = threading.Thread(target=test_connection)
+    try:
+        worker.start()
+        assert model_call.started.wait(timeout=1)
+        service.update_profile(
+            profile["profile_id"],
+            {"api_key": "sk-profile-new-generation123456"},
+        )
+    finally:
+        model_call.release.set()
+        worker.join(timeout=2)
+
+    try:
+        assert not worker.is_alive()
+        assert errors == []
+        assert len(results) == 1
+        assert model_call.api_keys == ["sk-profile-old-generation123456"]
+        assert results[0]["ok"] is False
+        assert "配置" in results[0]["message"]
+        assert "变化" in results[0]["message"]
+        assert (
+            "重测" in results[0]["message"]
+            or "重新测试" in results[0]["message"]
+        )
+        assert results[0]["profile"]["status"] == "untested"
+        assert service.get_profile(profile["profile_id"])["status"] == "untested"
+    finally:
+        service.close()
+
+
+def test_profile_credential_failure_does_not_mark_reentered_key_failed(tmp_path):
+    credentials = _FailingReadCredentialStore()
+    service = ModelProfileService(
+        db_path=tmp_path / "model-profiles.db",
+        workspace_dir=tmp_path / "profiles",
+        credential_store=credentials,
+    )
+    profile = service.create_profile(
+        {
+            "name": "Credential Recovery Race",
+            "capability": "chat",
+            "base_url": "https://api.example.test/v1",
+            "model": "demo-model",
+            "api_key": "sk-profile-old-read-failure123456",
+        }
+    )
+    record_started = threading.Event()
+    release_record = threading.Event()
+    original_record = service._record_test_result
+    results: list[dict] = []
+
+    def blocking_record(*args, **kwargs):
+        record_started.set()
+        assert release_record.wait(timeout=5)
+        return original_record(*args, **kwargs)
+
+    service._record_test_result = blocking_record  # type: ignore[method-assign]
+    worker = threading.Thread(
+        target=lambda: results.append(service.test_profile(profile["profile_id"]))
+    )
+    try:
+        worker.start()
+        assert record_started.wait(timeout=1)
+        service.update_profile(
+            profile["profile_id"],
+            {"api_key": "sk-profile-new-read-recovery123456"},
+        )
+    finally:
+        release_record.set()
+        worker.join(timeout=2)
+
+    try:
+        assert not worker.is_alive()
+        assert len(results) == 1
+        assert results[0]["ok"] is False
+        assert results[0]["stale_result"] is True
+        assert service.get_profile(profile["profile_id"])["status"] == "untested"
     finally:
         service.close()
 
@@ -1298,6 +2399,105 @@ def test_test_and_save_profile_failure_does_not_persist(monkeypatch, tmp_path):
         assert result["ok"] is False
         assert result["source"]["status"] == "failed"
         assert service.list_profiles()["profiles"] == []
+    finally:
+        service.close()
+
+
+@pytest.mark.parametrize("model_succeeds", [True, False], ids=["success", "failure"])
+def test_test_and_save_profile_discards_stale_result_after_source_key_rotation(
+    monkeypatch,
+    tmp_path,
+    model_succeeds: bool,
+):
+    service = make_profile_service(tmp_path)
+    source = service.create_source(
+        {
+            "name": "Rotating Gateway",
+            "provider": "openai_compatible",
+            "base_url": "https://api.example.test/v1",
+            "api_key": "sk-source-old-draft-generation123456",
+        }
+    )
+    profile = service.create_profile(
+        {
+            "source_id": source["source_id"],
+            "name": "Existing Draft",
+            "capability": "chat",
+            "model": "current-model",
+        }
+    )
+    request_started = threading.Event()
+    release_request = threading.Event()
+    used_api_keys: list[str] = []
+    results: list[dict] = []
+    errors: list[BaseException] = []
+
+    def blocking_chat(
+        _base_url: str,
+        _model: str,
+        api_key: str,
+        _messages: list[dict],
+    ) -> str:
+        used_api_keys.append(api_key)
+        request_started.set()
+        if not release_request.wait(timeout=5):
+            raise AssertionError("test did not release the fake model request")
+        if not model_succeeds:
+            raise ModelProfileError("network failed")
+        return "OK"
+
+    monkeypatch.setattr(
+        "apps.shell.model_profiles.openai_compatible_chat",
+        blocking_chat,
+    )
+
+    def test_and_save() -> None:
+        try:
+            results.append(
+                service.test_and_save_profile(
+                    source["source_id"],
+                    {
+                        "profile_id": profile["profile_id"],
+                        "name": "Existing Draft",
+                        "capability": "chat",
+                        "model": "stale-draft-model",
+                    },
+                )
+            )
+        except BaseException as exc:  # surfaced on the main test thread below
+            errors.append(exc)
+
+    worker = threading.Thread(target=test_and_save)
+    try:
+        worker.start()
+        assert request_started.wait(timeout=1)
+        service.update_source(
+            source["source_id"],
+            {"api_key": "sk-source-new-draft-generation123456"},
+        )
+    finally:
+        release_request.set()
+        worker.join(timeout=2)
+
+    try:
+        assert not worker.is_alive()
+        assert errors == []
+        assert used_api_keys == ["sk-source-old-draft-generation123456"]
+        assert len(results) == 1
+        assert results[0]["ok"] is False
+        assert results[0]["stale_result"] is True
+        assert "配置" in results[0]["message"]
+        assert "变化" in results[0]["message"]
+        assert (
+            "重测" in results[0]["message"]
+            or "重新测试" in results[0]["message"]
+        )
+
+        current_source = service.get_source(source["source_id"])
+        current_profile = service.get_profile(profile["profile_id"])
+        assert current_source["status"] == "untested"
+        assert current_profile["status"] == "untested"
+        assert current_profile["model"] == "current-model"
     finally:
         service.close()
 

@@ -564,8 +564,10 @@ async function main() {
     (async () => {
       const input = document.querySelector('[data-testid="chat-image-file-input"]');
       if (!input) throw new Error('chat image file input not found');
-      const blob = await fetch(\${JSON.stringify(imageDataUrl)}).then((response) => response.blob());
-      const file = new File([blob], 'smoke-image.svg', { type: 'image/svg+xml' });
+      const dataUrl = \${JSON.stringify(imageDataUrl)};
+      const payload = dataUrl.slice(dataUrl.indexOf(',') + 1);
+      const bytes = Uint8Array.from(atob(payload), (character) => character.charCodeAt(0));
+      const file = new File([bytes], 'smoke-image.svg', { type: 'image/svg+xml' });
       const transfer = new DataTransfer();
       transfer.items.add(file);
       Object.defineProperty(input, 'files', { configurable: true, value: transfer.files });
@@ -661,38 +663,10 @@ async function main() {
   console.log('[electron-smoke] image viewer closed');
   await waitFor(win, () => {
     const reply = document.querySelector('[data-message-id="assistant-chat-image-ui-smoke-reply"]');
-    const openRun = reply?.querySelector('[data-testid="chat-message-open-run-detail"]');
     return reply?.textContent.includes(${JSON.stringify(RUN_RESULT)})
-      && openRun
-      && openRun.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)}
-      && openRun.getAttribute('data-run-status') === 'completed'
-      && openRun.textContent.includes('Agent Studio');
-  }, 'image assistant reply Run Detail action');
-  await win.webContents.executeJavaScript("document.querySelector('[data-message-id=\\"assistant-chat-image-ui-smoke-reply\\"] [data-testid=\\"chat-message-open-run-detail\\"]').click()", true);
-  await waitFor(win, () => {
-    const detail = document.querySelector('[data-testid="agent-run-detail"]');
-    const result = document.querySelector('[data-testid="agent-run-detail-result"]');
-    const task = document.querySelector('[data-testid="agent-run-detail-task"]');
-    const events = Array.from(document.querySelectorAll('[data-testid="agent-run-detail-execution-event"]'));
-    const eventTypes = events.map((node) => node.getAttribute('data-run-event'));
-    const outputEvent = events.find((node) => node.getAttribute('data-run-event') === 'model.output.completed');
-    const completedEvent = events.find((node) => node.getAttribute('data-run-event') === 'run.completed');
-    return window.location.hash.includes(${JSON.stringify(RUN_ID)})
-      && detail?.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)}
-      && detail?.getAttribute('data-run-kind') === 'main_chat_run'
-      && detail?.getAttribute('data-run-status') === 'completed'
-      && detail?.getAttribute('data-task-id') === ${JSON.stringify(TASK_ID)}
-      && detail?.getAttribute('data-session-id') === ${JSON.stringify(SESSION_ID)}
-      && task?.textContent.includes(${JSON.stringify(RUN_GOAL)})
-      && result?.textContent.includes(${JSON.stringify(RUN_RESULT)})
-      && events.length === 2
-      && eventTypes.includes('model.output.completed')
-      && eventTypes.includes('run.completed')
-      && outputEvent?.textContent.includes(${JSON.stringify(RUN_RESULT)})
-      && completedEvent?.textContent.includes(${JSON.stringify(RUN_RESULT)})
-      && events.every((node) => node.getAttribute('data-run-event-run-id') === ${JSON.stringify(RUN_ID)});
-  }, 'image message Run Detail replay handoff');
-  console.log('[electron-smoke] image message Run Detail replay verified');
+      && reply?.querySelector('[data-testid="chat-message-open-run-detail"]') == null;
+  }, 'image assistant reply stays consumer-safe without Run Detail action');
+  console.log('[electron-smoke] image assistant reply kept Run Detail hidden');
   clearTimeout(watchdog);
   await win.close();
   app.quit();

@@ -27,7 +27,12 @@ class RuntimeWorkflowApprovalExecutionService:
         self._workflow_run_is_group_root = workflow_run_is_group_root
         self._workflow_approval_resume = workflow_approval_resume
 
-    def approve_workflow_run(self, run: dict[str, Any]) -> dict[str, Any]:
+    def approve_workflow_run(
+        self,
+        run: dict[str, Any],
+        *,
+        expected_approval_id: str,
+    ) -> dict[str, Any]:
         run_id = str(run["run_id"])
         pending = self._pending_approval_private(run_id)
         resume_context = WorkflowApprovalResumeContext.from_run(
@@ -40,4 +45,5 @@ class RuntimeWorkflowApprovalExecutionService:
             run,
             pending,
             resume_context,
+            expected_approval_id=expected_approval_id,
         )

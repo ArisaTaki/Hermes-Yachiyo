@@ -52,6 +52,8 @@ class RestrictedPluginTool:
     execute: PluginToolHandler
     required: tuple[str, ...] = ()
     risk_level: PluginRiskLevel = "low"
+    capability_ids: tuple[str, ...] = ()
+    action_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -286,15 +288,29 @@ def _register_plugin_tool(
         skill_docs=str(skill_docs or ""),
     )
 
-    TOOL_FUNCTION_NAMES[tool_name] = function_name
-    TOOL_NAME_ALIASES[function_name] = tool_name
-    KNOWN_AGENT_TOOLS.add(tool_name)
-    TOOL_DESCRIPTORS[tool_name] = descriptor
-    TOOL_DISPATCH_REGISTRY[tool_name] = _plugin_dispatch(tool_name)
-    _REGISTERED_PLUGIN_TOOLS[tool_name] = registered
-    _PLUGIN_TOOL_RISK_LEVELS[tool_name] = risk_level
-    if risk_level == "high":
-        HIGH_RISK_AGENT_TOOLS.add(tool_name)
+    try:
+        TOOL_FUNCTION_NAMES[tool_name] = function_name
+        TOOL_NAME_ALIASES[function_name] = tool_name
+        KNOWN_AGENT_TOOLS.add(tool_name)
+        TOOL_DESCRIPTORS[tool_name] = descriptor
+        TOOL_DISPATCH_REGISTRY[tool_name] = _plugin_dispatch(tool_name)
+        _REGISTERED_PLUGIN_TOOLS[tool_name] = registered
+        _PLUGIN_TOOL_RISK_LEVELS[tool_name] = risk_level
+        if risk_level == "high":
+            HIGH_RISK_AGENT_TOOLS.add(tool_name)
+        if tool.capability_ids or tool.action_ids:
+            from apps.shell.agent.runtime.tool_capabilities import (
+                register_tool_capability_binding,
+            )
+
+            register_tool_capability_binding(
+                tool_name,
+                capability_ids=tool.capability_ids,
+                action_ids=tool.action_ids,
+            )
+    except Exception:
+        _remove_plugin_tool(tool_name)
+        raise
     return registered
 
 
@@ -311,6 +327,11 @@ def _plugin_dispatch(tool_name: str) -> Callable[[Any, dict[str, Any], bool], di
 
 
 def _remove_plugin_tool(tool_name: str) -> None:
+    from apps.shell.agent.runtime.tool_capabilities import (
+        unregister_tool_capability_binding,
+    )
+
+    unregister_tool_capability_binding(tool_name)
     registered = _REGISTERED_PLUGIN_TOOLS.pop(tool_name, None)
     if registered is None:
         return

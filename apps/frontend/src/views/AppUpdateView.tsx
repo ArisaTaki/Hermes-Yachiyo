@@ -37,6 +37,11 @@ export function AppUpdateView() {
   const latest = check?.latest || download?.latest || info?.downloaded_update?.latest;
   const current = check?.current || info?.current;
   const downloaded = download?.ok ? download : info?.downloaded_update;
+  const installReady = Boolean(
+    check?.ok === true
+    && check.update_available === true
+    && installableUpdateDownload(downloaded, check.latest),
+  );
   const supported = Boolean(check?.supported ?? info?.supported);
   const updateAvailable = Boolean(check?.update_available);
   const changelog = latest?.changelog || downloaded?.latest?.changelog;
@@ -87,12 +92,16 @@ export function AppUpdateView() {
         const nextInfo = await getAppUpdateInfo();
         if (disposed) return;
         setInfo(nextInfo);
-        if (nextInfo.downloaded_update?.ok) setDownload(nextInfo.downloaded_update);
+        if (installableUpdateDownload(nextInfo.downloaded_update)) setDownload(nextInfo.downloaded_update);
         const result = await checkAppUpdate();
         if (disposed) return;
         setCheck(result);
         setInfo(result);
-        setDownload(result.downloaded_update?.ok ? result.downloaded_update : nextInfo.downloaded_update || null);
+        setDownload(
+          installableUpdateDownload(result.downloaded_update)
+            ? result.downloaded_update
+            : installableUpdateDownload(nextInfo.downloaded_update) ? nextInfo.downloaded_update : null,
+        );
         setProgress(null);
         if (result.ok === false) {
           setStatus(result.error || '检查更新失败');
@@ -137,7 +146,7 @@ export function AppUpdateView() {
       const result = await checkAppUpdate();
       setCheck(result);
       setInfo(result);
-      setDownload(result.downloaded_update?.ok ? result.downloaded_update : null);
+      setDownload(installableUpdateDownload(result.downloaded_update) ? result.downloaded_update : null);
       setProgress(null);
       if (result.ok === false) throw new Error(result.error || '检查更新失败');
       setStatus(result.update_available ? result.reason || '发现可用更新' : result.reason || '当前已是最新版本');
@@ -156,7 +165,6 @@ export function AppUpdateView() {
     try {
       const result = await downloadAppUpdate();
       if (!mountedRef.current) return;
-      setDownload(result);
       if (!result.ok) {
         if (result.cancelled) {
           setDownload(null);
@@ -166,11 +174,16 @@ export function AppUpdateView() {
         }
         throw new Error(result.error || '下载应用更新失败');
       }
+      if (!installableUpdateDownload(result)) {
+        setDownload(null);
+        throw new Error('更新下载未通过完整 SHA256 校验，已拒绝安装');
+      }
+      setDownload(result);
       const nextInfo = await getAppUpdateInfo();
       if (!mountedRef.current) return;
       setInfo(nextInfo);
       setProgress({ status: 'completed', file_name: result.file_name, percent: 100 });
-      setStatus(result.verified ? '更新已下载并通过校验，可安装并重启' : '更新已下载，可安装并重启；当前元数据未提供 SHA256 校验值');
+      setStatus('更新已下载并通过 SHA256 校验，可安装并重启');
     } catch (err) {
       if (!mountedRef.current) return;
       setStatus(err instanceof Error ? err.message : '下载应用更新失败');
@@ -181,9 +194,9 @@ export function AppUpdateView() {
 
   async function installDownloadedUpdate() {
     if (action) return;
-    const dmgPath = downloaded?.path || info?.downloaded_dmg_path || '';
-    if (!dmgPath) {
-      setStatus('请先下载应用更新');
+    const dmgPath = installReady ? downloaded?.path || '' : '';
+    if (!dmgPath || !installReady) {
+      setStatus('请先下载并完成 SHA256 校验后再安装更新');
       return;
     }
     setAction('install');
@@ -215,7 +228,7 @@ export function AppUpdateView() {
           <button type="button" className="page-back-link app-update-back-link" onClick={() => navigateTo('settings')}>← 返回设置</button>
           <span className="hy-eyebrow">Update Channel · {channelLabel}</span>
           <h2>应用更新</h2>
-          <p>检查 Oha Yachiyo 桌面应用版本差距，下载 DMG，并在校验后安装重启。</p>
+          <p>检查 Oha-Yachiyo 桌面应用版本差距，下载 DMG，并在校验后安装重启。</p>
         </div>
         <div className="hy-action-row">
           <button type="button" className="hy-btn hy-btn-ghost" disabled={Boolean(action)} onClick={() => void runCheck()}>
@@ -236,7 +249,7 @@ export function AppUpdateView() {
           <p>{updateAvailable ? check?.reason || '可下载新的桌面应用版本。' : info?.error || check?.reason || '当前未检测到可用更新。'}</p>
         </div>
         <div className="app-update-actions">
-          {downloaded?.ok ? (
+          {installReady ? (
             <button type="button" className="hy-btn hy-btn-primary" disabled={Boolean(action)} onClick={requestInstallDownloadedUpdate}>
               {action === 'install' ? '准备中...' : '安装并重启'}
             </button>
@@ -276,7 +289,9 @@ export function AppUpdateView() {
         <div className="app-update-progress-meta">
           <span>{progress?.received_bytes ? formatByteCount(progress.received_bytes) : '0 B'}</span>
           <span>{progress?.total_bytes ? formatByteCount(progress.total_bytes) : downloaded?.path || '—'}</span>
-          <span>{downloaded?.verified ? 'SHA256 已通过' : downloaded?.ok ? '未提供 SHA256' : '等待校验'}</span>
+          <span data-update-verification-status={installReady ? 'verified' : downloaded?.ok ? 'rejected' : 'pending'}>
+            {installReady ? 'SHA256 已通过' : downloaded?.ok ? '校验未通过，不可安装' : '等待校验'}
+          </span>
         </div>
       </section>
 
@@ -360,7 +375,8 @@ function updateStatusLabel(
   check: AppUpdateCheckResult | null,
   download: AppUpdateDownloadResult | undefined,
 ) {
-  if (download?.ok) return '已下载';
+  if (installableUpdateDownload(download)) return '已验证下载';
+  if (download?.ok) return '校验失败';
   if (check?.ok === false) return '检查失败';
   if (check?.update_available) return '有更新';
   if (check?.ok) return '已是最新';
@@ -369,7 +385,7 @@ function updateStatusLabel(
 }
 
 function downloadProgressPercent(progress: AppUpdateDownloadProgress | null, download: AppUpdateDownloadResult | undefined) {
-  if (download?.ok) return 100;
+  if (installableUpdateDownload(download)) return 100;
   if (typeof progress?.percent === 'number') return Math.max(0, Math.min(100, progress.percent));
   if (progress?.received_bytes && progress.total_bytes) {
     return Math.max(0, Math.min(100, (progress.received_bytes / progress.total_bytes) * 100));
@@ -380,7 +396,8 @@ function downloadProgressPercent(progress: AppUpdateDownloadProgress | null, dow
 }
 
 function downloadProgressLabel(progress: AppUpdateDownloadProgress | null, download: AppUpdateDownloadResult | undefined) {
-  if (download?.ok) return '已下载';
+  if (installableUpdateDownload(download)) return '已验证';
+  if (download?.ok) return '校验失败';
   if (!progress) return '待下载';
   if (progress.status === 'verifying') return '校验中';
   if (progress.status === 'completed') return '100%';
@@ -388,6 +405,26 @@ function downloadProgressLabel(progress: AppUpdateDownloadProgress | null, downl
   if (typeof progress.percent === 'number') return `${progress.percent.toFixed(progress.percent % 1 ? 1 : 0)}%`;
   if (progress.status === 'starting') return '准备下载';
   return '下载中';
+}
+
+function validUpdateSha256(value: unknown): value is string {
+  return typeof value === 'string' && /^[0-9a-f]{64}$/i.test(value.trim());
+}
+
+function installableUpdateDownload(
+  download: AppUpdateDownloadResult | null | undefined,
+  expectedLatest?: LatestReleaseMetadata,
+): download is AppUpdateDownloadResult & { verified: true; sha256: string } {
+  if (!download?.ok || download.verified !== true) return false;
+  const actualSha256 = download.sha256;
+  const embeddedSha256 = download.latest?.sha256;
+  if (!validUpdateSha256(actualSha256) || !validUpdateSha256(embeddedSha256)) return false;
+  if (actualSha256.toLowerCase() !== embeddedSha256.toLowerCase()) return false;
+  if (expectedLatest !== undefined) {
+    return validUpdateSha256(expectedLatest.sha256)
+      && actualSha256.toLowerCase() === expectedLatest.sha256.toLowerCase();
+  }
+  return true;
 }
 
 function downloadStatusLabel(progress: AppUpdateDownloadProgress | null) {

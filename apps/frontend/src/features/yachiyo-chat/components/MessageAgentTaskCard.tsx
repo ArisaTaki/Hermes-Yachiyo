@@ -1,9 +1,11 @@
 import {
+  agentTaskHasVisibleExecution,
   agentTaskSnapshotFromMessage,
   type YachiyoTaskChatMessage,
 } from '../taskSnapshots';
+import type { TaskPermissionRecoveryAction } from '../taskPermissionRecovery';
 import type { AgentTaskSnapshot, ApprovalCardSnapshot } from '../types';
-import { AgentTaskCard, type TaskPermissionRecoveryAction } from './AgentTaskCard';
+import { AgentTaskCard } from './AgentTaskCard';
 
 export function MessageAgentTaskCard({
   busy,
@@ -28,8 +30,12 @@ export function MessageAgentTaskCard({
   onRunRecoveryAction?: (task: AgentTaskSnapshot, action: TaskPermissionRecoveryAction) => void;
   publicTaskSnapshot?: AgentTaskSnapshot | null;
 }) {
-  if (hidden) return null;
-  const task = publicTaskSnapshot || agentTaskSnapshotFromMessage(message, displayContent);
+  if (hidden || message.role !== 'assistant') return null;
+  const publicTask = publicTaskSnapshot && agentTaskHasVisibleExecution(publicTaskSnapshot)
+    ? publicTaskSnapshot
+    : null;
+  const messageTask = agentTaskSnapshotFromMessage(message, displayContent);
+  const task = publicTask || (agentTaskHasVisibleExecution(messageTask, message) ? messageTask : null);
   if (!task) return null;
   return (
     <AgentTaskCard
@@ -39,6 +45,7 @@ export function MessageAgentTaskCard({
       onOpenStudio={onOpenStudio}
       onRejectApproval={onRejectApproval}
       onRunRecoveryAction={onRunRecoveryAction}
+      surface="chat"
       task={task}
     />
   );

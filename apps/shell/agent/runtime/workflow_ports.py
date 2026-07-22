@@ -37,6 +37,8 @@ class WorkflowContinuationPortBundle:
     update_run: Any | None = None
     update_run_group: Any | None = None
     get_run: Any | None = None
+    get_run_group: Any | None = None
+    transaction_scope: Any | None = None
     pending_approval_private: Any | None = None
     approve_workflow_node: Any | None = None
     runtime_limits: Any | None = None

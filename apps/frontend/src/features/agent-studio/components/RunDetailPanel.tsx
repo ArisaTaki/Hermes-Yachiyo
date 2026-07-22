@@ -293,13 +293,13 @@ export function RunDetailPanel({
             <div className="run-detail-title">
               <span>{runKindLabel(selectedRun.kind)} · {formatRunDate(selectedRun.created_at)}</span>
               <h3>{selectedRun.runnable_name || selectedRun.runnable_id}</h3>
-              <p>{selectedRun.user_goal || 'No task goal recorded.'}</p>
+              <p>{selectedRun.user_goal || '暂无任务目标记录。'}</p>
             </div>
             <span className={`run-status-pill ${runStatusTone(selectedRun.status)}`}>{runStatusLabel(selectedRun.status)}</span>
           </header>
           <div className="run-detail-meta" data-testid="agent-run-detail-meta">
             <span>{runKindLabel(selectedRun.kind)}</span>
-            <span>Updated {formatRunDate(selectedRun.updated_at || selectedRun.created_at)}</span>
+            <span>更新于 {formatRunDate(selectedRun.updated_at || selectedRun.created_at)}</span>
             {selectedRunIsLive ? <span className="run-live-pill">实时更新</span> : null}
             {selectedRun.run_group_id ? <span>Group {selectedRun.run_group_id}</span> : null}
             {selectedRun.task_id ? <code>Task {selectedRun.task_id}</code> : null}
@@ -553,7 +553,7 @@ export function RunDetailPanel({
                 <span>Agent 收到的完整任务目标</span>
               </div>
             </div>
-            <p>{selectedRun.user_goal || 'No task goal recorded.'}</p>
+            <p>{selectedRun.user_goal || '暂无任务目标记录。'}</p>
           </section>
           <section className={`run-detail-block run-result-block ${runStatusTone(selectedRun.status)}`} data-testid="agent-run-detail-result">
             <div className="run-detail-section-head">
@@ -564,7 +564,7 @@ export function RunDetailPanel({
               <span className={`run-status-pill ${runStatusTone(selectedRun.status)}`}>{runStatusLabel(selectedRun.status)}</span>
             </div>
             <RunExpandableContent
-              content={selectedRun.result || 'No result yet.'}
+              content={selectedRun.result || '暂无结果。'}
               label="展开完整结果"
               defaultOpen
             />

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from scripts import verify_secret_redaction as verifier
 
 
@@ -37,6 +39,199 @@ def test_verify_secret_redaction_scans_binary_sqlite_like_files(tmp_path):
 
     assert len(findings) == 1
     assert findings[0].path == db_path
+
+
+def test_verify_secret_redaction_ignores_control_interrupted_redacted_placeholder(tmp_path):
+    db_path = tmp_path / "chat.db"
+    db_path.write_bytes(b"SQLite format 3\x00token=[red\x00ac\x01ted]\x00")
+
+    findings = verifier.verify_secret_redaction(paths=[db_path])
+
+    assert findings == []
+
+
+def test_verify_secret_redaction_still_detects_contiguous_printable_token(tmp_path):
+    db_path = tmp_path / "chat.db"
+    db_path.write_bytes(b"SQLite format 3\x00token=fixture-token-123456\x00")
+
+    findings = verifier.verify_secret_redaction(paths=[db_path])
+
+    assert len(findings) == 1
+    assert findings[0].path == db_path
+
+
+def test_verify_secret_redaction_scans_real_sqlite_wal_sidecar_name(tmp_path):
+    runtime_dir = tmp_path / "runtime"
+    runtime_dir.mkdir()
+    wal_path = runtime_dir / "chat.db-wal"
+    wal_path.write_bytes(
+        b"SQLite WAL fixture\x00token=sidecar-fixture-token-123456\x00"
+    )
+
+    findings = verifier.verify_secret_redaction(paths=[runtime_dir])
+
+    assert len(findings) == 1
+    assert findings[0].path == wal_path
+
+
+@pytest.mark.parametrize(
+    "credential_ref",
+    (
+        "model_source:source_0123456789ab:api_key:0123456789abcdef0123456789abcdef",
+        "model_profile:profile_0123456789ab:api_key:0123456789abcdef0123456789abcdef",
+        "agent:agent-daily-helper:model_api_key:0123456789abcdef0123456789abcdef",
+    ),
+)
+def test_verify_secret_redaction_allows_strict_keychain_credential_refs(
+    tmp_path,
+    credential_ref,
+):
+    db_path = tmp_path / "runtime.db"
+    db_path.write_bytes(
+        b"SQLite format 3\x00credential_ref\x00previous-column-1"
+        + credential_ref.encode("ascii")
+        + b"\x00"
+    )
+
+    assert verifier.verify_secret_redaction(paths=[db_path]) == []
+
+
+@pytest.mark.parametrize(
+    "secret_like_run",
+    (
+        "model_source:source_0123456789ab:api_key:zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
+        "model_source:source_0123456789ab:api_key:0123456789abcdef0123456789abcde",
+        (
+            "api_key=model_source:source_0123456789ab:api_key:"
+            "0123456789abcdef0123456789abcdef"
+        ),
+        (
+            "agent:agent-daily-helper:model_api_key:"
+            "0123456789abcdef0123456789abcdef:api_key=sk-nested-secret123456"
+        ),
+        "api_key=sk-runtime-secret123456",
+        "Authorization: Bearer runtimeBearerSecret123456",
+    ),
+)
+def test_verify_secret_redaction_does_not_exempt_malformed_refs_or_real_secrets(
+    tmp_path,
+    secret_like_run,
+):
+    db_path = tmp_path / "runtime.db"
+    db_path.write_bytes(
+        b"SQLite format 3\x00" + secret_like_run.encode("ascii") + b"\x00"
+    )
+
+    findings = verifier.verify_secret_redaction(paths=[db_path])
+
+    assert len(findings) == 1
+    assert findings[0].path == db_path
+
+
+def test_verify_secret_redaction_streams_sqlite_files_larger_than_limit(tmp_path):
+    db_path = tmp_path / "runtime.sqlite3"
+    db_path.write_bytes(b"SQLite format 3\x00" + b"\x00" * 256)
+
+    findings = verifier.verify_secret_redaction(
+        paths=[db_path],
+        max_file_bytes=32,
+    )
+
+    assert findings == []
+
+
+def test_verify_secret_redaction_stream_detects_secret_beyond_size_limit(tmp_path):
+    wal_path = tmp_path / "runtime.sqlite3-wal"
+    wal_path.write_bytes(
+        b"SQLite WAL fixture\x00"
+        + b"\x00" * 256
+        + b"api_key=sk-streamed-secret123456\x00"
+    )
+
+    findings = verifier.verify_secret_redaction(
+        paths=[wal_path],
+        max_file_bytes=32,
+    )
+
+    assert len(findings) == 1
+    assert findings[0].path == wal_path
+
+
+def test_verify_secret_redaction_stream_detects_printable_run_across_chunks(
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setattr(verifier, "_SQLITE_SCAN_CHUNK_BYTES", 16)
+    db_path = tmp_path / "runtime.db"
+    db_path.write_bytes(
+        b"SQLite\x00"
+        + b"\x00" * 7
+        + b"api_key=sk-cross-chunk-secret123456\x00"
+    )
+
+    findings = verifier.verify_secret_redaction(paths=[db_path])
+
+    assert len(findings) == 1
+    assert findings[0].path == db_path
+
+
+def test_verify_secret_redaction_stream_allows_credential_ref_across_chunks(
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setattr(verifier, "_SQLITE_SCAN_CHUNK_BYTES", 16)
+    db_path = tmp_path / "runtime.db"
+    db_path.write_bytes(
+        b"SQLite\x00previous-column-1"
+        b"model_source:source_0123456789ab:api_key:"
+        b"0123456789abcdef0123456789abcdef\x00"
+    )
+
+    assert verifier.verify_secret_redaction(paths=[db_path]) == []
+
+
+@pytest.mark.parametrize("fragment", ("workspace", "core"))
+def test_verify_secret_redaction_allows_exact_task_id_overflow_continuation(
+    tmp_path,
+    fragment,
+):
+    db_path = tmp_path / "runtime.db"
+    db_path.write_bytes(
+        b"SQLite format 3\x00"
+        + f"sk-{fragment}-0123456789ab\",\"next_field\":true".encode("ascii")
+        + b"\x00"
+    )
+
+    assert verifier.verify_secret_redaction(paths=[db_path]) == []
+
+
+def test_verify_secret_redaction_workspace_fragment_does_not_hide_real_sk_key(
+    tmp_path,
+):
+    db_path = tmp_path / "runtime.db"
+    db_path.write_bytes(
+        b"SQLite format 3\x00"
+        b"sk-workspace-0123456789abcdef-real-secret\"\x00"
+    )
+
+    findings = verifier.verify_secret_redaction(paths=[db_path])
+
+    assert len(findings) == 1
+    assert findings[0].path == db_path
+
+
+def test_verify_secret_redaction_workspace_overflow_continuation_across_chunks(
+    monkeypatch,
+    tmp_path,
+):
+    monkeypatch.setattr(verifier, "_SQLITE_SCAN_CHUNK_BYTES", 16)
+    db_path = tmp_path / "runtime.db"
+    db_path.write_bytes(
+        b"SQLite\x00padding\x00"
+        b"sk-workspace-0123456789ab\",\"next_field\":true\x00"
+    )
+
+    assert verifier.verify_secret_redaction(paths=[db_path]) == []
 
 
 def test_verify_secret_redaction_skips_large_non_text_runtime_assets(tmp_path):

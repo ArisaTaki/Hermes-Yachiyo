@@ -5,19 +5,20 @@ import { RuntimeDebugSummary } from '../../runtime-shared/components/RuntimeDebu
 import { RuntimeExecutionEnvelopeSummary } from '../../runtime-shared/components/RuntimeExecutionEnvelopeSummary';
 import type { RuntimeImageArtifactPointSelection } from '../../runtime-shared/components/RuntimeReadableArtifactPreview';
 import { RuntimeTimelineSummary } from '../../runtime-shared/components/RuntimeTimelineSummary';
-import { runtimeEventIsDesktopReadinessRecovered } from '../../runtime-shared/desktopEvents';
 import {
   runtimeToolRecoveryActionWithInputPatch,
-  runtimeToolRecoveryActionsFromRecords,
   runtimeToolRecoveryMissingRequiredFields,
   runtimeToolRecoveryRetryAction,
   type RuntimeToolRecoveryAction,
 } from '../../runtime-shared/toolRecoveryActions';
-import { runtimeToolRecoveryHintsFromRecords } from '../../runtime-shared/toolRecoveryHints';
 import {
   yachiyoTaskReplanRecoveryActions,
   yachiyoTaskRuntimeExecutionRetryActions,
 } from '../taskRecoveryActions';
+import {
+  consumerTaskFailurePresentation,
+  type ConsumerFailureKind,
+} from '../consumerFailure';
 import { useYachiyoTaskEventReplay } from '../hooks/useYachiyoTaskEventReplay';
 import {
   yachiyoTaskApprovalStudioTarget,
@@ -31,6 +32,11 @@ import {
   plannerSummaryFromTask,
   type TaskPlannerSummarySnapshot,
 } from '../taskPlannerSummary';
+import {
+  taskPermissionRecoveryFromEvents as taskPermissionRecoveryFromEventsImpl,
+  taskPermissionRecoveryFromTaskFacts as taskPermissionRecoveryFromTaskFactsImpl,
+  type TaskPermissionRecovery,
+} from '../taskPermissionRecovery';
 import type {
   AgentTaskSnapshot,
   ApprovalCardSnapshot,
@@ -46,6 +52,7 @@ export function AgentTaskCard({
   onOpenStudio,
   onRejectApproval,
   onRunRecoveryAction,
+  surface = 'task',
   task,
 }: {
   busy?: boolean;
@@ -54,12 +61,15 @@ export function AgentTaskCard({
   onOpenStudio?: (runId: string | undefined, studioUrl?: string) => void;
   onRejectApproval?: (task: AgentTaskSnapshot, approval: ApprovalCardSnapshot) => void | Promise<void>;
   onRunRecoveryAction?: (task: AgentTaskSnapshot, action: TaskPermissionRecoveryAction) => void | Promise<void>;
+  surface?: 'chat' | 'task';
   task: AgentTaskSnapshot;
 }) {
+  const isChatSurface = surface === 'chat';
   const status = task.status || 'running';
   const runId = yachiyoTaskRunId(task);
   const studioRunId = yachiyoTaskStudioRunId(task);
   const studioUrl = yachiyoTaskStudioUrl(task);
+  const [runtimeDetailsOpen, setRuntimeDetailsOpen] = useState(false);
   const {
     approvalFacts,
     artifactFacts,
@@ -72,19 +82,52 @@ export function AgentTaskCard({
     timelineEventSource,
     timelineSummaryEvents,
     toolCallFacts,
-  } = useYachiyoTaskEventReplay(task);
+  } = useYachiyoTaskEventReplay(task, { enabled: !isChatSurface && runtimeDetailsOpen });
   const [recoveryCoordinate, setRecoveryCoordinate] = useState<TaskRecoveryCoordinate | null>(null);
   const canCancel = onCancelTask && ['queued', 'running', 'waiting_approval'].includes(status);
-  const hasHeaderActions = Boolean((studioRunId && studioUrl && onOpenStudio) || canCancel);
+  const canOfferRecovery = !['completed', 'success', 'succeeded'].includes(status.toLowerCase());
+  const hasHeaderActions = Boolean((!isChatSurface && studioRunId && studioUrl && onOpenStudio) || canCancel);
   const permissionRecovery = taskPermissionRecoveryFromTaskFacts(timelineEvents, toolCallFacts);
   const runtimeExecutionRetryActions = yachiyoTaskRuntimeExecutionRetryActions(task);
   const taskRecoveryCoordinate = recoveryCoordinate?.task_id === task.task_id ? recoveryCoordinate : null;
+  const canonicalRecoveryItems = taskCanonicalRecoveryItems(
+    task,
+    permissionRecovery,
+    runtimeExecutionRetryActions,
+    taskRecoveryCoordinate,
+  );
+  const visibleRecoveryItems = isChatSurface
+    ? chatTaskRecoveryItems(task, canonicalRecoveryItems)
+    : canonicalRecoveryItems;
+  const hasRecovery = canOfferRecovery && Boolean(
+    visibleRecoveryItems.length
+    || permissionRecovery
+    || (!isChatSurface && task.replan_recoveries?.length),
+  );
+  const visibleApprovalFacts = isChatSurface
+    ? approvalFacts.filter((approval) => (approval.status || 'pending') === 'pending')
+    : approvalFacts;
+  const normalizedStatus = status.toLowerCase();
+  const showChatFailure = isChatSurface && normalizedStatus === 'failed';
+  const showChatCancelled = isChatSurface && ['cancelled', 'canceled'].includes(normalizedStatus);
+  const chatFailurePresentation = showChatFailure || showChatCancelled
+    ? consumerTaskFailurePresentation(task)
+    : null;
+  const hasChatContent = Boolean(
+    canCancel
+    || visibleApprovalFacts.length
+    || artifactFacts.length
+    || hasRecovery
+    || chatFailurePresentation
+  );
   const recoveryScreenPointContract = taskRecoveryScreenPointContract(permissionRecovery);
   const plannerSummary = plannerSummaryFromTask(task);
 
+  if (isChatSurface && !hasChatContent) return null;
+
   return (
     <section
-      className={`yachiyo-agent-task-card ${status}`}
+      className={`yachiyo-agent-task-card ${status}${isChatSurface ? ' chat-surface' : ''}`}
       data-event-source={timelineEventSource}
       data-task-id={task.task_id}
       data-task-status={status}
@@ -92,16 +135,24 @@ export function AgentTaskCard({
       data-testid="yachiyo-agent-task-card"
     >
       <header className="yachiyo-agent-task-card-head">
-        <span className="yachiyo-agent-task-status">{taskStatusLabel(status)}</span>
+        <span className="yachiyo-agent-task-status">
+          {chatFailurePresentation
+            ? chatFailureStatusLabel(chatFailurePresentation.kind)
+            : taskStatusLabel(status)}
+        </span>
         <div>
-          <strong>{task.title || 'Yachiyo task'}</strong>
-          {task.current_step || task.progress_text ? (
+          <strong>
+            {isChatSurface
+              ? chatFailurePresentation?.title || chatTaskStatusTitle(status, artifactFacts.length > 0)
+              : task.title || 'Yachiyo task'}
+          </strong>
+          {!isChatSurface && (task.current_step || task.progress_text) ? (
             <p>{task.current_step || task.progress_text}</p>
           ) : null}
         </div>
         {hasHeaderActions ? (
           <div className="yachiyo-agent-task-card-actions">
-            {studioRunId && studioUrl && onOpenStudio ? (
+            {!isChatSurface && studioRunId && studioUrl && onOpenStudio ? (
               <a
                 href={studioUrl}
                 data-run-id={studioRunId}
@@ -131,176 +182,105 @@ export function AgentTaskCard({
           </div>
         ) : null}
       </header>
-      {task.summary ? <p className="yachiyo-agent-task-summary">{task.summary}</p> : null}
-      {plannerSummary ? <TaskPlannerSummary summary={plannerSummary} /> : null}
-      {task.runtime_execution_envelope ? (
-        <RuntimeExecutionEnvelopeSummary
-          envelope={task.runtime_execution_envelope}
-          leading={<UiIcon name="activity" title="Runtime Execution" />}
-          testId="yachiyo-agent-task-runtime-execution"
-          variant="chat"
-        />
+      {!isChatSurface && task.summary ? (
+        <p className="yachiyo-agent-task-summary">{task.summary}</p>
       ) : null}
-      {runtimeExecutionRetryActions.length ? (
-        <TaskRuntimeExecutionRetryActions
-          actions={runtimeExecutionRetryActions}
-          busy={busy}
-          onRunRecoveryAction={onRunRecoveryAction}
-          task={task}
-        />
-      ) : null}
-      {task.replan_recoveries?.length ? (
-        <TaskReplanRecoverySummary
-          busy={busy}
-          onRunRecoveryAction={onRunRecoveryAction}
-          recoveries={task.replan_recoveries}
-          task={task}
-        />
-      ) : null}
-      <TaskCoreProgress task={task} />
-      <RuntimeDebugSummary
-        className="yachiyo-agent-task-runtime-debug"
-        compact
-        sourceLabel="Task runtime"
-        summary={task.runtime_debug}
-        testId="yachiyo-agent-task-runtime-debug"
-      />
-      {timelineEvents.length || toolCallFacts.length ? (
-        <ToolCallSummary events={timelineEvents} toolCalls={toolCallFacts} />
-      ) : null}
-      {permissionRecovery ? (
-        <div
-          className="yachiyo-agent-task-permission-recovery"
-          data-blocking-conditions={permissionRecovery.blockingConditions.join(',')}
-          data-desktop-tools={permissionRecovery.tools.join(',')}
-          data-permission-targets={permissionRecovery.targets.join(',')}
-          data-recovery-kind={permissionRecovery.kind}
-          data-testid="yachiyo-agent-task-permission-recovery"
-        >
-          <UiIcon name="diagnostics" />
-          <div>
-            <strong>
-              {permissionRecovery.kind === 'permission'
-                ? '需要恢复桌面权限'
-                : permissionRecovery.kind === 'blocking_condition'
-                  ? '运行条件阻塞'
-                  : '需要处理运行环境'}
-            </strong>
-            <span>{permissionRecovery.labels.join('、')} 未就绪</span>
-            {permissionRecovery.hints.map((hint) => (
-              <span className="yachiyo-agent-task-recovery-hint" key={hint}>{hint}</span>
-            ))}
-            {permissionRecovery.actions.length ? (
-              <div
-                className="yachiyo-agent-task-recovery-actions"
-                data-testid="yachiyo-agent-task-recovery-actions"
-              >
-                {permissionRecovery.actions.slice(0, 3).flatMap((action) => {
-                  const retryAction = taskRecoveryRetryActionWithSelectedCoordinate(
-                    runtimeToolRecoveryRetryAction(action),
-                    taskRecoveryCoordinate,
-                  );
-                  const retryFields = retryAction?.required_retry_fields || [];
-                  const missingRetryFields = retryAction ? runtimeToolRecoveryMissingRequiredFields(retryAction) : [];
-                  const retryInputSource = retryAction?.retry_input_source === 'screen_capture_artifact'
-                    ? '截图定位'
-                    : '';
-                  const selectedRetryPoint = retryInputSource && taskRecoveryCoordinate
-                    ? taskRecoveryCoordinate
-                    : null;
-                  return [
-                    <button
-                      type="button"
-                      data-permission-target={action.permission_target}
-                      data-recovery-kind="permission_recovery"
-                      data-recovery-tool={action.tool}
-                      data-testid="yachiyo-agent-task-run-recovery-action"
-                      disabled={busy || !onRunRecoveryAction}
-                      key={`${action.tool}:${action.prompt}:${action.permission_target}:recovery`}
-                      onClick={() => void onRunRecoveryAction?.(task, action)}
-                      title={action.prompt}
-                    >
-                      <UiIcon name="settings" />
-                      <span>{action.label}</span>
-                    </button>,
-                    retryAction ? (
-                      <button
-                        type="button"
-                        className={retryFields.length ? 'has-retry-contract' : undefined}
-                        data-required-retry-fields={retryFields.join(',')}
-                        data-missing-retry-fields={missingRetryFields.join(',')}
-                        data-permission-target={retryAction.permission_target}
-                        data-retry-input-source={retryAction.retry_input_source || ''}
-                        data-selected-retry-x={selectedRetryPoint?.x ?? ''}
-                        data-selected-retry-y={selectedRetryPoint?.y ?? ''}
-                        data-recovery-kind="retry_original"
-                        data-recovery-tool={retryAction.tool}
-                        data-retry-input-schema={JSON.stringify(retryAction.retry_input_schema || {})}
-                        data-testid="yachiyo-agent-task-run-retry-action"
-                        disabled={busy || !onRunRecoveryAction || missingRetryFields.length > 0}
-                        key={`${retryAction.tool}:${retryAction.prompt}:${retryAction.permission_target}:retry`}
-                        onClick={() => void onRunRecoveryAction?.(task, retryAction)}
-                        title={retryAction.prompt}
-                      >
-                        <UiIcon name="retry" />
-                        <span>{retryAction.label}</span>
-                        {missingRetryFields.length ? (
-                          <small className="yachiyo-agent-task-retry-contract">
-                            待补参数：{missingRetryFields.join('、')}
-                            {retryInputSource ? ` · ${retryInputSource}` : ''}
-                          </small>
-                        ) : null}
-                      </button>
-                    ) : null,
-                  ];
-                })}
-              </div>
-            ) : null}
-          </div>
-          <a
-            href={permissionRecovery.href}
-            data-testid="yachiyo-agent-task-open-diagnostics"
-          >
-            <UiIcon name="diagnostics" />
-            <span>打开诊断</span>
-          </a>
-        </div>
-      ) : null}
-      {timelineEvents.length ? (
-        <RuntimeTimelineSummary
-          className="yachiyo-agent-task-timeline"
-          eventTestId="yachiyo-agent-task-timeline-event"
-          events={timelineSummaryEvents}
-          testId="yachiyo-agent-task-timeline"
-        />
-      ) : null}
-      {replayError ? (
-        <p className="yachiyo-agent-task-timeline-status error" data-testid="yachiyo-agent-task-event-error">
-          {replayError}
+      {isChatSurface && chatFailurePresentation ? (
+        <p className="yachiyo-agent-task-summary" data-testid="yachiyo-agent-task-consumer-failure">
+          {chatFailurePresentation.detail}
         </p>
       ) : null}
-      {replayHasMore ? (
-        <button
-          type="button"
-          className="yachiyo-agent-task-load-events"
-          data-next-after-sequence={replayNextAfterSequence}
-          data-testid="yachiyo-agent-task-load-more-events"
-          disabled={replayLoading}
-          onClick={() => void loadMoreTaskEvents()}
+      {!isChatSurface ? (
+        <details
+          className="yachiyo-agent-task-runtime-details run-detail-fold"
+          data-testid="yachiyo-agent-task-runtime-details"
+          onToggle={(event) => setRuntimeDetailsOpen(event.currentTarget.open)}
         >
-          {replayLoading ? '加载任务事件中...' : '加载更多任务事件'}
-        </button>
+          <summary className="yachiyo-agent-task-runtime-details-summary">
+            <UiIcon name="activity" />
+            <span>运行详情</span>
+            {replayLoading ? <small>正在加载事件…</small> : null}
+          </summary>
+          {runtimeDetailsOpen ? (
+            <div
+              className="yachiyo-agent-task-runtime-details-body run-detail-fold-body"
+              data-testid="yachiyo-agent-task-runtime-details-body"
+            >
+            {plannerSummary ? <TaskPlannerSummary summary={plannerSummary} /> : null}
+            {task.runtime_execution_envelope ? (
+              <RuntimeExecutionEnvelopeSummary
+                envelope={task.runtime_execution_envelope}
+                leading={<UiIcon name="activity" title="Runtime Execution" />}
+                testId="yachiyo-agent-task-runtime-execution"
+                variant="chat"
+              />
+            ) : null}
+            <TaskCoreProgress task={task} />
+            <RuntimeDebugSummary
+              className="yachiyo-agent-task-runtime-debug"
+              compact
+              sourceLabel="Task runtime"
+              summary={task.runtime_debug}
+              testId="yachiyo-agent-task-runtime-debug"
+            />
+            {timelineEvents.length || toolCallFacts.length ? (
+              <ToolCallSummary events={timelineEvents} toolCalls={toolCallFacts} />
+            ) : null}
+            {timelineEvents.length ? (
+              <RuntimeTimelineSummary
+                className="yachiyo-agent-task-timeline"
+                eventTestId="yachiyo-agent-task-timeline-event"
+                events={timelineSummaryEvents}
+                testId="yachiyo-agent-task-timeline"
+              />
+            ) : null}
+            {replayError ? (
+              <p className="yachiyo-agent-task-timeline-status error" data-testid="yachiyo-agent-task-event-error">
+                {replayError}
+              </p>
+            ) : null}
+            {replayHasMore ? (
+              <button
+                type="button"
+                className="yachiyo-agent-task-load-events"
+                data-next-after-sequence={replayNextAfterSequence}
+                data-testid="yachiyo-agent-task-load-more-events"
+                disabled={replayLoading}
+                onClick={() => void loadMoreTaskEvents()}
+              >
+                {replayLoading ? '加载任务事件中...' : '加载更多任务事件'}
+              </button>
+            ) : null}
+            </div>
+          ) : null}
+        </details>
       ) : null}
-      {approvalFacts.length ? (
+      {hasRecovery ? (
+        <TaskCanonicalRecoverySummary
+          busy={busy}
+          items={visibleRecoveryItems}
+          onRunRecoveryAction={onRunRecoveryAction}
+          permissionRecovery={permissionRecovery}
+          recoveries={task.replan_recoveries || []}
+          surface={surface}
+          task={task}
+          taskRecoveryCoordinate={taskRecoveryCoordinate}
+        />
+      ) : null}
+      {visibleApprovalFacts.length ? (
         <div className="yachiyo-agent-task-approvals">
-          {approvalFacts.slice(0, 2).map((approval) => {
+          {visibleApprovalFacts.slice(0, 2).map((approval, approvalIndex) => {
             const pending = (approval.status || 'pending') === 'pending';
-            const actionable = pending && (onApproveApproval || onRejectApproval);
+            const actionable = pending
+              && Boolean(String(approval.approval_id || '').trim())
+              && (onApproveApproval || onRejectApproval);
             const {
               runId: approvalStudioRunId,
               studioUrl: approvalStudioUrl,
             } = yachiyoTaskApprovalStudioTarget(task, approval);
-            const canOpenApprovalStudio = Boolean(onOpenStudio && (approvalStudioRunId || approvalStudioUrl));
+            const canOpenApprovalStudio = Boolean(
+              !isChatSurface && onOpenStudio && (approvalStudioRunId || approvalStudioUrl),
+            );
             return (
               <ApprovalCard
                 actions={
@@ -332,7 +312,7 @@ export function AgentTaskCard({
                 }
                 approval={approval}
                 busy={busy}
-                key={approval.approval_id}
+                key={approval.approval_id || `${approval.run_id || runId}:${approval.tool_name}:${approvalIndex}`}
                 onApprove={
                   actionable && onApproveApproval
                     ? () => void onApproveApproval(task, approval)
@@ -363,11 +343,29 @@ export function AgentTaskCard({
                 onSelectImagePoint={(selection) => {
                   setRecoveryCoordinate(taskRecoveryCoordinateFromSelection(task.task_id, selection));
                 }}
+                presentationMode={isChatSurface ? 'consumer' : 'diagnostic'}
                 selectedImagePoint={taskRecoverySelectedPointForArtifact(taskRecoveryCoordinate, artifact)}
                 taskId={task.task_id}
               />
             );
           })}
+          {isChatSurface && artifactFacts.length > 3
+          && onOpenStudio
+          && (studioRunId || studioUrl) ? (
+            <button
+              type="button"
+              data-testid="yachiyo-agent-task-open-more-artifacts"
+              onClick={() => {
+                if (studioUrl) {
+                  onOpenStudio(undefined, studioUrl);
+                  return;
+                }
+                onOpenStudio(studioRunId || runId);
+              }}
+            >
+              查看更多结果
+            </button>
+          ) : null}
         </div>
       ) : null}
     </section>
@@ -378,9 +376,11 @@ type TaskCoreTodo = NonNullable<NonNullable<AgentTaskSnapshot['task_core']>['tod
 type TaskCoreWorkspaceItem = NonNullable<NonNullable<NonNullable<AgentTaskSnapshot['task_core']>['workspace']>['items']>[number];
 type TaskCoreCheckpoint = NonNullable<NonNullable<AgentTaskSnapshot['task_core']>['checkpoints']>[number];
 type TaskReplanRecoverySnapshot = NonNullable<AgentTaskSnapshot['replan_recoveries']>[number];
-type TaskReplanRecoveryRow = {
-  actions: TaskPermissionRecoveryAction[];
-  recovery: TaskReplanRecoverySnapshot;
+type TaskCanonicalRecoverySource = 'permission' | 'replan' | 'runtime';
+type TaskCanonicalRecoveryItem = {
+  action: TaskPermissionRecoveryAction;
+  identity: string;
+  sources: TaskCanonicalRecoverySource[];
 };
 
 function TaskCoreProgress({ task }: { task: AgentTaskSnapshot }) {
@@ -560,167 +560,134 @@ function TaskPlannerSummary({ summary }: { summary: TaskPlannerSummarySnapshot }
   );
 }
 
-function TaskReplanRecoverySummary({
+function TaskCanonicalRecoverySummary({
   busy = false,
+  items,
   onRunRecoveryAction,
+  permissionRecovery,
   recoveries,
+  surface,
   task,
+  taskRecoveryCoordinate,
 }: {
   busy?: boolean;
+  items: TaskCanonicalRecoveryItem[];
   onRunRecoveryAction?: (task: AgentTaskSnapshot, action: TaskPermissionRecoveryAction) => void | Promise<void>;
+  permissionRecovery: TaskPermissionRecovery | null;
   recoveries: TaskReplanRecoverySnapshot[];
+  surface: 'chat' | 'task';
   task: AgentTaskSnapshot;
+  taskRecoveryCoordinate: TaskRecoveryCoordinate | null;
 }) {
-  const rows = recoveries.map((recovery) => ({
-    actions: taskReplanRecoveryActions(recovery),
-    recovery,
-  }));
-  const visibleRows = rows.slice(0, 4);
-  const actionItems = rows
-    .flatMap((row) => row.actions.map((action, index) => ({ action, index, recovery: row.recovery })))
-    .slice(0, 5);
-  const actionCount = rows.reduce((count, row) => count + row.actions.length, 0);
-  const latest = rows[0]?.recovery || null;
+  const isChatSurface = surface === 'chat';
+  const visibleRecoveries = recoveries.slice(0, 3);
   return (
     <div
-      className="yachiyo-agent-task-planner yachiyo-agent-task-replan-recovery"
-      data-latest-replan-request-id={latest?.request_id || ''}
-      data-latest-replan-status={latest?.status || ''}
-      data-replan-recovery-action-count={actionCount}
-      data-replan-recovery-count={rows.length}
-      data-testid="yachiyo-agent-task-replan-recovery"
+      className="yachiyo-agent-task-permission-recovery yachiyo-agent-task-canonical-recovery"
+      data-blocking-conditions={permissionRecovery?.blockingConditions.join(',') || ''}
+      data-desktop-tools={permissionRecovery?.tools.join(',') || ''}
+      data-permission-targets={permissionRecovery?.targets.join(',') || ''}
+      data-recovery-action-count={items.length}
+      data-recovery-kind={permissionRecovery?.kind || (recoveries.length ? 'replan' : 'runtime')}
+      data-testid="yachiyo-agent-task-canonical-recovery"
     >
-      <UiIcon name="retry" title="Replan recovery" />
-      <div className="yachiyo-agent-task-planner-body">
-        <div className="yachiyo-agent-task-planner-head">
-          <strong>Recovery plan</strong>
-          <span>{taskReplanRecoveryDetail(rows)}</span>
-        </div>
-        <div className="yachiyo-agent-task-planner-chips">
-          {visibleRows.map((row) => (
-            <span
-              className={`yachiyo-agent-task-planner-chip ${row.recovery.status === 'completed' ? '' : 'missing'}`}
-              data-replan-recovery-action-count={row.actions.length}
-              data-replan-recovery-id={row.recovery.request_id}
-              data-replan-recovery-planning-reason={row.recovery.planning_reason || ''}
-              data-replan-recovery-request-id={row.recovery.request_id}
-              data-replan-recovery-status={row.recovery.status || 'requested'}
-              data-replan-recovery-tool={row.recovery.selected_tool_name || row.recovery.source_tool_name || ''}
-              key={`replan:${row.recovery.request_id}`}
-              title={taskReplanRecoveryTitle(row)}
-            >
-              replan · {taskReplanRecoveryLabel(row.recovery)} · {row.recovery.status || 'requested'}
-            </span>
-          ))}
-          {recoveries.length > visibleRows.length ? (
-            <span className="yachiyo-agent-task-planner-chip more">
-              更多 · {recoveries.length - visibleRows.length}
-            </span>
-          ) : null}
-          {actionItems.map(({ action, index, recovery }) => {
-            const inputPreview = taskRecoveryValuePreview(action.input);
-            const verificationTargetsPreview = taskRecoveryValuePreview(action.verification_targets || []);
-            const deferredContinuationCount = action.deferred_continuation?.length || 0;
-            const deferredContinuationPreview = taskRecoveryDeferredContinuationPreview(
-              action.deferred_continuation || [],
-            );
-            return (
-              <button
-                type="button"
-                className={`yachiyo-agent-task-planner-chip yachiyo-agent-task-replan-action ${action.approval_required ? 'approval' : ''}`}
-                data-replan-recovery-action-approval-required={String(action.approval_required === true)}
-                data-replan-recovery-action-deferred-continuation={deferredContinuationPreview}
-                data-replan-recovery-action-deferred-continuation-count={deferredContinuationCount}
-                data-replan-recovery-action-id={action.action_id || ''}
-                data-replan-recovery-input={inputPreview}
-                data-replan-recovery-label={action.label || action.prompt || action.tool}
-                data-replan-recovery-permission-target={action.permission_target || ''}
+      <UiIcon name={permissionRecovery ? 'diagnostics' : 'retry'} />
+      <div>
+        <strong>{isChatSurface ? '需要你的操作' : '恢复操作'}</strong>
+        <span>
+          {isChatSurface
+            ? '完成下面的操作后可以继续'
+            : permissionRecovery?.labels.length
+            ? `${permissionRecovery.labels.join('、')} 未就绪`
+            : `${items.length} 个可执行恢复动作`}
+        </span>
+        {!isChatSurface ? permissionRecovery?.hints.slice(0, 3).map((hint) => (
+          <span className="yachiyo-agent-task-recovery-hint" key={hint}>{hint}</span>
+        )) : null}
+        {!isChatSurface && visibleRecoveries.length ? (
+          <div className="yachiyo-agent-task-planner-chips" data-testid="yachiyo-agent-task-recovery-statuses">
+            {visibleRecoveries.map((recovery) => (
+              <span
+                className={`yachiyo-agent-task-planner-chip ${recovery.status === 'completed' ? '' : 'missing'}`}
                 data-replan-recovery-request-id={recovery.request_id}
-                data-replan-recovery-risk={action.risk_level || ''}
-                data-replan-recovery-selected={String(action.selected === true)}
-                data-replan-recovery-tool={action.tool}
-                data-replan-recovery-tool-index={index}
-                data-replan-recovery-verification-targets={verificationTargetsPreview}
-                data-testid="yachiyo-agent-task-run-replan-recovery-action"
-                disabled={busy || !onRunRecoveryAction || !action.tool}
-                key={`${recovery.request_id}:action:${action.action_id || action.tool}:${index}`}
-                onClick={() => void onRunRecoveryAction?.(task, action)}
-                title={[
-                  action.prompt,
-                  inputPreview ? `input: ${inputPreview}` : '',
-                  deferredContinuationPreview ? `continues: ${deferredContinuationPreview}` : '',
-                  verificationTargetsPreview ? `verification: ${verificationTargetsPreview}` : '',
-                ].filter(Boolean).join(' · ')}
+                data-replan-recovery-status={recovery.status || 'requested'}
+                key={`recovery-status:${recovery.request_id}`}
               >
-                <UiIcon name="retry" />
-                <span>
-                  执行 · {action.label || action.tool}
-                  {deferredContinuationCount ? ` · continues ${deferredContinuationCount}` : ''}
-                  {deferredContinuationPreview ? ` · next: ${deferredContinuationPreview}` : ''}
-                </span>
-              </button>
-            );
-          })}
-        </div>
+                {taskReplanRecoveryLabel(recovery)} · {recovery.status || 'requested'}
+              </span>
+            ))}
+          </div>
+        ) : null}
+        {items.length ? (
+          <div
+            className="yachiyo-agent-task-recovery-actions"
+            data-testid="yachiyo-agent-task-recovery-actions"
+          >
+            {items.slice(0, 8).map((item) => {
+              const { action } = item;
+              const requiredFields = action.required_retry_fields || [];
+              const missingFields = runtimeToolRecoveryMissingRequiredFields(action);
+              const selectedRetryPoint = action.retry_input_source === 'screen_capture_artifact'
+                ? taskRecoveryCoordinate
+                : null;
+              const actionLabel = isChatSurface
+                ? String(task.status || '').toLowerCase() === 'failed'
+                  ? action.action_kind === 'permission_recovery' ? '检查权限' : '重试'
+                  : action.label || action.prompt || (action.action_kind === 'permission_recovery' ? '检查权限' : '继续')
+                : action.action_kind === 'permission_recovery'
+                ? action.label
+                : action.label || action.prompt || action.tool;
+              return (
+                <button
+                  type="button"
+                  className={requiredFields.length ? 'has-retry-contract' : undefined}
+                  data-missing-retry-fields={missingFields.join(',')}
+                  data-permission-target={action.permission_target || ''}
+                  data-recovery-action-id={action.action_id || ''}
+                  data-recovery-action-identity={item.identity}
+                  data-recovery-kind={action.action_kind || 'recovery'}
+                  data-recovery-request-id={action.replan_request_id || ''}
+                  data-recovery-sources={item.sources.join(',')}
+                  data-recovery-tool={action.tool}
+                  data-required-retry-fields={requiredFields.join(',')}
+                  data-retry-input-schema={JSON.stringify(action.retry_input_schema || {})}
+                  data-retry-input-source={action.retry_input_source || ''}
+                  data-selected-retry-x={selectedRetryPoint?.x ?? ''}
+                  data-selected-retry-y={selectedRetryPoint?.y ?? ''}
+                  data-testid="yachiyo-agent-task-run-recovery-action"
+                  disabled={busy || !onRunRecoveryAction || !action.tool || missingFields.length > 0}
+                  key={item.identity}
+                  onClick={() => void onRunRecoveryAction?.(task, action)}
+                  title={isChatSurface ? actionLabel : action.prompt || actionLabel}
+                >
+                  <UiIcon name={action.action_kind === 'permission_recovery' ? 'settings' : 'retry'} />
+                  <span>{actionLabel}</span>
+                  {missingFields.length ? (
+                    <small className="yachiyo-agent-task-retry-contract">
+                      {isChatSurface ? '需要补充信息后才能重试' : `待补参数：${missingFields.join('、')}`}
+                    </small>
+                  ) : null}
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
       </div>
-    </div>
-  );
-}
-
-function TaskRuntimeExecutionRetryActions({
-  actions,
-  busy = false,
-  onRunRecoveryAction,
-  task,
-}: {
-  actions: TaskPermissionRecoveryAction[];
-  busy?: boolean;
-  onRunRecoveryAction?: (task: AgentTaskSnapshot, action: TaskPermissionRecoveryAction) => void | Promise<void>;
-  task: AgentTaskSnapshot;
-}) {
-  return (
-    <div
-      className="yachiyo-agent-task-planner yachiyo-agent-task-runtime-retry"
-      data-runtime-retry-action-count={actions.length}
-      data-testid="yachiyo-agent-task-runtime-retry-actions"
-    >
-      <UiIcon name="retry" title="Runtime retry" />
-      <div className="yachiyo-agent-task-planner-body">
-        <div className="yachiyo-agent-task-planner-head">
-          <strong>Runtime retry</strong>
-          <span>{actions.length} 个可重试观察/验证动作</span>
-        </div>
-        <div className="yachiyo-agent-task-planner-chips">
-          {actions.map((action, index) => {
-            const inputPreview = taskRecoveryValuePreview(action.input);
-            return (
-              <button
-                type="button"
-                className="yachiyo-agent-task-planner-chip yachiyo-agent-task-runtime-retry-action"
-                data-runtime-retry-action-id={action.action_id || ''}
-                data-runtime-retry-input={inputPreview}
-                data-runtime-retry-input-source={action.retry_input_source || ''}
-                data-runtime-retry-label={action.label || action.prompt || action.tool}
-                data-runtime-retry-permission-target={action.permission_target || ''}
-                data-runtime-retry-risk={action.risk_level || ''}
-                data-runtime-retry-tool={action.tool}
-                data-runtime-retry-tool-index={index}
-                data-testid="yachiyo-agent-task-run-runtime-retry-action"
-                disabled={busy || !onRunRecoveryAction || !action.tool}
-                key={`${action.action_id || action.tool}:${index}`}
-                onClick={() => void onRunRecoveryAction?.(task, action)}
-                title={[
-                  action.prompt,
-                  inputPreview ? `input: ${inputPreview}` : '',
-                ].filter(Boolean).join(' · ')}
-              >
-                <UiIcon name="retry" />
-                <span>重试 · {action.tool}</span>
-              </button>
-            );
-          })}
-        </div>
-      </div>
+      {isChatSurface && permissionRecovery && !items.length ? (
+        <a
+          href={permissionRecovery.href}
+          data-testid="yachiyo-agent-task-open-recovery-help"
+        >
+          <UiIcon name="settings" />
+          <span>查看解决办法</span>
+        </a>
+      ) : null}
+      {!isChatSurface && permissionRecovery ? (
+        <a href={permissionRecovery.href} data-testid="yachiyo-agent-task-open-diagnostics">
+          <UiIcon name="diagnostics" />
+          <span>打开诊断</span>
+        </a>
+      ) : null}
     </div>
   );
 }
@@ -729,14 +696,107 @@ function taskReplanRecoveryActions(recovery: TaskReplanRecoverySnapshot): TaskPe
   return yachiyoTaskReplanRecoveryActions(recovery);
 }
 
-function taskReplanRecoveryDetail(rows: TaskReplanRecoveryRow[]): string {
-  const actionCount = rows.reduce((count, row) => count + row.actions.length, 0);
-  const pendingCount = rows.filter((row) => (row.recovery.status || 'requested') !== 'completed').length;
+function taskCanonicalRecoveryItems(
+  task: AgentTaskSnapshot,
+  permissionRecovery: TaskPermissionRecovery | null,
+  runtimeActions: TaskPermissionRecoveryAction[],
+  coordinate: TaskRecoveryCoordinate | null,
+): TaskCanonicalRecoveryItem[] {
+  const byIdentity = new Map<string, TaskCanonicalRecoveryItem>();
+  const add = (
+    rawAction: TaskPermissionRecoveryAction | null,
+    source: TaskCanonicalRecoverySource,
+    requestId = '',
+  ) => {
+    if (!rawAction?.tool) return;
+    const action = requestId && !rawAction.replan_request_id
+      ? { ...rawAction, replan_request_id: requestId }
+      : rawAction;
+    const identity = taskCanonicalRecoveryIdentity(action);
+    const existing = byIdentity.get(identity);
+    if (existing) {
+      if (!existing.sources.includes(source)) existing.sources.push(source);
+      return;
+    }
+    byIdentity.set(identity, { action, identity, sources: [source] });
+  };
+
+  (task.replan_recoveries || []).forEach((recovery) => {
+    taskReplanRecoveryActions(recovery).forEach((action) => {
+      add(action, 'replan', String(recovery.request_id || '').trim());
+    });
+  });
+  (permissionRecovery?.actions || []).forEach((rawAction) => {
+    const action = rawAction.action_kind
+      ? rawAction
+      : { ...rawAction, action_kind: 'permission_recovery' as const };
+    add(action, 'permission');
+    add(
+      taskRecoveryRetryActionWithSelectedCoordinate(
+        runtimeToolRecoveryRetryAction(action),
+        coordinate,
+      ),
+      'permission',
+    );
+  });
+  runtimeActions.forEach((action) => add(action, 'runtime'));
+  return Array.from(byIdentity.values());
+}
+
+function chatTaskRecoveryItems(
+  task: AgentTaskSnapshot,
+  items: TaskCanonicalRecoveryItem[],
+): TaskCanonicalRecoveryItem[] {
+  const explicitlyActionable = items.filter(({ action, sources }) => (
+    sources.includes('permission')
+    || action.action_kind === 'permission_recovery'
+    || action.approval_required === true
+  ));
+  if (String(task.status || '').toLowerCase() !== 'failed') return explicitlyActionable;
+  const failedCandidates = explicitlyActionable.length ? explicitlyActionable : items;
+  const runnableCandidate = failedCandidates.find(
+    ({ action }) => runtimeToolRecoveryMissingRequiredFields(action).length === 0,
+  );
+  return runnableCandidate ? [runnableCandidate] : failedCandidates.slice(0, 1);
+}
+
+export function chatTaskHasRunnableRecoveryAction(task: AgentTaskSnapshot): boolean {
+  if (['completed', 'success', 'succeeded'].includes(String(task.status || '').toLowerCase())) {
+    return false;
+  }
+  const permissionRecovery = taskPermissionRecoveryFromTaskFactsImpl(
+    task.recent_events || [],
+    task.tool_calls || [],
+  );
+  const items = taskCanonicalRecoveryItems(
+    task,
+    permissionRecovery,
+    yachiyoTaskRuntimeExecutionRetryActions(task),
+    null,
+  );
+  return chatTaskRecoveryItems(task, items).some(({ action }) => (
+    Boolean(action.tool)
+    && runtimeToolRecoveryMissingRequiredFields(action).length === 0
+  ));
+}
+
+function taskCanonicalRecoveryIdentity(action: TaskPermissionRecoveryAction): string {
   return [
-    `${rows.length} 个恢复请求`,
-    actionCount ? `${actionCount} 个可执行动作` : '',
-    pendingCount ? `${pendingCount} 个待处理` : '',
-  ].filter(Boolean).join(' · ');
+    String(action.replan_request_id || '').trim(),
+    String(action.action_id || '').trim(),
+    String(action.tool || '').trim(),
+    JSON.stringify(taskCanonicalRecoveryValue(action.input || {})),
+  ].join(':');
+}
+
+function taskCanonicalRecoveryValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map((item) => taskCanonicalRecoveryValue(item));
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, item]) => [key, taskCanonicalRecoveryValue(item)]),
+  );
 }
 
 function taskReplanRecoveryLabel(recovery: TaskReplanRecoverySnapshot): string {
@@ -749,47 +809,6 @@ function taskReplanRecoveryLabel(recovery: TaskReplanRecoverySnapshot): string {
     || recovery.request_id
     || 'recovery',
   ).trim();
-}
-
-function taskReplanRecoveryTitle(row: TaskReplanRecoveryRow): string {
-  return [
-    row.recovery.failure_detail,
-    row.recovery.planning_reason ? `reason: ${row.recovery.planning_reason}` : '',
-    row.recovery.permission_target ? `permission: ${row.recovery.permission_target}` : '',
-    row.recovery.risk_level ? `risk: ${row.recovery.risk_level}` : '',
-    row.actions.length ? `actions: ${row.actions.map((action) => action.tool).join(', ')}` : '',
-  ].filter(Boolean).join(' · ');
-}
-
-function taskRecoveryValuePreview(value: unknown): string {
-  if (value === undefined || value === null) return '';
-  if (typeof value === 'string') return truncateTaskRecoveryPreview(value);
-  try {
-    return truncateTaskRecoveryPreview(JSON.stringify(value));
-  } catch {
-    return truncateTaskRecoveryPreview(String(value));
-  }
-}
-
-function taskRecoveryDeferredContinuationPreview(items: Array<Record<string, unknown>>): string {
-  const parts = items.slice(0, 3).map((item) => (
-    taskRecoveryString(item.tool_name)
-    || taskRecoveryString(item.tool)
-    || taskRecoveryString(item.step_id)
-    || taskRecoveryString(item.request_id)
-  )).filter(Boolean);
-  if (!parts.length) return '';
-  const suffix = items.length > parts.length ? ` +${items.length - parts.length}` : '';
-  return truncateTaskRecoveryPreview(`${parts.join(' -> ')}${suffix}`);
-}
-
-function taskRecoveryString(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : '';
-}
-
-function truncateTaskRecoveryPreview(value: string): string {
-  const text = value.trim();
-  return text.length > 140 ? `${text.slice(0, 137)}...` : text;
 }
 
 function taskCoreTodoTone(status: unknown): string {
@@ -845,16 +864,25 @@ function taskStatusLabel(status: string) {
   return status || '任务';
 }
 
-type TaskPermissionRecovery = {
-  actions: TaskPermissionRecoveryAction[];
-  blockingConditions: string[];
-  href: string;
-  hints: string[];
-  kind: 'permission' | 'blocking_condition' | 'mixed';
-  labels: string[];
-  targets: string[];
-  tools: string[];
-};
+function chatTaskStatusTitle(status: string, hasArtifacts: boolean) {
+  if (status === 'queued' || status === 'running') return '正在处理';
+  if (status === 'waiting_approval') return '需要你的确认';
+  if (status === 'failed') return '没有完成';
+  if (status === 'cancelled') return '任务已取消';
+  if (hasArtifacts) return '已生成内容';
+  return '任务状态';
+}
+
+function chatFailureStatusLabel(kind: ConsumerFailureKind) {
+  if (kind === 'approval_required') return '待确认';
+  if (kind === 'permission_required') return '需授权';
+  if (kind === 'cancelled') return '已取消';
+  if (kind === 'verification_failed') return '待验证';
+  if (kind === 'content_not_found' || kind === 'app_not_found' || kind === 'target_not_found') {
+    return '未找到';
+  }
+  return '未完成';
+}
 
 export type TaskPermissionRecoveryAction = RuntimeToolRecoveryAction;
 
@@ -873,24 +901,6 @@ type TaskRecoveryCoordinate = {
 type TaskRecoveryScreenPointContract = {
   artifactKind: string;
   artifactTool: string;
-};
-
-const permissionTargetLabels: Record<string, string> = {
-  accessibility: '辅助功能权限',
-  automation: '自动化权限',
-  automation_or_accessibility: '自动化或辅助功能权限',
-  chrome_cdp: 'Chrome CDP',
-  music_app: 'Music.app',
-  open_command: 'macOS open 命令',
-  screen_capture_probe_failed: '屏幕录制探测',
-  screen_recording: '屏幕录制权限',
-  unsupported_platform: '当前平台',
-};
-
-const blockingConditionLabels: Record<string, string> = {
-  desktop_session_locked: '桌面会话已锁定',
-  foreground_focus_unavailable: '前台激活暂不可用',
-  screen_capture_blank: '屏幕画面为空黑',
 };
 
 function taskRecoveryRetryActionWithSelectedCoordinate(
@@ -973,7 +983,9 @@ function taskRecoverySelectedPointForArtifact(
   return coordinate;
 }
 
-export function taskPermissionRecoveryFromEvents(events: AgentTaskSnapshot['recent_events']): TaskPermissionRecovery | null {
+export function taskPermissionRecoveryFromEvents(
+  events: AgentTaskSnapshot['recent_events'],
+): TaskPermissionRecovery | null {
   return taskPermissionRecoveryFromTaskFacts(events, []);
 }
 
@@ -981,248 +993,5 @@ export function taskPermissionRecoveryFromTaskFacts(
   events: AgentTaskSnapshot['recent_events'],
   toolCalls: AgentTaskSnapshot['tool_calls'] = [],
 ): TaskPermissionRecovery | null {
-  const safeEvents = events || [];
-  const safeToolCalls = toolCalls || [];
-  const recoveryBoundary = latestReadinessRecoverySequence(safeEvents);
-  const recoveryEvents = safeEvents.filter((event) => recoveryEventSurvivesReadinessRecovery(event, recoveryBoundary));
-  const recoveryToolCalls = safeToolCalls.filter((toolCall) => recoveryToolCallSurvivesReadinessRecovery(toolCall, recoveryBoundary));
-  const targets = uniqueStrings([
-    ...recoveryEvents.flatMap((event) => permissionTargetsFromEvent(event)),
-    ...recoveryToolCalls.flatMap((toolCall) => permissionTargetsFromToolCall(toolCall)),
-  ]);
-  const blockingConditions = uniqueStrings([
-    ...recoveryEvents.flatMap((event) => blockingConditionsFromEvent(event)),
-    ...recoveryToolCalls.flatMap((toolCall) => blockingConditionsFromToolCall(toolCall)),
-  ]);
-  if (!targets.length && !blockingConditions.length) return null;
-  const hints = uniqueStrings([
-    ...recoveryEvents.flatMap((event) => recoveryHintsFromEvent(event)),
-    ...recoveryToolCalls.flatMap((toolCall) => recoveryHintsFromToolCall(toolCall)),
-  ]);
-  const tools = uniqueStrings([
-    ...recoveryEvents.flatMap((event) => desktopToolsFromEvent(event)),
-    ...recoveryToolCalls.flatMap((toolCall) => desktopToolsFromToolCall(toolCall)),
-  ]);
-  const actions = dedupeRecoveryActions([
-    ...executableRecoveryActionsFromEvents(recoveryEvents),
-    ...executableRecoveryActionsFromToolCalls(recoveryToolCalls),
-  ]);
-  const params = new URLSearchParams({ command: 'native doctor', return_to: 'chat' });
-  if (targets.length) params.set('permission_targets', targets.join(','));
-  if (blockingConditions.length) params.set('blocking_conditions', blockingConditions.join(','));
-  if (tools.length) params.set('desktop_tools', tools.join(','));
-  const kind = targets.length && blockingConditions.length
-    ? 'mixed'
-    : blockingConditions.length ? 'blocking_condition' : 'permission';
-  return {
-    actions,
-    blockingConditions,
-    href: `#/diagnostics?${params.toString()}`,
-    hints,
-    kind,
-    labels: [
-      ...targets.map((target) => permissionTargetLabels[target] || target),
-      ...blockingConditions.map((condition) => blockingConditionLabels[condition] || condition),
-    ],
-    targets,
-    tools,
-  };
-}
-
-function latestReadinessRecoverySequence(events: AgentTaskSnapshot['recent_events']): number {
-  return Math.max(
-    0,
-    ...(events || [])
-      .filter((event) => runtimeEventIsDesktopReadinessRecovered(String(event.event_type || '').trim()))
-      .map((event) => Number(event.sequence) || 0),
-  );
-}
-
-function recoveryEventSurvivesReadinessRecovery(
-  event: NonNullable<AgentTaskSnapshot['recent_events']>[number],
-  recoveryBoundary: number,
-): boolean {
-  const eventType = String(event.event_type || '').trim();
-  if (runtimeEventIsDesktopReadinessRecovered(eventType)) return false;
-  if (!recoveryBoundary) return true;
-  if ((Number(event.sequence) || 0) > recoveryBoundary) return true;
-  if (permissionTargetsFromEvent(event).length) return true;
-  const payload = objectValue(event.payload);
-  const result = objectValue(payload.result);
-  return !foregroundReadinessRecordWasRecovered(result) && !foregroundReadinessRecordWasRecovered(payload);
-}
-
-function recoveryToolCallSurvivesReadinessRecovery(
-  toolCall: NonNullable<AgentTaskSnapshot['tool_calls']>[number],
-  recoveryBoundary: number,
-): boolean {
-  if (!recoveryBoundary) return true;
-  if (permissionTargetsFromToolCall(toolCall).length) return true;
-  return !foregroundReadinessRecordWasRecovered(objectValue(toolCall.output_preview));
-}
-
-function executableRecoveryActionsFromEvents(events: AgentTaskSnapshot['recent_events']): TaskPermissionRecoveryAction[] {
-  return dedupeRecoveryActions((events || []).flatMap((event) => recoveryActionsFromEvent(event)));
-}
-
-function executableRecoveryActionsFromToolCalls(toolCalls: AgentTaskSnapshot['tool_calls']): TaskPermissionRecoveryAction[] {
-  return dedupeRecoveryActions((toolCalls || []).flatMap((toolCall) => recoveryActionsFromToolCall(toolCall)));
-}
-
-function recoveryActionsFromEvent(event: NonNullable<AgentTaskSnapshot['recent_events']>[number]): TaskPermissionRecoveryAction[] {
-  if ((event.sensitivity || 'public') === 'secret') return [];
-  const payload = objectValue(event.payload);
-  const result = objectValue(payload.result);
-  const retryTool = String(payload.tool || result.tool || result.tool_name || event.detail || '').trim();
-  return runtimeToolRecoveryActionsFromRecords(
-    [result, payload].filter(Boolean),
-    {
-      retry_input: objectValue(payload.input_preview || result.input_preview),
-      retry_source_event_type: String(event.event_type || '').trim(),
-      retry_tool: retryTool,
-    },
-  );
-}
-
-function recoveryActionsFromToolCall(toolCall: NonNullable<AgentTaskSnapshot['tool_calls']>[number]): TaskPermissionRecoveryAction[] {
-  const outputPreview = objectValue(toolCall.output_preview);
-  return runtimeToolRecoveryActionsFromRecords(
-    [outputPreview],
-    {
-      retry_input: objectValue(toolCall.input_preview),
-      retry_source_tool_call_id: String(toolCall.tool_call_id || '').trim(),
-      retry_tool: String(toolCall.tool_name || '').trim(),
-    },
-  );
-}
-
-function permissionTargetsFromEvent(event: NonNullable<AgentTaskSnapshot['recent_events']>[number]): string[] {
-  if ((event.sensitivity || 'public') === 'secret') return [];
-  const payload = objectValue(event.payload);
-  const result = objectValue(payload.result);
-  const sources = [result, payload].filter(Boolean);
-  const targets = sources.flatMap((source) => [
-    ...stringList(source.permission_targets),
-    ...stringList(source.missing_permissions),
-  ]);
-  const permissionError = sources.some((source) => source.permission_error === true);
-  return permissionError || targets.length ? targets : [];
-}
-
-function permissionTargetsFromToolCall(toolCall: NonNullable<AgentTaskSnapshot['tool_calls']>[number]): string[] {
-  const outputPreview = objectValue(toolCall.output_preview);
-  const targets = [
-    ...stringList(outputPreview.permission_targets),
-    ...stringList(outputPreview.missing_permissions),
-  ];
-  return outputPreview.permission_error === true || targets.length ? targets : [];
-}
-
-function blockingConditionsFromEvent(event: NonNullable<AgentTaskSnapshot['recent_events']>[number]): string[] {
-  if ((event.sensitivity || 'public') === 'secret') return [];
-  const payload = objectValue(event.payload);
-  const result = objectValue(payload.result);
-  return uniqueStrings([
-    ...blockingConditionsFromRecord(result),
-    ...blockingConditionsFromRecord(payload),
-  ]);
-}
-
-function blockingConditionsFromToolCall(toolCall: NonNullable<AgentTaskSnapshot['tool_calls']>[number]): string[] {
-  return blockingConditionsFromRecord(objectValue(toolCall.output_preview));
-}
-
-function blockingConditionsFromRecord(source: Record<string, unknown>): string[] {
-  const data = objectValue(source.data);
-  return uniqueStrings([
-    ...stringList(source.blocking_condition),
-    ...stringList(source.blocking_conditions),
-    ...stringList(data.blocking_condition),
-    ...stringList(data.blocking_conditions),
-  ]);
-}
-
-function foregroundReadinessRecordWasRecovered(source: Record<string, unknown>): boolean {
-  const data = objectValue(source.data);
-  const error = String(source.error_code || source.error || data.error_code || data.error || '').trim();
-  const conditions = uniqueStrings([
-    ...blockingConditionsFromRecord(source),
-    error,
-  ]);
-  if (source.blocked_by_runtime_readiness === true || data.blocked_by_runtime_readiness === true) return true;
-  if (data.ready_for_foreground_action === false) return true;
-  return conditions.some((condition) => recoverableForegroundReadinessConditions.has(condition));
-}
-
-const recoverableForegroundReadinessConditions = new Set([
-  'app_not_found',
-  'app_not_running',
-  'foreground_focus_unverified',
-  'foreground_not_ready',
-  'no_actionable_controls',
-  'ui_elements_empty',
-]);
-
-function recoveryHintsFromEvent(event: NonNullable<AgentTaskSnapshot['recent_events']>[number]): string[] {
-  if ((event.sensitivity || 'public') === 'secret') return [];
-  const payload = objectValue(event.payload);
-  const result = objectValue(payload.result);
-  const sources = [result, payload].filter(Boolean);
-  return runtimeToolRecoveryHintsFromRecords(sources);
-}
-
-function recoveryHintsFromToolCall(toolCall: NonNullable<AgentTaskSnapshot['tool_calls']>[number]): string[] {
-  return runtimeToolRecoveryHintsFromRecords([objectValue(toolCall.output_preview)]);
-}
-
-function desktopToolsFromEvent(event: NonNullable<AgentTaskSnapshot['recent_events']>[number]): string[] {
-  if ((event.sensitivity || 'public') === 'secret') return [];
-  const payload = objectValue(event.payload);
-  const result = objectValue(payload.result);
-  const detailTool = String(event.event_type || '').includes('tool') ? event.detail : '';
-  return [
-    result.action,
-    result.tool,
-    result.tool_name,
-    payload.tool,
-    payload.tool_name,
-    detailTool,
-  ].flatMap((value) => stringList(value));
-}
-
-function desktopToolsFromToolCall(toolCall: NonNullable<AgentTaskSnapshot['tool_calls']>[number]): string[] {
-  const outputPreview = objectValue(toolCall.output_preview);
-  return [
-    toolCall.tool_name,
-    outputPreview.action,
-    outputPreview.tool,
-    outputPreview.tool_name,
-  ].flatMap((value) => stringList(value));
-}
-
-function dedupeRecoveryActions(actions: TaskPermissionRecoveryAction[]): TaskPermissionRecoveryAction[] {
-  const byKey = new Map<string, TaskPermissionRecoveryAction>();
-  actions.forEach((action) => {
-    const key = `${action.tool}:${JSON.stringify(action.input)}:${action.permission_target}`;
-    if (!byKey.has(key)) byKey.set(key, action);
-  });
-  return Array.from(byKey.values());
-}
-
-function objectValue(value: unknown): Record<string, unknown> {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : {};
-}
-
-function stringList(value: unknown): string[] {
-  if (Array.isArray(value)) return value.flatMap((item) => stringList(item));
-  return String(value || '')
-    .split(',')
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
-function uniqueStrings(values: unknown[]): string[] {
-  return Array.from(new Set(values.map((value) => String(value || '').trim()).filter(Boolean)));
+  return taskPermissionRecoveryFromTaskFactsImpl(events, toolCalls);
 }

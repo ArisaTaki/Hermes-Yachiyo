@@ -22,6 +22,7 @@ import re
 import shutil
 import threading
 import time
+from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -34,6 +35,7 @@ from apps.core.chat_session import (
     ChatSession,
     MessageRole,
     MessageStatus,
+    load_existing_chat_session,
 )
 from apps.core.executor import (
     execution_capabilities,
@@ -43,6 +45,12 @@ from apps.core.executor import (
 from apps.core.special_sessions import is_proactive_chat_session
 from apps.locald.screenshot import ScreenCapturePermissionError, capture_screenshot_to_file
 from apps.shell.agent.runtime.config import MAIN_CHAT_AGENT_ID
+from apps.shell.agent.runtime.group_run_support import create_runnable_run
+from apps.shell.agent.runtime.group_runs import project_group_terminal_after_member
+from apps.shell.agent.runtime.run_group_attachments import (
+    issue_run_group_child_attachment,
+    normalize_run_group_child_identity,
+)
 from apps.shell.agent_runtime import AgentRuntimeError, get_agent_runtime_service
 from apps.shell.native_capabilities import get_native_image_input_capability
 from apps.shell.yachiyo_agent.daily_desktop import (
@@ -63,7 +71,9 @@ from apps.shell.yachiyo_agent.discovered_app_followups import (
     planner_discovered_app_followup_can_direct_execute,
 )
 from apps.shell.yachiyo_agent.desktop_plan_hints import hotkey_hint
-from apps.shell.yachiyo_agent.desktop_permissions import desktop_permission_missing_by_capability
+from apps.shell.yachiyo_agent.desktop_permissions import (
+    cached_desktop_permission_diagnostics as _cached_desktop_permission_diagnostics,
+)
 from apps.shell.yachiyo_agent.desktop_execution_policy import (
     desktop_provider_session_auto_start_default,
     desktop_provider_session_auto_start_recommended_for_requests,
@@ -76,10 +86,27 @@ from apps.shell.yachiyo_agent.runtime_planner import RuntimePlanner
 from packages.protocol.enums import ErrorCode, TaskStatus, TaskType
 from packages.security import contains_sensitive_text, redact_api_error_text
 
+
+def desktop_permission_missing_by_capability(
+    *,
+    use_cache: bool = True,
+) -> dict[str, list[str]]:
+    """Legacy injection seam; always passive regardless of use_cache."""
+
+    del use_cache
+    return dict(
+        _cached_desktop_permission_diagnostics().get("missing_permissions") or {}
+    )
+
 if TYPE_CHECKING:
     from apps.core.runtime import AppRuntime
 
 logger = logging.getLogger(__name__)
+
+
+class _ChatSessionNotFound(KeyError):
+    """An explicit Chat projection target no longer exists."""
+
 
 _MAX_CHAT_ATTACHMENTS = 4
 _MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024
@@ -96,6 +123,18 @@ _DAILY_DESKTOP_BROWSER_FOLLOWUP_MAX_CHARS = 120
 _DAILY_DESKTOP_MUSIC_FOLLOWUP_RECENT_LIMIT = 6
 _DAILY_DESKTOP_MUSIC_FOLLOWUP_MAX_CHARS = 80
 _ENTRYPOINT_PLANNING_CONTEXT_MAX_CHARS = 600
+_MAIN_CHAT_RUNNABLE_DESKTOP_EXECUTION_POLICY = {
+    "mode": "preview_input",
+    "prefer_isolated_desktop": True,
+    "avoid_user_foreground_takeover": True,
+    "require_sandbox_for_keyboard_mouse": True,
+    "allow_media_control": True,
+    "source": "daily_chat",
+    "reason": (
+        "Daily entrypoints should use structured desktop tools by default; "
+        "keyboard and mouse capture still requires an isolated desktop provider."
+    ),
+}
 _DAILY_DESKTOP_APP_CONTEXT_TOOLS = {
     "app.focus",
     "app.focus_and_safe_click",
@@ -169,6 +208,18 @@ _GROUP_FOLLOWUP_MARKERS = (_GROUP_FOLLOWUP_MARKER, _LEGACY_GROUP_FOLLOWUP_MARKER
 _GROUP_AGENT_UPSTREAM_MARKER = "[Oha-Yachiyo 群组执行约定]"
 _DELEGATED_RUN_SUMMARY_LOCK = threading.RLock()
 _GROUP_AGENT_SUMMARY_LOCK = threading.RLock()
+_SEND_MESSAGE_SINGLEFLIGHT_LOCKS = tuple(
+    threading.RLock()
+    for _ in range(64)
+)
+_CHAT_SESSION_MUTATION_LOCKS = tuple(
+    threading.RLock()
+    for _ in range(64)
+)
+_CHAT_RUNTIME_SESSION_POINTER_LOCKS = tuple(
+    threading.RLock()
+    for _ in range(64)
+)
 
 
 def _has_any_marker(text: str, markers: tuple[str, ...]) -> bool:
@@ -346,16 +397,8 @@ def _can_direct_execute_data_analysis_discovery(
     requests: list[dict[str, Any]],
     default_workdir: Path | None,
 ) -> bool:
-    if len(requests) != 1:
-        return False
-    request = requests[0]
-    if not (
-        str(request.get("source") or "").strip() == "runtime_planner"
-        and str(request.get("tool") or "").strip()
-        in {"workspace.list", "fs.find_files", "file.search"}
-        and str(request.get("planning_reason") or "").strip() == "planner_prefetch_data_source"
-        and bool(request.get("continue_to_model"))
-    ):
+    request = _data_analysis_discovery_request(requests)
+    if request is None:
         return False
     if default_workdir is None:
         return False
@@ -366,6 +409,48 @@ def _can_direct_execute_data_analysis_discovery(
         pattern=str(payload.get("pattern") or ""),
         file_type=str(payload.get("file_type") or ""),
     )
+
+
+def _data_analysis_discovery_request(
+    requests: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    if len(requests) not in {1, 2}:
+        return None
+    request = requests[0]
+    if not (
+        str(request.get("source") or "").strip() == "runtime_planner"
+        and str(request.get("tool") or "").strip()
+        in {"workspace.list", "fs.find_files", "file.search"}
+    ):
+        return None
+    if len(requests) == 1:
+        if not (
+            str(request.get("planning_reason") or "").strip()
+            == "planner_prefetch_data_source"
+            and bool(request.get("continue_to_model"))
+        ):
+            return None
+        return request
+
+    analyze_request = requests[1]
+    analyze_input = (
+        analyze_request.get("input")
+        if isinstance(analyze_request.get("input"), dict)
+        else {}
+    )
+    if not (
+        str(analyze_request.get("source") or "").strip() == "runtime_planner"
+        and str(analyze_request.get("tool") or "").strip() == "data.analyze"
+        and str(analyze_input.get("selection_source") or "").strip()
+        == "workspace.list"
+        and str(analyze_input.get("path") or "").strip()
+        in {
+            "<selected file from workspace.list>",
+            "<selected files from workspace.list>",
+        }
+    ):
+        return None
+    return request
 
 
 def _has_single_data_analysis_file(
@@ -411,7 +496,10 @@ def _data_analysis_file_matches_filter(
 ) -> bool:
     clean_name = str(name or "").strip()
     clean_pattern = str(pattern or "").strip()
-    if clean_pattern and not fnmatch.fnmatch(clean_name, clean_pattern):
+    if clean_pattern and not _data_analysis_file_matches_pattern(
+        clean_name,
+        clean_pattern,
+    ):
         return False
     clean_type = str(file_type or "").strip().lower()
     if clean_type in {"csv", "tsv", "json", "jsonl", "xlsx"}:
@@ -419,6 +507,25 @@ def _data_analysis_file_matches_filter(
     if clean_type in {"spreadsheet", "table", "text_table", "data"}:
         return bool(_data_analysis_file_kind(clean_name))
     return True
+
+
+def _data_analysis_file_matches_pattern(name: str, pattern: str) -> bool:
+    brace = re.fullmatch(
+        r"(?P<prefix>.*)\{(?P<items>[^{}]+)\}(?P<suffix>.*)",
+        str(pattern or "").strip(),
+    )
+    if brace is None:
+        return fnmatch.fnmatchcase(name.casefold(), pattern.casefold())
+    prefix = str(brace.group("prefix") or "")
+    suffix = str(brace.group("suffix") or "")
+    return any(
+        fnmatch.fnmatchcase(
+            name.casefold(),
+            f"{prefix}{item.strip()}{suffix}".casefold(),
+        )
+        for item in str(brace.group("items") or "").split(",")
+        if item.strip()
+    )
 
 
 def _data_analysis_file_kind(path: str) -> str:
@@ -519,12 +626,54 @@ def _search_snippet(value: str, query: str, *, limit: int = 96) -> str:
 
 
 def _is_chat_visible_activity(event: dict[str, Any]) -> bool:
-    phase = str(event.get("phase") or "")
+    metadata = event.get("metadata") if isinstance(event.get("metadata"), dict) else {}
+    raw_visibility = event.get("visibility", metadata.get("visibility"))
+    if raw_visibility is not None:
+        visibility = str(raw_visibility or "").strip().lower()
+        if visibility != "user":
+            return False
+    event_type = str(
+        event.get("event_type")
+        or metadata.get("event_type")
+        or event.get("type")
+        or metadata.get("type")
+        or ""
+    ).strip().lower()
     tool_name = str(event.get("tool_name") or "")
+    normalized_event_type = re.sub(r"[\s_.-]+", "", event_type)
+    normalized_tool = re.sub(r"[\s_.-]+", "", tool_name.strip().lower())
+    if (
+        normalized_event_type == "agentmodelfollowupcontext"
+        or normalized_event_type.startswith("agentpostactionverification")
+        or normalized_tool == "agentmodelfollowupcontext"
+        or normalized_tool.startswith("agentpostactionverification")
+    ):
+        return False
+    source = str(event.get("source") or metadata.get("source") or "").strip().lower()
+    if source in {
+        "runtime_post_action_auto_verify",
+        "runtime_native_postcondition_receipt",
+    }:
+        return False
+    phase = str(event.get("phase") or "")
     if phase not in _CHAT_VISIBLE_ACTIVITY_PHASES or not tool_name:
         return False
-    normalized_tool = re.sub(r"[\s_.-]+", "", tool_name.strip().lower())
     if normalized_tool in {"sendmessage", "messagesend"}:
+        return False
+    # Rows created before the visibility column existed need a conservative
+    # fallback. Observation/verifier probes remain available in Run Detail,
+    # but are not conversational progress users should have to read.
+    if normalized_tool in {
+        "desktopinspectapp",
+        "desktoplistapps",
+        "desktopreadui",
+        "desktoprunningapps",
+        "desktopuielements",
+        "desktopverify",
+        "nativeverifier",
+        "runtimeobservation",
+        "runtimeverify",
+    }:
         return False
     text = " ".join(str(event.get(key) or "") for key in ("title", "detail"))
     lowered = text.lower()
@@ -539,6 +688,7 @@ def _is_chat_visible_activity(event: dict[str, Any]) -> bool:
         "dispatch_group_agent",
         "run_oha_agent",
         "run_oha_workflow",
+        "internal model instruction",
     )
     if any(marker in lowered for marker in internal_markers):
         return False
@@ -736,6 +886,7 @@ class ChatAPI:
 
     def __init__(self, runtime: "AppRuntime") -> None:
         self._runtime = runtime
+        self._session_override = threading.local()
 
     def _unavailable_response(self, reason: str) -> Dict[str, Any]:
         payload = user_task_unavailable_payload(self._runtime)
@@ -798,6 +949,9 @@ class ChatAPI:
             desktop_snapshot_error = metadata.get("desktop_snapshot_error")
             response: Dict[str, Any] = {
                 "ok": True,
+                "client_message_id": client_message_id,
+                "committed": True,
+                "delivery_state": "accepted",
                 "message_id": message.message_id,
                 "task_id": message.task_id or "",
                 "status": status,
@@ -806,13 +960,119 @@ class ChatAPI:
             }
             if isinstance(desktop_snapshot_error, dict):
                 response["desktop_snapshot_error"] = desktop_snapshot_error
+            retry_of_message_id = str(metadata.get("retry_of_message_id") or "").strip()
+            if retry_of_message_id:
+                response["source_message_id"] = retry_of_message_id
             if message.error:
                 response["error"] = message.error
             return response
         return None
 
+    def _client_message_requires_task_resume(self, client_message_id: str) -> bool:
+        if not client_message_id:
+            return False
+        for message in reversed(self._session.get_messages(0)):
+            if message.role != MessageRole.USER:
+                continue
+            metadata = message.metadata if isinstance(message.metadata, dict) else {}
+            if str(metadata.get("client_message_id") or "") != client_message_id:
+                continue
+            return bool(
+                not str(message.task_id or "").strip()
+                and metadata.get("chat_delivery_requires_task") is True
+            )
+        return False
+
+    @staticmethod
+    def _accepted_send_response(
+        response: Dict[str, Any],
+        client_message_id: str,
+        *,
+        delivery_state: str = "accepted",
+    ) -> Dict[str, Any]:
+        return {
+            **response,
+            "ok": True,
+            "client_message_id": client_message_id,
+            "committed": True,
+            "delivery_state": delivery_state,
+        }
+
+    @staticmethod
+    def _not_committed_send_response(
+        response: Dict[str, Any],
+        client_message_id: str,
+    ) -> Dict[str, Any]:
+        return {
+            **response,
+            "ok": False,
+            "client_message_id": client_message_id,
+            "committed": False,
+            "delivery_state": "not_committed",
+        }
+
+    def _repair_send_message_task_link(
+        self,
+        *,
+        message_id: str,
+        task_id: str,
+        client_message_id: str,
+        text: str,
+        attachments: list[dict[str, Any]],
+        metadata: dict[str, Any] | None,
+    ) -> None:
+        """Repair the narrow task-created/message-link-not-written fault window."""
+        if not message_id or not task_id:
+            return
+        committed = self._idempotent_message_response(client_message_id)
+        if committed is not None and str(committed.get("task_id") or "").strip():
+            return
+        try:
+            if client_message_id:
+                self._session.upsert_user_message_by_client_id(
+                    text,
+                    client_message_id=client_message_id,
+                    task_id=task_id,
+                    status=MessageStatus.PENDING,
+                    attachments=attachments,
+                    metadata=metadata,
+                )
+            else:
+                self._session.link_message_to_task(message_id, task_id)
+        except Exception:
+            logger.warning(
+                "消息已接收，但任务关联仍在等待同步: message_id=%s, task_id=%s",
+                message_id,
+                task_id,
+            )
+
+    def _store_user_message(
+        self,
+        content: str,
+        attachments: list[dict[str, Any]],
+        *,
+        client_message_id: str,
+        metadata: dict[str, Any] | None,
+    ) -> str:
+        if client_message_id:
+            return self._session.upsert_user_message_by_client_id(
+                content,
+                client_message_id=client_message_id,
+                status=MessageStatus.PENDING,
+                attachments=attachments,
+                metadata=metadata,
+            )
+        return self._session.add_user_message(
+            content,
+            attachments,
+            metadata=metadata,
+        )
+
     @property
     def _session(self) -> ChatSession:
+        override = getattr(self._session_override, "value", None)
+        if override is not None:
+            return override
         return self._runtime.chat_session
 
     @property
@@ -827,6 +1087,22 @@ class ChatAPI:
         if callable(getter):
             return getter()
         return get_agent_runtime_service()
+
+    def _desktop_provider_session_owner_context(self) -> Any:
+        try:
+            service = self._agent_runtime_service()
+        except Exception:
+            return nullcontext()
+        owner_token = str(
+            getattr(service, "_desktop_provider_session_owner_token", "") or ""
+        ).strip()
+        if not owner_token:
+            return nullcontext()
+        from apps.shell.yachiyo_agent.isolated_provider_session import (
+            desktop_provider_session_owner,
+        )
+
+        return desktop_provider_session_owner(owner_token)
 
     def _chat_store(self):
         store = getattr(self._runtime, "store", None)
@@ -1432,6 +1708,19 @@ class ChatAPI:
             return ""
         if "\n" in str(text or "") or re.search(r"https?://|www\.|/|\\", value, flags=re.IGNORECASE):
             return ""
+        # This helper only expands genuinely context-free follow-ups.  An
+        # explicit browser/page/app scope is already a complete planner input;
+        # appending another "current page" clause can manufacture a bogus app
+        # target such as "input on current" and leak content-only fields into
+        # an app.focus request.
+        if re.search(
+            r"(?:网页|页面|浏览器|当前页|"
+            r"\b(?:browser|web\s*page|webpage|current\s+page|"
+            r"chrome|safari|firefox|edge|brave)\b)",
+            value,
+            flags=re.IGNORECASE,
+        ):
+            return ""
         lowered = value.lower()
         if lowered in {"算了", "算了吧", "不用了", "不要了", "取消", "不了", "不用", "no", "nope", "never mind"}:
             return ""
@@ -1721,34 +2010,205 @@ class ChatAPI:
             and re.search(r"(?:播放|想听|哪首|哪一首|歌名|曲名|song|track)", text, flags=re.IGNORECASE)
         )
 
-    def _with_session(self, session_id: str, callback):
+    def _with_session(
+        self,
+        session_id: str,
+        callback,
+        *,
+        require_existing: bool = False,
+    ):
         """Run a small ChatAPI mutation against a specific persisted session."""
         session_id = str(session_id or "").strip()
-        if not session_id or self._session.session_id == session_id:
+        if not session_id:
             return callback()
+        store = self._chat_store()
+        current = self._runtime.chat_session
+        if require_existing:
+            session = load_existing_chat_session(
+                store,
+                session_id,
+                current=current,
+                fail_active_messages=False,
+            )
+            if session is None:
+                raise _ChatSessionNotFound(session_id)
+        elif current.session_id == session_id:
+            session = current
+        else:
+            session = ChatSession(session_id=session_id)
+            session.attach_store(
+                store,
+                load_existing=True,
+                fail_active_messages=False,
+            )
 
-        session = ChatSession(session_id=session_id)
-        session.attach_store(
-            self._chat_store(),
-            load_existing=True,
-            fail_active_messages=False,
-        )
-        if hasattr(self._runtime, "_chat_session"):
-            previous = self._runtime._chat_session
-            self._runtime._chat_session = session
-            try:
-                return callback()
-            finally:
-                self._runtime._chat_session = previous
-
-        previous = self._runtime.chat_session
-        self._runtime.chat_session = session
+        sentinel = object()
+        previous = getattr(self._session_override, "value", sentinel)
+        self._session_override.value = session
         try:
-            return callback()
+            try:
+                result = callback()
+            except Exception:
+                if require_existing and store.get_session(session_id) is None:
+                    store.delete_session(session_id)
+                    raise _ChatSessionNotFound(session_id) from None
+                raise
+            if require_existing and store.get_session(session_id) is None:
+                store.delete_session(session_id)
+                raise _ChatSessionNotFound(session_id)
+            return result
         finally:
-            self._runtime.chat_session = previous
+            if previous is sentinel:
+                del self._session_override.value
+            else:
+                self._session_override.value = previous
+
+    def _with_existing_session(self, session_id: str, callback) -> bool:
+        """Run a late background projection only while its target exists."""
+        try:
+            self._with_session(session_id, callback, require_existing=True)
+        except _ChatSessionNotFound:
+            return False
+        return True
+
+    def _session_mutation_lock(self, session_id: str) -> threading.RLock:
+        lock_key = (id(self._chat_store()), str(session_id or "").strip())
+        return _CHAT_SESSION_MUTATION_LOCKS[
+            hash(lock_key) % len(_CHAT_SESSION_MUTATION_LOCKS)
+        ]
+
+    def _runtime_session_pointer_lock(self) -> threading.RLock:
+        return _CHAT_RUNTIME_SESSION_POINTER_LOCKS[
+            hash(("runtime-session-pointer", id(self._runtime)))
+            % len(_CHAT_RUNTIME_SESSION_POINTER_LOCKS)
+        ]
+
+    def send_message_in_session(
+        self,
+        session_id: str,
+        text: str,
+        attachments: list[dict] | None = None,
+        *,
+        runnable_id: str = "",
+        client_message_id: str = "",
+        metadata: dict[str, Any] | None = None,
+    ) -> Dict[str, Any]:
+        """Send while remaining bound to one existing persisted session."""
+
+        target_session_id = str(session_id or "").strip()
+        if not target_session_id:
+            return self._not_committed_send_response(
+                {"error": "会话不存在", "reason": "chat_session_deleted"},
+                client_message_id,
+            )
+
+        # Lock order is always session mutation lease -> delivery singleflight.
+        # delete_session takes only the outer lease, so it cannot invert this
+        # order while an idempotent send is crossing its commit boundary.
+        with self._session_mutation_lock(target_session_id):
+            try:
+                return self._with_session(
+                    target_session_id,
+                    lambda: self.send_message(
+                        text,
+                        attachments,
+                        runnable_id=runnable_id,
+                        client_message_id=client_message_id,
+                        metadata=metadata,
+                    ),
+                    require_existing=True,
+                )
+            except _ChatSessionNotFound:
+                return self._not_committed_send_response(
+                    {
+                        "error": "会话不存在",
+                        "reason": "chat_session_deleted",
+                        "session_id": target_session_id,
+                    },
+                    client_message_id,
+                )
+
+    def get_messages_in_session(
+        self,
+        session_id: str,
+        limit: int = 0,
+        anchor_message_id: str = "",
+    ) -> Dict[str, Any]:
+        """Read while remaining bound to one existing persisted session."""
+
+        target_session_id = str(session_id or "").strip()
+        if not target_session_id:
+            return {
+                "ok": False,
+                "error": "会话不存在",
+                "reason": "chat_session_deleted",
+                "messages": [],
+            }
+        try:
+            return self._with_session(
+                target_session_id,
+                lambda: self.get_messages(
+                    limit,
+                    anchor_message_id=anchor_message_id,
+                ),
+                require_existing=True,
+            )
+        except _ChatSessionNotFound:
+            return {
+                "ok": False,
+                "error": "会话不存在",
+                "reason": "chat_session_deleted",
+                "session_id": target_session_id,
+                "messages": [],
+            }
 
     def send_message(
+        self,
+        text: str,
+        attachments: list[dict] | None = None,
+        *,
+        runnable_id: str = "",
+        client_message_id: str = "",
+        metadata: dict[str, Any] | None = None,
+    ) -> Dict[str, Any]:
+        """Serialize one idempotent client delivery through its commit boundary."""
+        try:
+            idempotency_key = self._normalize_client_message_id(client_message_id)
+        except AgentRuntimeError:
+            # The implementation below owns the public validation response.
+            return self._send_message_once(
+                text,
+                attachments,
+                runnable_id=runnable_id,
+                client_message_id=client_message_id,
+                metadata=metadata,
+            )
+        if not idempotency_key:
+            return self._send_message_once(
+                text,
+                attachments,
+                runnable_id=runnable_id,
+                client_message_id="",
+                metadata=metadata,
+            )
+        lock_key = (
+            id(self._chat_store()),
+            self._session.session_id,
+            idempotency_key,
+        )
+        lock = _SEND_MESSAGE_SINGLEFLIGHT_LOCKS[
+            hash(lock_key) % len(_SEND_MESSAGE_SINGLEFLIGHT_LOCKS)
+        ]
+        with lock:
+            return self._send_message_once(
+                text,
+                attachments,
+                runnable_id=runnable_id,
+                client_message_id=idempotency_key,
+                metadata=metadata,
+            )
+
+    def _send_message_once(
         self,
         text: str,
         attachments: list[dict] | None = None,
@@ -1774,16 +2234,32 @@ class ChatAPI:
         """
         text = (text or "").strip()
         raw_attachments = attachments or []
-        if not text and not raw_attachments:
-            return {"ok": False, "error": "消息内容不能为空"}
         try:
             idempotency_key = self._normalize_client_message_id(client_message_id)
         except AgentRuntimeError as exc:
-            return {"ok": False, "error": redact_api_error_text(exc)}
+            return self._not_committed_send_response(
+                {"error": redact_api_error_text(exc)},
+                "",
+            )
+        if not text and not raw_attachments:
+            return self._not_committed_send_response(
+                {"error": "消息内容不能为空"},
+                idempotency_key,
+            )
         existing_response = self._idempotent_message_response(idempotency_key)
-        if existing_response is not None:
+        if (
+            existing_response is not None
+            and not self._client_message_requires_task_resume(idempotency_key)
+        ):
             return existing_response
+        main_chat_runnable_entrypoint = (
+            str(runnable_id or "").strip() == MAIN_CHAT_AGENT_ID
+        )
 
+        message_id = ""
+        task_id = ""
+        saved_attachments: list[dict[str, Any]] = []
+        user_metadata: dict[str, Any] = {}
         try:
             current_context = self._session_context()
             group_presynced = False
@@ -1808,7 +2284,10 @@ class ChatAPI:
                     metadata=metadata,
                 )
                 if runnable_orchestration is not None:
-                    return runnable_orchestration
+                    return self._accepted_send_response(
+                        runnable_orchestration,
+                        idempotency_key,
+                    )
 
             runnable_command = self._handle_runnable_command(
                 text,
@@ -1818,7 +2297,10 @@ class ChatAPI:
                 metadata=metadata,
             )
             if runnable_command is not None:
-                return runnable_command
+                return self._accepted_send_response(
+                    runnable_command,
+                    idempotency_key,
+                )
 
             current_context = self._session_context()
             if current_context.get("conversation_kind") == "group" and not group_presynced:
@@ -1845,12 +2327,13 @@ class ChatAPI:
                     metadata=daily_planning_metadata,
                 )
             ):
-                daily_desktop_runtime_plan = (
-                    daily_desktop_runtime_plan_prepared_for_execution(
-                        daily_desktop_runtime_plan,
-                        metadata=daily_planning_metadata,
+                with self._desktop_provider_session_owner_context():
+                    daily_desktop_runtime_plan = (
+                        daily_desktop_runtime_plan_prepared_for_execution(
+                            daily_desktop_runtime_plan,
+                            metadata=daily_planning_metadata,
+                        )
                     )
-                )
             daily_desktop_entrypoint_requests = list(
                 daily_desktop_runtime_plan.entrypoint_requests
             )
@@ -1860,13 +2343,23 @@ class ChatAPI:
             daily_desktop_runtime_envelope = dict(
                 daily_desktop_runtime_plan.runtime_execution_envelope
             )
+            blocked_daily_desktop_intent = bool(
+                not raw_attachments
+                and current_context.get("conversation_kind") != "group"
+                and daily_desktop_runtime_envelope
+                and daily_desktop_entrypoint_requests
+                and not daily_desktop_requests
+            )
             direct_daily_desktop_intent = (
                 not raw_attachments
                 and current_context.get("conversation_kind") != "group"
-                and self._daily_desktop_requests_can_direct_execute(
-                    daily_desktop_requests,
-                    task_text,
-                    metadata=daily_planning_metadata,
+                and (
+                    blocked_daily_desktop_intent
+                    or self._daily_desktop_requests_can_direct_execute(
+                        daily_desktop_requests,
+                        task_text,
+                        metadata=daily_planning_metadata,
+                    )
                 )
             )
             direct_daily_desktop_tool_requests = (
@@ -1882,7 +2375,8 @@ class ChatAPI:
             direct_daily_desktop_runtime_envelope = (
                 daily_desktop_runtime_envelope
                 if (
-                    direct_daily_desktop_tool_requests
+                    blocked_daily_desktop_intent
+                    or direct_daily_desktop_tool_requests
                     or daily_desktop_requests_can_complete_without_model(
                         daily_desktop_requests,
                     )
@@ -1898,16 +2392,21 @@ class ChatAPI:
                 self._warm_daily_desktop_permission_cache(daily_desktop_requests)
             unavailable_reason = user_task_unavailable_reason(self._runtime)
             if unavailable_reason and not direct_daily_desktop_intent and not direct_planner_orchestration_intent:
-                return self._unavailable_response(unavailable_reason)
+                return self._not_committed_send_response(
+                    self._unavailable_response(unavailable_reason),
+                    idempotency_key,
+                )
 
             if raw_attachments and self._should_enforce_image_capability():
                 image_input = get_native_image_input_capability()
                 if image_input.get("can_attach_images") is False:
-                    return {
-                        "ok": False,
-                        "error": str(image_input.get("reason") or "当前 Native Agent 模型暂不支持图片输入"),
-                        "image_input": image_input,
-                    }
+                    return self._not_committed_send_response(
+                        {
+                            "error": str(image_input.get("reason") or "当前 Native Agent 模型暂不支持图片输入"),
+                            "image_input": image_input,
+                        },
+                        idempotency_key,
+                    )
             saved_attachments = self._save_attachments(raw_attachments)
             if not text and saved_attachments:
                 text = "请识别并分析这张图片。"
@@ -1916,11 +2415,13 @@ class ChatAPI:
             if should_attach_desktop_snapshot and self._should_enforce_image_capability():
                 image_input = get_native_image_input_capability()
                 if image_input.get("can_attach_images") is False:
-                    return {
-                        "ok": False,
-                        "error": str(image_input.get("reason") or "当前 Native Agent 模型暂不支持图片输入"),
-                        "image_input": image_input,
-                    }
+                    return self._not_committed_send_response(
+                        {
+                            "error": str(image_input.get("reason") or "当前 Native Agent 模型暂不支持图片输入"),
+                            "image_input": image_input,
+                        },
+                        idempotency_key,
+                    )
             task_description, saved_attachments, desktop_snapshot_error = self._attach_desktop_snapshot_if_needed(
                 task_text,
                 saved_attachments,
@@ -1955,6 +2456,15 @@ class ChatAPI:
                 user_metadata,
                 surface="chat",
             )
+            if main_chat_runnable_entrypoint and not direct_daily_desktop_intent:
+                user_metadata = {
+                    **user_metadata,
+                    "desktop_provider_session_strict_foreground": True,
+                    "desktop_provider_session_auto_start": True,
+                    "desktop_execution_policy": dict(
+                        _MAIN_CHAT_RUNNABLE_DESKTOP_EXECUTION_POLICY
+                    ),
+                }
             if desktop_provider_session_strict_foreground_default(user_metadata):
                 user_metadata.setdefault("desktop_provider_session_strict_foreground", True)
             if desktop_provider_session_auto_start_recommended_for_requests(
@@ -1968,16 +2478,20 @@ class ChatAPI:
             if saved_attachments and not raw_attachments and self._should_enforce_image_capability():
                 image_input = get_native_image_input_capability()
                 if image_input.get("can_attach_images") is False:
-                    return {
-                        "ok": False,
-                        "error": str(image_input.get("reason") or "当前 Native Agent 模型暂不支持图片输入"),
-                        "image_input": image_input,
-                    }
+                    return self._not_committed_send_response(
+                        {
+                            "error": str(image_input.get("reason") or "当前 Native Agent 模型暂不支持图片输入"),
+                            "image_input": image_input,
+                        },
+                        idempotency_key,
+                    )
 
             # 1. 添加用户消息
-            message_id = self._session.add_user_message(
+            user_metadata["chat_delivery_requires_task"] = True
+            message_id = self._store_user_message(
                 text,
                 saved_attachments,
+                client_message_id=idempotency_key,
                 metadata=user_metadata or None,
             )
 
@@ -2041,15 +2555,14 @@ class ChatAPI:
                     task_id,
                     len(direct_group_dispatch_directives),
                 )
-                return {
-                    "ok": True,
+                return self._accepted_send_response({
                     "message_id": message_id,
                     "task_id": task_id,
                     "assistant_message_id": assistant_id,
                     "status": "completed",
                     "attachments": self._serialize_attachments(saved_attachments),
                     **({"desktop_snapshot_error": desktop_snapshot_error} if desktop_snapshot_error else {}),
-                }
+                }, idempotency_key)
             if direct_planner_orchestration_task is not None:
                 response = {
                     "ok": True,
@@ -2065,14 +2578,13 @@ class ChatAPI:
                     value = direct_planner_orchestration_task.get(key)
                     if value:
                         response[key] = value
-                return response
+                return self._accepted_send_response(response, idempotency_key)
             if direct_daily_desktop_task is not None:
                 payload = direct_daily_desktop_task["payload"]
                 agent_task = direct_daily_desktop_task["agent_task"]
                 status = str(agent_task.get("status") or payload.get("status") or "pending")
                 assistant = self._session.get_assistant_message_for_task(task_id)
-                return {
-                    "ok": True,
+                return self._accepted_send_response({
                     "message_id": message_id,
                     "task_id": task_id,
                     "assistant_message_id": str(getattr(assistant, "message_id", "") or ""),
@@ -2081,7 +2593,7 @@ class ChatAPI:
                     "agent_task": agent_task,
                     "attachments": self._serialize_attachments(saved_attachments),
                     **({"desktop_snapshot_error": desktop_snapshot_error} if desktop_snapshot_error else {}),
-                }
+                }, idempotency_key)
             if current_context.get("conversation_kind") == "group":
                 self._create_pending_group_agent_summary_tasks()
 
@@ -2093,18 +2605,39 @@ class ChatAPI:
                 len(saved_attachments),
             )
 
-            return {
-                "ok": True,
+            return self._accepted_send_response({
                 "message_id": message_id,
                 "task_id": task_id,
                 "status": "pending",
                 "attachments": self._serialize_attachments(saved_attachments),
                 **({"desktop_snapshot_error": desktop_snapshot_error} if desktop_snapshot_error else {}),
-            }
+            }, idempotency_key)
 
         except Exception as exc:
-            logger.error("发送消息失败: %s", exc)
-            return {"ok": False, "error": redact_api_error_text(exc)}
+            safe_error = redact_api_error_text(exc)
+            logger.error("发送消息失败: %s", safe_error)
+            self._repair_send_message_task_link(
+                message_id=message_id,
+                task_id=task_id,
+                client_message_id=idempotency_key,
+                text=text,
+                attachments=saved_attachments,
+                metadata=user_metadata,
+            )
+            committed = self._idempotent_message_response(idempotency_key)
+            if committed is not None:
+                return self._accepted_send_response(
+                    {
+                        **committed,
+                        "warning": "消息已接收，后续状态正在同步。",
+                    },
+                    idempotency_key,
+                    delivery_state="accepted_uncertain",
+                )
+            return self._not_committed_send_response(
+                {"error": "消息未发送，请重试。"},
+                idempotency_key,
+            )
 
     def send_runnable_message_in_session(
         self,
@@ -2132,11 +2665,86 @@ class ChatAPI:
 
         return self._with_session(session_id, _send)
 
-    def summarize_delegated_run(self, run_id: str) -> Dict[str, Any]:
+    def record_started_runnable_user_message_in_session(
+        self,
+        session_id: str,
+        text: str,
+        *,
+        task_id: str,
+        client_message_id: str,
+        metadata: dict[str, Any] | None = None,
+        attachments: list[dict[str, Any]] | None = None,
+    ) -> Dict[str, Any]:
+        """Record the canonical Chat user message after an external run starts."""
+        target_session_id = str(session_id or "").strip()
+        if not target_session_id:
+            raise AgentRuntimeError("session_id 不能为空")
+        if self._chat_store().get_session(target_session_id) is None:
+            return {
+                "ok": True,
+                "suppressed": True,
+                "reason": "chat_session_deleted",
+                "task_id": str(task_id or ""),
+                "session_id": target_session_id,
+            }
+        idempotency_key = self._normalize_client_message_id(client_message_id)
+        if not idempotency_key:
+            raise AgentRuntimeError("client_message_id 不能为空")
+
+        def _record() -> Dict[str, Any]:
+            canonical_metadata = self._with_client_message_id(
+                metadata,
+                idempotency_key,
+            )
+            message_id = self._session.upsert_user_message_by_client_id(
+                text,
+                client_message_id=idempotency_key,
+                task_id=task_id,
+                status=MessageStatus.PROCESSING,
+                attachments=attachments,
+                metadata=canonical_metadata,
+            )
+            return {
+                "ok": True,
+                "message_id": message_id,
+                "task_id": task_id,
+                "session_id": self._session.session_id,
+                "status": MessageStatus.PROCESSING.value,
+            }
+
+        try:
+            return self._with_session(
+                target_session_id,
+                _record,
+                require_existing=True,
+            )
+        except KeyError:
+            return {
+                "ok": True,
+                "suppressed": True,
+                "reason": "chat_session_deleted",
+                "task_id": str(task_id or ""),
+                "session_id": target_session_id,
+            }
+
+    def summarize_delegated_run(
+        self,
+        run_id: str,
+        *,
+        conversation_id: str = "",
+    ) -> Dict[str, Any]:
         """Create a main-model follow-up task for an auto-delegated Agent/Workflow run."""
         run_id = str(run_id or "").strip()
         if not run_id:
             return {"ok": False, "error": "Run ID 不能为空"}
+        target_session_id = str(conversation_id or "").strip()
+        if target_session_id and target_session_id != self._session.session_id:
+            if self._chat_store().get_session(target_session_id) is None:
+                return {"ok": False, "error": "会话不存在"}
+            return self._with_session(
+                target_session_id,
+                lambda: self.summarize_delegated_run(run_id),
+            )
         with _DELEGATED_RUN_SUMMARY_LOCK:
             existing_message = self._delegated_run_summary_message(run_id)
             if existing_message is not None:
@@ -2314,14 +2922,10 @@ class ChatAPI:
             return self._record_runnable_error(text, content, runnable=runnable, context=current_context, client_message_id=client_message_id)
 
         target = self._participant_for_runnable(runnable)
+        # Conversation scope carries context, not authority to join an older
+        # RunGroup. Every user-authored runnable request starts a fresh root
+        # batch; only runtime-owned child orchestration may attach to one.
         run_group_id = ""
-        if current_context.get("conversation_kind") in {"agent", "workflow"}:
-            run_group_id = str(current_context.get("run_group_id") or "")
-        elif current_context.get("conversation_kind") == "group":
-            # A group chat is long-lived, but each direct Agent mention is a
-            # fresh collaboration batch for Runs/History. The session context
-            # is rebound to the new batch after the run is created.
-            run_group_id = ""
         user_metadata = {
             "target": target,
             "runnable_kind": runnable.get("kind") or "",
@@ -2377,7 +2981,12 @@ class ChatAPI:
             and self._session.message_count() == 0
             and bool(user_goal)
         )
-        message_id = self._session.add_user_message(message_content, [], metadata=user_metadata)
+        message_id = self._store_user_message(
+            message_content,
+            [],
+            client_message_id=client_message_id,
+            metadata=user_metadata,
+        )
         if should_set_runnable_title:
             self._set_session_title_from_message(user_goal)
         upstream = self._chat_upstream_context()
@@ -2413,7 +3022,7 @@ class ChatAPI:
                     if is_group_context:
                         self._create_pending_group_agent_summary_tasks()
 
-                self._with_session(callback_session_id, _sync_completed_workflow)
+                self._with_existing_session(callback_session_id, _sync_completed_workflow)
                 logger.info("Workflow Run 异步完成: run_id=%s, status=%s", run_result.get("run_id"), run_result.get("status"))
 
             try:
@@ -2512,7 +3121,7 @@ class ChatAPI:
 
         def _on_run_complete(run_result: dict[str, Any]) -> None:
             """Agent Run 完成后的回调"""
-            self._with_session(
+            self._with_existing_session(
                 callback_session_id,
                 lambda: self._update_agent_run_message_from_result(assistant_id, sender, run_result),
             )
@@ -2653,9 +3262,10 @@ class ChatAPI:
         target = self._participant_for_runnable(runnable) if runnable else self._main_model_sender()
         context = context or self._session_context()
         message_content = (text or "").strip() or "（附件暂未发送给 Agent/Workflow）"
-        message_id = self._session.add_user_message(
+        message_id = self._store_user_message(
             message_content,
             [],
+            client_message_id=client_message_id,
             metadata=self._with_client_message_id({
                 "target": target,
                 "runnable_kind": runnable.get("kind") if runnable else "",
@@ -2699,9 +3309,10 @@ class ChatAPI:
         target = self._participant_for_runnable(runnable) if runnable else self._main_model_sender()
         context = context or self._session_context()
         message_content = (text or "").strip() or "（空的 Agent/Workflow 指令）"
-        message_id = self._session.add_user_message(
+        message_id = self._store_user_message(
             message_content,
             [],
+            client_message_id=client_message_id,
             metadata=self._with_client_message_id({
                 "target": target,
                 "runnable_kind": runnable.get("kind") if runnable else "",
@@ -3000,34 +3611,49 @@ class ChatAPI:
                 "name": str(child.get("runnable_name") or child.get("runnable_id") or "Agent"),
             }
             message = existing_by_run_id.get(child_run_id)
-            if message is None:
-                message_id = self._session.add_assistant_message(
-                    "",
-                    metadata={
-                        "sender": sender,
-                        "runnable_kind": "agent",
-                        "runnable_id": child_runnable.get("id") or child.get("runnable_id") or "",
-                        "run_id": child_run_id,
-                        "run_group_id": workflow_run.get("run_group_id") or child.get("run_group_id") or "",
-                        "run_status": "processing",
-                        "workflow_run_id": workflow_run_id,
-                        "workflow_parent_run_id": workflow_run_id,
-                    },
-                )
-            else:
-                message_id = message.message_id
-            self._update_workflow_child_run_message(message_id, sender, child, node_info)
+            projection_key = self._workflow_child_message_projection_key(
+                workflow_run_id,
+                child_run_id,
+            )
+            self._update_workflow_child_run_message(
+                message.message_id if message is not None else None,
+                sender,
+                child,
+                node_info,
+                workflow_parent_run_id=workflow_run_id,
+                projection_key=projection_key,
+            )
             if self._normalize_agent_run_status(str(child.get("status") or "")) in _ACTIVE_RUN_STATUSES:
                 active_progress = self._workflow_child_run_progress(sender, child, node_info)
         return active_progress
 
+    @staticmethod
+    def _workflow_child_message_projection_key(
+        workflow_run_id: str,
+        child_run_id: str,
+    ) -> str:
+        """Return the stable identity of one Workflow child chat projection."""
+        return json.dumps(
+            [
+                "workflow_child",
+                str(workflow_run_id or "").strip(),
+                str(child_run_id or "").strip(),
+                MessageRole.ASSISTANT.value,
+            ],
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+
     def _update_workflow_child_run_message(
         self,
-        message_id: str,
+        message_id: str | None,
         sender: dict[str, Any],
         child_run: dict[str, Any],
         node_info: dict[str, Any],
-    ) -> None:
+        *,
+        workflow_parent_run_id: str = "",
+        projection_key: str = "",
+    ) -> str:
         status = self._normalize_agent_run_status(str(child_run.get("status") or "processing"))
         node_label = str(node_info.get("workflow_node_label") or node_info.get("detail") or "").strip()
         node_task = str(node_info.get("workflow_node_task") or "").strip()
@@ -3049,40 +3675,66 @@ class ChatAPI:
             "run_artifact_count": artifact_count,
             "run_artifacts": artifact_summaries,
         }
-        existing = self._message_metadata(message_id)
-        workflow_parent_run_id = str(
+        existing = self._message_metadata(message_id) if message_id else {}
+        resolved_parent_run_id = str(
             existing.get("workflow_parent_run_id")
             or existing.get("workflow_run_id")
             or node_info.get("workflow_parent_run_id")
+            or workflow_parent_run_id
             or ""
         ).strip()
-        metadata["workflow_parent_run_id"] = workflow_parent_run_id
-        metadata["workflow_run_id"] = workflow_parent_run_id
+        metadata["workflow_parent_run_id"] = resolved_parent_run_id
+        metadata["workflow_run_id"] = resolved_parent_run_id
+        if projection_key:
+            metadata["assistant_projection_key"] = projection_key
+
+        def write_projection(
+            content: str,
+            message_status: MessageStatus,
+            *,
+            error: str | None = None,
+            metadata_update: dict[str, Any] | None = None,
+        ) -> str:
+            next_metadata = metadata_update or metadata
+            if projection_key:
+                return self._session.upsert_assistant_projection_message(
+                    projection_key,
+                    content,
+                    status=message_status,
+                    error=error,
+                    metadata=next_metadata,
+                    message_id=message_id or "",
+                )
+            if message_id:
+                self._session.update_assistant_message(
+                    message_id,
+                    content,
+                    status=message_status,
+                    error=error,
+                    metadata=next_metadata,
+                )
+                return message_id
+            raise ValueError("projection_key is required for a new Workflow child message")
 
         if status == "approval_required":
             content = self._approval_required_content(sender, child_run, goal=node_task)
-            self._session.update_assistant_message(
-                message_id,
+            return write_projection(
                 content,
-                status=MessageStatus.PROCESSING,
+                MessageStatus.PROCESSING,
                 error=None,
-                metadata=metadata,
             )
-            return
         if status in {"processing", "pending"}:
             title, detail = self._workflow_child_run_progress(sender, child_run, node_info)
-            self._session.update_assistant_message(
-                message_id,
+            return write_projection(
                 "",
-                status=MessageStatus.PROCESSING,
+                MessageStatus.PROCESSING,
                 error=None,
-                metadata={
+                metadata_update={
                     **metadata,
                     "run_progress_title": title,
                     "run_progress_detail": detail,
                 },
             )
-            return
 
         result = str(child_run.get("result") or "").strip()
         content = self._workflow_child_terminal_content(
@@ -3093,12 +3745,10 @@ class ChatAPI:
             node_task=node_task,
             artifact_notice_count=artifact_count,
         )
-        self._session.update_assistant_message(
-            message_id,
+        return write_projection(
             content,
-            status=self._message_status_for_run_status(status),
+            self._message_status_for_run_status(status),
             error=content if status in {"failed", "cancelled"} else None,
-            metadata=metadata,
         )
 
     @staticmethod
@@ -4254,54 +4904,152 @@ class ChatAPI:
             "session_context": context,
         }
 
-    def retry_message(self, message_id: str) -> Dict[str, Any]:
+    def retry_message(
+        self,
+        message_id: str,
+        *,
+        client_message_id: str = "",
+    ) -> Dict[str, Any]:
+        """Serialize one idempotent retry through its commit boundary."""
+        try:
+            idempotency_key = self._normalize_client_message_id(client_message_id)
+        except AgentRuntimeError as exc:
+            return self._not_committed_send_response(
+                {"error": redact_api_error_text(exc)},
+                "",
+            )
+        if not idempotency_key:
+            return self._retry_message_once(message_id, client_message_id="")
+
+        lock_key = (
+            id(self._chat_store()),
+            self._session.session_id,
+            idempotency_key,
+        )
+        lock = _SEND_MESSAGE_SINGLEFLIGHT_LOCKS[
+            hash(lock_key) % len(_SEND_MESSAGE_SINGLEFLIGHT_LOCKS)
+        ]
+        with lock:
+            return self._retry_message_once(
+                message_id,
+                client_message_id=idempotency_key,
+            )
+
+    def _retry_message_once(
+        self,
+        message_id: str,
+        *,
+        client_message_id: str,
+    ) -> Dict[str, Any]:
         """重新发送当前会话中的失败消息，复用已保存的附件文件。"""
         message_id = str(message_id or "").strip()
         if not message_id:
-            return {"ok": False, "error": "message_id 不能为空"}
+            response = {"ok": False, "error": "message_id 不能为空"}
+            return (
+                self._not_committed_send_response(response, client_message_id)
+                if client_message_id
+                else response
+            )
 
         try:
+            existing_response = self._idempotent_message_response(client_message_id)
+            if (
+                existing_response is not None
+                and not self._client_message_requires_task_resume(client_message_id)
+            ):
+                return existing_response
+
             self._sync_task_status_to_messages()
             target = next(
                 (msg for msg in self._session.get_all_messages() if msg.message_id == message_id),
                 None,
             )
-            delegated_retry = self._retry_delegated_agent_message(target)
+            delegated_retry = self._retry_delegated_agent_message(
+                target,
+                client_message_id=client_message_id,
+            )
             if delegated_retry is not None:
-                return delegated_retry
+                if not client_message_id:
+                    return delegated_retry
+                if delegated_retry.get("ok") is False:
+                    return self._not_committed_send_response(
+                        delegated_retry,
+                        client_message_id,
+                    )
+                return self._accepted_send_response(
+                    delegated_retry,
+                    client_message_id,
+                )
 
             source = self._find_retry_source_message(message_id)
             if source is None:
-                return {"ok": False, "error": "没有找到可重试的失败消息"}
+                response = {"ok": False, "error": "没有找到可重试的失败消息"}
+                return (
+                    self._not_committed_send_response(response, client_message_id)
+                    if client_message_id
+                    else response
+                )
 
             saved_attachments = [dict(attachment) for attachment in source.attachments or []]
             missing_attachments = self._missing_retry_attachments(saved_attachments)
             if missing_attachments:
-                return {
+                response = {
                     "ok": False,
                     "error": f"附件缓存不存在，无法重试：{', '.join(missing_attachments)}",
                 }
+                return (
+                    self._not_committed_send_response(response, client_message_id)
+                    if client_message_id
+                    else response
+                )
 
             if saved_attachments and self._should_enforce_image_capability():
                 image_input = get_native_image_input_capability()
                 if image_input.get("can_attach_images") is False:
-                    return {
+                    response = {
                         "ok": False,
                         "error": str(image_input.get("reason") or "当前 Native Agent 模型暂不支持图片输入"),
                         "image_input": image_input,
                     }
+                    return (
+                        self._not_committed_send_response(response, client_message_id)
+                        if client_message_id
+                        else response
+                    )
 
             text = (source.content or "").strip()
             if not text and saved_attachments:
                 text = "请识别并分析这张图片。"
             if not text:
-                return {"ok": False, "error": "原消息内容为空，无法重试"}
+                response = {"ok": False, "error": "原消息内容为空，无法重试"}
+                return (
+                    self._not_committed_send_response(response, client_message_id)
+                    if client_message_id
+                    else response
+                )
 
             unavailable_reason = user_task_unavailable_reason(self._runtime)
             if unavailable_reason:
-                return self._unavailable_response(unavailable_reason)
+                response = self._unavailable_response(unavailable_reason)
+                return (
+                    self._not_committed_send_response(response, client_message_id)
+                    if client_message_id
+                    else response
+                )
 
-            new_message_id = self._session.add_user_message(text, saved_attachments)
+            retry_metadata = self._with_client_message_id(
+                {
+                    "retry_of_message_id": message_id,
+                    "chat_delivery_requires_task": True,
+                },
+                client_message_id,
+            )
+            new_message_id = self._store_user_message(
+                text,
+                saved_attachments,
+                client_message_id=client_message_id,
+                metadata=retry_metadata,
+            )
             task = self._state.create_task(
                 task_type=TaskType.GENERAL,
                 description=text,
@@ -4317,7 +5065,7 @@ class ChatAPI:
                 task.task_id,
                 len(saved_attachments),
             )
-            return {
+            response = {
                 "ok": True,
                 "message_id": new_message_id,
                 "source_message_id": message_id,
@@ -4325,11 +5073,26 @@ class ChatAPI:
                 "status": "pending",
                 "attachments": self._serialize_attachments(saved_attachments),
             }
+            return (
+                self._accepted_send_response(response, client_message_id)
+                if client_message_id
+                else response
+            )
         except Exception as exc:
             logger.error("重试消息失败: %s", exc)
-            return {"ok": False, "error": redact_api_error_text(exc)}
+            response = {"ok": False, "error": redact_api_error_text(exc)}
+            return (
+                self._not_committed_send_response(response, client_message_id)
+                if client_message_id
+                else response
+            )
 
-    def _retry_delegated_agent_message(self, target: ChatMessage | None) -> Dict[str, Any] | None:
+    def _retry_delegated_agent_message(
+        self,
+        target: ChatMessage | None,
+        *,
+        client_message_id: str = "",
+    ) -> Dict[str, Any] | None:
         if target is None or target.role != MessageRole.ASSISTANT or target.status != MessageStatus.FAILED:
             return None
         metadata = target.metadata if isinstance(target.metadata, dict) else {}
@@ -4343,8 +5106,46 @@ class ChatAPI:
         if not runnable_id or not user_goal:
             return {"ok": False, "error": "这条 Agent 消息缺少可重试的派活信息"}
 
+        if client_message_id:
+            for message in reversed(self._session.get_all_messages()):
+                candidate_metadata = (
+                    message.metadata if isinstance(message.metadata, dict) else {}
+                )
+                if not (
+                    message.role == MessageRole.ASSISTANT
+                    and str(candidate_metadata.get("client_message_id") or "")
+                    == client_message_id
+                    and str(candidate_metadata.get("retry_of_message_id") or "")
+                    == target.message_id
+                ):
+                    continue
+                run_id = str(candidate_metadata.get("run_id") or "").strip()
+                if not run_id:
+                    continue
+                status = (
+                    message.status.value
+                    if isinstance(message.status, MessageStatus)
+                    else str(message.status)
+                )
+                return {
+                    "ok": True,
+                    "runnable_command": True,
+                    "message_id": message.message_id,
+                    "assistant_message_id": message.message_id,
+                    "assistant_message_ids": [message.message_id],
+                    "task_id": "",
+                    "status": status,
+                    "run_id": run_id,
+                    "run_group_id": str(candidate_metadata.get("run_group_id") or ""),
+                    "run_status": str(candidate_metadata.get("run_status") or status),
+                    "agent_run_id": run_id,
+                    "idempotent": True,
+                }
+
         context = self._session_context()
-        run_group_id = str(metadata.get("run_group_id") or context.get("run_group_id") or "")
+        # A user retry is another root request. Persisted message metadata is
+        # display context and must never authorize attachment to an old Group.
+        run_group_id = ""
         service = self._agent_runtime_service()
         try:
             runnable = service.resolve_runnable(runnable_id=runnable_id)
@@ -4368,6 +5169,7 @@ class ChatAPI:
                 "delegated_by_task_id": metadata.get("delegated_by_task_id") or "",
                 "delegated_goal": user_goal,
                 "retry_of_message_id": target.message_id,
+                **({"client_message_id": client_message_id} if client_message_id else {}),
             },
         )
         self._session.update_assistant_message(
@@ -4378,7 +5180,7 @@ class ChatAPI:
         callback_session_id = self._session.session_id
 
         def _on_run_complete(run_result: dict[str, Any]) -> None:
-            self._with_session(
+            self._with_existing_session(
                 callback_session_id,
                 lambda: self._update_agent_run_message_from_result(assistant_id, sender, run_result),
             )
@@ -4490,11 +5292,11 @@ class ChatAPI:
     ) -> bool:
         if not requests:
             return False
-        if _can_direct_execute_data_analysis_discovery(
-            requests,
-            self._main_chat_default_workdir(),
-        ):
-            return True
+        if _data_analysis_discovery_request(requests) is not None:
+            return _can_direct_execute_data_analysis_discovery(
+                requests,
+                self._main_chat_default_workdir(),
+            )
         if self._can_direct_execute_discovered_app_followup(
             requests,
             text,
@@ -4502,6 +5304,14 @@ class ChatAPI:
         ):
             return True
         if direct_browser_entrypoint_requests(requests, text):
+            return True
+        approval_requests = daily_desktop_approval_or_submit_entrypoint_requests(
+            requests,
+            text=text,
+        )
+        if approval_requests and daily_desktop_requests_can_complete_without_model(
+            approval_requests,
+        ):
             return True
         if daily_desktop_requests_can_complete_without_model(requests):
             return True
@@ -5010,6 +5820,15 @@ class ChatAPI:
 
             task = self._state.get_task(msg.task_id)
             if task is None:
+                run = self._linked_main_chat_run_for_task(msg.task_id)
+                if run:
+                    synced_task_ids.add(msg.task_id)
+                    self._sync_missing_task_from_durable_run(
+                        msg,
+                        run,
+                        current_context,
+                    )
+                    continue
                 if msg.status in (MessageStatus.PENDING, MessageStatus.PROCESSING):
                     self._session.mark_message_failed(msg.message_id, "任务状态不可恢复")
                 continue
@@ -5117,6 +5936,123 @@ class ChatAPI:
         self._sync_group_dispatches_from_completed_tasks(notify_group_summary=notify_group_summary)
         self._sync_group_agent_summary_parent_statuses()
 
+    def _sync_missing_task_from_durable_run(
+        self,
+        message: ChatMessage,
+        run: dict[str, Any],
+        current_context: dict[str, Any],
+    ) -> bool:
+        task_id = str(message.task_id or "").strip()
+        if not task_id:
+            return False
+        status = self._normalize_agent_run_status(str(run.get("status") or ""))
+        if status == "approval_required":
+            goal = message.content if message.role == MessageRole.USER else ""
+            return self._project_main_chat_approval_message(
+                task_id=task_id,
+                run=run,
+                goal=goal,
+            ) is not None
+        if status in {"processing", "pending"}:
+            assistant = self._session.get_assistant_message_for_task(task_id)
+            existing_metadata = (
+                dict(assistant.metadata or {})
+                if assistant and isinstance(assistant.metadata, dict)
+                else {}
+            )
+            metadata = {
+                **existing_metadata,
+                "run_status": status,
+                "run_id": run.get("run_id") or "",
+                "run_group_id": run.get("run_group_id") or "",
+            }
+            if str(existing_metadata.get("run_status") or "") == "approval_required":
+                metadata.update({
+                    "pending_approval": {},
+                    "run_progress_title": "审批已通过",
+                    "run_progress_detail": "Yachiyo 正在继续执行当前任务。",
+                })
+            self._session.upsert_assistant_message(
+                task_id=task_id,
+                content=assistant.content if assistant is not None else "",
+                status=MessageStatus.PROCESSING,
+                error=None,
+                attachments=assistant.attachments if assistant is not None else None,
+                metadata=metadata,
+            )
+            return True
+        if status == "completed":
+            assistant = self._session.get_assistant_message_for_task(task_id)
+            assistant_metadata = (
+                dict(assistant.metadata or {})
+                if assistant and isinstance(assistant.metadata, dict)
+                else {}
+            )
+            result = str(run.get("result") or "[任务已完成，无输出]")
+            message_metadata = (
+                message.metadata if isinstance(message.metadata, dict) else {}
+            )
+            result = self._sanitize_group_summary_result(
+                result,
+                message_metadata,
+                current_context,
+            )
+            if message.role == MessageRole.USER:
+                self._session.mark_message_completed(message.message_id)
+            self._session.upsert_assistant_message(
+                task_id=task_id,
+                content=result,
+                status=MessageStatus.COMPLETED,
+                metadata=_terminal_or_group_summary_metadata(
+                    assistant_metadata,
+                    "completed",
+                ),
+            )
+            return True
+        if status == "failed":
+            assistant = self._session.get_assistant_message_for_task(task_id)
+            assistant_metadata = (
+                dict(assistant.metadata or {})
+                if assistant and isinstance(assistant.metadata, dict)
+                else {}
+            )
+            error = str(run.get("result") or "任务执行失败")
+            if message.role == MessageRole.USER:
+                self._session.mark_message_failed(message.message_id, error)
+            self._session.upsert_assistant_message(
+                task_id=task_id,
+                content=f"❌ {error}",
+                status=MessageStatus.FAILED,
+                error=error,
+                metadata=_terminal_or_group_summary_metadata(
+                    assistant_metadata,
+                    "failed",
+                ),
+            )
+            return True
+        if status == "cancelled":
+            assistant = self._session.get_assistant_message_for_task(task_id)
+            assistant_metadata = (
+                dict(assistant.metadata or {})
+                if assistant and isinstance(assistant.metadata, dict)
+                else {}
+            )
+            error = "任务已取消"
+            if message.role == MessageRole.USER:
+                self._session.mark_message_failed(message.message_id, error)
+            self._session.upsert_assistant_message(
+                task_id=task_id,
+                content=f"⚠️ {error}",
+                status=MessageStatus.FAILED,
+                error=error,
+                metadata=_terminal_or_group_summary_metadata(
+                    assistant_metadata,
+                    "cancelled",
+                ),
+            )
+            return True
+        return False
+
     def _sync_main_chat_run_projection_for_running_task(self, task: Any) -> bool:
         """Project native main-chat Run approval state onto the Task chat message.
 
@@ -5134,31 +6070,13 @@ class ChatAPI:
         assistant = self._session.get_assistant_message_for_task(task_id)
         existing_metadata = dict(assistant.metadata or {}) if assistant and isinstance(assistant.metadata, dict) else {}
         if status == "approval_required":
-            pending = run.get("pending_approval") if isinstance(run.get("pending_approval"), dict) else {}
-            if not pending.get("tool"):
-                return False
-            sender = existing_metadata.get("sender") if isinstance(existing_metadata.get("sender"), dict) else self._main_model_sender_from_runtime()
-            content = self._approval_required_content(
-                sender,
-                run,
+            content = self._project_main_chat_approval_message(
+                task_id=task_id,
+                run=run,
                 goal=str(getattr(task, "description", "") or ""),
             )
-            metadata = {
-                **existing_metadata,
-                "sender": sender,
-                "run_status": "approval_required",
-                "run_id": run.get("run_id") or "",
-                "run_group_id": run.get("run_group_id") or "",
-                "pending_approval": pending,
-                "run_progress_title": "等待工具审批",
-                "run_progress_detail": content,
-            }
-            self._session.upsert_assistant_message(
-                task_id=task_id,
-                content=content,
-                status=MessageStatus.PROCESSING,
-                metadata=metadata,
-            )
+            if content is None:
+                return False
             self._record_main_chat_approval_activity(task, run, content)
             return True
         if status in {"processing", "pending"} and str(existing_metadata.get("run_status") or "") == "approval_required":
@@ -5179,6 +6097,46 @@ class ChatAPI:
             )
             return True
         return False
+
+    def _project_main_chat_approval_message(
+        self,
+        *,
+        task_id: str,
+        run: dict[str, Any],
+        goal: str,
+    ) -> str | None:
+        pending = run.get("pending_approval") if isinstance(run.get("pending_approval"), dict) else {}
+        if not pending.get("tool"):
+            return None
+        assistant = self._session.get_assistant_message_for_task(task_id)
+        existing_metadata = (
+            dict(assistant.metadata or {})
+            if assistant and isinstance(assistant.metadata, dict)
+            else {}
+        )
+        sender = (
+            existing_metadata.get("sender")
+            if isinstance(existing_metadata.get("sender"), dict)
+            else self._main_model_sender_from_runtime()
+        )
+        content = self._approval_required_content(sender, run, goal=goal)
+        metadata = {
+            **existing_metadata,
+            "sender": sender,
+            "run_status": "approval_required",
+            "run_id": run.get("run_id") or "",
+            "run_group_id": run.get("run_group_id") or "",
+            "pending_approval": pending,
+            "run_progress_title": "等待工具审批",
+            "run_progress_detail": content,
+        }
+        self._session.upsert_assistant_message(
+            task_id=task_id,
+            content=content,
+            status=MessageStatus.PROCESSING,
+            metadata=metadata,
+        )
+        return content
 
     def _linked_main_chat_run_for_task(self, task_id: str) -> dict[str, Any] | None:
         try:
@@ -5391,17 +6349,66 @@ class ChatAPI:
             if msg.status != MessageStatus.COMPLETED:
                 continue
             metadata = msg.metadata if isinstance(msg.metadata, dict) else {}
-            if metadata.get("group_dispatch_handled"):
+            if (
+                metadata.get("group_dispatch_handled")
+                or metadata.get("group_dispatch_state") == "ignored"
+            ):
                 continue
             sender = metadata.get("sender") if isinstance(metadata.get("sender"), dict) else {}
             if sender.get("kind") in {"agent", "workflow"}:
                 continue
+            prepared_directives = self._prepared_group_dispatch_directives(metadata)
             task = self._state.get_task(msg.task_id)
-            if task is None or task.status != TaskStatus.COMPLETED:
+            if task is None:
+                if not (
+                    prepared_directives
+                    and metadata.get("group_dispatch_state") in {"prepared", "started"}
+                ):
+                    continue
+                # A completed AppState Task is process-local.  The prepared
+                # receipt is the durable authority that lets a new process
+                # finish an interrupted dispatch without reinterpreting text.
+                task_description = ""
+                source_text = str(
+                    metadata.get("group_dispatch_source_intro") or ""
+                )
+                directives = prepared_directives
+            else:
+                if task.status != TaskStatus.COMPLETED:
+                    continue
+                task_description = task.description
+                source_text = task.result or msg.content
+                directives = (
+                    prepared_directives
+                    if (
+                        prepared_directives
+                        and metadata.get("group_dispatch_state") in {"prepared", "started"}
+                    )
+                    else self._parse_group_dispatch_directives(source_text)
+                )
+            if (
+                directives
+                and not prepared_directives
+                and not self._is_group_followup_task_description(task_description)
+                and not self._group_dispatch_command_authorized(
+                    task_description,
+                    source_text,
+                )
+            ):
+                self._session.update_assistant_message(
+                    msg.message_id,
+                    source_text,
+                    status=MessageStatus.COMPLETED,
+                    error=msg.error,
+                    metadata={
+                        "group_dispatch_state": "ignored",
+                        "group_dispatch_ignored_data": True,
+                        "group_dispatch_pending": None,
+                        "group_dispatch_stream_visible_content": None,
+                    },
+                )
                 continue
-            source_text = task.result or msg.content
-            directives = self._parse_group_dispatch_directives(source_text)
-            if self._is_group_followup_task_description(task.description):
+            if self._is_group_followup_task_description(task_description):
                 cleaned_metadata = dict(metadata)
                 cleaned_metadata.pop("group_dispatch_pending", None)
                 cleaned_metadata.pop("group_dispatch_stream_visible_content", None)
@@ -5430,11 +6437,11 @@ class ChatAPI:
                 continue
             if not directives:
                 missing_expected_dispatch = self._group_dispatch_expected_without_requests(
-                    task.description,
+                    task_description,
                     source_text,
                 )
                 fallback_directives = (
-                    self._fallback_group_dispatch_directives(task.description, source_text, context)
+                    self._fallback_group_dispatch_directives(task_description, source_text, context)
                     if missing_expected_dispatch
                     else []
                 )
@@ -5503,7 +6510,7 @@ class ChatAPI:
                 continue
             fallback_directives = self._missing_group_dispatch_fallback_directives(
                 directives,
-                self._fallback_group_dispatch_directives(task.description, source_text, context),
+                self._fallback_group_dispatch_directives(task_description, source_text, context),
                 context,
             )
             if fallback_directives:
@@ -5535,6 +6542,192 @@ class ChatAPI:
     @classmethod
     def _parse_group_dispatch_requests(cls, content: str) -> list[dict[str, str]]:
         return [directive.as_request() for directive in cls._parse_group_dispatch_directives(content)]
+
+    @staticmethod
+    def _prepared_group_dispatch_directives(
+        metadata: dict[str, Any],
+    ) -> list[GroupDispatchDirective]:
+        payload = metadata.get("group_dispatch_prepared")
+        if not isinstance(payload, list):
+            return []
+        directives: list[GroupDispatchDirective] = []
+        for item in payload[:3]:
+            if not isinstance(item, dict):
+                continue
+            directive = GroupDispatchDirective(
+                kind=str(item.get("kind") or ""),
+                target=str(item.get("target") or ""),
+                runnable_id=str(item.get("runnable_id") or ""),
+                goal=str(item.get("goal") or ""),
+            )
+            if (
+                directive.kind == "agent"
+                and directive.runnable_id
+                and directive.goal
+            ):
+                directives.append(directive)
+        return directives
+
+    @classmethod
+    def _group_dispatch_command_authorized(
+        cls,
+        task_description: str,
+        response_text: str,
+    ) -> bool:
+        """Require both user execution intent and executable payload provenance.
+
+        JSON is also a common data/documentation format.  A syntactically valid
+        dispatch-shaped object is therefore not authority by itself: the user
+        request must authorize real dispatch and the model output must present
+        the object as a command rather than a quotation.
+        """
+
+        request = cls._group_dispatch_user_request_from_task(task_description)
+        if not request:
+            return False
+        if not cls._group_dispatch_request_authorizes_execution(
+            task_description,
+            response_text,
+        ):
+            return False
+        return cls._group_dispatch_payload_has_command_provenance(response_text)
+
+    @classmethod
+    def _group_dispatch_request_authorizes_execution(
+        cls,
+        task_description: str,
+        response_text: str,
+    ) -> bool:
+        request = cls._group_dispatch_user_request_from_task(task_description)
+        instruction = cls._text_outside_quoted_data(request)
+        compact = re.sub(r"\s+", "", instruction)
+        if not compact:
+            return False
+
+        # An explicit prohibition always wins over dispatch-looking data that
+        # follows it.  This is capability authority, not a model suggestion.
+        if re.search(
+            r"(?:不要|不用|不需要|无需|先不|禁止|仅供|只供|do\s+not|don't|dont|must\s+not|without)"
+            r".{0,24}(?:执行|运行|派|派发|委派|分配|指派|交给|dispatch|delegate|assign|execute|run)",
+            compact,
+            re.IGNORECASE,
+        ):
+            return False
+
+        force_execution = bool(
+            re.search(
+                r"(?:实际|真正|立即|现在|开始)"
+                r".{0,20}(?:执行|运行|派|派发|委派|分配|指派|交给|dispatch|delegate|assign|execute|run)",
+                instruction,
+                re.IGNORECASE,
+            )
+            or re.search(
+                r"(?:请|帮我|麻烦|please).{0,30}"
+                r"(?:执行|运行|派给|交给|分配给|指派给|委派给|execute|run|dispatch.{0,12}\bto\b|assign.{0,12}\bto\b|delegate.{0,12}\bto\b)",
+                instruction,
+                re.IGNORECASE,
+            )
+        )
+        data_artifact = bool(re.search(
+            r"(?:json|payload|schema|代码块|指令文本|命令文本|样例|示例|例子|模板|格式|数据|引用|"
+            r"机制|协议|字段|内容|文本|模型输出|请求体|安全性|"
+            r"sample|example|template|format|data|quote|quoted|documentation|mechanism|protocol|output|request\s+body)",
+            instruction,
+            re.IGNORECASE,
+        ))
+        data_operation = bool(re.search(
+            r"(?:审计|分析|检查|评审|解释|说明|展示|输出|复制|引用|改写|翻译|"
+            r"audit|analy[sz]e|inspect|review|explain|describe|show|print|copy|quote|rewrite|translate)",
+            instruction,
+            re.IGNORECASE,
+        ))
+        if data_artifact and data_operation and not force_execution:
+            return False
+
+        if cls._group_dispatch_expected_without_requests(
+            task_description,
+            response_text,
+        ):
+            return True
+        return bool(re.search(
+            r"(?:派|派发|派活|委派|安排|分配|指派|交给|让|分工|协作|一起|跑|执行|运行|开始|做|处理|"
+            r"dispatch|delegate|assign|hand\s+off|collaborate|run|execute|start|do)",
+            instruction,
+            re.IGNORECASE,
+        ))
+
+    @staticmethod
+    def _text_outside_quoted_data(text: str) -> str:
+        """Drop quoted payload bodies while preserving surrounding instructions."""
+
+        lines: list[str] = []
+        in_fence = False
+        for line in str(text or "").splitlines():
+            if re.match(r"^\s*```", line):
+                in_fence = not in_fence
+                continue
+            if in_fence or re.match(r"^\s*>", line):
+                continue
+            lines.append(line)
+        instruction = "\n".join(lines)
+        instruction = re.sub(r"`[^`]*`", " ", instruction, flags=re.DOTALL)
+        instruction = re.sub(r"[「『“‘].*?[」』”’]", " ", instruction, flags=re.DOTALL)
+        # A JSON body may be pasted directly after an instruction.  Its keys
+        # and values cannot grant authority to execute the instruction.
+        json_body = re.search(
+            r"[\[{]\s*(?:[\[{\"'\d\]-]|true\b|false\b|null\b)",
+            instruction,
+            re.IGNORECASE,
+        )
+        if json_body is not None:
+            instruction = instruction[: json_body.start()]
+        return instruction.strip()
+
+    @classmethod
+    def _group_dispatch_payload_has_command_provenance(cls, content: str) -> bool:
+        text = str(content or "").strip()
+        if not text:
+            return False
+
+        outside_quotes: list[str] = []
+        fenced_blocks: list[str] = []
+        current_fence: list[str] = []
+        in_fence = False
+        for line in text.splitlines():
+            if re.match(r"^\s*```", line):
+                if in_fence:
+                    fenced_blocks.append("\n".join(current_fence))
+                    current_fence = []
+                in_fence = not in_fence
+                continue
+            if in_fence:
+                current_fence.append(line)
+                continue
+            if re.match(r"^\s*>", line):
+                continue
+            outside_quotes.append(line)
+        outside_text = re.sub(
+            r"[「『“‘].*?[」』”’]",
+            " ",
+            "\n".join(outside_quotes),
+            flags=re.DOTALL,
+        )
+        outside_text = re.sub(r"`[^`]*`", " ", outside_text, flags=re.DOTALL)
+        if re.search(
+            r"<\s*(?:oha|native)[\s_-]*group[\s_-]*dispatch\b[^>]*>.*?"
+            r"</\s*(?:oha|native)[\s_-]*group[\s_-]*dispatch\s*>",
+            outside_text,
+            re.DOTALL | re.IGNORECASE,
+        ):
+            return True
+        if cls._parse_group_dispatch_directives(outside_text):
+            return True
+
+        # A whole-document JSON fence is accepted as a deliberate structured
+        # command, but an embedded documentation/example fence is not.
+        if fenced_blocks and not "\n".join(outside_quotes).strip():
+            return any(cls._parse_group_dispatch_directives(block) for block in fenced_blocks)
+        return False
 
     @staticmethod
     def _coerce_group_dispatch_directive(request: Any) -> GroupDispatchDirective:
@@ -6541,31 +7734,64 @@ class ChatAPI:
             resolved.append((directive, runnable))
 
         summary = self._format_group_dispatch_summary(resolved, skipped)
-        visible_content = self._format_group_dispatch_visible_content(source_text or assistant_message.content, summary)
+        dispatch_metadata = self._message_metadata(assistant_message.message_id)
+        if (
+            dispatch_metadata.get("group_dispatch_state") in {"prepared", "started"}
+            and "group_dispatch_source_intro" in dispatch_metadata
+        ):
+            dispatch_source = str(
+                dispatch_metadata.get("group_dispatch_source_intro") or ""
+            )
+        else:
+            dispatch_source = source_text or assistant_message.content
+        source_intro = self._normalize_group_dispatch_intro(
+            self._strip_group_dispatch_payloads(dispatch_source)
+        ).strip()
+        visible_content = self._format_group_dispatch_visible_content(
+            dispatch_source,
+            summary,
+        )
         resolved_names = [
             str(runnable.get("nickname") or runnable.get("name") or directive.target or "Agent").strip()
             for directive, runnable in resolved
         ]
         resolved_names = [name for name in resolved_names if name]
-        self._record_group_dispatch_activity(
-            task_id=assistant_message.task_id or "",
-            title="群组任务已派发" if resolved else "群组任务派发失败",
-            detail="、".join(resolved_names) if resolved_names else "没有找到可接收任务的 Agent",
-            status="completed" if resolved else "failed",
-            event_id=f"{assistant_message.task_id or assistant_message.message_id}-group-dispatch-complete",
-        )
+        prepared_directives = [
+            {
+                "kind": "agent",
+                "target": str(
+                    runnable.get("nickname")
+                    or runnable.get("name")
+                    or directive.target
+                    or ""
+                ).strip(),
+                "runnable_id": str(runnable.get("id") or "").strip(),
+                "goal": directive.goal,
+            }
+            for directive, runnable in resolved
+        ]
         self._session.update_assistant_message(
             assistant_message.message_id,
             visible_content,
             status=MessageStatus.COMPLETED,
             metadata={
                 "sender": self._main_model_sender_from_runtime(),
-                "group_dispatch_handled": True,
+                "group_dispatch_state": "prepared" if resolved else "handled",
+                "group_dispatch_prepared": prepared_directives,
+                "group_dispatch_source_intro": source_intro,
+                "group_dispatch_handled": True if not resolved else None,
                 "group_dispatch_count": len(resolved),
                 "group_dispatch_skipped": skipped,
             },
         )
         if not resolved:
+            self._record_group_dispatch_activity(
+                task_id=assistant_message.task_id or "",
+                title="群组任务派发失败",
+                detail="没有找到可接收任务的 Agent",
+                status="failed",
+                event_id=f"{assistant_message.task_id or assistant_message.message_id}-group-dispatch-complete",
+            )
             if skipped:
                 if notify_group_summary:
                     self._maybe_create_group_agent_summary_task(assistant_message.task_id or "")
@@ -6574,12 +7800,50 @@ class ChatAPI:
         # Group sessions are long-lived; every main-model dispatch starts a
         # fresh run group, while all Agents in the same dispatch share it.
         run_group_id = ""
+        root_run_id = ""
         next_context = dict(context)
-        for directive, runnable in resolved:
+        dispatch_lock = threading.Lock()
+        dispatch_state: dict[str, Any] = {
+            "closed": False,
+            "started_count": 0,
+            "completed_runs": [],
+        }
+        parent_metadata = self._message_metadata(assistant_message.message_id)
+        persisted_started = parent_metadata.get("group_dispatch_started")
+        started_receipts = [
+            dict(item)
+            for item in (persisted_started if isinstance(persisted_started, list) else [])
+            if isinstance(item, dict)
+        ]
+
+        def _project_dispatch_group_if_settled() -> None:
+            with dispatch_lock:
+                if (
+                    not dispatch_state["closed"]
+                    or dispatch_state["started_count"] <= 0
+                    or not dispatch_state["completed_runs"]
+                ):
+                    return
+                completed_run = dict(dispatch_state["completed_runs"][-1])
+                expected_member_count = int(dispatch_state["started_count"])
+            project_group_terminal_after_member(
+                service,
+                completed_run,
+                expected_member_count=expected_member_count,
+            )
+
+        for dispatch_index, (directive, runnable) in enumerate(resolved):
             sender = self._participant_for_runnable(runnable)
             initial_content = ""
-            assistant_id = self._session.add_assistant_message(
+            child_identity = normalize_run_group_child_identity(
+                "chat-group-dispatch:"
+                f"{assistant_message.task_id or assistant_message.message_id}:"
+                f"{dispatch_index}:{runnable.get('id') or ''}"
+            )
+            assistant_id = self._session.upsert_assistant_projection_message(
+                child_identity,
                 initial_content,
+                status=MessageStatus.PROCESSING,
                 metadata={
                     "sender": sender,
                     "runnable_kind": "agent",
@@ -6592,11 +7856,6 @@ class ChatAPI:
                     "delegated_goal": directive.goal,
                 },
             )
-            self._session.update_assistant_message(
-                assistant_id,
-                initial_content,
-                status=MessageStatus.PROCESSING,
-            )
             callback_session_id = self._session.session_id
 
             def _on_run_complete(
@@ -6606,7 +7865,7 @@ class ChatAPI:
                 current_sender: dict[str, Any] = sender,
                 session_id: str = callback_session_id,
             ) -> None:
-                self._with_session(
+                self._with_existing_session(
                     session_id,
                     lambda: self._update_agent_run_message_from_result(
                         message_id,
@@ -6615,18 +7874,37 @@ class ChatAPI:
                         notify_group_summary=notify_group_summary,
                     ),
                 )
+                with dispatch_lock:
+                    dispatch_state["completed_runs"].append(dict(run_result))
+                _project_dispatch_group_if_settled()
 
             try:
-                run = service.create_run_for_runnable_async(
+                if run_group_id and not root_run_id:
+                    raise AgentRuntimeError("group_dispatch_parent_run_missing")
+                run_group_attachment = (
+                    issue_run_group_child_attachment(
+                        run_group_id=run_group_id,
+                        parent_run_id=root_run_id,
+                        child_kind="agent_run",
+                        child_runnable_id=str(runnable.get("id") or ""),
+                        child_identity=child_identity,
+                    )
+                    if run_group_id
+                    else None
+                )
+                run = create_runnable_run(
+                    service,
                     runnable_id=str(runnable.get("id") or ""),
-                    name=directive.target,
                     user_goal=directive.goal,
                     run_group_id=run_group_id,
+                    client_run_id=child_identity,
                     upstream=self._with_group_context_for_agent_upstream(
                         self._chat_upstream_context(),
                         next_context,
                         sender,
                     ),
+                    project_root_group=False,
+                    run_group_attachment=run_group_attachment,
                     on_complete=_on_run_complete,
                 )
             except AgentRuntimeError as exc:
@@ -6653,18 +7931,71 @@ class ChatAPI:
                 continue
 
             run_group_id = str(run.get("run_group_id") or run_group_id)
+            if not root_run_id:
+                root_run_id = str(run.get("run_id") or "")
+            with dispatch_lock:
+                dispatch_state["started_count"] += 1
+                if self._normalize_agent_run_status(str(run.get("status") or "")) in {
+                    "completed",
+                    "failed",
+                    "cancelled",
+                }:
+                    run_id = str(run.get("run_id") or "")
+                    if not any(
+                        str(item.get("run_id") or "") == run_id
+                        for item in dispatch_state["completed_runs"]
+                    ):
+                        dispatch_state["completed_runs"].append(dict(run))
+            started_receipt = {
+                "dispatch_index": dispatch_index,
+                "runnable_id": str(runnable.get("id") or ""),
+                "child_identity": child_identity,
+                "run_id": str(run.get("run_id") or ""),
+                "run_group_id": run_group_id,
+            }
+            started_receipts = [
+                item
+                for item in started_receipts
+                if str(item.get("child_identity") or "") != child_identity
+            ]
+            started_receipts.append(started_receipt)
+            self._session.update_assistant_message(
+                assistant_message.message_id,
+                visible_content,
+                status=MessageStatus.COMPLETED,
+                metadata={
+                    "group_dispatch_state": "started",
+                    "group_dispatch_started": started_receipts,
+                    "group_dispatch_run_group_id": run_group_id,
+                },
+            )
             self._attach_processing_agent_run_metadata(assistant_id, initial_content, run)
             if run_group_id:
                 next_context["run_group_id"] = run_group_id
                 self._bind_group_session_context(next_context, run_group_id=run_group_id)
 
-        if run_group_id:
-            self._session.update_assistant_message(
-                assistant_message.message_id,
-                visible_content,
-                status=MessageStatus.COMPLETED,
-                metadata={"group_dispatch_run_group_id": run_group_id},
-            )
+        with dispatch_lock:
+            dispatch_state["closed"] = True
+        _project_dispatch_group_if_settled()
+
+        self._record_group_dispatch_activity(
+            task_id=assistant_message.task_id or "",
+            title="群组任务已派发" if dispatch_state["started_count"] else "群组任务派发失败",
+            detail="、".join(resolved_names) if dispatch_state["started_count"] else "没有找到可接收任务的 Agent",
+            status="completed" if dispatch_state["started_count"] else "failed",
+            event_id=f"{assistant_message.task_id or assistant_message.message_id}-group-dispatch-complete",
+        )
+        self._session.update_assistant_message(
+            assistant_message.message_id,
+            visible_content,
+            status=MessageStatus.COMPLETED,
+            metadata={
+                "group_dispatch_state": "handled",
+                "group_dispatch_handled": True,
+                "group_dispatch_run_group_id": run_group_id or None,
+                "group_dispatch_started": started_receipts,
+            },
+        )
 
     def _maybe_create_group_agent_summary_task(self, parent_task_id: str) -> None:
         parent_task_id = str(parent_task_id or "").strip()
@@ -7738,12 +9069,13 @@ class ChatAPI:
         if not session_id:
             return {"ok": False, "error": "session_id 不能为空"}
         try:
-            self._runtime.switch_session(session_id)
-            return {
-                "ok": True,
-                "session_id": session_id,
-                "message_count": self._runtime.chat_session.message_count(),
-            }
+            with self._runtime_session_pointer_lock():
+                self._runtime.switch_session(session_id)
+                return {
+                    "ok": True,
+                    "session_id": session_id,
+                    "message_count": self._runtime.chat_session.message_count(),
+                }
         except Exception as exc:
             logger.error("切换会话失败: %s", exc)
             return {"ok": False, "error": redact_api_error_text(exc)}
@@ -7770,46 +9102,88 @@ class ChatAPI:
             logger.error("清空会话失败: %s", exc)
             return {"ok": False, "error": redact_api_error_text(exc)}
 
-    def discard_empty_current_session(self) -> Dict[str, Any]:
-        """丢弃当前空白会话，并切回最近历史会话。"""
+    def discard_empty_current_session(self, session_id: str = "") -> Dict[str, Any]:
+        """Discard one captured empty session without rebinding a newer chat."""
+        target_session_id = str(session_id or self._session.session_id or "").strip()
+        if not target_session_id:
+            return {"ok": False, "error": "会话不存在"}
+
         try:
-            current_session_id = self._session.session_id
-            if self._session_is_processing(current_session_id):
-                return {"ok": True, "discarded": False, "session_id": current_session_id}
-
-            store = self._chat_store()
-            stored_session = store.get_session(current_session_id)
-            if stored_session is not None and stored_session.conversation_kind == "group":
-                return {"ok": True, "discarded": False, "session_id": current_session_id}
-
-            messages = store.load_messages(current_session_id, limit=1)
-            if messages:
-                return {"ok": True, "discarded": False, "session_id": current_session_id}
-
-            store.delete_session(current_session_id)
-            _remove_attachment_session_dir(current_session_id)
-            remaining = store.list_sessions(limit=1)
-            if remaining:
-                next_session_id = remaining[0].session_id
-                switch_session = getattr(self._runtime, "switch_session", None)
-                if not callable(switch_session):
-                    raise RuntimeError("runtime 不支持切换会话")
-                switch_session(next_session_id)
-            else:
-                self._session.clear()
-                next_session_id = self._session.session_id
-
-            logger.info("空白会话已丢弃: %s -> %s", current_session_id, next_session_id)
-            return {
-                "ok": True,
-                "discarded": True,
-                "deleted_session_id": current_session_id,
-                "session_id": next_session_id,
-                "empty": not remaining,
-            }
+            # A scoped send takes the same lease before it commits. Whichever
+            # operation acquires it first decides whether the captured session
+            # is non-empty or has already been removed.
+            with self._session_mutation_lock(target_session_id):
+                return self._discard_empty_session_locked(target_session_id)
         except Exception as exc:
             logger.error("丢弃空白会话失败: %s", exc)
             return {"ok": False, "error": redact_api_error_text(exc)}
+
+    def _discard_empty_session_locked(self, target_session_id: str) -> Dict[str, Any]:
+        store = self._chat_store()
+        if store.get_session(target_session_id) is None:
+            return {
+                "ok": True,
+                "discarded": False,
+                "session_id": target_session_id,
+            }
+
+        def _discard_target() -> bool:
+            if self._session_is_processing(target_session_id):
+                return False
+
+            stored_session = store.get_session(target_session_id)
+            if stored_session is None or stored_session.conversation_kind == "group":
+                return False
+
+            messages = store.load_messages(target_session_id, limit=1)
+            if messages:
+                return False
+
+            store.delete_session(target_session_id)
+            _remove_attachment_session_dir(target_session_id)
+            return True
+
+        discarded = self._with_session(
+            target_session_id,
+            _discard_target,
+            require_existing=False,
+        )
+        if not discarded:
+            return {
+                "ok": True,
+                "discarded": False,
+                "session_id": target_session_id,
+            }
+
+        remaining = store.list_sessions(limit=1)
+
+        # Keep a session loaded by another request. Only replace the runtime
+        # pointer when it still names the session that this call captured.
+        with self._runtime_session_pointer_lock():
+            current_session_id = str(
+                self._runtime.chat_session.session_id or ""
+            ).strip()
+            if current_session_id == target_session_id:
+                if remaining:
+                    next_session_id = remaining[0].session_id
+                    switch_session = getattr(self._runtime, "switch_session", None)
+                    if not callable(switch_session):
+                        raise RuntimeError("runtime 不支持切换会话")
+                    switch_session(next_session_id)
+                else:
+                    self._runtime.chat_session.clear()
+                    next_session_id = self._runtime.chat_session.session_id
+            else:
+                next_session_id = current_session_id
+
+        logger.info("空白会话已丢弃: %s -> %s", target_session_id, next_session_id)
+        return {
+            "ok": True,
+            "discarded": True,
+            "deleted_session_id": target_session_id,
+            "session_id": next_session_id,
+            "empty": not remaining,
+        }
 
     def cancel_current_tasks(self) -> Dict[str, Any]:
         """取消当前会话中仍在等待/执行的任务，但保留会话历史。"""
@@ -7989,36 +9363,78 @@ class ChatAPI:
 
     def delete_current_session(self) -> Dict[str, Any]:
         """删除当前会话，并切换到剩余最近会话或新建空会话。"""
-        try:
-            self._sync_task_status_to_messages()
-            cancelled_count = self._cancel_active_session_tasks("删除会话前取消仍在执行的任务")
-            deleted_session_id = self._session.session_id
+        return self._delete_session_with_lease(self._session.session_id)
 
+    def delete_session(self, session_id: str = "") -> Dict[str, Any]:
+        """Delete one captured session without rebinding a newer active chat."""
+        target_session_id = str(session_id or self._session.session_id or "").strip()
+        return self._delete_session_with_lease(target_session_id)
+
+    def _delete_session_with_lease(self, target_session_id: str) -> Dict[str, Any]:
+        target_session_id = str(target_session_id or "").strip()
+        if not target_session_id:
+            return {"ok": False, "error": "会话不存在"}
+
+        # This lease is acquired before reading messages/tasks. A scoped send
+        # holds the same lease outside its idempotency singleflight lock, so the
+        # delete observes either no commit or the complete message/task link.
+        with self._session_mutation_lock(target_session_id):
+            return self._delete_session_locked(target_session_id)
+
+    def _delete_session_locked(self, target_session_id: str) -> Dict[str, Any]:
+        try:
             store = self._chat_store()
-            store.delete_session(deleted_session_id)
-            _remove_attachment_session_dir(deleted_session_id)
+            if store.get_session(target_session_id) is None:
+                return {"ok": False, "error": "会话不存在"}
+
+            def _delete_target() -> int:
+                self._sync_task_status_to_messages()
+                cancelled_count = self._cancel_active_session_tasks(
+                    "删除会话前取消仍在执行的任务"
+                )
+                store.delete_session(target_session_id)
+                _remove_attachment_session_dir(target_session_id)
+                return cancelled_count
+
+            # The thread-local override remains A even if another window loads
+            # B while cancellation is in progress.
+            cancelled_count = self._with_session(
+                target_session_id,
+                _delete_target,
+                require_existing=False,
+            )
             remaining = store.list_sessions(limit=1)
             remaining_count = store.count_sessions()
 
-            if remaining:
-                next_session_id = remaining[0].session_id
-                switch_session = getattr(self._runtime, "switch_session", None)
-                if not callable(switch_session):
-                    raise RuntimeError("runtime 不支持切换会话")
-                switch_session(next_session_id)
-            else:
-                self._session.clear()
-                next_session_id = self._session.session_id
+            # Pointer CAS is intentionally brief and happens only after the
+            # potentially long send/cancel work. load_session uses the same
+            # pointer lock, so B cannot be overwritten between check and swap.
+            with self._runtime_session_pointer_lock():
+                current_session_id = str(
+                    self._runtime.chat_session.session_id or ""
+                ).strip()
+                if current_session_id == target_session_id:
+                    if remaining:
+                        next_session_id = remaining[0].session_id
+                        switch_session = getattr(self._runtime, "switch_session", None)
+                        if not callable(switch_session):
+                            raise RuntimeError("runtime 不支持切换会话")
+                        switch_session(next_session_id)
+                    else:
+                        self._runtime.chat_session.clear()
+                        next_session_id = self._runtime.chat_session.session_id
+                else:
+                    next_session_id = current_session_id
 
             logger.info(
                 "当前会话已删除: %s -> %s，已取消任务数=%d",
-                deleted_session_id,
+                target_session_id,
                 next_session_id,
                 cancelled_count,
             )
             return {
                 "ok": True,
-                "deleted_session_id": deleted_session_id,
+                "deleted_session_id": target_session_id,
                 "session_id": next_session_id,
                 "cancelled_tasks": cancelled_count,
                 "remaining_sessions": remaining_count,
@@ -8045,6 +9461,34 @@ class ChatAPI:
                 continue
             seen.add(msg.task_id)
             active_task_ids.append(msg.task_id)
+
+        # A task can cross AppState's commit boundary before both the primary
+        # message link and its repair write fail. The persisted message then
+        # has no task_id, so deletion must also discover active tasks by their
+        # authoritative chat_session_id to avoid leaving a runner orphan.
+        list_tasks = getattr(self._state, "list_tasks", None)
+        if callable(list_tasks):
+            try:
+                session_id = self._session.session_id
+                for task in list_tasks():
+                    task_id = str(getattr(task, "task_id", "") or "").strip()
+                    if (
+                        not task_id
+                        or task_id in seen
+                        or str(getattr(task, "chat_session_id", "") or "").strip()
+                        != session_id
+                        or getattr(task, "status", None)
+                        not in (TaskStatus.PENDING, TaskStatus.RUNNING)
+                    ):
+                        continue
+                    seen.add(task_id)
+                    active_task_ids.append(task_id)
+            except Exception:
+                logger.debug(
+                    "按会话补扫活动任务失败: %s",
+                    self._session.session_id,
+                    exc_info=True,
+                )
 
         cancelled = 0
         for task_id in active_task_ids:

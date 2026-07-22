@@ -40,7 +40,12 @@ ACCEPTANCE_10_3_MATRIX: tuple[AcceptanceScenario, ...] = (
             (
                 "source",
                 "apps/frontend/src/features/yachiyo-chat/hooks/useYachiyoTaskSubmit.ts",
-                ("startYachiyoTask({", "source: 'chat'", "pollAgentRunInBackground(taskId);"),
+                (
+                    "startYachiyoTask({",
+                    "source: 'chat'",
+                    "pollAgentRunInBackground(taskId, {",
+                    "identity,",
+                ),
             ),
             (
                 "source",
@@ -78,8 +83,8 @@ ACCEPTANCE_10_3_MATRIX: tuple[AcceptanceScenario, ...] = (
                 "scripts/smoke_chat_public_task_ui.mjs",
                 (
                     'data-testid="yachiyo-agent-task-card"',
-                    'data-testid="yachiyo-agent-task-open-studio"',
-                    "Chat public task card rendered",
+                    "&& !details",
+                    "consumer Chat hides technical execution UI",
                 ),
             ),
         ),
@@ -91,17 +96,17 @@ ACCEPTANCE_10_3_MATRIX: tuple[AcceptanceScenario, ...] = (
             (
                 "source",
                 "apps/frontend/src/features/yachiyo-chat/components/AgentTaskCard.tsx",
-                ("ApprovalCard", "approvalFacts.slice(0, 2).map((approval)"),
+                ("ApprovalCard", "visibleApprovalFacts.slice(0, 2).map((approval, approvalIndex)"),
             ),
             (
                 "source",
                 "apps/frontend/src/features/yachiyo-chat/hooks/useYachiyoTaskEventReplay.ts",
-                ("mergeApprovalSnapshots", "approvalsFromRunEventReplay(replayEvents)"),
+                ("mergeApprovalSnapshots", "approvalsFromRunEventReplay(currentReplayEvents)"),
             ),
             (
                 "smoke",
                 "scripts/smoke_chat_approval_ui.mjs",
-                ('data-testid="chat-message-approval-card"', 'data-testid="chat-message-approval-approve"'),
+                ('data-testid="yachiyo-task-approval-card"', 'data-testid="yachiyo-task-approval-approve"'),
             ),
             (
                 "smoke",
@@ -122,7 +127,7 @@ ACCEPTANCE_10_3_MATRIX: tuple[AcceptanceScenario, ...] = (
             (
                 "smoke",
                 "scripts/smoke_chat_approval_ui.mjs",
-                ('data-testid="chat-message-approval-approve"', "waitForApprovedRunDetailHandoff"),
+                ('data-testid="yachiyo-task-approval-approve"', "waitForApprovedRunDetailHandoff"),
             ),
             (
                 "smoke",
@@ -143,7 +148,7 @@ ACCEPTANCE_10_3_MATRIX: tuple[AcceptanceScenario, ...] = (
             (
                 "smoke",
                 "scripts/smoke_chat_approval_ui.mjs",
-                ('data-testid="chat-message-approval-reject"', "waitForRejected"),
+                ('data-testid="yachiyo-task-approval-reject"', "waitForRejected"),
             ),
             (
                 "smoke",
@@ -506,7 +511,8 @@ def test_chat_daily_entry_acceptance_paths_are_guarded() -> None:
         [
             "startYachiyoTask({",
             "rememberYachiyoTasks([task]);",
-            "pollAgentRunInBackground(taskId);",
+            "pollAgentRunInBackground(taskId, {",
+            "identity,",
             "return true;",
         ],
     )
@@ -608,10 +614,10 @@ def test_chat_daily_entry_acceptance_paths_are_guarded() -> None:
             'data-testid="yachiyo-task-approval-card"',
             'data-testid="yachiyo-task-approval-approve"',
             'data-testid="yachiyo-task-approval-reject"',
-            'data-testid="yachiyo-agent-task-open-studio"',
+            "&& !details",
             "Chat public task approval approved",
             "Chat public task approval rejected",
-            "Chat public task card rendered",
+            "consumer Chat hides technical execution UI",
         ],
     )
 
@@ -641,10 +647,10 @@ def test_tasks_daily_entry_acceptance_paths_are_guarded() -> None:
         [
             "{ view: 'tasks', label: '任务', icon: 'activity' }",
             "{ view: 'memories', label: '记忆', icon: 'sparkle' }",
-            "{ view: 'skills', label: 'Skills', icon: 'resources' }",
-            "if (view === 'tasks') return 'Oha Yachiyo — 任务';",
-            "if (view === 'memories') return 'Oha Yachiyo — 记忆';",
-            "if (view === 'skills') return 'Oha Yachiyo — Skills';",
+            "{ view: 'skills', label: '技能库', icon: 'resources' }",
+            "if (view === 'tasks') return 'Oha-Yachiyo — 任务';",
+            "if (view === 'memories') return 'Oha-Yachiyo — 记忆';",
+            "if (view === 'skills') return 'Oha-Yachiyo — 技能库';",
             "if (view === 'tasks') {",
         ],
     )

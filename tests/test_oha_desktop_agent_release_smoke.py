@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 
 import pytest
 
@@ -32,8 +33,214 @@ def _fake_dev_isolated_provider_report() -> dict[str, object]:
     }
 
 
+def _fake_generic_agent_report() -> dict[str, object]:
+    return {
+        "ok": True,
+        "mode": "generic_agent_release_smoke",
+        "scenario_count": 8,
+        "passed_count": 8,
+        "failed_count": 0,
+        "scenarios": [
+            {"id": scenario_id, "status": "passed", "returncode": 0}
+            for scenario_id in (
+                "file_resolution",
+                "app_resolution",
+                "browser_research",
+                "media_alias",
+                "permission_resume",
+                "background_non_takeover",
+                "bounded_recovery",
+                "internal_visibility",
+            )
+        ],
+    }
+
+
+def _packaged_daily_provider_acceptance() -> dict[str, object]:
+    revision = "0123456789abcdef0123456789abcdef01234567"
+    fingerprint = f"sha256:{'b' * 64}"
+    asar_sha256 = "a" * 64
+    target = {"target_pid": 4312, "target_window_id": 9721}
+    transport = {
+        "provider_id": "cua-driver",
+        "provider_kind": "background_desktop",
+        "transport": "electron_bridge",
+        "delivery_mode": "background",
+        "foreground_takeover_required": False,
+    }
+    payload: dict[str, object] = {
+        "schema_version": "oha-yachiyo.daily-provider-acceptance.v2",
+        "status": "passed",
+        "evidence_source": "local_packaged_tcc_acceptance",
+        "recorded_at": datetime.now(timezone.utc).isoformat(),
+        "provider_kind": "background_desktop",
+        "provider_id": "cua-driver",
+        "desktop_session_kind": "background_desktop",
+        "transport": "cua_mcp_electron_bridge",
+        "packaged_app": True,
+        "packaged_app_path": "/Applications/Oha-Yachiyo.app",
+        "build_revision": revision,
+        "host_bundle_id": "io.github.arisataki.oha-yachiyo",
+        "host_attribution_verified": True,
+        "foreground_takeover_required": False,
+        "tcc": {
+            "accessibility": "authorized",
+            "screen_recording": "authorized",
+        },
+        "app_identity": {
+            "bundle_id": "io.github.arisataki.oha-yachiyo",
+            "version": "0.4.0",
+            "app_asar_sha256": asar_sha256,
+            "build_revision": revision,
+            "source_tree_fingerprint": fingerprint,
+        },
+        "observations": {
+            "bridge_status": {
+                "build_metadata": {
+                    "commit": revision,
+                    "source_tree_fingerprint": fingerprint,
+                }
+            },
+            "provider_health": {
+                "checked": True,
+                "ok": True,
+                "status": "healthy",
+                "provider_id": "cua-driver",
+                "provider_kind": "background_desktop",
+                "source": "cua_mcp_electron_bridge",
+                "transport": "electron_bridge",
+                "blocking_conditions": [],
+            },
+            "authorized_task": {
+                "receipts": {
+                    "launch": {
+                        "tool_name": "app.open",
+                        "output_preview": {
+                            **target,
+                            "agent_owned_target": True,
+                            "self_activation_suppressed": True,
+                            "launch_verified": True,
+                            "desktop_execution_provider_transport": transport,
+                        },
+                    },
+                    "observation": {
+                        "tool_name": "desktop.ui_elements",
+                        "output_preview": {
+                            "target_bound": True,
+                            "observation_verified": True,
+                            "data": {
+                                **target,
+                                "frontmost": False,
+                                "desktop_scope": "agent_owned_background",
+                            },
+                            "desktop_execution_provider_transport": transport,
+                        },
+                    },
+                    "input": {
+                        "tool_name": "desktop.type_into_ui_element",
+                        "output_preview": {
+                            "target_bound": True,
+                            "action_dispatched": True,
+                            "grounded_element": {
+                                "pid": target["target_pid"],
+                                "window_id": target["target_window_id"],
+                                "selector_type": "element_token",
+                                "label": "Display",
+                            },
+                            "desktop_execution_provider_evidence": {
+                                "pid": target["target_pid"],
+                                "window_id": target["target_window_id"],
+                                "desktop_scope": "agent_owned_background",
+                                "target_bound": True,
+                            },
+                            "desktop_execution_provider_transport": transport,
+                        },
+                    },
+                    "verify": {
+                        "tool_name": "desktop.verify",
+                        "output_preview": {
+                            "target_bound": True,
+                            "postcondition_verified": True,
+                            "verification_context_trusted": True,
+                            "verification_method": (
+                                "trusted_exact_typed_content_receipt"
+                            ),
+                            "observed_target": {
+                                "pid": target["target_pid"],
+                                "window_id": target["target_window_id"],
+                                "agent_owned_target": True,
+                            },
+                            "desktop_execution_provider_transport": transport,
+                        },
+                    },
+                }
+            },
+            "observer": {
+                "frontmost_samples": [
+                    {"bundle_id": "com.apple.finder", "pid": 101},
+                    {"bundle_id": "com.apple.finder", "pid": 101},
+                ],
+                "frontmost_unchanged": True,
+                "pointer_max_delta": 0.25,
+                "samples": [
+                    {
+                        "label": "before_task",
+                        "frontmost": {
+                            "ok": True,
+                            "bundle_id": "com.apple.finder",
+                            "pid": 101,
+                        },
+                        "cursor": {"ok": True, "x": 40.0, "y": 50.0},
+                    },
+                    {
+                        "label": "after_task",
+                        "frontmost": {
+                            "ok": True,
+                            "bundle_id": "com.apple.finder",
+                            "pid": 101,
+                        },
+                        "cursor": {"ok": True, "x": 40.1, "y": 50.1},
+                    },
+                ],
+            },
+            "permission_denial": {
+                "checked": True,
+                "ok": False,
+                "status": "not_ready",
+                "blocking_conditions": [
+                    "desktop_permission_accessibility_required"
+                ],
+                "action_dispatched": False,
+                "tool_call_count": 0,
+                "tool_calls": [],
+                "launch_attempted": False,
+                "input_attempted": False,
+                "foreground_fallback_used": False,
+            },
+        },
+        "checks": {
+            "packaged_bridge_ready": True,
+            "background_launch_verified": True,
+            "target_bound_observation_verified": True,
+            "background_input_verified": True,
+            "postcondition_verified": True,
+            "foreground_app_unchanged": True,
+            "pointer_not_taken_over": True,
+            "keyboard_not_taken_over": True,
+            "permission_denial_fails_closed": True,
+        },
+    }
+    payload["evidence_digest"] = smoke._daily_provider_acceptance_digest(payload)
+    return payload
+
+
 @pytest.fixture(autouse=True)
 def _verified_direct_runtime_probe(monkeypatch) -> None:
+    monkeypatch.setattr(
+        smoke.smoke_generic_agent_release,
+        "run_smoke",
+        _fake_generic_agent_report,
+    )
     monkeypatch.setattr(
         smoke,
         "local_desktop_execution_runtime_probe",
@@ -82,13 +289,17 @@ def test_oha_desktop_agent_release_smoke_covers_product_readiness(
     assert report["isolated_provider_release_ready"] is False
     assert report["isolated_provider_release_blockers"] == []
     assert report["direct_desktop_release_ready"] is True
-    assert report["public_release_ready"] is True
-    assert report["public_release_readiness"]["ready"] is True
-    assert report["public_release_readiness"]["blocking_conditions"] == []
+    assert report["default_daily_provider_release_ready"] is False
+    assert report["public_release_ready"] is False
+    assert report["public_release_readiness"]["ready"] is False
+    assert report["public_release_readiness"]["blocking_conditions"] == [
+        "default_daily_provider_release_evidence_required"
+    ]
     assert report["failed_sections"] == []
     assert report["checks"] == {
         "all_sections_passed": True,
         "covers_deepagent_core": True,
+        "covers_generic_agent_behaviors": True,
         "covers_desktop_executor": True,
         "covers_desktop_provider_execution_loop": True,
         "covers_legacy_facade_planner_ownership": True,
@@ -105,6 +316,7 @@ def test_oha_desktop_agent_release_smoke_covers_product_readiness(
     }
 
     section_by_id = {section["id"]: section for section in report["sections"]}
+    assert section_by_id["generic_agent_behaviors"]["report"]["passed_count"] == 8
     assert section_by_id["deepagent_core"]["report"]["tool_steps"] == [
         "desktop.list_apps",
         "app.open",
@@ -114,14 +326,14 @@ def test_oha_desktop_agent_release_smoke_covers_product_readiness(
         "all_use_runtime_planner"
     ] is True
     assert section_by_id["shared_daily_surfaces"]["report"]["checks"][
-        "direct_recovery_keeps_daily_direct_policy"
+        "direct_recovery_keeps_daily_background_policy"
     ] is True
     assert section_by_id["shared_daily_surfaces"]["report"]["checks"][
-        "direct_recovery_does_not_require_provider_session"
+        "direct_recovery_avoids_isolated_session_autostart"
     ] is True
     assert section_by_id["shared_daily_surfaces"]["report"]["direct_recovery_request"][
         "desktop_execution_policy"
-    ]["avoid_user_foreground_takeover"] is False
+    ]["avoid_user_foreground_takeover"] is True
     assert section_by_id["direct_desktop_runtime"]["ok"] is True
     assert section_by_id["direct_desktop_runtime"]["report"]["checks"][
         "constrained_input_executes_through_local_broker"
@@ -133,10 +345,10 @@ def test_oha_desktop_agent_release_smoke_covers_product_readiness(
         "model_never_called"
     ] is True
     assert section_by_id["desktop_executor_before_model"]["report"]["checks"][
-        "daily_app_open_uses_direct_desktop"
+        "daily_app_open_avoids_isolated_session_autostart"
     ] is True
     assert section_by_id["desktop_executor_before_model"]["report"]["checks"][
-        "daily_media_playback_uses_direct_desktop"
+        "daily_media_playback_avoids_isolated_session_autostart"
     ] is True
     assert section_by_id["desktop_provider_execution_loop"]["report"]["checks"][
         "provider_executes_sandbox_ready_request"
@@ -216,6 +428,36 @@ def test_oha_desktop_agent_release_smoke_covers_product_readiness(
     ] is False
 
 
+def test_oha_desktop_agent_release_smoke_fails_when_generic_behaviors_fail(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    failed_report = _fake_generic_agent_report()
+    failed_report.update(
+        {
+            "ok": False,
+            "passed_count": 7,
+            "failed_count": 1,
+            "failed_scenarios": ["bounded_recovery"],
+        }
+    )
+    monkeypatch.setattr(
+        smoke.smoke_generic_agent_release,
+        "run_smoke",
+        lambda: failed_report,
+    )
+
+    report = smoke.run_smoke(
+        workdir=tmp_path / "generic-failure",
+        run_isolated_provider_smoke=False,
+    )
+
+    assert report["ok"] is False
+    assert report["public_release_ready"] is False
+    assert report["checks"]["covers_generic_agent_behaviors"] is False
+    assert "generic_agent_behaviors" in report["failed_sections"]
+
+
 def test_oha_desktop_agent_release_smoke_rejects_unverified_direct_runtime(
     tmp_path,
     monkeypatch,
@@ -253,6 +495,231 @@ def test_oha_desktop_agent_release_smoke_rejects_unverified_direct_runtime(
     assert direct["report"]["checks"]["production_broker_probe_verified"] is False
     assert report["direct_desktop_release_ready"] is False
     assert report["public_release_ready"] is False
+
+
+def test_public_release_does_not_treat_foreground_probe_as_daily_provider_evidence(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        smoke.smoke_isolated_desktop_provider,
+        "run_smoke",
+        lambda **_kwargs: _fake_dev_isolated_provider_report(),
+    )
+    report = smoke.run_smoke(
+        workdir=tmp_path / "foreground-only",
+        run_isolated_provider_smoke=True,
+        public_release_required=True,
+    )
+
+    assert report["direct_desktop_release_ready"] is True
+    assert report["default_daily_provider_release_ready"] is False
+    assert report["public_release_ready"] is False
+    assert report["default_daily_provider_release_blockers"] == [
+        "default_daily_provider_release_evidence_required"
+    ]
+
+
+def test_public_release_accepts_explicit_packaged_tcc_daily_provider_evidence(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        smoke.smoke_isolated_desktop_provider,
+        "run_smoke",
+        lambda **_kwargs: _fake_dev_isolated_provider_report(),
+    )
+    monkeypatch.setattr(
+        smoke,
+        "_packaged_app_identity_from_disk",
+        lambda _path: {
+            "ok": True,
+            "location_valid": True,
+            "bundle_id": "io.github.arisataki.oha-yachiyo",
+            "version": "0.4.0",
+            "app_asar_sha256": "a" * 64,
+        },
+    )
+    acceptance_path = tmp_path / "daily-provider-acceptance.json"
+    acceptance_path.write_text(
+        json.dumps(_packaged_daily_provider_acceptance()),
+        encoding="utf-8",
+    )
+
+    report = smoke.run_smoke(
+        workdir=tmp_path / "packaged-background",
+        run_isolated_provider_smoke=True,
+        public_release_required=True,
+        daily_provider_acceptance_json=acceptance_path,
+    )
+
+    assert report["daily_provider_acceptance"]["ok"] is True
+    assert all(
+        report["daily_provider_acceptance"]["derived_checks"].values()
+    )
+    assert report["default_daily_provider_release_source"] == (
+        "local_packaged_tcc_acceptance"
+    )
+    assert report["default_daily_provider_release_ready"] is True
+    assert report["default_daily_provider_release_blockers"] == []
+    assert report["public_release_ready"] is report["ok"]
+
+
+def test_daily_provider_acceptance_rejects_generic_ok_payload(tmp_path) -> None:
+    acceptance_path = tmp_path / "unverified-acceptance.json"
+    acceptance_path.write_text(json.dumps({"ok": True}), encoding="utf-8")
+
+    evidence = smoke._daily_provider_acceptance_evidence(acceptance_path)
+
+    assert evidence["ok"] is False
+    assert "daily_provider_acceptance_schema_version_matches_failed" in evidence[
+        "blocking_conditions"
+    ]
+    assert "daily_provider_acceptance_tcc_accessibility_authorized_failed" in evidence[
+        "blocking_conditions"
+    ]
+    assert "daily_provider_acceptance_background_input_verified_accepted_failed" in evidence[
+        "blocking_conditions"
+    ]
+
+
+def test_daily_provider_acceptance_rejects_mutated_digest(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        smoke,
+        "_packaged_app_identity_from_disk",
+        lambda _path: {
+            "ok": True,
+            "location_valid": True,
+            "bundle_id": "io.github.arisataki.oha-yachiyo",
+            "version": "0.4.0",
+            "app_asar_sha256": "a" * 64,
+        },
+    )
+    payload = _packaged_daily_provider_acceptance()
+    payload["provider_id"] = "mutated-after-collection"
+    acceptance_path = tmp_path / "mutated-acceptance.json"
+    acceptance_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    evidence = smoke._daily_provider_acceptance_evidence(acceptance_path)
+
+    assert evidence["ok"] is False
+    assert evidence["validation"]["evidence_digest_valid"] is False
+    assert "daily_provider_acceptance_evidence_digest_valid_failed" in evidence[
+        "blocking_conditions"
+    ]
+
+
+def test_daily_provider_acceptance_derives_target_binding_and_fail_closed(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        smoke,
+        "_packaged_app_identity_from_disk",
+        lambda _path: {
+            "ok": True,
+            "location_valid": True,
+            "bundle_id": "io.github.arisataki.oha-yachiyo",
+            "version": "0.4.0",
+            "app_asar_sha256": "a" * 64,
+        },
+    )
+    payload = _packaged_daily_provider_acceptance()
+    observations = payload["observations"]
+    assert isinstance(observations, dict)
+    authorized_task = observations["authorized_task"]
+    assert isinstance(authorized_task, dict)
+    receipts = authorized_task["receipts"]
+    assert isinstance(receipts, dict)
+    input_receipt = receipts["input"]
+    assert isinstance(input_receipt, dict)
+    input_output = input_receipt["output_preview"]
+    assert isinstance(input_output, dict)
+    grounded_element = input_output["grounded_element"]
+    assert isinstance(grounded_element, dict)
+    grounded_element["window_id"] = 123456
+    provider_evidence = input_output["desktop_execution_provider_evidence"]
+    assert isinstance(provider_evidence, dict)
+    provider_evidence["window_id"] = 123456
+    permission_denial = observations["permission_denial"]
+    assert isinstance(permission_denial, dict)
+    permission_denial["tool_call_count"] = 1
+    permission_denial["tool_calls"] = [{"tool": "app.open"}]
+    payload["evidence_digest"] = smoke._daily_provider_acceptance_digest(payload)
+    acceptance_path = tmp_path / "unbound-acceptance.json"
+    acceptance_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    evidence = smoke._daily_provider_acceptance_evidence(acceptance_path)
+
+    assert evidence["ok"] is False
+    assert evidence["validation"]["authorized_receipts_share_target"] is False
+    assert evidence["derived_checks"]["background_input_verified"] is False
+    assert evidence["derived_checks"]["permission_denial_fails_closed"] is False
+    assert (
+        "daily_provider_acceptance_background_input_verified_derived_failed"
+        in evidence["blocking_conditions"]
+    )
+    assert (
+        "daily_provider_acceptance_permission_denial_fails_closed_derived_failed"
+        in evidence["blocking_conditions"]
+    )
+
+
+def test_daily_provider_acceptance_rejects_foreground_input_transport(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        smoke,
+        "_packaged_app_identity_from_disk",
+        lambda _path: {
+            "ok": True,
+            "location_valid": True,
+            "bundle_id": "io.github.arisataki.oha-yachiyo",
+            "version": "0.4.0",
+            "app_asar_sha256": "a" * 64,
+        },
+    )
+    payload = _packaged_daily_provider_acceptance()
+    observations = payload["observations"]
+    assert isinstance(observations, dict)
+    authorized_task = observations["authorized_task"]
+    assert isinstance(authorized_task, dict)
+    receipts = authorized_task["receipts"]
+    assert isinstance(receipts, dict)
+    input_receipt = receipts["input"]
+    assert isinstance(input_receipt, dict)
+    input_output = input_receipt["output_preview"]
+    assert isinstance(input_output, dict)
+    transport = input_output["desktop_execution_provider_transport"]
+    assert isinstance(transport, dict)
+    transport["delivery_mode"] = "foreground"
+    transport["foreground_takeover_required"] = True
+    payload["evidence_digest"] = smoke._daily_provider_acceptance_digest(payload)
+    acceptance_path = tmp_path / "foreground-transport.json"
+    acceptance_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    evidence = smoke._daily_provider_acceptance_evidence(acceptance_path)
+
+    assert evidence["ok"] is False
+    assert evidence["derived_checks"]["background_input_verified"] is False
+    assert evidence["derived_checks"]["keyboard_not_taken_over"] is False
+
+
+def test_packaged_app_identity_requires_applications_location(tmp_path) -> None:
+    app_path = tmp_path / "Oha-Yachiyo.app"
+    app_path.mkdir()
+
+    identity = smoke._packaged_app_identity_from_disk(app_path)
+
+    assert identity == {
+        "ok": False,
+        "location_valid": False,
+        "error": "packaged_app_must_be_installed_under_applications",
+    }
 
 
 def test_oha_desktop_agent_release_smoke_can_include_isolated_provider(
@@ -521,6 +988,11 @@ def test_oha_desktop_agent_release_smoke_cli_writes_report(
         "public_release_required": False,
         "public_release_ready": False,
         "public_release_readiness": {},
+        "default_daily_provider_release_ready": False,
+        "default_daily_provider_release_source": "",
+        "default_daily_provider_release_blockers": [],
+        "daily_provider_acceptance_requested": False,
+        "daily_provider_acceptance": {},
         "direct_desktop_release_ready": False,
         "direct_desktop_backend": {},
         "section_count": 0,
@@ -778,6 +1250,37 @@ def test_oha_desktop_agent_release_smoke_cli_public_release_uses_direct_desktop(
     assert captured_kwargs["run_isolated_provider_smoke"] is False
     assert captured_kwargs["public_release_required"] is True
     assert captured_kwargs["require_public_release_backend"] is False
+
+
+def test_oha_desktop_agent_release_smoke_cli_public_release_uses_readiness_exit(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        smoke,
+        "run_smoke",
+        lambda **_kwargs: {
+            "ok": True,
+            "mode": "oha_desktop_agent_release_smoke",
+            "public_release_required": True,
+            "public_release_ready": False,
+            "section_count": 0,
+            "failed_sections": [],
+            "checks": {"all_sections_passed": True},
+            "sections": [],
+        },
+    )
+
+    exit_code = smoke.main(
+        [
+            "--public-release",
+            "--skip-isolated-provider-smoke",
+            "--report-json",
+            str(tmp_path / "oha-release-smoke.json"),
+        ]
+    )
+
+    assert exit_code == 1
 
 
 def test_oha_desktop_agent_release_smoke_cli_passes_provider_manifest(

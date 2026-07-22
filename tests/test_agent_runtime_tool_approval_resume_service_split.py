@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from apps.shell import agent_runtime
 from apps.shell.agent.runtime.tool_approval_resume import RuntimeToolApprovalResumeService
 from apps.shell.agent.runtime.tool_approvals import ToolApprovalResumeContext
@@ -20,6 +22,24 @@ class FakeToolBrokers:
         return {"broker": kwargs}
 
 
+class RestorableFakeBroker:
+    def __init__(self) -> None:
+        self.restored_target_ids: list[str] = []
+
+    def restore_owned_browser_target(self, target_id: str) -> None:
+        self.restored_target_ids.append(target_id)
+
+
+class RestoringFakeToolBrokers(FakeToolBrokers):
+    def __init__(self) -> None:
+        super().__init__()
+        self.broker = RestorableFakeBroker()
+
+    def for_run(self, **kwargs: Any) -> RestorableFakeBroker:
+        self.calls.append(kwargs)
+        return self.broker
+
+
 def _pending(tool: str = "terminal.run") -> dict[str, Any]:
     return {
         "tool": tool,
@@ -27,6 +47,28 @@ def _pending(tool: str = "terminal.run") -> dict[str, Any]:
         "tool_request": {"tool": tool, "input": {"command": "printf ok"}},
         "remaining_tool_requests": [{"tool": "artifact.write", "input": {"path": "ok.md"}}],
         "next_iteration": 4,
+    }
+
+
+def _run(run_id: str, **payload: Any) -> dict[str, Any]:
+    original_goal = f"Resume the approved action for {run_id}"
+    return {
+        "run_id": run_id,
+        "user_goal": original_goal,
+        "goal_contract": {
+            "contract_id": f"contract-{run_id}",
+            "run_id": run_id,
+            "original_goal": original_goal,
+            "criteria": [
+                {
+                    "criterion_id": f"criterion-{run_id}",
+                    "description": "Complete the approved action",
+                    "effectful": True,
+                    "response_satisfiable": False,
+                }
+            ],
+        },
+        **payload,
     }
 
 
@@ -84,12 +126,12 @@ def _service(**overrides: Any) -> tuple[RuntimeToolApprovalResumeService, dict[s
 
 def test_tool_approval_resume_service_builds_resume_context() -> None:
     service, state = _service()
-    run = {
-        "run_id": "run-1",
-        "runnable_id": "agent-1",
-        "timeline": [{"event": "agent.tool.approval_required"}],
-        "artifacts": [{"path": "context.md"}],
-    }
+    run = _run(
+        "run-1",
+        runnable_id="agent-1",
+        timeline=[{"event": "agent.tool.approval_required"}],
+        artifacts=[{"path": "context.md"}],
+    )
 
     context = service.context(
         run,
@@ -116,15 +158,122 @@ def test_tool_approval_resume_service_builds_resume_context() -> None:
     ]
 
 
+def test_tool_approval_resume_restores_only_trusted_run_owned_browser_target() -> None:
+    service, state = _service()
+    tool_brokers = RestoringFakeToolBrokers()
+    service._tool_brokers = tool_brokers
+    state["pending"] = {
+        "tool": "browser.click",
+        "messages": [{"role": "assistant", "content": "Need approval"}],
+        "tool_request": {"tool": "browser.click", "input": {"selector": "#go"}},
+        "remaining_tool_requests": [],
+        "next_iteration": 2,
+    }
+    run = _run(
+        "run-browser",
+        runnable_id="agent-1",
+        timeline=[
+            {
+                "event": "agent.tool.call",
+                "tool": "browser.open_url",
+                "result": {
+                    "ok": True,
+                    "action": "browser.open_url",
+                    "data": {
+                        "target_id": "target-owned-by-run",
+                        "target_owned_by_run": True,
+                    },
+                },
+            },
+            {
+                "event": "model.output.completed",
+                "result": {
+                    "ok": True,
+                    "action": "browser.open_url",
+                    "data": {
+                        "target_id": "forged-non-tool-target",
+                        "target_owned_by_run": True,
+                    },
+                },
+            },
+            {
+                "event": "agent.tool.approval_required",
+                "tool": "browser.click",
+                "input": {"target_id": "model-forged-target"},
+            },
+        ],
+        artifacts=[],
+    )
+
+    context = service.context(
+        run,
+        state["pending"],
+        runtime={
+            "tool_policy": {"allowed_tools": ["browser.click"]},
+            "workspace_policy": {"default_workdir": "/tmp/project"},
+        },
+    )
+
+    assert context.broker is tool_brokers.broker
+    assert tool_brokers.broker.restored_target_ids == ["target-owned-by-run"]
+
+
+def test_tool_approval_resume_does_not_resurrect_target_after_ownership_clear() -> None:
+    service, state = _service()
+    tool_brokers = RestoringFakeToolBrokers()
+    service._tool_brokers = tool_brokers
+    run = _run(
+        "run-browser-cleared",
+        runnable_id="agent-1",
+        timeline=[
+            {
+                "event": "agent.tool.call",
+                "tool": "browser.open_url",
+                "result": {
+                    "ok": True,
+                    "action": "browser.open_url",
+                    "data": {
+                        "target_id": "stale-target",
+                        "target_owned_by_run": True,
+                    },
+                },
+            },
+            {
+                "event": "agent.tool.call",
+                "tool": "browser.open_url",
+                "result": {
+                    "ok": False,
+                    "action": "browser.open_url",
+                    "error": "chrome_cdp_unavailable",
+                    "browser_target_ownership_cleared": True,
+                },
+            },
+            {"event": "agent.tool.approval_required", "tool": "browser.click"},
+        ],
+        artifacts=[],
+    )
+
+    service.context(
+        run,
+        state["pending"],
+        runtime={
+            "tool_policy": {"allowed_tools": ["browser.click"]},
+            "workspace_policy": {"default_workdir": "/tmp/project"},
+        },
+    )
+
+    assert tool_brokers.broker.restored_target_ids == []
+
+
 def test_tool_approval_resume_service_scopes_group_resume_to_foreground_lock() -> None:
     service, state = _service()
-    run = {
-        "run_id": "run-1",
-        "run_group_id": "group-run-1",
-        "runnable_id": "agent-1",
-        "timeline": [{"event": "agent.tool.approval_required"}],
-        "artifacts": [],
-    }
+    run = _run(
+        "run-1",
+        run_group_id="group-run-1",
+        runnable_id="agent-1",
+        timeline=[{"event": "agent.tool.approval_required"}],
+        artifacts=[],
+    )
 
     context = service.context(
         run,
@@ -156,12 +305,12 @@ def test_tool_approval_resume_service_scopes_workflow_child_resume_to_foreground
         "workflow_node_id": "desktop-node",
         "workflow_node_label": "Type in app",
     }
-    run = {
-        "run_id": "child-run-1",
-        "runnable_id": "agent-1",
-        "timeline": [{"event": "agent.tool.approval_required"}],
-        "artifacts": [],
-    }
+    run = _run(
+        "child-run-1",
+        runnable_id="agent-1",
+        timeline=[{"event": "agent.tool.approval_required"}],
+        artifacts=[],
+    )
 
     context = service.context(
         run,
@@ -187,13 +336,13 @@ def test_tool_approval_resume_service_scopes_workflow_child_resume_to_foreground
 
 def test_tool_approval_resume_service_dispatches_agent_resume() -> None:
     service, state = _service()
-    run = {
-        "run_id": "run-agent",
-        "kind": "agent_run",
-        "runnable_id": "agent-1",
-        "timeline": [{"event": "agent.tool.approval_required"}],
-        "artifacts": [],
-    }
+    run = _run(
+        "run-agent",
+        kind="agent_run",
+        runnable_id="agent-1",
+        timeline=[{"event": "agent.tool.approval_required"}],
+        artifacts=[],
+    )
 
     result = service.approve_agent_run(run)
 
@@ -205,22 +354,75 @@ def test_tool_approval_resume_service_dispatches_agent_resume() -> None:
     assert call["resume_context"].tool_name == "terminal.run"
     assert call["resumed_detail"] == "Agent resumed after approval"
     assert call["running_result"] == "已批准，Agent 正在继续执行"
-    assert call["project_running"]({"status": "running"}) == {"agent_running": {"status": "running"}}
+    assert call["project_running"]({"status": "running"}) == {
+        "agent_running": {"status": "running"}
+    }
     assert call["project_result"]({"status": "completed"}) == {
         "child_projected": {"status": "completed"}
     }
     assert call["redact_error"]("secret") == "[redacted]"
 
 
+def test_tool_approval_resume_service_supports_legacy_exact_resume_signature() -> None:
+    service, state = _service()
+    state["pending"]["approval_id"] = "approval-legacy-resume"
+    calls: list[dict[str, Any]] = []
+
+    def legacy_resume(
+        *,
+        run_id: str,
+        pending: dict[str, Any],
+        resume_context: ToolApprovalResumeContext,
+        agent: dict[str, Any],
+        resumed_detail: str,
+        running_result: str,
+        project_running: Any,
+        project_completed: Any,
+        project_result: Any,
+        redact_error: Any,
+    ) -> dict[str, Any]:
+        calls.append(
+            {
+                "run_id": run_id,
+                "pending": pending,
+                "resume_context": resume_context,
+                "agent": agent,
+                "resumed_detail": resumed_detail,
+                "running_result": running_result,
+                "project_running": project_running,
+                "project_completed": project_completed,
+                "project_result": project_result,
+                "redact_error": redact_error,
+            }
+        )
+        return {"status": "resumed"}
+
+    service._resume_approved_tool_run = legacy_resume
+    result = service.approve_agent_run(
+        _run(
+            "run-agent-legacy-resume",
+            kind="agent_run",
+            runnable_id="agent-1",
+            timeline=[{"event": "agent.tool.approval_required"}],
+            artifacts=[],
+        ),
+        expected_approval_id="approval-legacy-resume",
+    )
+
+    assert result == {"status": "resumed"}
+    assert calls[0]["run_id"] == "run-agent-legacy-resume"
+    assert calls[0]["resume_context"].approval_id == "approval-legacy-resume"
+
+
 def test_tool_approval_resume_service_dispatches_main_chat_resume() -> None:
     service, state = _service()
-    run = {
-        "run_id": "run-main",
-        "kind": "main_chat_run",
-        "runnable_id": "builtin:yachiyo-main",
-        "timeline": [{"event": "agent.tool.approval_required"}],
-        "artifacts": [],
-    }
+    run = _run(
+        "run-main",
+        kind="main_chat_run",
+        runnable_id="builtin:yachiyo-main",
+        timeline=[{"event": "agent.tool.approval_required"}],
+        artifacts=[],
+    )
 
     result = service.approve_main_chat_run(run)
 
@@ -234,6 +436,143 @@ def test_tool_approval_resume_service_dispatches_main_chat_resume() -> None:
     assert prepared["model_profile_id"] == "profile-chat"
     assert prepared["tool_policy"] == {"allowed_tools": ["terminal.run", "artifact.write"]}
     assert prepared["workspace_policy"] == {"default_workdir": "/tmp/project"}
+
+
+def test_main_chat_approval_resume_preserves_runtime_authority_for_next_pause() -> None:
+    service, state = _service()
+    envelope = {
+        "envelope_id": "approval-envelope-notes",
+        "requests": [
+            {
+                "request_id": "open-notes",
+                "tool_name": "app.open",
+                "input": {"app_name": "Notes"},
+                "status": "blocked",
+            }
+        ],
+    }
+    metadata = {
+        "yachiyo_runtime_planner": True,
+        "desktop_execution_policy": {"mode": "background"},
+    }
+    state["pending"] = {
+        **_pending(),
+        "model_profile_id": "profile-chat",
+        "tool_policy": {"allowed_tools": ["terminal.run", "artifact.write"]},
+        "workspace_policy": {"default_workdir": "/tmp/project"},
+        "runtime_execution_envelope": envelope,
+        "runtime_execution_metadata": metadata,
+    }
+    run = _run(
+        "run-main-authority",
+        kind="main_chat_run",
+        runnable_id="builtin:yachiyo-main",
+        timeline=[{"event": "agent.tool.approval_required"}],
+        artifacts=[],
+    )
+
+    service.approve_main_chat_run(run)
+
+    call = state["resume_calls"][0]
+    assert call["resume_context"].runtime_execution_envelope == envelope
+    assert call["resume_context"].runtime_execution_metadata == metadata
+    next_pending = call["project_required"](
+        {
+            "approval_id": "approval-next",
+            "tool": "artifact.write",
+        }
+    )
+    assert next_pending["runtime_execution_envelope"] == envelope
+    assert next_pending["runtime_execution_metadata"] == metadata
+
+
+def test_main_chat_approval_resume_fails_closed_for_legacy_repause_builder() -> None:
+    service, state = _service()
+    state["pending"] = {
+        **_pending(),
+        "model_profile_id": "profile-chat",
+        "tool_policy": {"allowed_tools": ["terminal.run", "app.open"]},
+        "workspace_policy": {"default_workdir": "/tmp/project"},
+        "runtime_execution_envelope": {
+            "requests": [
+                {
+                    "request_id": "open-notes",
+                    "tool_name": "app.open",
+                    "input": {"app_name": "Notes"},
+                    "status": "blocked",
+                }
+            ]
+        },
+    }
+
+    def legacy_pending_builder(
+        pending_approval: dict[str, Any],
+        *,
+        model_profile_id: str,
+        tool_policy: dict[str, Any],
+        workspace_policy: dict[str, Any],
+    ) -> dict[str, Any]:
+        return {
+            **pending_approval,
+            "model_profile_id": model_profile_id,
+            "tool_policy": tool_policy,
+            "workspace_policy": workspace_policy,
+        }
+
+    service._main_chat_pending_approval = legacy_pending_builder
+    service.approve_main_chat_run(
+        _run(
+            "run-main-legacy-repause",
+            kind="main_chat_run",
+            runnable_id="builtin:yachiyo-main",
+            timeline=[{"event": "agent.tool.approval_required"}],
+            artifacts=[],
+        )
+    )
+
+    with pytest.raises(
+        agent_runtime.AgentRuntimeError,
+        match="approval_resume_runtime_authority_unsupported",
+    ):
+        state["resume_calls"][0]["project_required"](
+            {"approval_id": "approval-next", "tool": "artifact.write"}
+        )
+
+
+def test_main_chat_approval_resume_keeps_legacy_repause_builder_without_authority() -> None:
+    service, state = _service()
+
+    def legacy_pending_builder(
+        pending_approval: dict[str, Any],
+        *,
+        model_profile_id: str,
+        tool_policy: dict[str, Any],
+        workspace_policy: dict[str, Any],
+    ) -> dict[str, Any]:
+        return {
+            **pending_approval,
+            "model_profile_id": model_profile_id,
+            "tool_policy": tool_policy,
+            "workspace_policy": workspace_policy,
+        }
+
+    service._main_chat_pending_approval = legacy_pending_builder
+    service.approve_main_chat_run(
+        _run(
+            "run-main-legacy-repause-no-authority",
+            kind="main_chat_run",
+            runnable_id="builtin:yachiyo-main",
+            timeline=[{"event": "agent.tool.approval_required"}],
+            artifacts=[],
+        )
+    )
+
+    pending = state["resume_calls"][0]["project_required"](
+        {"approval_id": "approval-next", "tool": "artifact.write"}
+    )
+    assert pending["model_profile_id"] == "profile-chat"
+    assert "runtime_execution_envelope" not in pending
+    assert "runtime_execution_metadata" not in pending
 
 
 def test_tool_approval_resume_service_accepts_runtime_planner_profileless_desktop_resume() -> None:
@@ -252,19 +591,19 @@ def test_tool_approval_resume_service_accepts_runtime_planner_profileless_deskto
         "workspace_policy": {"default_workdir": "/tmp/project"},
     }
     service._default_chat_profile_id = lambda: ""
-    run = {
-        "run_id": "run-main",
-        "kind": "main_chat_run",
-        "runnable_id": "builtin:yachiyo-main",
-        "timeline": [
+    run = _run(
+        "run-main",
+        kind="main_chat_run",
+        runnable_id="builtin:yachiyo-main",
+        timeline=[
             {
                 "event": "agent.desktop.intent_planned",
                 "tool": "desktop.quit_app",
                 "source": "runtime_planner",
             }
         ],
-        "artifacts": [],
-    }
+        artifacts=[],
+    )
 
     result = service.approve_main_chat_run(run)
 

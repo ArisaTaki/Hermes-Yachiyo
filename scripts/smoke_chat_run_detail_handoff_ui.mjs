@@ -21,14 +21,19 @@ const COMPLETED_MESSAGE_ID = 'assistant-chat-run-detail-handoff-message';
 const FAILED_RUN_ID = 'chat_run_detail_handoff_ui_smoke_failed_run';
 const FAILED_TASK_ID = 'task-chat-run-detail-handoff-ui-smoke-failed';
 const FAILED_RUN_GROUP_ID = 'group-chat-run-detail-handoff-ui-smoke-failed';
+const FAILED_USER_MESSAGE_ID = 'user-chat-run-detail-handoff-failed-message';
 const FAILED_MESSAGE_ID = 'assistant-chat-run-detail-handoff-failed-message';
+const FAILED_ORIGINAL_CLIENT_MESSAGE_ID = 'client-chat-run-detail-handoff-failed-original';
 const FAILED_RUN_GOAL = 'Open failed Chat message Run Detail from Electron UI smoke';
+const FAILED_USER_PROMPT = 'Retry the original failed desktop request from Chat.';
 const FAILED_RUN_ERROR = 'Chat failed message mapped NativeRunEngine failure.';
+const RETRY_DRAFT = 'Keep this composer draft while retrying';
 const CODE_BLOCK = "console.log('oha code copy smoke');";
 const ASSISTANT_CONTENT = `${RUN_RESULT}\n\n\`\`\`js\n${CODE_BLOCK}\n\`\`\``;
 const now = new Date().toISOString();
 
 const bridgeState = {
+  publicTaskPayloads: [],
   retryPayloads: [],
 };
 
@@ -169,6 +174,12 @@ const messages = [
     status: 'completed',
     task_id: TASK_ID,
     created_at: now,
+    activity_events: [{
+      event_id: 'activity-chat-run-detail-handoff-completed',
+      tool_name: 'workspace.read',
+      status: 'completed',
+      detail: 'Read the completed run workspace.',
+    }],
     metadata: {
       task_id: TASK_ID,
       run_id: RUN_ID,
@@ -179,6 +190,18 @@ const messages = [
     },
   },
   {
+    id: FAILED_USER_MESSAGE_ID,
+    role: 'user',
+    content: FAILED_USER_PROMPT,
+    status: 'completed',
+    task_id: FAILED_TASK_ID,
+    created_at: now,
+    metadata: {
+      task_id: FAILED_TASK_ID,
+      client_message_id: FAILED_ORIGINAL_CLIENT_MESSAGE_ID,
+    },
+  },
+  {
     id: FAILED_MESSAGE_ID,
     role: 'assistant',
     content: FAILED_RUN_ERROR,
@@ -186,6 +209,12 @@ const messages = [
     status: 'failed',
     task_id: FAILED_TASK_ID,
     created_at: now,
+    activity_events: [{
+      event_id: 'activity-chat-run-detail-handoff-failed',
+      tool_name: 'desktop.active_window',
+      status: 'failed',
+      detail: 'Desktop observation failed before the retry.',
+    }],
     metadata: {
       task_id: FAILED_TASK_ID,
       run_id: FAILED_RUN_ID,
@@ -342,9 +371,30 @@ async function startMockBridge() {
         });
         return;
       }
+      if (request.method === 'GET' && url.pathname === '/__smoke/state') {
+        sendJson(response, 200, bridgeState);
+        return;
+      }
+      if (request.method === 'POST' && url.pathname === '/yachiyo/tasks') {
+        const body = await readRequestJson(request);
+        bridgeState.publicTaskPayloads.push(body);
+        await new Promise((resolve) => setTimeout(resolve, 180));
+        sendJson(response, 503, { ok: false, error: 'force legacy retry fallback' });
+        return;
+      }
       if (request.method === 'POST' && url.pathname === '/ui/chat/messages/retry') {
         const body = await readRequestJson(request);
         bridgeState.retryPayloads.push(body);
+        await new Promise((resolve) => setTimeout(resolve, 180));
+        if (bridgeState.retryPayloads.length === 1) {
+          sendJson(response, 200, {
+            ok: false,
+            committed: false,
+            delivery_state: 'not_committed',
+            error: 'forced failed-message retry rejection',
+          });
+          return;
+        }
         sendJson(response, 200, {
           ok: true,
           task_id: 'task-chat-run-detail-handoff-retry-smoke',
@@ -492,7 +542,9 @@ const failedRunId = ${JSON.stringify(FAILED_RUN_ID)};
 const failedTaskId = ${JSON.stringify(FAILED_TASK_ID)};
 const failedMessageId = ${JSON.stringify(FAILED_MESSAGE_ID)};
 const failedRunGoal = ${JSON.stringify(FAILED_RUN_GOAL)};
+const failedUserPrompt = ${JSON.stringify(FAILED_USER_PROMPT)};
 const failedRunError = ${JSON.stringify(FAILED_RUN_ERROR)};
+const retryDraft = ${JSON.stringify(RETRY_DRAFT)};
 const watchdog = setTimeout(() => {
   console.error('electron smoke timed out');
   app.exit(1);
@@ -515,6 +567,9 @@ function waitFor(win, predicate, label, timeout = 15000) {
             JSON.stringify({
               hash: window.location.hash,
               chatButton: document.querySelector('[data-testid="chat-message-open-run-detail"]')?.outerHTML || '',
+              retryButton: document.querySelector('[data-testid="chat-message-retry"]')?.outerHTML || '',
+              composerInput: document.querySelector('[data-testid="chat-composer-input"]')?.outerHTML || '',
+              composerSend: document.querySelector('[data-testid="chat-composer-send"]')?.outerHTML || '',
               copyButton: document.querySelector('[data-testid="chat-message-copy"]')?.outerHTML || '',
               codeCopyButton: document.querySelector('[data-testid="chat-code-copy"]')?.outerHTML || '',
               detail: document.querySelector('[data-testid="agent-run-detail"]')?.outerHTML || '',
@@ -556,37 +611,79 @@ async function main() {
     if (level >= 2) console.error('[renderer]', message);
   });
   await win.loadURL(devUrl + '?bridge=' + encodeURIComponent(bridgeUrl) + '#/chat');
+  await win.webContents.executeJavaScript(
+    'window.__retrySmokeBridgeUrl = ' + JSON.stringify(bridgeUrl),
+    true,
+  );
   console.log('[electron-smoke] chat loaded');
   await waitFor(win, () => {
-    const completedArticle = document.querySelector('[data-message-id="${COMPLETED_MESSAGE_ID}"]');
-    const button = completedArticle?.querySelector('[data-testid="chat-message-open-run-detail"]');
-    const failedArticle = document.querySelector('[data-message-id="${FAILED_MESSAGE_ID}"]');
-    const failedButton = failedArticle?.querySelector('[data-testid="chat-message-open-run-detail"]');
-    return Boolean(button)
-      && button.textContent.includes('Agent Studio')
-      && button.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)}
-      && button.getAttribute('data-run-status') === 'completed'
+    const chatButton = document.querySelector('[data-testid="chat-message-open-run-detail"]');
+    const retryButton = document.querySelector('[data-testid="chat-message-retry"]');
+    const bodyText = document.body.textContent || '';
+    return !chatButton
       && document.querySelector('[data-testid="chat-message-copy"]')
       && document.querySelector('[data-testid="chat-code-copy"]')
-      && document.body.textContent.includes(${JSON.stringify(RUN_RESULT)})
-      && failedArticle?.classList.contains('error')
-      && failedArticle?.textContent.includes(${JSON.stringify(FAILED_RUN_ERROR)})
-      && failedArticle?.querySelector('[data-testid="chat-message-retry"]')
-      && failedButton
-      && failedButton.getAttribute('data-run-id') === ${JSON.stringify(FAILED_RUN_ID)}
-      && failedButton.getAttribute('data-run-status') === 'failed';
-  }, 'completed Chat message Run Detail action');
+      && bodyText.includes(${JSON.stringify(RUN_RESULT)})
+      && bodyText.includes(${JSON.stringify(FAILED_RUN_ERROR)})
+      && bodyText.includes('查看详情')
+      && retryButton?.disabled === false;
+  }, 'consumer Chat hides successful Run Detail and keeps failed detail action');
+  await win.webContents.executeJavaScript(\`
+    (() => {
+      const input = document.querySelector('[data-testid="chat-composer-input"]');
+      if (!input) throw new Error('missing Chat composer input');
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
+      setter.call(input, ${JSON.stringify(RETRY_DRAFT)});
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    })();
+  \`, true);
+  await waitFor(win, () => (
+    document.querySelector('[data-testid="chat-composer-input"]')?.value === ${JSON.stringify(RETRY_DRAFT)}
+    && document.querySelector('[data-testid="chat-composer-send"]')?.disabled === false
+  ), 'retry draft ready');
   await win.webContents.executeJavaScript(\`
     const retry = document.querySelector('[data-message-id="${FAILED_MESSAGE_ID}"] [data-testid="chat-message-retry"]');
     if (!retry) throw new Error('missing failed Chat message retry button');
     retry.click();
   \`, true);
-  console.log('[electron-smoke] failed Chat message retry clicked');
+  await waitFor(win, () => Boolean(
+    document.querySelector('[data-message-id="local:pending-assistant-reply"]')
+  ), 'failed Chat retry loading');
+  await waitFor(win, async () => {
+    const state = await fetch(window.__retrySmokeBridgeUrl + '/__smoke/state').then((response) => response.json());
+    const retry = document.querySelector('[data-message-id="${FAILED_MESSAGE_ID}"] [data-testid="chat-message-retry"]');
+    const input = document.querySelector('[data-testid="chat-composer-input"]');
+    const send = document.querySelector('[data-testid="chat-composer-send"]');
+    return state.retryPayloads.length === 1
+      && state.publicTaskPayloads[0]?.prompt === ${JSON.stringify(FAILED_USER_PROMPT)}
+      && !state.publicTaskPayloads[0]?.prompt.includes(${JSON.stringify(FAILED_RUN_ERROR)})
+      && retry?.disabled === false
+      && !document.querySelector('[data-message-id="local:pending-assistant-reply"]')
+      && input?.value === ${JSON.stringify(RETRY_DRAFT)}
+      && send?.disabled === false;
+  }, 'failed Chat retry rejection releases submitting state with original prompt');
   await win.webContents.executeJavaScript(\`
-    const openFailedRun = document.querySelector('[data-message-id="${FAILED_MESSAGE_ID}"] [data-testid="chat-message-open-run-detail"]');
-    if (!openFailedRun) throw new Error('missing failed Chat message Run Detail button');
-    if (openFailedRun.getAttribute('data-run-id') !== ${JSON.stringify(FAILED_RUN_ID)}) throw new Error('failed Chat message Run Detail button has wrong run id');
-    if (openFailedRun.getAttribute('data-run-status') !== 'failed') throw new Error('failed Chat message Run Detail button has wrong status');
+    document.querySelector('[data-message-id="${FAILED_MESSAGE_ID}"] [data-testid="chat-message-retry"]')?.click();
+  \`, true);
+  await waitFor(win, () => Boolean(
+    document.querySelector('[data-message-id="local:pending-assistant-reply"]')
+  ), 'successful failed Chat retry loading');
+  await waitFor(win, async () => {
+    const state = await fetch(window.__retrySmokeBridgeUrl + '/__smoke/state').then((response) => response.json());
+    const retry = document.querySelector('[data-message-id="${FAILED_MESSAGE_ID}"] [data-testid="chat-message-retry"]');
+    const input = document.querySelector('[data-testid="chat-composer-input"]');
+    const send = document.querySelector('[data-testid="chat-composer-send"]');
+    return state.retryPayloads.length === 2
+      && state.publicTaskPayloads[1]?.prompt === ${JSON.stringify(FAILED_USER_PROMPT)}
+      && retry?.disabled === false
+      && input?.value === ${JSON.stringify(RETRY_DRAFT)}
+      && send?.disabled === false;
+  }, 'successful failed Chat retry releases submitting state');
+  console.log('[electron-smoke] failed Chat retry reuses original user prompt and releases state');
+  await win.webContents.executeJavaScript(\`
+    const openFailedRun = document.querySelector('[data-message-id="${FAILED_MESSAGE_ID}"] [data-testid="chat-message-failure-open-detail"]');
+    if (!openFailedRun) throw new Error('missing failed Chat message detail button');
     openFailedRun.click();
   \`, true);
   await waitFor(win, () => (
@@ -617,15 +714,11 @@ async function main() {
   await win.loadURL(devUrl + '?bridge=' + encodeURIComponent(bridgeUrl) + '#/chat');
   await waitFor(win, () => {
     const completedArticle = document.querySelector('[data-message-id="${COMPLETED_MESSAGE_ID}"]');
-    const button = completedArticle?.querySelector('[data-testid="chat-message-open-run-detail"]');
-    return Boolean(button)
-      && button.textContent.includes('Agent Studio')
-      && button.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)}
-      && button.getAttribute('data-run-status') === 'completed'
+    return completedArticle?.querySelector('[data-testid="chat-message-open-run-detail"]') == null
       && document.querySelector('[data-testid="chat-message-copy"]')
       && document.querySelector('[data-testid="chat-code-copy"]')
       && document.body.textContent.includes(${JSON.stringify(RUN_RESULT)});
-  }, 'completed Chat message after failed Run Detail');
+  }, 'completed Chat message after failed Run Detail stays consumer-safe');
   await win.webContents.executeJavaScript(\`
   (() => {
     window.__ohaChatCopiedText = [];
@@ -653,39 +746,10 @@ async function main() {
     && document.querySelector('[data-testid="chat-code-copy"].copied')
   ), 'completed Chat code block copied');
   console.log('[electron-smoke] completed Chat code block copied');
-  await win.webContents.executeJavaScript(\`
-    const openRun = document.querySelector('[data-message-id="${COMPLETED_MESSAGE_ID}"] [data-testid="chat-message-open-run-detail"]');
-    if (!openRun) throw new Error('missing completed Chat message Run Detail button');
-    if (openRun.getAttribute('data-run-id') !== ${JSON.stringify(RUN_ID)}) throw new Error('completed Chat message Run Detail button has wrong run id');
-    if (openRun.getAttribute('data-run-status') !== 'completed') throw new Error('completed Chat message Run Detail button has wrong status');
-    openRun.click();
-  \`, true);
   await waitFor(win, () => (
-    window.location.hash.includes('/agents')
-    && window.location.hash.includes(${JSON.stringify(RUN_ID)})
-    && document.querySelector('[data-testid="agent-run-detail"]')?.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)}
-    && document.querySelector('[data-testid="agent-run-detail"]')?.getAttribute('data-task-id') === ${JSON.stringify(TASK_ID)}
-    && document.querySelector('[data-testid="agent-run-detail"]')?.getAttribute('data-session-id') === ${JSON.stringify(SESSION_ID)}
-    && document.querySelector('[data-testid="agent-run-detail-task"]')?.textContent.includes(${JSON.stringify(RUN_GOAL)})
-    && document.querySelector('[data-testid="agent-run-detail-result"]')?.textContent.includes(${JSON.stringify(RUN_RESULT)})
-  ), 'Run Detail handoff');
-  await waitFor(win, () => {
-    const events = Array.from(document.querySelectorAll('[data-testid="agent-run-detail-execution-event"]'));
-    const eventTypes = events.map((node) => node.getAttribute('data-run-event'));
-    const sequences = events.map((node) => node.getAttribute('data-run-event-sequence'));
-    const runIds = events.map((node) => node.getAttribute('data-run-event-run-id'));
-    const outputEvent = events.find((node) => node.getAttribute('data-run-event') === 'model.output.completed');
-    const completedEvent = events.find((node) => node.getAttribute('data-run-event') === 'agent.run.completed');
-    return events.length === 3
-      && eventTypes.includes('agent.run.started')
-      && eventTypes.includes('model.output.completed')
-      && eventTypes.includes('agent.run.completed')
-      && sequences.join(',') === '1,2,3'
-      && runIds.every((id) => id === ${JSON.stringify(RUN_ID)})
-      && outputEvent?.textContent.includes(${JSON.stringify(`"output": "${RUN_RESULT}"`)})
-      && completedEvent?.textContent.includes(${JSON.stringify(RUN_RESULT)});
-  }, 'Run Detail replay events');
-  console.log('[electron-smoke] completed Chat message opened matching Run Detail');
+    document.querySelector('[data-message-id="${COMPLETED_MESSAGE_ID}"] [data-testid="chat-message-open-run-detail"]') == null
+  ), 'completed Chat message keeps Run Detail hidden');
+  console.log('[electron-smoke] completed Chat message kept Run Detail hidden');
   clearTimeout(watchdog);
   await win.close();
   app.quit();
@@ -725,12 +789,28 @@ main().catch((error) => {
 }
 
 function assertMockBridgeContract() {
-  if (bridgeState.retryPayloads.length !== 1) {
-    throw new Error(`expected one failed message retry request, got ${bridgeState.retryPayloads.length}`);
+  if (bridgeState.publicTaskPayloads.length !== 2) {
+    throw new Error(`expected two public retry attempts, got ${bridgeState.publicTaskPayloads.length}`);
   }
-  const retryPayload = bridgeState.retryPayloads[0] || {};
-  if (retryPayload.message_id !== FAILED_MESSAGE_ID) {
-    throw new Error(`unexpected retry message_id: ${retryPayload.message_id || 'missing message_id'}`);
+  if (bridgeState.publicTaskPayloads.some((payload) => payload.prompt !== FAILED_USER_PROMPT)) {
+    throw new Error(`failed retry used the wrong public prompt: ${JSON.stringify(bridgeState.publicTaskPayloads)}`);
+  }
+  const retryClientMessageIds = bridgeState.publicTaskPayloads.map((payload) => (
+    String(payload.metadata?.client_message_id || '')
+  ));
+  if (
+    retryClientMessageIds.some((clientMessageId) => (
+      !clientMessageId || clientMessageId === FAILED_ORIGINAL_CLIENT_MESSAGE_ID
+    ))
+    || new Set(retryClientMessageIds).size !== retryClientMessageIds.length
+  ) {
+    throw new Error(`failed retry did not use fresh client message ids: ${JSON.stringify(retryClientMessageIds)}`);
+  }
+  if (bridgeState.retryPayloads.length !== 2) {
+    throw new Error(`expected two failed message retry requests, got ${bridgeState.retryPayloads.length}`);
+  }
+  if (bridgeState.retryPayloads.some((payload) => payload.message_id !== FAILED_MESSAGE_ID)) {
+    throw new Error(`unexpected retry message_id: ${JSON.stringify(bridgeState.retryPayloads)}`);
   }
 }
 

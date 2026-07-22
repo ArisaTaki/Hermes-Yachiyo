@@ -6,6 +6,9 @@ dist/
 build/
 .eggs/
 tmp/
+release/
+output/
+.playwright-cli/
 
 # Virtual environment
 .venv/

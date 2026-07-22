@@ -269,3 +269,111 @@ def test_native_runtime_keeps_run_control_facade_methods_available_after_split(t
         assert ("update-agent-group", run) in calls
     finally:
         service.close()
+
+
+def test_run_control_facade_forwards_nonempty_approval_generation_ids() -> None:
+    calls: list[tuple[str, str]] = []
+
+    class _ApprovalExecution:
+        @staticmethod
+        def approve_run_approval(run_id: str, *, expected_approval_id: str) -> dict[str, Any]:
+            calls.append(("approve", expected_approval_id))
+            return {"run_id": run_id}
+
+    class _ApprovalResumeDispatcher:
+        @staticmethod
+        def approve_once(run: dict[str, Any], *, expected_approval_id: str) -> dict[str, Any]:
+            calls.append(("approve-once", expected_approval_id))
+            return run
+
+    class _ToolApprovalResume:
+        @staticmethod
+        def approve_main_chat_run(run: dict[str, Any], *, expected_approval_id: str) -> dict[str, Any]:
+            calls.append(("approve-main", expected_approval_id))
+            return run
+
+    class _WorkflowApprovalExecution:
+        @staticmethod
+        def approve_workflow_run(run: dict[str, Any], *, expected_approval_id: str) -> dict[str, Any]:
+            calls.append(("approve-workflow", expected_approval_id))
+            return run
+
+    class _ApprovalTransitions:
+        @staticmethod
+        def reject(
+            run_id: str,
+            reason: str,
+            *,
+            expected_approval_id: str,
+        ) -> dict[str, Any]:
+            calls.append(("reject", expected_approval_id))
+            return {"run_id": run_id, "reason": reason}
+
+        @staticmethod
+        def timeout(
+            run_id: str,
+            reason: str,
+            *,
+            expected_approval_id: str,
+        ) -> dict[str, Any]:
+            calls.append(("timeout", expected_approval_id))
+            return {"run_id": run_id, "reason": reason}
+
+    class _ApprovalResume:
+        @staticmethod
+        def resume_approved_tool_run(**kwargs: Any) -> dict[str, Any]:
+            calls.append(("resume", kwargs["expected_approval_id"]))
+            return {"run_id": kwargs["run_id"]}
+
+    class _Service(RuntimeRunControlFacadeMixin):
+        approval_execution = _ApprovalExecution()
+        approval_resume_dispatcher = _ApprovalResumeDispatcher()
+        tool_approval_resume = _ToolApprovalResume()
+        workflow_approval_execution = _WorkflowApprovalExecution()
+        approval_transitions = _ApprovalTransitions()
+        approval_resume = _ApprovalResume()
+
+        @staticmethod
+        def get_run(run_id: str) -> dict[str, Any]:
+            return {"run_id": run_id}
+
+        @staticmethod
+        def _project_approval_resume_required(*_args: Any) -> dict[str, Any]:
+            return {}
+
+        @staticmethod
+        def _project_approval_resume_failed(*_args: Any) -> dict[str, Any]:
+            return {}
+
+    service = _Service()
+    run = {
+        "run_id": "run-1",
+        "pending_approval": {"approval_id": "approval-from-run"},
+    }
+
+    service.approve_run_approval("run-1", " approval-explicit ")
+    service._approve_run_approval_once(run)
+    service._approve_main_chat_run_approval(run)
+    service._approve_workflow_run_approval(run)
+    service.reject_run_approval("run-1", "no", "approval-reject")
+    service.timeout_run_approval("run-1", expected_approval_id="approval-timeout")
+    service._resume_approved_tool_run(
+        run_id="run-1",
+        pending=run["pending_approval"],
+        resume_context={"run_id": "run-1"},
+        agent={"agent_id": "agent-1"},
+        resumed_detail="resumed",
+        running_result="running",
+        project_completed=lambda *_args: {},
+        expected_approval_id="approval-resume",
+    )
+
+    assert calls == [
+        ("approve", "approval-explicit"),
+        ("approve-once", "approval-from-run"),
+        ("approve-main", "approval-from-run"),
+        ("approve-workflow", "approval-from-run"),
+        ("reject", "approval-reject"),
+        ("timeout", "approval-timeout"),
+        ("resume", "approval-resume"),
+    ]

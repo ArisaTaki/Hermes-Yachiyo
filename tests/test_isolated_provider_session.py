@@ -26,6 +26,105 @@ from apps.shell.yachiyo_agent.desktop_provider_contract import (
 )
 
 
+class _OwnedSessionProcess:
+    pid = 424242
+
+    def __init__(self) -> None:
+        self.terminated = False
+
+    def poll(self) -> int | None:
+        return 0 if self.terminated else None
+
+    def terminate(self) -> None:
+        self.terminated = True
+
+    def wait(self, timeout: float | None = None) -> int:
+        self.terminated = True
+        return 0
+
+    def kill(self) -> None:
+        self.terminated = True
+
+
+def _running_owned_session_manager(
+    monkeypatch,
+) -> tuple[IsolatedDesktopProviderSessionManager, _OwnedSessionProcess]:
+    provider_url_key = "OHA_YACHIYO_DESKTOP_PROVIDER_URL"
+    monkeypatch.delenv(provider_url_key, raising=False)
+    process = _OwnedSessionProcess()
+    manager = IsolatedDesktopProviderSessionManager(repo_root=Path("/repo"))
+    manager._process = process
+    manager._env = {provider_url_key: "http://127.0.0.1:32109"}
+    manager._previous_env = {provider_url_key: None}
+    session_module._apply_runtime_env(
+        manager._env,
+        previous_env=manager._previous_env,
+    )
+    return manager, process
+
+
+def test_owned_provider_session_stops_and_restores_env_after_last_owner_release(
+    monkeypatch,
+) -> None:
+    manager, process = _running_owned_session_manager(monkeypatch)
+
+    manager.claim_owner("runtime-a")
+    released = manager.release_owner("runtime-a")
+
+    assert released["released"] is True
+    assert released["stopped"] is True
+    assert process.terminated is True
+    assert "OHA_YACHIYO_DESKTOP_PROVIDER_URL" not in session_module.os.environ
+
+
+def test_owned_provider_session_waits_for_all_runtime_owners_before_stopping(
+    monkeypatch,
+) -> None:
+    manager, process = _running_owned_session_manager(monkeypatch)
+    manager.claim_owner("runtime-a")
+    manager.claim_owner("runtime-b")
+
+    first_release = manager.release_owner("runtime-a")
+
+    assert first_release["released"] is True
+    assert first_release["stopped"] is False
+    assert process.terminated is False
+
+    second_release = manager.release_owner("runtime-b")
+
+    assert second_release["released"] is True
+    assert second_release["stopped"] is True
+    assert process.terminated is True
+
+
+def test_provider_owner_token_is_not_projected_in_public_session_status(
+    monkeypatch,
+) -> None:
+    manager, _process = _running_owned_session_manager(monkeypatch)
+    owner_token = "runtime-private-owner-token"
+    manager.claim_owner(owner_token)
+
+    public_status = manager.status(probe_health=False)
+
+    assert owner_token not in json.dumps(public_status, ensure_ascii=False)
+    manager.release_owner(owner_token)
+
+
+def test_runtime_owner_release_does_not_stop_external_configured_provider(
+    monkeypatch,
+) -> None:
+    provider_url_key = "OHA_YACHIYO_DESKTOP_PROVIDER_URL"
+    external_url = "http://127.0.0.1:61770"
+    monkeypatch.setenv(provider_url_key, external_url)
+    manager = IsolatedDesktopProviderSessionManager(repo_root=Path("/repo"))
+
+    released = manager.release_owner("runtime-a")
+
+    assert released["released"] is False
+    assert released["stopped"] is False
+    assert session_module.os.environ[provider_url_key] == external_url
+
+
 def test_headless_provider_resolves_selected_app_placeholder_for_readonly_tools(
     monkeypatch,
 ) -> None:

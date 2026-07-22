@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
+from hashlib import sha256
 from typing import Any
 
 from .adapters import agent_definition_snapshot_from_payload
@@ -86,6 +87,7 @@ from .runtime_execution import (
     runtime_execution_requests_from_envelope_payload,
 )
 from .runtime_planner import RuntimePlanner
+from .recovery_actions import COMPILED_RECOVERY_CONTINUATION_METADATA_KEY
 from .runtime_progress import ProgressEventScope, public_runtime_tool_result_events
 from .start_event_enrichment import (
     start_payload_with_planner_decision_events,
@@ -2343,12 +2345,19 @@ def _replan_continuation_deferred_items(
 def _agent_start_payload_from_replan_continuation(
     continuation: ReplanContinuationSnapshot,
 ) -> dict[str, Any]:
+    metadata = dict(continuation.metadata)
+    metadata[COMPILED_RECOVERY_CONTINUATION_METADATA_KEY] = True
+    client_run_id = _replan_continuation_idempotency_key(
+        continuation,
+        scope="agent",
+    )
+    metadata.setdefault("replan_idempotency_key", client_run_id)
     payload: dict[str, Any] = {
         "agent_id": continuation.agent_id,
         "objective": continuation.prompt,
         "title": continuation.title or continuation.prompt,
-        "client_run_id": continuation.client_run_id,
-        "metadata": dict(continuation.metadata),
+        "client_run_id": client_run_id,
+        "metadata": metadata,
         "direct_tool_requests": [
             dict(request) for request in continuation.direct_tool_requests
         ],
@@ -2360,17 +2369,62 @@ def _agent_start_payload_from_replan_continuation(
 def _chat_start_payload_from_replan_continuation(
     continuation: ReplanContinuationSnapshot,
 ) -> dict[str, Any]:
+    metadata = dict(continuation.metadata)
+    metadata[COMPILED_RECOVERY_CONTINUATION_METADATA_KEY] = True
+    client_id = _replan_continuation_idempotency_key(
+        continuation,
+        scope="chat",
+    )
+    metadata["client_message_id"] = client_id
+    metadata.setdefault("replan_idempotency_key", client_id)
     payload: dict[str, Any] = {
         "prompt": continuation.prompt,
         "title": continuation.title or continuation.prompt,
         "conversation_id": continuation.conversation_id,
-        "metadata": dict(continuation.metadata),
+        "client_run_id": client_id,
+        "client_message_id": client_id,
+        "client_task_id": client_id,
+        "metadata": metadata,
         "direct_tool_requests": [
             dict(request) for request in continuation.direct_tool_requests
         ],
         "daily_desktop_planning_context": continuation.daily_desktop_planning_context,
     }
     return {key: value for key, value in payload.items() if value not in (None, "", [], {})}
+
+
+def _replan_continuation_idempotency_key(
+    continuation: ReplanContinuationSnapshot,
+    *,
+    scope: str,
+) -> str:
+    explicit_id = _replan_continuation_explicit_client_id(continuation)
+    identity = "\n".join(
+        (
+            f"scope={scope}",
+            f"client_request_id={explicit_id}",
+            f"source_task_id={_first_text(continuation.source_task_id)}",
+            f"source_run_id={_first_text(continuation.source_run_id)}",
+            f"source_group_run_id={_first_text(continuation.source_group_run_id)}",
+            f"source_workflow_run_id={_first_text(continuation.source_workflow_run_id)}",
+            f"continuation_id={_first_text(continuation.continuation_id)}",
+        )
+    )
+    digest = sha256(identity.encode("utf-8")).hexdigest()
+    return f"yachiyo-replan-{scope}:{digest}"
+
+
+def _replan_continuation_explicit_client_id(
+    continuation: ReplanContinuationSnapshot,
+) -> str:
+    metadata = continuation.metadata if isinstance(continuation.metadata, Mapping) else {}
+    return _first_text(
+        continuation.client_run_id,
+        metadata.get("client_run_id"),
+        metadata.get("client_message_id"),
+        metadata.get("client_task_id"),
+        metadata.get("idempotency_key"),
+    )[:128]
 
 
 def _replan_recovery_action_direct_request(

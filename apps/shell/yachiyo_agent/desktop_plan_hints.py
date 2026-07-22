@@ -6,7 +6,7 @@ import re
 from collections.abc import Iterable, Mapping
 from typing import Any
 
-from .app_name_hints import legacy_music_app_name_hint
+from .app_name_hints import is_legacy_app_name_hint, legacy_music_app_name_hint
 from .hotkey_hints import legacy_normalize_hotkey_token, legacy_parse_hotkey_combo
 
 _GENERIC_MUSIC_QUERIES = {
@@ -122,15 +122,282 @@ _NON_CONTENT_TYPE_TEXTS = {
     "进去。",
 }
 
+_CLICK_ACTION_PATTERN = (
+    r"(?:双击|点击|点一下|点按|单击|按一下|按(?!钮)|点(?!名)|"
+    r"\b(?:double\s+click|click(?:ing)?|press(?:ing)?|tap(?:ping)?)\b)"
+)
+_TYPE_ACTION_PATTERN = (
+    r"(?:帮我打(?!开)(?:字|上|入)?|打字|打上|打入|输入(?!框|栏)|键入|填写|填入|"
+    r"写入|写下|记录下|记下|改成|改为|设为|设置为|填成|填为|写成|写为|"
+    r"更新为|置为|"
+    r"\b(?:type|typing|input(?:ting)?|enter(?:ing)?|fill(?:ing)?|write|writing|"
+    r"set|change|update)\b)"
+)
+_OPEN_ACTION_PATTERN = (
+    r"(?:打开|启动|开启|运行|拉起|开起来|开一下|开下|"
+    r"\b(?:open(?:ing)?|launch(?:ing)?|start(?:ing)?(?:\s+up)?|run(?:ning)?)\b)"
+)
+_FOCUS_ACTION_PATTERN = (
+    r"(?:切换到?|切到|切回|回到|切一下|切下|聚焦|激活|置前|"
+    r"\b(?:focus(?:ing)?|switch(?:ing)?(?:\s+to)?|activate|activating|"
+    r"bring(?:ing)?|go(?:ing)?\s+back\s+to|back\s+to)\b)"
+)
+_DESKTOP_MUTATION_ACTION_PATTERN = (
+    rf"(?:{_CLICK_ACTION_PATTERN}|{_TYPE_ACTION_PATTERN}|{_OPEN_ACTION_PATTERN}|"
+    rf"{_FOCUS_ACTION_PATTERN})"
+)
+_NEGATION_CUE_PATTERN = (
+    r"(?:不要|不许|不能|不可|不必|不需要|不用|无需|无法|没法|没有办法|未能|"
+    r"别|禁止|避免|请勿|勿)|"
+    r"\b(?:do\s+not|don['’]t|dont|cannot|can\s+not|can['’]t|never|without|"
+    r"could\s+not|couldn['’]t|will\s+not|won['’]t|"
+    r"must\s+not|mustn['’]t|should\s+not|shouldn['’]t|"
+    r"need\s+not|no\s+need\s+to|avoid|refrain\s+from)\b"
+)
+
+
+def _affirmative_action_text(text: str, action_pattern: str) -> str:
+    """Remove only clauses whose matching desktop action is negated.
+
+    Strong punctuation and explicit sequence/adversative words reset negation.
+    Soft punctuation is intentionally retained so one negator still covers an
+    enumeration such as ``不要输入、点击或切换焦点``.
+    """
+
+    value = str(text or "").strip()
+    if not value:
+        return ""
+    separator_pattern = re.compile(
+        r"[。；;！!？?\.\n]+|"
+        r"(?:但是|不过|然而|而是|反而|然后|接着|随后|而后|之后再|但|而)|"
+        r"\b(?:but|however|instead|then|afterwards|subsequently)\b|"
+        rf"[，,](?=\s*(?:{_NEGATION_CUE_PATTERN}))|(?=\bwithout\b)",
+        flags=re.IGNORECASE,
+    )
+    clauses: list[str] = []
+    cursor = 0
+    for separator in separator_pattern.finditer(value):
+        clause = value[cursor : separator.start()]
+        if clause.strip():
+            clauses.extend(_split_negation_scope_commas(clause, action_pattern))
+        cursor = separator.end()
+    clause = value[cursor:]
+    if clause.strip():
+        clauses.extend(_split_negation_scope_commas(clause, action_pattern))
+    kept: list[str] = []
+    removed_negated_clause = False
+    for clause in clauses:
+        if _action_clause_is_negated(clause, action_pattern):
+            removed_negated_clause = True
+        else:
+            kept.append(clause.strip(" ，,"))
+    if not removed_negated_clause:
+        return value
+    return ". ".join(part for part in kept if part).strip()
+
+
+def _split_negation_scope_commas(clause: str, action_pattern: str) -> list[str]:
+    """Split a negated prefix from an explicit affirmative action after a comma."""
+
+    value = str(clause or "")
+    parts: list[str] = []
+    cursor = 0
+    for separator in re.finditer(r"[，,]", value):
+        left = value[cursor : separator.start()]
+        right = value[separator.end() :]
+        if not _comma_starts_affirmative_action(left, right, action_pattern):
+            continue
+        if left.strip():
+            parts.append(left)
+        cursor = separator.end()
+    tail = value[cursor:]
+    if tail.strip():
+        parts.append(tail)
+    return parts
+
+
+def _comma_starts_affirmative_action(
+    left: str,
+    right: str,
+    action_pattern: str,
+) -> bool:
+    if not _has_effective_negation_cue(left):
+        return False
+    if not re.search(
+        _DESKTOP_MUTATION_ACTION_PATTERN,
+        left,
+        flags=re.IGNORECASE,
+    ):
+        return False
+    if re.search(
+        rf"(?:[，,]\s*|\s+)(?:or\b|或|或者)\s*"
+        rf"(?:{_DESKTOP_MUTATION_ACTION_PATTERN})",
+        right,
+        flags=re.IGNORECASE,
+    ):
+        return False
+    head = re.split(r"[，,]", right, maxsplit=1)[0]
+    if re.fullmatch(rf"\s*(?:{action_pattern})\s*", head, flags=re.IGNORECASE):
+        return False
+    action_scope = (
+        r"(?:(?:在|到|向|于|用|通过)\s*[^.！!？?，,;]{0,32}?|"
+        r"(?:in|into|inside|within)\s+(?:the\s+)?[^.！!？?,;]{0,32}?)?"
+    )
+    return bool(
+        re.match(
+            rf"\s*(?:(?:请|麻烦)(?:你|您)?\s*)?{action_scope}"
+            rf"(?:{action_pattern})",
+            right,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _has_effective_negation_cue(value: str) -> bool:
+    return any(
+        not _polite_request_negation_cue(value, match)
+        for match in re.finditer(
+            _NEGATION_CUE_PATTERN,
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _action_clause_is_negated(clause: str, action_pattern: str) -> bool:
+    matches = tuple(re.finditer(action_pattern, clause, flags=re.IGNORECASE))
+    return bool(matches) and all(
+        _action_match_is_negated(clause, match.start()) for match in matches
+    )
+
+
+def _action_match_is_negated(clause: str, action_start: int) -> bool:
+    prefix = clause[:action_start]
+    if re.search(r"(?:^|[^\w])不\s*(?:再\s*)?$", prefix):
+        return True
+    cue_matches = tuple(
+        match
+        for match in re.finditer(
+            _NEGATION_CUE_PATTERN,
+            prefix,
+            flags=re.IGNORECASE,
+        )
+        if not _polite_request_negation_cue(prefix, match)
+    )
+    if not cue_matches:
+        return False
+    between = prefix[cue_matches[-1].end() :]
+    if len(between) > 100:
+        return False
+    soft_separator = max(between.rfind("，"), between.rfind(","))
+    if soft_separator >= 0:
+        before_separator = between[:soft_separator]
+        if not re.search(
+            _DESKTOP_MUTATION_ACTION_PATTERN,
+            before_separator,
+            flags=re.IGNORECASE,
+        ) and not re.search(r"(?:操作|交互|\binteract(?:ion|ing)?\b)", before_separator):
+            return False
+    return True
+
+
+def _polite_request_negation_cue(prefix: str, match: re.Match[str]) -> bool:
+    """Exclude Chinese can-you phrasing from destructive negation scope."""
+
+    token = match.group(0)
+    previous = prefix[match.start() - 1 : match.start()] if match.start() else ""
+    if not ((token == "不能" and previous == "能") or (token == "不可" and previous == "可")):
+        return False
+    request_start = match.start() - 1
+    request_prefix = prefix[:request_start].rstrip()
+    if not request_prefix or re.search(r"[，,。！!？?；;\n]$", request_prefix):
+        return True
+    return bool(
+        re.search(
+            r"(?:^|[，,。！!？?；;\n\s])"
+            r"(?:请问(?:一下|下)?|请(?:你|您)?|"
+            r"麻烦(?:(?:你|您)|问(?:一下|下)?)?|劳驾|帮我|"
+            r"我|你|您|(?:我)?想问(?:一下)?)$",
+            request_prefix,
+        )
+    )
+
+
+def affirmative_desktop_action_text(text: str, action: str) -> str:
+    """Return text with negated clauses for one desktop mutation removed."""
+
+    action_pattern = {
+        "click": _CLICK_ACTION_PATTERN,
+        "type": _TYPE_ACTION_PATTERN,
+        "open": _OPEN_ACTION_PATTERN,
+        "focus": _FOCUS_ACTION_PATTERN,
+    }.get(str(action or "").strip().lower())
+    if not action_pattern:
+        return str(text or "").strip()
+    return _affirmative_action_text(text, action_pattern)
+
+
+def desktop_action_requested(text: str, action: str) -> bool:
+    """Return whether a supported desktop mutation has an affirmative mention."""
+
+    action_pattern = {
+        "click": _CLICK_ACTION_PATTERN,
+        "type": _TYPE_ACTION_PATTERN,
+        "open": _OPEN_ACTION_PATTERN,
+        "focus": _FOCUS_ACTION_PATTERN,
+    }.get(str(action or "").strip().lower())
+    if not action_pattern:
+        return False
+    affirmative_text = affirmative_desktop_action_text(text, action)
+    return bool(re.search(action_pattern, affirmative_text, flags=re.IGNORECASE))
+
+
+def desktop_app_control_only_negated(text: str) -> bool:
+    """Return true when every mentioned open/focus action is explicitly negated."""
+
+    return _desktop_actions_only_negated(text, ("open", "focus"))
+
+
+def desktop_mutation_only_negated(text: str) -> bool:
+    """Return true when every mentioned desktop mutation is explicitly negated."""
+
+    return _desktop_actions_only_negated(text, ("click", "type", "open", "focus"))
+
+
+def _desktop_actions_only_negated(text: str, actions: Iterable[str]) -> bool:
+    patterns = {
+        "click": _CLICK_ACTION_PATTERN,
+        "type": _TYPE_ACTION_PATTERN,
+        "open": _OPEN_ACTION_PATTERN,
+        "focus": _FOCUS_ACTION_PATTERN,
+    }
+    mentioned_actions = tuple(
+        action
+        for action in actions
+        if (pattern := patterns.get(str(action or "").strip().lower()))
+        if re.search(pattern, str(text or ""), flags=re.IGNORECASE)
+    )
+    return bool(mentioned_actions) and not any(
+        desktop_action_requested(text, action) for action in mentioned_actions
+    )
+
 
 def app_control_mode(text: str) -> str:
+    text = _affirmative_action_text(text, _FOCUS_ACTION_PATTERN)
     return (
         "focus"
         if contains_any(
             text,
             [
+                "切换到",
                 "切到",
+                "切回",
+                "回到",
+                "切一下",
+                "切下",
                 "聚焦",
+                "激活",
+                "置前",
                 "focus",
                 "switch to",
                 "switch ",
@@ -168,7 +435,7 @@ def app_foreground_tool_candidates(mode: str, action: str) -> tuple[str, ...]:
 
 
 def click_target_hint(text: str) -> dict[str, Any] | None:
-    value = str(text or "")
+    value = _affirmative_action_text(text, _CLICK_ACTION_PATTERN)
     if safe_click_hint(value) is not None:
         return None
     if _looks_like_audio_level_request(value):
@@ -189,7 +456,7 @@ def click_target_hint(text: str) -> dict[str, Any] | None:
         not conditional_click_request
         and (
             re.search(
-                r"(?:双击|点击|点一下|点按|单击|按一下|点)\s*"
+                r"(?:双击|点击|点一下|点按|单击|按一下|点(?!名))\s*"
                 r"(?:可见(?:的)?|当前(?:的)?|这个|该)?[^。！？!?，,]{1,60}?"
                 r"(?:按钮|控件|元素|菜单项|菜单|复选框)",
                 value,
@@ -197,7 +464,7 @@ def click_target_hint(text: str) -> dict[str, Any] | None:
             )
             or re.search(
                 r"(?:^|[，,]|并|然后|再|接着|之后|后)\s*"
-                r"(?:双击|点击|点一下|点按|单击|按一下|点)\s*"
+                r"(?:双击|点击|点一下|点按|单击|按一下|点(?!名))\s*"
                 r"[^。！？!?，,]{1,60}$",
                 value,
                 flags=re.IGNORECASE,
@@ -216,11 +483,11 @@ def click_target_hint(text: str) -> dict[str, Any] | None:
         return None
     if re.search(
         r"\b(?:press|hit|tap)\s+(?:command|cmd|control|ctrl|option|alt|shift)\b",
-        str(text or ""),
+        value,
         flags=re.IGNORECASE,
     ) or re.search(
         r"(?:按|敲).{0,6}(?:command|cmd|⌘|control|ctrl|option|alt|shift)",
-        str(text or ""),
+        value,
         flags=re.IGNORECASE,
     ):
         return None
@@ -236,11 +503,11 @@ def click_target_hint(text: str) -> dict[str, Any] | None:
         r"(?:\s+(?:and|then)\s+(?:verify|confirm|check).{0,24}"
         r"(?:success|result|state|status))?$",
         r"(?P<target_post>[^。！？!?，,]{1,60}?)(?:按钮|控件|元素|菜单项|菜单|复选框)?\s*(?:双击|点击|点一下|点按|单击)$",
-        r"(?:双击|点击|点一下|点按|单击|按一下|按(?!钮)|点(?!击|按|一下))\s*(?P<target>[^。！？!?，,]+)",
+        r"(?:双击|点击|点一下|点按|单击|按一下|按(?!钮)|点(?!击|按|一下|名))\s*(?P<target>[^。！？!?，,]+)",
         r"(?:double\s+click|click|press|tap)\s+(?:the\s+)?(?P<target_en>[^.!?,]+)",
     )
     for pattern in patterns:
-        match = re.search(pattern, text, flags=re.IGNORECASE)
+        match = re.search(pattern, value, flags=re.IGNORECASE)
         if not match:
             continue
         if conditional_click_request:
@@ -278,6 +545,9 @@ def click_target_hint(text: str) -> dict[str, Any] | None:
 
 
 def type_into_ui_hint(text: str, *, app_name: str = "") -> dict[str, Any] | None:
+    original_text = str(text or "")
+    text = _affirmative_action_text(original_text, _TYPE_ACTION_PATTERN)
+    removed_negated_clause = clean(text) != clean(original_text)
     field_cn = (
         r"搜索框|搜索栏|消息框|聊天框|地址栏|输入框|文本框|输入栏|"
         r"收件人|发件人|联系人|主题|标题|姓名|名称|邮箱|邮件地址|电话|"
@@ -370,6 +640,8 @@ def type_into_ui_hint(text: str, *, app_name: str = "") -> dict[str, Any] | None
             or ""
         )
         target = clean_type_target(raw_target, app_name=app_name)
+        if removed_negated_clause:
+            target = _explicit_type_field_label(raw_target) or target
         typed_text = clean_followup_text(raw_text)
         if _looks_like_current_input_target(raw_target, target):
             continue
@@ -378,17 +650,33 @@ def type_into_ui_hint(text: str, *, app_name: str = "") -> dict[str, Any] | None
     return None
 
 
+def _explicit_type_field_label(value: str) -> str:
+    match = re.search(
+        r"(?:搜索框|搜索栏|消息框|聊天框|地址栏|输入框|文本框|输入栏|"
+        r"search box|search field|message field|address bar|input field|text box)$",
+        clean(value),
+        flags=re.IGNORECASE,
+    )
+    return match.group(0) if match else ""
+
+
 def safe_type_text_hint(text: str) -> str:
+    text = _affirmative_action_text(text, _TYPE_ACTION_PATTERN)
     patterns = (
+        r"^(?:请|麻烦)?(?:帮我打(?:字|上|入)?|打字|打上|打入)\s+"
+        r"(?P<text_help>[^。！？!?，,]+)",
         r"(?:输入(?!框|栏)|键入|填写|填入|写入|写下|记录下|记下|写)\s*(?P<text>[^。！？!?，,]+)",
-        r"(?:type|enter|fill)\s+(?P<text_en>[^.!?,]+)",
+        r"\b(?:type|enter|fill)(?:\s+|\s*[:：]\s*)(?P<text_en>[^.!?,]+)",
     )
     for pattern in patterns:
         match = re.search(pattern, text, flags=re.IGNORECASE)
         if not match:
             continue
         typed_text = clean_followup_text(
-            match.groupdict().get("text") or match.groupdict().get("text_en") or ""
+            match.groupdict().get("text_help")
+            or match.groupdict().get("text")
+            or match.groupdict().get("text_en")
+            or ""
         )
         typed_text = re.sub(
             r"^(?:文本|文字|内容|text)\s+",
@@ -417,6 +705,83 @@ def safe_type_text_hint(text: str) -> str:
         if typed_text:
             return typed_text
     return ""
+
+
+def standalone_safe_type_text_hint(text: str) -> str:
+    """Return literal text only for a whole-utterance foreground typing command.
+
+    ``safe_type_text_hint`` intentionally remains broad because app-scoped flows use
+    it to extract text from larger instructions.  A bare foreground mutation needs a
+    stricter boundary: otherwise words such as ``输入`` or ``写`` inside a code,
+    report, communication, or click request can turn the entire task into an
+    unapproved typing action.
+    """
+
+    value = _affirmative_action_text(text, _TYPE_ACTION_PATTERN)
+    if not value:
+        return ""
+    match = re.fullmatch(
+        r"(?:请|麻烦)?\s*"
+        r"(?:(?:在)?(?:当前|前台)(?:界面|输入框|文本框|应用|窗口)"
+        r"(?:里|中|上)?\s*)?"
+        r"(?:帮我打(?:字|上|入)?|打字|打上|打入|输入|键入|"
+        r"type|enter)"
+        r"(?:\s+|\s*[:：]\s*|(?=(?:文本|文字|内容)\s+))"
+        r"(?P<text>[^\r\n。！？!?，,；;]+?)\s*[.!。]?",
+        value,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return ""
+    typed_text = clean_followup_text(match.group("text"))
+    typed_text = re.sub(
+        r"^(?:文本|文字|内容|text)\s+",
+        "",
+        typed_text,
+        flags=re.IGNORECASE,
+    ).strip()
+    typed_text = re.sub(
+        r"\s+(?:in|into)\s+(?:the\s+)?"
+        r"(?:(?:current|active|foreground)\s+)?"
+        r"(?:input|input\s+field|field|text\s+box)$",
+        "",
+        typed_text,
+        flags=re.IGNORECASE,
+    ).strip()
+    if not typed_text or _looks_like_non_content_type_text(typed_text):
+        return ""
+    if _standalone_type_text_has_task_semantics(typed_text):
+        return ""
+    return typed_text
+
+
+def _standalone_type_text_has_task_semantics(text: str) -> bool:
+    """Reject payloads that read like another task rather than literal keystrokes."""
+
+    value = str(text or "").strip()
+    lowered = value.lower()
+    task_patterns = (
+        r"(?:一份|一个|一段|这份|这个|这段)\s*"
+        r"(?:代码|脚本|程序|报告|报表|总结|摘要|文档|文件|笔记|任务)",
+        r"(?:生成|创建|制作|撰写|改写|翻译|总结|整理).{0,24}"
+        r"(?:代码|脚本|程序|报告|报表|摘要|文档|文件|笔记|任务)",
+        r"(?:发送|发给|发消息|回复|发邮件|打电话|打给).{0,40}",
+        r"(?:点击|单击|点按|选择|按下).{0,24}(?:按钮|控件|链接|菜单)?",
+        r"(?:剪贴板|当前网页|当前页面|选中的?内容).{0,30}"
+        r"(?:写入|填入|输入|发送|保存|整理|总结)",
+    )
+    if any(re.search(pattern, value, flags=re.IGNORECASE) for pattern in task_patterns):
+        return True
+    return bool(
+        re.search(
+            r"\b(?:generate|create|compose|summari[sz]e|rewrite|translate|send|"
+            r"email|message|call|click|press|select|paste)\b.{0,48}"
+            r"\b(?:code|script|report|artifact|document|file|note|task|button|"
+            r"message|email|clipboard|page)?\b",
+            lowered,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _looks_like_non_content_type_text(text: str) -> bool:
@@ -514,12 +879,13 @@ def _looks_like_current_input_target(raw_target: str, clean_target_value: str) -
 
 
 def submit_action_hint(text: str) -> str:
-    lowered = str(text or "").lower()
-    if contains_any(lowered, ["发送", "send"]):
+    value = str(text or "")
+    lowered = value.lower()
+    if "发送" in value or re.search(r"\bsend\b", lowered):
         return "send"
-    if contains_any(
+    if contains_any(value, ["搜索", "回车", "确认", "提交"]) or re.search(
+        r"\b(?:search|enter|return|confirm|submit)\b",
         lowered,
-        ["搜索", "回车", "确认", "提交", "search", "enter", "return", "confirm", "submit"],
     ):
         return "confirm"
     return ""
@@ -700,7 +1066,7 @@ def screen_capture_hint(text: str) -> dict[str, Any] | None:
 def _looks_like_screenshot_file_reference(value: str, lowered: str) -> bool:
     return bool(
         re.search(
-            r"(?:最近|最新|上一张|上一个|下载(?:文件夹|目录)?|桌面|文件夹|目录)"
+            r"(?:刚才(?:的)?|最近|最新|上一张|上一个|下载(?:文件夹|目录)?|桌面|文件夹|目录)"
             r".{0,18}(?:截图|截屏)",
             value,
             flags=re.IGNORECASE,
@@ -961,6 +1327,8 @@ def hotkey_hint(text: str) -> dict[str, Any] | None:
     normalized = re.sub(r"\s+", "", value).lower()
     if normalized in {"退出当前应用", "退出当前app", "关闭当前应用", "关闭当前app"}:
         return {"key": "q", "modifiers": ["command"]}
+    if normalized in {"空格一下", "空格下", "敲一下空格", "敲空格一下"}:
+        return {"key": "space", "modifiers": []}
     if not contains_any(
         value.lower(),
         ["按", "敲", "快捷键", "press", "hit", "tap", "hotkey", "shortcut"],
@@ -1161,7 +1529,7 @@ def safe_scroll_hint(text: str) -> dict[str, Any] | None:
 
 
 def safe_click_hint(text: str) -> dict[str, int | float] | None:
-    value = clean(text)
+    value = clean(_affirmative_action_text(text, _CLICK_ACTION_PATTERN))
     patterns = (
         r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:(?P<double>双击|double\s+click)|点击|点一下|点按|单击|点|click)\s*"
@@ -1210,6 +1578,12 @@ def media_non_action_reference_hint(text: str) -> bool:
     return bool(
         re.fullmatch(r"(?:播放列表|播放队列|播放记录)", value, flags=re.IGNORECASE)
         or re.search(
+            r"(?:可以|可|能够|能)?\s*被\s*(?:随时)?\s*(?:停止|暂停)\s*的\s*"
+            r"(?:慢\s*)?(?:请求|任务|操作|进程|作业|流程|命令|脚本)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
             r"(?:播放|播|放)\s*(?:到|至)\s*\d+(?:\.\d+)?\s*%?\s*$",
             value,
             flags=re.IGNORECASE,
@@ -1229,7 +1603,7 @@ def media_tool_preview(
     if (
         isinstance(app_capability, Mapping)
         and not app_name
-        and "desktop.list_apps" in allowed
+        and (allowed is None or "desktop.list_apps" in allowed)
     ):
         return None, {}
     control_only = str(inputs.get("control_only") or "").strip().lower() == "true"
@@ -1237,12 +1611,11 @@ def media_tool_preview(
     if action == "status":
         return _first_allowed(("media.apple_music_status",), allowed), {}
     if query and is_apple_music:
-        generic_tool = _first_allowed(("media.music_app_open_and_play",), allowed)
-        if generic_tool:
-            return generic_tool, {"app_name": app_name or "Music"}
         apple_tool = _first_allowed(("media.apple_music_play",), allowed)
         if apple_tool:
             return apple_tool, {"query": query}
+        # The generic open-and-play tool cannot accept a song/artist query.
+        # Returning it here would silently discard the user's requested media.
         return None, {}
     if app_name and not is_apple_music:
         if action == "play":
@@ -1255,8 +1628,8 @@ def media_tool_preview(
             tool_name = (
                 _first_allowed(
                     (
-                        "media.music_app_control",
                         "media.apple_music_control",
+                        "media.music_app_control",
                         "media.system_control",
                     ),
                     allowed,
@@ -1279,7 +1652,7 @@ def media_tool_preview(
         tool_name = _first_allowed(("media.system_control", "media.apple_music_control"), allowed)
         return tool_name, {"action": action} if tool_name else {}
     tool_name = _first_allowed(
-        ("media.music_app_control", "media.apple_music_control", "media.system_control"),
+        ("media.apple_music_control", "media.music_app_control", "media.system_control"),
         allowed,
     )
     if tool_name == "media.music_app_control":
@@ -1659,6 +2032,9 @@ def _append_media_app_verify_step(
 
 
 def media_action_hint(text: str) -> str:
+    if _media_failure_condition_hint(text):
+        return ""
+    text = _strip_polite_media_action_prefix(text)
     lowered = str(text or "").lower()
     if media_non_action_reference_hint(text):
         return ""
@@ -1695,10 +2071,17 @@ def media_action_hint(text: str) -> str:
             "换一首",
             "换首歌",
             "换歌",
-            "跳过",
-            "next",
-            "skip",
         ],
+    ) or re.search(
+        r"(?:跳过|跳)(?:这首|当前(?:这)?首|当前歌曲|这首歌)",
+        str(text or ""),
+    ) or re.fullmatch(
+        r"\s*(?:apple\s+music|music)\s*[,;:]?\s*(?:next|skip)\s*",
+        lowered,
+    ) or re.fullmatch(r"\s*(?:next|skip)\s*", lowered) or re.search(
+        r"\b(?:next|skip)\s+(?:this\s+|the\s+|current\s+)?"
+        r"(?:media\s+)?(?:song|track)\b|\bnext\s+media\b",
+        lowered,
     ):
         return "next"
     if contains_any(lowered, ["上一首", "上一曲", "previous"]) or re.search(
@@ -1896,10 +2279,15 @@ def _generic_music_app_scope_requested(text: str) -> bool:
 
 def media_query_hint(text: str) -> str:
     value = clean(text)
+    if _media_failure_condition_hint(value):
+        return ""
     if re.fullmatch(r"(?:播放|播|放)(?:一下|下)?", value, flags=re.IGNORECASE):
         return ""
     if re.fullmatch(r"(?:play|start playing)", value, flags=re.IGNORECASE):
         return ""
+    quoted_match, quoted_query = _quoted_media_query_hint(value)
+    if quoted_match:
+        return quoted_query
     if _generic_music_playback_without_query(value):
         return ""
     patterns = (
@@ -1960,29 +2348,195 @@ def media_query_hint(text: str) -> str:
         if not match:
             continue
         groups = match.groupdict()
-        query = (
-            groups.get("query_put")
-            or groups.get("query_mixed_app_for")
-            or groups.get("query_search")
-            or groups.get("query_search_in")
-            or groups.get("query_app_search")
-            or groups.get("query_open_search")
-            or groups.get("query_en_scoped_app")
-            or groups.get("query_zh_scoped_search")
-            or groups.get("query_music_capability_play")
-            or groups.get("query_generic_music_play")
-            or groups.get("query_generic_music_search")
-            or groups.get("query_zh_search")
-            or groups.get("query_zh_suffix")
-            or groups.get("query_listen")
-            or groups.get("query")
-            or groups.get("query_en")
-            or ""
+        query_group = next(
+            (
+                name
+                for name in (
+                    "query_put",
+                    "query_mixed_app_for",
+                    "query_search",
+                    "query_search_in",
+                    "query_app_search",
+                    "query_open_search",
+                    "query_en_scoped_app",
+                    "query_zh_scoped_search",
+                    "query_music_capability_play",
+                    "query_generic_music_play",
+                    "query_generic_music_search",
+                    "query_zh_search",
+                    "query_zh_suffix",
+                    "query_listen",
+                    "query",
+                    "query_en",
+                )
+                if groups.get(name)
+            ),
+            "",
         )
-        query = _clean_media_query(query)
+        if not query_group:
+            continue
+        raw_query = str(groups[query_group])
+        if _unquoted_media_query_is_conditional(
+            value,
+            query_span=match.span(query_group),
+        ):
+            continue
+        query = _clean_media_query(raw_query)
+        if _negative_modal_query_fragment(query):
+            continue
         if query:
             return query
     return ""
+
+
+def _quoted_media_query_hint(value: str) -> tuple[bool, str]:
+    action = (
+        r"(?:搜索|搜一下|搜|查找|找|检索|播放|播|放|想听|听听|听一首|听首|听点|来点|"
+        r"search|find|look\s+up|play|start\s+playing|listen\s+to)"
+    )
+    bridge = (
+        r"(?:一下|下|一首|首|个|点)?\s*"
+        r"(?:(?:the\s+)?(?:song|track)|歌曲?|音乐|曲目)?\s*"
+        r"(?:名为|叫作?|名字是|named)?\s*"
+        r"(?:(?:apple\s*music|苹果音乐|音乐(?:应用|app)?)"
+        r"\s*(?:里的|中的|上的|内的|里面的|里|中|上|内|里面|的)?\s*)?"
+        r"(?:for\s+)?[:：]?\s*"
+    )
+    quote_pairs = (
+        ("“", "”"),
+        ("‘", "’"),
+        ("「", "」"),
+        ("『", "』"),
+        ("《", "》"),
+        ('"', '"'),
+        ("'", "'"),
+    )
+    for opening, closing in quote_pairs:
+        pattern = rf"{action}{bridge}{re.escape(opening)}"
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        query_start = match.end()
+        query_end = _closing_media_quote_index(
+            value,
+            start=query_start,
+            opening=opening,
+            closing=closing,
+        )
+        if query_end is None:
+            continue
+        query = clean(value[query_start:query_end]).strip(" .，,。")
+        if _media_query_match_is_failure_condition(
+            value,
+            query_span=(query_start, query_end),
+        ):
+            return True, ""
+        if not query or query.lower() in _GENERIC_MUSIC_QUERIES:
+            return True, ""
+        return True, query
+    return False, ""
+
+
+def _closing_media_quote_index(
+    value: str,
+    *,
+    start: int,
+    opening: str,
+    closing: str,
+) -> int | None:
+    scan_end = min(len(value), start + 160)
+    if opening == closing == "'":
+        candidates = [
+            index
+            for index in range(start, scan_end)
+            if value[index] == closing
+            and not (
+                index > start
+                and index + 1 < len(value)
+                and value[index - 1].isalnum()
+                and value[index + 1].isalnum()
+            )
+        ]
+        index = candidates[0] if candidates else -1
+    else:
+        index = value.find(closing, start, scan_end)
+    return index if index >= start else None
+
+
+def _unquoted_media_query_is_conditional(
+    value: str,
+    *,
+    query_span: tuple[int, int],
+) -> bool:
+    return _media_query_match_is_failure_condition(value, query_span=query_span)
+
+
+def _media_query_match_is_failure_condition(
+    value: str,
+    *,
+    query_span: tuple[int, int],
+) -> bool:
+    start, end = query_span
+    clause_start_matches = list(re.finditer(r"[。！？!?,，；;\n]", value[:start]))
+    clause_start = clause_start_matches[-1].end() if clause_start_matches else 0
+    clause_end_match = re.search(r"[。！？!?,，；;\n]", value[end:])
+    clause_end = end + clause_end_match.start() if clause_end_match else len(value)
+    clause = value[clause_start:clause_end].strip()
+    return bool(
+        re.match(r"^(?:如果|假如|若)", clause)
+        and re.search(r"(?:只能|(?<!能)不能|无法)", clause)
+    )
+
+
+def _negative_modal_query_fragment(value: str) -> bool:
+    return bool(
+        re.fullmatch(
+            r"(?:(?:而|但|却|不过|只是)\s*)?(?:不能|无法|不可|不会)",
+            str(value or "").strip(),
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _media_failure_condition_hint(text: str) -> bool:
+    value = clean(text)
+    if not value:
+        return False
+    chinese_condition = re.match(
+        r"^(?:(?:请问|请确认|想问(?:一下)?|我想问(?:一下)?)\s*)?"
+        r"(?:如果|假如|若)",
+        value,
+        flags=re.IGNORECASE,
+    )
+    if chinese_condition and re.search(
+        r"(?:只能|(?<!能)不能|无法).{0,60}"
+        r"(?:打开|启动|搜索|搜|查找|播放|播|放)",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        return True
+    lowered = value.lower()
+    return bool(
+        re.match(r"^(?:please\s+)?if\b", lowered)
+        and re.search(
+            r"\b(?:can\s+only|can\s*not|cannot|can't|(?:is\s+)?unable\s+to)\b"
+            r".{0,80}\b(?:open|launch|search|find|play)\b",
+            lowered,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _strip_polite_media_action_prefix(text: str) -> str:
+    value = clean(text)
+    value = re.sub(r"^请问\s*", "", value)
+    return re.sub(
+        r"^(?:如果|假如|若)\s*(?:可以|方便|可行)(?:的话)?\s*[，,]?\s*",
+        "",
+        value,
+        count=1,
+        flags=re.IGNORECASE,
+    )
 
 
 def _generic_music_playback_without_query(value: str) -> bool:
@@ -2302,6 +2856,12 @@ def _strip_app_prefix_from_type_target(value: str) -> str:
 
 def clean_followup_text(value: str) -> str:
     text = clean(value)
+    # Treat punctuation that introduces an explicit payload as syntax rather
+    # than text to type. Strip the separator before quotes so `：“hello”`
+    # normalizes to `hello` instead of leaving either delimiter behind.
+    text = re.sub(r"^(?:[:：]\s*)+", "", text).strip()
+    text = re.sub(r"^[\"'`“”‘’]+|[\"'`“”‘’]+$", "", text).strip()
+    text = re.sub(r"^(?:[:：]\s*)+", "", text).strip()
     text = re.split(
         r"(?:并且|然后|再|接着|之后|随后|后|并|and\s+then|then|and)?\s*"
         r"(?:按一下|按下|按|敲|点击|点|press|hit|tap)?\s*"
@@ -2537,6 +3097,9 @@ def _ui_control_presence_app_name_hint(value: str) -> str:
     if re.search(current_scope, value, flags=re.IGNORECASE) and not explicit_app_before_current_scope:
         return ""
     patterns = (
+        r"\b(?:what|which)\s+(?:buttons|controls|ui\s+elements|text\s+fields)\s+"
+        r"(?:are\s+)?(?:visible|shown|available|there)?\s*(?:in|on|for|of)\s+"
+        r"(?:the\s+)?(?P<app_en_visible>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\b(?:[.!?]|$)",
         r"^(?:帮我|请|麻烦|能否|能不能|可以|直接|检查|查看|看看|确认|识别)?\s*"
         r"(?P<app_surface>[\w .·-]{1,40}?)\s*"
         r"(?:当前|现在|这个|前台|该)?\s*(?:窗口|界面|屏幕|应用|app|ui|UI)?"
@@ -2899,6 +3462,7 @@ def _looks_like_screen_capture_request(value: str, lowered: str) -> bool:
             r".{0,12}(?:当前|现在|这个|我的|我现在的)?(?:屏幕|桌面|界面|画面)",
             value,
         )
+        or _looks_like_app_observation_capture_request(value)
         or re.search(
             r"(?:当前|现在|这个|我的|我现在的)?(?:屏幕|桌面|界面|画面)"
             r".{0,8}(?:是什么|是啥|内容|画面|有什么|有啥)",
@@ -2935,6 +3499,23 @@ def _looks_like_screen_capture_request(value: str, lowered: str) -> bool:
         )
         or re.search(r"\bwhat(?:'s| is)?\s+on\s+(?:my|the|this|current)?\s*(?:screen|desktop)\b", lowered)
     )
+
+
+def _looks_like_app_observation_capture_request(value: str) -> bool:
+    match = re.fullmatch(
+        r"(?P<app>[^.。！！？?，,]{1,40}?)\s*"
+        r"(?:看一下|看看|看下|查看|观察(?:一下|下)?)",
+        value,
+        flags=re.IGNORECASE,
+    )
+    if match is None:
+        return False
+    app_name = str(match.group("app") or "").strip()
+    if is_legacy_app_name_hint(app_name):
+        return True
+    # Dynamic app names are supported when they look like a product name,
+    # while conversational subjects such as "这个项目" stay out of the capture path.
+    return bool(re.fullmatch(r"[A-Z][A-Za-z0-9 ._-]{1,39}", app_name))
 
 
 def _explicit_screen_capture_requested(value: str, lowered: str) -> bool:
@@ -2980,6 +3561,7 @@ def _screen_capture_app_name_hint(value: str) -> str:
         r"(?P<app>[^。！？!?，,]+?)\s*(?:界面|画面)",
         r"(?P<app2>[^。！？!?，,]+?)\s*(?:界面|画面).{0,8}(?:截图|截屏|看一下|看看|查看|观察)",
         r"(?P<app3>[^。！？!?，,]+?)\s*(?:看一下|看看|看下|查看|观察(?:一下|下)?)\s*(?:界面|画面)",
+        r"^(?P<app_observe>[^。！？!?，,]+?)\s*(?:看一下|看看|看下|查看|观察(?:一下|下)?)$",
         r"^(?:把|将)?\s*(?P<app_preopen>[^。！？!?，,]+?)\s*"
         r"(?:打开|启动|开启|拉起)\s*(?:然后|并|再|接着|之后)?\s*"
         r"(?:看看|看一下|看下|查看|读取|读一下|读下|看).{0,16}"
@@ -3348,6 +3930,8 @@ def _safe_shortcut_action_from_phrase(value: str) -> str:
         "forcequitapplications": "force_quit_dialog",
         "showforcequitapplications": "force_quit_dialog",
         "锁屏": "lock_screen",
+        "锁一下屏": "lock_screen",
+        "锁下屏": "lock_screen",
         "锁定屏幕": "lock_screen",
         "lockscreen": "lock_screen",
         "全选": "select_all",

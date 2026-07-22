@@ -8,6 +8,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, Field
 
+from apps.shell.agent.runtime.memory_services import issue_user_memory_consent_capability
 from apps.shell.agent_runtime import AgentRuntimeError, get_agent_runtime_service
 from packages.security import redact_api_error_detail
 
@@ -95,6 +96,7 @@ class WorkflowRunRequest(BaseModel):
 
 
 class ApprovalRejectRequest(BaseModel):
+    approval_id: str | None = Field(default=None, max_length=160)
     reason: str | None = Field(default=None, max_length=2000)
 
 
@@ -104,6 +106,13 @@ class MemoryRequest(BaseModel):
     kind: str | None = Field(default=None, max_length=40)
     scope: str | None = Field(default=None, max_length=40)
     reason: str | None = Field(default=None, max_length=2000)
+    project_id: str | None = Field(default=None, max_length=160)
+    source_session_id: str | None = Field(default=None, max_length=160)
+    source_message_id: str | None = Field(default=None, max_length=160)
+    source_task_id: str | None = Field(default=None, max_length=160)
+    enabled: bool | None = None
+    user_confirmed: bool | None = None
+    consent_receipt: dict[str, str] | None = None
 
 
 class FutureTaskRequest(BaseModel):
@@ -140,7 +149,21 @@ def _payload_with_idempotency(model: BaseModel, request: Request | None) -> dict
 
 
 def _bad_request(exc: Exception) -> HTTPException:
-    return HTTPException(status_code=400, detail=redact_api_error_detail(exc))
+    detail = redact_api_error_detail(exc)
+    status_code = 409 if _approval_generation_conflict(detail) else 400
+    return HTTPException(status_code=status_code, detail=detail)
+
+
+def _approval_generation_conflict(detail: Any) -> bool:
+    text = str(detail or "")
+    return any(
+        marker in text
+        for marker in (
+            "approval_generation_mismatch",
+            "approval_generation_projection_missing",
+            "approval_generation_conflict",
+        )
+    )
 
 
 def _agent_runtime_service(request: Request | None = None) -> Any:
@@ -481,6 +504,22 @@ async def update_memory(
         raise _bad_request(exc) from exc
 
 
+@router.post("/memories/{memory_id}/consent-capability")
+async def issue_memory_consent_capability(
+    memory_id: str,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
+    try:
+        service = _agent_runtime_service(http_request)
+        return await asyncio.to_thread(
+            issue_user_memory_consent_capability,
+            service.memory_services,
+            memory_id,
+        )
+    except AgentRuntimeError as exc:
+        raise _bad_request(exc) from exc
+
+
 @router.delete("/memories/{memory_id}")
 async def delete_memory(
     memory_id: str,
@@ -612,6 +651,8 @@ async def create_agent_run(
     request: AgentRunRequest,
     http_request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
+    if str(request.run_group_id or "").strip():
+        raise HTTPException(status_code=400, detail="public_run_group_attachment_forbidden")
     try:
         return await asyncio.to_thread(
             _agent_runtime_service(http_request).create_agent_run,
@@ -631,6 +672,8 @@ async def create_workflow_run(
     request: WorkflowRunRequest,
     http_request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
+    if str(request.run_group_id or "").strip():
+        raise HTTPException(status_code=400, detail="public_run_group_attachment_forbidden")
     try:
         return await asyncio.to_thread(
             _agent_runtime_service(http_request).create_workflow_run,
@@ -673,10 +716,20 @@ async def cancel_run(run_id: str, http_request: Request = None) -> dict[str, Any
 @router.post("/runs/{run_id}/approval/approve")
 async def approve_run_approval(
     run_id: str,
+    request: ApprovalRejectRequest | None = None,
     http_request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
+    approval_id = str(
+        (request.approval_id if request is not None else "") or ""
+    ).strip()
+    if not approval_id:
+        raise HTTPException(status_code=400, detail="approval_expected_id_required")
     try:
-        return await asyncio.to_thread(_agent_runtime_service(http_request).approve_run_approval, run_id)
+        return await asyncio.to_thread(
+            _agent_runtime_service(http_request).approve_run_approval,
+            run_id,
+            approval_id,
+        )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Run 不存在") from exc
     except AgentRuntimeError as exc:
@@ -689,12 +742,18 @@ async def reject_run_approval(
     request: ApprovalRejectRequest | None = None,
     http_request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
+    approval_id = str(
+        (request.approval_id if request is not None else "") or ""
+    ).strip()
+    if not approval_id:
+        raise HTTPException(status_code=400, detail="approval_expected_id_required")
     try:
         reason = request.reason if request is not None else ""
         return await asyncio.to_thread(
             _agent_runtime_service(http_request).reject_run_approval,
             run_id,
             reason or "",
+            approval_id,
         )
     except KeyError as exc:
         raise HTTPException(status_code=404, detail="Run 不存在") from exc

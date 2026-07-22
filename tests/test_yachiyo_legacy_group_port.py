@@ -187,6 +187,7 @@ def test_legacy_group_run_inherits_builtin_desktop_policy_for_member_runs(
     assert "workspace.read" in allowed_tools
     assert "screen.capture" in allowed_tools
     assert "desktop.permissions" in allowed_tools
+    assert "desktop.permissions.verify" in allowed_tools
     assert "desktop.running_apps" in allowed_tools
     assert "desktop.windows" in allowed_tools
     assert "app.status" in allowed_tools
@@ -210,6 +211,7 @@ def test_legacy_group_run_inherits_builtin_desktop_policy_for_member_runs(
         "app.focus_and_type_into_ui_element": True,
         "app.open_and_hotkey": True,
         "app.focus_and_hotkey": True,
+        "desktop.permissions.verify": True,
         "desktop.close_window": True,
         "desktop.quit_app": True,
         "desktop.hotkey": True,

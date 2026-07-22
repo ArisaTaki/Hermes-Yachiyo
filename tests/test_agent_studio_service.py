@@ -1484,7 +1484,7 @@ def test_legacy_studio_port_projects_component_build_failure(monkeypatch) -> Non
     assert "PyInstaller unavailable" in result["error"]
 
 
-def test_legacy_studio_tool_catalog_exposes_local_desktop_provider(monkeypatch) -> None:
+def test_legacy_studio_tool_catalog_exposes_passive_background_provider(monkeypatch) -> None:
     monkeypatch.delenv("OHA_YACHIYO_DESKTOP_PROVIDER_URL", raising=False)
     monkeypatch.delenv("OHA_YACHIYO_SANDBOX_DESKTOP_PROVIDER_URL", raising=False)
     monkeypatch.delenv("OHA_YACHIYO_DESKTOP_PROVIDER_EXECUTE_URL", raising=False)
@@ -1496,6 +1496,33 @@ def test_legacy_studio_tool_catalog_exposes_local_desktop_provider(monkeypatch) 
     monkeypatch.setattr(
         "apps.shell.yachiyo_agent.legacy_ports.desktop_runtime_blocking_conditions_by_capability",
         lambda: {},
+    )
+    monkeypatch.setattr(
+        "apps.shell.yachiyo_agent.legacy_ports.sandbox_desktop_provider_status",
+        lambda *_args, **_kwargs: {
+            "available": True,
+            "adapter_ready": True,
+            "provider_kind": "background_desktop",
+            "provider_id": "cua-driver",
+            "status": "available",
+            "supported_tools": [
+                "app.open",
+                "desktop.inspect_app",
+                "desktop.safe_type_text",
+            ],
+            "keyboard_mouse_capture_supported": True,
+            "foreground_mutation_supported": True,
+            "desktop_session_kind": "background_desktop",
+            "desktop_session_isolated": False,
+            "foreground_takeover_required": False,
+            "requires_real_sandbox_for": [],
+            "health": {
+                "checked": True,
+                "ok": True,
+                "status": "healthy",
+                "transport": "electron_bridge",
+            },
+        },
     )
     monkeypatch.setattr(
         "apps.shell.yachiyo_agent.controlled_provider_diagnostics.isolated_desktop_provider_session_status",
@@ -1516,20 +1543,23 @@ def test_legacy_studio_tool_catalog_exposes_local_desktop_provider(monkeypatch) 
     provider = catalog["sandbox_provider"]
     tools = {tool["tool_name"]: tool for tool in catalog["tools"]}
 
-    assert provider["provider_kind"] == LOCAL_DESKTOP_PROVIDER_KIND
-    assert provider["provider_id"] == LOCAL_DESKTOP_PROVIDER_ID
+    assert provider["provider_kind"] == "background_desktop"
+    assert provider["provider_id"] == "cua-driver"
     assert provider["status"] == "available"
-    assert provider["keyboard_mouse_capture_supported"] is False
-    assert provider["desktop_session_kind"] == "user_foreground"
+    assert provider["keyboard_mouse_capture_supported"] is True
+    assert provider["foreground_mutation_supported"] is True
+    assert provider["desktop_session_kind"] == "background_desktop"
     assert provider["desktop_session_isolated"] is False
-    assert provider["foreground_takeover_required"] is True
-    assert "desktop.safe_type_text" in provider["requires_real_sandbox_for"]
+    assert provider["foreground_takeover_required"] is False
+    assert provider["requires_real_sandbox_for"] == []
+    assert provider["health"]["transport"] == "electron_bridge"
     assert "app.open" in provider["supported_tools"]
     assert "desktop.inspect_app" in provider["supported_tools"]
     assert tools["app.open"]["provider_ready"] is True
     assert tools["desktop.inspect_app"]["provider_ready"] is True
-    assert tools["desktop.safe_type_text"]["provider_supported"] is False
-    assert tools["app.open"]["provider_kind"] == LOCAL_DESKTOP_PROVIDER_KIND
+    assert tools["desktop.safe_type_text"]["provider_supported"] is True
+    assert tools["desktop.safe_type_text"]["provider_ready"] is True
+    assert tools["app.open"]["provider_kind"] == "background_desktop"
     controlled = catalog["controlled_provider_diagnostics"]
     assert controlled["ready"] is False
     assert controlled["configured"] is False
@@ -1912,7 +1942,7 @@ def test_agent_studio_service_prefers_port_planner_when_available() -> None:
     assert metadata["desktop_provider_local_native"] is True
     assert metadata["desktop_execution_policy"] == {
         "mode": "supervised_live",
-        "allow_live_foreground": True,
+        "allow_live_foreground": False,
         "prefer_isolated_desktop": True,
         "avoid_user_foreground_takeover": True,
         "require_sandbox_for_keyboard_mouse": True,
@@ -2098,15 +2128,15 @@ def test_agent_studio_start_agent_run_preserves_provider_routes(
         for request in start_payload["direct_tool_requests"]
         if request["tool"] == "desktop.list_apps"
     )
-    operation_request = next(
-        request
-        for request in start_payload["direct_tool_requests"]
-        if request["tool"] == "app.focus_and_click_ui_element"
-    )
     envelope_request = next(
         request
         for request in start_payload["metadata"]["yachiyo_execution_envelope"]["requests"]
         if request["tool_name"] == "desktop.list_apps"
+    )
+    envelope_operation_request = next(
+        request
+        for request in start_payload["metadata"]["yachiyo_execution_envelope"]["requests"]
+        if request["tool_name"] == "app.focus_and_click_ui_element"
     )
     assert calls
     assert discovery_request["desktop_execution_route"]["status"] == "sandbox_ready"
@@ -2114,11 +2144,21 @@ def test_agent_studio_start_agent_run_preserves_provider_routes(
         "local-headless-desktop"
     )
     assert discovery_request["sandbox_provider"]["provider_id"] == "local-headless-desktop"
-    assert operation_request["desktop_execution_route"]["status"] == "sandbox_ready"
-    assert operation_request["desktop_execution_route"]["selected_provider_id"] == (
+    assert not any(
+        request["tool"] == "app.focus_and_click_ui_element"
+        for request in start_payload["direct_tool_requests"]
+    )
+    assert envelope_operation_request["desktop_execution_route"]["status"] == (
+        "sandbox_ready"
+    )
+    assert envelope_operation_request["desktop_execution_route"][
+        "selected_provider_id"
+    ] == (
         "local-headless-desktop"
     )
-    assert operation_request["sandbox_provider"]["provider_id"] == "local-headless-desktop"
+    assert envelope_operation_request["sandbox_provider"]["provider_id"] == (
+        "local-headless-desktop"
+    )
     assert envelope_request["desktop_execution_route"]["status"] == "sandbox_ready"
     assert start_payload["runtime_execution_envelope"] == (
         start_payload["metadata"]["yachiyo_execution_envelope"]
@@ -2367,7 +2407,7 @@ def test_agent_studio_service_starts_workflow_from_planner_orchestration() -> No
     assert metadata["surface"] == "agent_studio"
     assert metadata["source"] == "agent_studio_planner_orchestration"
     assert metadata["desktop_execution_policy"]["mode"] == "supervised_live"
-    assert metadata["desktop_execution_policy"]["allow_live_foreground"] is True
+    assert metadata["desktop_execution_policy"]["allow_live_foreground"] is False
     assert metadata["planner_orchestration"] is True
     assert metadata["planner_orchestration_kind"] == "workflow"
     assert metadata["planner_orchestration_target_id"] == "workflow-1"
@@ -2455,7 +2495,7 @@ def test_agent_studio_service_starts_group_run_from_planner_orchestration() -> N
     assert metadata["surface"] == "agent_studio"
     assert metadata["source"] == "agent_studio_planner_orchestration"
     assert metadata["desktop_execution_policy"]["mode"] == "supervised_live"
-    assert metadata["desktop_execution_policy"]["allow_live_foreground"] is True
+    assert metadata["desktop_execution_policy"]["allow_live_foreground"] is False
     assert metadata["planner_orchestration"] is True
     assert metadata["planner_orchestration_kind"] == "group_run"
     assert metadata["planner_orchestration_target_id"] == "group-1"
@@ -3265,7 +3305,8 @@ def test_agent_studio_service_auto_starts_group_replan_continuation_from_child_a
     ]
     request = _port_call_payload(port, "start_agent_run")
     assert request["agent_id"] == "agent-2"
-    assert request["client_run_id"] == "client-group-auto-1"
+    assert request["client_run_id"].startswith("yachiyo-replan-agent:")
+    assert request["metadata"]["replan_idempotency_key"] == request["client_run_id"]
     assert request["metadata"]["source"] == "agent_studio_group_replan_auto_continuation"
     assert request["metadata"]["source_group_run_id"] == "group-run-1"
     assert request["metadata"]["replan_auto_start_eligible"] is True

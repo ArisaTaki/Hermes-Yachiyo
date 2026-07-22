@@ -33,6 +33,12 @@ def test_build_runtime_approval_services_wires_pause_approve_and_resume() -> Non
         timeline_factory=timeline_factory,
         append_run_event=lambda _run_id, _event_type, _payload: None,
         update_run=lambda run_id, **kwargs: {"run_id": run_id, **kwargs},
+        get_run=lambda run_id: {
+            "run_id": run_id,
+            "status": "running",
+            "pending_approval": {},
+            "updated_at": "2026-07-11T10:00:00+00:00",
+        },
         snapshots=snapshots,
         call_agent_tool=lambda *_args, **_kwargs: {"ok": True},
         fatal_tool_failure_detail=lambda *_args, **_kwargs: "",

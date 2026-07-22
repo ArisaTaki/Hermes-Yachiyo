@@ -13,32 +13,10 @@ from apps.shell.agent.runtime.app_aliases import (
     APP_ALIASES,
     COMMUNICATION_APP_NAMES,
     EMAIL_APP_NAMES,
+    GENERIC_APP_ALIAS_COMPACTS,
     compact_app_alias,
 )
 from apps.shell.agent.runtime.media_apps import music_app_name_from_text
-
-GENERIC_APP_ALIAS_COMPACTS = frozenset(
-    {
-        "browser",
-        "defaultbrowser",
-        "systemdefaultbrowser",
-        "defaultwebbrowser",
-        "webbrowser",
-        "浏览器",
-        "默认浏览器",
-        "系统默认浏览器",
-        "默认网页浏览器",
-        "文件管理器",
-        "文件浏览器",
-        "terminal",
-        "终端",
-        "命令行",
-        "musicplayer",
-        "音乐播放器",
-        "播放器",
-    }
-)
-
 
 def _legacy_app_name_compact(value: str) -> str:
     app_name = str(value or "").strip()
@@ -101,11 +79,21 @@ def explicit_app_action_target_hint(value: str) -> str:
     text = str(value or "").strip()
     patterns = (
         r"^(?:你)?(?:可不可以帮我|可以帮我|能帮我|能不能帮我|帮我|请|麻烦|能否|能不能|能(?!不能|否)|可以)?"
+        r"(?:直接)?(?:切换到|切到|切回|切|聚焦|激活|置前)(?:一下|下)?\s*"
+        r"(?P<app_focus_prefixed>[^。！？!?，,\n]{1,60}?)\s*"
+        r"(?:吧|吗|嘛|呢|么)?[?？。！!]*$",
+        r"^(?:你)?(?:可不可以帮我|可以帮我|能帮我|能不能帮我|帮我|请|麻烦|能否|能不能|能(?!不能|否)|可以)?"
+        r"(?:直接)?(?P<app_focus_postposed>[^。！？!?，,\n]{1,60}?)\s*"
+        r"(?:切换|切|切回|聚焦|激活|置前)(?:一下|下)?"
+        r"(?:吧|吗|嘛|呢|么)?[?？。！!]*$",
+        r"^(?:你)?(?:可不可以帮我|可以帮我|能帮我|能不能帮我|帮我|请|麻烦|能否|能不能|能(?!不能|否)|可以)?"
         r"(?:直接)?(?:把|将)?\s*(?P<app_postposed>[^。！？!?，,\n]{1,60}?)\s*"
         r"(?:打开起来|启动起来|运行起来|拉起来|拉起|开启起来|开起来|打开|启动|运行|开启|开)"
         r"\s*(?:了|一下|下|起来)?(?:吧|吗|嘛|呢|么)?[?？。！!]*$",
         r"^(?:你)?(?:可不可以帮我|可以帮我|能帮我|能不能帮我|帮我|请|麻烦|能否|能不能|能(?!不能|否)|可以)?"
-        r"(?:直接)?(?:打开起来|启动起来|运行起来|拉起来|拉起|开启起来|开起来|开了|打开|启动|运行|开启|开)"
+        r"(?:直接)?(?:打开起来|启动起来|运行起来|拉起来|拉起|开启起来|"
+        r"开起来|开了|打开|启动|运行|开启|"
+        r"开(?!展|发|始|放|会|通|设|创|具|销|源|票|幕|工|课|心))"
         r"(?:一下|下)?\s*"
         r"(?P<app_prefixed>[^。！？!?，,\n]{1,60}?)\s*(?:起来)?"
         r"(?:吧|吗|嘛|呢|么)?[?？。！!]*$",

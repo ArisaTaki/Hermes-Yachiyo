@@ -26,6 +26,9 @@ from .desktop_plan_hints import (
     media_non_action_reference_hint,
     media_playback_hint,
 )
+from .discovered_app_followups import (
+    planner_discovered_app_followup_can_direct_execute,
+)
 from .system_plan_hints import browser_tab_audio_control_request, system_control_hint
 
 logger = logging.getLogger(__name__)
@@ -56,6 +59,7 @@ _ENTRYPOINT_DISCOVERY_TOOLS = {
     "desktop.permissions",
 }
 _ENTRYPOINT_VERIFY_TOOLS = {
+    "clipboard.read",
     "desktop.active_window",
     "desktop.verify",
     "desktop.list_windows",
@@ -117,6 +121,7 @@ _DIRECT_BROWSER_ENTRYPOINT_TOOLS = frozenset(
     {
         "browser.open_url",
         "browser.open_url_and_extract_text",
+        "browser.open_url_and_screenshot",
     }
 )
 
@@ -162,10 +167,10 @@ def direct_browser_entrypoint_requests(
     readback_requests = _direct_browser_readback_entrypoint_requests(request_list, text)
     if readback_requests:
         return readback_requests
-    if _looks_like_browser_artifact_request(text):
+    if _looks_like_browser_persistent_artifact_request(text):
         return []
     for index, request in enumerate(request_list):
-        normalized = _direct_browser_entrypoint_request(request)
+        normalized = _direct_browser_entrypoint_request(request, text=text)
         if not normalized:
             continue
         if not _direct_browser_entrypoint_suffix_is_deferred_output_only(
@@ -191,12 +196,15 @@ _DIRECT_BROWSER_READBACK_TOOLS = frozenset(
         "browser.current_page",
         "browser.extract",
         "browser.extract_text",
+        "browser.screenshot",
     }
 )
 
 
 def _direct_browser_entrypoint_request(
     request: Mapping[str, Any],
+    *,
+    text: str = "",
 ) -> dict[str, Any]:
     tool_name = str(request.get("tool") or "").strip()
     if tool_name not in _DIRECT_BROWSER_ENTRYPOINT_TOOLS:
@@ -214,6 +222,11 @@ def _direct_browser_entrypoint_request(
         return {}
     normalized = dict(request)
     normalized.pop("continue_to_model", None)
+    if (
+        tool_name == "browser.open_url_and_extract_text"
+        and _looks_like_browser_summary_request(text)
+    ):
+        normalized["presentation"] = "summary"
     return normalized
 
 
@@ -237,7 +250,7 @@ def _direct_browser_readback_entrypoint_requests(
 ) -> list[dict[str, Any]]:
     if _looks_like_browser_persistent_artifact_request(text):
         return []
-    if not _looks_like_current_page_summary_request(text):
+    if not _looks_like_current_page_readback_request(text):
         return []
     for index, request in enumerate(requests):
         normalized = _direct_browser_readback_entrypoint_request(request)
@@ -247,8 +260,22 @@ def _direct_browser_readback_entrypoint_requests(
             requests[index + 1:],
         ):
             continue
-        normalized.setdefault("presentation", "summary")
-        return [normalized]
+        tool_name = str(normalized.get("tool") or "").strip()
+        if tool_name in {"browser.extract", "browser.extract_text"} and (
+            _looks_like_browser_summary_request(text)
+        ):
+            normalized.setdefault("presentation", "summary")
+        prefix: list[dict[str, Any]] = []
+        for earlier in requests[:index]:
+            earlier_tool = str(earlier.get("tool") or "").strip()
+            if earlier_tool in _ENTRYPOINT_DISCOVERY_TOOLS:
+                continue
+            open_request = _direct_browser_entrypoint_request(earlier, text=text)
+            if open_request and earlier_tool == "browser.open_url":
+                prefix.append(open_request)
+                continue
+            return []
+        return [*prefix, normalized]
     return []
 
 
@@ -271,19 +298,33 @@ def _direct_browser_readback_entrypoint_request(
     return normalized
 
 
-def _looks_like_current_page_summary_request(text: str) -> bool:
+def _looks_like_current_page_readback_request(text: str) -> bool:
     value = str(text or "").strip()
     if not value:
         return False
+    page_context = re.search(
+        r"(?:当前(?:网页|页面)|(?:网页|页面)(?:内容)?|"
+        r"current\s+(?:webpage|page)|this\s+(?:webpage|page)|browser\s+page)",
+        value,
+        flags=re.IGNORECASE,
+    )
+    if not page_context:
+        return False
     return bool(
         re.search(
-            r"(?:当前(?:网页|页面)|current\s+(?:webpage|page)|this\s+(?:webpage|page))",
+            r"(?:读|读取|看|内容|链接|总结|摘要|概括|截图|截个图|截张图|"
+            r"read|extract|link|url|summari[sz]e|summary|recap|screenshot|capture)",
             value,
             flags=re.IGNORECASE,
         )
-        and re.search(
-            r"(?:总结|摘要|概括|summari[sz]e|summary|recap)",
-            value,
+    )
+
+
+def _looks_like_browser_summary_request(text: str) -> bool:
+    return bool(
+        re.search(
+            r"(?:总结|摘要|概括|提炼|summari[sz]e|summary|recap)",
+            str(text or ""),
             flags=re.IGNORECASE,
         )
     )
@@ -315,11 +356,40 @@ def daily_desktop_requests_can_complete_without_model(
     deferred = [request for request in items if bool(request.get("continue_to_model"))]
     if not deferred:
         return True
-    return all(_deferred_request_is_direct_verification(request) for request in deferred)
+    return all(
+        _deferred_request_is_direct_verification(request)
+        or _deferred_request_is_deterministic_discovered_app_followup(request)
+        for request in deferred
+    )
+
+
+def _deferred_request_is_deterministic_discovered_app_followup(
+    request: Mapping[str, Any],
+) -> bool:
+    if str(request.get("source") or "").strip() != "runtime_planner":
+        return False
+    target = request.get("followup_target")
+    if not isinstance(target, Mapping):
+        return False
+    if any(key in target for key in ("x", "y", "coordinates", "point")):
+        return False
+    return planner_discovered_app_followup_can_direct_execute(
+        {"followup_target": target},
+        [dict(request)],
+        DAILY_DESKTOP_TOOL_NAMES,
+    )
 
 
 def _deferred_request_is_direct_verification(request: Mapping[str, Any]) -> bool:
     tool_name = str(request.get("tool") or "").strip()
+    runtime_stage = str(request.get("runtime_stage") or "").strip()
+    runtime_role = str(request.get("runtime_role") or "").strip()
+    if runtime_stage == "verify" or runtime_role == "verify_result":
+        if bool(request.get("approval_required")):
+            return False
+        if tool_name == "system.volume":
+            payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+            return str(payload.get("action") or "").strip() == "status"
     if (
         tool_name not in _ENTRYPOINT_VERIFY_TOOLS
         and tool_name not in _ENTRYPOINT_DISCOVERY_TOOLS
@@ -328,8 +398,6 @@ def _deferred_request_is_direct_verification(request: Mapping[str, Any]) -> bool
         return False
     if bool(request.get("approval_required")):
         return False
-    runtime_stage = str(request.get("runtime_stage") or "").strip()
-    runtime_role = str(request.get("runtime_role") or "").strip()
     step_id = str(request.get("step_id") or "").strip()
     if runtime_stage == "verify" or runtime_role == "verify_result":
         return True
@@ -429,10 +497,42 @@ def daily_desktop_approval_or_submit_entrypoint_requests(
 ) -> list[dict[str, Any]]:
     """Return approval-preserving foreground requests for Chat/Bubble entrypoints."""
 
-    return _approval_entrypoint_requests(requests or []) or _submit_foreground_entrypoint_request(text)
+    return _approval_entrypoint_requests(
+        requests or [],
+        text=text,
+    ) or _submit_foreground_entrypoint_request(text)
 
 
 _APPROVAL_ENTRYPOINT_PREREQUISITE_TOOLS = frozenset(
+    {
+        "app.open",
+        "app.focus",
+        "app.focus_window",
+        "app.focus_and_safe_shortcut",
+        "app.focus_and_safe_type_text",
+        "app.open_and_safe_shortcut",
+        "app.open_and_safe_type_text",
+        "browser.open_url",
+        "browser.current_page",
+        "browser.extract",
+        "browser.extract_text",
+        "desktop.active_window",
+        "desktop.open_app",
+        "desktop.focus_app",
+        "desktop.inspect_app",
+        "desktop.list_apps",
+        "desktop.list_windows",
+        "desktop.read_ui",
+        "desktop.running_apps",
+        "desktop.safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.ui_elements",
+        "desktop.verify",
+        "screen.capture",
+    }
+)
+_APPROVAL_ENTRYPOINT_NO_POSTVERIFY_TOOLS = frozenset(
     {
         "app.open",
         "app.focus",
@@ -445,30 +545,80 @@ _APPROVAL_ENTRYPOINT_PREREQUISITE_TOOLS = frozenset(
 
 def _approval_entrypoint_requests(
     requests: Sequence[Mapping[str, Any]],
+    *,
+    text: str = "",
 ) -> list[dict[str, Any]]:
+    request_list = [request for request in requests if isinstance(request, Mapping)]
     selected: list[dict[str, Any]] = []
-    for index, request in enumerate(requests):
-        if not isinstance(request, Mapping):
-            continue
+    for index, request in enumerate(request_list):
         tool_name = str(request.get("tool") or request.get("tool_name") or "").strip()
         if not tool_name:
             continue
         if bool(request.get("approval_required")) or bool(request.get("requires_approval")):
+            selected = _approval_entrypoint_prerequisite_requests(
+                request_list[:index],
+                request,
+            )
             if _system_ui_open_confirm_is_redundant(selected, request):
                 return selected
             selected.append(_entrypoint_request_copy(request))
             selected.extend(
                 _entrypoint_request_copy(remaining)
-                for remaining in requests[index + 1 :]
-                if isinstance(remaining, Mapping)
-                and str(
+                for remaining in request_list[index + 1 :]
+                if str(
                     remaining.get("tool") or remaining.get("tool_name") or ""
                 ).strip()
+                and (
+                    str(remaining.get("tool") or remaining.get("tool_name") or "").strip()
+                    != "artifact.write"
+                    or _looks_like_browser_persistent_artifact_request(text)
+                )
             )
             return selected
-        if tool_name in _APPROVAL_ENTRYPOINT_PREREQUISITE_TOOLS:
-            selected.append(_entrypoint_request_copy(request))
     return []
+
+
+def _approval_entrypoint_prerequisite_requests(
+    prefix: Sequence[Mapping[str, Any]],
+    approval_request: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    """Keep the ordered ancestor chain that prepares an approval-required action."""
+
+    by_step_id: dict[str, Mapping[str, Any]] = {}
+    for request in prefix:
+        step_id = str(request.get("step_id") or request.get("planner_step_id") or "").strip()
+        if step_id:
+            by_step_id[step_id] = request
+
+    required: set[str] = set()
+    pending = [
+        str(step_id or "").strip()
+        for step_id in list(approval_request.get("depends_on") or [])
+        if str(step_id or "").strip()
+    ]
+    while pending:
+        step_id = pending.pop()
+        if step_id in required:
+            continue
+        required.add(step_id)
+        dependency = by_step_id.get(step_id)
+        if dependency is None:
+            continue
+        pending.extend(
+            str(parent or "").strip()
+            for parent in list(dependency.get("depends_on") or [])
+            if str(parent or "").strip() and str(parent or "").strip() not in required
+        )
+
+    selected: list[dict[str, Any]] = []
+    for request in prefix:
+        tool_name = str(request.get("tool") or request.get("tool_name") or "").strip()
+        step_id = str(request.get("step_id") or request.get("planner_step_id") or "").strip()
+        if (required and step_id in required) or (
+            not required and tool_name in _APPROVAL_ENTRYPOINT_PREREQUISITE_TOOLS
+        ):
+            selected.append(_entrypoint_request_copy(request))
+    return selected
 
 
 def _system_ui_open_confirm_is_redundant(
@@ -499,7 +649,7 @@ def _entrypoint_request_copy(request: Mapping[str, Any]) -> dict[str, Any]:
         clean_input.pop("query", None)
         clean_input.pop("selection_source", None)
         payload["input"] = clean_input
-    if tool_name in _APPROVAL_ENTRYPOINT_PREREQUISITE_TOOLS:
+    if tool_name in _APPROVAL_ENTRYPOINT_NO_POSTVERIFY_TOOLS:
         payload["requires_post_action_verification"] = False
     return payload
 
@@ -558,7 +708,7 @@ def main_chat_entrypoint_allowed_tools(
         allowed = policy.get("allowed_tools") if isinstance(policy, Mapping) else None
         if allowed:
             return desktop_agent_entrypoint_allowed_tools(
-                [*daily_desktop_allowed_tools(allowed), *DAILY_DESKTOP_TOOL_NAMES]
+                daily_desktop_allowed_tools(allowed)
             )
     return desktop_agent_entrypoint_allowed_tools(fallback)
 
@@ -1696,10 +1846,18 @@ def _legacy_compatible_semantic_ui_entrypoint_requests(
     payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
     if not _semantic_ui_payload(payload):
         return []
+    # The Runtime Planner keeps discovery, pre-action observation, and
+    # post-action verification in the executable envelope.  The legacy-shaped
+    # entrypoint projection exposes only the primary semantic action (plus an
+    # explicit submit suffix); otherwise a valid planner-owned UI action falls
+    # through to the legacy parser merely because it is safely surrounded by
+    # observation steps.
     non_semantic = [
         request
         for request in visible
         if request not in semantic
+        and str(request.get("tool") or "").strip()
+        not in _ENTRYPOINT_NON_PRIMARY_TOOLS
     ]
     if non_semantic and any(
         str(request.get("tool") or "").strip() != "desktop.submit_foreground"
@@ -2331,13 +2489,36 @@ def daily_desktop_entrypoint_runtime_plan(
         ),
     )
     if direct_request:
-        requests = [direct_request]
+        bound = _structured_recovery_request_runtime_binding(
+            str(text or ""),
+            direct_request,
+            metadata=metadata,
+            allowed_tools=allowed,
+        )
+        if bound is None:
+            # A trusted recovery selection is still not permission to execute
+            # outside the immutable planner goal.  Leave it non-executable
+            # when the exact tool/input cannot be bound to one plan criterion.
+            return DailyDesktopEntrypointRuntimePlan(
+                decision=None,
+                entrypoint_requests=[],
+                executable_requests=[],
+                runtime_execution_envelope={},
+                selected_source="metadata_unbound",
+                allowed_tools=tuple(allowed),
+            )
+        (
+            decision,
+            requests,
+            executable_requests,
+            runtime_execution_envelope,
+        ) = bound
         return DailyDesktopEntrypointRuntimePlan(
-            decision=None,
+            decision=decision,
             entrypoint_requests=requests,
-            executable_requests=requests,
-            runtime_execution_envelope={},
-            selected_source="metadata",
+            executable_requests=executable_requests,
+            runtime_execution_envelope=runtime_execution_envelope,
+            selected_source="metadata_runtime_planner",
             allowed_tools=tuple(allowed),
         )
 
@@ -2420,6 +2601,283 @@ def daily_desktop_entrypoint_runtime_plan(
         selected_source="daily_desktop_intent" if legacy_requests else "none",
         allowed_tools=tuple(allowed),
     )
+
+
+def _structured_recovery_request_runtime_binding(
+    text: str,
+    direct_request: Mapping[str, Any],
+    *,
+    metadata: Mapping[str, Any] | None,
+    allowed_tools: Sequence[str],
+) -> tuple[
+    Any,
+    list[dict[str, Any]],
+    list[dict[str, Any]],
+    dict[str, Any],
+] | None:
+    """Compile trusted recovery semantics into one complete Runtime plan."""
+
+    try:
+        from apps.shell.agent.runtime.action_targets import action_target_matches
+
+        from .runtime_execution import (
+            runtime_execution_blocked_requests_from_envelope_payload,
+            runtime_execution_envelope_payload,
+            runtime_execution_requests_from_envelope_payload,
+        )
+        from .runtime_planner import RuntimePlanner
+
+        planner = RuntimePlanner()
+        original_decision = planner.decision(
+            str(text or ""),
+            allowed_tools=allowed_tools,
+        )
+        original_envelope = runtime_execution_envelope_payload(
+            original_decision,
+            allowed_tools=allowed_tools,
+            full_plan=True,
+            metadata=metadata,
+        )
+        direct_tool = str(direct_request.get("tool") or "").strip()
+        direct_input = (
+            dict(direct_request.get("input"))
+            if isinstance(direct_request.get("input"), Mapping)
+            else {}
+        )
+        original_matches = _structured_recovery_planned_request_matches(
+            original_envelope,
+            direct_tool=direct_tool,
+            direct_input=direct_input,
+        )
+        if original_matches:
+            decision = original_decision
+            envelope = original_envelope
+            matches = original_matches
+        else:
+            recovery_goal = daily_desktop_recovery_prompt(metadata)
+            if not recovery_goal:
+                return None
+            recovery_decision = planner.decision(
+                recovery_goal,
+                allowed_tools=allowed_tools,
+            )
+            recovery_envelope = runtime_execution_envelope_payload(
+                recovery_decision,
+                allowed_tools=allowed_tools,
+                full_plan=True,
+                metadata=metadata,
+            )
+            if _structured_recovery_goal_conflicts(
+                original_decision,
+                recovery_decision,
+            ):
+                return None
+            matches = _structured_recovery_planned_request_matches(
+                recovery_envelope,
+                direct_tool=direct_tool,
+                direct_input=direct_input,
+            )
+            if not matches:
+                return None
+            decision = recovery_decision
+            envelope = recovery_envelope
+    except (TypeError, ValueError):
+        logger.debug("Structured recovery goal binding unavailable", exc_info=True)
+        return None
+    raw_requests = envelope.get("requests")
+    if not isinstance(raw_requests, list):
+        return None
+    if len(matches) != 1:
+        return None
+    planned_request = matches[0]
+    step_id = str(planned_request.get("step_id") or "").strip()
+    capability_id = str(planned_request.get("capability_id") or "").strip()
+    plan_id = str(planned_request.get("plan_id") or "").strip()
+    action_target = planned_request.get("action_target")
+    if (
+        not step_id
+        or not capability_id
+        or not plan_id
+        or not isinstance(action_target, Mapping)
+        or not action_target
+    ):
+        return None
+    task_core = getattr(getattr(decision, "plan", None), "task_core", None)
+    contract = getattr(task_core, "goal_contract", None)
+    criteria = list(getattr(contract, "criteria", None) or [])
+    criterion_matches = [
+        criterion
+        for criterion in criteria
+        if step_id in list(getattr(criterion, "source_step_ids", None) or [])
+        and capability_id
+        in list(getattr(criterion, "required_capabilities", None) or [])
+        and isinstance(getattr(criterion, "expected", None), Mapping)
+        and isinstance(criterion.expected.get("target"), Mapping)
+        and action_target_matches(
+            criterion.expected["target"],
+            action_target,
+            capability_ids=(capability_id,),
+            source_step_id=step_id,
+        )
+    ]
+    if len(criterion_matches) != 1:
+        return None
+    criterion = criterion_matches[0]
+    contract_id = str(getattr(contract, "contract_id", "") or "").strip()
+    criterion_id = str(getattr(criterion, "criterion_id", "") or "").strip()
+    if not contract_id or not criterion_id:
+        return None
+
+    bound_envelope = dict(envelope)
+    bound_raw_requests: list[Any] = []
+    selected_step_id = step_id
+    for item in raw_requests:
+        if not isinstance(item, Mapping):
+            bound_raw_requests.append(item)
+            continue
+        bound_item = dict(item)
+        item_step_id = str(bound_item.get("step_id") or "").strip()
+        bound_item["goal_contract_id"] = contract_id
+        bound_item["root_goal_unchanged"] = True
+        matching_criteria = [
+            candidate
+            for candidate in criteria
+            if item_step_id
+            and item_step_id
+            in {
+                *list(getattr(candidate, "source_step_ids", None) or []),
+                *list(getattr(candidate, "verifier_step_ids", None) or []),
+            }
+        ]
+        if len(matching_criteria) == 1:
+            bound_item["goal_criterion_id"] = str(
+                getattr(matching_criteria[0], "criterion_id", "") or ""
+            ).strip()
+        if item_step_id == selected_step_id:
+            bound_item["source"] = str(direct_request.get("source") or "").strip()
+            bound_item["planning_reason"] = str(
+                direct_request.get("planning_reason") or ""
+            ).strip()
+        bound_raw_requests.append(bound_item)
+    bound_envelope["requests"] = bound_raw_requests
+    executable_requests = runtime_execution_requests_from_envelope_payload(
+        bound_envelope,
+        allowed_tools=allowed_tools,
+    )
+    blocked_requests = runtime_execution_blocked_requests_from_envelope_payload(
+        bound_envelope,
+        allowed_tools=allowed_tools,
+    )
+    bound_by_step = {
+        str(item.get("step_id") or "").strip(): item
+        for item in bound_raw_requests
+        if isinstance(item, Mapping) and str(item.get("step_id") or "").strip()
+    }
+    for projected in [*executable_requests, *blocked_requests]:
+        projected_step_id = str(projected.get("step_id") or "").strip()
+        bound_item = bound_by_step.get(projected_step_id)
+        if not isinstance(bound_item, Mapping):
+            continue
+        for key in (
+            "goal_contract_id",
+            "goal_criterion_id",
+            "root_goal_unchanged",
+            "source",
+            "planning_reason",
+        ):
+            value = bound_item.get(key)
+            if value not in (None, "", [], {}):
+                projected[key] = value
+    entrypoint_requests = executable_requests or blocked_requests
+    if not entrypoint_requests:
+        return None
+    return (
+        decision,
+        entrypoint_requests,
+        executable_requests,
+        bound_envelope,
+    )
+
+
+def _structured_recovery_planned_request_matches(
+    envelope: Mapping[str, Any],
+    *,
+    direct_tool: str,
+    direct_input: Mapping[str, Any],
+) -> list[Mapping[str, Any]]:
+    raw_requests = envelope.get("requests")
+    if not isinstance(raw_requests, list):
+        return []
+    return [
+        item
+        for item in raw_requests
+        if isinstance(item, Mapping)
+        and str(item.get("tool_name") or item.get("tool") or "").strip()
+        == direct_tool
+        and isinstance(item.get("input"), Mapping)
+        and _structured_recovery_input_is_semantic_subset(
+            direct_input,
+            item["input"],
+        )
+    ]
+
+
+def _structured_recovery_input_is_semantic_subset(
+    selected: Mapping[str, Any],
+    planned: Mapping[str, Any],
+) -> bool:
+    # Presentation-only rationale is planner-owned and may be normalized.
+    ignored_keys = {"reason", "presentation"}
+    return all(
+        key in planned and planned[key] == value
+        for key, value in selected.items()
+        if key not in ignored_keys
+    )
+
+
+def _structured_recovery_goal_conflicts(
+    original_decision: Any,
+    recovery_decision: Any,
+) -> bool:
+    """Reject recovery metadata that changes a concrete root-goal identity."""
+
+    identity_keys = {
+        "app_name",
+        "url",
+        "path",
+        "target",
+        "query",
+        "window_title",
+        "title_contains",
+        "text",
+        "level",
+    }
+
+    def identities(decision: Any) -> dict[str, set[str]]:
+        task_core = getattr(getattr(decision, "plan", None), "task_core", None)
+        contract = getattr(task_core, "goal_contract", None)
+        values: dict[str, set[str]] = {}
+        for criterion in list(getattr(contract, "criteria", None) or []):
+            expected = getattr(criterion, "expected", None)
+            target = expected.get("target") if isinstance(expected, Mapping) else None
+            if not isinstance(target, Mapping):
+                continue
+            for key in identity_keys:
+                value = target.get(key)
+                if value in (None, "", [], {}):
+                    continue
+                values.setdefault(key, set()).add(str(value).strip().casefold())
+        return values
+
+    original = identities(original_decision)
+    recovery = identities(recovery_decision)
+    if not original:
+        return False
+    for key, original_values in original.items():
+        recovery_values = recovery.get(key)
+        if recovery_values is None or original_values.isdisjoint(recovery_values):
+            return True
+    return False
 
 
 def daily_desktop_runtime_plan_prepared_for_execution(
@@ -2781,7 +3239,15 @@ def _entrypoint_requests_have_primary_action(
         if not isinstance(request, Mapping):
             continue
         tool_name = str(request.get("tool") or "").strip()
-        if tool_name and tool_name not in _ENTRYPOINT_NON_PRIMARY_TOOLS:
+        user_requested_visual_capture = (
+            tool_name == "screen.capture"
+            and str(request.get("runtime_role") or "").strip()
+            == "capture_visual_state"
+        )
+        if tool_name and (
+            tool_name not in _ENTRYPOINT_NON_PRIMARY_TOOLS
+            or user_requested_visual_capture
+        ):
             return True
     return False
 

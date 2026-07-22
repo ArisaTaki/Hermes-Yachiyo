@@ -19,7 +19,10 @@ const now = new Date().toISOString();
 
 const bridgeState = {
   status: 'pending',
+  approveAttempts: 0,
   approveCalls: 0,
+  failNextApprove: true,
+  legacyApproveCalls: 0,
   rejectCalls: 0,
 };
 
@@ -413,22 +416,15 @@ async function startMockBridge() {
         return;
       }
       if (request.method === 'GET' && url.pathname === `/yachiyo/tasks/${RUN_ID}`) {
-        sendJson(response, 200, taskSnapshot());
+        sendJson(response, 404, { ok: false, error: 'task facade unavailable in simplified Chat smoke' });
         return;
       }
       if (request.method === 'GET' && url.pathname === `/yachiyo/tasks/${RUN_ID}/timeline`) {
-        sendJson(response, 200, runPayload());
+        sendJson(response, 404, { ok: false, error: 'task timeline unavailable in simplified Chat smoke' });
         return;
       }
       if (request.method === 'GET' && url.pathname === `/yachiyo/tasks/${RUN_ID}/events`) {
-        const afterSequence = Number(url.searchParams.get('after_sequence') || '0');
-        const limit = Math.max(1, Number(url.searchParams.get('limit') || '200'));
-        sendJson(response, 200, {
-          run_id: RUN_ID,
-          after_sequence: Math.max(0, afterSequence),
-          limit,
-          events: runEvents().filter((event) => event.sequence > afterSequence).slice(0, limit),
-        });
+        sendJson(response, 404, { ok: false, error: 'task events unavailable in simplified Chat smoke' });
         return;
       }
       if (request.method === 'GET' && url.pathname === `/yachiyo/studio/runs/${RUN_ID}/timeline`) {
@@ -449,8 +445,31 @@ async function startMockBridge() {
       if (request.method === 'POST' && url.pathname === `/ui/runs/${RUN_ID}/approval/approve`) {
         bridgeState.status = 'approved';
         bridgeState.approveCalls += 1;
+        bridgeState.legacyApproveCalls += 1;
         log(`mock bridge approved chat approval (${bridgeState.approveCalls})`);
         sendJson(response, 200, runPayload());
+        return;
+      }
+      if (request.method === 'POST' && url.pathname === `/yachiyo/tasks/${RUN_ID}/approvals/${APPROVAL_ID}/approve`) {
+        bridgeState.approveAttempts += 1;
+        if (bridgeState.failNextApprove) {
+          bridgeState.failNextApprove = false;
+          log('mock bridge rejected first approve attempt with 409');
+          await new Promise((resolve) => setTimeout(resolve, 150));
+          sendJson(response, 409, { ok: false, error: 'approval generation conflict' });
+          return;
+        }
+        bridgeState.status = 'approved';
+        bridgeState.approveCalls += 1;
+        log(`mock bridge approved chat approval task (${bridgeState.approveCalls})`);
+        sendJson(response, 200, taskSnapshot());
+        return;
+      }
+      if (request.method === 'POST' && url.pathname === `/yachiyo/tasks/${RUN_ID}/approvals/${APPROVAL_ID}/reject`) {
+        bridgeState.status = 'rejected';
+        bridgeState.rejectCalls += 1;
+        log(`mock bridge rejected chat approval task (${bridgeState.rejectCalls})`);
+        sendJson(response, 200, taskSnapshot());
         return;
       }
       if (request.method === 'POST' && url.pathname === `/yachiyo/tasks/${RUN_ID}/approve`) {
@@ -551,6 +570,7 @@ const { app, BrowserWindow } = require('electron');
 const devUrl = ${JSON.stringify(devUrl)};
 const bridgeUrl = ${JSON.stringify(bridgeUrl)};
 const chatUrl = devUrl + '?bridge=' + encodeURIComponent(bridgeUrl) + '#/chat';
+const resetUrl = 'data:text/html,<meta%20http-equiv%3D%22Content-Security-Policy%22%20content%3D%22default-src%20%27none%27%22><title>Reset</title>';
 const watchdog = setTimeout(() => {
   console.error('electron smoke timed out');
   app.exit(1);
@@ -593,49 +613,29 @@ function waitFor(win, predicate, label, timeout = 18000) {
 }
 async function waitForApproval(win, label) {
   await waitFor(win, () => {
-    const card = document.querySelector('[data-testid="chat-message-approval-card"]');
-    const taskCard = document.querySelector('[data-testid="yachiyo-agent-task-card"]');
-    const actions = document.querySelector('[data-testid="chat-message-approval-actions"]');
+    const messageApprovalCard = document.querySelector('[data-testid="chat-message-approval-card"]');
+    const messageActions = document.querySelector('[data-testid="chat-message-approval-actions"]');
+    const messageApprove = document.querySelector('[data-testid="chat-message-approval-approve"]');
+    const messageReject = document.querySelector('[data-testid="chat-message-approval-reject"]');
     const composer = document.querySelector('[data-testid="chat-composer-approval-notice"]');
-    const approve = document.querySelector('[data-testid="chat-message-approval-approve"]');
-    const reject = document.querySelector('[data-testid="chat-message-approval-reject"]');
-    const openRun = document.querySelector('[data-testid="chat-message-approval-open-run-detail"]');
-    const taskApprovalOpenRun = document.querySelector('[data-testid="yachiyo-task-approval-open-studio"]');
-    const composerApprove = document.querySelector('[data-testid="chat-composer-approval-approve"]');
-    const composerReject = document.querySelector('[data-testid="chat-composer-approval-reject"]');
+    const composerHint = document.querySelector('[data-testid="chat-composer-approval-canonical-hint"]');
     const composerOpenRun = document.querySelector('[data-testid="chat-composer-approval-open-run-detail"]');
-    const visibleApproval = (
-      (
-        card?.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)}
-        && card?.getAttribute('data-approval-id') === ${JSON.stringify(APPROVAL_ID)}
-        && card?.getAttribute('data-approval-tool') === 'terminal.run'
-        && card.textContent.includes(${JSON.stringify(APPROVAL_COMMAND)})
-        && openRun?.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)}
-        && openRun?.getAttribute('data-run-status') === 'approval_required'
-        && openRun.textContent.includes('Agent Studio')
-      )
-      || (
-        taskCard?.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)}
-        && taskCard?.textContent.includes(${JSON.stringify(APPROVAL_COMMAND)})
-        && taskApprovalOpenRun?.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)}
-        && taskApprovalOpenRun.textContent.includes('Studio')
-      )
-    );
     return document.querySelector('textarea.chat-input')
-      && visibleApproval
-      && actions?.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)}
-      && actions?.getAttribute('data-approval-id') === ${JSON.stringify(APPROVAL_ID)}
-      && actions?.getAttribute('data-approval-tool') === 'terminal.run'
-      && approve
-      && reject
+      && messageApprovalCard?.getAttribute('data-approval-id') === ${JSON.stringify(APPROVAL_ID)}
+      && messageApprovalCard?.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)}
+      && messageApprovalCard?.textContent.includes(${JSON.stringify(APPROVAL_COMMAND)})
+      && messageActions?.getAttribute('data-approval-id') === ${JSON.stringify(APPROVAL_ID)}
+      && messageApprove
+      && messageReject
       && composer?.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)}
       && composer?.getAttribute('data-run-status') === 'approval_required'
       && composer?.getAttribute('data-approval-id') === ${JSON.stringify(APPROVAL_ID)}
-      && composerApprove
-      && composerReject
+      && composerHint?.textContent.includes('任务卡或消息')
       && composerOpenRun?.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)}
       && composerOpenRun?.getAttribute('data-run-status') === 'approval_required'
-      && composerOpenRun.textContent.includes('Agent Studio');
+      && composerOpenRun.textContent.includes('Agent Studio')
+      && !document.querySelector('[data-testid="chat-composer-approval-approve"]')
+      && !document.querySelector('[data-testid="chat-composer-approval-reject"]');
   }, label);
 }
 async function waitForRunDetailHandoff(win, label) {
@@ -695,17 +695,27 @@ async function waitForApproved(win, label) {
   await waitFor(win, () => {
     const approved = document.querySelector('[data-message-id="assistant-chat-approval-ui-smoke-approved"]');
     return approved?.textContent.includes('Approved from Chat approval UI smoke.')
-      && approved?.querySelector('[data-testid="chat-message-open-run-detail"]')
-      && !document.querySelector('[data-testid="chat-message-approval-card"]')
+      && !document.querySelector('[data-testid="chat-message-approval-actions"]')
       && !document.querySelector('[data-testid="chat-composer-approval-notice"]');
+  }, label);
+}
+async function waitForRetryableApproval(win, label) {
+  await waitFor(win, () => {
+    const messageApprovalCard = document.querySelector('[data-testid="chat-message-approval-card"]');
+    const approve = document.querySelector('[data-testid="chat-message-approval-approve"]');
+    const composer = document.querySelector('[data-testid="chat-composer-approval-notice"]');
+    return messageApprovalCard?.getAttribute('data-approval-id') === ${JSON.stringify(APPROVAL_ID)}
+      && composer?.getAttribute('data-approval-id') === ${JSON.stringify(APPROVAL_ID)}
+      && approve
+      && !approve.disabled
+      && !document.querySelector('[data-testid="chat-composer-approval-approve"]');
   }, label);
 }
 async function waitForRejected(win, label) {
   await waitFor(win, () => {
     const rejected = document.querySelector('[data-message-id="assistant-chat-approval-ui-smoke-rejected"]');
-    return rejected?.className.includes('error')
-      && rejected?.textContent.includes('Rejected from chat')
-      && !document.querySelector('[data-testid="chat-message-approval-card"]')
+    return rejected?.textContent.includes('Rejected from chat')
+      && !document.querySelector('[data-testid="chat-message-approval-actions"]')
       && !document.querySelector('[data-testid="chat-composer-approval-notice"]');
   }, label);
 }
@@ -727,51 +737,34 @@ async function main() {
     if (level >= 2) console.error('[renderer]', message);
   });
   await win.loadURL(chatUrl);
-  console.log('[electron-smoke] chat loaded for message approval');
-  await waitForApproval(win, 'message approval card and composer notice');
-  await win.webContents.executeJavaScript('(document.querySelector("[data-testid=chat-message-approval-open-run-detail]") || document.querySelector("[data-testid=yachiyo-task-approval-open-studio]") || document.querySelector("[data-testid=yachiyo-agent-task-open-studio]")).click()', true);
-  await waitForRunDetailHandoff(win, 'message approval Run Detail handoff');
-  console.log('[electron-smoke] message approval opened Run Detail');
+  console.log('[electron-smoke] chat loaded for canonical task approval');
+  await waitForApproval(win, 'canonical task approval and composer navigation');
+  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\\"chat-composer-approval-open-run-detail\\\"]').click()", true);
+  await waitForRunDetailHandoff(win, 'task approval Run Detail handoff');
+  console.log('[electron-smoke] task approval opened Run Detail');
   await win.loadURL(chatUrl);
-  await waitForApproval(win, 'message approval card after Run Detail handoff');
+  await waitForApproval(win, 'canonical task approval after Run Detail handoff');
   await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"chat-message-approval-approve\\"]').click()", true);
-  await waitForApproved(win, 'message approval approve projection');
-  console.log('[electron-smoke] message approval approved');
-  await win.webContents.executeJavaScript("document.querySelector('[data-message-id=\\"assistant-chat-approval-ui-smoke-approved\\"] [data-testid=\\"chat-message-open-run-detail\\"]').click()", true);
-  await waitForApprovedRunDetailHandoff(win, 'approved message Run Detail handoff');
-  console.log('[electron-smoke] approved message Run Detail replay verified');
+  await waitFor(win, () => document.querySelector('[data-testid="chat-message-approval-approve"]')?.disabled, 'task approval busy state');
+  await waitForRetryableApproval(win, 'failed approve keeps the same approval generation retryable');
+  console.log('[electron-smoke] failed approve preserved the canonical task approval for retry');
+  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"chat-message-approval-approve\\"]').click()", true);
+  await waitForApproved(win, 'task approval approve projection');
+  console.log('[electron-smoke] canonical task approval approved');
 
   await win.webContents.executeJavaScript("fetch(" + JSON.stringify(bridgeUrl + '/__smoke/reset') + ", { method: 'POST' })", true);
-  await win.loadURL('about:blank');
+  await win.loadURL(resetUrl);
   await win.loadURL(chatUrl);
-  console.log('[electron-smoke] chat loaded for message reject');
-  await waitForApproval(win, 'message approval card after reset');
-  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"chat-message-approval-reject\\"]').click()", true);
-  await waitForRejected(win, 'message approval reject projection');
-  console.log('[electron-smoke] message approval rejected');
-
-  await win.webContents.executeJavaScript("fetch(" + JSON.stringify(bridgeUrl + '/__smoke/reset') + ", { method: 'POST' })", true);
-  await win.loadURL('about:blank');
-  await win.loadURL(chatUrl);
-  console.log('[electron-smoke] chat loaded for composer approve');
-  await waitForApproval(win, 'composer approval notice before approve');
-  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"chat-composer-approval-approve\\"]').click()", true);
-  await waitForApproved(win, 'composer approval approve projection');
-  console.log('[electron-smoke] composer approval approved');
-
-  await win.webContents.executeJavaScript("fetch(" + JSON.stringify(bridgeUrl + '/__smoke/reset') + ", { method: 'POST' })", true);
-  await win.loadURL('about:blank');
-  await win.loadURL(chatUrl);
-  console.log('[electron-smoke] chat loaded for composer reject');
-  await waitForApproval(win, 'composer approval notice after reset');
+  console.log('[electron-smoke] chat loaded for canonical task reject');
+  await waitForApproval(win, 'canonical task approval after reset');
   await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"chat-composer-approval-open-run-detail\\"]').click()", true);
   await waitForRunDetailHandoff(win, 'composer approval Run Detail handoff');
   console.log('[electron-smoke] composer approval opened Run Detail');
   await win.loadURL(chatUrl);
-  await waitForApproval(win, 'composer approval notice after Run Detail handoff');
-  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"chat-composer-approval-reject\\"]').click()", true);
-  await waitForRejected(win, 'composer approval reject projection');
-  console.log('[electron-smoke] composer approval rejected');
+  await waitForApproval(win, 'canonical task approval after composer Run Detail handoff');
+  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"chat-message-approval-reject\\"]').click()", true);
+  await waitForRejected(win, 'task approval reject projection');
+  console.log('[electron-smoke] canonical task approval rejected');
 
   clearTimeout(watchdog);
   await win.close();
@@ -821,11 +814,17 @@ async function main() {
     const devUrl = `http://127.0.0.1:${vitePort}`;
     await waitForHttp(devUrl);
     await runElectronSmoke(devUrl, bridge.url);
-    if (bridgeState.approveCalls !== 2) {
-      fail(`expected two chat approval approve calls, got ${bridgeState.approveCalls}`);
+    if (bridgeState.approveCalls !== 1) {
+      fail(`expected one canonical chat approval approve call, got ${bridgeState.approveCalls}`);
     }
-    if (bridgeState.rejectCalls !== 2) {
-      fail(`expected two chat approval reject calls, got ${bridgeState.rejectCalls}`);
+    if (bridgeState.approveAttempts !== 2) {
+      fail(`expected two authoritative approve attempts, got ${bridgeState.approveAttempts}`);
+    }
+    if (bridgeState.legacyApproveCalls !== 0) {
+      fail(`expected no legacy approve fallback after 409, got ${bridgeState.legacyApproveCalls}`);
+    }
+    if (bridgeState.rejectCalls !== 1) {
+      fail(`expected one canonical chat approval reject call, got ${bridgeState.rejectCalls}`);
     }
     log('passed');
   } finally {

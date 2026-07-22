@@ -75,7 +75,7 @@ Before calling a change release-ready, check:
 The local RC helper produces the evidence bundle maintainers use for signoff:
 
 ```bash
-python scripts/refresh_local_rc_signoff.py --channel experimental --repository kuguya-AI-app-develop/oha-yachiyo
+python scripts/refresh_local_rc_signoff.py --channel experimental --repository kuguya-AI-app-develop/Hermes-Yachiyo
 python scripts/refresh_local_rc_signoff.py --print-status
 ```
 

@@ -289,7 +289,7 @@ export function nextApprovalStatusText(run: { pending_approval?: { tool?: unknow
 
 export function approvalRequiredMessages(messages: ChatApprovalMessage[]) {
   return messages.filter((message) => (
-    hasActionableApproval(message)
+    hasPendingApproval(message)
     && Boolean(message.id)
   ));
 }
@@ -378,6 +378,10 @@ export function approvalRequiredItems(
 }
 
 export function hasActionableApproval(message?: ChatApprovalMessage | null) {
+  return hasPendingApproval(message) && Boolean(approvalIdFromPending(message?.metadata?.pending_approval));
+}
+
+export function hasPendingApproval(message?: ChatApprovalMessage | null) {
   const pending = message?.metadata?.pending_approval;
   return (
     messageRunStatus(message) === 'approval_required'

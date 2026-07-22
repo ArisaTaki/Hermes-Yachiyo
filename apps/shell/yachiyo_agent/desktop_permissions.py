@@ -140,6 +140,64 @@ def cached_desktop_runtime_blocking_conditions_by_capability(
     return _copy_missing(cached)
 
 
+def desktop_permission_probe_cache_status(
+    *,
+    platform_name: str | None = None,
+) -> dict[str, Any]:
+    """Describe fresh cached diagnostics without performing any probes."""
+
+    platform_id = _desktop_platform(platform_name)
+    now = time.monotonic()
+
+    def cache_is_fresh(cache: Any) -> bool:
+        if cache is None:
+            return False
+        cache_platform, cache_time, _cached = cache
+        return bool(
+            cache_platform == platform_id
+            and now - cache_time <= PERMISSION_PROBE_CACHE_TTL_SECONDS
+        )
+
+    permission_checked = platform_id == "macos" and cache_is_fresh(
+        _PERMISSION_CACHE
+    )
+    runtime_blockers_checked = platform_id == "macos" and cache_is_fresh(
+        _RUNTIME_BLOCKER_CACHE
+    )
+    checked = permission_checked and runtime_blockers_checked
+    return {
+        "checked": checked,
+        "permission_checked": permission_checked,
+        "runtime_blockers_checked": runtime_blockers_checked,
+        "status": "cached" if checked else "not_checked",
+    }
+
+
+def cached_desktop_permission_diagnostics() -> dict[str, Any]:
+    """Return a passive snapshot that never mistakes unknown state for ready."""
+
+    status = desktop_permission_probe_cache_status()
+    missing_permissions = cached_desktop_permission_missing_by_capability()
+    blocking_conditions = (
+        cached_desktop_runtime_blocking_conditions_by_capability()
+    )
+    if status.get("checked") is not True:
+        blocking_conditions = {
+            **blocking_conditions,
+            "desktop_execution": _ordered_unique(
+                [
+                    *blocking_conditions.get("desktop_execution", []),
+                    "desktop_permission_diagnostics_not_checked",
+                ]
+            ),
+        }
+    return {
+        **status,
+        "missing_permissions": missing_permissions,
+        "blocking_conditions": blocking_conditions,
+    }
+
+
 def clear_desktop_permission_probe_cache() -> None:
     """Clear the readiness permission cache after explicit diagnostic changes."""
 
@@ -323,24 +381,11 @@ def _run_osascript(script: str, *, timeout: float = 3.0) -> tuple[bool, str]:
 
 
 def _configured_browser_cdp_url() -> str:
-    for env_name in ("YACHIYO_BROWSER_CDP_URL", "BROWSER_CDP_URL"):
-        value = _env_value(env_name)
-        if value:
-            return value
-
     try:
-        from apps.shell import config as shell_config
-
-        path = Path(shell_config._CONFIG_DIR) / "native_tool_config.json"
-        data = json.loads(path.read_text(encoding="utf-8"))
+        from apps.shell.agent.tools import browser
     except Exception:
         return ""
-    if not isinstance(data, dict):
-        return ""
-    config = data.get("config")
-    if not isinstance(config, dict):
-        return ""
-    return str(config.get("browser.cdp_url") or "").strip()
+    return browser._configured_browser_cdp_url()
 
 
 def _browser_cdp_reachable(raw_url: str) -> bool:
@@ -427,3 +472,12 @@ def _add_missing(missing: dict[str, list[str]], capability_id: str, token: str) 
 
 def _copy_missing(missing: Mapping[str, list[str]]) -> dict[str, list[str]]:
     return {str(key): list(values) for key, values in missing.items()}
+
+
+def _ordered_unique(values: Any) -> list[str]:
+    result: list[str] = []
+    for value in values or []:
+        clean = str(value or "").strip()
+        if clean and clean not in result:
+            result.append(clean)
+    return result

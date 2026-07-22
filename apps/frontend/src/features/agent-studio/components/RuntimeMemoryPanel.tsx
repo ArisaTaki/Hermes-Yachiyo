@@ -110,12 +110,12 @@ export function RuntimeMemoryPanel({
                     <strong>{futureTask.title || 'FutureTask'}</strong>
                     <em className={`run-status-pill ${futureTaskStatusTone(futureTask.status)}`}>{futureTaskStatusLabel(futureTask.status)}</em>
                   </div>
-                  <p>{futureTask.prompt || 'No prompt'}</p>
+                  <p>{futureTask.prompt || '暂无 Prompt'}</p>
                   <div className="runtime-management-meta">
-                    <span>Due {formatEpochDate(futureTask.scheduled_at_epoch)}</span>
+                    <span>到期 {formatEpochDate(futureTask.scheduled_at_epoch)}</span>
                     {futureTask.cron ? <span>{futureTask.cron}</span> : null}
                     {futureTask.runnable_name || futureTask.runnable_id ? <span>{futureTask.runnable_name || futureTask.runnable_id}</span> : null}
-                    {typeof futureTask.run_count === 'number' ? <span>{futureTask.run_count} runs</span> : null}
+                    {typeof futureTask.run_count === 'number' ? <span>{futureTask.run_count} 次运行</span> : null}
                     <code>{futureTask.future_task_id}</code>
                   </div>
                   {futureTask.error ? <div className="agent-inline-note warn">{futureTask.error}</div> : null}

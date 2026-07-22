@@ -304,9 +304,9 @@ export function RuntimeExecutionEnvelopeSummary({
                 />
               ))}
               {requests.length > visibleRequests.length ? (
-                <span className="studio-tool-empty">+{requests.length - visibleRequests.length} requests</span>
+                <span className="studio-tool-empty">还有 {requests.length - visibleRequests.length} 个请求</span>
               ) : null}
-              {!requests.length ? <span className="studio-tool-empty">No execution requests</span> : null}
+              {!requests.length ? <span className="studio-tool-empty">暂无执行请求</span> : null}
             </div>
           ) : null}
         </>

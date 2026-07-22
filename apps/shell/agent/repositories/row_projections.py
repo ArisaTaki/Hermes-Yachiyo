@@ -182,6 +182,11 @@ def row_to_run(
             else run_group_source(str(run_group_id or ""))
         ),
         "client_request_id": str(row["client_request_id"] or "") if "client_request_id" in row_keys else "",
+        "project_root_group": (
+            bool(row["project_root_group"])
+            if "project_root_group" in row_keys
+            else False
+        ),
         "kind": row["kind"],
         "runnable_id": row["runnable_id"],
         "runnable_name": runnable_name(kind, runnable_id),

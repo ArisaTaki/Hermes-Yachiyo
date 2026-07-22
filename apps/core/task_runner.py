@@ -292,15 +292,16 @@ class TaskRunner:
         if task is None or not session_id:
             return
         try:
-            from apps.core.chat_session import ChatSession, MessageStatus
+            from apps.core.chat_session import MessageStatus, load_existing_chat_session
             from apps.core.chat_store import get_chat_store
 
-            session = ChatSession(session_id=session_id)
-            session.attach_store(
+            session = load_existing_chat_session(
                 get_chat_store(),
-                load_existing=True,
+                session_id,
                 fail_active_messages=False,
             )
+            if session is None:
+                return
             if task.status == TaskStatus.COMPLETED:
                 assistant = session.get_assistant_message_for_task(task.task_id)
                 assistant_metadata = getattr(assistant, "metadata", None)

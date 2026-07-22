@@ -72,6 +72,15 @@ def _local_tool_request(tool_name: str, payload: dict[str, Any]) -> dict[str, An
     return {
         "tool": tool_name,
         "input": payload,
+        "allow_user_foreground_takeover": True,
+        "desktop_execution_policy": {
+            "mode": "allow",
+            "allow_live_foreground": True,
+            "prefer_background_desktop": False,
+            "prefer_isolated_desktop": False,
+            "avoid_user_foreground_takeover": False,
+            "require_sandbox_for_keyboard_mouse": False,
+        },
         "desktop_execution_route": {
             "route_id": f"desktop-route:{tool_name}",
             "tool_name": tool_name,
@@ -82,6 +91,8 @@ def _local_tool_request(tool_name: str, payload: dict[str, Any]) -> dict[str, An
             "can_execute": True,
             "can_auto_start": True,
             "sandbox_required": True,
+            "foreground_takeover_allowed": True,
+            "requires_user_foreground_session": True,
             "blocking_conditions": [],
         },
         "sandbox_provider": {
@@ -641,12 +652,197 @@ def test_desktop_provider_registry_refreshes_adapter_from_runtime_env(monkeypatc
     assert requests[0]["url"] == "http://127.0.0.1:19093/tools/execute"
 
 
+def test_registry_refresh_never_returns_wrong_selected_provider_id(monkeypatch) -> None:
+    class WrongIdentityAdapter:
+        provider_kind = "sandbox_desktop"
+        provider_id = "sandbox-wrong"
+
+        def can_execute(self, *_args: Any, **_kwargs: Any) -> bool:
+            return True
+
+    registry = DesktopExecutionProviderRegistry()
+    wrong_adapter = WrongIdentityAdapter()
+    monkeypatch.setattr(
+        registry,
+        "_refresh_env_adapter",
+        lambda _provider_kind: wrong_adapter,
+    )
+    route = {
+        "selected_provider_kind": "sandbox_desktop",
+        "selected_provider_id": "sandbox-required",
+    }
+
+    adapter = registry.adapter_for(
+        "sandbox_desktop",
+        "desktop.safe_type_text",
+        route,
+        {"tool": "desktop.safe_type_text"},
+    )
+
+    assert adapter is None
+
+
+def test_owned_desktop_scope_does_not_capture_independent_tool_domains() -> None:
+    class OwnedDesktopAdapter:
+        provider_kind = "background_desktop"
+        provider_id = "background-owned"
+        supported_tools = ["desktop.verify"]
+
+        def owns_task_scope(self, tool_request: dict[str, Any]) -> bool:
+            scope = tool_request.get("_runtime_execution_scope")
+            return isinstance(scope, dict) and scope.get("run_id") == "run-owned"
+
+        def can_execute(self, *_args: Any, **_kwargs: Any) -> bool:
+            return False
+
+    registry = DesktopExecutionProviderRegistry([OwnedDesktopAdapter()])
+
+    for tool_name in (
+        "artifact.read",
+        "browser.search",
+        "data.query",
+        "file.read",
+        "fs.read",
+        "future_task.list",
+        "memory.search",
+        "python.run",
+        "skill.read",
+        "terminal.run",
+        "workspace.read",
+    ):
+        request = {
+            "tool": tool_name,
+            "input": {},
+            "_runtime_execution_scope": {"run_id": "run-owned"},
+        }
+
+        bound = registry.bind_tool_request_to_owned_provider(tool_name, request)
+
+        assert "desktop_execution_route" not in bound, tool_name
+        assert "desktop_execution_provider" not in bound, tool_name
+        assert "_desktop_provider_affinity_bound" not in bound, tool_name
+
+
+def test_owned_desktop_scope_keeps_desktop_and_unknown_tools_fail_closed() -> None:
+    class OwnedDesktopAdapter:
+        provider_kind = "background_desktop"
+        provider_id = "background-owned"
+        supported_tools: list[str] = []
+
+        def owns_task_scope(self, tool_request: dict[str, Any]) -> bool:
+            scope = tool_request.get("_runtime_execution_scope")
+            return isinstance(scope, dict) and scope.get("run_id") == "run-owned"
+
+        def can_execute(self, *_args: Any, **_kwargs: Any) -> bool:
+            return False
+
+    registry = DesktopExecutionProviderRegistry([OwnedDesktopAdapter()])
+
+    for tool_name in (
+        "app.status",
+        "desktop.verify",
+        "screen.capture",
+        "unclassified.future_desktop_probe",
+    ):
+        request = {
+            "tool": tool_name,
+            "input": {},
+            "_runtime_execution_scope": {"run_id": "run-owned"},
+        }
+
+        bound = registry.bind_tool_request_to_owned_provider(tool_name, request)
+        route = bound["desktop_execution_route"]
+
+        assert bound["_desktop_provider_affinity_bound"] is True, tool_name
+        assert route["provider_execution_required"] is True, tool_name
+        assert route["selected_provider_kind"] == "background_desktop", tool_name
+        assert route["selected_provider_id"] == "background-owned", tool_name
+        assert route["status"] == "provider_tool_unavailable", tool_name
+        assert route["can_execute"] is False, tool_name
+
+
+def test_retired_owner_keeps_affinity_and_blocks_local_broker() -> None:
+    class RetiredOwnerAdapter:
+        provider_kind = "background_desktop"
+        provider_id = "background-owned"
+        supported_tools: list[str] = []
+
+        def owns_task_scope(self, tool_request: dict[str, Any]) -> bool:
+            scope = tool_request.get("_runtime_execution_scope")
+            return isinstance(scope, dict) and scope.get("run_id") == "run-owned"
+
+        def can_execute(self, *_args: Any, **_kwargs: Any) -> bool:
+            return False
+
+    class ReplacementAdapter:
+        provider_kind = "background_desktop"
+        provider_id = "background-owned"
+
+        def can_execute(self, *_args: Any, **_kwargs: Any) -> bool:
+            return False
+
+    broker_calls: list[tuple[str, dict[str, Any], bool]] = []
+
+    class Broker:
+        def call(
+            self,
+            name: str,
+            payload: dict[str, Any],
+            *,
+            approved: bool = False,
+        ) -> dict[str, Any]:
+            broker_calls.append((name, dict(payload), approved))
+            return {"ok": True, "action": name}
+
+    owner = RetiredOwnerAdapter()
+    replacement = ReplacementAdapter()
+    registry = DesktopExecutionProviderRegistry(
+        [owner, LocalDesktopExecutionProviderAdapter()]
+    )
+    assert registry._replace_equivalent_adapter(
+        "background_desktop",
+        replacement,
+    ) is replacement
+    tool_request = _local_tool_request(
+        "desktop.safe_type_text",
+        {"text": "must stay off the local desktop"},
+    )
+    tool_request["_runtime_execution_scope"] = {"run_id": "run-owned"}
+
+    result = registry.execute_if_routed(
+        "desktop.safe_type_text",
+        {"text": "must stay off the local desktop"},
+        tool_request=tool_request,
+        broker=Broker(),
+    )
+
+    assert result is not None
+    assert result["ok"] is False
+    assert result["desktop_execution_route"]["desktop_provider_affinity"] is True
+    assert result["desktop_execution_route"]["selected_provider_id"] == (
+        "background-owned"
+    )
+    assert result["status"] == "provider_capability_mismatch"
+    assert result["error"] == "desktop_execution_provider_tool_unavailable"
+    assert result["desktop_provider_capability_mismatch"] is True
+    assert result["retryable"] is True
+    assert result["replan_allowed"] is True
+    assert result["retry_with_alternative_capability"] is True
+    assert result["desktop_execution_provider"]["adapter_registered"] is True
+    assert result["recommended_tools"] == []
+    assert result["recovery_actions"] == []
+    assert broker_calls == []
+
+
 def test_desktop_provider_transport_failure_stays_structured() -> None:
     def fake_urlopen(_request: Any, *, timeout: float) -> FakeResponse:
         raise TimeoutError("provider timed out")
 
     registry = desktop_execution_provider_registry_from_env(
-        {"OHA_YACHIYO_DESKTOP_PROVIDER_URL": "http://localhost:19091"},
+        {
+            "OHA_YACHIYO_DESKTOP_PROVIDER_URL": "http://localhost:19091",
+            "OHA_YACHIYO_DESKTOP_PROVIDER_ID": "sandbox-1",
+        },
         urlopen=fake_urlopen,
     )
 

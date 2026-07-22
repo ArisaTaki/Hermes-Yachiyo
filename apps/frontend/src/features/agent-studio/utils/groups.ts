@@ -127,7 +127,7 @@ export function agentGroupListMeta(group: AgentGroupSnapshot): string {
 }
 
 export function agentGroupMemberSummary(group: AgentGroupSnapshot): string {
-  return group.members.map((member) => member.name || member.agent_id).join('、') || 'No members';
+  return group.members.map((member) => member.name || member.agent_id).join('、') || '暂无成员';
 }
 
 export function agentGroupToolPolicyPresetFor(policyId: string): AgentGroupToolPolicyPreset | null {

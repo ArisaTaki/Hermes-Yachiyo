@@ -14,6 +14,12 @@ import pytest
 from apps.shell.agent.tools import browser as browser_mod
 from apps.shell.agent.tools import desktop as desktop_mod
 from apps.shell.agent.runtime.errors import AgentRuntimeError
+from apps.shell.agent.runtime.events import (
+    RUNTIME_EXECUTION_PROVENANCE_KEY,
+    RUNTIME_EXECUTION_PROVENANCE_VERSION,
+    RUNTIME_LOCAL_TOOL_BROKER_PROVENANCE_SOURCE,
+)
+from apps.shell.agent.runtime.outcome_evaluator import evaluate_main_chat_outcome
 from apps.shell.agent.tools.broker import ToolBroker
 from apps.shell.agent.tools.policy import (
     DAILY_DESKTOP_TOOL_NAMES,
@@ -75,6 +81,24 @@ def test_tool_dispatch_registry_covers_known_agent_tools() -> None:
     assert set(TOOL_DISPATCH_REGISTRY) == KNOWN_AGENT_TOOLS
 
 
+def test_local_app_open_fails_closed_for_background_delivery_hint() -> None:
+    class NoLocalOpenBroker:
+        @staticmethod
+        def app_open(_app_name: str) -> dict:
+            raise AssertionError("background-only app.open must not use the local broker")
+
+    result = dispatch_tool_call(
+        NoLocalOpenBroker(),
+        "app.open",
+        {"app_name": "TextEdit", "bring_to_front": False},
+    )
+
+    assert result["ok"] is False
+    assert result["status"] == "provider_required"
+    assert result["blocked_by_desktop_execution_policy"] is True
+    assert result["blocking_conditions"] == ["sandbox_desktop_provider_required"]
+
+
 def test_tool_broker_call_uses_split_registry_for_workspace_read(tmp_path) -> None:
     (tmp_path / "note.txt").write_text("hello", encoding="utf-8")
     broker = _broker(tmp_path)
@@ -83,7 +107,203 @@ def test_tool_broker_call_uses_split_registry_for_workspace_read(tmp_path) -> No
         "ok": True,
         "path": "note.txt",
         "content": "hello",
+        "truncated": False,
+        "size_bytes": 5,
+        "content_bytes": 5,
+        "decoding_lossy": False,
     }
+
+
+def test_workspace_read_reports_authoritative_truncation_metadata(tmp_path) -> None:
+    (tmp_path / "large.txt").write_bytes(b"a" * 200_001)
+    broker = _broker(tmp_path)
+
+    result = broker.call("workspace.read", {"path": "large.txt"})
+
+    assert result == {
+        "ok": True,
+        "path": "large.txt",
+        "content": "a" * 200_000,
+        "truncated": True,
+        "size_bytes": 200_001,
+        "content_bytes": 200_000,
+        "decoding_lossy": False,
+    }
+
+
+def test_workspace_read_reports_lossy_utf8_without_breaking_preview(tmp_path) -> None:
+    (tmp_path / "invalid.txt").write_bytes(b"ok\xff")
+    broker = _broker(tmp_path)
+
+    result = broker.call("workspace.read", {"path": "invalid.txt"})
+
+    assert result == {
+        "ok": True,
+        "path": "invalid.txt",
+        "content": "ok\ufffd",
+        "truncated": False,
+        "size_bytes": 3,
+        "content_bytes": 3,
+        "decoding_lossy": True,
+    }
+
+
+def test_desktop_verify_app_running_uses_status_without_foreground_inspection() -> None:
+    calls: list[tuple[str, str]] = []
+
+    class StatusOnlyBroker:
+        def app_status(self, app_name: str) -> dict:
+            calls.append(("app_status", app_name))
+            return {
+                "ok": True,
+                "action": "app.status",
+                "summary": f"{app_name} is running",
+                "data": {
+                    "app_name": app_name,
+                    "running": True,
+                    "status": "running",
+                },
+                "permission_error": False,
+            }
+
+        def desktop_inspect_app(self, *_args, **_kwargs):
+            raise AssertionError("app_running verification must not inspect or focus UI")
+
+        def desktop_active_window(self):
+            raise AssertionError("app_running verification must not require foreground state")
+
+    result = dispatch_tool_call(
+        StatusOnlyBroker(),
+        "desktop.verify",
+        {
+            "app_name": "WPS Office",
+            "verification_goal": "app_running",
+        },
+    )
+
+    assert calls == [("app_status", "WPS Office")]
+    assert result["ok"] is True
+    assert result["action"] == "desktop.verify"
+    assert result["running"] is True
+    assert result["launch_verified"] is True
+    assert result["data"]["running"] is True
+    assert result["data"]["launch_verified"] is True
+
+
+@pytest.mark.parametrize(
+    ("status_result", "expected_running", "expected_reason"),
+    [
+        (
+            {
+                "ok": True,
+                "action": "app.status",
+                "summary": "WPS Office is not running",
+                "data": {
+                    "app_name": "WPS Office",
+                    "running": False,
+                    "status": "not_running",
+                },
+                "permission_error": False,
+            },
+            False,
+            "desktop_verification_failed",
+        ),
+        (
+            {
+                "ok": False,
+                "action": "app.status",
+                "summary": "app.status failed",
+                "error": "status query failed",
+                "data": {"app_name": "WPS Office"},
+                "permission_error": False,
+            },
+            None,
+            "desktop_tool_failed",
+        ),
+        (
+            {
+                "ok": True,
+                "action": "app.status",
+                "summary": "status response was incomplete",
+                "data": {"app_name": "WPS Office"},
+                "permission_error": False,
+            },
+            None,
+            "desktop_verification_failed",
+        ),
+    ],
+)
+def test_desktop_verify_app_running_fails_closed(
+    status_result: dict,
+    expected_running: bool | None,
+    expected_reason: str,
+) -> None:
+    class StatusBroker:
+        def app_status(self, _app_name: str) -> dict:
+            return status_result
+
+    result = dispatch_tool_call(
+        StatusBroker(),
+        "desktop.verify",
+        {
+            "app_name": "WPS Office",
+            "verification_goal": "app_running",
+        },
+    )
+    outcome = evaluate_main_chat_outcome(
+        {},
+        [
+            {
+                "event_type": "agent.tool.call",
+                "payload": {"tool": "desktop.verify", "result": result},
+            }
+        ],
+    )
+
+    assert result["running"] is expected_running
+    assert result["launch_verified"] is expected_running
+    assert result["data"]["launch_verified"] is expected_running
+    assert outcome.allows_completion is False
+    assert outcome.reason == expected_reason
+
+
+def test_desktop_verify_without_app_running_goal_keeps_ui_inspection_semantics() -> None:
+    calls: list[tuple] = []
+
+    class InspectingBroker:
+        def app_status(self, _app_name: str):
+            raise AssertionError("default desktop verification must not switch to app.status")
+
+        def desktop_inspect_app(self, app_name: str, **kwargs):
+            calls.append(("desktop_inspect_app", app_name, kwargs))
+            return {
+                "ok": True,
+                "action": "desktop.inspect_app",
+                "summary": "Visible controls inspected",
+                "data": {"app_name": app_name, "elements": []},
+            }
+
+    result = dispatch_tool_call(
+        InspectingBroker(),
+        "desktop.verify",
+        {"app_name": "WPS Office", "role_filter": "button", "limit": 40},
+    )
+
+    assert calls == [
+        (
+            "desktop_inspect_app",
+            "WPS Office",
+            {
+                "open_if_needed": False,
+                "focus": False,
+                "role_filter": "button",
+                "limit": 40,
+            },
+        )
+    ]
+    assert result["ok"] is True
+    assert result["action"] == "desktop.verify"
+    assert result["summary"] == "Visible controls inspected"
 
 
 def test_tool_broker_call_uses_fs_read_file_alias(tmp_path) -> None:
@@ -94,6 +314,10 @@ def test_tool_broker_call_uses_fs_read_file_alias(tmp_path) -> None:
         "ok": True,
         "path": "note.txt",
         "content": "hello",
+        "truncated": False,
+        "size_bytes": 5,
+        "content_bytes": 5,
+        "decoding_lossy": False,
     }
 
 
@@ -702,6 +926,53 @@ def test_tool_broker_call_returns_data_analysis_parse_error(tmp_path) -> None:
     assert not (tmp_path / "artifacts" / "reports" / "broken.md").exists()
 
 
+def test_tool_broker_data_analysis_verifies_written_artifact_postcondition(tmp_path) -> None:
+    (tmp_path / "sales.csv").write_text(
+        "region,revenue\nEast,10\nWest,20\n",
+        encoding="utf-8",
+    )
+    broker = _broker(tmp_path)
+
+    result = broker.call(
+        "data.analyze",
+        {"path": "sales.csv", "artifact_path": "reports/sales.md"},
+    )
+
+    assert result["ok"] is True
+    assert result["postcondition_verified"] is True
+    assert (tmp_path / "artifacts" / "reports" / "sales.md").is_file()
+
+
+def test_tool_broker_data_analysis_fails_closed_for_unverified_artifact_target(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    (tmp_path / "sales.csv").write_text(
+        "region,revenue\nEast,10\n",
+        encoding="utf-8",
+    )
+    broker = _broker(tmp_path)
+    monkeypatch.setattr(
+        broker,
+        "artifact_write",
+        lambda _path, _content: {
+            "ok": True,
+            "path": "reports/wrong-target.md",
+            "bytes": 7,
+        },
+    )
+
+    result = broker.data_analyze(
+        "sales.csv",
+        artifact_path="reports/sales.md",
+    )
+
+    assert result["ok"] is False
+    assert result["postcondition_verified"] is False
+    assert result["verification_failed"] is True
+    assert result["error"] == "data_analysis_artifact_unverified"
+
+
 def test_data_analyze_schema_rejects_invalid_max_rows() -> None:
     with pytest.raises(AgentRuntimeError, match="data.analyze 参数 max_rows"):
         ToolDescriptorRegistry.validate_payload(
@@ -1305,6 +1576,45 @@ def test_app_status_schema_requires_app_name() -> None:
 
     with pytest.raises(AgentRuntimeError, match="app.status 参数 app_name 必须是非空字符串"):
         ToolDescriptorRegistry.validate_payload("app.status", {"app_name": ""})
+
+
+def test_desktop_verify_schema_accepts_only_app_running_verification_goal() -> None:
+    ToolDescriptorRegistry.validate_payload("desktop.verify", {})
+    ToolDescriptorRegistry.validate_payload(
+        "desktop.verify",
+        {"app_name": "WPS Office"},
+    )
+    ToolDescriptorRegistry.validate_payload(
+        "desktop.verify",
+        {
+            "app_name": "WPS Office",
+            "verification_goal": "app_running",
+        },
+    )
+
+    with pytest.raises(
+        AgentRuntimeError,
+        match="desktop.verify 参数 verification_goal 必须是以下值之一：app_running",
+    ):
+        ToolDescriptorRegistry.validate_payload(
+            "desktop.verify",
+            {
+                "app_name": "WPS Office",
+                "verification_goal": "foreground",
+            },
+        )
+
+    with pytest.raises(
+        AgentRuntimeError,
+        match=(
+            "desktop.verify 参数 app_name 在 verification_goal=app_running 时"
+            "必须是非空字符串"
+        ),
+    ):
+        ToolDescriptorRegistry.validate_payload(
+            "desktop.verify",
+            {"verification_goal": "app_running"},
+        )
 
 
 def test_app_quit_schema_requires_app_name() -> None:
@@ -1961,7 +2271,7 @@ def test_music_app_open_and_play_schema_requires_app_name() -> None:
         ToolDescriptorRegistry.validate_payload("media.music_app_open_and_play", {})
 
 
-def test_browser_click_schema_accepts_optional_fallback_coordinates() -> None:
+def test_browser_click_schema_exposes_only_cdp_page_target_fields() -> None:
     ToolDescriptorRegistry.validate_payload(
         "browser.open_url_and_extract_text",
         {"url": "https://example.com/docs", "selector": "main"},
@@ -1972,26 +2282,26 @@ def test_browser_click_schema_accepts_optional_fallback_coordinates() -> None:
     )
     ToolDescriptorRegistry.validate_payload(
         "browser.click",
-        {"selector": "#submit", "fallback_x": 12, "fallback_y": 34.5, "click_count": 2},
+        {"selector": "#submit", "click_count": 2},
     )
 
-    with pytest.raises(AgentRuntimeError, match="browser.click 参数 fallback_x 必须是非负坐标数字"):
+    with pytest.raises(AgentRuntimeError, match="参数包含未声明字段"):
         ToolDescriptorRegistry.validate_payload(
             "browser.click",
-            {"selector": "#submit", "fallback_x": -1, "fallback_y": 34},
+            {"selector": "#submit", "fallback_x": 12, "fallback_y": 34},
         )
 
 
-def test_browser_type_text_schema_accepts_optional_fallback_coordinates() -> None:
+def test_browser_type_text_schema_exposes_only_cdp_page_target_fields() -> None:
     ToolDescriptorRegistry.validate_payload(
         "browser.type_text",
-        {"selector": "point=12,34", "text": "hello", "fallback_x": 12, "fallback_y": 34.5},
+        {"selector": "point=12,34", "text": "hello"},
     )
 
-    with pytest.raises(AgentRuntimeError, match="browser.type_text 参数 fallback_y 必须是非负坐标数字"):
+    with pytest.raises(AgentRuntimeError, match="参数包含未声明字段"):
         ToolDescriptorRegistry.validate_payload(
             "browser.type_text",
-            {"selector": "point=12,34", "text": "hello", "fallback_x": 12, "fallback_y": -1},
+            {"selector": "point=12,34", "text": "hello", "fallback_y": 34},
         )
 
 
@@ -2659,6 +2969,7 @@ def test_tool_broker_app_open_and_safe_type_text_sequences_foreground_action(
     assert list(result["fallback_result"]) == [
         "open",
         "focus",
+        "active_window",
         "safe_type_text",
     ]
 
@@ -2717,6 +3028,7 @@ def test_tool_broker_app_open_and_safe_key_sequences_foreground_action(
     assert list(result["fallback_result"]) == [
         "open",
         "focus",
+        "active_window",
         "safe_key",
     ]
 
@@ -2821,6 +3133,7 @@ def test_tool_broker_app_open_and_safe_scroll_sequences_foreground_action(
     assert list(result["fallback_result"]) == [
         "open",
         "focus",
+        "active_window",
         "safe_scroll",
     ]
 
@@ -2877,6 +3190,7 @@ def test_tool_broker_app_open_and_safe_click_sequences_foreground_action(
     assert list(result["fallback_result"]) == [
         "open",
         "focus",
+        "active_window",
         "safe_click",
     ]
 
@@ -2956,6 +3270,78 @@ def test_tool_broker_app_open_and_click_ui_element_sequences_foreground_action(
         "active_window",
         "click_ui_element",
     ]
+
+
+def test_tool_broker_legacy_ui_callback_runs_only_after_exact_foreground_observation(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    broker = _broker(tmp_path)
+    click_calls: list[str] = []
+    _stub_active_window(monkeypatch, "Google Chrome")
+    monkeypatch.setattr(
+        desktop_mod,
+        "app_focus",
+        lambda app_name: {
+            "ok": True,
+            "action": "app.focus",
+            "data": {"app_name": app_name, "focus_verified": True},
+        },
+    )
+
+    def legacy_click(target: str, *, role_filter: str = "", limit: int = 80, click_count: int = 1):
+        click_calls.append(target)
+        return {
+            "ok": True,
+            "action": "desktop.click_ui_element",
+            "data": {"target": target, "role_filter": role_filter},
+        }
+
+    monkeypatch.setattr(desktop_mod, "click_ui_element", legacy_click)
+
+    result = broker.app_focus_and_click_ui_element(
+        "Google Chrome",
+        "Sign in",
+        role_filter="button",
+    )
+
+    assert result["ok"] is True
+    assert click_calls == ["Sign in"]
+    assert result["fallback_result"]["active_window"]["data"]["app_name"] == (
+        "Google Chrome"
+    )
+
+
+def test_tool_broker_legacy_ui_callback_fails_closed_for_wrong_foreground_app(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    broker = _broker(tmp_path)
+    click_calls: list[str] = []
+    _stub_active_window(monkeypatch, "Safari")
+    monkeypatch.setattr(
+        desktop_mod,
+        "app_focus",
+        lambda app_name: {
+            "ok": True,
+            "action": "app.focus",
+            "data": {"app_name": app_name, "focus_verified": True},
+        },
+    )
+
+    def legacy_click(target: str, *, role_filter: str = "", limit: int = 80, click_count: int = 1):
+        click_calls.append(target)
+        return {"ok": True, "action": "desktop.click_ui_element"}
+
+    monkeypatch.setattr(desktop_mod, "click_ui_element", legacy_click)
+
+    result = broker.app_focus_and_click_ui_element("Google Chrome", "Sign in")
+
+    assert result["ok"] is False
+    assert result["error"] == "foreground_app_mismatch"
+    assert result["data"]["expected_app_name"] == "Google Chrome"
+    assert result["data"]["active_app_name"] == "Safari"
+    assert click_calls == []
 
 
 def test_tool_broker_app_open_and_type_into_ui_element_sequences_foreground_action(
@@ -3071,23 +3457,18 @@ def test_tool_broker_app_focus_and_safe_shortcut_reports_action_failure(
     }
     assert list(result["fallback_result"]) == [
         "focus",
+        "active_window",
         "safe_shortcut",
     ]
 
 
-def test_tool_broker_safe_shortcut_skips_active_window_verification_after_focus(
+def test_tool_broker_safe_shortcut_verifies_active_window_after_focus(
     tmp_path,
     monkeypatch,
 ) -> None:
     broker = _broker(tmp_path)
     calls: list[tuple[str, str]] = []
-    monkeypatch.setattr(
-        desktop_mod,
-        "active_window",
-        lambda: (_ for _ in ()).throw(
-            AssertionError("safe shortcut should not require active-window verification")
-        ),
-    )
+    _stub_active_window(monkeypatch, "Slack")
 
     monkeypatch.setattr(
         desktop_mod,
@@ -3117,7 +3498,7 @@ def test_tool_broker_safe_shortcut_skips_active_window_verification_after_focus(
         "foreground_action": "safe_shortcut",
         "shortcut_action": "paste",
     }
-    assert list(result["fallback_result"]) == ["focus", "safe_shortcut"]
+    assert list(result["fallback_result"]) == ["focus", "active_window", "safe_shortcut"]
 
 
 def test_tool_broker_app_focus_and_safe_shortcut_stops_when_focus_unverified(
@@ -3190,6 +3571,28 @@ def test_tool_broker_app_focus_and_safe_shortcut_stops_when_focus_unverified(
 def test_tool_dispatch_registry_routes_browser_tools(tmp_path, monkeypatch) -> None:
     broker = _broker(tmp_path)
     calls = []
+    search_url = "https://www.google.com/search?q=open+hanako"
+    search_evidence = {
+        "ok": True,
+        "action": "browser.open_url_and_extract_text",
+        "summary": "Opened browser page and extracted text",
+        "data": {
+            "selector": "",
+            "text": "OpenHanako result evidence",
+            "truncated": False,
+            "page_url": search_url,
+            "page_url_truncated": False,
+            "link_contexts": [
+                {"href": "https://example.com/openhanako", "text": "OpenHanako"}
+            ],
+        },
+        "permission_error": False,
+        "fallback_used": False,
+    }
+
+    def open_and_extract(url: str, *, selector: str = "") -> dict:
+        calls.append(("open_extract", url, selector))
+        return search_evidence if url == search_url else {"ok": True}
 
     monkeypatch.setattr(
         broker,
@@ -3199,7 +3602,7 @@ def test_tool_dispatch_registry_routes_browser_tools(tmp_path, monkeypatch) -> N
     monkeypatch.setattr(
         broker,
         "browser_open_url_and_extract_text",
-        lambda url, *, selector="": calls.append(("open_extract", url, selector)) or {"ok": True},
+        open_and_extract,
     )
     monkeypatch.setattr(
         broker,
@@ -3226,11 +3629,19 @@ def test_tool_dispatch_registry_routes_browser_tools(tmp_path, monkeypatch) -> N
         lambda selector="": calls.append(("extract", selector)) or {"ok": True},
     )
 
-    assert dispatch_tool_call(
+    search_result = dispatch_tool_call(
         broker,
         "browser.search",
         {"query": "open hanako"},
-    ) == {"ok": True}
+    )
+    assert search_result["action"] == "browser.search"
+    assert search_result["data"] == {
+        **search_evidence["data"],
+        "query": "open hanako",
+        "search_url": search_url,
+    }
+    assert search_result["summary"] == search_evidence["summary"]
+    assert search_result["permission_error"] is False
     assert dispatch_tool_call(
         broker,
         "browser.open",
@@ -3255,12 +3666,12 @@ def test_tool_dispatch_registry_routes_browser_tools(tmp_path, monkeypatch) -> N
     assert dispatch_tool_call(
         broker,
         "browser.click",
-        {"selector": "#go", "fallback_x": 12, "fallback_y": 34, "click_count": 2},
+        {"selector": "#go", "click_count": 2},
     ) == {"ok": True}
     assert dispatch_tool_call(
         broker,
         "browser.type_text",
-        {"selector": "point=12,34", "text": "八千代", "fallback_x": 12, "fallback_y": 34},
+        {"selector": "point=12,34", "text": "八千代"},
     ) == {"ok": True}
     assert dispatch_tool_call(
         broker,
@@ -3268,13 +3679,13 @@ def test_tool_dispatch_registry_routes_browser_tools(tmp_path, monkeypatch) -> N
         {"selector": "main"},
     ) == {"ok": True}
     assert calls == [
-        ("open", "https://www.google.com/search?q=open+hanako"),
+        ("open_extract", search_url, ""),
         ("open", "https://example.com/alias"),
         ("open", "https://example.com"),
         ("open_extract", "https://example.com/docs", "main"),
         ("open_screenshot", "https://example.com/docs", "capture docs"),
-        ("click", "#go", 12, 34, 2),
-        ("type", "point=12,34", "八千代", {"fallback_x": 12, "fallback_y": 34}),
+        ("click", "#go", None, None, 2),
+        ("type", "point=12,34", "八千代", {}),
         ("extract", "main"),
     ]
 
@@ -3447,9 +3858,11 @@ def test_app_open_resolves_installed_bundle_after_open_failure(monkeypatch, tmp_
         "resolved_app_name": "Microsoft Word",
         "app_resolution": "installed_app_bundle",
         "app_resolution_source": "desktop.list_apps",
-        "app_resolution_score": 90,
+        "app_resolution_score": 100,
         "app_resolution_confidence": "high",
-        "app_resolution_reason": "query_tokens_in_app_name",
+        "app_resolution_reason": "exact_name",
+        "app_resolution_matched_name": "Microsoft Word",
+        "app_resolution_matched_name_source": "bundle_name",
         "resolved_app_path": str(app_dir / "Microsoft Word.app"),
     }
     assert [call[0] for call in calls] == [
@@ -3490,9 +3903,11 @@ def test_app_open_resolves_shorter_bundle_from_qualified_request(monkeypatch, tm
     assert result["data"]["requested_app_name"] == "Apple Music"
     assert result["data"]["resolved_app_name"] == "Music"
     assert result["data"]["app_resolution_source"] == "desktop.list_apps"
-    assert result["data"]["app_resolution_score"] == 85
-    assert result["data"]["app_resolution_confidence"] == "medium"
-    assert result["data"]["app_resolution_reason"] == "app_name_tokens_in_query"
+    assert result["data"]["app_resolution_score"] == 100
+    assert result["data"]["app_resolution_confidence"] == "high"
+    assert result["data"]["app_resolution_reason"] == "exact_name"
+    assert result["data"]["app_resolution_matched_name"] == "Music"
+    assert result["data"]["app_resolution_matched_name_source"] == "bundle_name"
     assert result["data"]["resolved_app_path"] == str(app_dir / "Music.app")
     assert [call[0] for call in calls] == [
         ["open", "-a", "Apple Music"],
@@ -3525,6 +3940,73 @@ def test_app_open_success_records_launch_verification(monkeypatch) -> None:
         "launch_status": "running",
     }
     assert calls[0][0] == ["open", "-a", "Google Chrome"]
+
+
+def test_tool_broker_projects_existing_native_app_verification_receipts(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    broker = _broker(tmp_path)
+    monkeypatch.setattr(
+        desktop_mod,
+        "app_open",
+        lambda _app_name: {
+            "ok": True,
+            "action": "app.open",
+            "data": {"app_name": "Notes", "launch_verified": True},
+        },
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "app_focus",
+        lambda _app_name: {
+            "ok": True,
+            "action": "app.focus",
+            "data": {"app_name": "Notes", "focus_verified": True},
+        },
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "app_focus_window",
+        lambda _app_name, _title: {
+            "ok": True,
+            "action": "app.focus_window",
+            "data": {
+                "app_name": "Slack",
+                "focus_status": "focused",
+                "window_title": "general - Slack",
+            },
+        },
+    )
+
+    opened = broker.app_open("Notes")
+    focused = broker.app_focus("Notes")
+    window = broker.app_focus_window("Slack", "general")
+
+    for result in (opened, focused, window):
+        assert result["postcondition_verified"] is True
+        assert result["data"]["postcondition_verified"] is True
+
+
+def test_tool_broker_does_not_promote_unverified_app_open(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    broker = _broker(tmp_path)
+    monkeypatch.setattr(
+        desktop_mod,
+        "app_open",
+        lambda _app_name: {
+            "ok": True,
+            "action": "app.open",
+            "data": {"app_name": "Notes", "launch_verified": False},
+        },
+    )
+
+    result = broker.app_open("Notes")
+
+    assert "postcondition_verified" not in result
+    assert "postcondition_verified" not in result["data"]
 
 
 def test_app_open_handles_common_finder_folder_aliases(monkeypatch) -> None:
@@ -3897,12 +4379,14 @@ def test_desktop_open_path_with_app_opens_safe_existing_file(monkeypatch, tmp_pa
     assert result["ok"] is True
     assert result["action"] == "desktop.open_path_with_app"
     assert result["summary"] == "Opened report.pdf with Preview"
+    assert result["postcondition_verified"] is True
     assert result["data"] == {
         "path": str(target),
         "expanded_path": expanded,
         "app_name": "Preview",
         "open_target": "app_open",
         "exists": True,
+        "postcondition_verified": True,
         "is_dir": False,
         "suffix": ".pdf",
     }
@@ -4213,6 +4697,60 @@ def test_desktop_open_path_with_app_blocks_unsafe_file_types(monkeypatch, tmp_pa
     assert calls == []
 
 
+def test_parse_app_focus_output_requires_observed_frontmost_app_match() -> None:
+    mismatched = desktop_mod._parse_app_focus_output(
+        "focused|Calculator|true|ChatGPT",
+        "Calculator",
+    )
+    matched = desktop_mod._parse_app_focus_output(
+        "focused|Calculator|false|Calculator",
+        "Calculator",
+    )
+
+    assert mismatched["focus_verified"] is False
+    assert mismatched["focus_status"] == "not_frontmost"
+    assert mismatched["frontmost_app"] == "ChatGPT"
+    assert mismatched["system_events_reported_frontmost"] is True
+    assert matched["focus_verified"] is True
+    assert matched["system_events_reported_frontmost"] is False
+
+
+def test_parse_appkit_focus_output_requires_observed_frontmost_app_match() -> None:
+    mismatched = desktop_mod._parse_appkit_focus_output(
+        "appkit|Calculator|true|true|ChatGPT",
+        "Calculator",
+    )
+    matched = desktop_mod._parse_appkit_focus_output(
+        "appkit|Calculator|true|false|Calculator",
+        "Calculator",
+    )
+
+    assert mismatched["focus_verified"] is False
+    assert mismatched["focus_status"] == "not_frontmost"
+    assert mismatched["frontmost_app"] == "ChatGPT"
+    assert mismatched["appkit_reported_active"] is True
+    assert matched["focus_verified"] is True
+    assert matched["appkit_reported_active"] is False
+
+
+def test_parse_dock_focus_output_requires_observed_frontmost_app_match() -> None:
+    mismatched = desktop_mod._parse_dock_focus_output(
+        "dock|Calculator|clicked|true|ChatGPT|true|1|计算器",
+        "Calculator",
+    )
+    matched = desktop_mod._parse_dock_focus_output(
+        "dock|Calculator|clicked|false|Calculator|true|1|计算器",
+        "Calculator",
+    )
+
+    assert mismatched["focus_verified"] is False
+    assert mismatched["focus_status"] == "not_frontmost"
+    assert mismatched["frontmost_app"] == "ChatGPT"
+    assert mismatched["dock_reported_frontmost"] is True
+    assert matched["focus_verified"] is True
+    assert matched["dock_reported_frontmost"] is False
+
+
 def test_app_focus_falls_back_to_open_when_automation_is_blocked(monkeypatch) -> None:
     open_calls = []
 
@@ -4344,6 +4882,7 @@ def test_app_focus_verifies_frontmost_process(monkeypatch) -> None:
         "focus_verified": True,
         "focus_status": "frontmost",
         "frontmost_app": "Slack",
+        "system_events_reported_frontmost": True,
     }
     assert osascript_calls == [["Slack"]]
 
@@ -4369,6 +4908,7 @@ def test_app_focus_reports_process_visibility_snapshot(monkeypatch) -> None:
         "focus_verified": True,
         "focus_status": "frontmost",
         "frontmost_app": "Slack",
+        "system_events_reported_frontmost": True,
         "process_visible": True,
         "window_count": 2,
     }
@@ -4558,7 +5098,7 @@ def test_electron_native_focus_app_parses_http_error_payload(monkeypatch) -> Non
 
     monkeypatch.setattr(desktop_mod, "urlopen", fake_urlopen)
 
-    result = desktop_mod._electron_native_focus_app("Calculator")
+    result = desktop_mod._electron_native_focus_app("Calculator", timeout_seconds=6)
 
     assert result["ok"] is False
     assert result["http_status"] == 409
@@ -5183,7 +5723,7 @@ def test_desktop_permissions_reports_ready_state(monkeypatch) -> None:
         },
     )
 
-    result = desktop_mod.permissions()
+    result = desktop_mod.permissions(active_verification=True)
 
     assert result["ok"] is True
     assert result["action"] == "desktop.permissions"
@@ -5204,7 +5744,7 @@ def test_desktop_permissions_reports_missing_targets_and_affected_tools(monkeypa
         },
     )
 
-    result = desktop_mod.permissions()
+    result = desktop_mod.permissions(active_verification=True)
 
     assert result["ok"] is True
     assert result["action"] == "desktop.permissions"
@@ -5282,7 +5822,7 @@ def test_desktop_permissions_reports_generic_desktop_aliases_as_affected_tools(m
         },
     )
 
-    result = desktop_mod.permissions()
+    result = desktop_mod.permissions(active_verification=True)
 
     assert result["ok"] is True
     assert result["permission_error"] is True
@@ -5307,7 +5847,7 @@ def test_desktop_permissions_reports_runtime_blockers(monkeypatch) -> None:
         lambda **_kwargs: {"foreground_activation": ["desktop_session_locked"]},
     )
 
-    result = desktop_mod.permissions()
+    result = desktop_mod.permissions(active_verification=True)
 
     assert result["ok"] is True
     assert result["permission_error"] is False
@@ -5322,17 +5862,17 @@ def test_desktop_permissions_reports_runtime_blockers(monkeypatch) -> None:
     assert result["summary"].startswith("Desktop runtime blockers: desktop_session_locked")
     assert result["recovery_hints"] == [
         (
-            "Unlock the active macOS user session, then rerun desktop.permissions "
+            "Unlock the active macOS user session, then approve desktop.permissions.verify "
             "or retry the foreground desktop action."
         )
     ]
     assert result["recovery_actions"] == [
         {
             "label": "解锁后重新检查桌面权限",
-            "tool": "desktop.permissions",
+            "tool": "desktop.permissions.verify",
             "input": {},
             "permission_target": "desktop_session_unlocked",
-            "risk_level": "low",
+            "risk_level": "medium",
         }
     ]
     assert result["data"]["recovery_actions"] == result["recovery_actions"]
@@ -5349,7 +5889,7 @@ def test_desktop_permissions_reports_blank_screen_runtime_blocker(monkeypatch) -
         lambda **_kwargs: {"screen_capture": ["screen_capture_blank"]},
     )
 
-    result = desktop_mod.permissions()
+    result = desktop_mod.permissions(active_verification=True)
 
     assert result["ok"] is True
     assert result["runtime_blocked"] is True
@@ -5385,7 +5925,7 @@ def test_desktop_permissions_reports_extended_privacy_recovery_actions(monkeypat
         },
     )
 
-    result = desktop_mod.permissions()
+    result = desktop_mod.permissions(active_verification=True)
 
     assert result["permission_error"] is True
     assert result["permission_targets"] == [
@@ -5439,6 +5979,15 @@ def test_desktop_permissions_reports_extended_privacy_recovery_actions(monkeypat
 
 
 def test_desktop_permission_preflight_reports_cached_missing_targets(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "apps.shell.yachiyo_agent.desktop_permissions.desktop_permission_probe_cache_status",
+        lambda: {
+            "checked": True,
+            "permission_checked": True,
+            "runtime_blockers_checked": True,
+            "status": "cached",
+        },
+    )
     monkeypatch.setattr(
         "apps.shell.yachiyo_agent.desktop_permissions.cached_desktop_permission_missing_by_capability",
         lambda: {
@@ -5506,8 +6055,11 @@ def test_desktop_list_apps_filters_by_query(monkeypatch, tmp_path) -> None:
     assert result["data"]["normalized_query"] == "applemusic"
     assert result["data"]["count"] == 1
     assert result["data"]["apps"][0]["name"] == "Music"
-    assert result["data"]["apps"][0]["match_score"] > 0
-    assert result["data"]["apps"][0]["match_confidence"] == "medium"
+    assert result["data"]["apps"][0]["match_score"] == 100
+    assert result["data"]["apps"][0]["match_confidence"] == "high"
+    assert result["data"]["apps"][0]["match_reason"] == "exact_name"
+    assert result["data"]["apps"][0]["matched_query"] == "Music"
+    assert result["data"]["apps"][0]["matched_query_source"] == "app_alias"
     assert result["data"]["best_match"]["name"] == "Music"
     assert result["data"]["resolution"]["requested_app_name"] == "Apple Music"
     assert result["data"]["resolution"]["resolved_app_name"] == "Music"
@@ -6056,7 +6608,12 @@ def test_desktop_inspect_app_returns_ready_snapshot_for_accessible_controls(monk
         },
     )
 
-    result = desktop_mod.inspect_app("Linear", role_filter="button", limit=20)
+    result = desktop_mod.inspect_app(
+        "Linear",
+        focus=True,
+        role_filter="button",
+        limit=20,
+    )
 
     assert result["ok"] is True
     assert result["action"] == "desktop.inspect_app"
@@ -6149,7 +6706,7 @@ def test_desktop_inspect_app_reports_limited_menu_visibility(monkeypatch) -> Non
         },
     )
 
-    result = desktop_mod.inspect_app("Calculator")
+    result = desktop_mod.inspect_app("Calculator", focus=True)
 
     assert result["ok"] is True
     assert result["summary"] == (
@@ -6803,34 +7360,75 @@ def test_desktop_type_into_ui_element_permission_failure_returns_recovery_target
     assert result["fallback_result"] == {"observe": observed}
 
 
-def test_app_status_reports_running_state(monkeypatch) -> None:
+def test_app_status_resolves_bundle_id_alias_without_target_apple_event(monkeypatch) -> None:
+    captured: dict[str, object] = {}
+
+    def forbidden_osascript(*_args, **_kwargs):
+        raise AssertionError("app.status must not send Apple Events to the target app")
+
+    def fake_jxa(script: str, args=None) -> dict:
+        captured["script"] = script
+        captured["args"] = args
+        return {
+            "ok": True,
+            "stdout": json.dumps({"running": True}),
+            "stderr": "",
+        }
+
     monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
     monkeypatch.setattr(
         desktop_mod,
-        "_run_osascript",
-        lambda _script, _args=None: {"ok": True, "stdout": "running", "stderr": ""},
+        "_resolve_installed_app",
+        lambda _app_name: {
+            "name": "wpsoffice",
+            "matched_name": "WPS Office",
+            "metadata": {"bundle_id": "com.kingsoft.wpsoffice.mac"},
+        },
     )
+    monkeypatch.setattr(desktop_mod, "_run_osascript", forbidden_osascript)
+    monkeypatch.setattr(desktop_mod, "_run_jxa", fake_jxa)
 
-    result = desktop_mod.app_status("Google Chrome")
+    result = desktop_mod.app_status("WPS")
 
     assert result["ok"] is True
     assert result["action"] == "app.status"
-    assert result["summary"] == "Google Chrome is running"
+    assert result["summary"] == "WPS is running"
     assert result["permission_error"] is False
     assert result["fallback_used"] is False
     assert result["data"] == {
-        "app_name": "Google Chrome",
+        "app_name": "WPS",
         "running": True,
         "status": "running",
     }
+    criteria = json.loads(captured["args"][0])
+    assert criteria == {
+        "bundle_id": "com.kingsoft.wpsoffice.mac",
+        "names": ["WPS Office", "wpsoffice", "WPS"],
+    }
+    assert "NSWorkspace" in captured["script"]
+    assert "runningApplications" in captured["script"]
+    assert "activate" not in captured["script"]
+    assert "frontmostApplication" not in captured["script"]
 
 
 def test_app_status_reports_not_running_state(monkeypatch) -> None:
     monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod, "_resolve_installed_app", lambda _app_name: {})
     monkeypatch.setattr(
         desktop_mod,
         "_run_osascript",
-        lambda _script, _args=None: {"ok": True, "stdout": "not_running", "stderr": ""},
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("app.status must not use target-application AppleScript")
+        ),
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "_run_jxa",
+        lambda _script, _args=None: {
+            "ok": True,
+            "stdout": json.dumps({"running": False}),
+            "stderr": "",
+        },
     )
 
     result = desktop_mod.app_status("Slack")
@@ -6843,6 +7441,36 @@ def test_app_status_reports_not_running_state(monkeypatch) -> None:
         "running": False,
         "status": "not_running",
     }
+
+
+def test_app_status_jxa_failure_fails_closed(monkeypatch) -> None:
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod, "_resolve_installed_app", lambda _app_name: {})
+    monkeypatch.setattr(
+        desktop_mod,
+        "_run_osascript",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("app.status must not fall back to target-application AppleScript")
+        ),
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "_run_jxa",
+        lambda _script, _args=None: {
+            "ok": False,
+            "error": "jxa query timed out",
+            "permission_error": False,
+        },
+    )
+
+    result = desktop_mod.app_status("WPS Office")
+
+    assert result["ok"] is False
+    assert result["action"] == "app.status"
+    assert result["summary"] == "app.status failed"
+    assert result["error"] == "jxa query timed out"
+    assert result["permission_error"] is False
+    assert result["data"] == {"app_name": "WPS Office"}
 
 
 def test_desktop_close_window_uses_standard_foreground_shortcut(monkeypatch) -> None:
@@ -7541,11 +8169,13 @@ def test_desktop_notes_create_uses_macos_notes_automation(monkeypatch) -> None:
 
     assert result["ok"] is True
     assert result["action"] == "notes.create"
+    assert result["postcondition_verified"] is True
     assert result["data"] == {
         "title": "hello world",
         "body_length": 11,
         "folder_name": "",
         "note_id": "note-id",
+        "postcondition_verified": True,
     }
     assert "tell application \"Notes\"" in calls[0][0]
     assert calls[0][1] == ["hello world", "hello world", ""]
@@ -7565,11 +8195,13 @@ def test_desktop_reminders_create_uses_macos_reminders_automation(monkeypatch) -
 
     assert result["ok"] is True
     assert result["action"] == "reminders.create"
+    assert result["postcondition_verified"] is True
     assert result["data"] == {
         "title": "开会",
         "due_at": "2026-06-25T15:00",
         "list_name": "",
         "reminder_id": "reminder-id",
+        "postcondition_verified": True,
     }
     assert "tell application \"Reminders\"" in calls[0][0]
     assert calls[0][1] == ["开会", "", "true", "2026", "6", "25", "15", "0"]
@@ -7589,12 +8221,14 @@ def test_desktop_calendar_create_event_defaults_to_one_hour(monkeypatch) -> None
 
     assert result["ok"] is True
     assert result["action"] == "calendar.create_event"
+    assert result["postcondition_verified"] is True
     assert result["data"] == {
         "title": "开会",
         "start_at": "2026-06-25T15:00",
         "end_at": "2026-06-25T16:00",
         "calendar_name": "",
         "event_id": "event-id",
+        "postcondition_verified": True,
     }
     assert "tell application \"Calendar\"" in calls[0][0]
     assert calls[0][1] == [
@@ -7829,7 +8463,9 @@ def test_apple_music_permission_failure_returns_music_and_automation_targets(mon
     monkeypatch.setattr(
         desktop_mod,
         "app_open",
-        lambda app_name: {"ok": True, "action": "app.open", "data": {"app_name": app_name}},
+        lambda _app_name: (_ for _ in ()).throw(
+            AssertionError("background-safe playback must not open Music after an error")
+        ),
     )
 
     result = desktop_mod.apple_music_play("超时空辉夜姬")
@@ -7865,25 +8501,282 @@ def test_apple_music_permission_failure_returns_music_and_automation_targets(mon
             "risk_level": "low",
         },
     ]
-    assert result["fallback_used"] is True
+    assert result["fallback_used"] is False
 
 
-def test_apple_music_play_opens_search_when_track_is_not_in_library(monkeypatch) -> None:
-    subprocess_calls = []
+def _verified_music_focus_result() -> dict:
+    return {
+        "ok": True,
+        "action": "app.focus",
+        "data": {
+            "app_name": "Music",
+            "focus_verified": True,
+            "focus_strategy": "electron_native_bridge",
+            "frontmost_app": "Music",
+        },
+        "permission_error": False,
+        "fallback_used": False,
+    }
 
-    def fake_run(command, *, capture_output=None, text=None, timeout=None, check=None):
-        subprocess_calls.append(
-            {
-                "command": command,
-                "capture_output": capture_output,
-                "text": text,
-                "timeout": timeout,
-                "check": check,
-            }
-        )
-        return subprocess.CompletedProcess(command, 0, "", "")
+
+def _mock_empty_apple_music_catalog(monkeypatch) -> None:
+    class EmptyCatalogResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args) -> None:
+            return None
+
+        def read(self, _limit=-1) -> bytes:
+            return b'{"resultCount":0,"results":[]}'
+
+    monkeypatch.setattr(
+        desktop_mod,
+        "urlopen_with_bundled_ca",
+        lambda _request, *, timeout=None: EmptyCatalogResponse(),
+    )
+
+
+def test_apple_music_play_uses_background_safe_library_automation(monkeypatch) -> None:
+    scripts: list[str] = []
+
+    def fake_osascript(script: str, _args=None) -> dict:
+        scripts.append(script)
+        return {
+            "ok": True,
+            "stdout": (
+                "played|超时空辉夜姬|花谱|playing|track|"
+                "超时空辉夜姬 OST|identity_verified"
+            ),
+            "stderr": "",
+        }
 
     monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod, "_run_osascript", fake_osascript)
+    monkeypatch.setattr(
+        desktop_mod,
+        "urlopen_with_bundled_ca",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("local library hits must remain zero-network")
+        ),
+        raising=False,
+    )
+
+    result = desktop_mod.apple_music_play("超时空辉夜姬")
+
+    assert result["ok"] is True
+    assert result["data"]["track"] == "超时空辉夜姬"
+    assert result["data"]["album"] == "超时空辉夜姬 OST"
+    assert result["data"]["match_kind"] == "track"
+    assert result["data"]["track_identity_verified"] is True
+    assert result["data"]["player_state"] == "playing"
+    assert result["data"]["playback_started"] is True
+    assert result["data"]["background_safe"] is True
+    assert result["data"]["foreground_action_taken"] is False
+    assert len(scripts) == 1
+    assert "activate" not in scripts[0].lower()
+
+
+def test_apple_music_library_fuzzy_candidates_never_play(monkeypatch) -> None:
+    scripts: list[str] = []
+
+    def fake_osascript(script: str, _args=None, **_kwargs) -> dict:
+        scripts.append(script)
+        return {
+            "ok": True,
+            "stdout": "no_exact_match|Remember (Piano Cover)||",
+            "stderr": "",
+        }
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod, "_run_osascript", fake_osascript)
+    _mock_empty_apple_music_catalog(monkeypatch)
+
+    result = desktop_mod.apple_music_play("Remember")
+
+    assert result["ok"] is True
+    assert result["data"]["outcome"] == "partial"
+    assert result["data"]["playback_started"] is False
+    assert result["data"]["library_match_status"] == "no_exact_match"
+    assert len(scripts) == 1
+    assert "set trackRef to item 1 of matches" not in scripts[0]
+    assert "play trackRef" not in scripts[0]
+
+
+def test_apple_music_library_ambiguous_exact_track_never_plays(monkeypatch) -> None:
+    scripts: list[str] = []
+
+    def fake_osascript(script: str, _args=None, **_kwargs) -> dict:
+        scripts.append(script)
+        return {
+            "ok": True,
+            "stdout": "ambiguous_exact_track|Remember|2|",
+            "stderr": "",
+        }
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod, "_run_osascript", fake_osascript)
+    _mock_empty_apple_music_catalog(monkeypatch)
+
+    result = desktop_mod.apple_music_play("Remember")
+
+    assert result["ok"] is True
+    assert result["data"]["outcome"] == "partial"
+    assert result["data"]["playback_started"] is False
+    assert result["data"]["library_match_status"] == "ambiguous_exact_track"
+    assert "unambiguous exact" in result["summary"]
+    assert len(scripts) == 1
+    assert "exactTrackCount is 1" in scripts[0]
+
+
+def test_apple_music_library_unique_exact_track_is_atomic_and_zero_network(
+    monkeypatch,
+) -> None:
+    scripts: list[str] = []
+
+    def fake_osascript(script: str, _args=None, **_kwargs) -> dict:
+        scripts.append(script)
+        return {
+            "ok": True,
+            "stdout": (
+                "played|Remember|KAF|playing|track|"
+                "Cosmic Princess Kaguya!|identity_verified"
+            ),
+            "stderr": "",
+        }
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod, "_run_osascript", fake_osascript)
+    monkeypatch.setattr(
+        desktop_mod,
+        "urlopen_with_bundled_ca",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("an exact local track must not use the network")
+        ),
+    )
+
+    result = desktop_mod.apple_music_play("Remember")
+
+    assert result["ok"] is True
+    assert result["data"]["track"] == "Remember"
+    assert result["data"]["artist"] == "KAF"
+    assert result["data"]["album"] == "Cosmic Princess Kaguya!"
+    assert result["data"]["match_kind"] == "track"
+    assert result["data"]["track_identity_verified"] is True
+    assert result["data"]["player_state"] == "playing"
+    assert result["data"]["playback_started"] is True
+    assert len(scripts) == 1
+    assert scripts[0].index("exactTrackCount is 1") < scripts[0].index(
+        "play selectedTrack"
+    )
+
+
+def test_apple_music_library_receipt_cannot_claim_a_nonmatching_track_succeeded(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(
+        desktop_mod,
+        "_run_osascript",
+        lambda _script, _args=None, **_kwargs: {
+            "ok": True,
+            "stdout": (
+                "played|Remember (Piano Cover)|Cover Artist|playing|track|"
+                "Covers|identity_verified"
+            ),
+            "stderr": "",
+        },
+    )
+
+    result = desktop_mod.apple_music_play("Remember")
+
+    assert result["ok"] is True
+    assert result["data"]["outcome"] == "partial"
+    assert result["data"]["track_identity_verified"] is False
+    assert result["data"]["playback_state_unverified"] is True
+    assert result["data"]["playback_started"] is False
+
+
+def test_apple_music_library_exact_album_uses_stable_first_track(monkeypatch) -> None:
+    scripts: list[str] = []
+
+    def fake_osascript(script: str, _args=None, **_kwargs) -> dict:
+        scripts.append(script)
+        return {
+            "ok": True,
+            "stdout": (
+                "played|Remember|KAF|playing|album|"
+                "Cosmic Princess Kaguya!|identity_verified"
+            ),
+            "stderr": "",
+        }
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod, "_run_osascript", fake_osascript)
+    monkeypatch.setattr(
+        desktop_mod,
+        "urlopen_with_bundled_ca",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("an exact local album must not use the network")
+        ),
+    )
+
+    result = desktop_mod.apple_music_play("Cosmic Princess Kaguya!")
+
+    assert result["ok"] is True
+    assert result["data"]["match_kind"] == "album"
+    assert result["data"]["album"] == "Cosmic Princess Kaguya!"
+    assert result["data"]["track"] == "Remember"
+    assert result["data"]["playback_started"] is True
+    assert len(scripts) == 1
+    assert "disc number" in scripts[0]
+    assert "track number" in scripts[0]
+    assert "database ID" in scripts[0]
+    assert scripts[0].index("exactAlbumIdentityCount is not 1") < scripts[0].index(
+        "play selectedTrack"
+    )
+
+
+def test_apple_music_library_allows_only_terminal_title_punctuation_variants(
+    monkeypatch,
+) -> None:
+    received_args: list[str] = []
+
+    def fake_osascript(_script: str, args=None, **_kwargs) -> dict:
+        received_args.extend(str(value) for value in (args or []))
+        if "Cosmic Princess Kaguya!" not in received_args:
+            return {"ok": True, "stdout": "not_found|||", "stderr": ""}
+        return {
+            "ok": True,
+            "stdout": (
+                "played|Remember|KAF|playing|album|"
+                "Cosmic Princess Kaguya!|identity_verified"
+            ),
+            "stderr": "",
+        }
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod, "_run_osascript", fake_osascript)
+
+    result = desktop_mod.apple_music_play("Cosmic Princess Kaguya")
+
+    assert result["ok"] is True
+    assert result["data"]["status"] == "played"
+    assert result["data"]["match_kind"] == "album"
+    assert result["data"]["album"] == "Cosmic Princess Kaguya!"
+    assert result["data"]["track_identity_verified"] is True
+    assert "Cosmic Princess Kaguya!" in received_args
+    assert "Cosmic Princess Kaguya—" not in received_args
+
+
+def test_apple_music_play_returns_background_partial_when_track_is_not_in_library(
+    monkeypatch,
+) -> None:
+    def unexpected_foreground_helper(*_args, **_kwargs):
+        raise AssertionError("background-safe playback must not invoke foreground helpers")
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    _mock_empty_apple_music_catalog(monkeypatch)
     monkeypatch.setattr(
         desktop_mod,
         "_run_osascript",
@@ -7893,44 +8786,1731 @@ def test_apple_music_play_opens_search_when_track_is_not_in_library(monkeypatch)
             "stderr": "",
         },
     )
-    monkeypatch.setattr(desktop_mod.subprocess, "run", fake_run)
+    monkeypatch.setattr(desktop_mod, "app_open", unexpected_foreground_helper)
+    monkeypatch.setattr(desktop_mod, "_open_apple_music_search", unexpected_foreground_helper)
+    monkeypatch.setattr(
+        desktop_mod,
+        "_focus_apple_music_after_search_dispatch",
+        unexpected_foreground_helper,
+    )
 
     result = desktop_mod.apple_music_play("超时空辉夜姬")
 
-    search_url = "https://music.apple.com/search?term=%E8%B6%85%E6%97%B6%E7%A9%BA%E8%BE%89%E5%A4%9C%E5%A7%AC"
-    assert result["ok"] is False
+    assert result["ok"] is True
     assert result["action"] == "media.apple_music_play"
-    assert result["summary"] == "Could not directly play 超时空辉夜姬; opened Apple Music search."
-    assert result["data"] == {
-        "query": "超时空辉夜姬",
-        "status": "not_found",
-        "search_url": search_url,
-        "search_opened": True,
-    }
+    assert result["summary"] == (
+        "Apple Music local library and official catalog did not contain an exact "
+        "match for 超时空辉夜姬; no foreground search was opened."
+    )
+    assert "error" not in result
+    assert result["data"]["query"] == "超时空辉夜姬"
+    assert result["data"]["status"] == "not_found"
+    assert result["data"]["background_safe"] is True
+    assert result["data"]["library_search_completed"] is True
+    assert result["data"]["catalog_lookup_completed"] is True
+    assert result["data"]["catalog_match_verified"] is False
+    assert result["data"]["foreground_action_taken"] is False
+    assert result["data"]["target_app"] == "Music"
+    assert result["data"]["search_opened"] is False
+    assert result["data"]["playback_started"] is False
+    assert result["data"]["outcome"] == "partial"
+    assert result["data"]["user_action_required"] is False
     assert result["permission_error"] is False
-    assert result["fallback_used"] is True
-    assert result["fallback"] == "apple_music_search"
-    assert result["fallback_result"] == {
-        "ok": True,
-        "action": "media.apple_music.search",
-        "summary": "Opened Apple Music search for 超时空辉夜姬",
-        "data": {
-            "query": "超时空辉夜姬",
-            "url": search_url,
-            "open_target": "apple_music_search",
+    assert result["fallback_used"] is False
+
+
+def test_apple_music_play_uses_exact_official_catalog_match_without_taking_foreground(
+    monkeypatch,
+) -> None:
+    scripts: list[str] = []
+    snapshot_count = 0
+    requested_urls: list[str] = []
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args) -> None:
+            return None
+
+        def read(self, _limit=-1) -> bytes:
+            return json.dumps(
+                {
+                    "resultCount": 3,
+                    "results": [
+                        {
+                            "kind": "song",
+                            "trackId": 101,
+                            "trackName": "超时空辉夜姬 (Piano Cover)",
+                            "artistName": "Cover Artist",
+                            "collectionName": "超时空辉夜姬",
+                            "trackNumber": 1,
+                            "trackViewUrl": "https://music.apple.com/us/album/cover/1?i=101",
+                        },
+                        {
+                            "kind": "song",
+                            "trackId": 102,
+                            "trackName": "The Moon",
+                            "artistName": "KAF",
+                            "collectionName": "超时空辉夜姬",
+                            "trackNumber": 2,
+                            "trackViewUrl": "https://music.apple.com/us/album/the-moon/2?i=102",
+                        },
+                        {
+                            "kind": "song",
+                            "trackId": 103,
+                            "trackName": "Ready For The Princess",
+                            "artistName": "KAF",
+                            "collectionName": "超时空辉夜姬",
+                            "trackNumber": 1,
+                            "trackViewUrl": "https://music.apple.com/us/album/ready/3?i=103",
+                        },
+                    ],
+                }
+            ).encode("utf-8")
+
+    def fake_urlopen(request, *, timeout=None):
+        assert timeout is not None and timeout > 0
+        requested_urls.append(request.full_url)
+        return FakeResponse()
+
+    def fake_osascript(script: str, args=None, **_kwargs) -> dict:
+        nonlocal snapshot_count
+        scripts.append(script)
+        if "search library playlist 1" in script:
+            return {"ok": True, "stdout": "not_found|超时空辉夜姬|", "stderr": ""}
+        if "open location" in script:
+            assert args == ["https://music.apple.com/us/album/ready/3?i=103"]
+            return {"ok": True, "stdout": "dispatched", "stderr": ""}
+        if "play current track" in script:
+            return {"ok": True, "stdout": "played", "stderr": ""}
+        if "player state" in script:
+            snapshot_count += 1
+            states = {
+                1: "status|playing|Old Song|Old Artist",
+                2: "status|paused|Ready For The Princess|KAF",
+                3: "status|playing|Ready For The Princess|KAF",
+            }
+            return {"ok": True, "stdout": states[min(snapshot_count, 3)], "stderr": ""}
+        raise AssertionError(f"unexpected Music AppleScript: {script}")
+
+    frontmost = iter(["Codex", "Codex"])
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod, "_run_osascript", fake_osascript)
+    monkeypatch.setattr(desktop_mod, "urlopen_with_bundled_ca", fake_urlopen, raising=False)
+    monkeypatch.setattr(
+        desktop_mod,
+        "_appkit_frontmost_app_name",
+        lambda: {"ok": True, "app_name": next(frontmost, "Codex")},
+    )
+    monkeypatch.setattr(desktop_mod.time, "sleep", lambda _seconds: None)
+
+    result = desktop_mod.apple_music_play("超时空辉夜姬")
+
+    assert result["ok"] is True
+    assert result["data"]["catalog_match_verified"] is True
+    assert result["data"]["track_identity_verified"] is True
+    assert result["data"]["track"] == "Ready For The Princess"
+    assert result["data"]["artist"] == "KAF"
+    assert result["data"]["player_state"] == "playing"
+    assert result["data"]["playback_started"] is True
+    assert result["data"]["foreground_action_taken"] is False
+    assert result["data"]["frontmost_before"] == "Codex"
+    assert result["data"]["frontmost_after"] == "Codex"
+    assert len(requested_urls) == 1
+    assert "entity=song" in requested_urls[0]
+    assert "limit=" in requested_urls[0]
+    combined_scripts = "\n".join(scripts).lower()
+    assert "activate" not in combined_scripts
+    assert "system events" not in combined_scripts
+
+
+def test_apple_music_catalog_prefers_exact_collection_over_exact_track_name() -> None:
+    match = desktop_mod._apple_music_catalog_match(
+        "Cosmic Princess Kaguya!",
+        [
+            {
+                "kind": "song",
+                "trackId": 201,
+                "trackName": "Cosmic Princess Kaguya!",
+                "artistName": "Unrelated Artist",
+                "collectionName": "Unrelated Album",
+                "trackNumber": 1,
+                "trackViewUrl": "https://music.apple.com/us/album/wrong/1?i=201",
+            },
+            {
+                "kind": "song",
+                "trackId": 202,
+                "trackName": "Remember",
+                "artistName": "KAF",
+                "collectionName": "Cosmic Princess Kaguya!",
+                "trackNumber": 1,
+                "trackViewUrl": "https://music.apple.com/us/album/right/2?i=202",
+            },
+        ],
+    )
+
+    assert match is not None
+    assert match["track_id"] == "202"
+    assert match["match_kind"] == "collection"
+
+
+def test_apple_music_catalog_rejects_same_name_from_multiple_collection_ids() -> None:
+    match = desktop_mod._apple_music_catalog_match(
+        "Cosmic Princess Kaguya!",
+        [
+            {
+                "kind": "song",
+                "trackId": 211,
+                "collectionId": 9001,
+                "trackName": "Remember",
+                "artistName": "KAF",
+                "collectionName": "Cosmic Princess Kaguya!",
+                "trackNumber": 1,
+                "trackViewUrl": "https://music.apple.com/us/album/one/1?i=211",
+            },
+            {
+                "kind": "song",
+                "trackId": 212,
+                "collectionId": 9002,
+                "trackName": "Another Remember",
+                "artistName": "Different Artist",
+                "collectionName": "Cosmic Princess Kaguya!",
+                "trackNumber": 1,
+                "trackViewUrl": "https://music.apple.com/us/album/two/2?i=212",
+            },
+        ],
+    )
+
+    assert match is None
+
+
+def test_apple_music_catalog_missing_collection_ids_use_conservative_artist_identity() -> None:
+    match = desktop_mod._apple_music_catalog_match(
+        "Cosmic Princess Kaguya!",
+        [
+            {
+                "kind": "song",
+                "trackId": 213,
+                "trackName": "Remember",
+                "artistName": "KAF",
+                "collectionName": "Cosmic Princess Kaguya!",
+                "trackNumber": 1,
+                "trackViewUrl": "https://music.apple.com/us/album/one/1?i=213",
+            },
+            {
+                "kind": "song",
+                "trackId": 214,
+                "trackName": "Another Remember",
+                "artistName": "Different Artist",
+                "collectionName": "Cosmic Princess Kaguya!",
+                "trackNumber": 2,
+                "trackViewUrl": "https://music.apple.com/us/album/two/2?i=214",
+            },
+        ],
+    )
+
+    assert match is None
+
+
+def test_apple_music_catalog_rejects_ambiguous_exact_track_names() -> None:
+    match = desktop_mod._apple_music_catalog_match(
+        "Remember",
+        [
+            {
+                "kind": "song",
+                "trackId": 301,
+                "trackName": "Remember",
+                "artistName": "KAF",
+                "collectionName": "Cosmic Princess Kaguya!",
+                "trackNumber": 1,
+                "trackViewUrl": "https://music.apple.com/us/album/one/1?i=301",
+            },
+            {
+                "kind": "song",
+                "trackId": 302,
+                "trackName": "Remember",
+                "artistName": "Different Artist",
+                "collectionName": "Different Album",
+                "trackNumber": 4,
+                "trackViewUrl": "https://music.apple.com/us/album/two/2?i=302",
+            },
+        ],
+    )
+
+    assert match is None
+
+
+def test_apple_music_catalog_accepts_a_unique_exact_track_name() -> None:
+    match = desktop_mod._apple_music_catalog_match(
+        "Remember",
+        [
+            {
+                "kind": "song",
+                "trackId": 303,
+                "trackName": "Remember",
+                "artistName": "KAF",
+                "collectionName": "Cosmic Princess Kaguya!",
+                "trackNumber": 1,
+                "trackViewUrl": "https://music.apple.com/us/album/one/1?i=303",
+            }
+        ],
+    )
+
+    assert match is not None
+    assert match["track_id"] == "303"
+    assert match["match_kind"] == "track"
+
+
+@pytest.mark.parametrize(
+    ("query", "catalog_title"),
+    [
+        ("WALL-E", "WALLE"),
+        ("A/B", "AB"),
+        ("Foo (Bar)", "FooBar"),
+        ("Re:Member", "Remember"),
+    ],
+)
+def test_apple_music_catalog_semantic_punctuation_is_not_discarded(
+    query: str,
+    catalog_title: str,
+) -> None:
+    match = desktop_mod._apple_music_catalog_match(
+        query,
+        [
+            {
+                "kind": "song",
+                "trackId": 304,
+                "trackName": catalog_title,
+                "artistName": "Example Artist",
+                "collectionName": "Example Album",
+                "trackNumber": 1,
+                "trackViewUrl": "https://music.apple.com/us/album/example/1?i=304",
+            }
+        ],
+    )
+
+    assert match is None
+
+
+@pytest.mark.parametrize(
+    ("query", "catalog_title"),
+    [
+        ("What?", "What!"),
+        ("Foo!!", "Foo?"),
+        ("Foo", "Foo!!"),
+    ],
+)
+def test_apple_music_catalog_terminal_punctuation_tolerance_is_asymmetric(
+    query: str,
+    catalog_title: str,
+) -> None:
+    match = desktop_mod._apple_music_catalog_match(
+        query,
+        [
+            {
+                "kind": "song",
+                "trackId": 306,
+                "trackName": catalog_title,
+                "artistName": "Example Artist",
+                "collectionName": "Example Album",
+                "trackNumber": 1,
+                "trackViewUrl": "https://music.apple.com/us/album/example/1?i=306",
+            }
+        ],
+    )
+
+    assert match is None
+
+
+@pytest.mark.parametrize("terminal_punctuation", ["!", "！", "?", "？"])
+def test_apple_music_catalog_tolerates_omitted_terminal_exclamation_or_question_mark(
+    terminal_punctuation: str,
+) -> None:
+    match = desktop_mod._apple_music_catalog_match(
+        "Cosmic Princess Kaguya",
+        [
+            {
+                "kind": "song",
+                "trackId": 305,
+                "trackName": "Remember",
+                "artistName": "KAF",
+                "collectionName": f"Cosmic Princess Kaguya{terminal_punctuation}",
+                "trackNumber": 1,
+                "trackViewUrl": "https://music.apple.com/us/album/kaguya/1?i=305",
+            }
+        ],
+    )
+
+    assert match is not None
+    assert match["track_id"] == "305"
+    assert match["match_kind"] == "collection"
+
+
+@pytest.mark.parametrize(
+    ("query", "reported_track"),
+    [
+        ("WALL-E", "WALLE"),
+        ("A/B", "AB"),
+        ("Foo (Bar)", "FooBar"),
+        ("Re:Member", "Remember"),
+    ],
+)
+def test_apple_music_library_receipt_preserves_semantic_punctuation(
+    monkeypatch,
+    query: str,
+    reported_track: str,
+) -> None:
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(
+        desktop_mod,
+        "_run_osascript",
+        lambda _script, _args=None, **_kwargs: {
+            "ok": True,
+            "stdout": (
+                f"played|{reported_track}|Example Artist|playing|track|"
+                "Example Album|identity_verified"
+            ),
+            "stderr": "",
         },
-        "permission_error": False,
-        "fallback_used": False,
-    }
-    assert subprocess_calls == [
-        {
-            "command": ["open", "-a", "Music", search_url],
-            "capture_output": True,
-            "text": True,
-            "timeout": 10,
-            "check": False,
-        }
+    )
+
+    result = desktop_mod.apple_music_play(query)
+
+    assert result["ok"] is True
+    assert result["data"]["outcome"] == "partial"
+    assert result["data"]["track_identity_verified"] is False
+    assert result["data"]["playback_started"] is False
+
+
+@pytest.mark.parametrize(
+    ("query", "reported_track"),
+    [
+        ("What?", "What!"),
+        ("Foo!!", "Foo?"),
+        ("Foo", "Foo!!"),
+    ],
+)
+def test_apple_music_library_receipt_terminal_punctuation_is_asymmetric(
+    monkeypatch,
+    query: str,
+    reported_track: str,
+) -> None:
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(
+        desktop_mod,
+        "_run_osascript",
+        lambda _script, _args=None, **_kwargs: {
+            "ok": True,
+            "stdout": (
+                f"played|{reported_track}|Example Artist|playing|track|"
+                "Example Album|identity_verified"
+            ),
+            "stderr": "",
+        },
+    )
+
+    result = desktop_mod.apple_music_play(query)
+
+    assert result["ok"] is True
+    assert result["data"]["outcome"] == "partial"
+    assert result["data"]["track_identity_verified"] is False
+    assert result["data"]["playback_started"] is False
+
+
+def test_apple_music_local_name_variants_do_not_rewrite_explicit_terminal_punctuation() -> None:
+    assert desktop_mod._apple_music_terminal_punctuation_variants("What?") == [
+        "What?"
     ]
+    assert desktop_mod._apple_music_terminal_punctuation_variants("Foo!!") == [
+        "Foo!!"
+    ]
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://music.apple.com/us/album/x/1?i=103",
+        "https://evil.example/us/album/x/1?i=103",
+        "https://user@music.apple.com/us/album/x/1?i=103",
+        "https://music.apple.com:444/us/album/x/1?i=103",
+        "https://music.apple.com/us/album/x/1?i=999",
+        "https://music.apple.com/us/album/x/1",
+    ],
+)
+def test_apple_music_catalog_rejects_untrusted_track_urls(url: str) -> None:
+    assert desktop_mod._apple_music_catalog_url_is_valid(url, 103) is False
+
+
+def test_apple_music_catalog_api_failure_stays_an_honest_background_partial(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(
+        desktop_mod,
+        "_run_osascript",
+        lambda script, _args=None, **_kwargs: {
+            "ok": True,
+            "stdout": "not_found|超时空辉夜姬|",
+            "stderr": "",
+        }
+        if "search library playlist 1" in script
+        else (_ for _ in ()).throw(AssertionError("API failure must not drive Music UI")),
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "urlopen_with_bundled_ca",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(TimeoutError("offline")),
+    )
+
+    result = desktop_mod.apple_music_play("超时空辉夜姬")
+
+    assert result["ok"] is True
+    assert "error" not in result
+    assert result["data"]["status"] == "not_found"
+    assert result["data"]["outcome"] == "partial"
+    assert result["data"]["catalog_lookup_completed"] is False
+    assert result["data"]["catalog_lookup_status"] == "catalog_lookup_TimeoutError"
+    assert result["data"]["foreground_action_taken"] is False
+    assert result["data"]["playback_started"] is False
+    assert "official catalog lookup did not complete" in result["summary"]
+    assert "did not contain an exact match" not in result["summary"]
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        {"resultCount": 0, "results": None},
+        {"resultCount": 0, "results": {}},
+    ],
+)
+def test_apple_music_catalog_rejects_missing_or_non_list_results(
+    monkeypatch,
+    payload: dict,
+) -> None:
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args) -> None:
+            return None
+
+        def read(self, _limit=-1) -> bytes:
+            return json.dumps(payload).encode("utf-8")
+
+    monkeypatch.setattr(
+        desktop_mod,
+        "urlopen_with_bundled_ca",
+        lambda *_args, **_kwargs: FakeResponse(),
+    )
+
+    match, error = desktop_mod._fetch_apple_music_catalog_match(
+        "Cosmic Princess Kaguya!",
+        deadline=desktop_mod.time.monotonic() + 30,
+    )
+
+    assert match is None
+    assert error == "catalog_response_invalid"
+
+
+def test_apple_music_catalog_foreground_switch_never_reports_background_success(
+    monkeypatch,
+) -> None:
+    snapshot_count = 0
+
+    def fake_osascript(script: str, _args=None, **_kwargs) -> dict:
+        nonlocal snapshot_count
+        if "open location" in script:
+            return {"ok": True, "stdout": "dispatched", "stderr": ""}
+        if "play current track" in script:
+            return {"ok": True, "stdout": "played", "stderr": ""}
+        if "player state" in script:
+            snapshot_count += 1
+            states = {
+                1: "status|playing|Old Song|Old Artist",
+                2: "status|paused|Ready For The Princess|KAF",
+                3: "status|playing|Ready For The Princess|KAF",
+            }
+            return {"ok": True, "stdout": states[min(snapshot_count, 3)], "stderr": ""}
+        raise AssertionError("unexpected AppleScript")
+
+    frontmost = iter(["Codex", "Music", "Codex", "Codex", "Codex"])
+    monkeypatch.setattr(desktop_mod, "_run_osascript", fake_osascript)
+    monkeypatch.setattr(
+        desktop_mod,
+        "_appkit_frontmost_app_name",
+        lambda: {"ok": True, "app_name": next(frontmost, "Codex")},
+    )
+    monkeypatch.setattr(desktop_mod.time, "sleep", lambda _seconds: None)
+
+    result = desktop_mod._apple_music_play_catalog_match(
+        "超时空辉夜姬",
+        {
+            "track_id": "103",
+            "track": "Ready For The Princess",
+            "artist": "KAF",
+            "collection": "超时空辉夜姬",
+            "track_url": "https://music.apple.com/us/album/ready/3?i=103",
+        },
+        deadline=desktop_mod.time.monotonic() + 30,
+    )
+
+    assert result["ok"] is True
+    assert result["data"]["outcome"] == "partial"
+    assert result["data"]["playback_started"] is False
+    assert result["data"]["foreground_action_taken"] is True
+    assert result["data"]["background_safe"] is False
+    assert result["data"]["frontmost_after"] == "Music"
+    assert "Music" in result["data"]["frontmost_observations"]
+    assert result["data"]["foreground_observation_verified"] is False
+
+
+def test_apple_music_catalog_missing_initial_foreground_observation_never_dispatches(
+    monkeypatch,
+) -> None:
+    dispatch_calls = 0
+
+    def fake_osascript(script: str, _args=None, **_kwargs) -> dict:
+        nonlocal dispatch_calls
+        if "open location" in script:
+            dispatch_calls += 1
+            return {"ok": True, "stdout": "dispatched", "stderr": ""}
+        if "player state" in script:
+            return {
+                "ok": True,
+                "stdout": "status|playing|Ready For The Princess|KAF",
+                "stderr": "",
+            }
+        if "play current track" in script:
+            return {"ok": True, "stdout": "played", "stderr": ""}
+        raise AssertionError("unexpected AppleScript")
+
+    monkeypatch.setattr(desktop_mod, "_run_osascript", fake_osascript)
+    monkeypatch.setattr(
+        desktop_mod,
+        "_appkit_frontmost_app_name",
+        lambda: {"ok": False, "app_name": ""},
+    )
+    monkeypatch.setattr(desktop_mod.time, "sleep", lambda _seconds: None)
+
+    result = desktop_mod._apple_music_play_catalog_match(
+        "超时空辉夜姬",
+        {
+            "track_id": "103",
+            "track": "Ready For The Princess",
+            "artist": "KAF",
+            "collection": "超时空辉夜姬",
+            "track_url": "https://music.apple.com/us/album/ready/3?i=103",
+        },
+        deadline=desktop_mod.time.monotonic() + 30,
+    )
+
+    assert result["ok"] is True
+    assert result["data"]["outcome"] == "partial"
+    assert result["data"]["foreground_observation_verified"] is False
+    assert result["data"]["catalog_dispatch_verified"] is False
+    assert result["data"]["playback_started"] is False
+    assert dispatch_calls == 0
+
+
+def test_apple_music_catalog_switch_to_any_other_app_fails_closed_before_play(
+    monkeypatch,
+) -> None:
+    play_calls = 0
+    snapshot_count = 0
+
+    def fake_osascript(script: str, _args=None, **_kwargs) -> dict:
+        nonlocal play_calls, snapshot_count
+        if "open location" in script:
+            return {"ok": True, "stdout": "dispatched", "stderr": ""}
+        if "player state" in script:
+            snapshot_count += 1
+            stdout = (
+                "status|playing|Old Song|Old Artist"
+                if snapshot_count == 1
+                else "status|paused|Ready For The Princess|KAF"
+            )
+            return {"ok": True, "stdout": stdout, "stderr": ""}
+        if "play current track" in script:
+            play_calls += 1
+            return {"ok": True, "stdout": "played", "stderr": ""}
+        raise AssertionError("unexpected AppleScript")
+
+    frontmost = iter(["Codex", "Slack", "Slack", "Slack"])
+    monkeypatch.setattr(desktop_mod, "_run_osascript", fake_osascript)
+    monkeypatch.setattr(
+        desktop_mod,
+        "_appkit_frontmost_app_name",
+        lambda: {"ok": True, "app_name": next(frontmost, "Slack")},
+    )
+    monkeypatch.setattr(desktop_mod.time, "sleep", lambda _seconds: None)
+
+    result = desktop_mod._apple_music_play_catalog_match(
+        "超时空辉夜姬",
+        {
+            "track_id": "103",
+            "track": "Ready For The Princess",
+            "artist": "KAF",
+            "collection": "超时空辉夜姬",
+            "track_url": "https://music.apple.com/us/album/ready/3?i=103",
+        },
+        deadline=desktop_mod.time.monotonic() + 30,
+    )
+
+    assert result["ok"] is True
+    assert result["data"]["outcome"] == "partial"
+    assert result["data"]["foreground_observation_verified"] is False
+    assert result["data"]["foreground_action_taken"] is True
+    assert result["data"]["background_safe"] is False
+    assert result["data"]["playback_started"] is False
+    assert play_calls == 0
+
+
+def test_apple_music_catalog_identity_match_cannot_bypass_foreground_sampling(
+    monkeypatch,
+) -> None:
+    play_calls = 0
+    snapshot_count = 0
+
+    def fake_osascript(script: str, _args=None, **_kwargs) -> dict:
+        nonlocal play_calls, snapshot_count
+        if "open location" in script:
+            return {"ok": True, "stdout": "dispatched", "stderr": ""}
+        if "player state" in script:
+            snapshot_count += 1
+            stdout = (
+                "status|playing|Old Song|Old Artist"
+                if snapshot_count == 1
+                else "status|paused|Ready For The Princess|KAF"
+            )
+            return {"ok": True, "stdout": stdout, "stderr": ""}
+        if "play current track" in script:
+            play_calls += 1
+            return {"ok": True, "stdout": "played", "stderr": ""}
+        raise AssertionError("unexpected AppleScript")
+
+    frontmost = iter(["Codex", "Codex", "Slack"])
+    monkeypatch.setattr(desktop_mod, "_run_osascript", fake_osascript)
+    monkeypatch.setattr(
+        desktop_mod,
+        "_appkit_frontmost_app_name",
+        lambda: {"ok": True, "app_name": next(frontmost, "Slack")},
+    )
+    monkeypatch.setattr(desktop_mod.time, "sleep", lambda _seconds: None)
+
+    result = desktop_mod._apple_music_play_catalog_match(
+        "超时空辉夜姬",
+        {
+            "track_id": "103",
+            "track": "Ready For The Princess",
+            "artist": "KAF",
+            "collection": "超时空辉夜姬",
+            "track_url": "https://music.apple.com/us/album/ready/3?i=103",
+        },
+        deadline=desktop_mod.time.monotonic() + 30,
+    )
+
+    assert result["ok"] is True
+    assert result["data"]["outcome"] == "partial"
+    assert result["data"]["track_identity_verified"] is False
+    assert result["data"]["foreground_observation_verified"] is False
+    assert result["data"]["playback_started"] is False
+    assert play_calls == 0
+
+
+@pytest.mark.parametrize(
+    ("observed_track", "observed_artist"),
+    [
+        ("Old Song", "Old Artist"),
+        ("Ready For The Princess", "Wrong Artist"),
+    ],
+)
+def test_apple_music_catalog_never_plays_until_track_and_artist_both_match(
+    monkeypatch,
+    observed_track: str,
+    observed_artist: str,
+) -> None:
+    play_calls = 0
+    snapshot_count = 0
+
+    def fake_osascript(script: str, _args=None, **_kwargs) -> dict:
+        nonlocal play_calls, snapshot_count
+        if "open location" in script:
+            return {"ok": True, "stdout": "dispatched", "stderr": ""}
+        if "play current track" in script:
+            play_calls += 1
+            return {"ok": True, "stdout": "played", "stderr": ""}
+        if "player state" in script:
+            snapshot_count += 1
+            if snapshot_count == 1:
+                stdout = "status|playing|Old Song|Old Artist"
+            else:
+                stdout = f"status|playing|{observed_track}|{observed_artist}"
+            return {"ok": True, "stdout": stdout, "stderr": ""}
+        raise AssertionError("unexpected AppleScript")
+
+    monkeypatch.setattr(desktop_mod, "_run_osascript", fake_osascript)
+    monkeypatch.setattr(
+        desktop_mod,
+        "_appkit_frontmost_app_name",
+        lambda: {"ok": True, "app_name": "Codex"},
+    )
+    monkeypatch.setattr(desktop_mod.time, "sleep", lambda _seconds: None)
+
+    result = desktop_mod._apple_music_play_catalog_match(
+        "超时空辉夜姬",
+        {
+            "track_id": "103",
+            "track": "Ready For The Princess",
+            "artist": "KAF",
+            "collection": "超时空辉夜姬",
+            "track_url": "https://music.apple.com/us/album/ready/3?i=103",
+        },
+        deadline=desktop_mod.time.monotonic() + 30,
+    )
+
+    assert result["ok"] is True
+    assert result["data"]["outcome"] == "partial"
+    assert result["data"]["track_identity_verified"] is False
+    assert result["data"]["playback_started"] is False
+    assert play_calls == 0
+
+
+def test_apple_music_catalog_rechecks_identity_inside_the_play_script(
+    monkeypatch,
+) -> None:
+    snapshot_count = 0
+    guarded_play_scripts: list[str] = []
+
+    def fake_osascript(script: str, args=None, **_kwargs) -> dict:
+        nonlocal snapshot_count
+        if "open location" in script:
+            return {"ok": True, "stdout": "dispatched", "stderr": ""}
+        if "player state" in script:
+            snapshot_count += 1
+            stdout = (
+                "status|playing|Old Song|Old Artist"
+                if snapshot_count == 1
+                else "status|paused|Ready For The Princess|KAF"
+            )
+            return {"ok": True, "stdout": stdout, "stderr": ""}
+        if "play current track" in script:
+            guarded_play_scripts.append(script)
+            assert args == ["Ready For The Princess", "KAF"]
+            assert "expectedTrack" in script
+            assert "expectedArtist" in script
+            return {
+                "ok": True,
+                "stdout": "identity_changed|Different Song|Different Artist",
+                "stderr": "",
+            }
+        raise AssertionError("unexpected AppleScript")
+
+    monkeypatch.setattr(desktop_mod, "_run_osascript", fake_osascript)
+    monkeypatch.setattr(
+        desktop_mod,
+        "_appkit_frontmost_app_name",
+        lambda: {"ok": True, "app_name": "Codex"},
+    )
+    monkeypatch.setattr(desktop_mod.time, "sleep", lambda _seconds: None)
+
+    result = desktop_mod._apple_music_play_catalog_match(
+        "超时空辉夜姬",
+        {
+            "track_id": "103",
+            "track": "Ready For The Princess",
+            "artist": "KAF",
+            "collection": "超时空辉夜姬",
+            "track_url": "https://music.apple.com/us/album/ready/3?i=103",
+        },
+        deadline=desktop_mod.time.monotonic() + 30,
+    )
+
+    assert result["ok"] is True
+    assert result["data"]["outcome"] == "partial"
+    assert result["data"]["track_identity_verified"] is False
+    assert result["data"]["identity_changed_before_play"] is True
+    assert result["data"]["observed_track"] == "Different Song"
+    assert result["data"]["observed_artist"] == "Different Artist"
+    assert result["data"]["playback_started"] is False
+    assert len(guarded_play_scripts) == 1
+
+
+def test_apple_music_catalog_preserves_real_automation_permission_failures(
+    monkeypatch,
+) -> None:
+    dispatch_calls = 0
+
+    def fake_osascript(script: str, _args=None, **_kwargs) -> dict:
+        nonlocal dispatch_calls
+        if "player state" in script:
+            return {
+                "ok": False,
+                "error": "Not authorized to send Apple events to Music",
+                "stderr": "",
+            }
+        if "open location" in script:
+            dispatch_calls += 1
+        raise AssertionError("permission failure must stop before catalog dispatch")
+
+    monkeypatch.setattr(desktop_mod, "_run_osascript", fake_osascript)
+    monkeypatch.setattr(
+        desktop_mod,
+        "_appkit_frontmost_app_name",
+        lambda: {"ok": True, "app_name": "Codex"},
+    )
+
+    result = desktop_mod._apple_music_play_catalog_match(
+        "Cho Kaguya Hime",
+        {
+            "track_id": "103",
+            "track": "Cho Kaguya Hime",
+            "artist": "KAF",
+            "collection": "Cho Kaguya Hime",
+            "track_url": "https://music.apple.com/us/album/ready/3?i=103",
+        },
+        deadline=desktop_mod.time.monotonic() + 30,
+    )
+
+    assert result["ok"] is False
+    assert result["permission_error"] is True
+    assert "automation" in result["missing_permissions"]
+    assert dispatch_calls == 0
+
+
+def test_apple_music_search_open_failure_stays_failed(monkeypatch) -> None:
+    monkeypatch.setattr(
+        desktop_mod,
+        "_apple_music_search_result_evidence",
+        lambda _query: {"ok": False, "data": {"result_marker": False}},
+        raising=False,
+    )
+    monkeypatch.setattr(
+        desktop_mod.subprocess,
+        "run",
+        lambda command, **_kwargs: subprocess.CompletedProcess(
+            command,
+            1,
+            "",
+            "Music could not open URL",
+        ),
+    )
+
+    result = desktop_mod._open_apple_music_search("超时空辉夜姬")
+
+    assert result["ok"] is False
+    assert result["data"]["search_opened"] is False
+    assert result["data"]["dispatch_verified"] is False
+    assert result["data"]["foreground_verified"] is False
+
+
+def test_apple_music_search_refocuses_music_after_chatgpt_takes_foreground(
+    monkeypatch,
+) -> None:
+    observed_apps = iter(["ChatGPT", "Music", "Music"])
+    focus_calls: list[str] = []
+    matching = {
+        "ok": True,
+        "data": {
+            "result_marker": True,
+            "query_match": True,
+            "search_query_identity_verified": True,
+            "fingerprint": "matching-results",
+        },
+    }
+
+    monkeypatch.setattr(
+        desktop_mod.subprocess,
+        "run",
+        lambda command, **_kwargs: subprocess.CompletedProcess(command, 0, "", ""),
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "active_window",
+        lambda: {
+            "ok": True,
+            "action": "desktop.active_window",
+            "data": {"app_name": next(observed_apps), "title": ""},
+        },
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "_focus_apple_music_after_search_dispatch",
+        lambda: (
+            focus_calls.append("Music") or _verified_music_focus_result()
+        ),
+    )
+    monkeypatch.setattr(desktop_mod.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(
+        desktop_mod,
+        "_apple_music_search_result_evidence",
+        lambda _query: matching,
+    )
+
+    result = desktop_mod._open_apple_music_search("超时空辉夜姬")
+
+    assert result["ok"] is True
+    assert result["data"]["search_query_verified"] is True
+    assert focus_calls == ["Music"]
+    assert [
+        item["data"]["app_name"]
+        for item in result["fallback_result"]["foreground_observations"]
+    ] == ["ChatGPT", "Music"]
+    assert (
+        result["fallback_result"]["final_foreground_observation"]["data"]["app_name"]
+        == "Music"
+    )
+
+
+def test_apple_music_search_fails_closed_when_music_refocus_fails(
+    monkeypatch,
+) -> None:
+    observed_apps = iter(["ChatGPT", "Music"])
+    evidence_calls: list[str] = []
+
+    monkeypatch.setattr(
+        desktop_mod.subprocess,
+        "run",
+        lambda command, **_kwargs: subprocess.CompletedProcess(command, 0, "", ""),
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "active_window",
+        lambda: {
+            "ok": True,
+            "action": "desktop.active_window",
+            "data": {"app_name": next(observed_apps), "title": ""},
+        },
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "_focus_apple_music_after_search_dispatch",
+        lambda: {
+            "ok": False,
+            "action": "app.focus",
+            "error": "app_focus_not_verified",
+            "data": {
+                "app_name": "Music",
+                "focus_verified": False,
+                "frontmost_app": "ChatGPT",
+            },
+            "permission_error": False,
+        },
+    )
+    monkeypatch.setattr(desktop_mod.time, "sleep", lambda _seconds: None)
+
+    def result_evidence(query: str) -> dict:
+        evidence_calls.append(query)
+        return {
+            "ok": True,
+            "data": {
+                "result_marker": True,
+                "query_match": True,
+                "fingerprint": "matching-results",
+            },
+        }
+
+    monkeypatch.setattr(
+        desktop_mod,
+        "_apple_music_search_result_evidence",
+        result_evidence,
+    )
+
+    result = desktop_mod._open_apple_music_search("超时空辉夜姬")
+
+    assert result["ok"] is False
+    assert result["error"] == "app_focus_not_verified"
+    assert result["data"]["foreground_verified"] is False
+    assert result["data"]["search_query_verified"] is False
+    assert evidence_calls == ["超时空辉夜姬"]
+
+
+def test_apple_music_search_focus_prefers_electron_native_bridge(monkeypatch) -> None:
+    native_calls: list[str] = []
+    monkeypatch.setattr(
+        desktop_mod,
+        "_electron_native_bridge_config",
+        lambda: ("http://127.0.0.1:50123", "token"),
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "_activate_apple_music_after_search_dispatch",
+        lambda: (_ for _ in ()).throw(
+            AssertionError("native bridge must be preferred when available")
+        ),
+    )
+
+    def native_focus(app_name: str) -> dict:
+        native_calls.append(app_name)
+        return {
+            "ok": True,
+            "action": "electron.native.desktop.focus",
+            "summary": f"Focused {app_name} via native bridge",
+            "data": {
+                "app_name": app_name,
+                "focus_verified": True,
+                "frontmost_app": app_name,
+            },
+            "permission_error": False,
+        }
+
+    monkeypatch.setattr(desktop_mod, "_electron_native_focus_app", native_focus)
+
+    result = desktop_mod._focus_apple_music_after_search_dispatch()
+
+    assert result["ok"] is True
+    assert result["data"]["focus_strategy"] == "electron_native_bridge"
+    assert native_calls == ["Music"]
+
+
+def test_packaged_apple_music_search_verifies_focus_through_electron_even_if_already_frontmost(
+    monkeypatch,
+) -> None:
+    focus_calls: list[str] = []
+    observed_apps = iter(["Music", "Music"])
+    matching = {
+        "ok": True,
+        "data": {
+            "result_marker": True,
+            "query_match": True,
+            "search_query_identity_verified": True,
+            "fingerprint": "matching-results",
+        },
+    }
+    monkeypatch.setattr(
+        desktop_mod.subprocess,
+        "run",
+        lambda command, **_kwargs: subprocess.CompletedProcess(command, 0, "", ""),
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "active_window",
+        lambda: {
+            "ok": True,
+            "action": "desktop.active_window",
+            "data": {"app_name": next(observed_apps), "title": ""},
+        },
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "_electron_native_bridge_config",
+        lambda: ("http://127.0.0.1:50123", "token"),
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "_focus_apple_music_after_search_dispatch",
+        lambda: (
+            focus_calls.append("Music")
+            or {
+                "ok": True,
+                "action": "app.focus",
+                "data": {
+                    "app_name": "Music",
+                    "focus_verified": True,
+                    "frontmost_app": "Music",
+                    "focus_strategy": "electron_native_bridge",
+                },
+            }
+        ),
+    )
+    monkeypatch.setattr(desktop_mod.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(
+        desktop_mod,
+        "_apple_music_search_result_evidence",
+        lambda _query: matching,
+    )
+
+    result = desktop_mod._open_apple_music_search("超时空辉夜姬")
+
+    assert result["ok"] is True
+    assert focus_calls == ["Music"]
+    assert result["fallback_result"]["focus"]["data"]["focus_strategy"] == (
+        "electron_native_bridge"
+    )
+
+
+def test_apple_music_search_fails_closed_when_music_never_reaches_foreground(
+    monkeypatch,
+) -> None:
+    def observed_window() -> dict:
+        return {
+            "ok": True,
+            "action": "desktop.active_window",
+            "summary": "Active window: Finder",
+            "data": {"app_name": "Finder", "title": ""},
+            "permission_error": False,
+            "fallback_used": False,
+        }
+
+    monkeypatch.setattr(
+        desktop_mod.subprocess,
+        "run",
+        lambda command, **_kwargs: subprocess.CompletedProcess(command, 0, "", ""),
+    )
+    monkeypatch.setattr(desktop_mod, "active_window", observed_window)
+    monkeypatch.setattr(
+        desktop_mod,
+        "_focus_apple_music_after_search_dispatch",
+        lambda: _verified_music_focus_result(),
+    )
+    monkeypatch.setattr(desktop_mod.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(
+        desktop_mod,
+        "_apple_music_search_result_evidence",
+        lambda _query: {"ok": True, "data": {"result_marker": True, "fingerprint": "old"}},
+        raising=False,
+    )
+
+    result = desktop_mod._open_apple_music_search("超时空辉夜姬")
+
+    assert result["ok"] is False
+    assert result["data"]["search_opened"] is False
+    assert result["data"]["dispatch_verified"] is True
+    assert result["data"]["foreground_verified"] is False
+    assert result["data"]["observed_app"] == "Finder"
+    assert result["data"]["poll_attempts"] == 8
+
+
+def test_apple_music_search_fails_when_universal_link_does_not_change_results(
+    monkeypatch,
+) -> None:
+    unchanged = {
+        "ok": True,
+        "data": {
+            "result_marker": True,
+            "query_match": False,
+            "fingerprint": "same-results",
+        },
+    }
+    monkeypatch.setattr(
+        desktop_mod.subprocess,
+        "run",
+        lambda command, **_kwargs: subprocess.CompletedProcess(command, 0, "", ""),
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "active_window",
+        lambda: {
+            "ok": True,
+            "action": "desktop.active_window",
+            "data": {"app_name": "Music", "title": "音乐"},
+        },
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "_focus_apple_music_after_search_dispatch",
+        lambda: _verified_music_focus_result(),
+    )
+    monkeypatch.setattr(desktop_mod.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(
+        desktop_mod,
+        "_apple_music_search_result_evidence",
+        lambda _query: unchanged,
+        raising=False,
+    )
+
+    result = desktop_mod._open_apple_music_search("超时空辉夜姬")
+
+    assert result["ok"] is False
+    assert result["data"]["search_opened"] is False
+    assert result["data"]["dispatch_verified"] is True
+    assert result["data"]["foreground_verified"] is True
+    assert result["data"]["search_query_verified"] is False
+
+
+def test_apple_music_search_rejects_irrelevant_changed_result_fingerprint(
+    monkeypatch,
+) -> None:
+    evidence = iter(
+        [
+            {
+                "ok": True,
+                "data": {
+                    "result_marker": True,
+                    "query_match": False,
+                    "fingerprint": "old-irrelevant-results",
+                },
+            },
+            *[
+                {
+                    "ok": True,
+                    "data": {
+                        "result_marker": True,
+                        "query_match": False,
+                        "fingerprint": "new-irrelevant-results",
+                    },
+                }
+                for _ in range(8)
+            ],
+        ]
+    )
+    monkeypatch.setattr(
+        desktop_mod.subprocess,
+        "run",
+        lambda command, **_kwargs: subprocess.CompletedProcess(command, 0, "", ""),
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "active_window",
+        lambda: {
+            "ok": True,
+            "action": "desktop.active_window",
+            "data": {"app_name": "Music", "title": "音乐"},
+        },
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "_focus_apple_music_after_search_dispatch",
+        lambda: _verified_music_focus_result(),
+    )
+    monkeypatch.setattr(desktop_mod.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(
+        desktop_mod,
+        "_apple_music_search_result_evidence",
+        lambda _query: next(evidence),
+    )
+
+    result = desktop_mod._open_apple_music_search("超时空辉夜姬")
+
+    assert result["ok"] is False
+    assert result["data"]["search_query_verified"] is False
+    assert len(result["fallback_result"]["result_evidence_observations"]) == 8
+
+
+def test_apple_music_search_accepts_unchanged_matching_result_on_first_poll(
+    monkeypatch,
+) -> None:
+    matching = {
+        "ok": True,
+        "data": {
+            "result_marker": True,
+            "query_match": True,
+            "search_query_identity_verified": True,
+            "fingerprint": "same-matching-results",
+        },
+    }
+    monkeypatch.setattr(
+        desktop_mod.subprocess,
+        "run",
+        lambda command, **_kwargs: subprocess.CompletedProcess(command, 0, "", ""),
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "active_window",
+        lambda: {
+            "ok": True,
+            "action": "desktop.active_window",
+            "data": {"app_name": "Music", "title": "音乐"},
+        },
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "_focus_apple_music_after_search_dispatch",
+        lambda: (_ for _ in ()).throw(
+            AssertionError("already-foreground Music must not be refocused")
+        ),
+    )
+    monkeypatch.setattr(desktop_mod.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(
+        desktop_mod,
+        "_apple_music_search_result_evidence",
+        lambda _query: matching,
+    )
+
+    result = desktop_mod._open_apple_music_search("超时空辉夜姬")
+
+    assert result["ok"] is True
+    assert result["data"]["search_query_verified"] is True
+    assert result["data"]["search_query_identity_verified"] is True
+    assert result["data"]["search_result_changed_from_nonmatching_baseline"] is False
+    assert result["data"]["result_fingerprint"] == "same-matching-results"
+    assert len(result["fallback_result"]["result_evidence_observations"]) == 1
+
+
+def test_apple_music_search_rejects_changed_results_from_matching_baseline_without_identity(
+    monkeypatch,
+) -> None:
+    evidence = iter(
+        [
+            {
+                "ok": True,
+                "data": {
+                    "result_marker": True,
+                    "query_match": True,
+                    "search_query_identity_verified": False,
+                    "fingerprint": "matching-baseline",
+                },
+            },
+            *[
+                {
+                    "ok": True,
+                    "data": {
+                        "result_marker": True,
+                        "query_match": True,
+                        "search_query_identity_verified": False,
+                        "fingerprint": "changed-but-ambiguous",
+                    },
+                }
+                for _ in range(8)
+            ],
+        ]
+    )
+    monkeypatch.setattr(
+        desktop_mod.subprocess,
+        "run",
+        lambda command, **_kwargs: subprocess.CompletedProcess(command, 0, "", ""),
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "active_window",
+        lambda: {
+            "ok": True,
+            "action": "desktop.active_window",
+            "data": {"app_name": "Music", "title": "音乐"},
+        },
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "_focus_apple_music_after_search_dispatch",
+        lambda: (_ for _ in ()).throw(
+            AssertionError("already-foreground Music must not be refocused")
+        ),
+    )
+    monkeypatch.setattr(desktop_mod.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(
+        desktop_mod,
+        "_apple_music_search_result_evidence",
+        lambda _query: next(evidence),
+    )
+
+    result = desktop_mod._open_apple_music_search("超时空辉夜姬")
+
+    assert result["ok"] is False
+    assert result["data"]["search_query_verified"] is False
+    assert result["data"]["search_query_identity_verified"] is False
+    assert result["data"]["search_result_changed_from_nonmatching_baseline"] is False
+
+
+def test_apple_music_search_yields_when_focus_moves_after_result_evidence(
+    monkeypatch,
+) -> None:
+    observed_apps = iter(["Music", "ChatGPT"])
+    matching = {
+        "ok": True,
+        "data": {
+            "result_marker": True,
+            "query_match": True,
+            "search_query_identity_verified": True,
+            "fingerprint": "matching-results",
+        },
+    }
+    monkeypatch.setattr(
+        desktop_mod.subprocess,
+        "run",
+        lambda command, **_kwargs: subprocess.CompletedProcess(command, 0, "", ""),
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "active_window",
+        lambda: {
+            "ok": True,
+            "action": "desktop.active_window",
+            "data": {"app_name": next(observed_apps), "title": ""},
+        },
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "_focus_apple_music_after_search_dispatch",
+        lambda: (_ for _ in ()).throw(
+            AssertionError("user focus changes must not be overridden")
+        ),
+    )
+    monkeypatch.setattr(desktop_mod.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(
+        desktop_mod,
+        "_apple_music_search_result_evidence",
+        lambda _query: matching,
+    )
+
+    result = desktop_mod._open_apple_music_search("超时空辉夜姬")
+
+    assert result["ok"] is True
+    assert result["data"]["foreground_verified"] is False
+    assert result["data"]["search_query_verified"] is True
+    assert result["data"]["focus_changed_after_search"] is True
+    assert result["data"]["observed_app"] == "ChatGPT"
+    assert "error" not in result
+    assert (
+        result["fallback_result"]["final_foreground_observation"]["data"]["app_name"]
+        == "ChatGPT"
+    )
+
+
+def test_apple_music_search_fails_closed_when_final_foreground_observation_fails(
+    monkeypatch,
+) -> None:
+    observations = iter(
+        [
+            {
+                "ok": True,
+                "action": "desktop.active_window",
+                "data": {"app_name": "Music", "title": ""},
+            },
+            {
+                "ok": False,
+                "error": "accessibility_permission_required",
+                "permission_error": True,
+                "permission_targets": ["accessibility"],
+                "data": {},
+            },
+        ]
+    )
+    matching = {
+        "ok": True,
+        "data": {
+            "result_marker": True,
+            "query_match": True,
+            "search_query_identity_verified": True,
+            "fingerprint": "matching-results",
+        },
+    }
+    monkeypatch.setattr(
+        desktop_mod.subprocess,
+        "run",
+        lambda command, **_kwargs: subprocess.CompletedProcess(command, 0, "", ""),
+    )
+    monkeypatch.setattr(desktop_mod, "active_window", lambda: next(observations))
+    monkeypatch.setattr(
+        desktop_mod,
+        "_focus_apple_music_after_search_dispatch",
+        lambda: (_ for _ in ()).throw(
+            AssertionError("already-foreground Music must not be refocused")
+        ),
+    )
+    monkeypatch.setattr(desktop_mod.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(
+        desktop_mod,
+        "_apple_music_search_result_evidence",
+        lambda _query: matching,
+    )
+
+    result = desktop_mod._open_apple_music_search("超时空辉夜姬")
+
+    assert result["ok"] is False
+    assert result["permission_error"] is True
+    assert result["data"]["search_opened"] is False
+    assert result["data"]["search_query_verified"] is False
+    assert result["blocking_condition"] == "foreground_focus_unverified"
+
+
+def test_apple_music_search_result_evidence_matches_unicode_query(monkeypatch) -> None:
+    monkeypatch.setattr(
+        desktop_mod,
+        "_run_osascript",
+        lambda _script, _args=None: {
+            "ok": True,
+            "stdout": (
+                "results\n"
+                "identity\tsearch_field\t超时空·辉夜姬\n"
+                "marker\t最佳结果\n"
+                "marker\t超时空辉夜姬\n"
+                "marker\t艺人\n"
+                "marker\t花谱"
+            ),
+            "stderr": "",
+        },
+    )
+
+    result = desktop_mod._apple_music_search_result_evidence("超时空辉夜姬")
+
+    assert result["ok"] is True
+    assert result["data"]["result_marker"] is True
+    assert result["data"]["query_match"] is True
+    assert result["data"]["normalized_query_match"] == "超时空辉夜姬"
+    assert result["data"]["search_query_identity_verified"] is True
+    assert result["data"]["search_query_identity_source"] == "search_field"
+    assert result["data"]["fingerprint"]
+
+
+def test_apple_music_search_result_evidence_uses_bounded_direct_ax_loops(
+    monkeypatch,
+) -> None:
+    captured: dict[str, str] = {}
+
+    def fake_osascript(script: str, _args=None) -> dict:
+        captured["script"] = script
+        return {
+            "ok": True,
+            "stdout": "results\n最佳结果\n超时空辉夜姬",
+            "stderr": "",
+        }
+
+    monkeypatch.setattr(desktop_mod, "_run_osascript", fake_osascript)
+
+    result = desktop_mod._apple_music_search_result_evidence("超时空辉夜姬")
+
+    assert result["ok"] is True
+    script = captured["script"]
+    assert "every UI element" not in script
+    assert script.count("exit repeat") >= 4
+    assert "markerCount is greater than or equal to 64" in script
+    assert '"AXSearchField"' in script
+    assert '"AXTextField"' in script
+    assert "toolbarChildIndex is greater than 24" in script
+    assert "searchContainerChildIndex is greater than 16" in script
+
+
+def test_apple_music_search_result_evidence_accepts_exact_ax_text_field_identity(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        desktop_mod,
+        "_run_osascript",
+        lambda _script, _args=None: {
+            "ok": True,
+            "stdout": (
+                "results\n"
+                "identity\tsearch_field\t超时空辉夜姬\n"
+                "identity_role\tAXTextField\n"
+                "identity_description\t搜索\n"
+                "marker\t超时空辉夜姬"
+            ),
+            "stderr": "",
+        },
+    )
+
+    result = desktop_mod._apple_music_search_result_evidence("超时空·辉夜姬")
+
+    assert result["ok"] is True
+    assert result["data"]["search_query_identity_verified"] is True
+    assert result["data"]["search_query_identity_role"] == "AXTextField"
+    assert result["data"]["search_query_identity_description"] == "搜索"
+
+
+def test_apple_music_play_does_not_search_after_music_error(monkeypatch) -> None:
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(
+        desktop_mod,
+        "_run_osascript",
+        lambda _script, _args=None: {
+            "ok": True,
+            "stdout": "error|-1743|Not authorized to send Apple events",
+            "stderr": "",
+        },
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "_open_apple_music_search",
+        lambda _query: (_ for _ in ()).throw(AssertionError("status=error must not dispatch search")),
+    )
+
+    result = desktop_mod.apple_music_play("超时空辉夜姬")
+
+    assert result["ok"] is False
+    assert result["permission_error"] is True
+    assert "Not authorized" in result["error"]
+
+
+def test_apple_music_play_not_found_never_dispatches_search_fallback(monkeypatch) -> None:
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    _mock_empty_apple_music_catalog(monkeypatch)
+    monkeypatch.setattr(
+        desktop_mod,
+        "_run_osascript",
+        lambda _script, _args=None: {
+            "ok": True,
+            "stdout": "not_found|超时空辉夜姬|",
+            "stderr": "",
+        },
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "_open_apple_music_search",
+        lambda _query: (_ for _ in ()).throw(
+            AssertionError("not_found must remain on the background-safe path")
+        ),
+    )
+
+    result = desktop_mod.apple_music_play("超时空辉夜姬")
+
+    assert result["ok"] is True
+    assert result["data"]["status"] == "not_found"
+    assert result["data"]["search_opened"] is False
+
+
+def test_apple_music_play_deadline_bounds_background_library_search(monkeypatch) -> None:
+    now = 0.0
+    timed_calls: list[tuple[str, float]] = []
+
+    def monotonic() -> float:
+        return now
+
+    def advance(seconds: float) -> None:
+        nonlocal now
+        now += seconds
+
+    def bounded_osascript(
+        _script: str,
+        _args=None,
+        *,
+        timeout_seconds: float = 10,
+    ) -> dict:
+        timed_calls.append(("library", timeout_seconds))
+        advance(timeout_seconds)
+        return {
+            "ok": True,
+            "stdout": "not_found|超时空辉夜姬|",
+            "stderr": "",
+        }
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod, "_APPLE_MUSIC_PLAY_DEADLINE_SECONDS", 8.0, raising=False)
+    monkeypatch.setattr(desktop_mod.time, "monotonic", monotonic)
+    monkeypatch.setattr(desktop_mod, "_run_osascript", bounded_osascript)
+    monkeypatch.setattr(
+        desktop_mod,
+        "_open_apple_music_search",
+        lambda _query: (_ for _ in ()).throw(
+            AssertionError("deadline failure must not dispatch foreground fallback")
+        ),
+    )
+
+    result = desktop_mod.apple_music_play("超时空辉夜姬")
+
+    assert result["ok"] is True
+    assert "error" not in result
+    assert result["data"]["outcome"] == "partial"
+    assert result["data"]["status"] == "playback_unverified"
+    assert result["data"]["deadline_exceeded"] is True
+    assert result["data"]["search_opened"] is False
+    assert result["data"]["playback_state_unverified"] is True
+    assert result["data"]["track_identity_verified"] is False
+    assert result["data"]["catalog_dispatch_verified"] is False
+    assert result["data"]["playback_started"] is False
+    trusted_result = {
+        **result,
+        RUNTIME_EXECUTION_PROVENANCE_KEY: {
+            "source": RUNTIME_LOCAL_TOOL_BROKER_PROVENANCE_SOURCE,
+            "version": RUNTIME_EXECUTION_PROVENANCE_VERSION,
+        },
+    }
+    outcome = evaluate_main_chat_outcome(
+        {},
+        [
+            {
+                "event_type": "agent.tool.call",
+                "payload": {
+                    "tool": "media.apple_music_play",
+                    "result": trusted_result,
+                },
+            }
+        ],
+    )
+    assert outcome.kind == "completed"
+    assert outcome.reason == "partial_background_library_not_found"
+    assert now == pytest.approx(8.0)
+    assert timed_calls == [("library", 8.0)]
 
 
 def test_apple_music_control_executes_low_risk_playback_action(monkeypatch) -> None:
@@ -7963,6 +10543,7 @@ def test_apple_music_control_executes_low_risk_playback_action(monkeypatch) -> N
         "fallback_used": False,
     }
     assert calls[0][1] == ["pause"]
+    assert 'if application "Music" is not running' in calls[0][0]
 
 
 def test_apple_music_open_and_play_opens_music_then_starts_playback(monkeypatch) -> None:
@@ -8323,7 +10904,8 @@ def test_clipboard_write_uses_system_clipboard_without_echoing_text(monkeypatch)
                 "check": check,
             }
         )
-        return subprocess.CompletedProcess(command, 0, "", "")
+        stdout = "hello world" if command == ["pbpaste"] else ""
+        return subprocess.CompletedProcess(command, 0, stdout, "")
 
     monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
     monkeypatch.setattr(desktop_mod.subprocess, "run", fake_run)
@@ -8337,7 +10919,9 @@ def test_clipboard_write_uses_system_clipboard_without_echoing_text(monkeypatch)
         "data": {
             "text_length": 11,
             "platform": "macos",
+            "postcondition_verified": True,
         },
+        "postcondition_verified": True,
         "permission_error": False,
         "fallback_used": False,
     }
@@ -8349,10 +10933,47 @@ def test_clipboard_write_uses_system_clipboard_without_echoing_text(monkeypatch)
             "capture_output": True,
             "timeout": 3,
             "check": False,
-        }
+        },
+        {
+            "command": ["pbpaste"],
+            "input": None,
+            "text": True,
+            "capture_output": True,
+            "timeout": 3,
+            "check": False,
+        },
     ]
     assert "hello world" not in result["summary"]
     assert "hello world" not in str(result["data"])
+
+
+def test_clipboard_write_fails_closed_when_exact_readback_does_not_match(
+    monkeypatch,
+) -> None:
+    def fake_run(
+        command,
+        *,
+        input=None,
+        text=None,
+        capture_output=None,
+        timeout=None,
+        check=None,
+    ):
+        stdout = "changed by another process" if command == ["pbpaste"] else ""
+        return subprocess.CompletedProcess(command, 0, stdout, "")
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod.subprocess, "run", fake_run)
+
+    result = desktop_mod.clipboard_write("hello world")
+
+    assert result["ok"] is False
+    assert result["verification_failed"] is True
+    assert result["error"] == "clipboard_write_readback_unverified"
+    assert result["data"]["postcondition_verified"] is False
+    assert result.get("postcondition_verified") is not True
+    assert "hello world" not in repr(result)
+    assert "changed by another process" not in repr(result)
 
 
 def test_clipboard_read_uses_system_clipboard_with_bounded_preview(monkeypatch) -> None:
@@ -8413,6 +11034,12 @@ def test_clipboard_read_rejects_invalid_preview_limit(monkeypatch) -> None:
 def test_apple_music_control_permission_failure_returns_music_and_automation_targets(
     monkeypatch,
 ) -> None:
+    open_calls: list[str] = []
+
+    def fake_app_open(app_name: str) -> dict[str, Any]:
+        open_calls.append(app_name)
+        return {"ok": True, "action": "app.open", "data": {"app_name": app_name}}
+
     monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
     monkeypatch.setattr(
         desktop_mod,
@@ -8429,7 +11056,7 @@ def test_apple_music_control_permission_failure_returns_music_and_automation_tar
     monkeypatch.setattr(
         desktop_mod,
         "app_open",
-        lambda app_name: {"ok": True, "action": "app.open", "data": {"app_name": app_name}},
+        fake_app_open,
     )
 
     result = desktop_mod.apple_music_control("next")
@@ -8439,13 +11066,15 @@ def test_apple_music_control_permission_failure_returns_music_and_automation_tar
     assert result["permission_error"] is True
     assert result["missing_permissions"] == ["music_app", "automation"]
     assert result["permission_targets"] == ["music_app", "automation"]
-    assert result["fallback_used"] is True
+    assert result["fallback_used"] is False
+    assert open_calls == []
 
 
-def test_apple_music_control_uses_media_key_fallback_when_automation_fails(
+def test_apple_music_control_never_uses_foreground_fallback_when_automation_fails(
     monkeypatch,
 ) -> None:
     calls = []
+    open_calls: list[str] = []
 
     def fake_osascript(_script, args=None):
         calls.append(args)
@@ -8459,47 +11088,28 @@ def test_apple_music_control_uses_media_key_fallback_when_automation_fails(
 
     monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
     monkeypatch.setattr(desktop_mod, "_run_osascript", fake_osascript)
+
+    def fake_app_open(app_name: str) -> dict[str, Any]:
+        open_calls.append(app_name)
+        return {"ok": True, "action": "app.open", "data": {"app_name": app_name}}
+
     monkeypatch.setattr(
         desktop_mod,
         "app_open",
-        lambda app_name: {"ok": True, "action": "app.open", "data": {"app_name": app_name}},
+        fake_app_open,
     )
 
     result = desktop_mod.apple_music_control("play")
 
-    assert result["ok"] is True
+    assert result["ok"] is False
     assert result["action"] == "media.apple_music_control"
-    assert result["summary"] == "Apple Music play attempted via media key fallback"
-    assert result["data"] == {
-        "control": "play",
-        "player_state": "unknown",
-        "track": "",
-        "artist": "",
-        "fallback": "system_media_key",
-        "fallback_control": "toggle",
-        "media_key": "Play/Pause",
-        "playback_state_unverified": True,
-        "direct_error": "Not authorized to send Apple events to Music.",
-    }
-    assert result["permission_error"] is False
+    assert result["data"] == {"control": "play", "status": "error"}
+    assert result["permission_error"] is True
     assert result["missing_permissions"] == ["music_app", "automation"]
     assert result["permission_targets"] == ["music_app", "automation"]
-    assert result["fallback_used"] is True
-    assert result["fallback"] == "system_media_key"
-    assert result["fallback_result"]["media_key"] == {
-        "ok": True,
-        "action": "media.apple_music.media_key",
-        "summary": "Pressed Play/Pause media key for Apple Music",
-        "data": {
-            "requested_control": "play",
-            "media_control": "toggle",
-            "media_key": "Play/Pause",
-            "key_code": 100,
-        },
-        "permission_error": False,
-        "fallback_used": False,
-    }
-    assert calls == [["play"], ["100", "toggle"]]
+    assert result["fallback_used"] is False
+    assert open_calls == []
+    assert calls == [["play"]]
 
 
 def test_apple_music_open_and_play_permission_failure_returns_music_and_automation_targets(

@@ -107,7 +107,7 @@ export function GroupRunDetailPanel({
     || selectedGroupRunSnapshot?.objective
     || selectedRunGroup?.title
     || selectedRunGroup?.objective
-    || 'No GroupRun summary recorded.';
+    || '暂无 GroupRun 摘要。';
   const groupRunObjective = selectedGroupRunSnapshot?.objective || selectedRunGroup?.objective || '';
   const groupRunParticipants = selectedGroupRunSnapshot?.participants?.length
     ? selectedGroupRunSnapshot.participants
@@ -283,7 +283,7 @@ export function GroupRunDetailPanel({
               data-testid="agent-run-detail-group-run-load-more-events"
               onClick={() => void onLoadMoreGroupRunEvents()}
             >
-              {replayLoading ? 'Loading GroupRun Events...' : replayHasMore ? 'Load more GroupRun Events' : 'GroupRun replay complete'}
+              {replayLoading ? '正在加载 GroupRun 事件...' : replayHasMore ? '加载更多 GroupRun 事件' : 'GroupRun 回放已完成'}
             </button>
           </div>
         </section>

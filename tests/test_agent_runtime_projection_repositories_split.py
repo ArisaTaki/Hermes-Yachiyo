@@ -9,9 +9,12 @@ import threading
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from apps.shell import agent_runtime
 from apps.shell.agent.repositories.approvals import ApprovalRepository
 from apps.shell.agent.repositories.artifacts import RunArtifactRepository
+from apps.shell.agent.repositories.sqlite import open_locked_runtime_connection
 from apps.shell.agent.runtime.events import redact_json_value
 
 
@@ -51,8 +54,13 @@ def test_projection_repositories_remain_exported_from_legacy_runtime_module() ->
 def test_approval_repository_claims_and_resolves_pending_approvals() -> None:
     conn = sqlite3.connect(":memory:")
     conn.row_factory = sqlite3.Row
-    conn.execute(
+    conn.executescript(
         """
+        CREATE TABLE runs (
+            run_id TEXT PRIMARY KEY,
+            status TEXT NOT NULL,
+            pending_approval_json TEXT NOT NULL DEFAULT '{}'
+        );
         CREATE TABLE run_approvals (
             approval_id TEXT PRIMARY KEY,
             run_id TEXT NOT NULL,
@@ -64,6 +72,7 @@ def test_approval_repository_claims_and_resolves_pending_approvals() -> None:
             resolved_at TEXT NOT NULL DEFAULT '',
             updated_at TEXT NOT NULL
         )
+        ;
         """
     )
     now_values = iter(
@@ -82,7 +91,9 @@ def test_approval_repository_claims_and_resolves_pending_approvals() -> None:
         threading.RLock(),
         now=lambda: next(now_values),
         json_dump=_json_dump,
+        json_load=_json_load,
         public_pending_approval=_public_pending_approval,
+        error_type=agent_runtime.AgentRuntimeError,
     )
 
     pending = {
@@ -90,6 +101,10 @@ def test_approval_repository_claims_and_resolves_pending_approvals() -> None:
         "tool": "terminal.run",
         "input_preview": {"command": "echo ok"},
     }
+    conn.execute(
+        "INSERT INTO runs (run_id, status, pending_approval_json) VALUES (?, ?, ?)",
+        ("run-1", "approval_required", _json_dump(pending)),
+    )
     repo.sync("run-1", status="approval_required", pending_approval=pending)
     conn.commit()
     row = conn.execute(
@@ -99,8 +114,16 @@ def test_approval_repository_claims_and_resolves_pending_approvals() -> None:
     assert row["status"] == "pending"
     assert _json_load(row["input_preview_json"], {}) == {"command": "echo ok"}
 
-    assert repo.claim_pending_approval("run-1", pending) is True
-    assert repo.claim_pending_approval("run-1", pending) is False
+    assert repo.claim_pending_approval(
+        "run-1",
+        pending,
+        expected_approval_id="approval-1",
+    ) is True
+    assert repo.claim_pending_approval(
+        "run-1",
+        pending,
+        expected_approval_id="approval-1",
+    ) is False
     row = conn.execute(
         "SELECT * FROM run_approvals WHERE approval_id=?",
         ("approval-1",),
@@ -118,6 +141,320 @@ def test_approval_repository_claims_and_resolves_pending_approvals() -> None:
         ("approval-2",),
     ).fetchone()
     assert row["status"] == "cancelled"
+
+
+def test_approval_repository_rejects_stale_generation_inside_claim_transaction() -> None:
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.executescript(
+        """
+        CREATE TABLE runs (
+            run_id TEXT PRIMARY KEY,
+            status TEXT NOT NULL,
+            pending_approval_json TEXT NOT NULL DEFAULT '{}'
+        );
+        CREATE TABLE run_approvals (
+            approval_id TEXT PRIMARY KEY,
+            run_id TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            tool TEXT NOT NULL DEFAULT '',
+            input_preview_json TEXT NOT NULL DEFAULT '{}',
+            payload_json TEXT NOT NULL DEFAULT '{}',
+            requested_at TEXT NOT NULL,
+            resolved_at TEXT NOT NULL DEFAULT '',
+            updated_at TEXT NOT NULL
+        );
+        """
+    )
+    pending_a = {
+        "approval_id": "approval-A",
+        "tool": "terminal.run",
+        "input_preview": {"command": "printf A"},
+    }
+    pending_b = {
+        "approval_id": "approval-B",
+        "tool": "terminal.run",
+        "input_preview": {"command": "printf B"},
+    }
+    conn.execute(
+        "INSERT INTO runs (run_id, status, pending_approval_json) VALUES (?, ?, ?)",
+        ("run-1", "approval_required", _json_dump(pending_b)),
+    )
+    for pending in (pending_a, pending_b):
+        conn.execute(
+            """
+            INSERT INTO run_approvals (
+                approval_id, run_id, status, tool, input_preview_json, payload_json,
+                requested_at, resolved_at, updated_at
+            ) VALUES (?, 'run-1', 'pending', 'terminal.run', '{}', ?, 'now', '', 'now')
+            """,
+            (pending["approval_id"], _json_dump(pending)),
+        )
+    conn.commit()
+    repo = ApprovalRepository(
+        conn,
+        threading.RLock(),
+        now=lambda: "2026-07-11T00:00:00Z",
+        json_dump=_json_dump,
+        json_load=_json_load,
+        public_pending_approval=_public_pending_approval,
+        error_type=agent_runtime.AgentRuntimeError,
+    )
+
+    with pytest.raises(agent_runtime.AgentRuntimeError, match="approval_generation_mismatch"):
+        repo.claim_pending_timeout(
+            "run-1",
+            pending_a,
+            expected_approval_id="approval-A",
+        )
+
+    with pytest.raises(agent_runtime.AgentRuntimeError, match="approval_generation_mismatch"):
+        repo.claim_pending_approval(
+            "run-1",
+            pending_a,
+            expected_approval_id="approval-A",
+        )
+
+    statuses = {
+        row["approval_id"]: row["status"]
+        for row in conn.execute(
+            "SELECT approval_id, status FROM run_approvals ORDER BY approval_id"
+        )
+    }
+    assert statuses == {"approval-A": "pending", "approval-B": "pending"}
+    assert repo.claim_pending_approval(
+        "run-1",
+        pending_b,
+        expected_approval_id="approval-B",
+    ) is True
+    assert conn.execute(
+        "SELECT status FROM run_approvals WHERE approval_id='approval-B'"
+    ).fetchone()["status"] == "approved"
+
+
+def test_approval_claim_consumes_every_other_authority_generation_atomically(
+    tmp_path: Path,
+) -> None:
+    lock = threading.RLock()
+    conn = open_locked_runtime_connection(tmp_path / "approval-generations.db", lock)
+    conn.row_factory = sqlite3.Row
+    conn.executescript(
+        """
+        CREATE TABLE runs (
+            run_id TEXT PRIMARY KEY,
+            status TEXT NOT NULL,
+            pending_approval_json TEXT NOT NULL DEFAULT '{}'
+        );
+        CREATE TABLE run_approvals (
+            approval_id TEXT PRIMARY KEY,
+            run_id TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            tool TEXT NOT NULL DEFAULT '',
+            input_preview_json TEXT NOT NULL DEFAULT '{}',
+            payload_json TEXT NOT NULL DEFAULT '{}',
+            requested_at TEXT NOT NULL,
+            resolved_at TEXT NOT NULL DEFAULT '',
+            updated_at TEXT NOT NULL
+        );
+        """
+    )
+    pending_b = {"approval_id": "approval-B", "tool": "terminal.run"}
+    conn.execute(
+        "INSERT INTO runs (run_id, status, pending_approval_json) VALUES (?, ?, ?)",
+        ("run-1", "approval_required", _json_dump(pending_b)),
+    )
+    conn.executemany(
+        """
+        INSERT INTO run_approvals (
+            approval_id, run_id, status, requested_at, resolved_at, updated_at
+        ) VALUES (?, 'run-1', ?, 'requested', ?, 'before')
+        """,
+        (
+            ("approval-A", "approved", "approved-at"),
+            ("approval-B", "pending", ""),
+            ("approval-C", "pending", ""),
+        ),
+    )
+    conn.commit()
+    repo = ApprovalRepository(
+        conn,
+        lock,
+        now=lambda: "2026-07-17T10:00:00Z",
+        json_dump=_json_dump,
+        json_load=_json_load,
+        public_pending_approval=_public_pending_approval,
+        error_type=agent_runtime.AgentRuntimeError,
+    )
+
+    with pytest.raises(RuntimeError, match="rollback consumed generations"):
+        with conn.transaction():
+            assert repo.claim_pending_approval(
+                "run-1",
+                pending_b,
+                expected_approval_id="approval-B",
+            )
+            raise RuntimeError("rollback consumed generations")
+
+    rolled_back = {
+        row["approval_id"]: row["status"]
+        for row in conn.execute(
+            "SELECT approval_id, status FROM run_approvals ORDER BY approval_id"
+        ).fetchall()
+    }
+    assert rolled_back == {
+        "approval-A": "approved",
+        "approval-B": "pending",
+        "approval-C": "pending",
+    }
+
+    with conn.transaction():
+        assert repo.claim_pending_approval(
+            "run-1",
+            pending_b,
+            expected_approval_id="approval-B",
+        )
+        conn.execute(
+            """
+            UPDATE runs
+               SET status='running', pending_approval_json='{}'
+             WHERE run_id='run-1'
+            """
+        )
+        # Run projection compatibility still resolves all pending rows. The
+        # claim must consume orphaned pending generations before this broad sync.
+        repo.resolve_pending("run-1", status="running")
+
+    statuses = {
+        row["approval_id"]: row["status"]
+        for row in conn.execute(
+            "SELECT approval_id, status FROM run_approvals ORDER BY approval_id"
+        ).fetchall()
+    }
+    assert statuses == {
+        "approval-A": "consumed",
+        "approval-B": "approved",
+        "approval-C": "consumed",
+    }
+    repo.assert_approval_resume_active("run-1", "approval-B")
+    for stale_id in ("approval-A", "approval-C"):
+        with pytest.raises(
+            agent_runtime.AgentRuntimeError,
+            match="approval_resume_inactive",
+        ):
+            repo.assert_approval_resume_active("run-1", stale_id)
+    conn.close()
+
+
+def test_approval_repository_reject_claim_uses_same_generation_cas() -> None:
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.executescript(
+        """
+        CREATE TABLE runs (
+            run_id TEXT PRIMARY KEY,
+            status TEXT NOT NULL,
+            pending_approval_json TEXT NOT NULL DEFAULT '{}'
+        );
+        CREATE TABLE run_approvals (
+            approval_id TEXT PRIMARY KEY,
+            run_id TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            tool TEXT NOT NULL DEFAULT '',
+            input_preview_json TEXT NOT NULL DEFAULT '{}',
+            payload_json TEXT NOT NULL DEFAULT '{}',
+            requested_at TEXT NOT NULL,
+            resolved_at TEXT NOT NULL DEFAULT '',
+            updated_at TEXT NOT NULL
+        );
+        """
+    )
+    pending = {"approval_id": "approval-current", "tool": "terminal.run"}
+    conn.execute(
+        "INSERT INTO runs (run_id, status, pending_approval_json) VALUES (?, ?, ?)",
+        ("run-1", "approval_required", _json_dump(pending)),
+    )
+    conn.execute(
+        """
+        INSERT INTO run_approvals (
+            approval_id, run_id, status, requested_at, resolved_at, updated_at
+        ) VALUES ('approval-current', 'run-1', 'pending', 'now', '', 'now')
+        """
+    )
+    conn.commit()
+    repo = ApprovalRepository(
+        conn,
+        threading.RLock(),
+        now=lambda: "2026-07-11T00:00:00Z",
+        json_dump=_json_dump,
+        json_load=_json_load,
+        public_pending_approval=_public_pending_approval,
+        error_type=agent_runtime.AgentRuntimeError,
+    )
+
+    assert repo.claim_pending_rejection(
+        "run-1",
+        pending,
+        expected_approval_id="approval-current",
+    ) is True
+    assert conn.execute(
+        "SELECT status FROM run_approvals WHERE approval_id='approval-current'"
+    ).fetchone()["status"] == "rejected"
+
+
+def test_approval_repository_does_not_reopen_cross_run_generation_collision() -> None:
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.execute(
+        """
+        CREATE TABLE run_approvals (
+            approval_id TEXT PRIMARY KEY,
+            run_id TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            tool TEXT NOT NULL DEFAULT '',
+            input_preview_json TEXT NOT NULL DEFAULT '{}',
+            payload_json TEXT NOT NULL DEFAULT '{}',
+            requested_at TEXT NOT NULL,
+            resolved_at TEXT NOT NULL DEFAULT '',
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    conn.execute(
+        """
+        INSERT INTO run_approvals (
+            approval_id, run_id, status, requested_at, resolved_at, updated_at
+        ) VALUES ('approval-collision', 'run-old', 'rejected', 'old', 'old', 'old')
+        """
+    )
+    conn.commit()
+    repo = ApprovalRepository(
+        conn,
+        threading.RLock(),
+        now=lambda: "2026-07-11T00:00:00Z",
+        json_dump=_json_dump,
+        json_load=_json_load,
+        public_pending_approval=_public_pending_approval,
+        error_type=agent_runtime.AgentRuntimeError,
+    )
+
+    with pytest.raises(agent_runtime.AgentRuntimeError, match="approval_generation_conflict"):
+        repo.upsert_pending(
+            "run-new",
+            {
+                "approval_id": "approval-collision",
+                "tool": "terminal.run",
+            },
+        )
+
+    row = conn.execute(
+        "SELECT run_id, status, resolved_at FROM run_approvals WHERE approval_id=?",
+        ("approval-collision",),
+    ).fetchone()
+    assert dict(row) == {
+        "run_id": "run-old",
+        "status": "rejected",
+        "resolved_at": "old",
+    }
 
 
 def test_artifact_repository_sync_read_and_delete_files(tmp_path: Path) -> None:

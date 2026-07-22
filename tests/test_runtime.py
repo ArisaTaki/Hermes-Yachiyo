@@ -1,6 +1,9 @@
 """Runtime tests for the native TaskRunner adapter."""
 
 import asyncio
+import threading
+
+import pytest
 
 from apps.bridge.routes import model_profiles as model_profile_routes
 from apps.core.executor import NativeAgentExecutor, NativeAgentUnavailableExecutor, SimulatedExecutor
@@ -114,6 +117,272 @@ def test_start_does_not_require_native_agent_readiness(tmp_path, monkeypatch):
     assert runtime.running is True
 
 
+def test_start_reconciles_activity_rows_left_by_interrupted_process(
+    tmp_path,
+    monkeypatch,
+):
+    runtime = _make_runtime(tmp_path, monkeypatch)
+
+    class FakeRuntimeService:
+        db_path = tmp_path / "agent-runtime.db"
+        workspace_dir = tmp_path / "workspace"
+
+        def reconcile_startup_runs(self, *_args, **_kwargs):
+            return {}
+
+        def get_task_run_projections(self, task_ids):
+            statuses = {
+                "completed-linked-task": "completed",
+                "approval-linked-task": "approval_required",
+                "deferred-linked-task": "running",
+            }
+            return {
+                task_id: {"task_id": task_id, "status": statuses[task_id]}
+                for task_id in task_ids
+                if task_id in statuses
+            }
+
+        def close(self):
+            return None
+
+    runtime.agent_runtime_service = FakeRuntimeService()
+    runtime.activity_store.record_event(
+        event_id="stale-running",
+        task_id="interrupted-task",
+        phase="task_start",
+        title="Interrupted task",
+        status="running",
+        created_at="2000-01-01T00:00:00+00:00",
+    )
+    runtime.activity_store.record_event(
+        event_id="stale-progress",
+        task_id="interrupted-task",
+        phase="tool_progress",
+        title="Interrupted tool",
+        status="progress",
+        created_at="2000-01-01T00:00:01+00:00",
+    )
+    runtime.activity_store.record_event(
+        event_id="already-completed",
+        task_id="completed-task",
+        phase="task_complete",
+        title="Completed task",
+        status="completed",
+        created_at="2000-01-01T00:00:02+00:00",
+    )
+    runtime.activity_store.record_event(
+        event_id="linked-completed",
+        task_id="completed-linked-task",
+        phase="tool_progress",
+        title="Completed native run",
+        status="running",
+        created_at="2000-01-01T00:00:03+00:00",
+    )
+    runtime.activity_store.record_event(
+        event_id="linked-approval",
+        task_id="approval-linked-task",
+        phase="tool_progress",
+        title="Waiting for approval",
+        status="running",
+        created_at="2000-01-01T00:00:04+00:00",
+    )
+    runtime.activity_store.record_event(
+        event_id="linked-deferred-lease",
+        task_id="deferred-linked-task",
+        phase="tool_progress",
+        title="Owned by a live lease",
+        status="progress",
+        created_at="2000-01-01T00:00:05+00:00",
+    )
+    runtime.activity_store.record_event(
+        event_id="future-running",
+        task_id="future-task",
+        phase="task_start",
+        title="Future task",
+        status="running",
+        created_at="2999-01-01T00:00:00+00:00",
+    )
+    monkeypatch.setattr(runtime, "_start_task_runner", lambda: None)
+
+    runtime.start()
+    try:
+        events = {
+            event.event_id: event
+            for event in runtime.activity_store.list_events(limit=20)
+        }
+
+        assert events["stale-running"].status == "failed"
+        assert events["stale-progress"].status == "failed"
+        assert events["already-completed"].status == "completed"
+        assert events["linked-completed"].status == "completed"
+        assert events["linked-approval"].status == "running"
+        assert events["linked-deferred-lease"].status == "progress"
+        assert events["future-running"].status == "running"
+        assert events["stale-running"].to_dict()["metadata"] == {
+            "recovered_after_restart": 1,
+            "recovery_reason": "runtime_restarted",
+        }
+        assert runtime.activity_store.reconcile_interrupted_tasks(
+            runtime._startup_reconciliation_cutoff,
+            terminal_status_by_task={},
+            orphan_task_ids=set(),
+        ) == 0
+    finally:
+        runtime.stop()
+
+
+def test_start_reconciles_activity_from_canonical_run_after_partial_recovery_error(
+    tmp_path,
+    monkeypatch,
+):
+    runtime = _make_runtime(tmp_path, monkeypatch)
+
+    class PartiallyFailedRuntimeService:
+        db_path = tmp_path / "agent-runtime.db"
+        workspace_dir = tmp_path / "workspace"
+
+        def reconcile_startup_runs(self, *_args, **_kwargs):
+            raise RuntimeError("group projection failed after Run commit")
+
+        def get_task_run_projections(self, task_ids):
+            assert "partially-recovered-task" in task_ids
+            return {
+                "partially-recovered-task": {
+                    "task_id": "partially-recovered-task",
+                    "run_id": "partially-recovered-run",
+                    "status": "failed",
+                }
+            }
+
+        def close(self):
+            return None
+
+    runtime.agent_runtime_service = PartiallyFailedRuntimeService()
+    runtime.activity_store.record_event(
+        event_id="partially-recovered-activity",
+        task_id="partially-recovered-task",
+        phase="tool_progress",
+        title="Recovery committed before projection failed",
+        status="running",
+        created_at="2000-01-01T00:00:00+00:00",
+    )
+    monkeypatch.setattr(runtime, "_start_task_runner", lambda: None)
+
+    runtime.start()
+    try:
+        event = runtime.activity_store.get_event("partially-recovered-activity")
+        assert event is not None
+        assert event.status == "failed"
+    finally:
+        runtime.stop()
+
+
+def test_runtime_lease_watchdog_projects_terminal_run_to_activity(
+    tmp_path,
+    monkeypatch,
+):
+    runtime = _make_runtime(tmp_path, monkeypatch)
+
+    class FakeRuntimeService:
+        def reconcile_runtime_leases(self, _observed_at):
+            return {
+                "terminal_tasks": {
+                    "expired-lease-task": {
+                        "task_id": "expired-lease-task",
+                        "run_id": "expired-lease-run",
+                        "status": "failed",
+                    }
+                },
+                "next_lease_expiry_at": "",
+            }
+
+    runtime.activity_store.record_event(
+        event_id="expired-lease-activity",
+        task_id="expired-lease-task",
+        phase="tool_progress",
+        title="Waiting for leased execution",
+        status="running",
+        created_at="2000-01-01T00:00:00+00:00",
+    )
+    runtime._runtime_instance_service = FakeRuntimeService()
+    runtime._running = True
+    monkeypatch.setattr(
+        runtime,
+        "_schedule_deferred_startup_reconciliation",
+        lambda *_args, **_kwargs: None,
+    )
+
+    runtime._run_runtime_lease_watchdog()
+
+    event = runtime.activity_store.get_event("expired-lease-activity")
+    assert event is not None
+    assert event.status == "failed"
+    assert event.to_dict()["metadata"]["recovery_reason"] == (
+        "runtime_status_reconciled"
+    )
+
+
+def test_runtime_lease_watchdog_retries_transient_activity_projection_failure(
+    tmp_path,
+    monkeypatch,
+):
+    runtime = _make_runtime(tmp_path, monkeypatch)
+
+    class FakeRuntimeService:
+        calls = 0
+
+        def reconcile_runtime_leases(self, _observed_at):
+            self.calls += 1
+            return {
+                "terminal_tasks": (
+                    {
+                        "retry-lease-task": {
+                            "task_id": "retry-lease-task",
+                            "run_id": "retry-lease-run",
+                            "status": "failed",
+                        }
+                    }
+                    if self.calls == 1
+                    else {}
+                ),
+                "next_lease_expiry_at": "",
+            }
+
+    runtime.activity_store.record_event(
+        event_id="retry-lease-activity",
+        task_id="retry-lease-task",
+        phase="tool_progress",
+        title="Waiting for retry",
+        status="running",
+        created_at="2000-01-01T00:00:00+00:00",
+    )
+    runtime._runtime_instance_service = FakeRuntimeService()
+    runtime._running = True
+    monkeypatch.setattr(
+        runtime,
+        "_schedule_deferred_startup_reconciliation",
+        lambda *_args, **_kwargs: None,
+    )
+    reconcile = runtime.activity_store.reconcile_interrupted_tasks
+    attempts = 0
+
+    def fail_once(*args, **kwargs):
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise OSError("activity store temporarily unavailable")
+        return reconcile(*args, **kwargs)
+
+    monkeypatch.setattr(runtime.activity_store, "reconcile_interrupted_tasks", fail_once)
+
+    runtime._run_runtime_lease_watchdog()
+    assert runtime.activity_store.get_event("retry-lease-activity").status == "running"
+
+    runtime._run_runtime_lease_watchdog()
+    assert runtime.activity_store.get_event("retry-lease-activity").status == "failed"
+    assert attempts == 2
+
+
 def test_stop_closes_injected_native_runtime_service(tmp_path, monkeypatch):
     runtime = _make_runtime(tmp_path, monkeypatch)
     closed = []
@@ -190,6 +459,107 @@ def test_start_task_runner_receives_runtime_activity_store(tmp_path, monkeypatch
         assert runtime.task_runner is created[0]
     finally:
         runtime._stop_task_runner()
+
+
+def test_start_propagates_task_runner_startup_failure_and_releases_resources(
+    tmp_path,
+    monkeypatch,
+):
+    class FakeRuntimeService:
+        db_path = tmp_path / "agent-runtime.db"
+        workspace_dir = tmp_path / "workspace"
+
+        def reconcile_startup_runs(self, *_args, **_kwargs):
+            return {}
+
+    starts = 0
+
+    class FlakyTaskRunner:
+        def __init__(self, state, *, executor=None, activity_store=None):
+            self.state = state
+            self.executor = executor
+            self.activity_store = activity_store
+
+        async def start(self):
+            nonlocal starts
+            starts += 1
+            if starts == 1:
+                raise RuntimeError("task-runner-startup-failed")
+
+        async def stop(self):
+            return None
+
+    service = FakeRuntimeService()
+    monkeypatch.setattr("apps.core.task_runner.TaskRunner", FlakyTaskRunner)
+    monkeypatch.setattr(
+        "apps.core.executor.select_executor",
+        lambda _runtime: SimulatedExecutor(),
+    )
+
+    failed_runtime = _make_runtime(tmp_path / "failed", monkeypatch)
+    failed_runtime.agent_runtime_service = service
+
+    with pytest.raises(RuntimeError, match="task-runner-startup-failed"):
+        failed_runtime.start()
+
+    assert failed_runtime.running is False
+    assert failed_runtime.task_runner is None
+    assert failed_runtime._task_runner_thread is None
+    assert failed_runtime._task_runner_loop is None
+    assert failed_runtime._runtime_instance_lock is None
+
+    replacement_runtime = _make_runtime(tmp_path / "replacement", monkeypatch)
+    replacement_runtime.agent_runtime_service = service
+    replacement_runtime.start()
+    try:
+        assert replacement_runtime.running is True
+        assert replacement_runtime.task_runner is not None
+        assert replacement_runtime._task_runner_thread is not None
+        assert replacement_runtime._task_runner_thread.is_alive()
+    finally:
+        replacement_runtime.stop()
+
+
+def test_start_task_runner_accepts_long_running_start_coroutine(
+    tmp_path,
+    monkeypatch,
+):
+    entered_start = threading.Event()
+
+    class LongRunningTaskRunner:
+        def __init__(self, state, *, executor=None, activity_store=None):
+            self.state = state
+            self.executor = executor
+            self.activity_store = activity_store
+            self._stop_requested = None
+
+        async def start(self):
+            self._stop_requested = asyncio.Event()
+            entered_start.set()
+            await self._stop_requested.wait()
+
+        async def stop(self):
+            assert self._stop_requested is not None
+            self._stop_requested.set()
+
+    monkeypatch.setattr("apps.core.task_runner.TaskRunner", LongRunningTaskRunner)
+    monkeypatch.setattr(
+        "apps.core.executor.select_executor",
+        lambda _runtime: SimulatedExecutor(),
+    )
+    runtime = _make_runtime(tmp_path, monkeypatch)
+
+    runtime._start_task_runner()
+    try:
+        assert entered_start.is_set()
+        assert runtime._task_runner_thread is not None
+        assert runtime._task_runner_thread.is_alive()
+    finally:
+        runtime._stop_task_runner()
+
+    assert runtime.task_runner is None
+    assert runtime._task_runner_thread is None
+    assert runtime._task_runner_loop is None
 
 
 def test_refresh_task_runner_executor_without_runner_is_noop(tmp_path, monkeypatch):

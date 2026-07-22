@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Smoke-test approval resume projection across Chat and Agent Studio timelines."""
+"""Smoke-test public Chat and diagnostic Agent Studio approval timelines."""
 
 from __future__ import annotations
 
@@ -371,13 +371,15 @@ def _chat_evidence() -> dict[str, Any]:
             approval.approval_id == APPROVAL_ID and approval.status == "approved"
             for approval in after.approvals
         ),
-        "after_tool_call_completed": after_call is not None
-        and after_call.status == "completed"
+        "after_tool_call_remains_approved": after_call is not None
+        and after_call.status == "approved"
         and after_call.approval_id == APPROVAL_ID,
-        "after_page_replays_resume_events": _event_types(after_page.events)
+        "after_tool_execution_detail_hidden": after_call is not None
+        and after_call.output_preview == {}
+        and "agent.tool.completed" not in _event_types(after.events),
+        "after_page_replays_public_resume_events": _event_types(after_page.events)
         == [
             "agent.tool.approval_approved",
-            "agent.tool.completed",
             "agent.completed",
         ],
         "approval_payload_preserved": port.calls[3]

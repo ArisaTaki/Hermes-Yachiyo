@@ -147,8 +147,14 @@ async def approve_run_approval(
     http_request: Request | None = None,
 ) -> dict[str, Any]:
     metadata = dict(request.metadata) if request is not None else {}
-    if request is not None and request.approval_id:
-        metadata.setdefault("approval_id", request.approval_id)
+    approval_id = str(
+        (request.approval_id if request is not None else "")
+        or metadata.get("approval_id")
+        or ""
+    ).strip()
+    if not approval_id:
+        raise HTTPException(status_code=400, detail="approval_expected_id_required")
+    metadata["approval_id"] = approval_id
     decision = ApprovalDecision(
         approved=True,
         reason=request.reason if request is not None else None,
@@ -173,8 +179,14 @@ async def reject_run_approval(
     http_request: Request | None = None,
 ) -> dict[str, Any]:
     metadata = dict(request.metadata) if request is not None else {}
-    if request is not None and request.approval_id:
-        metadata.setdefault("approval_id", request.approval_id)
+    approval_id = str(
+        (request.approval_id if request is not None else "")
+        or metadata.get("approval_id")
+        or ""
+    ).strip()
+    if not approval_id:
+        raise HTTPException(status_code=400, detail="approval_expected_id_required")
+    metadata["approval_id"] = approval_id
     decision = ApprovalDecision(
         approved=False,
         reason=request.reason if request is not None else None,

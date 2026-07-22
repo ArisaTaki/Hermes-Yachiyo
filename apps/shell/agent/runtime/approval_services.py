@@ -41,6 +41,9 @@ def build_runtime_approval_services(
     timeline_factory: Callable[..., dict[str, Any]],
     append_run_event: Callable[[str, str, dict[str, Any]], Any],
     update_run: Callable[..., dict[str, Any]],
+    get_run: Callable[[str], dict[str, Any]],
+    get_run_group: Callable[[str], dict[str, Any]] | None = None,
+    update_run_group: Callable[..., dict[str, Any] | None] | None = None,
     snapshots: Any,
     call_agent_tool: Callable[..., dict[str, Any]],
     fatal_tool_failure_detail: Callable[..., str],
@@ -48,18 +51,25 @@ def build_runtime_approval_services(
     run_tool_requests: Callable[..., None],
     claim_pending_approval: Callable[..., bool],
     continue_custom_api_agent: Callable[..., str],
+    event_buffer_scope: Callable[[str], Any] | None = None,
+    transaction_scope: Callable[..., Any] | None = None,
 ) -> RuntimeApprovalServiceBundle:
     approvals = ApprovalCoordinator(
         timeline_factory=timeline_factory,
         append_run_event=append_run_event,
         update_run=update_run,
+        transaction_scope=transaction_scope,
     )
     return RuntimeApprovalServiceBundle(
         approval_pause=ApprovalPauseProjectionCoordinator(
             timeline_factory=timeline_factory,
             append_run_event=append_run_event,
             update_run=update_run,
+            get_run=get_run,
             snapshots=snapshots,
+            transaction_scope=transaction_scope,
+            get_run_group=get_run_group,
+            update_run_group=update_run_group,
         ),
         approvals=approvals,
         approval_resume=ApprovalResumeCoordinator(
@@ -72,6 +82,9 @@ def build_runtime_approval_services(
             approve_tool_run=approvals.approve_tool_run,
             continue_custom_api_agent=continue_custom_api_agent,
             append_run_event=append_run_event,
+            event_buffer_scope=event_buffer_scope,
+            transaction_scope=transaction_scope,
+            get_current_run=get_run,
         ),
     )
 
@@ -80,6 +93,9 @@ def build_runtime_approval_runtime_services(
     *,
     get_run: Callable[[str], dict[str, Any]],
     pending_approval_private: Callable[[str], dict[str, Any] | None],
+    assert_approval_resume_active: Callable[[str, str], None],
+    claim_pending_rejection: Callable[..., bool],
+    claim_pending_timeout: Callable[..., bool],
     approvals: Any,
     project_child_run_transition: Callable[[dict[str, Any]], dict[str, Any]],
     project_cancelled_workflow_group_if_root: Callable[
@@ -99,18 +115,28 @@ def build_runtime_approval_runtime_services(
     project_agent_running: Callable[[dict[str, Any]], dict[str, Any]],
     project_agent_completed: Callable[..., dict[str, Any]],
     project_main_chat_completed: Callable[..., dict[str, Any]],
+    project_main_chat_failed: Callable[..., dict[str, Any]] | None = None,
     approve_workflow_run: Callable[[dict[str, Any]], dict[str, Any]],
     approve_main_chat_run: Callable[[dict[str, Any]], dict[str, Any]],
     execution_lock: Any,
     execution_in_progress: set[str],
+    transaction_scope: Callable[..., Any] | None = None,
+    close_run_owned_browser_target: Callable[[dict[str, Any]], Any] | None = None,
+    project_agent_run_group_if_root: Callable[[dict[str, Any]], Any] | None = None,
 ) -> RuntimeApprovalRuntimeServiceBundle:
     approval_transitions = RuntimeApprovalTransitionService(
         get_run=get_run,
         pending_approval_private=pending_approval_private,
+        claim_pending_rejection=claim_pending_rejection,
+        claim_pending_timeout=claim_pending_timeout,
         approvals=approvals,
         project_child_run_transition=project_child_run_transition,
         project_cancelled_workflow_group_if_root=project_cancelled_workflow_group_if_root,
         cancel_run=cancel_run,
+        error_type=AgentRuntimeError,
+        transaction_scope=transaction_scope,
+        close_run_owned_browser_target=close_run_owned_browser_target,
+        project_agent_run_group_if_root=project_agent_run_group_if_root,
     )
     tool_approval_resume = RuntimeToolApprovalResumeService(
         pending_approval_private=pending_approval_private,
@@ -126,10 +152,12 @@ def build_runtime_approval_runtime_services(
         project_agent_running=project_agent_running,
         project_agent_completed=project_agent_completed,
         project_main_chat_completed=project_main_chat_completed,
+        project_main_chat_failed=project_main_chat_failed,
         project_child_run_transition=project_child_run_transition,
         redact_agent_error=redact_secrets,
         main_chat_agent_id=MAIN_CHAT_AGENT_ID,
         error_type=AgentRuntimeError,
+        assert_approval_resume_active=assert_approval_resume_active,
     )
     approval_resume_dispatcher = RuntimeApprovalRunDispatcher(
         approve_workflow_run=approve_workflow_run,
@@ -146,5 +174,6 @@ def build_runtime_approval_runtime_services(
             execution_in_progress=execution_in_progress,
             get_run=get_run,
             approve_once=approval_resume_dispatcher.approve_once,
+            error_type=AgentRuntimeError,
         ),
     )

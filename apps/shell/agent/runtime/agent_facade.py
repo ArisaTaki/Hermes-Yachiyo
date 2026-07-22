@@ -43,8 +43,14 @@ class RuntimeAgentFacadeMixin:
         self,
         payload: dict[str, Any],
         on_complete: Callable[[dict[str, Any]], None] | None = None,
+        deferred_execution_start_sink: Callable[[Callable[[], None]], None]
+        | None = None,
     ) -> dict[str, Any]:
-        return self.agent_run_async_coordinator.create_async(payload, on_complete=on_complete)
+        return self.agent_run_async_coordinator.create_async(
+            payload,
+            on_complete=on_complete,
+            deferred_execution_start_sink=deferred_execution_start_sink,
+        )
 
     def _execute_agent_run(
         self,
@@ -115,9 +121,11 @@ class RuntimeAgentFacadeMixin:
         runtime_execution_envelope: dict[str, Any] | None = None,
         runtime_execution_metadata: dict[str, Any] | None = None,
         daily_desktop_planning_context: str | None = None,
+        original_goal: str | None = None,
         start_iteration: int = 0,
         run_id: str = "",
         budget: Any | None = None,
+        resume_after_approved_tool: bool = False,
     ) -> str:
         return self.custom_api_agent_loop.run(
             agent,
@@ -131,9 +139,11 @@ class RuntimeAgentFacadeMixin:
             runtime_execution_envelope=runtime_execution_envelope,
             runtime_execution_metadata=runtime_execution_metadata,
             daily_desktop_planning_context=daily_desktop_planning_context,
+            original_goal=original_goal,
             start_iteration=start_iteration,
             run_id=run_id,
             budget=budget,
+            resume_after_approved_tool=resume_after_approved_tool,
         )
 
     def test_agent_model(self, agent_id: str) -> dict[str, Any]:

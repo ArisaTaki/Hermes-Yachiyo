@@ -91,6 +91,20 @@ export type YachiyoTaskChatMessage = {
   metadata?: YachiyoTaskChatMetadata;
 };
 
+export function agentTaskHasVisibleExecution(
+  task?: AgentTaskSnapshot | null,
+  message?: YachiyoTaskChatMessage | null,
+): boolean {
+  if (message?.activity_events?.some(messageActivityHasVisibleExecution)) return true;
+  if (!task) return false;
+  if (task.tool_calls?.length) return true;
+  if (task.pending_approvals?.length) return true;
+  if (task.replan_recoveries?.length) return true;
+  if (task.artifacts?.length) return true;
+  if (taskRuntimeEnvelopeHasActionableRecovery(task)) return true;
+  return Boolean(task.recent_events?.some(agentTaskEventHasToolEvidence));
+}
+
 export function agentTaskSnapshotFromMessage(
   message: YachiyoTaskChatMessage,
   displayContent: string,
@@ -309,7 +323,7 @@ function messageTaskApprovals(
   if (pending) {
     const tool = String(pending.tool || 'tool');
     approvals.push({
-      approval_id: String(pending.approval_id || runId),
+      approval_id: String(pending.approval_id || '').trim(),
       run_id: runId,
       title: `审批 ${tool}`,
       status: 'pending',
@@ -324,7 +338,7 @@ function messageTaskApprovals(
     const childRunId = String(message.metadata?.workflow_waiting_child_run_id || runId);
     const tool = String(workflowPending.tool || 'workflow.approval');
     approvals.push({
-      approval_id: String(workflowPending.approval_id || childRunId),
+      approval_id: String(workflowPending.approval_id || '').trim(),
       run_id: childRunId,
       title: `审批 ${tool}`,
       status: 'pending',
@@ -369,9 +383,98 @@ function messageTaskEvents(
     detail: event.detail || null,
     visibility: 'user',
     sensitivity: 'public',
-    payload: event.metadata || {},
+    payload: {
+      ...(event.metadata || {}),
+      tool_name: event.tool_name || undefined,
+    },
     created_at: event.created_at || '',
   }));
+}
+
+function agentTaskEventHasToolEvidence(
+  event: NonNullable<AgentTaskSnapshot['recent_events']>[number],
+): boolean {
+  const eventType = String(event.event_type || '').trim().toLowerCase();
+  if (eventType.startsWith('agent.tool.') || eventType.startsWith('tool.')) return true;
+  if (eventTypeHasActionableRecovery(eventType)) return true;
+  const actor = String(event.actor || '').trim().toLowerCase();
+  if (actor === 'tool' || actor.startsWith('tool:')) return true;
+  const payload = event.payload || {};
+  if (Boolean(
+    String(payload.tool_name || '').trim()
+    || String(payload.tool_call_id || '').trim()
+    || String(payload.tool || '').trim(),
+  )) return true;
+  return recordHasActionableRecoveryEvidence(payload);
+}
+
+function messageActivityHasVisibleExecution(event: YachiyoTaskChatActivityEvent): boolean {
+  if (String(event.tool_name || '').trim()) return true;
+  const eventTypes = [event.phase, event.status]
+    .map((value) => String(value || '').trim().toLowerCase())
+    .filter(Boolean);
+  if (eventTypes.some((eventType) => (
+    eventType.startsWith('agent.tool.')
+    || eventType.startsWith('tool.')
+    || eventTypeHasActionableRecovery(eventType)
+  ))) return true;
+  return recordHasActionableRecoveryEvidence(event.metadata || {});
+}
+
+function eventTypeHasActionableRecovery(eventType: string): boolean {
+  return eventType.includes('permission_recovery')
+    || eventType.includes('intent_unavailable')
+    || eventType.includes('intent_unverified')
+    || eventType.includes('.replan.recovery.')
+    || eventType.includes('recovery_required')
+    || eventType.includes('retry_required');
+}
+
+function taskRuntimeEnvelopeHasActionableRecovery(task: AgentTaskSnapshot): boolean {
+  const allowPlannedRetries = (
+    task.task_progress?.needs_replan === true
+    || Number(task.task_progress?.failed_verification_count || 0) > 0
+  );
+  return Boolean(task.runtime_execution_envelope?.requests?.some((request) => {
+    const retry = objectRecord(request.observation_retry);
+    if (!Object.keys(retry).length) return false;
+    const evidence = objectRecord(request.observation_evidence);
+    return allowPlannedRetries || runtimeExecutionEvidenceNeedsRetry(evidence);
+  }));
+}
+
+function runtimeExecutionEvidenceNeedsRetry(evidence: Record<string, unknown>): boolean {
+  if (recordHasActionableRecoveryEvidence(evidence)) return true;
+  if (evidence.verification_failed === true) return true;
+  if (evidence.foreground_required === true && evidence.foreground_ready === false) return true;
+  return false;
+}
+
+function recordHasActionableRecoveryEvidence(value: unknown): boolean {
+  const record = objectRecord(value);
+  const result = objectRecord(record.result);
+  const data = objectRecord(record.data);
+  return [record, result, data].some((source) => (
+    source.permission_error === true
+    || unknownValueHasEntries(source.permission_targets)
+    || unknownValueHasEntries(source.missing_permissions)
+    || unknownValueHasEntries(source.blocking_condition)
+    || unknownValueHasEntries(source.blocking_conditions)
+    || unknownValueHasEntries(source.recovery_actions)
+    || unknownValueHasEntries(source.observation_retry)
+  ));
+}
+
+function objectRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function unknownValueHasEntries(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some((item) => unknownValueHasEntries(item));
+  if (value && typeof value === 'object') return Object.keys(value).length > 0;
+  return typeof value === 'string' ? Boolean(value.trim()) : value === true;
 }
 
 function messageRunStatus(message?: YachiyoTaskChatMessage | null) {

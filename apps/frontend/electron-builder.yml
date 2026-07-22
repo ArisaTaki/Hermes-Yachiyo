@@ -33,10 +33,20 @@ files:
 extraResources:
   - from: ../../dist/backend/oha-yachiyo-backend
     to: backend/oha-yachiyo-backend
+  - from: ../../dist/backend/runtime
+    to: backend/runtime
   - from: ../../dist/desktop-provider/oha-yachiyo-desktop-provider
     to: desktop-provider/oha-yachiyo-desktop-provider
   - from: ../../dist/desktop-provider/oha-yachiyo-virtual-desktop-bridge
     to: desktop-provider/oha-yachiyo-virtual-desktop-bridge
+  - from: ../../dist/cua-driver/macos/cua-driver
+    to: computer-use/macos/OhaCuaDriver.app/Contents/MacOS/cua-driver
+  - from: ../../packaging/cua-driver-background-helper.Info.plist
+    to: computer-use/macos/OhaCuaDriver.app/Contents/Info.plist
+  - from: ../../dist/cua-driver/macos/LICENSE.md
+    to: computer-use/macos/LICENSE.md
+  - from: ../../dist/cua-driver/macos/manifest.json
+    to: computer-use/macos/manifest.json
   - from: ../../assets
     to: assets
     filter:
@@ -53,6 +63,9 @@ mac:
   gatekeeperAssess: false
   entitlements: ../../packaging/entitlements.mac.plist
   entitlementsInherit: ../../packaging/entitlements.mac.plist
+  # Cua is signed separately with its narrow Apple Events + Screen Capture policy.
+  signIgnore:
+    - '/Contents/Resources/computer-use/macos/OhaCuaDriver\.app/Contents/MacOS/cua-driver$'
   target:
     - target: dmg
   extendInfo:

@@ -2,11 +2,37 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Any
 
 from apps.shell.yachiyo_agent.runtime_execution import (
     runtime_execution_continuation_requests_from_envelope_payload,
 )
+
+
+def _preferred_runtime_execution_mapping(
+    primary: Any,
+    fallback: Any,
+) -> dict[str, Any] | None:
+    candidates = [value for value in (primary, fallback) if isinstance(value, dict)]
+    for expected_rank in (2, 1, 0):
+        for value in candidates:
+            requests = value.get("requests")
+            nested = value.get("yachiyo_execution_envelope")
+            nested_requests = (
+                nested.get("requests") if isinstance(nested, dict) else None
+            )
+            rank = (
+                2
+                if (isinstance(requests, list) and requests)
+                or (isinstance(nested_requests, list) and nested_requests)
+                else 1
+                if value
+                else 0
+            )
+            if rank == expected_rank:
+                return deepcopy(value)
+    return None
 
 
 class RuntimeMainChatFacadeMixin:
@@ -18,6 +44,7 @@ class RuntimeMainChatFacadeMixin:
         task_id: str,
         session_id: str,
         user_goal: str,
+        client_run_id: str = "",
         metadata: dict[str, Any] | None = None,
         runtime_execution_envelope: dict[str, Any] | None = None,
         direct_tool_request: dict[str, Any] | None = None,
@@ -27,10 +54,19 @@ class RuntimeMainChatFacadeMixin:
             task_id=task_id,
             session_id=session_id,
             user_goal=user_goal,
+            client_run_id=client_run_id,
             metadata=metadata,
             runtime_execution_envelope=runtime_execution_envelope,
             direct_tool_request=direct_tool_request,
             direct_tool_requests=direct_tool_requests,
+        )
+
+    def latest_awaiting_user_main_chat_run(
+        self,
+        session_id: str,
+    ) -> dict[str, Any] | None:
+        return self.task_run_links.latest_awaiting_user_main_chat_for_session(
+            session_id
         )
 
     def call_main_chat_model(
@@ -84,12 +120,16 @@ class RuntimeMainChatFacadeMixin:
             "tool_policy": tool_policy,
             "workspace_policy": workspace_policy,
         }
-        if runtime_execution_envelope is not None:
-            payload["runtime_execution_envelope"] = runtime_execution_envelope
+        effective_runtime_execution_envelope = _preferred_runtime_execution_mapping(
+            runtime_execution_envelope,
+            pending_approval.get("runtime_execution_envelope"),
+        )
+        if isinstance(effective_runtime_execution_envelope, dict):
+            payload["runtime_execution_envelope"] = effective_runtime_execution_envelope
             if not payload.get("remaining_tool_requests"):
                 payload["remaining_tool_requests"] = (
                     runtime_execution_continuation_requests_from_envelope_payload(
-                        runtime_execution_envelope,
+                        effective_runtime_execution_envelope,
                         after_request=(
                             pending_approval.get("tool_request")
                             if isinstance(pending_approval.get("tool_request"), dict)
@@ -98,8 +138,12 @@ class RuntimeMainChatFacadeMixin:
                         allowed_tools=tool_policy.get("allowed_tools") or [],
                     )
                 )
-        if runtime_execution_metadata is not None:
-            payload["runtime_execution_metadata"] = runtime_execution_metadata
+        effective_runtime_execution_metadata = _preferred_runtime_execution_mapping(
+            runtime_execution_metadata,
+            pending_approval.get("runtime_execution_metadata"),
+        )
+        if isinstance(effective_runtime_execution_metadata, dict):
+            payload["runtime_execution_metadata"] = effective_runtime_execution_metadata
         return payload
 
     def execute_main_chat_model_loop(

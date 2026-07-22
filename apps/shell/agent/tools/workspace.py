@@ -8,7 +8,7 @@ import re
 from pathlib import Path
 from uuid import uuid4
 
-from apps.shell.agent.runtime.errors import AgentRuntimeError
+from apps.shell.agent.runtime.errors import AgentRuntimeError, AgentWorkspaceBoundaryError
 
 _UNIFIED_HUNK_RE = re.compile(
     r"^@@ -(?P<old_start>\d+)(?:,(?P<old_count>\d+))? "
@@ -24,7 +24,7 @@ def _safe_rel_path(value: str) -> str:
         or candidate.startswith("../")
         or "/../" in candidate
     ):
-        raise AgentRuntimeError("路径必须是相对路径，且不能越界")
+        raise AgentWorkspaceBoundaryError("路径必须是相对路径，且不能越界")
     return candidate
 
 

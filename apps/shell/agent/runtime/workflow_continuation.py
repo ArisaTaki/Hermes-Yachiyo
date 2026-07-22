@@ -12,6 +12,7 @@ from apps.shell.agent.runtime.tool_brokers import write_artifact_with_tool_broke
 from apps.shell.agent.runtime.workflow_approvals import (
     WorkflowApprovalPauseCoordinator,
     WorkflowApprovalPauseProjection,
+    is_workflow_projection_integrity_error,
 )
 from apps.shell.agent.runtime.workflow_child_approvals import (
     WorkflowChildPendingApprovalProjection,
@@ -86,6 +87,8 @@ class WorkflowContinuationCoordinator:
         update_run: Any | None = None,
         update_run_group: Any | None = None,
         get_run: Any | None = None,
+        get_run_group: Any | None = None,
+        transaction_scope: Any | None = None,
         pending_approval_private: Any | None = None,
         approve_workflow_node: Any | None = None,
         runtime_limits: Any | None = None,
@@ -176,6 +179,11 @@ class WorkflowContinuationCoordinator:
         self._update_run_callback = port_value(update_run, "update_run")
         self._update_run_group_callback = port_value(update_run_group, "update_run_group")
         self._get_run_callback = port_value(get_run, "get_run")
+        self._get_run_group_callback = port_value(get_run_group, "get_run_group")
+        self._transaction_scope = port_value(
+            transaction_scope,
+            "transaction_scope",
+        )
         self._pending_approval_private_callback = port_value(
             pending_approval_private,
             "pending_approval_private",
@@ -201,6 +209,8 @@ class WorkflowContinuationCoordinator:
             update_run=self._update_run,
             update_run_group=self._update_run_group,
             get_run=self._get_run,
+            get_run_group=self._get_run_group,
+            transaction_scope=self._transaction_scope,
         )
         self._approval_pause = WorkflowApprovalPauseCoordinator(
             timeline_factory=self._timeline,
@@ -208,6 +218,8 @@ class WorkflowContinuationCoordinator:
             update_run=self._update_run,
             update_run_group=self._update_run_group,
             get_run=self._get_run,
+            get_run_group=self._get_run_group,
+            transaction_scope=self._transaction_scope,
         )
         self._edge_followed = WorkflowEdgeFollowedCoordinator(
             node_kind=self._node_kind,
@@ -524,10 +536,37 @@ class WorkflowContinuationCoordinator:
         run_id: str,
         event_type: str,
         payload: dict[str, Any],
+        *,
+        expected_status: str | None = None,
+        expected_updated_at: str | None = None,
     ) -> Any:
+        fence_requested = expected_status is not None or expected_updated_at is not None
+        event_fence = {
+            "expected_status": expected_status,
+            "expected_updated_at": expected_updated_at,
+        }
         if self._append_run_event_callback is not None:
-            return self._append_run_event_callback(run_id, event_type, payload)
-        return self._engine.append_run_event(run_id, event_type, payload)
+            if not fence_requested or not supports_keyword(
+                self._append_run_event_callback,
+                "expected_status",
+            ):
+                result = self._append_run_event_callback(run_id, event_type, payload)
+                return True if fence_requested and result is None else result
+            return self._append_run_event_callback(
+                run_id,
+                event_type,
+                payload,
+                **event_fence,
+            )
+        if fence_requested and supports_keyword(self._engine.append_run_event, "expected_status"):
+            return self._engine.append_run_event(
+                run_id,
+                event_type,
+                payload,
+                **event_fence,
+            )
+        result = self._engine.append_run_event(run_id, event_type, payload)
+        return True if fence_requested and result is None else result
 
     def _update_run(self, run_id: str, **fields: Any) -> dict[str, Any]:
         if self._update_run_callback is not None:
@@ -544,11 +583,40 @@ class WorkflowContinuationCoordinator:
             return self._get_run_callback(run_id)
         return self._engine.get_run(run_id)
 
+    def _get_run_group(self, run_group_id: str) -> dict[str, Any]:
+        if self._get_run_group_callback is not None:
+            return self._get_run_group_callback(run_group_id)
+        return self._engine.get_run_group(run_group_id)
+
+    def _advance_continuation_fence(
+        self,
+        run: dict[str, Any],
+        *,
+        expected_updated_at: str,
+    ) -> dict[str, Any] | None:
+        expected_version = str(expected_updated_at or "").strip()
+        if not expected_version:
+            # Persisted Runs always carry updated_at. Keeping injected legacy ports
+            # compatible avoids inventing a non-atomic fallback version.
+            return run
+        if str(run.get("status") or "").strip().lower() != "running":
+            return None
+        updated = self._update_run(
+            str(run["run_id"]),
+            status="running",
+            expected_status="running",
+            expected_updated_at=expected_version,
+            expected_pending_approval_absent=True,
+        )
+        if updated is None:
+            return None
+        return {**run, **updated}
+
     def _approve_workflow_node(
         self,
         run_id: str,
         **kwargs: Any,
-    ) -> dict[str, Any]:
+    ) -> dict[str, Any] | None:
         if self._approve_workflow_node_callback is not None:
             return self._approve_workflow_node_callback(run_id, **kwargs)
         return self._engine.approvals.approve_workflow_node(run_id, **kwargs)
@@ -623,9 +691,19 @@ class WorkflowContinuationCoordinator:
         daily_desktop_planning_context: str | None = None,
     ) -> dict[str, Any]:
         engine = self._engine
+        run_id = str(run["run_id"])
         run_group_id = str(run.get("run_group_id") or "")
         current_node_info: dict[str, str] = {}
+        continuation_generation = str(run.get("updated_at") or "").strip()
         try:
+            fenced_run = self._advance_continuation_fence(
+                run,
+                expected_updated_at=continuation_generation,
+            )
+            if fenced_run is None:
+                return self._get_run(run_id)
+            run = fenced_run
+            continuation_generation = str(run.get("updated_at") or "").strip()
             workflow_goal = str(run.get("user_goal") or context)
             path = self._workflow_path(workflow)
             nodes_by_id = self._workflow_nodes_by_id(workflow, path)
@@ -664,6 +742,14 @@ class WorkflowContinuationCoordinator:
             budget = self._workflow_budget(run, timeline)
             step_count = 0
             while node is not None:
+                fenced_run = self._advance_continuation_fence(
+                    run,
+                    expected_updated_at=continuation_generation,
+                )
+                if fenced_run is None:
+                    return self._get_run(run_id)
+                run = fenced_run
+                continuation_generation = str(run.get("updated_at") or "").strip()
                 step_count += 1
                 if step_count > max_step_count:
                     raise AgentRuntimeError("Workflow 执行步骤超过 Loop 上限")
@@ -831,14 +917,18 @@ class WorkflowContinuationCoordinator:
                 timeline=timeline,
                 artifacts=artifacts,
                 root_group=root_group,
+                expected_updated_at=(continuation_generation or None),
             )
         except Exception as exc:
+            if is_workflow_projection_integrity_error(exc):
+                raise
             return self._outcomes.failed(
                 run,
                 WorkflowContinuationFailureProjection.from_error(exc, current_node_info),
                 timeline=timeline,
                 artifacts=artifacts,
                 root_group=root_group,
+                expected_updated_at=(continuation_generation or None),
             )
 
     @staticmethod
@@ -859,11 +949,48 @@ class WorkflowContinuationCoordinator:
         label: str,
         criteria: str,
         input_preview: dict[str, Any],
+        expected_approval_id: str,
         start_node_id: str = "",
     ) -> dict[str, Any]:
-        run_id = str(run["run_id"])
-        running = self._approve_workflow_node(
-            run_id,
+        running = self.project_approved_node(
+            run,
+            context=context,
+            timeline=timeline,
+            artifacts=artifacts,
+            workflow_node_id=workflow_node_id,
+            label=label,
+            criteria=criteria,
+            input_preview=input_preview,
+            expected_approval_id=expected_approval_id,
+        )
+        if running is None:
+            return self._get_run(str(run["run_id"]))
+        return self.continue_after_approval_node(
+            running,
+            workflow,
+            context=context,
+            timeline=timeline,
+            artifacts=artifacts,
+            start_index=start_index,
+            start_node_id=start_node_id,
+            root_group=root_group,
+        )
+
+    def project_approved_node(
+        self,
+        run: dict[str, Any],
+        *,
+        context: str,
+        timeline: list[dict[str, Any]],
+        artifacts: list[dict[str, Any]],
+        workflow_node_id: str,
+        label: str,
+        criteria: str,
+        input_preview: dict[str, Any],
+        expected_approval_id: str,
+    ) -> dict[str, Any] | None:
+        return self._approve_workflow_node(
+            str(run["run_id"]),
             timeline=timeline,
             artifacts=artifacts,
             result_context=context,
@@ -871,14 +998,29 @@ class WorkflowContinuationCoordinator:
             label=label,
             criteria=criteria,
             input_preview=input_preview,
+            expected_approval_id=expected_approval_id,
         )
-        if root_group:
-            self._update_run_group(
-                str(run.get("run_group_id") or ""),
-                status="running",
-                summary=context,
-            )
-            running = self._get_run(run_id)
+
+    def continue_after_approval_node(
+        self,
+        running: dict[str, Any],
+        workflow: dict[str, Any],
+        *,
+        context: str,
+        timeline: list[dict[str, Any]],
+        artifacts: list[dict[str, Any]],
+        start_index: int,
+        root_group: bool,
+        start_node_id: str = "",
+    ) -> dict[str, Any]:
+        run_id = str(running["run_id"])
+        fenced_running = self._advance_continuation_fence(
+            running,
+            expected_updated_at=str(running.get("updated_at") or ""),
+        )
+        if fenced_running is None:
+            return self._get_run(run_id)
+        running = fenced_running
         return self.continue_run(
             running,
             workflow,
@@ -1028,7 +1170,6 @@ class WorkflowContinuationCoordinator:
                 **agent_payload,
             )
         )
-        self._append_run_event(str(run["run_id"]), "workflow.node.agent", agent_payload)
         self._merge_workflow_child_run_outcome(timeline, artifacts, execution.child_run, label)
         return self._apply_child_execution_status(
             run,
@@ -1038,6 +1179,8 @@ class WorkflowContinuationCoordinator:
             timeline=timeline,
             artifacts=artifacts,
             root_group=root_group,
+            child_event_type="workflow.node.agent",
+            child_event_payload=agent_payload,
         )
 
     def _project_workflow_child_pending_context(
@@ -1062,6 +1205,8 @@ class WorkflowContinuationCoordinator:
         if projection is None:
             return child
         updated = projection.project(self._update_run)
+        if updated is None:
+            return self._get_run(child_run_id)
         return {**child, **updated}
 
     def _apply_child_execution_status(
@@ -1074,25 +1219,90 @@ class WorkflowContinuationCoordinator:
         timeline: list[dict[str, Any]],
         artifacts: list[dict[str, Any]],
         root_group: bool,
+        child_event_type: str = "",
+        child_event_payload: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         projection = WorkflowChildExecutionStatusProjection.from_execution(
             execution,
             label=label,
         )
         if projection is None:
+            if child_event_type and isinstance(child_event_payload, dict):
+                self._append_run_event(
+                    str(run["run_id"]),
+                    child_event_type,
+                    child_event_payload,
+                )
             return {"done": False, "context": str(getattr(execution, "next_context") or "")}
-        timeline.append(projection.timeline_event(self._timeline))
-        self._append_run_event(
+        if projection.parent_status == "approval_required":
+            child_run = getattr(execution, "child_run", None)
+            child_pending = (
+                child_run.get("pending_approval")
+                if isinstance(child_run, dict)
+                and isinstance(child_run.get("pending_approval"), dict)
+                else None
+            )
+            result = self._approval_pause.pause_for_child(
+                run,
+                result_text=projection.next_context,
+                timeline_event=projection.timeline_event(self._timeline),
+                event_type=projection.event_type,
+                event_payload=projection.run_event_payload(),
+                timeline=timeline,
+                artifacts=artifacts,
+                child_event_type=child_event_type,
+                child_event_payload=child_event_payload,
+                child_pending_approval=child_pending,
+            )
+            return {"done": True, "run": result}
+        if child_event_type and isinstance(child_event_payload, dict):
+            self._append_run_event(
+                str(run["run_id"]),
+                child_event_type,
+                child_event_payload,
+            )
+        current = self._get_run(str(run["run_id"]))
+        current_status = str(current.get("status") or "").strip().lower()
+        if current_status in {"completed", "failed", "cancelled", "canceled"}:
+            return {"done": True, "run": current}
+        group = None
+        if root_group and run_group_id:
+            try:
+                group = self._get_run_group(run_group_id)
+            except (AttributeError, KeyError):
+                group = None
+        next_timeline = [*timeline, projection.timeline_event(self._timeline)]
+        result = self._update_run(
+            str(run["run_id"]),
+            **projection.update_fields(timeline=next_timeline, artifacts=artifacts),
+            expected_status=current_status,
+            expected_updated_at=str(current.get("updated_at") or ""),
+            expected_pending_approval_absent=True,
+        )
+        if result is None:
+            return {"done": True, "run": self._get_run(str(run["run_id"]))}
+        timeline[:] = next_timeline
+        event_kwargs = {}
+        if supports_keyword(self._append_run_event, "expected_status"):
+            event_kwargs = {
+                "expected_status": str(projection.parent_status or ""),
+                "expected_updated_at": str(result.get("updated_at") or ""),
+            }
+        event = self._append_run_event(
             str(run["run_id"]),
             projection.event_type,
             projection.run_event_payload(),
+            **event_kwargs,
         )
-        result = self._update_run(
-            str(run["run_id"]),
-            **projection.update_fields(timeline=timeline, artifacts=artifacts),
-        )
-        if root_group:
-            self._update_run_group(run_group_id, **projection.run_group_update_fields())
+        if event_kwargs and event is None:
+            return {"done": True, "run": self._get_run(str(run["run_id"]))}
+        if group is not None:
+            self._update_run_group(
+                run_group_id,
+                **projection.run_group_update_fields(),
+                expected_status=str(group.get("status") or ""),
+                expected_updated_at=str(group.get("updated_at") or ""),
+            )
             result = self._get_run(result["run_id"])
         return {"done": True, "run": result}
 
@@ -1130,7 +1340,6 @@ class WorkflowContinuationCoordinator:
         )
         payload = execution.event_payload()
         timeline.append(self._timeline("workflow.node.workflow", label, **payload))
-        self._append_run_event(str(run["run_id"]), "workflow.node.workflow", payload)
         self._merge_workflow_child_run_outcome(timeline, artifacts, execution.child_run, label)
         return self._apply_child_execution_status(
             run,
@@ -1140,6 +1349,8 @@ class WorkflowContinuationCoordinator:
             timeline=timeline,
             artifacts=artifacts,
             root_group=root_group,
+            child_event_type="workflow.node.workflow",
+            child_event_payload=payload,
         )
 
     def _pause_for_approval_node(
@@ -1174,7 +1385,6 @@ class WorkflowContinuationCoordinator:
             artifacts=artifacts,
             root_group=root_group,
         )
-
     def _run_parallel_node(
         self,
         run: dict[str, Any],

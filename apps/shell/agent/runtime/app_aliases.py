@@ -215,6 +215,31 @@ APP_ALIASES: dict[str, str] = {
     "goland": "GoLand",
 }
 
+
+# Generic labels describe an app role chosen by the user or operating system;
+# they are aliases for planning convenience, not stable installed-app identity.
+GENERIC_APP_ALIAS_COMPACTS = frozenset(
+    {
+        "browser",
+        "defaultbrowser",
+        "systemdefaultbrowser",
+        "defaultwebbrowser",
+        "webbrowser",
+        "浏览器",
+        "默认浏览器",
+        "系统默认浏览器",
+        "默认网页浏览器",
+        "文件管理器",
+        "文件浏览器",
+        "terminal",
+        "终端",
+        "命令行",
+        "musicplayer",
+        "音乐播放器",
+        "播放器",
+    }
+)
+
 BROWSER_APP_NAMES = {
     "Arc",
     "Brave Browser",

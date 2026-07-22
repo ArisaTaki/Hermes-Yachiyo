@@ -241,6 +241,24 @@ def test_keychain_store_rejects_interaction_policy_read_failure(
     assert security.SecKeychainSetUserInteractionAllowed.calls == []
 
 
+def test_keychain_auth_failure_has_actionable_chinese_recovery_without_passphrase_text(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    security = _FakeLibrary()
+    _configure_noninteractive_find(security)
+    security.SecKeychainFindGenericPassword.return_value = -25293
+    store = _keychain_store(monkeypatch, security)
+
+    with pytest.raises(credential_store.CredentialStoreError) as error:
+        store.get("profile:test:api_key")
+
+    message = str(error.value)
+    assert "钥匙串" in message
+    assert "重新保存 API Key" in message
+    assert "passphrase" not in message.lower()
+    assert "user name" not in message.lower()
+
+
 def test_keychain_store_serializes_process_global_interaction_policy(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

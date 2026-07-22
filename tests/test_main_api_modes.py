@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 import time
 from dataclasses import dataclass
@@ -552,28 +553,92 @@ def test_update_native_agent_is_unsupported_external_kernel_endpoint(tmp_path):
 
 
 def test_launch_browser_cdp_writes_native_config_url(tmp_path, monkeypatch):
-    class _Socket:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *_args):
-            return False
-
     store = ChatStore(db_path=str(tmp_path / "chat.db"))
     runtime = _RuntimeStub(store)
     try:
         monkeypatch.setattr(config_mod, "_CONFIG_DIR", tmp_path / "yachiyo-config")
-        monkeypatch.setattr("apps.shell.main_api.socket.create_connection", lambda *_args, **_kwargs: _Socket())
+        profile_dir = tmp_path / "oha-profile"
+        process_checks = iter(({}, {"pid": 43210, "port": 43123}))
+        launch_calls = []
+        monkeypatch.setattr("apps.shell.main_api._browser_cdp_profile_dir", lambda: profile_dir)
+        monkeypatch.setattr("apps.shell.main_api._reserve_browser_cdp_port", lambda _host: 43123)
+        monkeypatch.setattr(
+            "apps.shell.main_api._find_owned_browser_cdp_process",
+            lambda *_args, **_kwargs: next(process_checks),
+        )
+        monkeypatch.setattr("apps.shell.main_api._browser_cdp_port_reachable", lambda *_args: True)
+        monkeypatch.setattr("apps.shell.main_api.sys.platform", "darwin")
+        monkeypatch.setattr("apps.shell.main_api.shutil.which", lambda name: "/usr/bin/open" if name == "open" else None)
+        monkeypatch.setattr(
+            "apps.shell.main_api.subprocess.run",
+            lambda command, **kwargs: launch_calls.append((command, kwargs))
+            or subprocess.CompletedProcess(command, 0, stdout="", stderr=""),
+        )
 
         api = MainWindowAPI(runtime, AppConfig())
         result = api.launch_browser_cdp()
 
         assert result["ok"] is True
-        assert result["url"] == "http://127.0.0.1:9222"
+        assert result["url"] == "http://127.0.0.1:43123"
+        assert result["pid"] == 43210
+        assert result["owned_by_yachiyo"] is True
+        assert launch_calls[0][0][:6] == [
+            "open",
+            "-n",
+            "-g",
+            "-a",
+            "Google Chrome",
+            "--args",
+        ]
+        assert "--remote-debugging-port=43123" in launch_calls[0][0]
+        assert "--remote-debugging-address=127.0.0.1" in launch_calls[0][0]
+        assert f"--user-data-dir={profile_dir}" in launch_calls[0][0]
         config_text = (tmp_path / "yachiyo-config" / "native_tool_config.json").read_text(encoding="utf-8")
-        assert '"browser.cdp_url": "http://127.0.0.1:9222"' in config_text
+        assert '"browser.cdp_url": "http://127.0.0.1:43123"' in config_text
+        assert '"browser.cdp_owner": "oha-yachiyo"' in config_text
+        assert '"browser.cdp_pid": 43210' in config_text
+        assert f'"browser.cdp_profile_dir": "{profile_dir}"' in config_text
     finally:
         store.close()
+
+
+def test_find_owned_browser_cdp_process_requires_pid_listener_attestation(
+    tmp_path,
+    monkeypatch,
+):
+    from apps.shell.agent.tools import browser as browser_mod
+
+    profile_dir = tmp_path / "chrome-debug"
+    port = 43123
+    pid = 43210
+    command = (
+        "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome "
+        f"--remote-debugging-port={port} --user-data-dir={profile_dir}"
+    )
+    monkeypatch.setattr(
+        main_api_mod.subprocess,
+        "run",
+        lambda *_args, **_kwargs: subprocess.CompletedProcess(
+            [],
+            0,
+            stdout=f"{pid} {command}\n",
+            stderr="",
+        ),
+    )
+    attestations = []
+    monkeypatch.setattr(
+        browser_mod,
+        "_browser_cdp_process_matches",
+        lambda url, **kwargs: attestations.append((url, kwargs)) or False,
+    )
+
+    assert main_api_mod._find_owned_browser_cdp_process(profile_dir, port=port) == {}
+    assert attestations == [
+        (
+            f"http://127.0.0.1:{port}",
+            {"pid": pid, "profile_dir": str(profile_dir.resolve(strict=False))},
+        )
+    ]
 
 
 def test_run_native_diagnostic_command_returns_native_output_and_cache(tmp_path, monkeypatch):

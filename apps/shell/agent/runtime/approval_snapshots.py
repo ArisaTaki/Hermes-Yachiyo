@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Any
 
 from apps.shell.agent.runtime.events import tool_input_preview
@@ -10,6 +11,7 @@ from apps.shell.agent.tools.policy import (
     HIGH_RISK_DESKTOP_TOOL_NAMES,
     MEDIUM_RISK_BROWSER_TOOL_NAMES,
     MEDIUM_RISK_DESKTOP_TOOL_NAMES,
+    TOOL_DESCRIPTORS,
 )
 
 MEDIUM_RISK_AGENT_TOOLS = {
@@ -26,24 +28,119 @@ def approval_input_preview(value: Any, *, limit: int = 1200) -> Any:
     return tool_input_preview(value, limit=limit)
 
 
+def approval_executable_input(tool_name: str, value: Any) -> Any:
+    """Project a tool payload through its broker-declared input schema."""
+
+    if not isinstance(value, dict):
+        return value
+    descriptor = TOOL_DESCRIPTORS.get(str(tool_name or "").strip())
+    if descriptor is None:
+        # Extension tools may be broker-registered without a built-in
+        # descriptor. Their pending input is already the only executable
+        # contract available at this boundary, so preserve it after the
+        # standard secret redaction below.
+        return deepcopy(value)
+    allowed_fields = descriptor.allowed_fields
+    return {
+        str(key): deepcopy(item)
+        for key, item in value.items()
+        if str(key) in allowed_fields
+    }
+
+
+def internal_pending_approval_trace(value: Any) -> dict[str, Any]:
+    """Build the private audit fact omitted from a public approval card."""
+
+    raw = value if isinstance(value, dict) else {}
+    if not raw:
+        return {}
+    tool_name = str(raw.get("tool") or "").strip()
+    tool_request = (
+        raw.get("tool_request")
+        if isinstance(raw.get("tool_request"), dict)
+        else {}
+    )
+    request_input = (
+        tool_request.get("input")
+        if isinstance(tool_request.get("input"), dict)
+        else raw.get("input")
+    )
+    request_input = request_input if isinstance(request_input, dict) else {}
+    executable_input = approval_executable_input(tool_name, request_input)
+    executable_record = executable_input if isinstance(executable_input, dict) else {}
+    non_executable_input = {
+        str(key): deepcopy(item)
+        for key, item in request_input.items()
+        if str(key) not in executable_record
+    }
+    planner_trace = {
+        str(key): deepcopy(item)
+        for key, item in tool_request.items()
+        if key not in {"tool", "input"} and item not in (None, "", [], {})
+    }
+    private_transport_keys = {
+        "approval_id",
+        "approval_request_fingerprint",
+        "tool",
+        "input",
+        "input_preview",
+        "requested_at",
+        "messages",
+        "tool_request",
+        "remaining_tool_requests",
+        "next_iteration",
+        "risk_level",
+        "policy_reason",
+    }
+    for key, item in raw.items():
+        if key in private_transport_keys or item in (None, "", [], {}):
+            continue
+        planner_trace.setdefault(str(key), deepcopy(item))
+    payload = {
+        "approval_id": str(raw.get("approval_id") or ""),
+        "tool": tool_name,
+        "requested_at": str(raw.get("requested_at") or ""),
+    }
+    if planner_trace:
+        payload["planner_trace"] = planner_trace
+    if non_executable_input:
+        payload["non_executable_input"] = non_executable_input
+    return payload
+
+
 def public_pending_approval(value: Any) -> dict[str, Any]:
     raw = value if isinstance(value, dict) else {}
     if not raw:
         return {}
-    tool_request = raw.get("tool_request") if isinstance(raw.get("tool_request"), dict) else {}
+    tool_request = (
+        raw.get("tool_request")
+        if isinstance(raw.get("tool_request"), dict)
+        else {}
+    )
+    tool_name = str(raw.get("tool") or "").strip()
     input_preview = raw.get("input_preview")
-    if input_preview:
-        public_input_preview = approval_input_preview(input_preview)
+    raw_input = raw.get("input")
+    if isinstance(raw_input, dict):
+        # Private pending approvals intentionally carry planner identity in
+        # ``input_preview`` so an approval resume can be fenced to the exact
+        # action generation. Public cards show only broker-declared arguments;
+        # planner/debug identity is persisted as a separate internal trace.
+        public_input_preview = approval_input_preview(
+            approval_executable_input(tool_name, raw_input)
+        )
+    elif input_preview:
+        public_input_preview = approval_input_preview(
+            approval_executable_input(tool_name, input_preview)
+        )
     else:
-        public_input_preview = approval_input_preview(raw.get("input") or {})
+        public_input_preview = approval_input_preview({})
     preview_record = public_input_preview if isinstance(public_input_preview, dict) else {}
     snapshot = {
         "approval_id": str(raw.get("approval_id") or ""),
-        "tool": str(raw.get("tool") or ""),
+        "tool": tool_name,
         "input_preview": public_input_preview,
         "requested_at": str(raw.get("requested_at") or ""),
     }
-    tool_name = str(snapshot["tool"] or "").strip()
     risk_level = _approval_risk_level(raw, tool_name)
     policy_reason = _approval_policy_reason(
         raw,
@@ -73,76 +170,6 @@ def public_pending_approval(value: Any) -> dict[str, Any]:
         text = str(raw.get(key) or tool_request.get(key) or preview_record.get(key) or "").strip()
         if text:
             snapshot[key] = text
-    for key in (
-        "source",
-        "planning_reason",
-        "step_id",
-        "planner_step_id",
-        "capability_id",
-        "decision_id",
-        "plan_id",
-        "tool_plan_id",
-        "intent_kind",
-        "replan_request_id",
-        "replan_trigger",
-        "runtime_doctrine",
-        "runtime_stage",
-        "runtime_role",
-    ):
-        text = str(raw.get(key) or tool_request.get(key) or preview_record.get(key) or "").strip()
-        if text:
-            snapshot[key] = text
-    for key in ("requires_observation", "requires_post_action_verification"):
-        value = raw.get(key)
-        if value is None:
-            value = tool_request.get(key)
-        if value is None:
-            value = preview_record.get(key)
-        if isinstance(value, bool):
-            snapshot[key] = value
-    for key in ("replan_triggers", "replan_signal_ids"):
-        value = raw.get(key) or tool_request.get(key) or preview_record.get(key)
-        if isinstance(value, list):
-            items = [str(item).strip() for item in value if str(item).strip()]
-            if items:
-                snapshot[key] = items
-    for key, aliases in (
-        ("action_target", ("action_target",)),
-        ("observation_evidence", ("observation_evidence",)),
-        ("observation_retry", ("observation_retry",)),
-        ("task_workspace_items", ("task_workspace_items", "workspace_items")),
-        ("verification_targets", ("verification_targets", "task_verification_targets")),
-        ("task_verification_targets", ("task_verification_targets", "verification_targets")),
-    ):
-        if key in {"action_target", "observation_evidence", "observation_retry"}:
-            item = _first_mapping(raw, tool_request, preview_record, aliases)
-            if item:
-                snapshot[key] = item
-        else:
-            items = _first_mapping_items(raw, tool_request, preview_record, aliases)
-            if items:
-                snapshot[key] = items
-    runtime_metadata = _first_mapping(
-        raw,
-        tool_request,
-        preview_record,
-        ("runtime_execution_metadata", "metadata"),
-    )
-    if runtime_metadata:
-        snapshot["runtime_execution_metadata"] = runtime_metadata
-    runtime_envelope = _first_mapping(
-        raw,
-        tool_request,
-        preview_record,
-        ("runtime_execution_envelope", "yachiyo_execution_envelope"),
-    )
-    if not runtime_envelope and runtime_metadata:
-        runtime_envelope = (
-            _mapping_item(runtime_metadata.get("runtime_execution_envelope"))
-            or _mapping_item(runtime_metadata.get("yachiyo_execution_envelope"))
-        )
-    if runtime_envelope:
-        snapshot["runtime_execution_envelope"] = runtime_envelope
     if risk_level:
         snapshot["risk_level"] = risk_level
     if policy_reason:
@@ -204,50 +231,6 @@ def _workflow_approval_criteria(raw: dict[str, Any], public_input_preview: Any) 
     if isinstance(public_input_preview, dict):
         return str(public_input_preview.get("criteria") or "").strip()
     return ""
-
-
-def _first_mapping(
-    raw: dict[str, Any],
-    tool_request: dict[str, Any],
-    preview_record: dict[str, Any],
-    aliases: tuple[str, ...],
-) -> dict[str, Any]:
-    for source in (raw, tool_request, preview_record):
-        for key in aliases:
-            item = _mapping_item(source.get(key))
-            if item:
-                return item
-    return {}
-
-
-def _first_mapping_items(
-    raw: dict[str, Any],
-    tool_request: dict[str, Any],
-    preview_record: dict[str, Any],
-    aliases: tuple[str, ...],
-) -> list[dict[str, Any]]:
-    for source in (raw, tool_request, preview_record):
-        for key in aliases:
-            items = _mapping_items(source.get(key))
-            if items:
-                return items
-    return []
-
-
-def _mapping_item(value: Any) -> dict[str, Any]:
-    if not isinstance(value, dict):
-        return {}
-    public_value = approval_input_preview(value)
-    return dict(public_value) if isinstance(public_value, dict) else {}
-
-
-def _mapping_items(value: Any) -> list[dict[str, Any]]:
-    if not isinstance(value, list):
-        return []
-    public_value = approval_input_preview(value)
-    if not isinstance(public_value, list):
-        return []
-    return [dict(item) for item in public_value if isinstance(item, dict)]
 
 
 def _medium_risk_foreground_reason(tool_name: str, public_input_preview: Any) -> str:
@@ -353,6 +336,11 @@ def _medium_risk_foreground_reason(tool_name: str, public_input_preview: Any) ->
 
 def _high_risk_foreground_reason(tool_name: str, public_input_preview: Any) -> str:
     record = public_input_preview if isinstance(public_input_preview, dict) else {}
+    if tool_name == "app.quit":
+        app_name = _preview_value(record, "app_name")
+        if app_name:
+            return f"将退出应用 {app_name}，可能导致未保存内容丢失，按工具策略必须人工确认。"
+        return "将退出本地应用，可能导致未保存内容丢失，按工具策略必须人工确认。"
     if tool_name != "desktop.submit_foreground":
         return ""
     action = _preview_value(record, "action")
@@ -470,3 +458,6 @@ class ApprovalSnapshotBuilder:
 
     def public_pending_approval(self, value: Any) -> dict[str, Any]:
         return public_pending_approval(value)
+
+    def internal_pending_approval_trace(self, value: Any) -> dict[str, Any]:
+        return internal_pending_approval_trace(value)

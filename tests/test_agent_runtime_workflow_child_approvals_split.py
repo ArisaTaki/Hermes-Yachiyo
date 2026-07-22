@@ -102,7 +102,8 @@ def test_workflow_child_pending_approval_projection_project_calls_update_run() -
     )
 
     result = projection.project(
-        lambda run_id, **fields: calls.append((run_id, fields)) or {"run_id": run_id, **fields}
+        lambda run_id, **fields: calls.append((run_id, fields))
+        or {"run_id": run_id, "pending_approval": fields["pending_approval"]}
     )
 
     assert result == {
@@ -110,5 +111,29 @@ def test_workflow_child_pending_approval_projection_project_calls_update_run() -
         "pending_approval": {"approval_id": "approval-1"},
     }
     assert calls == [
-        ("child-run-1", {"pending_approval": {"approval_id": "approval-1"}})
+        (
+            "child-run-1",
+            {
+                "pending_approval": {"approval_id": "approval-1"},
+                "expected_status": "approval_required",
+                "expected_approval_id": "approval-1",
+            },
+        )
     ]
+
+
+def test_workflow_child_pending_approval_projection_is_generation_fenced() -> None:
+    calls: list[tuple[str, dict[str, Any]]] = []
+    projection = WorkflowChildPendingApprovalProjection(
+        child_run_id="child-run-race",
+        pending_approval={"approval_id": "approval-race"},
+    )
+
+    def lose_to_cancel(run_id: str, **fields: Any) -> None:
+        calls.append((run_id, fields))
+        assert fields["expected_status"] == "approval_required"
+        assert fields["expected_approval_id"] == "approval-race"
+        return None
+
+    assert projection.project(lose_to_cancel) is None
+    assert calls[0][0] == "child-run-race"

@@ -76,6 +76,9 @@ PROVIDER_WORKFLOW_PROVIDER_EVIDENCE_KIND = "provider_workflow_full_chain"
 PROVIDER_WORKFLOW_CONTRACT_EVIDENCE_KIND = "provider_contract_full_chain"
 NATIVE_PROVIDER_CONTRACT_SMOKE_MODE = "native_provider_contract_smoke"
 OHA_DESKTOP_AGENT_RELEASE_SMOKE_MODE = "oha_desktop_agent_release_smoke"
+OHA_DEFAULT_DAILY_PROVIDER_RELEASE_EVIDENCE = (
+    "oha_default_daily_provider_release_ready"
+)
 OHA_DESKTOP_AGENT_SECTION_EVIDENCE: dict[str, str] = {
     "deepagent_core": "oha_deepagent_core",
     "shared_daily_surfaces": "oha_chat_bubble_live2d_runtime",
@@ -98,6 +101,7 @@ SMOKE_ITEMS: tuple[dict[str, Any], ...] = (
         "required": (
             OHA_DESKTOP_AGENT_RELEASE_SMOKE_MODE,
             "oha_direct_desktop_runtime",
+            OHA_DEFAULT_DAILY_PROVIDER_RELEASE_EVIDENCE,
         ),
         "related": (
             *tuple(OHA_DESKTOP_AGENT_SECTION_EVIDENCE.values()),
@@ -106,6 +110,8 @@ SMOKE_ITEMS: tuple[dict[str, Any], ...] = (
         "next_action": (
             "python scripts/smoke_oha_desktop_agent_release.py "
             "--skip-isolated-provider-smoke --public-release "
+            "--daily-provider-acceptance-json "
+            "tmp/oha-daily-provider-acceptance.json "
             "--report-json tmp/oha-desktop-agent-release-smoke.json"
         ),
     },
@@ -120,11 +126,15 @@ SMOKE_ITEMS: tuple[dict[str, Any], ...] = (
     },
     {
         "id": "chat_desktop_task",
-        "label": "Chat can route a desktop execution task",
-        "required": ("source_agent_entrypoint_desktop_execution",),
+        "label": "Packaged Chat can route a desktop task without exposing internal execution",
+        "required": (
+            "source_agent_entrypoint_desktop_execution",
+            "dmg_chat_native_file_smoke",
+        ),
         "next_action": (
-            "python scripts/verify_release_candidate.py --source-only "
-            "--report-json tmp/rc-verification-source-capabilities.json"
+            "python scripts/verify_release_candidate.py --require-artifacts "
+            "--run-dmg-chat-native-file-smoke "
+            "--report-json tmp/rc-verification-chat-native-file.json"
         ),
     },
     {
@@ -361,7 +371,12 @@ def _collect_report_evidence(
         )
     for section_id in sorted(SECTION_IDS):
         section = report.get(section_id)
-        if isinstance(section, dict) and _section_passed(section):
+        section_passed = (
+            section.get("status") == "passed"
+            if section_id == "dmg_chat_native_file_smoke" and isinstance(section, dict)
+            else isinstance(section, dict) and _section_passed(section)
+        )
+        if section_passed:
             _add_evidence(evidence, section_id, source=source, kind="section")
     matrix = _matrix_from_report(report)
     capabilities = matrix.get("capabilities") if isinstance(matrix, dict) else []
@@ -1181,6 +1196,31 @@ def _collect_oha_desktop_agent_release_evidence(
         )
     if report.get("ok") is not True:
         return
+    if (
+        report.get("public_release_ready") is True
+        and report.get("default_daily_provider_release_ready") is True
+    ):
+        acceptance = (
+            report.get("daily_provider_acceptance")
+            if isinstance(report.get("daily_provider_acceptance"), Mapping)
+            else {}
+        )
+        _add_evidence(
+            evidence,
+            OHA_DEFAULT_DAILY_PROVIDER_RELEASE_EVIDENCE,
+            source=source,
+            kind="oha_default_daily_provider_release",
+            provider_source=str(
+                report.get("default_daily_provider_release_source") or ""
+            ),
+            provider_kind=str(acceptance.get("provider_kind") or ""),
+            provider_id=str(acceptance.get("provider_id") or ""),
+            transport=str(acceptance.get("transport") or ""),
+            build_revision=str(acceptance.get("build_revision") or ""),
+            foreground_takeover_required=acceptance.get(
+                "foreground_takeover_required"
+            ),
+        )
     for section in _dict_list(report.get("sections")):
         if section.get("ok") is not True:
             continue

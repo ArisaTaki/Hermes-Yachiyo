@@ -141,7 +141,7 @@ export function AgentGroupPanel({
               <span>{agentGroupListMeta(group)}</span>
             </button>
           ))}
-          {!agentGroups.length ? <div className="agent-empty-inline">No Agent Groups</div> : null}
+          {!agentGroups.length ? <div className="agent-empty-inline">暂无 Agent 群组</div> : null}
         </div>
       </aside>
 
@@ -332,7 +332,7 @@ export function AgentGroupPanel({
               </span>
             </label>
           ))}
-          {!agents.length ? <div className="agent-empty-inline">No Agents</div> : null}
+          {!agents.length ? <div className="agent-empty-inline">暂无 Agent</div> : null}
         </div>
 
         <GroupRunPanel

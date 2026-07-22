@@ -2,6 +2,7 @@ import type { ModelProfile } from '../../../lib/modelProfiles';
 import type { SkillFolderSpec, SkillSpec } from '../types';
 import type { AgentDraft } from '../types';
 import type { ToolCatalogSnapshot } from '../../yachiyo-studio/types';
+import { SettingsDisclosure } from '../../../components/SettingsDisclosure';
 import {
   agentToolCapabilitySummaries,
   type AgentToolCapabilitySummary,
@@ -190,7 +191,7 @@ export function AgentEditorPanel({
   return (
     <form className="agent-studio-panel agent-editor" data-testid="agent-editor" onSubmit={(event) => { event.preventDefault(); onSaveAgent(); }}>
       <div className="section-heading-row">
-        <h2>{draft.agent_id ? '编辑 Agent' : '新建 Agent'}</h2>
+        <h2>{draft.agent_id ? '编辑助手' : '新建助手'}</h2>
         {draft.agent_id && selectedAgentDeletable ? <button type="button" className="danger-action" data-testid="agent-delete" disabled={busy} onClick={onRequestDeleteAgent}>删除</button> : null}
       </div>
       {selectedAgentReadOnly ? <div className="agent-inline-note">系统 Agent 由 oha-yachiyo 管理，可查看但不能编辑、删除或直接挂载 Skill。</div> : null}
@@ -198,12 +199,12 @@ export function AgentEditorPanel({
         <AgentAvatar avatarUrl={draft.avatar_url} name={draft.nickname || draft.name || 'Agent'} />
         <div className="agent-profile-fields">
           <div className="agent-form-row">
-            <label><span>Name</span><input className="hy-input" data-testid="agent-name-input" value={draft.name} onChange={(event) => updateDraft({ name: event.target.value })} readOnly={selectedAgentReadOnly} required /></label>
-            <label><span>Nickname</span><input className="hy-input" data-testid="agent-nickname-input" value={draft.nickname} onChange={(event) => updateDraft({ nickname: event.target.value })} readOnly={selectedAgentReadOnly} placeholder="对话框里显示的称呼" /></label>
+            <label><span>名称</span><input className="hy-input" data-testid="agent-name-input" value={draft.name} onChange={(event) => updateDraft({ name: event.target.value })} readOnly={selectedAgentReadOnly} required /></label>
+            <label><span>昵称</span><input className="hy-input" data-testid="agent-nickname-input" value={draft.nickname} onChange={(event) => updateDraft({ nickname: event.target.value })} readOnly={selectedAgentReadOnly} placeholder="对话框里显示的称呼" /></label>
           </div>
           <div className="agent-avatar-picker-row">
             <div>
-              <span>Avatar</span>
+              <span>头像</span>
               <strong>{draft.avatar_url ? '已选择自定义头像' : '使用首字母头像'}</strong>
             </div>
             <div className="agent-avatar-picker-actions">
@@ -213,40 +214,29 @@ export function AgentEditorPanel({
               ) : null}
             </div>
           </div>
-          <label><span>Description</span><input className="hy-input" data-testid="agent-description-input" value={draft.description} onChange={(event) => updateDraft({ description: event.target.value })} readOnly={selectedAgentReadOnly} /></label>
+          <label><span>用途介绍</span><input className="hy-input" data-testid="agent-description-input" value={draft.description} onChange={(event) => updateDraft({ description: event.target.value })} readOnly={selectedAgentReadOnly} /></label>
         </div>
       </div>
       <div className="agent-form-row">
-        <label><span>Category</span><input className="hy-input" data-testid="agent-category-input" value={draft.category} onChange={(event) => updateDraft({ category: event.target.value })} readOnly={selectedAgentReadOnly} /></label>
-        <label>
-          <span>Output Contract</span>
-          <select className="hy-select" data-testid="agent-output-contract-select" value={draft.output_contract} disabled={selectedAgentReadOnly} onChange={(event) => updateDraft({ output_contract: event.target.value })}>
-            <option value="chat">chat</option>
-            <option value="markdown">markdown</option>
-            <option value="diff">diff</option>
-            <option value="report">report</option>
-            <option value="artifacts">artifacts</option>
-          </select>
-          <small className="agent-field-help">约束最终交付形态；diff 不会自动写工作区，artifacts 会优先提示可保存产物。</small>
-        </label>
+        <label><span>分类</span><input className="hy-input" data-testid="agent-category-input" value={draft.category} onChange={(event) => updateDraft({ category: event.target.value })} readOnly={selectedAgentReadOnly} /></label>
       </div>
       <label>
-        <span>Functional Instructions</span>
+        <span>任务说明</span>
         <textarea className="hy-input agent-textarea" data-testid="agent-instructions-input" value={draft.instructions} onChange={(event) => updateDraft({ instructions: event.target.value })} readOnly={selectedAgentReadOnly} />
         <small className="agent-field-help">写任务边界、工作方法、必须遵守的功能要求。</small>
       </label>
       <label>
-        <span>Personal Prompt</span>
+        <span>说话风格</span>
         <textarea className="hy-input agent-textarea compact" data-testid="agent-persona-input" value={draft.persona_prompt} onChange={(event) => updateDraft({ persona_prompt: event.target.value })} readOnly={selectedAgentReadOnly} />
         <small className="agent-field-help">写人设、口吻、角色偏好；运行时会和功能要求分段放进 Agent context。</small>
       </label>
       <section className="agent-backend-section" aria-label="Model">
         <div className="section-heading-row compact">
-          <h3>Model</h3>
+          <h3>默认 AI</h3>
         </div>
         <div className="agent-backend-fields">
           <label>
-            <span>Chat Profile</span>
+            <span>对话 AI</span>
             <select
               className="hy-select"
               disabled={selectedAgentReadOnly || draft.model_mode === 'custom_api'}
@@ -261,15 +251,6 @@ export function AgentEditorPanel({
               ))}
             </select>
           </label>
-          <label className="agent-checkbox-row">
-            <input
-              type="checkbox"
-              checked={draft.model_mode === 'custom_api'}
-              disabled={selectedAgentReadOnly}
-              onChange={(event) => updateDraft({ model_mode: event.target.checked ? 'custom_api' : 'profile' })}
-            />
-            <span>Custom API</span>
-          </label>
         </div>
       </section>
       {!chatModelProfiles.length ? (
@@ -277,7 +258,7 @@ export function AgentEditorPanel({
       ) : null}
       <div className="agent-form-row">
         <label>
-          <span>Vision Profile</span>
+          <span>图片识别模型</span>
           <select className="hy-select" value={draft.vision_model_profile_id} disabled={selectedAgentReadOnly} onChange={(event) => updateDraft({ vision_model_profile_id: event.target.value })}>
             <option value="">跟随全局图片识别</option>
             {visionModelProfiles.map((profile) => (
@@ -287,23 +268,16 @@ export function AgentEditorPanel({
             ))}
           </select>
         </label>
-        <label><span>模型配置</span><button type="button" className="hy-btn hy-btn-ghost" onClick={onOpenModelProfiles}>管理 Profile</button></label>
+        <label><span>AI 服务</span><button type="button" className="hy-btn hy-btn-ghost" onClick={onOpenModelProfiles}>管理 AI 服务</button></label>
       </div>
       {!visionModelProfiles.length ? (
-        <div className="notice">还没有可用的图片识别模型组。需要图片能力时，请先在模型配置页面创建 vision Profile。</div>
-      ) : null}
-      {draft.model_mode === 'custom_api' ? (
-        <div className="agent-config-box">
-          <label><span>Model</span><input className="hy-input" value={draft.model} onChange={(event) => updateDraft({ model: event.target.value })} readOnly={selectedAgentReadOnly} placeholder="gpt-4.1-mini" /></label>
-          <label><span>Base URL</span><input className="hy-input" value={draft.base_url} onChange={(event) => updateDraft({ base_url: event.target.value })} readOnly={selectedAgentReadOnly} placeholder="https://api.example.com/v1" /></label>
-          <label><span>API Key</span><input className="hy-input" type="password" value={draft.api_key} onChange={(event) => updateDraft({ api_key: event.target.value })} readOnly={selectedAgentReadOnly} placeholder={customApiKeyConfigured ? '已配置，留空不覆盖' : '保存到后端'} /></label>
-        </div>
+        <div className="notice">还没有可用的图片识别模型组。需要图片能力时，请先在模型配置页面创建。</div>
       ) : null}
       <section className="agent-capability-box" aria-label="Capabilities">
         <div className="section-heading-row compact">
-          <h3>Capabilities</h3>
+          <h3>可用能力</h3>
         </div>
-        <p className="agent-section-help">这里会实际写入 ToolBroker 允许工具；写文件和运行命令即使开启，也仍然需要 Run 审批。</p>
+        <p className="agent-section-help">开启常用桌面能力；写文件和运行命令即使开启，也仍然需要 Run 审批。</p>
         {dailyDesktopToolsIncomplete ? (
           <div className="agent-desktop-execution-notice" data-testid="agent-desktop-execution-notice">
             <div>
@@ -320,7 +294,55 @@ export function AgentEditorPanel({
               开启日常桌面能力
             </button>
           </div>
+        ) : (
+          <div className="agent-desktop-execution-notice">
+            <div>
+              <strong>日常助手能力已开启</strong>
+              <span>涉及输入、点击、文件修改或命令运行时，仍会按原有安全策略请求确认。</span>
+            </div>
+          </div>
+        )}
+      </section>
+      <SettingsDisclosure
+        summary="高级模型与输出"
+        description="用于自定义模型连接和专业交付格式；日常使用通常不需要调整。"
+        testId="agent-advanced-model-output"
+      >
+        <label>
+          <span>Output Contract</span>
+          <select className="hy-select" data-testid="agent-output-contract-select" value={draft.output_contract} disabled={selectedAgentReadOnly} onChange={(event) => updateDraft({ output_contract: event.target.value })}>
+            <option value="chat">chat</option>
+            <option value="markdown">markdown</option>
+            <option value="diff">diff</option>
+            <option value="report">report</option>
+            <option value="artifacts">artifacts</option>
+          </select>
+          <small className="agent-field-help">约束最终交付形态；diff 不会自动写工作区，artifacts 会优先提示可保存产物。</small>
+        </label>
+        <div className="agent-form-row">
+          <label className="agent-checkbox-row">
+            <input
+              type="checkbox"
+              checked={draft.model_mode === 'custom_api'}
+              disabled={selectedAgentReadOnly}
+              onChange={(event) => updateDraft({ model_mode: event.target.checked ? 'custom_api' : 'profile' })}
+            />
+            <span>Custom API</span>
+          </label>
+        </div>
+        {draft.model_mode === 'custom_api' ? (
+          <div className="agent-config-box">
+            <label><span>Model</span><input className="hy-input" value={draft.model} onChange={(event) => updateDraft({ model: event.target.value })} readOnly={selectedAgentReadOnly} placeholder="gpt-4.1-mini" /></label>
+            <label><span>Base URL</span><input className="hy-input" value={draft.base_url} onChange={(event) => updateDraft({ base_url: event.target.value })} readOnly={selectedAgentReadOnly} placeholder="https://api.example.com/v1" /></label>
+            <label><span>API Key</span><input className="hy-input" type="password" value={draft.api_key} onChange={(event) => updateDraft({ api_key: event.target.value })} readOnly={selectedAgentReadOnly} placeholder={customApiKeyConfigured ? '已配置，留空不覆盖' : '保存到后端'} /></label>
+          </div>
         ) : null}
+      </SettingsDisclosure>
+      <SettingsDisclosure
+        summary="精细能力与安全策略"
+        description="逐项控制工具、审批和权限映射，适合需要严格边界的专业助手。"
+        testId="agent-advanced-capabilities"
+      >
         <div className="agent-capability-grid">
           {agentCapabilityToggles.map((capability) => {
             const summary = toolCapabilityById.get(capability.id);
@@ -351,7 +373,7 @@ export function AgentEditorPanel({
                   <strong>{summary?.label || capability.label}</strong>
                 </span>
                 <span className="agent-capability-toggle-tools">
-                  {(summary?.tools || []).join(', ') || 'No tools'}
+                  {(summary?.tools || []).join(', ') || '暂无工具'}
                 </span>
                 <span className="agent-capability-toggle-meta">
                   <span className={`studio-tool-risk ${summary?.riskLevel || 'unknown'}`}>
@@ -380,24 +402,30 @@ export function AgentEditorPanel({
           summaries={toolCapabilitySummaries}
           onReload={onReloadToolCatalog}
         />
-      </section>
-      <div className="agent-form-row">
+      </SettingsDisclosure>
+      <SettingsDisclosure
+        summary="工作区访问范围"
+        description="限定助手可以读取和写入的本地目录；保留默认值即可获得隔离工作区。"
+        testId="agent-advanced-workspace"
+      >
+        <div className="agent-form-row">
+          <label>
+            <span>Default Workdir</span>
+            <input className="hy-input" value={draft.default_workdir} onChange={(event) => updateDraft({ default_workdir: event.target.value })} readOnly={selectedAgentReadOnly} placeholder="保存后自动分配独立目录" />
+            <small className="agent-field-help">工具相对路径的基准目录；留空时保存后自动分配到 Yachiyo 的 Agent 工作区。</small>
+          </label>
+          <label>
+            <span>Writable Scopes</span>
+            <input className="hy-input" value={draft.writable_scopes} onChange={(event) => updateDraft({ writable_scopes: event.target.value })} readOnly={selectedAgentReadOnly} placeholder="src, tests" />
+            <small className="agent-field-help">允许 `workspace.write_patch` 写入的相对目录，逗号分隔。</small>
+          </label>
+        </div>
         <label>
-          <span>Default Workdir</span>
-          <input className="hy-input" value={draft.default_workdir} onChange={(event) => updateDraft({ default_workdir: event.target.value })} readOnly={selectedAgentReadOnly} placeholder="保存后自动分配独立目录" />
-          <small className="agent-field-help">工具相对路径的基准目录；留空时保存后自动分配到 Yachiyo 的 Agent 工作区。</small>
+          <span>Readable Scopes</span>
+          <input className="hy-input" value={draft.readable_scopes} onChange={(event) => updateDraft({ readable_scopes: event.target.value })} readOnly={selectedAgentReadOnly} />
+          <small className="agent-field-help">允许 `workspace.list/read` 访问的相对目录，默认 `.` 表示工作区内可读。</small>
         </label>
-        <label>
-          <span>Writable Scopes</span>
-          <input className="hy-input" value={draft.writable_scopes} onChange={(event) => updateDraft({ writable_scopes: event.target.value })} readOnly={selectedAgentReadOnly} placeholder="src, tests" />
-          <small className="agent-field-help">允许 `workspace.write_patch` 写入的相对目录，逗号分隔。</small>
-        </label>
-      </div>
-      <label>
-        <span>Readable Scopes</span>
-        <input className="hy-input" value={draft.readable_scopes} onChange={(event) => updateDraft({ readable_scopes: event.target.value })} readOnly={selectedAgentReadOnly} />
-        <small className="agent-field-help">允许 `workspace.list/read` 访问的相对目录，默认 `.` 表示工作区内可读。</small>
-      </label>
+      </SettingsDisclosure>
       {draft.agent_id ? (
         <AgentDeskPanel
           agentId={draft.agent_id}
@@ -405,7 +433,7 @@ export function AgentEditorPanel({
           selectedAgentReadOnly={selectedAgentReadOnly}
         />
       ) : null}
-      <div className="agent-inline-note">可行性验证：保存后先用“测试模型”检查模型连接，再用 Quick Run 做端到端验证；工具权限和 scopes 会在运行时强制校验。</div>
+      <div className="agent-inline-note">保存后可先测试 AI 连接，再用“试运行”检查实际效果。权限与工作区范围仍会在运行时强制校验。</div>
       <div className="agent-editor-actions">
         <button type="submit" className="primary-action" data-testid="agent-save" disabled={busy || selectedAgentReadOnly}>保存 Agent</button>
         {draft.agent_id ? <button type="button" disabled={busy || selectedAgentReadOnly} onClick={onTestAgentModel}>测试模型</button> : null}
@@ -413,11 +441,11 @@ export function AgentEditorPanel({
       {draft.agent_id ? (
         <section className="agent-quick-run">
           <div>
-            <h3>Quick Run</h3>
-            <p>用当前 Agent 立即创建 Run，完成后自动打开 Runs 详情。</p>
+            <h3>试运行</h3>
+            <p>让当前助手立即完成一个小任务，结束后自动打开详情。</p>
           </div>
           <label>
-            <span>Goal</span>
+            <span>要做的事</span>
             <textarea
               className="hy-input agent-run-textarea"
               value={agentRunGoal}
@@ -436,7 +464,7 @@ export function AgentEditorPanel({
             title={agentQuickRunDisabledReason || undefined}
             onClick={onRunAgent}
           >
-            运行当前 Agent
+            运行当前助手
           </button>
         </section>
       ) : (

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -70,6 +69,26 @@ def test_create_runnable_run_passes_daily_desktop_overlay_to_async_runtime() -> 
     assert captured["payload"]["runtime_planner_entrypoint"] is True
 
 
+def test_create_runnable_run_passes_client_run_id_to_async_runtime() -> None:
+    captured: dict[str, Any] = {}
+
+    class Runtime:
+        def create_run_for_runnable_async(self, **payload: Any) -> dict[str, Any]:
+            captured["payload"] = payload
+            return {"run_id": "run-agent", "status": "processing"}
+
+    create_runnable_run(
+        Runtime(),
+        runnable_id="agent-desktop",
+        user_goal="Inspect",
+        client_run_id="group-client-1:0:agent-desktop",
+    )
+
+    assert captured["payload"]["client_run_id"] == (
+        "group-client-1:0:agent-desktop"
+    )
+
+
 def test_create_runnable_run_passes_direct_execution_plan_to_async_runtime() -> None:
     captured: dict[str, Any] = {}
     direct_requests = [{"tool": "app.open", "input": {"app_name": "Music"}}]
@@ -126,9 +145,10 @@ def test_agent_run_async_uses_agent_override_without_persisted_lookup() -> None:
         ),
         project_agent_run_group_if_root=lambda run: run,
         resolve_runnable=lambda **_kwargs: {"kind": "agent", "id": "agent-desktop"},
-        update_run=lambda *_args, **_kwargs: pytest.fail("no failure expected"),
-        runtime_agent_timeline=SimpleNamespace(failed=lambda error: {"error": error}),
-        runtime_agent_run_events=SimpleNamespace(failed=lambda *_args: None),
+        get_run=lambda run_id: {"run_id": run_id, "status": "running"},
+        project_agent_run_failure=lambda *_args, **_kwargs: pytest.fail(
+            "no failure expected"
+        ),
         redact_error=str,
         error_type=RuntimeError,
         thread_factory=_ImmediateThread,
@@ -181,9 +201,10 @@ def test_agent_run_async_overlays_daily_desktop_policy_for_clear_chat_intent() -
         ),
         project_agent_run_group_if_root=lambda run: run,
         resolve_runnable=lambda **_kwargs: {"kind": "agent", "id": "agent-yachiyo"},
-        update_run=lambda *_args, **_kwargs: pytest.fail("no failure expected"),
-        runtime_agent_timeline=SimpleNamespace(failed=lambda error: {"error": error}),
-        runtime_agent_run_events=SimpleNamespace(failed=lambda *_args: None),
+        get_run=lambda run_id: {"run_id": run_id, "status": "running"},
+        project_agent_run_failure=lambda *_args, **_kwargs: pytest.fail(
+            "no failure expected"
+        ),
         redact_error=str,
         error_type=RuntimeError,
         thread_factory=_ImmediateThread,
@@ -228,9 +249,10 @@ def test_agent_run_async_uses_runtime_planner_for_daily_desktop_overlay() -> Non
         ),
         project_agent_run_group_if_root=lambda run: run,
         resolve_runnable=lambda **_kwargs: {"kind": "agent", "id": "agent-yachiyo"},
-        update_run=lambda *_args, **_kwargs: pytest.fail("no failure expected"),
-        runtime_agent_timeline=SimpleNamespace(failed=lambda error: {"error": error}),
-        runtime_agent_run_events=SimpleNamespace(failed=lambda *_args: None),
+        get_run=lambda run_id: {"run_id": run_id, "status": "running"},
+        project_agent_run_failure=lambda *_args, **_kwargs: pytest.fail(
+            "no failure expected"
+        ),
         redact_error=str,
         error_type=RuntimeError,
         thread_factory=_ImmediateThread,
@@ -269,9 +291,10 @@ def test_agent_run_async_does_not_overlay_daily_desktop_policy_for_howto_questio
         execute_agent_run=lambda *_args, **_kwargs: {"status": "completed"},
         project_agent_run_group_if_root=lambda run: run,
         resolve_runnable=lambda **_kwargs: {"kind": "agent", "id": "agent-yachiyo"},
-        update_run=lambda *_args, **_kwargs: pytest.fail("no failure expected"),
-        runtime_agent_timeline=SimpleNamespace(failed=lambda error: {"error": error}),
-        runtime_agent_run_events=SimpleNamespace(failed=lambda *_args: None),
+        get_run=lambda run_id: {"run_id": run_id, "status": "running"},
+        project_agent_run_failure=lambda *_args, **_kwargs: pytest.fail(
+            "no failure expected"
+        ),
         redact_error=str,
         error_type=RuntimeError,
         thread_factory=_ImmediateThread,
@@ -294,9 +317,10 @@ def test_agent_run_async_rejects_mismatched_agent_override() -> None:
         execute_agent_run=lambda *_args, **_kwargs: {},
         project_agent_run_group_if_root=lambda run: run,
         resolve_runnable=lambda **_kwargs: {"kind": "agent", "id": "agent-desktop"},
-        update_run=lambda *_args, **_kwargs: None,
-        runtime_agent_timeline=SimpleNamespace(failed=lambda error: {"error": error}),
-        runtime_agent_run_events=SimpleNamespace(failed=lambda *_args: None),
+        get_run=lambda run_id: {"run_id": run_id, "status": "running"},
+        project_agent_run_failure=lambda *_args, **_kwargs: pytest.fail(
+            "no failure expected"
+        ),
         redact_error=str,
         error_type=RuntimeError,
         thread_factory=_ImmediateThread,
@@ -316,7 +340,13 @@ class _FakeStarter:
     def __init__(self, captured: dict[str, Any]) -> None:
         self._captured = captured
 
-    def start_async(self, payload: dict[str, Any], *, agent: dict[str, Any]) -> AgentRunStart:
+    def start_async(
+        self,
+        payload: dict[str, Any],
+        *,
+        agent: dict[str, Any],
+        lock: Any,
+    ) -> AgentRunStart:
         self._captured["starter_payload"] = payload
         self._captured["starter_agent"] = agent
         return AgentRunStart(

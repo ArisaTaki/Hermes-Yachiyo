@@ -2,7 +2,83 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
+from contextvars import ContextVar
+from copy import deepcopy
 from typing import Any
+
+from apps.shell.agent.runtime.errors import AgentRuntimeError
+
+
+class BufferedRunEventBatch:
+    """Run-scoped event writes held until an authoritative Run CAS wins."""
+
+    def __init__(self, run_id: str, append_event: Any) -> None:
+        self.run_id = str(run_id or "").strip()
+        self._append_event = append_event
+        self._records: list[tuple[str, dict[str, Any] | None, dict[str, Any]]] = []
+
+    def append(
+        self,
+        event_type: str,
+        payload: dict[str, Any] | None,
+        **event_fields: Any,
+    ) -> dict[str, Any]:
+        payload_snapshot = deepcopy(payload) if isinstance(payload, dict) else None
+        self._records.append(
+            (event_type, payload_snapshot, deepcopy(event_fields))
+        )
+        return {
+            "run_id": self.run_id,
+            "event_type": event_type,
+            "payload": deepcopy(payload_snapshot) if payload_snapshot is not None else {},
+            "sequence": 0,
+            "buffered": True,
+        }
+
+    def flush(
+        self,
+        *,
+        expected_status: str = "",
+        expected_updated_at: str = "",
+    ) -> None:
+        fence = (
+            {
+                "expected_status": expected_status,
+                "expected_updated_at": expected_updated_at,
+            }
+            if expected_status and expected_updated_at
+            else {}
+        )
+        for event_type, payload, event_fields in list(self._records):
+            fields = {**event_fields, **fence}
+            event = self._append_event(
+                self.run_id,
+                event_type,
+                payload,
+                **fields,
+            )
+            if fence and event is None:
+                raise AgentRuntimeError("run_event_fence_mismatch")
+        self._records.clear()
+
+    def append_durable(
+        self,
+        event_type: str,
+        payload: dict[str, Any],
+        **event_fields: Any,
+    ) -> dict[str, Any] | None:
+        """Bypass deferral for an already-observed external side effect."""
+
+        return self._append_event(
+            self.run_id,
+            event_type,
+            deepcopy(payload),
+            **deepcopy(event_fields),
+        )
+
+    def discard(self) -> None:
+        self._records.clear()
 
 
 class RuntimeRunTimelineService:
@@ -20,6 +96,19 @@ class RuntimeRunTimelineService:
         self._run_groups = run_groups
         self._runtime_events = runtime_events
         self._run_artifacts = run_artifacts
+        self._buffered_events: ContextVar[BufferedRunEventBatch | None] = ContextVar(
+            f"runtime_run_event_buffer_{id(self)}",
+            default=None,
+        )
+
+    @contextmanager
+    def buffer_events(self, run_id: str):
+        batch = BufferedRunEventBatch(run_id, self._runtime_events.append)
+        token = self._buffered_events.set(batch)
+        try:
+            yield batch
+        finally:
+            self._buffered_events.reset(token)
 
     def list_runs(self, limit: int = 50) -> dict[str, Any]:
         return self._runs.list(limit)
@@ -97,14 +186,39 @@ class RuntimeRunTimelineService:
         actor: str = "native_runtime",
         visibility: str = "user",
         sensitivity: str = "public",
-    ) -> dict[str, Any]:
+        expected_status: str | None = None,
+        expected_updated_at: str | None = None,
+    ) -> dict[str, Any] | None:
+        append_kwargs = {
+            "actor": actor,
+            "visibility": visibility,
+            "sensitivity": sensitivity,
+        }
+        if expected_status is not None:
+            append_kwargs["expected_status"] = expected_status
+        if expected_updated_at is not None:
+            append_kwargs["expected_updated_at"] = expected_updated_at
+        buffered = self._buffered_events.get()
+        if buffered is not None and buffered.run_id == str(run_id or "").strip():
+            if (
+                str(expected_status or "").strip().lower()
+                in {"cancelled", "canceled", "completed", "failed"}
+                and str(expected_updated_at or "").strip()
+            ):
+                # A separately fenced terminal writer (most importantly user
+                # cancellation) is authoritative, not speculative resume
+                # output. Never let the losing resume discard that audit.
+                return buffered.append_durable(
+                    event_type,
+                    payload or {},
+                    **append_kwargs,
+                )
+            return buffered.append(event_type, payload, **append_kwargs)
         return self._runtime_events.append(
             run_id,
             event_type,
             payload,
-            actor=actor,
-            visibility=visibility,
-            sensitivity=sensitivity,
+            **append_kwargs,
         )
 
     def list_events(

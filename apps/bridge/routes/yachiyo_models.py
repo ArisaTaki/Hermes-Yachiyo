@@ -147,6 +147,13 @@ class MemoryBody(BaseModel):
     kind: str | None = Field(default=None, max_length=40)
     scope: str | None = Field(default=None, max_length=40)
     reason: str | None = Field(default=None, max_length=2000)
+    project_id: str | None = Field(default=None, max_length=160)
+    source_session_id: str | None = Field(default=None, max_length=160)
+    source_message_id: str | None = Field(default=None, max_length=160)
+    source_task_id: str | None = Field(default=None, max_length=160)
+    enabled: bool | None = None
+    user_confirmed: bool | None = None
+    consent_receipt: dict[str, str] | None = None
 
 
 class FutureTaskCancelBody(BaseModel):

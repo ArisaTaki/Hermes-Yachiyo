@@ -67,6 +67,7 @@ PLANNER_APPROVAL_CASES: tuple[dict[str, Any], ...] = (
         "expected_intent": "desktop_operation",
         "expected_tools": [
             "desktop.list_apps",
+            "desktop.ui_elements",
             "app.focus_and_type_into_ui_element",
             "desktop.ui_elements",
         ],

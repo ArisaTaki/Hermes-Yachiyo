@@ -71,6 +71,18 @@ def test_yachiyo_chat_facade_executes_daily_desktop_intent_through_main_chat_run
         }
 
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.app_status",
+        lambda app_name: {
+            "ok": True,
+            "action": "app.status",
+            "summary": f"Checked {app_name}",
+            "data": {
+                "app_name": app_name,
+                "running": app_name in {"Apple Music", "Music"},
+            },
+        },
+    )
     try:
         chat = YachiyoAgentService(
             LegacyRuntimePort(runtime),
@@ -82,7 +94,13 @@ def test_yachiyo_chat_facade_executes_daily_desktop_intent_through_main_chat_run
                 "prompt": "打开 Apple Music",
                 "conversation_id": "session-yachiyo-facade",
                 "agent_id": "builtin:yachiyo-main",
-                "metadata": {"client_task_id": "client-facade-apple-music"},
+                # This harness deliberately exercises the local fake rather
+                # than a Cua background provider.  Production Chat remains
+                # background-first unless the user grants foreground use.
+                "metadata": {
+                    "client_task_id": "client-facade-apple-music",
+                    "allow_user_foreground_takeover": True,
+                },
             }
         )
         timeline = chat.get_task_timeline(task.task_id)
@@ -98,7 +116,9 @@ def test_yachiyo_chat_facade_executes_daily_desktop_intent_through_main_chat_run
         assert timeline.tool_calls[-1].tool_name == "app.open"
         assert timeline.tool_calls[-1].status == "completed"
         assert "agent.desktop.intent_planned" in event_types
-        assert "agent.tool.call" in event_types
+        # The consumer timeline exposes the outcome, not the Runtime's
+        # internal tool-by-tool execution trace.
+        assert "agent.tool.call" not in event_types
         assert "agent.desktop.intent_completed" in event_types
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
@@ -758,6 +778,16 @@ def test_agent_studio_start_group_run_records_native_group_replay(tmp_path, monk
         monkeypatch.setattr(runtime, "get_agent_group", get_agent_group, raising=False)
         monkeypatch.setattr(
             runtime,
+            "resolve_runnable",
+            lambda *, runnable_id="", name="": (
+                {"id": runnable_id, "kind": "agent", "enabled": True}
+                if runnable_id in {member["agent_id"] for member in group["members"]}
+                else None
+            ),
+            raising=False,
+        )
+        monkeypatch.setattr(
+            runtime,
             "create_run_for_runnable_async",
             complete_child_run,
             raising=False,
@@ -887,6 +917,16 @@ def test_agent_studio_start_group_run_surfaces_native_group_approval(
             }
 
         monkeypatch.setattr(runtime, "get_agent_group", get_agent_group, raising=False)
+        monkeypatch.setattr(
+            runtime,
+            "resolve_runnable",
+            lambda *, runnable_id="", name="": (
+                {"id": runnable_id, "kind": "agent", "enabled": True}
+                if runnable_id in {member["agent_id"] for member in group["members"]}
+                else None
+            ),
+            raising=False,
+        )
         monkeypatch.setattr(
             runtime,
             "create_run_for_runnable_async",
@@ -1276,7 +1316,13 @@ def test_agent_studio_rejects_native_tool_approval_with_replay_events(tmp_path) 
 
         studio = AgentStudioService(LegacyStudioPort(runtime))
 
-        rejected = studio.reject_run_approval(run["run_id"], "No secret-bearing commands")
+        rejected = studio.reject_run_approval(
+            run["run_id"],
+            {
+                "approval_id": pending_approval["approval_id"],
+                "reason": "No secret-bearing commands",
+            },
+        )
         timeline = studio.get_run_timeline(run["run_id"])
         events = list(studio.get_run_event_stream(run["run_id"]))
         first_page = studio.get_run_event_page(run["run_id"], limit=2)
@@ -1370,7 +1416,13 @@ def test_agent_studio_rejects_native_workflow_approval_with_group_replay_events(
         studio = AgentStudioService(LegacyStudioPort(runtime))
 
         pending = studio.get_run_timeline(workflow_run["run_id"])
-        rejected = studio.reject_run_approval(workflow_run["run_id"], "Needs safer rollout")
+        rejected = studio.reject_run_approval(
+            workflow_run["run_id"],
+            {
+                "approval_id": pending.pending_approval.approval_id,
+                "reason": "Needs safer rollout",
+            },
+        )
         timeline_after = studio.get_run_timeline(workflow_run["run_id"])
         group_run = studio.get_group_run(run_group["run_group_id"])
         events = list(studio.get_run_event_stream(workflow_run["run_id"]))
@@ -1414,7 +1466,13 @@ def test_agent_studio_rejects_native_workflow_approval_with_group_replay_events(
         assert second_page.events[0].sequence > first_page.events[-1].sequence
         assert {
             event.event_type for event in second_page.events
-        } & {"workflow.node.approval_rejected", "approval.rejected", "workflow.run.cancelled"}
+        } & {
+            "workflow.node.approval_rejected",
+            "approval.rejected",
+            "workflow.run.cancelled",
+            "workflow.cancelled",
+            "group.run.cancelled",
+        }
         assert "sk-workflow-reject-secret123456" not in serialized_events
     finally:
         runtime.close()
@@ -1473,7 +1531,10 @@ def test_agent_studio_approves_native_workflow_approval_and_replays_resume(tmp_p
         studio = AgentStudioService(LegacyStudioPort(runtime))
 
         before = studio.get_run_timeline(waiting["run_id"])
-        approved = studio.approve_run_approval(waiting["run_id"])
+        approved = studio.approve_run_approval(
+            waiting["run_id"],
+            {"approval_id": before.pending_approval.approval_id},
+        )
         after = studio.get_run_timeline(waiting["run_id"])
         group_run = studio.get_group_run(str(after.run_group_id or after.group_run_id or ""))
         events = list(studio.get_run_event_stream(waiting["run_id"]))

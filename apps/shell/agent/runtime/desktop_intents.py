@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-import re
+import re as _stdlib_re
 import shlex
 from collections.abc import Mapping
 from datetime import date, datetime, time, timedelta
+from functools import lru_cache
 from typing import Any
 from urllib.parse import quote_plus, urlparse
 
@@ -34,6 +35,59 @@ from apps.shell.agent.runtime.web_destinations import (
     browser_only_web_destination_url,
     known_web_destination_url,
 )
+
+
+@lru_cache(maxsize=2048)
+def _cached_regex_compile(pattern: Any, flags: int = 0) -> Any:
+    """Compile this planner's stable patterns without stdlib cache churn."""
+
+    return _stdlib_re.compile(pattern, flags)
+
+
+class _CachedRegexFacade:
+    """Small ``re`` facade backed by a planner-local, bounded pattern cache."""
+
+    IGNORECASE = _stdlib_re.IGNORECASE
+
+    def compile(self, pattern: Any, flags: int = 0) -> Any:
+        return _cached_regex_compile(pattern, flags)
+
+    def search(self, pattern: Any, string: str, flags: int = 0) -> Any:
+        return self.compile(pattern, flags).search(string)
+
+    def match(self, pattern: Any, string: str, flags: int = 0) -> Any:
+        return self.compile(pattern, flags).match(string)
+
+    def fullmatch(self, pattern: Any, string: str, flags: int = 0) -> Any:
+        return self.compile(pattern, flags).fullmatch(string)
+
+    def finditer(self, pattern: Any, string: str, flags: int = 0) -> Any:
+        return self.compile(pattern, flags).finditer(string)
+
+    def sub(
+        self,
+        pattern: Any,
+        repl: Any,
+        string: str,
+        count: int = 0,
+        flags: int = 0,
+    ) -> str:
+        return self.compile(pattern, flags).sub(repl, string, count)
+
+    def split(
+        self,
+        pattern: Any,
+        string: str,
+        maxsplit: int = 0,
+        flags: int = 0,
+    ) -> list[str]:
+        return self.compile(pattern, flags).split(string, maxsplit)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(_stdlib_re, name)
+
+
+re = _CachedRegexFacade()
 
 _TERMINAL_COMMAND_HEADS = {
     "awk",
@@ -10893,6 +10947,7 @@ def _looks_like_foreground_ui_input_open_prefix(raw_app: str, followup: str) -> 
     )
 
 
+@lru_cache(maxsize=2048)
 def _known_app_followup_split(value: str) -> tuple[str, str, str] | None:
     text = str(value or "").strip()
     if not text:
@@ -11048,6 +11103,7 @@ def _app_command_or_preferences_shortcut_action(app_name: str, followup: str) ->
     return ""
 
 
+@lru_cache(maxsize=2048)
 def _known_app_prefix_split(value: str) -> tuple[str, str, str] | None:
     text = str(value or "").strip()
     if not text:
@@ -11063,10 +11119,12 @@ def _known_app_prefix_split(value: str) -> tuple[str, str, str] | None:
     return None
 
 
-def _known_app_followup_aliases() -> list[tuple[str, str]]:
-    return _shared_known_app_followup_aliases()
+@lru_cache(maxsize=1)
+def _known_app_followup_aliases() -> tuple[tuple[str, str], ...]:
+    return tuple(_shared_known_app_followup_aliases())
 
 
+@lru_cache(maxsize=4096)
 def _split_compact_app_prefix(value: str, alias: str) -> tuple[str, str] | None:
     compact_alias = _compact_app_alias(alias)
     if not compact_alias:

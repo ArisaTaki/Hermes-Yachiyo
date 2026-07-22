@@ -491,7 +491,7 @@ export function AgentStudioToolsTab({
               <span className={`studio-tool-risk ${normalizedRisk(tool)}`}>{riskLabel(tool)}</span>
             </button>
           ))}
-          {!filteredTools.length ? <span className="studio-tool-empty">No tools</span> : null}
+          {!filteredTools.length ? <span className="studio-tool-empty">暂无工具</span> : null}
         </div>
       </aside>
 
@@ -513,8 +513,8 @@ export function AgentStudioToolsTab({
           startResult={plannerStartResult}
         />
         {selectedTool ? <ToolDetail tool={selectedTool} catalog={catalog} /> : null}
-        {!selectedTool && !loading ? <span className="studio-tool-empty">No tool selected</span> : null}
-        {loading ? <span className="studio-tool-empty">Loading tools</span> : null}
+        {!selectedTool && !loading ? <span className="studio-tool-empty">请选择工具</span> : null}
+        {loading ? <span className="studio-tool-empty">正在加载工具</span> : null}
       </div>
     </section>
   );
@@ -1110,7 +1110,7 @@ function RuntimePlannerPreview({
             disabled={loading || !prompt.trim()}
             data-testid="studio-runtime-planner-run"
           >
-            {loading ? 'Planning...' : 'Plan'}
+            {loading ? '规划中...' : '规划'}
           </button>
           <button
             type="button"
@@ -1119,7 +1119,7 @@ function RuntimePlannerPreview({
             data-testid="studio-runtime-planner-build-execution"
             onClick={onPlanExecution}
           >
-            {executionLoading ? 'Building...' : 'Build Envelope'}
+            {executionLoading ? '构建中...' : '构建执行包'}
           </button>
           <button
             type="button"
@@ -1128,7 +1128,7 @@ function RuntimePlannerPreview({
             data-testid="studio-runtime-planner-start-orchestration"
             onClick={onStartOrchestration}
           >
-            {startLoading ? 'Starting...' : 'Start in Studio'}
+            {startLoading ? '启动中...' : '在 Studio 中启动'}
           </button>
         </div>
       </form>
@@ -1203,7 +1203,7 @@ function RuntimePlannerPreview({
             {steps.map((step, index) => (
               <PlannerStepRow key={step.step_id || `${step.title}-${index}`} step={step} index={index} />
             ))}
-            {!steps.length ? <span className="studio-tool-empty">No planned steps</span> : null}
+            {!steps.length ? <span className="studio-tool-empty">暂无规划步骤</span> : null}
           </div>
           {plan?.task_core ? <TaskCoreInspector taskCore={plan.task_core} /> : null}
         </div>
@@ -1657,11 +1657,11 @@ function ToolDetail({
       <div className="studio-tool-inspector-section" data-testid="studio-tool-fallback-notes">
         <div className="studio-tool-inspector-heading">
           <h3>Fallback</h3>
-          <span>{fallbackNotes.length ? 'Runtime fallback path' : 'No fallback registered'}</span>
+          <span>{fallbackNotes.length ? 'Runtime fallback 路径' : '暂无 fallback 登记'}</span>
         </div>
         <div className="studio-tool-note-list">
           {fallbackNotes.map((note) => <span key={note}>{note}</span>)}
-          {!fallbackNotes.length ? <span>No fallback registered for this tool.</span> : null}
+          {!fallbackNotes.length ? <span>这个工具暂无 fallback 登记。</span> : null}
         </div>
       </div>
 
@@ -1684,7 +1684,7 @@ function ToolDetail({
             ))}
           </div>
         ) : (
-          <span className="studio-tool-empty">No input properties</span>
+          <span className="studio-tool-empty">暂无输入参数</span>
         )}
       </div>
 
@@ -1917,7 +1917,7 @@ function toolProviderState(tool: ToolCatalogItemSnapshot, catalog: ToolCatalogSn
   }
   return {
     label: 'Runtime path',
-    detail: provider ? 'No provider route for this tool' : 'No desktop provider advertised',
+    detail: provider ? '这个工具暂无 provider 路由' : '暂无桌面 provider 声明',
     ready,
     supported,
     ...baseState,

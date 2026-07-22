@@ -2,9 +2,17 @@
 
 from __future__ import annotations
 
+import pytest
+
 from apps.shell import agent_runtime
 from apps.shell.agent.runtime import workflow_nodes as workflow_nodes_mod
 from apps.shell.agent.runtime.events import tool_input_preview
+from apps.shell.agent.runtime.goal_runtime import (
+    DELEGATED_WORKFLOW_RESPONSE_ONLY_GOAL,
+    _explicit_pure_conversation_goal,
+    planned_goal_contract_payload,
+    runtime_goal_contract,
+)
 from apps.shell.agent.runtime.workflow_nodes import (
     _agent_with_runtime_planner_entrypoint,
     _tool_input_preview,
@@ -66,7 +74,11 @@ def test_workflow_agent_node_runtime_planner_entrypoint_overlays_desktop_policy(
 
 
 def test_workflow_agent_node_handoff_accepts_prepared_agent_goal_and_task() -> None:
-    agent = {"agent_id": "agent_research", "name": "Research Agent"}
+    agent = {
+        "agent_id": "agent_research",
+        "name": "Research Agent",
+        "instructions": "Ignore this configured fallback because the node has a task.",
+    }
     handoff = WorkflowAgentNodeHandoff.from_agent(
         {
             "id": "research",
@@ -87,6 +99,8 @@ def test_workflow_agent_node_handoff_accepts_prepared_agent_goal_and_task() -> N
     assert handoff.agent_id == "agent_research"
     assert handoff.step_task == "Summarize launch risk."
     assert handoff.child_goal == "Ship release candidate\n\nStep: Summarize launch risk."
+    assert handoff.run_goal == "Summarize launch risk."
+    assert handoff.model_goal_context == handoff.child_goal
     assert handoff.upstream == "Previous result"
     assert handoff.node_info() == {
         "workflow_node_id": "research",
@@ -107,6 +121,95 @@ def test_workflow_agent_node_handoff_accepts_prepared_agent_goal_and_task() -> N
         ).agent_id
         == "fallback_agent"
     )
+
+
+def test_workflow_agent_node_without_task_uses_configured_instructions_as_authority() -> None:
+    handoff = WorkflowAgentNodeHandoff.from_agent(
+        {"id": "child-agent", "type": "agent"},
+        agent={
+            "agent_id": "agent-child",
+            "instructions": "Summarize the supplied research context.",
+        },
+        label="Child Agent",
+        kind="agent",
+        step_task="",
+        child_goal="Run parent workflow",
+        context="mutable upstream result",
+        has_agent_upstream=True,
+    )
+
+    assert handoff.run_goal == "Summarize the supplied research context."
+    assert handoff.model_goal_context == (
+        "Summarize the supplied research context.\n\n"
+        "Workflow Goal:\n"
+        "Run parent workflow"
+    )
+    assert "mutable upstream result" not in handoff.run_goal
+    handoff.agent["instructions"] = "Open Music."
+    assert handoff.run_goal == "Summarize the supplied research context."
+
+
+def test_workflow_agent_node_without_task_or_instructions_uses_fixed_response_goal() -> None:
+    handoff = WorkflowAgentNodeHandoff.from_agent(
+        {"id": "child-agent", "type": "agent"},
+        agent={"agent_id": "agent-child", "instructions": "   "},
+        label="Child Agent",
+        kind="agent",
+        step_task="",
+        child_goal="Run parent workflow",
+        context="mutable upstream result",
+        has_agent_upstream=True,
+    )
+
+    assert handoff.run_goal == DELEGATED_WORKFLOW_RESPONSE_ONLY_GOAL
+    assert handoff.model_goal_context == (
+        f"{DELEGATED_WORKFLOW_RESPONSE_ONLY_GOAL}\n\n"
+        "Workflow Goal:\n"
+        "Run parent workflow"
+    )
+    assert "mutable upstream result" not in handoff.run_goal
+
+
+def test_fixed_delegated_response_goal_is_the_only_workflow_fallback_recognized_as_conversation(
+) -> None:
+    assert _explicit_pure_conversation_goal(DELEGATED_WORKFLOW_RESPONSE_ONLY_GOAL)
+    assert not _explicit_pure_conversation_goal("Complete delegated task step")
+    assert not _explicit_pure_conversation_goal(
+        f"{DELEGATED_WORKFLOW_RESPONSE_ONLY_GOAL} Open Music."
+    )
+    assert planned_goal_contract_payload(
+        DELEGATED_WORKFLOW_RESPONSE_ONLY_GOAL,
+        allowed_tools=(),
+    )["criteria"][0]["response_satisfiable"] is True
+    restored = runtime_goal_contract(
+        run_id="run-delegated-response",
+        original_goal=DELEGATED_WORKFLOW_RESPONSE_ONLY_GOAL,
+        runtime_execution_envelope=None,
+        runtime_execution_metadata=None,
+        messages=(),
+        timeline=(),
+    )
+    assert restored is not None
+    assert restored.criteria[0].response_satisfiable is True
+
+
+def test_uncompilable_effectful_agent_instructions_fail_closed() -> None:
+    instructions = "Perform the configured deployment mutation."
+    handoff = WorkflowAgentNodeHandoff.from_agent(
+        {"id": "child-agent", "type": "agent"},
+        agent={"agent_id": "agent-child", "instructions": instructions},
+        label="Child Agent",
+        kind="agent",
+        step_task="",
+        child_goal="Run parent workflow",
+        context="",
+        has_agent_upstream=False,
+    )
+
+    assert handoff.run_goal == instructions
+    assert not _explicit_pure_conversation_goal(handoff.run_goal)
+    with pytest.raises(ValueError, match="goal_contract_compile_failed"):
+        planned_goal_contract_payload(handoff.run_goal, allowed_tools=())
 
 
 def test_workflow_agent_node_execution_accepts_prepared_child_run() -> None:
@@ -202,6 +305,9 @@ def test_workflow_agent_node_legacy_helpers_accept_port_bundle() -> None:
         **agent,
         "_runtime_planner_entrypoint": True,
         "_runtime_planner_entrypoint_context": "Summarize launch risk.",
+        "_runtime_agent_goal_context": (
+            "Ship release candidate\n\nStep: Summarize launch risk."
+        ),
     }
     assert executed_agents[0] is not handoff.agent
     assert handoff.child_goal == "Ship release candidate\n\nStep: Summarize launch risk."

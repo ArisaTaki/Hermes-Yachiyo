@@ -23,11 +23,23 @@ import http, { type IncomingMessage, type RequestOptions, type ServerResponse } 
 import https from 'node:https';
 import { createRequire } from 'node:module';
 import { createServer } from 'node:net';
+import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+
+import {
+  buildMacAppUpdateInstallerScript,
+  isVerifiedDownloadedUpdate,
+  normalizeSha256,
+  OFFICIAL_APP_BUNDLE_ID,
+  OFFICIAL_UPDATE_REPOSITORY,
+  trustedUpdateTarget,
+  validateTrustedLatestMetadata,
+} from './appUpdaterPolicy.js';
+import { CuaMcpBridge } from './cuaMcpBridge.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
@@ -39,13 +51,32 @@ const ELECTRON_NATIVE_TOKEN_ENV = 'OHA_YACHIYO_ELECTRON_NATIVE_TOKEN';
 const ELECTRON_NATIVE_BRIDGE_SMOKE_ENV = 'OHA_YACHIYO_ELECTRON_NATIVE_BRIDGE_SMOKE';
 const ELECTRON_NATIVE_BRIDGE_SMOKE_APP_ENV = 'OHA_YACHIYO_ELECTRON_NATIVE_BRIDGE_SMOKE_APP';
 const DESKTOP_SMOKE_MODE_ENV = 'OHA_YACHIYO_DESKTOP_SMOKE_MODE';
+const ELECTRON_PROCESS_SMOKE_ROOT_ENV = 'OHA_YACHIYO_ELECTRON_SMOKE_ROOT';
+const ELECTRON_PROCESS_SMOKE_LEDGER_ENV = 'OHA_YACHIYO_ELECTRON_SMOKE_LEDGER';
+const ELECTRON_PARENT_PID_ENV = 'OHA_YACHIYO_ELECTRON_PARENT_PID';
+const ELECTRON_PARENT_TOKEN_ENV = 'OHA_YACHIYO_ELECTRON_PARENT_TOKEN';
+const CUA_DRIVER_PATH_ENV = 'OHA_YACHIYO_CUA_DRIVER_PATH';
+const CUA_DRIVER_COMMAND_ENV = 'OHA_YACHIYO_CUA_DRIVER_COMMAND';
+const CUA_HOST_BUNDLE_ID_ENV = 'OHA_YACHIYO_CUA_HOST_BUNDLE_ID';
+const CUA_MCP_TRANSPORT_ENV = 'OHA_YACHIYO_CUA_MCP_TRANSPORT';
+const CUA_MCP_BRIDGE_URL_ENV = 'OHA_YACHIYO_CUA_MCP_BRIDGE_URL';
+const CUA_MCP_BRIDGE_TOKEN_ENV = 'OHA_YACHIYO_CUA_MCP_BRIDGE_TOKEN';
+const CUA_MCP_BRIDGE_GENERATION_ENV = 'OHA_YACHIYO_CUA_MCP_BRIDGE_GENERATION';
+const CUA_MCP_ELECTRON_BRIDGE_TRANSPORT = 'electron-bridge-v1';
 const CHAT_IMAGE_PICKER_SMOKE_PATHS_ENV = 'OHA_YACHIYO_CHAT_IMAGE_PICKER_SMOKE_PATHS';
 const DEV_BRIDGE_URL = 'http://127.0.0.1:8420';
 const PACKAGED_BRIDGE_URL = 'http://127.0.0.1:18420';
 let bridgeUrl = initialBridgeUrl();
 let bridgeSessionToken = process.env[BRIDGE_TOKEN_ENV] || randomBytes(32).toString('hex');
 const APP_BUILD_METADATA_FILE = 'oha-yachiyo-build.json';
-const DEFAULT_UPDATE_REPOSITORY = 'kuguya-AI-app-develop/oha-yachiyo';
+const DEFAULT_UPDATE_REPOSITORY = OFFICIAL_UPDATE_REPOSITORY;
+const TRUSTED_UPDATE_NETWORK_HOSTS = new Set([
+  'github.com',
+  'api.github.com',
+  'release-assets.githubusercontent.com',
+  'objects.githubusercontent.com',
+  'github-releases.githubusercontent.com',
+]);
 const GITHUB_COMPARE_COMMIT_LIMIT = 100;
 const CHANGELOG_CATEGORY_ORDER = [
   '新增/改进',
@@ -148,6 +179,8 @@ type NativeFocusSnapshot = {
   frontmost_app: string;
   process_visible?: boolean;
   window_count?: number;
+  system_events_reported_frontmost?: boolean;
+  appkit_reported_active?: boolean;
   appkit_activate_result?: string;
   launchservices_returncode?: number;
   blocking_condition?: string;
@@ -247,6 +280,9 @@ type LatestReleaseMetadata = {
   sha256?: string;
   download_url?: string;
   latest_json_url?: string;
+  dirty?: boolean;
+  release_publishable?: boolean;
+  source_tree_fingerprint?: string;
   published_at?: string;
   changelog?: ReleaseChangelog;
 };
@@ -311,6 +347,10 @@ type ChatImageSelection = AvatarImageSelection & {
 };
 
 let backendProcess: ChildProcessWithoutNullStreams | null = null;
+let cuaMcpBridge: CuaMcpBridge | null = null;
+let cuaMcpBridgeUrl = '';
+let cuaMcpBridgeToken = randomBytes(32).toString('hex');
+let cuaMcpBridgeGeneration = randomBytes(12).toString('hex');
 let nativeRuntimeServer: http.Server | null = null;
 let nativeRuntimeUrl = '';
 let mainWindow: BrowserWindow | null = null;
@@ -332,7 +372,12 @@ let backendRestartPromise: Promise<{ success: boolean; bridgeUrl?: string; error
 let lastDownloadedAppUpdate: AppUpdateDownloadResult | null = null;
 let activeAppUpdateDownload: AppUpdateDownloadTask | null = null;
 let appUpdateQuitConfirmed = false;
+let appShutdownRequested = false;
 let backendShutdownBeforeQuit = false;
+let backendShutdownPromise: Promise<void> | null = null;
+let backendTerminationPromise: Promise<void> | null = null;
+let electronProcessSmokeLedgerPath = '';
+const electronProcessToken = randomBytes(16).toString('hex');
 const appUpdateCloseConfirmedWindows = new WeakSet<BrowserWindow>();
 const enforcedWindowTitles = new WeakMap<BrowserWindow, string>();
 const titleHandlersInstalled = new WeakSet<BrowserWindow>();
@@ -349,7 +394,122 @@ type MainWindowOptions = {
 };
 
 app.setName('Oha-Yachiyo');
+try {
+  configureElectronProcessSmoke();
+} catch {
+  console.error('[electron-process-smoke] configuration rejected');
+  app.exit(1);
+  process.exit(1);
+}
 showMacDockIcon();
+
+function configureElectronProcessSmoke(): void {
+  if (process.env[DESKTOP_SMOKE_MODE_ENV] !== '1') return;
+  const configuredRoot = process.env[ELECTRON_PROCESS_SMOKE_ROOT_ENV]?.trim();
+  if (!configuredRoot) return;
+  if (!path.isAbsolute(configuredRoot)) {
+    throw new Error(`${ELECTRON_PROCESS_SMOKE_ROOT_ENV} must be an absolute path`);
+  }
+  let smokeRootStat: ReturnType<typeof fs.lstatSync>;
+  try {
+    smokeRootStat = fs.lstatSync(configuredRoot);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    fs.mkdirSync(configuredRoot, { recursive: true, mode: 0o700 });
+    smokeRootStat = fs.lstatSync(configuredRoot);
+  }
+  if (smokeRootStat.isSymbolicLink() || !smokeRootStat.isDirectory()) {
+    throw new Error(`${ELECTRON_PROCESS_SMOKE_ROOT_ENV} must be a real directory`);
+  }
+  const smokeRoot = fs.realpathSync(configuredRoot);
+  const temporaryRoot = fs.realpathSync(os.tmpdir());
+  const relativeToTemporaryRoot = path.relative(temporaryRoot, smokeRoot);
+  if (
+    !relativeToTemporaryRoot
+    || relativeToTemporaryRoot === '..'
+    || relativeToTemporaryRoot.startsWith(`..${path.sep}`)
+    || path.isAbsolute(relativeToTemporaryRoot)
+  ) {
+    throw new Error(`${ELECTRON_PROCESS_SMOKE_ROOT_ENV} must stay inside the system temporary directory`);
+  }
+  fs.chmodSync(smokeRoot, 0o700);
+  const smokeUserDataPath = path.join(smokeRoot, 'user-data');
+  let smokeUserDataStat: ReturnType<typeof fs.lstatSync>;
+  try {
+    smokeUserDataStat = fs.lstatSync(smokeUserDataPath);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    fs.mkdirSync(smokeUserDataPath, { recursive: false, mode: 0o700 });
+    smokeUserDataStat = fs.lstatSync(smokeUserDataPath);
+  }
+  if (smokeUserDataStat.isSymbolicLink() || !smokeUserDataStat.isDirectory()) {
+    throw new Error('Electron process smoke userData must be a real directory');
+  }
+  fs.chmodSync(smokeUserDataPath, 0o700);
+  app.setPath('userData', smokeUserDataPath);
+  electronProcessSmokeLedgerPath = path.join(smokeRoot, 'electron-lifecycle.jsonl');
+  if (fs.existsSync(electronProcessSmokeLedgerPath)) {
+    const ledgerStat = fs.lstatSync(electronProcessSmokeLedgerPath);
+    if (ledgerStat.isSymbolicLink() || !ledgerStat.isFile()) {
+      throw new Error('Electron process smoke ledger must be a regular file');
+    }
+  }
+  process.env[ELECTRON_PROCESS_SMOKE_LEDGER_ENV] = electronProcessSmokeLedgerPath;
+  recordElectronProcessSmoke('process.configured', {
+    smoke_root: smokeRoot,
+    user_data: smokeUserDataPath,
+  });
+}
+
+function recordElectronProcessSmoke(event: string, details: Record<string, unknown> = {}): void {
+  if (!electronProcessSmokeLedgerPath) return;
+  const payload = {
+    event,
+    at: new Date().toISOString(),
+    electron_pid: process.pid,
+    process_token: electronProcessToken,
+    recorder: 'electron-main',
+    ...details,
+  };
+  const descriptor = fs.openSync(
+    electronProcessSmokeLedgerPath,
+    fs.constants.O_WRONLY
+      | fs.constants.O_APPEND
+      | fs.constants.O_CREAT
+      | (fs.constants.O_NOFOLLOW || 0),
+    0o600,
+  );
+  try {
+    if (!fs.fstatSync(descriptor).isFile()) {
+      throw new Error('Electron process smoke ledger must stay a regular file');
+    }
+    fs.writeSync(descriptor, `${JSON.stringify(payload)}\n`, null, 'utf8');
+  } finally {
+    fs.closeSync(descriptor);
+  }
+}
+
+function recordSecondInstanceWindowFocus(attempt = 0): void {
+  if (!electronProcessSmokeLedgerPath) return;
+  const targetWindow = mainWindow;
+  if (targetWindow && !targetWindow.isDestroyed() && !targetWindow.isFocused()) {
+    if (process.platform === 'darwin') app.focus({ steal: true });
+    targetWindow.show();
+    targetWindow.moveTop();
+    targetWindow.focus();
+  }
+  const focused = Boolean(targetWindow && !targetWindow.isDestroyed() && targetWindow.isFocused());
+  recordElectronProcessSmoke('window.focus', {
+    source: 'second-instance',
+    attempt,
+    focused,
+    visible: Boolean(targetWindow && !targetWindow.isDestroyed() && targetWindow.isVisible()),
+    minimized: Boolean(targetWindow && !targetWindow.isDestroyed() && targetWindow.isMinimized()),
+  });
+  if (!focused && attempt < 10) {
+    setTimeout(() => recordSecondInstanceWindowFocus(attempt + 1), 50);
+  }
+}
 
 function projectRoot(): string {
   return path.resolve(__dirname, '..', '..', '..');
@@ -560,8 +720,7 @@ function parseNativeFocusSnapshot(
   const appName = parts[1] || fallbackAppName;
   const frontmostText = parts[2] || '';
   const frontmostApp = parts[3] || '';
-  const focusVerified = frontmostText.toLocaleLowerCase() === 'true'
-    || Boolean(appName && frontmostApp && compactAppName(appName) === compactAppName(frontmostApp));
+  const focusVerified = Boolean(appName && frontmostApp && compactAppName(appName) === compactAppName(frontmostApp));
   const snapshot: NativeFocusSnapshot = {
     app_name: appName,
     focus_verified: focusVerified,
@@ -570,6 +729,10 @@ function parseNativeFocusSnapshot(
     native_bridge: 'electron_main',
     native_attempts: nativeAttempts,
   };
+  const systemEventsReportedFrontmost = parseNativeBoolean(frontmostText);
+  if (systemEventsReportedFrontmost !== undefined) {
+    snapshot.system_events_reported_frontmost = systemEventsReportedFrontmost;
+  }
   const processVisible = parseNativeBoolean(parts[4]);
   if (processVisible !== undefined) snapshot.process_visible = processVisible;
   const windowCount = parseNativeInteger(parts[5]);
@@ -587,9 +750,8 @@ function parseNativeAppKitFocusSnapshot(
   const activateResult = parts[2] || '';
   const activeText = parts[3] || '';
   const frontmostApp = parts[4] || '';
-  const focusVerified = activeText.toLocaleLowerCase() === 'true'
-    || Boolean(appName && frontmostApp && compactAppName(appName) === compactAppName(frontmostApp));
-  return {
+  const focusVerified = Boolean(appName && frontmostApp && compactAppName(appName) === compactAppName(frontmostApp));
+  const snapshot: NativeFocusSnapshot = {
     app_name: appName,
     focus_verified: focusVerified,
     focus_status: focusVerified ? 'frontmost' : 'not_frontmost',
@@ -598,6 +760,11 @@ function parseNativeAppKitFocusSnapshot(
     native_bridge: 'electron_main',
     native_attempts: nativeAttempts,
   };
+  const appKitReportedActive = parseNativeBoolean(activeText);
+  if (appKitReportedActive !== undefined) {
+    snapshot.appkit_reported_active = appKitReportedActive;
+  }
+  return snapshot;
 }
 
 function nativeFocusToolResult(snapshot: NativeFocusSnapshot): NativeToolResult {
@@ -634,6 +801,10 @@ function nativeFocusToolResult(snapshot: NativeFocusSnapshot): NativeToolResult 
   };
 }
 
+const NATIVE_FOCUS_OPEN_TIMEOUT_MS = 700;
+const NATIVE_FOCUS_SYSTEM_EVENTS_TIMEOUT_MS = 1300;
+const NATIVE_FOCUS_APPKIT_TIMEOUT_MS = 1100;
+
 async function electronNativeFocusApp(appName: string): Promise<NativeToolResult> {
   if (process.platform !== 'darwin') {
     return {
@@ -659,29 +830,36 @@ async function electronNativeFocusApp(appName: string): Promise<NativeToolResult
     };
   }
   const attempts: Array<Record<string, unknown>> = [];
-  const openResult = await runNativeCommand('/usr/bin/open', ['-a', cleanAppName], 5000);
+  const openResult = await runNativeCommand(
+    '/usr/bin/open',
+    ['-a', cleanAppName],
+    NATIVE_FOCUS_OPEN_TIMEOUT_MS,
+  );
   attempts.push(nativeFocusAttempt('electron_open_a', openResult));
   const verifyScript = nativeSystemEventsFocusScript();
-  const verifyResult = await runNativeCommand('/usr/bin/osascript', ['-e', verifyScript, cleanAppName], 5000);
+  const verifyResult = await runNativeCommand(
+    '/usr/bin/osascript',
+    ['-e', verifyScript, cleanAppName],
+    NATIVE_FOCUS_SYSTEM_EVENTS_TIMEOUT_MS,
+  );
   attempts.push(nativeFocusAttempt('electron_system_events_verify', verifyResult));
-  if (verifyResult.exitCode !== 0) {
-    return {
-      ok: false,
-      action: 'electron.native.desktop.focus',
-      summary: `Electron native focus failed for ${cleanAppName}`,
-      error: verifyResult.stderr || 'native_focus_verification_failed',
-      data: { app_name: cleanAppName, native_bridge: 'electron_main', native_attempts: attempts },
-      permission_error: false,
-      fallback_used: false,
-    };
+  let latestSnapshot: NativeFocusSnapshot = {
+    app_name: cleanAppName,
+    focus_verified: false,
+    focus_status: 'not_frontmost',
+    frontmost_app: '',
+    native_bridge: 'electron_main',
+    native_attempts: attempts,
+  };
+  if (verifyResult.exitCode === 0) {
+    latestSnapshot = parseNativeFocusSnapshot(verifyResult.stdout, cleanAppName, attempts);
+    if (latestSnapshot.focus_verified) return nativeFocusToolResult(latestSnapshot);
   }
-  let latestSnapshot = parseNativeFocusSnapshot(verifyResult.stdout, cleanAppName, attempts);
-  if (latestSnapshot.focus_verified) return nativeFocusToolResult(latestSnapshot);
 
   const appKitResult = await runNativeCommand(
     '/usr/bin/osascript',
     ['-l', 'JavaScript', '-e', nativeAppKitFocusScript(), cleanAppName],
-    5000,
+    NATIVE_FOCUS_APPKIT_TIMEOUT_MS,
   );
   attempts.push(nativeFocusAttempt('electron_appkit_nsrunningapplication', appKitResult));
   if (appKitResult.exitCode === 0) {
@@ -689,9 +867,17 @@ async function electronNativeFocusApp(appName: string): Promise<NativeToolResult
     if (latestSnapshot.focus_verified) return nativeFocusToolResult(latestSnapshot);
   }
 
-  const launchServicesResult = await runNativeCommand('/usr/bin/open', ['-a', cleanAppName], 5000);
+  const launchServicesResult = await runNativeCommand(
+    '/usr/bin/open',
+    ['-a', cleanAppName],
+    NATIVE_FOCUS_OPEN_TIMEOUT_MS,
+  );
   attempts.push(nativeFocusAttempt('electron_launchservices_open_a', launchServicesResult));
-  const launchVerifyResult = await runNativeCommand('/usr/bin/osascript', ['-e', verifyScript, cleanAppName], 5000);
+  const launchVerifyResult = await runNativeCommand(
+    '/usr/bin/osascript',
+    ['-e', verifyScript, cleanAppName],
+    NATIVE_FOCUS_SYSTEM_EVENTS_TIMEOUT_MS,
+  );
   attempts.push(nativeFocusAttempt('electron_launchservices_verify', launchVerifyResult));
   if (launchVerifyResult.exitCode === 0) {
     latestSnapshot = parseNativeFocusSnapshot(launchVerifyResult.stdout, cleanAppName, attempts);
@@ -906,9 +1092,9 @@ async function runElectronNativeBridgeSmoke(): Promise<Record<string, unknown>> 
   };
 }
 
-function defaultLatestJsonUrl(branch = 'oha-develop', repository = DEFAULT_UPDATE_REPOSITORY): string {
+function defaultLatestJsonUrl(branch = 'oha-develop'): string {
   const latestBranch = branch === 'main' ? 'main' : branch === 'alpha' ? 'alpha' : 'oha-develop';
-  return `https://github.com/${repository}/releases/download/${latestBranch}-latest/Oha-Yachiyo-${latestBranch}-latest.json`;
+  return `https://github.com/${DEFAULT_UPDATE_REPOSITORY}/releases/download/${latestBranch}-latest/Oha-Yachiyo-${latestBranch}-latest.json`;
 }
 
 function defaultAppBuildMetadata(): AppBuildMetadata {
@@ -957,7 +1143,7 @@ function readAppBuildMetadata(): AppBuildMetadata {
       repository,
       latest_json_url: typeof data.latest_json_url === 'string' && data.latest_json_url.trim()
         ? data.latest_json_url.trim()
-        : defaultLatestJsonUrl(branch, repository),
+        : defaultLatestJsonUrl(branch),
       build_number: numericBuildNumber(data.build_number) ?? fallback.build_number,
     };
   }
@@ -995,18 +1181,28 @@ function updateDownloadRecordPath(): string {
   return path.join(updateDownloadsDir(), 'downloaded-update.json');
 }
 
-function safeDmgFileName(value: unknown, branch: string): string {
-  const fallback = `Oha-Yachiyo-${branch === 'main' ? 'main' : 'develop'}-latest.dmg`;
-  if (typeof value !== 'string' || !value.trim()) return fallback;
-  const name = path.basename(value.trim());
-  return /^[A-Za-z0-9._-]+\.dmg$/.test(name) ? name : fallback;
+function normalizedUpdateDownloadPath(value: unknown, expectedFileName: string): string | null {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  if (!/^Oha-Yachiyo-(?:main|alpha|oha-develop)-latest\.dmg$/.test(expectedFileName)) return null;
+  const resolved = path.resolve(value.trim());
+  const downloads = path.resolve(updateDownloadsDir());
+  const relative = path.relative(downloads, resolved);
+  if (!relative || relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return null;
+  if (path.basename(resolved) !== expectedFileName) return null;
+  try {
+    const stat = fs.lstatSync(resolved);
+    if (stat.isSymbolicLink() || !stat.isFile()) return null;
+  } catch {
+    return null;
+  }
+  return resolved;
 }
 
 function downloadedUpdateIsForDifferentBuild(
   current: AppBuildMetadata,
   download: AppUpdateDownloadResult | null | undefined,
 ): download is AppUpdateDownloadResult {
-  if (!download?.ok || !download.path || !fs.existsSync(download.path)) return false;
+  if (!download || !isVerifiedDownloadedUpdate(download)) return false;
   const latest = download.latest || {};
   if (compareVersionStrings(latest.version, current.version) > 0) return true;
   const currentBuild = numericBuildNumber(current.build_number);
@@ -1018,34 +1214,73 @@ function downloadedUpdateIsForDifferentBuild(
 }
 
 function downloadedUpdateMatchesLatest(download: AppUpdateDownloadResult | null | undefined, latest: LatestReleaseMetadata): download is AppUpdateDownloadResult {
-  if (!download?.ok || !download.path || !fs.existsSync(download.path)) return false;
-  const expectedSha = typeof latest.sha256 === 'string' ? latest.sha256.trim().toLowerCase() : '';
-  if (expectedSha && download.sha256?.toLowerCase() === expectedSha) return true;
-  const downloadLatest = download.latest || {};
-  if (latest.commit && downloadLatest.commit && latest.commit === downloadLatest.commit) return true;
-  if (latest.version && downloadLatest.version && latest.version === downloadLatest.version) {
-    return numericBuildNumber(latest.build_number ?? latest.run_number) === numericBuildNumber(downloadLatest.build_number ?? downloadLatest.run_number);
-  }
-  return false;
+  if (!isVerifiedDownloadedUpdate(download, latest)) return false;
+  const expectedFileName = typeof latest.dmg_name === 'string' ? latest.dmg_name.trim() : '';
+  if (!download?.path || download.file_name !== expectedFileName) return false;
+  return normalizedUpdateDownloadPath(download.path, expectedFileName) !== null;
 }
 
-function readDownloadedAppUpdate(current?: AppBuildMetadata): AppUpdateDownloadResult | null {
-  if (lastDownloadedAppUpdate?.ok && (!current || downloadedUpdateIsForDifferentBuild(current, lastDownloadedAppUpdate))) {
-    return lastDownloadedAppUpdate;
-  }
-  const record = readJsonFile<AppUpdateDownloadResult>(updateDownloadRecordPath());
-  if (!record?.ok || !record.path || !fs.existsSync(record.path)) return null;
-  if (current && !downloadedUpdateIsForDifferentBuild(current, record)) return null;
-  lastDownloadedAppUpdate = record;
-  return record;
-}
-
-function writeDownloadedAppUpdate(record: AppUpdateDownloadResult): void {
+function validatedPersistedAppUpdate(
+  current: AppBuildMetadata,
+  record: AppUpdateDownloadResult | null | undefined,
+): AppUpdateDownloadResult | null {
+  if (!record || !isVerifiedDownloadedUpdate(record)) return null;
+  let latest: LatestReleaseMetadata;
   try {
-    fs.mkdirSync(updateDownloadsDir(), { recursive: true });
-    fs.writeFileSync(updateDownloadRecordPath(), JSON.stringify(record, null, 2), 'utf8');
+    latest = validateTrustedLatestMetadata<LatestReleaseMetadata>(current, record.latest);
+  } catch {
+    return null;
+  }
+  if (!isVerifiedDownloadedUpdate(record, latest)) return null;
+  const expectedFileName = latest.dmg_name || '';
+  if (record.file_name !== expectedFileName) return null;
+  const normalizedPath = normalizedUpdateDownloadPath(record.path, expectedFileName);
+  if (!normalizedPath) return null;
+  const normalizedSha256 = normalizeSha256(record.sha256);
+  if (!normalizedSha256) return null;
+  const normalized = {
+    ...record,
+    path: normalizedPath,
+    sha256: normalizedSha256,
+    verified: true,
+    latest,
+  };
+  return downloadedUpdateIsForDifferentBuild(current, normalized) ? normalized : null;
+}
+
+function readDownloadedAppUpdate(current: AppBuildMetadata): AppUpdateDownloadResult | null {
+  const cached = validatedPersistedAppUpdate(current, lastDownloadedAppUpdate);
+  if (cached) return cached;
+  const record = readJsonFile<AppUpdateDownloadResult>(updateDownloadRecordPath());
+  const validated = validatedPersistedAppUpdate(current, record);
+  if (!validated) {
+    if (lastDownloadedAppUpdate || record) clearDownloadedAppUpdate();
+    return null;
+  }
+  lastDownloadedAppUpdate = validated;
+  return validated;
+}
+
+function writeDownloadedAppUpdate(record: AppUpdateDownloadResult): boolean {
+  if (!isVerifiedDownloadedUpdate(record)) return false;
+  const recordPath = updateDownloadRecordPath();
+  const temporaryPath = `${recordPath}.tmp-${process.pid}-${randomBytes(6).toString('hex')}`;
+  try {
+    fs.mkdirSync(updateDownloadsDir(), { recursive: true, mode: 0o700 });
+    fs.writeFileSync(temporaryPath, JSON.stringify(record, null, 2), {
+      encoding: 'utf8',
+      flag: 'wx',
+      mode: 0o600,
+    });
+    fs.renameSync(temporaryPath, recordPath);
+    fs.chmodSync(recordPath, 0o600);
+    return true;
   } catch (error) {
     console.warn('[updater] failed to persist downloaded update:', error);
+    try {
+      fs.rmSync(temporaryPath, { force: true });
+    } catch {}
+    return false;
   }
 }
 
@@ -1124,7 +1359,7 @@ function appUpdateInfo(): AppUpdateInfo {
     supported: process.platform === 'darwin' && app.isPackaged && Boolean(appBundlePath),
     packaged: app.isPackaged,
     current,
-    latest_json_url: current.latest_json_url || defaultLatestJsonUrl(current.branch, current.repository),
+    latest_json_url: current.latest_json_url || defaultLatestJsonUrl(current.branch),
     app_bundle_path: appBundlePath,
     downloaded_dmg_path: downloadedUpdate?.path,
     downloaded_update: downloadedUpdate,
@@ -1156,9 +1391,11 @@ function httpRequest(
   options: RequestOptions,
   callback: (response: IncomingMessage) => void,
 ) {
-  if (url.protocol === 'https:') return https.get(url, options, callback);
-  if (url.protocol === 'http:') return http.get(url, options, callback);
-  throw new Error('仅支持 http(s) 更新链接');
+  if (url.protocol !== 'https:') throw new Error('应用更新仅支持 HTTPS 链接');
+  if (url.username || url.password || url.port || !TRUSTED_UPDATE_NETWORK_HOSTS.has(url.hostname)) {
+    throw new Error('应用更新链接未通过 GitHub 信任边界');
+  }
+  return https.get(url, options, callback);
 }
 
 function redirectedUrl(location: string, baseUrl: URL): URL {
@@ -1467,7 +1704,9 @@ function sha256File(filePath: string): Promise<string> {
 async function checkAppUpdate(): Promise<AppUpdateCheckResult> {
   const info = appUpdateInfo();
   try {
-    const latestMetadata = await fetchJson<LatestReleaseMetadata>(cacheBustedUrl(info.latest_json_url));
+    const target = trustedUpdateTarget(info.current);
+    const rawMetadata = await fetchJson<unknown>(target.metadataUrl);
+    const latestMetadata = validateTrustedLatestMetadata<LatestReleaseMetadata>(info.current, rawMetadata);
     const decision = updateAvailableReason(info.current, latestMetadata);
     const latest = await latestWithCurrentInstallChangelog(info.current, latestMetadata, decision.available);
     const downloadedUpdate = downloadedUpdateMatchesLatest(info.downloaded_update, latest)
@@ -1502,13 +1741,24 @@ async function downloadAppUpdate(
   if (!check.ok || !check.latest) {
     return { ok: false, error: check.error || '无法读取更新元数据' };
   }
+  if (!check.update_available) {
+    return { ok: false, latest: check.latest, error: check.reason || '当前没有可下载的应用更新' };
+  }
+  let latest: LatestReleaseMetadata;
+  let target: ReturnType<typeof trustedUpdateTarget>;
+  try {
+    target = trustedUpdateTarget(check.current);
+    latest = validateTrustedLatestMetadata<LatestReleaseMetadata>(check.current, check.latest);
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) };
+  }
   if (downloadedUpdateMatchesLatest(check.downloaded_update, check.latest)) {
     return check.downloaded_update;
   }
-  const downloadUrl = typeof check.latest.download_url === 'string' ? check.latest.download_url.trim() : '';
-  if (!downloadUrl) return { ok: false, latest: check.latest, error: '更新元数据缺少 DMG 下载链接' };
-
-  const fileName = safeDmgFileName(check.latest.dmg_name || downloadUrl, check.current.branch);
+  const expectedSha256 = normalizeSha256(latest.sha256);
+  if (!expectedSha256) return { ok: false, latest, error: '更新元数据缺少合法的 SHA256' };
+  const downloadUrl = target.downloadUrl;
+  const fileName = target.dmgFileName;
   const destination = path.join(updateDownloadsDir(), fileName);
   const controller = new AbortController();
   activeAppUpdateDownload = {
@@ -1524,13 +1774,12 @@ async function downloadAppUpdate(
     if (controller.signal.aborted) throw controller.signal.reason || new AppUpdateDownloadCancelledError();
     const actualSha256 = await sha256File(destination);
     if (controller.signal.aborted) throw controller.signal.reason || new AppUpdateDownloadCancelledError();
-    const expectedSha256 = typeof check.latest.sha256 === 'string' ? check.latest.sha256.trim().toLowerCase() : '';
-    if (expectedSha256 && actualSha256.toLowerCase() !== expectedSha256) {
+    if (actualSha256.toLowerCase() !== expectedSha256) {
       await fs.promises.rm(destination, { force: true });
       clearDownloadedAppUpdate();
       return {
         ok: false,
-        latest: check.latest,
+        latest,
         error: 'DMG SHA256 校验失败，已删除下载文件',
       };
     }
@@ -1539,10 +1788,14 @@ async function downloadAppUpdate(
       path: destination,
       file_name: fileName,
       sha256: actualSha256,
-      verified: Boolean(expectedSha256),
-      latest: check.latest,
+      verified: true,
+      latest,
     };
-    writeDownloadedAppUpdate(lastDownloadedAppUpdate);
+    if (!writeDownloadedAppUpdate(lastDownloadedAppUpdate)) {
+      await fs.promises.rm(destination, { force: true });
+      clearDownloadedAppUpdate();
+      return { ok: false, latest, error: '无法安全保存已验证的更新记录，已删除下载文件' };
+    }
     onProgress?.({ status: 'completed', file_name: fileName, percent: 100 });
     return lastDownloadedAppUpdate;
   } catch (error) {
@@ -1558,7 +1811,7 @@ async function downloadAppUpdate(
       });
       return {
         ok: false,
-        latest: check.latest,
+        latest,
         cancelled: true,
         error: error instanceof Error ? error.message : '应用更新下载已取消',
       };
@@ -1570,10 +1823,12 @@ async function downloadAppUpdate(
     });
     try {
       await fs.promises.rm(`${destination}.part`, { force: true });
+      await fs.promises.rm(destination, { force: true });
     } catch {}
+    clearDownloadedAppUpdate();
     return {
       ok: false,
-      latest: check.latest,
+      latest,
       error: error instanceof Error ? error.message : String(error),
     };
   } finally {
@@ -1581,56 +1836,108 @@ async function downloadAppUpdate(
   }
 }
 
-function normalizedDownloadedDmgPath(value: unknown): string | null {
-  const candidate = typeof value === 'string' && value.trim()
-    ? value.trim()
-    : lastDownloadedAppUpdate?.path || '';
-  if (!candidate) return null;
-  const resolved = path.resolve(candidate);
-  const downloads = path.resolve(updateDownloadsDir());
-  if (!resolved.startsWith(`${downloads}${path.sep}`)) return null;
-  if (!resolved.endsWith('.dmg')) return null;
-  return fs.existsSync(resolved) ? resolved : null;
-}
-
-function installDownloadedAppUpdate(rawPath: unknown): { success: boolean; appBundlePath?: string; dmgPath?: string; error?: string } {
+async function installDownloadedAppUpdate(
+  rawPath: unknown,
+): Promise<{ success: boolean; appBundlePath?: string; dmgPath?: string; error?: string }> {
   if (process.platform !== 'darwin') return { success: false, error: '应用更新安装仅支持 macOS' };
   if (!app.isPackaged) return { success: false, error: '开发环境不支持覆盖安装，请使用已打包的 DMG 版本' };
   const appBundlePath = currentAppBundlePath();
   if (!appBundlePath) return { success: false, error: '当前运行环境不是可更新的 macOS .app 包' };
-  const dmgPath = normalizedDownloadedDmgPath(rawPath);
-  if (!dmgPath) return { success: false, appBundlePath, error: '未找到已下载的更新 DMG' };
+  if (appBundlePath.startsWith('/Volumes/') || appBundlePath.includes('/AppTranslocation/')) {
+    return { success: false, appBundlePath, error: '请先把 Oha-Yachiyo 移到“应用程序”目录后再更新' };
+  }
+  try {
+    fs.accessSync(path.dirname(appBundlePath), fs.constants.W_OK);
+  } catch {
+    return { success: false, appBundlePath, error: '当前应用目录不可写，无法安全替换应用' };
+  }
+  const check = await checkAppUpdate();
+  if (!check.ok || !check.update_available || !check.latest || !check.downloaded_update) {
+    return {
+      success: false,
+      appBundlePath,
+      error: check.error || '无法从官方更新元数据重新确认已下载的更新，请联网后重试',
+    };
+  }
+  const current = check.current;
+  const download = check.downloaded_update;
+  if (!isVerifiedDownloadedUpdate(download, check.latest)) {
+    return { success: false, appBundlePath, error: '未找到与官方元数据匹配的已验证更新 DMG，请重新下载' };
+  }
+  let latest: LatestReleaseMetadata;
+  let target: ReturnType<typeof trustedUpdateTarget>;
+  try {
+    target = trustedUpdateTarget(current);
+    latest = validateTrustedLatestMetadata<LatestReleaseMetadata>(current, download.latest);
+  } catch (error) {
+    return {
+      success: false,
+      appBundlePath,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+  if (!isVerifiedDownloadedUpdate(download, latest)) {
+    return { success: false, appBundlePath, error: '更新下载记录未通过 SHA256 身份校验，请重新下载' };
+  }
+  const dmgPath = normalizedUpdateDownloadPath(download.path, target.dmgFileName);
+  if (!dmgPath || download.file_name !== target.dmgFileName) {
+    return { success: false, appBundlePath, error: '已下载更新的路径或文件名不可信，请重新下载' };
+  }
+  if (typeof rawPath === 'string' && rawPath.trim() && path.resolve(rawPath.trim()) !== dmgPath) {
+    return { success: false, appBundlePath, dmgPath, error: '安装请求与已验证的更新记录不匹配' };
+  }
+  const expectedSha256 = normalizeSha256(latest.sha256);
+  if (!expectedSha256) {
+    return { success: false, appBundlePath, dmgPath, error: '更新元数据缺少合法的 SHA256' };
+  }
+  let actualSha256: string;
+  try {
+    actualSha256 = await sha256File(dmgPath);
+  } catch (error) {
+    return {
+      success: false,
+      appBundlePath,
+      dmgPath,
+      error: `无法重新校验更新 DMG：${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+  if (actualSha256.toLowerCase() !== expectedSha256) {
+    try {
+      fs.rmSync(dmgPath, { force: true });
+    } catch {}
+    clearDownloadedAppUpdate();
+    return { success: false, appBundlePath, dmgPath, error: '更新 DMG 在安装前发生变化，已删除并拒绝安装' };
+  }
   const appName = path.basename(appBundlePath);
   if (!/^Oha-Yachiyo.*\.app$/.test(appName)) {
     return { success: false, appBundlePath, dmgPath, error: `拒绝覆盖非 Oha-Yachiyo 应用包：${appName}` };
   }
-  const script = [
-    'set -euo pipefail',
-    'app_path="$1"',
-    'dmg_path="$2"',
-    'app_name="$3"',
-    'app_pid="$4"',
-    'while kill -0 "$app_pid" >/dev/null 2>&1; do sleep 0.25; done',
-    'mount_dir="$(mktemp -d "${TMPDIR:-/tmp}/oha-yachiyo-update.XXXXXX")"',
-    'cleanup() { /usr/bin/hdiutil detach "$mount_dir" -quiet >/dev/null 2>&1 || true; rmdir "$mount_dir" >/dev/null 2>&1 || true; }',
-    'trap cleanup EXIT',
-    '/usr/bin/hdiutil attach "$dmg_path" -nobrowse -readonly -mountpoint "$mount_dir" -quiet',
-    'source_app="$mount_dir/$app_name"',
-    'if [[ ! -d "$source_app" ]]; then source_app="$(/usr/bin/find "$mount_dir" -maxdepth 2 -type d -name "$app_name" -print -quit)"; fi',
-    'if [[ ! -d "$source_app" ]]; then echo "Cannot find $app_name in DMG" >&2; exit 1; fi',
-    'parent_dir="$(dirname "$app_path")"',
-    'tmp_app="$parent_dir/.$app_name.updating.$$"',
-    'rm -rf "$tmp_app"',
-    '/usr/bin/ditto "$source_app" "$tmp_app"',
-    'rm -rf "$app_path"',
-    'mv "$tmp_app" "$app_path"',
-    '/usr/bin/open "$app_path"',
-  ].join('\n');
+  const script = buildMacAppUpdateInstallerScript();
   try {
-    spawn('/bin/zsh', ['-lc', script, 'oha-yachiyo-update', appBundlePath, dmgPath, appName, String(process.pid)], {
+    const installer = spawn('/bin/zsh', [
+      '-lc',
+      script,
+      'oha-yachiyo-update',
+      appBundlePath,
+      dmgPath,
+      appName,
+      String(process.pid),
+      expectedSha256,
+      OFFICIAL_APP_BUNDLE_ID,
+      typeof latest.version === 'string' ? latest.version.trim() : '',
+      updateDownloadRecordPath(),
+    ], {
       detached: true,
       stdio: 'ignore',
-    }).unref();
+    });
+    await new Promise<void>((resolve, reject) => {
+      installer.once('spawn', () => {
+        installer.unref();
+        resolve();
+      });
+      installer.once('error', reject);
+    });
+    appUpdateQuitConfirmed = true;
     app.quit();
     return { success: true, appBundlePath, dmgPath };
   } catch (error) {
@@ -1702,7 +2009,7 @@ function enforceWindowTitle(targetWindow: BrowserWindow, title: string): void {
 function mainWindowTitle(params: Record<string, string> = {}): string {
   const view = normalizeView(params.view);
   if (view === 'provider') return 'Oha-Yachiyo 模型配置';
-  if (view === 'agents') return 'Oha-Yachiyo Agent Studio';
+  if (view === 'agents') return 'Oha-Yachiyo 代理工作台';
   if (view === 'resources') return 'Oha-Yachiyo 资源管理';
   if (view === 'workspace') return 'Oha-Yachiyo 工作区';
   if (view === 'settings') return params.mode === 'live2d'
@@ -1767,6 +2074,78 @@ function packagedBackendPath(): string | null {
   const binaryName = process.platform === 'win32' ? 'oha-yachiyo-backend.exe' : 'oha-yachiyo-backend';
   const candidate = path.join(process.resourcesPath, 'backend', binaryName);
   return app.isPackaged && fs.existsSync(candidate) ? candidate : null;
+}
+
+function developmentBackendPythonPath(): string {
+  const configured = process.env.OHA_YACHIYO_PYTHON?.trim();
+  if (configured) return configured;
+  const candidates = process.platform === 'win32'
+    ? [path.join(projectRoot(), '.venv', 'Scripts', 'python.exe')]
+    : [
+        path.join(projectRoot(), '.venv', 'bin', 'python'),
+        path.join(projectRoot(), '.venv', 'bin', 'python3'),
+      ];
+  return candidates.find((candidate) => fs.existsSync(candidate)) || 'python3';
+}
+
+function packagedCuaDriverPath(): string {
+  return path.join(
+    process.resourcesPath,
+    'computer-use',
+    'macos',
+    'OhaCuaDriver.app',
+    'Contents',
+    'MacOS',
+    'cua-driver',
+  );
+}
+
+function usesPackagedCuaMcpBridge(): boolean {
+  return app.isPackaged && process.platform === 'darwin';
+}
+
+async function startPackagedCuaMcpBridge(): Promise<void> {
+  if (appShutdownRequested || !usesPackagedCuaMcpBridge() || cuaMcpBridge) return;
+  const nextBridge = new CuaMcpBridge({
+    driverPath: packagedCuaDriverPath(),
+    hostBundleId: OFFICIAL_APP_BUNDLE_ID,
+    token: cuaMcpBridgeToken,
+    generation: cuaMcpBridgeGeneration,
+  });
+  cuaMcpBridge = nextBridge;
+  try {
+    const nextBridgeUrl = await nextBridge.start();
+    if (appShutdownRequested || cuaMcpBridge !== nextBridge) {
+      await nextBridge.close();
+      if (cuaMcpBridge === nextBridge) cuaMcpBridge = null;
+      return;
+    }
+    cuaMcpBridgeUrl = nextBridgeUrl;
+  } catch (error) {
+    if (cuaMcpBridge === nextBridge) cuaMcpBridge = null;
+    cuaMcpBridgeUrl = '';
+    await nextBridge.close();
+    throw error;
+  }
+}
+
+async function rotatePackagedCuaMcpBridge(): Promise<void> {
+  cuaMcpBridgeToken = randomBytes(32).toString('hex');
+  cuaMcpBridgeGeneration = randomBytes(12).toString('hex');
+  const bridge = cuaMcpBridge;
+  if (bridge) {
+    await bridge.rotate({
+      token: cuaMcpBridgeToken,
+      generation: cuaMcpBridgeGeneration,
+    });
+  }
+}
+
+async function closePackagedCuaMcpBridge(): Promise<void> {
+  const bridge = cuaMcpBridge;
+  cuaMcpBridge = null;
+  cuaMcpBridgeUrl = '';
+  if (bridge) await bridge.close();
 }
 
 function initialBridgeUrl(): string {
@@ -1849,34 +2228,76 @@ async function prepareBridgeUrlForPackagedBackend(): Promise<void> {
 }
 
 function startBackend(): void {
+  if (appShutdownRequested) return;
   if (process.env.OHA_YACHIYO_SKIP_BACKEND === '1') return;
   if (backendProcess) return;
 
   const backendBinary = packagedBackendPath();
-  const command = backendBinary || process.env.OHA_YACHIYO_PYTHON || 'python3';
+  const command = backendBinary || developmentBackendPythonPath();
   const args = backendBinary ? [] : ['-m', 'apps.desktop_backend.app'];
-  backendProcess = spawn(command, args, {
+  const backendParentToken = randomBytes(24).toString('hex');
+  const backendEnvironment: NodeJS.ProcessEnv = {
+    ...process.env,
+    PYTHONPATH: projectRoot(),
+    OHA_YACHIYO_DESKTOP_BACKEND: '1',
+    [ELECTRON_PARENT_PID_ENV]: String(process.pid),
+    [ELECTRON_PARENT_TOKEN_ENV]: backendParentToken,
+    [BRIDGE_URL_ENV]: bridgeUrl,
+    [BRIDGE_TOKEN_ENV]: bridgeSessionToken,
+    [ELECTRON_NATIVE_URL_ENV]: nativeRuntimeUrl,
+    [ELECTRON_NATIVE_TOKEN_ENV]: bridgeSessionToken,
+  };
+  if (usesPackagedCuaMcpBridge()) {
+    // A packaged build is authoritative: only the authenticated Electron-owned
+    // bridge may launch Cua Driver. Empty bridge state must fail closed instead
+    // of falling back to a PATH or user-supplied subprocess command.
+    delete backendEnvironment[CUA_DRIVER_PATH_ENV];
+    delete backendEnvironment[CUA_DRIVER_COMMAND_ENV];
+    delete backendEnvironment[CUA_HOST_BUNDLE_ID_ENV];
+    backendEnvironment[CUA_MCP_TRANSPORT_ENV] = CUA_MCP_ELECTRON_BRIDGE_TRANSPORT;
+    backendEnvironment[CUA_MCP_BRIDGE_URL_ENV] = cuaMcpBridgeUrl;
+    backendEnvironment[CUA_MCP_BRIDGE_TOKEN_ENV] = cuaMcpBridgeToken;
+    backendEnvironment[CUA_MCP_BRIDGE_GENERATION_ENV] = cuaMcpBridgeGeneration;
+  } else {
+    delete backendEnvironment[CUA_MCP_TRANSPORT_ENV];
+    delete backendEnvironment[CUA_MCP_BRIDGE_URL_ENV];
+    delete backendEnvironment[CUA_MCP_BRIDGE_TOKEN_ENV];
+    delete backendEnvironment[CUA_MCP_BRIDGE_GENERATION_ENV];
+  }
+  const spawnedBackend = spawn(command, args, {
     cwd: backendBinary ? process.resourcesPath : projectRoot(),
-    env: {
-      ...process.env,
-      PYTHONPATH: projectRoot(),
-      OHA_YACHIYO_DESKTOP_BACKEND: '1',
-      [BRIDGE_URL_ENV]: bridgeUrl,
-      [BRIDGE_TOKEN_ENV]: bridgeSessionToken,
-      [ELECTRON_NATIVE_URL_ENV]: nativeRuntimeUrl,
-      [ELECTRON_NATIVE_TOKEN_ENV]: bridgeSessionToken,
-    },
+    env: backendEnvironment,
+  });
+  backendProcess = spawnedBackend;
+  recordElectronProcessSmoke('backend.spawn', {
+    backend_pid: spawnedBackend.pid ?? null,
+    parent_token_hash: createHash('sha256').update(backendParentToken).digest('hex').slice(0, 16),
   });
 
-  backendProcess.stdout.on('data', (chunk) => process.stdout.write(`[backend] ${chunk}`));
-  backendProcess.stderr.on('data', (chunk) => process.stderr.write(`[backend] ${chunk}`));
-  backendProcess.on('error', (error) => {
+  spawnedBackend.stdout.on('data', (chunk) => process.stdout.write(`[backend] ${chunk}`));
+  spawnedBackend.stderr.on('data', (chunk) => process.stderr.write(`[backend] ${chunk}`));
+  spawnedBackend.on('error', (error) => {
     console.error(`[backend] failed to start: ${error.message}`);
-    backendProcess = null;
+    recordElectronProcessSmoke('backend.exit', {
+      backend_pid: spawnedBackend.pid ?? null,
+      error: error.message,
+    });
+    if (backendProcess === spawnedBackend) {
+      backendProcess = null;
+      void cuaMcpBridge?.endActiveSession();
+    }
   });
-  backendProcess.on('exit', (code, signal) => {
+  spawnedBackend.on('exit', (code, signal) => {
     console.log(`[backend] exited code=${code ?? 'null'} signal=${signal ?? 'null'}`);
-    backendProcess = null;
+    recordElectronProcessSmoke('backend.exit', {
+      backend_pid: spawnedBackend.pid ?? null,
+      code,
+      signal,
+    });
+    if (backendProcess === spawnedBackend) {
+      backendProcess = null;
+      void cuaMcpBridge?.endActiveSession();
+    }
   });
 }
 
@@ -1887,10 +2308,12 @@ function stopBackend(): void {
 }
 
 function terminateBackend(timeoutMs = 5000): Promise<void> {
+  if (backendTerminationPromise) return backendTerminationPromise;
   const processToStop = backendProcess;
   if (!processToStop) return Promise.resolve();
   backendProcess = null;
-  return new Promise((resolve) => {
+  let trackedTermination: Promise<void>;
+  trackedTermination = new Promise<void>((resolve) => {
     let finished = false;
     const finish = () => {
       if (finished) return;
@@ -1913,7 +2336,13 @@ function terminateBackend(timeoutMs = 5000): Promise<void> {
         finish();
       }
     }, timeoutMs);
+  }).finally(() => {
+    if (backendTerminationPromise === trackedTermination) {
+      backendTerminationPromise = null;
+    }
   });
+  backendTerminationPromise = trackedTermination;
+  return trackedTermination;
 }
 
 function normalizeBridgeUrl(value: unknown): string | null {
@@ -1941,15 +2370,33 @@ function reloadRendererWindows(): void {
 }
 
 async function restartBackendProcess(targetBridgeUrl?: unknown): Promise<{ success: boolean; bridgeUrl?: string; error?: string }> {
+  if (appShutdownRequested) {
+    return { success: false, bridgeUrl, error: '应用正在退出，不能重启后台服务' };
+  }
   if (backendRestartPromise) return backendRestartPromise;
   backendRestartPromise = (async () => {
     const nextBridgeUrl = normalizeBridgeUrl(targetBridgeUrl) || bridgeUrl;
     const previousBridgeUrl = bridgeUrl;
     bridgeUrl = nextBridgeUrl;
     bridgeSessionToken = randomBytes(32).toString('hex');
+    await rotatePackagedCuaMcpBridge();
+    if (appShutdownRequested) {
+      return { success: false, bridgeUrl, error: '应用正在退出，已取消后台服务重启' };
+    }
     await terminateBackend();
+    if (appShutdownRequested) {
+      return { success: false, bridgeUrl, error: '应用正在退出，已取消后台服务重启' };
+    }
+    try {
+      await startPackagedCuaMcpBridge();
+    } catch (error) {
+      console.warn('[cua-mcp-bridge] listener unavailable; packaged backend will fail closed:', error);
+    }
     startBackend();
     const settings = await waitForUiSettings();
+    if (appShutdownRequested) {
+      return { success: false, bridgeUrl, error: '应用正在退出，已取消后台服务重启' };
+    }
     if (!settings) {
       return {
         success: false,
@@ -2102,6 +2549,10 @@ function createMainWindow(
     },
   });
   enforceWindowTitle(mainWindow, title);
+  recordElectronProcessSmoke('window.created', {
+    visible: mainWindow.isVisible(),
+    minimized: mainWindow.isMinimized(),
+  });
 
   mainWindow.once('ready-to-show', () => {
     if (!mainWindow || mainWindow.isDestroyed() || startHidden) return;
@@ -3475,46 +3926,85 @@ ipcMain.handle('oha:openLauncherMenu', (event, mode: unknown) => {
   menu.popup({ window: targetWindow });
 });
 
-app.whenReady().then(() => {
-  showMacDockIcon();
-  void (async () => {
-    if (process.env[ELECTRON_NATIVE_BRIDGE_SMOKE_ENV] === '1') {
-      try {
-        const smokeResult = await runElectronNativeBridgeSmoke();
-        console.log(`electron-native-bridge-smoke:${JSON.stringify(smokeResult)}`);
-        closeNativeRuntimeServer();
-        app.exit(smokeResult.ok === true ? 0 : 1);
-      } catch (error) {
-        const smokeResult = {
-          ok: false,
-          mode: 'electron_native_bridge_smoke',
-          error: error instanceof Error ? error.message : String(error),
-        };
-        console.log(`electron-native-bridge-smoke:${JSON.stringify(smokeResult)}`);
-        closeNativeRuntimeServer();
-        app.exit(1);
-      }
-      return;
-    }
-    await prepareBridgeUrlForPackagedBackend();
-    try {
-      await startNativeRuntimeServer();
-    } catch (error) {
-      console.warn('[native-runtime] failed to start Electron native bridge:', error);
-    }
-    startBackend();
-    createMainWindow({ view: 'main' }, lastUiSettings, { focusOnReady: false });
-    hasEnteredMainExperience = true;
-    const settings = await waitForUiSettings();
-    if (settings) lastUiSettings = settings;
-    configureTray(settings);
-    showMainWindow({}, settings, { focusOnReady: false });
-    await openConfiguredDesktopMode(undefined, settings);
-    if (settings?.window_mode?.open_chat_on_start) showChatWindow();
-  })();
+// Electron can otherwise launch two independent backend/runtime owners against
+// the same database.  Acquire the application lock before any whenReady startup
+// work; a secondary launch only brings the existing assistant to the front.
+const hasPrimaryInstanceLock = app.requestSingleInstanceLock();
+if (!hasPrimaryInstanceLock) {
+  recordElectronProcessSmoke('secondary');
+  app.quit();
+} else {
+  recordElectronProcessSmoke('primary');
+  app.on('second-instance', () => {
+    recordElectronProcessSmoke('second-instance');
+    if (process.platform === 'darwin') app.focus({ steal: true });
+    showMainWindowAtLastRoute({ restore: 'last' });
+    if (process.platform === 'darwin') app.focus({ steal: true });
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.focus();
+    recordSecondInstanceWindowFocus();
+  });
 
-  app.on('activate', showMainWindowFromAppActivation);
-});
+  app.whenReady().then(() => {
+    showMacDockIcon();
+    void (async () => {
+      if (process.env[ELECTRON_NATIVE_BRIDGE_SMOKE_ENV] === '1') {
+        try {
+          const smokeResult = await runElectronNativeBridgeSmoke();
+          console.log(`electron-native-bridge-smoke:${JSON.stringify(smokeResult)}`);
+          closeNativeRuntimeServer();
+          app.exit(smokeResult.ok === true ? 0 : 1);
+        } catch (error) {
+          const smokeResult = {
+            ok: false,
+            mode: 'electron_native_bridge_smoke',
+            error: error instanceof Error ? error.message : String(error),
+          };
+          console.log(`electron-native-bridge-smoke:${JSON.stringify(smokeResult)}`);
+          closeNativeRuntimeServer();
+          app.exit(1);
+        }
+        return;
+      }
+      await prepareBridgeUrlForPackagedBackend();
+      if (appShutdownRequested) return;
+      try {
+        await startNativeRuntimeServer();
+      } catch (error) {
+        console.warn('[native-runtime] failed to start Electron native bridge:', error);
+      }
+      if (appShutdownRequested) {
+        closeNativeRuntimeServer();
+        return;
+      }
+      try {
+        await startPackagedCuaMcpBridge();
+      } catch (error) {
+        console.warn('[cua-mcp-bridge] listener unavailable; packaged backend will fail closed:', error);
+      }
+      if (appShutdownRequested) return;
+      startBackend();
+      if (appShutdownRequested) return;
+      createMainWindow({ view: 'main' }, lastUiSettings, { focusOnReady: false });
+      hasEnteredMainExperience = true;
+      const settings = await waitForUiSettings();
+      if (appShutdownRequested) return;
+      if (settings) lastUiSettings = settings;
+      configureTray(settings);
+      if (!focusMainWindowWithoutNavigation(
+        routeForWindow(mainWindow),
+        settings,
+        { focusOnReady: false },
+      )) {
+        createMainWindow({ view: 'main' }, settings, { focusOnReady: false });
+      }
+      await openConfiguredDesktopMode(undefined, settings);
+      if (appShutdownRequested) return;
+      if (settings?.window_mode?.open_chat_on_start) showChatWindow();
+    })();
+
+    app.on('activate', showMainWindowFromAppActivation);
+  });
+}
 
 app.on('before-quit', (event) => {
   if (activeAppUpdateDownload && !appUpdateQuitConfirmed) {
@@ -3524,11 +4014,24 @@ app.on('before-quit', (event) => {
     setTimeout(() => app.quit(), 0);
     return;
   }
+  appShutdownRequested = true;
   cleanupAllTerminalSessions();
-  if (!backendShutdownBeforeQuit && backendProcess) {
+  if (backendShutdownPromise) {
     event.preventDefault();
-    void terminateBackend().finally(() => {
+    return;
+  }
+  if (
+    !backendShutdownBeforeQuit
+    && (backendProcess || backendTerminationPromise || cuaMcpBridge)
+  ) {
+    event.preventDefault();
+    const backendTermination = backendTerminationPromise ?? terminateBackend();
+    backendShutdownPromise = Promise.allSettled([
+      backendTermination,
+      closePackagedCuaMcpBridge(),
+    ]).then(() => {
       backendShutdownBeforeQuit = true;
+      backendShutdownPromise = null;
       app.quit();
     });
     return;

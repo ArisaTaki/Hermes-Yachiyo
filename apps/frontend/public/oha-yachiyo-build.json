@@ -1,13 +1,18 @@
 {
   "name": "Oha-Yachiyo",
   "channel": "experimental",
-  "branch": "develop",
-  "version": "0.4.0-dev",
+  "branch": "oha-develop",
+  "source_branch": "phase-5/oha-yachiyo-runtime",
+  "version": "0.4.0",
   "base_version": "0.4.0",
-  "commit": "dev",
-  "short_commit": "dev",
+  "commit": "5f908f521a0c87be5f6bee168c6e525c07b63e59",
+  "short_commit": "5f908f5",
   "build_number": 0,
-  "repository": "kuguya-AI-app-develop/oha-yachiyo",
-  "latest_json_url": "https://github.com/kuguya-AI-app-develop/oha-yachiyo/releases/download/develop-latest/Oha-Yachiyo-develop-latest.json",
-  "built_at": "dev"
+  "run_number": 0,
+  "repository": "local/oha-yachiyo",
+  "latest_json_url": "https://github.com/local/oha-yachiyo/releases/download/oha-develop-latest/Oha-Yachiyo-oha-develop-latest.json",
+  "built_at": "2026-07-21T01:47:30Z",
+  "dirty": true,
+  "source_tree_fingerprint": "sha256:38a870db2355dafc1cbaa8af13ff15deb2176631d79f6768082813367d56e3fa",
+  "release_publishable": false
 }

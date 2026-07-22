@@ -15,6 +15,15 @@ const ROUTE_SAMPLES = [
     ],
   },
   {
+    id: 'consumer_settings',
+    route: '#/settings',
+    selectors: [
+      '[data-testid="assistant-persona-advanced"]:not([open])',
+      '[data-testid="user-profile-advanced"]:not([open])',
+      '[data-testid="ai-service-advanced"]:not([open])',
+    ],
+  },
+  {
     id: 'agent_studio_agents',
     route: '#/agents/agents',
     selectors: [

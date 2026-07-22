@@ -6,6 +6,71 @@ from collections.abc import Iterable, Mapping
 from typing import Any
 
 
+_SEMANTIC_ELEMENT_CLICK_TOOLS = frozenset(
+    {
+        "app.open_and_click_ui_element",
+        "app.focus_and_click_ui_element",
+        "desktop.click_ui_element",
+    }
+)
+
+
+def discovered_app_click_followup_target_from_planned_requests(
+    app_query: str,
+    planned_requests: Iterable[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Project one unambiguous semantic click target from an existing plan."""
+
+    query = str(app_query or "").strip()
+    if not query:
+        return {}
+    candidates: dict[tuple[str, str, int, int], dict[str, Any]] = {}
+    for request in planned_requests:
+        if not isinstance(request, Mapping):
+            continue
+        tool_name = str(request.get("tool_name") or request.get("tool") or "").strip()
+        if tool_name not in _SEMANTIC_ELEMENT_CLICK_TOOLS:
+            continue
+        raw_input = request.get("input")
+        if not isinstance(raw_input, Mapping):
+            raw_input = request.get("input_preview")
+        payload = raw_input if isinstance(raw_input, Mapping) else {}
+        target = str(payload.get("target") or "").strip()
+        if not target:
+            continue
+        role_filter = str(payload.get("role_filter") or "").strip()
+        limit = _bounded_positive_int(payload.get("limit"), default=80, maximum=200)
+        click_count = _bounded_positive_int(
+            payload.get("click_count"),
+            default=1,
+            maximum=3,
+        )
+        signature = (target, role_filter, limit, click_count)
+        candidates[signature] = {
+            "kind": "desktop_discovered_app_action",
+            "app_query": query,
+            "app_name_source": "desktop.list_apps",
+            "target_action": "click",
+            "target": target,
+            "role_filter": role_filter,
+            "limit": limit,
+            "click_count": click_count,
+        }
+    if len(candidates) != 1:
+        return {}
+    return next(iter(candidates.values()))
+
+
+def _bounded_positive_int(value: Any, *, default: int, maximum: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    if parsed <= 0:
+        return default
+    return min(parsed, maximum)
+
+
 def planner_discovered_app_followup_can_direct_execute(
     selection_payload: Mapping[str, Any],
     planned_requests: list[dict[str, Any]],
@@ -54,6 +119,8 @@ def discovered_app_followup_target_can_direct_execute(
     target_action = str(target.get("target_action") or "").strip()
     if target_action == "safe_shortcut":
         can_prepare = _can_prepare_safe_shortcut(target, allowed)
+    elif target_action == "click":
+        can_prepare = _can_prepare_click(target, allowed)
     elif target_action == "app_search":
         if not _app_search_query(target):
             return False
@@ -98,6 +165,18 @@ def _can_prepare_safe_shortcut(target: Mapping[str, Any], allowed: set[str]) -> 
         or (
             _can_prepare_app(target, allowed)
             and "desktop.safe_shortcut" in allowed
+        )
+    )
+
+
+def _can_prepare_click(target: Mapping[str, Any], allowed: set[str]) -> bool:
+    if not str(target.get("target") or "").strip():
+        return False
+    return (
+        "app.open_and_click_ui_element" in allowed
+        or (
+            bool(allowed & {"app.open", "desktop.open_app"})
+            and "desktop.click_ui_element" in allowed
         )
     )
 

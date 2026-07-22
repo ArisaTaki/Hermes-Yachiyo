@@ -50,5 +50,13 @@ class WorkflowChildPendingApprovalProjection:
             pending_approval=next_pending,
         )
 
-    def project(self, update_run: Any) -> dict[str, Any]:
-        return update_run(self.child_run_id, pending_approval=self.pending_approval)
+    def project(self, update_run: Any) -> dict[str, Any] | None:
+        expected_approval_id = str(self.pending_approval.get("approval_id") or "").strip()
+        if not expected_approval_id:
+            return None
+        return update_run(
+            self.child_run_id,
+            pending_approval=self.pending_approval,
+            expected_status="approval_required",
+            expected_approval_id=expected_approval_id,
+        )

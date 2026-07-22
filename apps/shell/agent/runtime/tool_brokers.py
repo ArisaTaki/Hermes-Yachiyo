@@ -5,8 +5,99 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable
 
+from apps.shell.agent.tools import browser
 from apps.shell.agent.tools.broker import ToolBroker
 from apps.shell.agent.tools.foreground_lock import ForegroundActionLock
+
+
+_BROWSER_TARGET_OWNERSHIP_ERRORS = {
+    "browser_owned_target_invalid",
+    "browser_owned_target_required",
+    "browser_owned_target_unavailable",
+    "browser_owned_target_unverified",
+}
+
+
+def latest_run_owned_browser_target_id(run: dict[str, Any]) -> str:
+    """Return the latest target backed by canonical broker ownership evidence."""
+
+    for event in reversed(run.get("timeline") or []):
+        if not isinstance(event, dict):
+            continue
+        event_kind = str(event.get("event") or event.get("event_type") or "").strip()
+        if event_kind != "agent.tool.call":
+            continue
+        result = event.get("result") if isinstance(event.get("result"), dict) else {}
+        data = result.get("data") if isinstance(result.get("data"), dict) else {}
+        action = str(
+            result.get("action")
+            or event.get("tool")
+            or event.get("action")
+            or ""
+        ).strip()
+        if not action.startswith("browser."):
+            continue
+        error = str(result.get("error") or "").strip()
+        if (
+            result.get("browser_target_ownership_cleared") is True
+            or data.get("target_ownership_cleared") is True
+            or error in _BROWSER_TARGET_OWNERSHIP_ERRORS
+        ):
+            return ""
+        if action == "browser.open_url" and (
+            result.get("ok") is not True
+            or data.get("target_owned_by_run") is not True
+        ):
+            # A new-page attempt starts a new ownership epoch. Failed or
+            # non-owned opens must not resurrect a target from an older epoch.
+            return ""
+        if result.get("ok") is not True or data.get("target_owned_by_run") is not True:
+            continue
+        target_id = str(data.get("target_id") or "").strip()
+        # Invalid current evidence is itself a tombstone; scanning farther back
+        # could otherwise close a target that the run no longer owns.
+        return target_id if browser.is_valid_target_id(target_id) else ""
+    return ""
+
+
+def close_owned_browser_target_best_effort(broker: Any) -> None:
+    """Release a run-owned browser target without changing terminal outcome."""
+
+    close_target = getattr(broker, "close_owned_browser_target", None)
+    if not callable(close_target):
+        return
+    try:
+        close_target()
+    except Exception:
+        # Target cleanup is important but must not turn a durable completed or
+        # failed run back into an application error.
+        return
+
+
+def close_run_owned_browser_target_best_effort(
+    run: dict[str, Any],
+    *,
+    tool_brokers: Any,
+    workspace_policy: dict[str, Any],
+) -> None:
+    """Restore and close only the exact CDP target owned by one durable Run."""
+
+    target_id = latest_run_owned_browser_target_id(run)
+    run_id = str(run.get("run_id") or "").strip()
+    if not target_id or not run_id:
+        return
+    try:
+        broker = tool_brokers.for_run(
+            run_id=run_id,
+            workspace_policy=workspace_policy,
+        )
+        restore_target = getattr(broker, "restore_owned_browser_target", None)
+        if not callable(restore_target):
+            return
+        restore_target(target_id)
+    except Exception:
+        return
+    close_owned_browser_target_best_effort(broker)
 
 
 class RuntimeToolBrokerFactory:

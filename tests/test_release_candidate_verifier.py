@@ -175,6 +175,93 @@ def _command_index(commands: list[object], predicate) -> int:
     raise AssertionError("expected command was not recorded")
 
 
+FINAL_SIGNOFF_TEST_COMMIT = "abcdef1234567890abcdef1234567890abcdef12"
+
+
+def _clean_source_revision(
+    commit: str = FINAL_SIGNOFF_TEST_COMMIT,
+) -> dict[str, object]:
+    return {
+        "available": True,
+        "commit": commit,
+        "short_commit": commit[:7],
+        "dirty": False,
+    }
+
+
+def _complete_manual_checks_payload(
+    commit: str = FINAL_SIGNOFF_TEST_COMMIT,
+) -> dict[str, object]:
+    return {
+        "source_revision": _clean_source_revision(commit),
+        "checks": [
+            {
+                "id": check["id"],
+                "status": "passed",
+                "evidence": f"{check['id']} passed for final signoff.",
+            }
+            for check in rc.MANUAL_RELEASE_CANDIDATE_CHECK_DETAILS
+        ],
+    }
+
+
+def _stub_final_signoff_source_smokes(monkeypatch) -> None:
+    desktop_evidence = _passed_source_smoke_section(
+        "agent_entrypoint_desktop_execution_smoke",
+        "main_chat_generic_app_open_before_model",
+        "agent_run_generic_app_open_before_model",
+        "main_chat_generic_app_inspect_before_model",
+        "agent_run_generic_app_inspect_before_model",
+        "main_chat_capability_discovered_app_open_before_model",
+        "main_chat_capability_discovered_app_open_path_before_model",
+        "main_chat_daily_desktop_before_model",
+        "agent_run_daily_desktop_overlay_before_model",
+    )["evidence"]
+    data_evidence = _passed_source_smoke_section(
+        "agent_entrypoint_data_analysis_smoke",
+        "main_chat_data_analysis_before_model",
+        "agent_run_data_analysis_before_model",
+        "studio_agent_run_data_analysis_before_model",
+        "workflow_agent_node_data_analysis_before_model",
+    )["evidence"]
+    approval_evidence = _passed_source_smoke_section(
+        "approval_policy_gate_smoke",
+    )["evidence"]
+    monkeypatch.setattr(
+        rc,
+        "verify_agent_entrypoint_desktop_execution_smoke",
+        lambda _root: ([], desktop_evidence),
+    )
+    monkeypatch.setattr(
+        rc,
+        "verify_agent_entrypoint_data_analysis_smoke",
+        lambda _root: ([], data_evidence),
+    )
+    monkeypatch.setattr(
+        rc,
+        "verify_approval_policy_gate_smoke",
+        lambda _root: ([], approval_evidence),
+    )
+
+
+def _write_cleaned_packaged_chat_process_ledger(command: list[str]) -> None:
+    ledger_path = Path(command[command.index("--process-ledger-json") + 1])
+    smoke_root = Path(command[command.index("--smoke-root") + 1])
+    executable = Path(command[command.index("--app-executable") + 1])
+    ledger_path.write_text(
+        json.dumps(
+            {
+                "pid": 42421,
+                "pgid": 42421,
+                "executable": str(executable.resolve()),
+                "smoke_root": str(smoke_root.resolve()),
+                "cleaned": True,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
 def _passed_source_smoke_section(mode: str, *case_ids: str) -> dict[str, object]:
     required_checks_by_case = native_capabilities.SOURCE_SECTION_REQUIRED_CASE_CHECKS.get(
         mode,
@@ -368,6 +455,7 @@ def test_release_candidate_verifier_runs_source_and_artifact_guards(tmp_path, mo
             "paths": (Path("release"),),
             "allow_binary_targets": True,
             "check_packaged_app_bundle": True,
+            "allow_nonpublishable_local_rc": True,
         },
     ]
     output = capsys.readouterr().out
@@ -763,12 +851,13 @@ def test_release_candidate_verifier_writes_report_json(tmp_path, monkeypatch):
         "event_types"
     ] == [
         "agent.started",
-        "agent.tool.call",
         "agent.tool.approval_required",
         "agent.tool.approval_approved",
-        "agent.tool.completed",
         "agent.completed",
     ]
+    assert report["approval_resume_timeline_smoke"]["evidence"]["chat"][
+        "after_timeline"
+    ]["tool_calls"][0]["status"] == "approved"
     assert report["approval_resume_timeline_smoke"]["evidence"]["studio"][
         "approved_timeline"
     ]["tool_calls"][0]["status"] == "completed"
@@ -1437,11 +1526,12 @@ def test_release_candidate_verifier_reports_locked_real_desktop_ui_inspection(
 def test_release_candidate_verifier_reports_electron_native_bridge_smoke_when_requested(
     tmp_path, monkeypatch, capsys
 ):
+    focus_apps: list[str] = []
     monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
-    monkeypatch.setattr(
-        rc,
-        "run_electron_native_bridge_smoke",
-        lambda: {
+
+    def native_bridge_smoke(*, focus_app: str = "") -> dict[str, Any]:
+        focus_apps.append(focus_app)
+        return {
             "ok": True,
             "mode": "electron_native_bridge_smoke",
             "native_runtime_url": "http://127.0.0.1:50123",
@@ -1449,8 +1539,15 @@ def test_release_candidate_verifier_reports_electron_native_bridge_smoke_when_re
                 "native_bridge_started": True,
                 "unauthenticated_rejected": True,
                 "authenticated_status_ok": True,
+                "focus_attempted": True,
+                "focus_verified": True,
             },
-        },
+        }
+
+    monkeypatch.setattr(
+        rc,
+        "run_electron_native_bridge_smoke",
+        native_bridge_smoke,
     )
 
     assert rc.verify_release_candidate(
@@ -1467,6 +1564,7 @@ def test_release_candidate_verifier_reports_electron_native_bridge_smoke_when_re
     assert section["run_requested"] is True
     assert section["findings"] == []
     assert section["evidence"]["mode"] == "electron_native_bridge_smoke"
+    assert focus_apps == ["Music"]
 
 
 def test_release_candidate_verifier_allows_source_only_electron_native_bridge_smoke(
@@ -1477,7 +1575,7 @@ def test_release_candidate_verifier_allows_source_only_electron_native_bridge_sm
     monkeypatch.setattr(
         rc,
         "run_electron_native_bridge_smoke",
-        lambda: {
+        lambda **_kwargs: {
             "ok": True,
             "mode": "electron_native_bridge_smoke",
             "native_runtime_url": "http://127.0.0.1:50123",
@@ -1485,6 +1583,8 @@ def test_release_candidate_verifier_allows_source_only_electron_native_bridge_sm
                 "native_bridge_started": True,
                 "unauthenticated_rejected": True,
                 "authenticated_status_ok": True,
+                "focus_attempted": True,
+                "focus_verified": True,
             },
         },
     )
@@ -1513,6 +1613,36 @@ def test_release_candidate_verifier_allows_source_only_electron_native_bridge_sm
     }
 
 
+def test_electron_native_bridge_verifier_rejects_status_only_smoke_evidence(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        rc,
+        "run_electron_native_bridge_smoke",
+        lambda **_kwargs: {
+            "ok": True,
+            "mode": "electron_native_bridge_smoke",
+            "checks": {
+                "native_bridge_started": True,
+                "authenticated_status_ok": True,
+                "focus_attempted": False,
+                "focus_verified": False,
+            },
+        },
+    )
+
+    findings, evidence = rc.verify_electron_native_bridge_smoke(tmp_path)
+
+    assert evidence["ok"] is True
+    assert findings == [
+        rc.Finding(
+            tmp_path / "scripts/smoke_electron_native_bridge.py",
+            "electron_native_focus_unverified",
+        )
+    ]
+
+
 def test_release_candidate_verifier_fails_when_electron_native_bridge_smoke_fails(
     tmp_path, monkeypatch, capsys
 ):
@@ -1520,7 +1650,7 @@ def test_release_candidate_verifier_fails_when_electron_native_bridge_smoke_fail
     monkeypatch.setattr(
         rc,
         "run_electron_native_bridge_smoke",
-        lambda: {
+        lambda **_kwargs: {
             "ok": False,
             "mode": "electron_native_bridge_smoke",
             "error": "electron_not_installed",
@@ -2409,9 +2539,156 @@ def test_release_candidate_verifier_final_signoff_rejects_dirty_source_revision(
     ]
 
 
+def test_release_candidate_verifier_final_signoff_rejects_source_only(
+    tmp_path, monkeypatch, capsys
+):
+    calls: list[dict[str, object]] = []
+    monkeypatch.setattr(
+        rc,
+        "verify_release_artifacts",
+        lambda **kwargs: calls.append(kwargs) or [],
+    )
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        source_only=True,
+        require_manual_checks_complete=True,
+        report_json=Path("tmp/rc.json"),
+    ) == 1
+
+    assert calls == []
+    output = capsys.readouterr().out
+    assert (
+        "--source-only cannot be combined with --require-manual-checks-complete"
+        in output
+    )
+    report = json.loads((tmp_path / "tmp" / "rc.json").read_text(encoding="utf-8"))
+    assert report["ok"] is False
+    assert report["built_artifact_guards"]["status"] == "failed"
+
+
+def test_release_candidate_verifier_final_signoff_implicitly_requires_artifacts(
+    tmp_path, monkeypatch, capsys
+):
+    _stub_final_signoff_source_smokes(monkeypatch)
+    checks_path = tmp_path / "tmp" / "manual-checks.json"
+    checks_path.parent.mkdir(parents=True)
+    checks_path.write_text(
+        json.dumps(_complete_manual_checks_payload()),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(rc, "_source_revision", lambda _root: _clean_source_revision())
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        manual_checks_json=Path("tmp/manual-checks.json"),
+        require_manual_checks_complete=True,
+        report_json=Path("tmp/rc.json"),
+    ) == 1
+
+    output = capsys.readouterr().out
+    assert "release candidate artifacts not found" in output
+    report = json.loads((tmp_path / "tmp" / "rc.json").read_text(encoding="utf-8"))
+    assert report["ok"] is False
+    assert report["source_revision_final_signoff_findings"] == []
+    assert report["built_artifact_guards"]["status"] == "failed"
+    assert report["built_artifact_guards"]["artifact_paths"] == []
+
+
+def test_release_candidate_verifier_final_signoff_rejects_unavailable_source_revision(
+    tmp_path, monkeypatch, capsys
+):
+    _stub_final_signoff_source_smokes(monkeypatch)
+    (tmp_path / "release").mkdir()
+    checks_path = tmp_path / "tmp" / "manual-checks.json"
+    checks_path.parent.mkdir(parents=True)
+    checks_path.write_text(
+        json.dumps(_complete_manual_checks_payload()),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        rc,
+        "_source_revision",
+        lambda _root: {
+            "available": False,
+            "commit": "",
+            "short_commit": "",
+            "dirty": True,
+            "error": "git source revision unavailable",
+        },
+    )
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        manual_checks_json=Path("tmp/manual-checks.json"),
+        require_manual_checks_complete=True,
+        report_json=Path("tmp/rc.json"),
+    ) == 1
+
+    output = capsys.readouterr().out
+    assert "source revision final signoff guard: failed" in output
+    report = json.loads((tmp_path / "tmp" / "rc.json").read_text(encoding="utf-8"))
+    assert report["ok"] is False
+    assert report["built_artifact_guards"]["status"] == "passed"
+    assert report["source_revision_final_signoff_findings"] == [
+        {
+            "path": str(tmp_path),
+            "message": (
+                "final signoff requires an available clean source revision; "
+                "restore Git revision metadata and rebuild release artifacts "
+                "before final signoff"
+            ),
+        }
+    ]
+
+
+def test_release_candidate_verifier_final_signoff_accepts_clean_source_and_artifacts(
+    tmp_path, monkeypatch
+):
+    _stub_final_signoff_source_smokes(monkeypatch)
+    (tmp_path / "release").mkdir()
+    checks_path = tmp_path / "tmp" / "manual-checks.json"
+    checks_path.parent.mkdir(parents=True)
+    checks_path.write_text(
+        json.dumps(_complete_manual_checks_payload()),
+        encoding="utf-8",
+    )
+    calls: list[dict[str, object]] = []
+    monkeypatch.setattr(rc, "_source_revision", lambda _root: _clean_source_revision())
+    monkeypatch.setattr(
+        rc,
+        "verify_release_artifacts",
+        lambda **kwargs: calls.append(kwargs) or [],
+    )
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        manual_checks_json=Path("tmp/manual-checks.json"),
+        require_manual_checks_complete=True,
+        report_json=Path("tmp/rc.json"),
+    ) == 0
+
+    report = json.loads((tmp_path / "tmp" / "rc.json").read_text(encoding="utf-8"))
+    assert report["ok"] is True
+    assert report["source_revision"] == _clean_source_revision()
+    assert report["source_revision_final_signoff_findings"] == []
+    assert report["built_artifact_guards"]["status"] == "passed"
+    assert calls[1] == {
+        "root": tmp_path,
+        "paths": (Path("release"),),
+        "allow_binary_targets": True,
+        "check_packaged_app_bundle": True,
+        "allow_nonpublishable_local_rc": False,
+        "require_bound_release_candidate": True,
+    }
+
+
 def test_release_candidate_verifier_final_signoff_rejects_stale_manual_evidence_source_revision(
     tmp_path, monkeypatch, capsys
 ):
+    (tmp_path / "release").mkdir()
     current_commit = "2222222222222222222222222222222222222222"
     stale_commit = "1111111111111111111111111111111111111111"
     checks_path = tmp_path / "tmp" / "manual-checks.json"
@@ -2465,7 +2742,6 @@ def test_release_candidate_verifier_final_signoff_rejects_stale_manual_evidence_
 
     assert rc.verify_release_candidate(
         root=tmp_path,
-        source_only=True,
         manual_checks_json=Path("tmp/manual-checks.json"),
         require_manual_checks_complete=True,
         report_json=Path("tmp/rc.json"),
@@ -2507,6 +2783,7 @@ def test_release_candidate_verifier_final_signoff_rejects_stale_manual_evidence_
 def test_release_candidate_verifier_final_signoff_requires_manual_evidence_source_revision(
     tmp_path, monkeypatch, capsys
 ):
+    (tmp_path / "release").mkdir()
     current_commit = "2222222222222222222222222222222222222222"
     checks_path = tmp_path / "tmp" / "manual-checks.json"
     checks_path.parent.mkdir()
@@ -2543,7 +2820,6 @@ def test_release_candidate_verifier_final_signoff_requires_manual_evidence_sourc
 
     assert rc.verify_release_candidate(
         root=tmp_path,
-        source_only=True,
         manual_checks_json=Path("tmp/manual-checks.json"),
         require_manual_checks_complete=True,
         report_json=Path("tmp/rc.json"),
@@ -2576,6 +2852,9 @@ def test_release_candidate_verifier_final_signoff_requires_manual_evidence_sourc
 def test_release_candidate_verifier_accepts_previous_rc_report_manual_statuses(
     tmp_path, monkeypatch, capsys
 ):
+    _stub_final_signoff_source_smokes(monkeypatch)
+    (tmp_path / "release").mkdir()
+    prior_commit = "fedcba9876543210fedcba9876543210fedcba98"
     prior_report_path = tmp_path / "tmp" / "prior-rc-report.json"
     prior_report_path.parent.mkdir()
     prior_statuses = []
@@ -2597,7 +2876,7 @@ def test_release_candidate_verifier_accepts_previous_rc_report_manual_statuses(
                 "ok": True,
                 "source_revision": {
                     "available": True,
-                    "commit": "fedcba9876543210fedcba9876543210fedcba98",
+                    "commit": prior_commit,
                     "short_commit": "fedcba9",
                     "dirty": False,
                 },
@@ -2610,6 +2889,11 @@ def test_release_candidate_verifier_accepts_previous_rc_report_manual_statuses(
             }
         ),
         encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        rc,
+        "_source_revision",
+        lambda _root: _clean_source_revision(prior_commit),
     )
     monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
 
@@ -2633,7 +2917,7 @@ def test_release_candidate_verifier_accepts_previous_rc_report_manual_statuses(
         {
             "source": "tmp/prior-rc-report.json",
             "available": True,
-            "commit": "fedcba9876543210fedcba9876543210fedcba98",
+            "commit": prior_commit,
             "short_commit": "fedcba9",
             "dirty": False,
         }
@@ -2817,6 +3101,8 @@ def test_release_candidate_verifier_merges_multiple_manual_check_json_sources(
     tmp_path,
     monkeypatch,
 ):
+    _stub_final_signoff_source_smokes(monkeypatch)
+    (tmp_path / "release").mkdir()
     auto_statuses = rc._manual_release_candidate_check_report()
     for check in auto_statuses:
         if check["id"] == "packaged_bridge_isolation":
@@ -2828,6 +3114,7 @@ def test_release_candidate_verifier_merges_multiple_manual_check_json_sources(
     auto_report_path.write_text(
         json.dumps(
             {
+                "source_revision": _clean_source_revision(),
                 "manual_release_candidate_check_statuses": auto_statuses,
                 "electron_ui_smoke": {
                     "status": "passed",
@@ -2884,6 +3171,7 @@ def test_release_candidate_verifier_merges_multiple_manual_check_json_sources(
         ),
         encoding="utf-8",
     )
+    monkeypatch.setattr(rc, "_source_revision", lambda _root: _clean_source_revision())
     monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
 
     assert (
@@ -3022,14 +3310,37 @@ def test_release_candidate_verifier_requires_complete_manual_checks_for_signoff(
     assert report["manual_release_candidate_checks_required"] is True
 
 
+def test_release_candidate_verifier_final_signoff_uses_publishable_artifact_mode(
+    tmp_path,
+    monkeypatch,
+):
+    (tmp_path / "release").mkdir()
+    calls: list[dict[str, object]] = []
+
+    def fake_verify_release_artifacts(**kwargs):
+        calls.append(kwargs)
+        return []
+
+    monkeypatch.setattr(rc, "verify_release_artifacts", fake_verify_release_artifacts)
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        require_manual_checks_complete=True,
+    ) == 1
+    assert calls[1]["allow_nonpublishable_local_rc"] is False
+
+
 def test_release_candidate_verifier_accepts_complete_manual_checks_for_signoff(
     tmp_path, monkeypatch, capsys
 ):
+    _stub_final_signoff_source_smokes(monkeypatch)
+    (tmp_path / "release").mkdir()
     evidence_path = tmp_path / "tmp" / "manual-checks.json"
     evidence_path.parent.mkdir()
     evidence_path.write_text(
         json.dumps(
             {
+                "source_revision": _clean_source_revision(),
                 "checks": [
                     {
                         "id": check["id"],
@@ -3042,6 +3353,7 @@ def test_release_candidate_verifier_accepts_complete_manual_checks_for_signoff(
         ),
         encoding="utf-8",
     )
+    monkeypatch.setattr(rc, "_source_revision", lambda _root: _clean_source_revision())
     monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
 
     assert rc.verify_release_candidate(
@@ -3067,6 +3379,14 @@ def test_release_candidate_verifier_accepts_complete_manual_markdown_for_signoff
     monkeypatch,
     capsys,
 ):
+    _stub_final_signoff_source_smokes(monkeypatch)
+    (tmp_path / "release").mkdir()
+    markdown_commit = "1111111111111111111111111111111111111111"
+    monkeypatch.setattr(
+        rc,
+        "_source_revision",
+        lambda _root: _clean_source_revision(markdown_commit),
+    )
     monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
     markdown_path = tmp_path / "tmp" / "manual-checks.md"
     markdown_path.parent.mkdir(parents=True)
@@ -3107,7 +3427,6 @@ def test_release_candidate_verifier_accepts_complete_manual_markdown_for_signoff
     assert (
         rc.verify_release_candidate(
             root=tmp_path,
-            source_only=True,
             manual_checks_markdown=Path("tmp/manual-checks.md"),
             require_manual_checks_complete=True,
             report_json=Path("tmp/rc.json"),
@@ -3143,6 +3462,7 @@ def test_release_candidate_verifier_markdown_checked_items_default_to_passed(
     tmp_path,
     monkeypatch,
 ):
+    _stub_final_signoff_source_smokes(monkeypatch)
     monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
     markdown_path = tmp_path / "tmp" / "manual-checks.md"
     markdown_path.parent.mkdir(parents=True)
@@ -3180,7 +3500,6 @@ def test_release_candidate_verifier_markdown_checked_items_default_to_passed(
             root=tmp_path,
             source_only=True,
             manual_checks_markdown=Path("tmp/manual-checks.md"),
-            require_manual_checks_complete=True,
             report_json=Path("tmp/rc.json"),
         )
         == 0
@@ -4420,6 +4739,7 @@ def test_release_candidate_verifier_report_can_mark_provider_not_applicable_with
     tmp_path,
     monkeypatch,
 ):
+    _stub_final_signoff_source_smokes(monkeypatch)
     for env_name in rc.PROVIDER_SMOKE_ENV_VARS:
         monkeypatch.delenv(env_name, raising=False)
     monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
@@ -4439,7 +4759,6 @@ def test_release_candidate_verifier_report_can_mark_provider_not_applicable_with
             root=tmp_path,
             source_only=True,
             manual_checks_json=Path("tmp/manual-checks.json"),
-            require_manual_checks_complete=True,
             mark_provider_smoke_not_applicable_if_missing=True,
             report_json=Path("tmp/rc.json"),
         )
@@ -4504,6 +4823,7 @@ def test_release_candidate_verifier_checks_mounted_dmg_app(tmp_path, monkeypatch
             "paths": (Path("release"),),
             "allow_binary_targets": True,
             "check_packaged_app_bundle": True,
+            "allow_nonpublishable_local_rc": True,
         },
         {
             "root": tmp_path,
@@ -5557,6 +5877,7 @@ def test_release_candidate_verifier_runs_dmg_chat_native_file_smoke(
             executable.write_text("#!/bin/sh\n", encoding="utf-8")
             executable.chmod(0o755)
         elif command[:2] == ["node", str(rc.DMG_CHAT_NATIVE_FILE_SMOKE_SCRIPT)]:
+            _write_cleaned_packaged_chat_process_ledger(command)
             report_path = Path(command[command.index("--report-json") + 1])
             report_path.write_text(
                 json.dumps(
@@ -5569,6 +5890,9 @@ def test_release_candidate_verifier_runs_dmg_chat_native_file_smoke(
                         "task_id": "task-packaged-chat-native-file-smoke",
                         "image_viewer_verified": True,
                         "run_detail_verified": True,
+                        "chat_technical_action_hidden": True,
+                        "internal_execution_hidden": True,
+                        "run_detail_navigation_source": "direct_agent_studio_route",
                         "desktop_picker_ipc_verified": True,
                         "app_build_metadata": {
                             "commit": source_commit,
@@ -5640,6 +5964,9 @@ def test_release_candidate_verifier_runs_dmg_chat_native_file_smoke(
                 "task_id": "task-packaged-chat-native-file-smoke",
                 "image_viewer_verified": True,
                 "run_detail_verified": True,
+                "chat_technical_action_hidden": True,
+                "internal_execution_hidden": True,
+                "run_detail_navigation_source": "direct_agent_studio_route",
                 "desktop_picker_ipc_verified": True,
                 "app_build_metadata": {
                     "commit": source_commit,
@@ -5663,10 +5990,290 @@ def test_release_candidate_verifier_runs_dmg_chat_native_file_smoke(
     assert "main_chat_run_packaged_native_file_smoke" in manual_statuses[
         "chat_native_file_upload"
     ]["evidence"]
+    assert "confirmed Chat hid the internal activity" in manual_statuses[
+        "chat_native_file_upload"
+    ]["evidence"]
+    assert "replay directly in Agent Studio" in manual_statuses[
+        "chat_native_file_upload"
+    ]["evidence"]
     assert report["manual_release_candidate_check_summary"]["remaining_count"] == 6
     assert report["manual_release_candidate_check_summary"]["automated_evidence_check_ids"] == [
         "chat_native_file_upload",
     ]
+
+
+@pytest.mark.parametrize(
+    ("chat_action_hidden", "internal_execution_hidden", "expected_message"),
+    [
+        (
+            False,
+            True,
+            "release candidate packaged Chat native file smoke did not prove the "
+            "technical run action stays hidden in Chat",
+        ),
+        (
+            True,
+            False,
+            "release candidate packaged Chat native file smoke did not prove internal "
+            "activity, tool, and recovery details stay hidden in Chat",
+        ),
+    ],
+)
+def test_dmg_chat_native_file_smoke_requires_hidden_execution_attestation(
+    tmp_path,
+    monkeypatch,
+    chat_action_hidden: bool,
+    internal_execution_hidden: bool,
+    expected_message: str,
+):
+    dmg_path = Path("release/Oha-Yachiyo-0.4.0-arm64.dmg")
+    (tmp_path / dmg_path).parent.mkdir(parents=True)
+    (tmp_path / dmg_path).write_bytes(b"fake dmg")
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / rc.DMG_CHAT_NATIVE_FILE_SMOKE_SCRIPT).write_text(
+        "#!/usr/bin/env node\n",
+        encoding="utf-8",
+    )
+    commands: list[list[str]] = []
+
+    def fake_run(command, **kwargs):
+        commands.append(command)
+        if command[:2] == ["hdiutil", "attach"]:
+            mount_dir = Path(command[command.index("-mountpoint") + 1])
+            executable = (
+                mount_dir / "Oha-Yachiyo.app" / "Contents" / "MacOS" / "Oha-Yachiyo"
+            )
+            executable.parent.mkdir(parents=True)
+            executable.write_text("#!/bin/sh\n", encoding="utf-8")
+            executable.chmod(0o755)
+        elif command[:2] == ["node", str(rc.DMG_CHAT_NATIVE_FILE_SMOKE_SCRIPT)]:
+            _write_cleaned_packaged_chat_process_ledger(command)
+            report_path = Path(command[command.index("--report-json") + 1])
+            report_path.write_text(
+                json.dumps(
+                    {
+                        "ok": True,
+                        "run_detail_verified": True,
+                        "run_detail_navigation_source": "direct_agent_studio_route",
+                        "chat_technical_action_hidden": chat_action_hidden,
+                        "internal_execution_hidden": internal_execution_hidden,
+                    }
+                ),
+                encoding="utf-8",
+            )
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(rc.sys, "platform", "darwin")
+    monkeypatch.setattr(rc.subprocess, "run", fake_run)
+
+    findings, uploads = rc.verify_dmg_chat_native_file_upload_smoke(
+        tmp_path,
+        (dmg_path,),
+    )
+
+    assert uploads == []
+    assert findings == [
+        rc.Finding(
+            dmg_path,
+            expected_message,
+        )
+    ]
+    assert any(command[:2] == ["hdiutil", "detach"] for command in commands)
+
+
+def test_dmg_chat_native_file_smoke_parent_timeout_cleans_ledger_process_group(
+    tmp_path,
+    monkeypatch,
+):
+    dmg_path = Path("release/Oha-Yachiyo-0.4.0-arm64.dmg")
+    (tmp_path / dmg_path).parent.mkdir(parents=True)
+    (tmp_path / dmg_path).write_bytes(b"fake dmg")
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / rc.DMG_CHAT_NATIVE_FILE_SMOKE_SCRIPT).write_text(
+        "#!/usr/bin/env node\n",
+        encoding="utf-8",
+    )
+    commands: list[list[str]] = []
+    process_group_id = 42420
+
+    def fake_run(command, **kwargs):
+        commands.append(command)
+        if command[:2] == ["hdiutil", "attach"]:
+            mount_dir = Path(command[command.index("-mountpoint") + 1])
+            executable = (
+                mount_dir / "Oha-Yachiyo.app" / "Contents" / "MacOS" / "Oha-Yachiyo"
+            )
+            executable.parent.mkdir(parents=True)
+            executable.write_text("#!/bin/sh\n", encoding="utf-8")
+            executable.chmod(0o755)
+        elif command[:2] == ["node", str(rc.DMG_CHAT_NATIVE_FILE_SMOKE_SCRIPT)]:
+            assert kwargs["timeout"] == pytest.approx(
+                0.1 + rc.DMG_CHAT_NATIVE_FILE_SMOKE_CLEANUP_GRACE_SECONDS
+            )
+            ledger_path = Path(command[command.index("--process-ledger-json") + 1])
+            smoke_root = Path(command[command.index("--smoke-root") + 1])
+            executable = Path(command[command.index("--app-executable") + 1])
+            ledger_path.write_text(
+                json.dumps(
+                    {
+                        "pid": process_group_id,
+                        "pgid": process_group_id,
+                        "executable": str(executable.resolve()),
+                        "smoke_root": str(smoke_root.resolve()),
+                        "cleaned": False,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            raise rc.subprocess.TimeoutExpired(
+                command,
+                kwargs["timeout"],
+                output="node timed out",
+                stderr="",
+            )
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    signals: list[tuple[int, int]] = []
+    wait_results = iter([False, True])
+    monkeypatch.setattr(rc.sys, "platform", "darwin")
+    monkeypatch.setattr(rc.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        rc,
+        "_wait_for_process_group_exit",
+        lambda _pgid, *, timeout_seconds: next(wait_results),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        rc.os,
+        "killpg",
+        lambda pgid, sig: signals.append((pgid, sig)),
+    )
+
+    findings, uploads = rc.verify_dmg_chat_native_file_upload_smoke(
+        tmp_path,
+        (dmg_path,),
+        timeout_seconds=0.1,
+    )
+
+    assert uploads == []
+    assert len(findings) == 1
+    assert "timed out after 0s" in findings[0].message
+    assert signals == [
+        (process_group_id, rc.signal.SIGTERM),
+        (process_group_id, rc.signal.SIGKILL),
+    ]
+    node_command = next(
+        command
+        for command in commands
+        if command[:2] == ["node", str(rc.DMG_CHAT_NATIVE_FILE_SMOKE_SCRIPT)]
+    )
+    assert "--process-ledger-json" in node_command
+    assert "--smoke-root" in node_command
+
+
+def test_packaged_chat_timeout_cleanup_rejects_mismatched_ledger_without_signal(
+    tmp_path,
+    monkeypatch,
+):
+    expected_executable = tmp_path / "Oha-Yachiyo.app" / "Oha-Yachiyo"
+    expected_smoke_root = tmp_path / "expected-smoke-root"
+    ledger_path = tmp_path / "process-ledger.json"
+    ledger_path.write_text(
+        json.dumps(
+            {
+                "pid": 42422,
+                "pgid": 42422,
+                "executable": str((tmp_path / "different-app").resolve()),
+                "smoke_root": str(expected_smoke_root.resolve()),
+                "cleaned": False,
+            }
+        ),
+        encoding="utf-8",
+    )
+    signals: list[tuple[int, int]] = []
+    monkeypatch.setattr(
+        rc.os,
+        "killpg",
+        lambda pgid, sig: signals.append((pgid, sig)),
+    )
+
+    cleaned, detail = rc._cleanup_packaged_chat_process_from_ledger(
+        ledger_path,
+        expected_executable=expected_executable,
+        expected_smoke_root=expected_smoke_root,
+    )
+
+    assert cleaned is False
+    assert detail == "process ledger executable does not match this packaged Chat smoke"
+    assert signals == []
+
+
+def test_dmg_chat_native_file_smoke_nonzero_exit_cleans_unclean_ledger_group(
+    tmp_path,
+    monkeypatch,
+):
+    dmg_path = Path("release/Oha-Yachiyo-0.4.0-arm64.dmg")
+    (tmp_path / dmg_path).parent.mkdir(parents=True)
+    (tmp_path / dmg_path).write_bytes(b"fake dmg")
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / rc.DMG_CHAT_NATIVE_FILE_SMOKE_SCRIPT).write_text(
+        "#!/usr/bin/env node\n",
+        encoding="utf-8",
+    )
+    process_group_id = 42423
+
+    def fake_run(command, **_kwargs):
+        if command[:2] == ["hdiutil", "attach"]:
+            mount_dir = Path(command[command.index("-mountpoint") + 1])
+            executable = (
+                mount_dir / "Oha-Yachiyo.app" / "Contents" / "MacOS" / "Oha-Yachiyo"
+            )
+            executable.parent.mkdir(parents=True)
+            executable.write_text("#!/bin/sh\n", encoding="utf-8")
+            executable.chmod(0o755)
+        elif command[:2] == ["node", str(rc.DMG_CHAT_NATIVE_FILE_SMOKE_SCRIPT)]:
+            ledger_path = Path(command[command.index("--process-ledger-json") + 1])
+            smoke_root = Path(command[command.index("--smoke-root") + 1])
+            executable = Path(command[command.index("--app-executable") + 1])
+            ledger_path.write_text(
+                json.dumps(
+                    {
+                        "pid": process_group_id,
+                        "pgid": process_group_id,
+                        "executable": str(executable.resolve()),
+                        "smoke_root": str(smoke_root.resolve()),
+                        "cleaned": False,
+                    }
+                ),
+                encoding="utf-8",
+            )
+            return SimpleNamespace(returncode=7, stdout="", stderr="smoke failed")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    signals: list[tuple[int, int]] = []
+    monkeypatch.setattr(rc.sys, "platform", "darwin")
+    monkeypatch.setattr(rc.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        rc,
+        "_wait_for_process_group_exit",
+        lambda _pgid, *, timeout_seconds: True,
+    )
+    monkeypatch.setattr(
+        rc.os,
+        "killpg",
+        lambda pgid, sig: signals.append((pgid, sig)),
+    )
+
+    findings, uploads = rc.verify_dmg_chat_native_file_upload_smoke(
+        tmp_path,
+        (dmg_path,),
+    )
+
+    assert uploads == []
+    assert len(findings) == 1
+    assert "failed with exit code 7" in findings[0].message
+    assert "cleanup failed" not in findings[0].message
+    assert signals == [(process_group_id, rc.signal.SIGTERM)]
 
 
 def test_release_candidate_verifier_rejects_stale_dmg_chat_native_file_app_metadata(
@@ -5699,6 +6306,9 @@ def test_release_candidate_verifier_rejects_stale_dmg_chat_native_file_app_metad
                 "task_id": "task-packaged-chat-native-file-smoke",
                 "image_viewer_verified": True,
                 "run_detail_verified": True,
+                "chat_technical_action_hidden": True,
+                "internal_execution_hidden": True,
+                "run_detail_navigation_source": "direct_agent_studio_route",
                 "desktop_picker_ipc_verified": True,
                 "app_build_metadata": {
                     "commit": stale_commit,
@@ -5783,6 +6393,127 @@ def test_release_candidate_dmg_app_startup_smoke_requires_executable(
         )
     ]
     assert bridge_statuses == []
+
+
+@pytest.mark.parametrize("smoke_kind", ("startup", "screen", "ui_sampling"))
+def test_dmg_electron_smokes_isolate_single_instance_and_run_embedded_backend(
+    smoke_kind,
+    tmp_path,
+    monkeypatch,
+):
+    dmg_paths = (
+        Path("release/Oha-Yachiyo-a.dmg"),
+        Path("release/Oha-Yachiyo-b.dmg"),
+    )
+    for dmg_path in dmg_paths:
+        absolute_dmg = tmp_path / dmg_path
+        absolute_dmg.parent.mkdir(parents=True, exist_ok=True)
+        absolute_dmg.write_bytes(b"fake dmg")
+    if smoke_kind == "ui_sampling":
+        ui_script = tmp_path / rc.DMG_UI_SAMPLING_SMOKE_SCRIPT
+        ui_script.parent.mkdir(parents=True, exist_ok=True)
+        ui_script.write_text("// fixture\n", encoding="utf-8")
+
+    launched_environments: list[dict[str, object]] = []
+    terminated_home_exists: list[bool] = []
+
+    def fake_run(command, **_kwargs):
+        if command[:2] == ["hdiutil", "attach"]:
+            mount_dir = Path(command[command.index("-mountpoint") + 1])
+            executable = (
+                mount_dir
+                / rc.PACKAGED_APP_NAME
+                / "Contents"
+                / "MacOS"
+                / rc.PACKAGED_APP_EXECUTABLE_NAME
+            )
+            executable.parent.mkdir(parents=True)
+            executable.write_bytes(b"fixture executable")
+            executable.chmod(0o755)
+        elif command and command[0] == "node":
+            report_path = Path(command[command.index("--report-json") + 1])
+            report_path.write_text(
+                json.dumps({"ok": True, "sample_count": 0, "samples": []}),
+                encoding="utf-8",
+            )
+        elif command[:2] != ["hdiutil", "detach"]:
+            raise AssertionError(f"unexpected command: {command!r}")
+        return SimpleNamespace(returncode=0, stdout="", stderr="")
+
+    def fake_popen(command, **kwargs):
+        env = kwargs["env"]
+        home_path = Path(env["HOME"])
+        smoke_root = Path(env[rc.DMG_ELECTRON_SMOKE_ROOT_ENV])
+        launched_environments.append(
+            {
+                "command": command,
+                "home": home_path,
+                "smoke_root": smoke_root,
+                "smoke_root_exists": smoke_root.is_dir(),
+                "smoke_mode": env.get(rc.DMG_ELECTRON_SMOKE_MODE_ENV),
+                "bridge_url": env.get("OHA_YACHIYO_BRIDGE_URL"),
+                "oha_home": env.get("OHA_YACHIYO_HOME"),
+                "skip_backend": env.get("OHA_YACHIYO_SKIP_BACKEND"),
+            }
+        )
+        return SimpleNamespace(pid=8000 + len(launched_environments))
+
+    monkeypatch.setenv("OHA_YACHIYO_SKIP_BACKEND", "1")
+    monkeypatch.setattr(rc.sys, "platform", "darwin")
+    monkeypatch.setattr(rc.subprocess, "run", fake_run)
+    monkeypatch.setattr(rc, "_MANAGED_SUBPROCESS_POPEN", fake_popen)
+
+    def fake_terminate(process):
+        index = int(process.pid) - 8001
+        terminated_home_exists.append(
+            Path(launched_environments[index]["home"]).is_dir()
+        )
+
+    monkeypatch.setattr(rc, "_terminate_process", fake_terminate)
+    monkeypatch.setattr(
+        rc,
+        "_wait_for_dmg_app_status",
+        lambda _process, **_kwargs: (
+            None,
+            {"service": "oha-yachiyo", "build_metadata": {}},
+        ),
+    )
+    monkeypatch.setattr(
+        rc,
+        "_read_screen_probe_metadata",
+        lambda _bridge_url: {"width": 1, "height": 1, "format": "png"},
+    )
+
+    if smoke_kind == "startup":
+        result = rc.verify_dmg_app_startup(tmp_path, dmg_paths)
+    elif smoke_kind == "screen":
+        result = rc.verify_dmg_screen_recording_probe(tmp_path, dmg_paths)
+    else:
+        result = rc.verify_dmg_ui_sampling_smoke(tmp_path, dmg_paths)
+
+    assert result[0] == []
+    assert len(launched_environments) == len(dmg_paths)
+    assert terminated_home_exists == [True] * len(dmg_paths)
+    smoke_roots = {
+        str(item["smoke_root"])
+        for item in launched_environments
+    }
+    assert len(smoke_roots) == len(dmg_paths)
+    system_temp = Path(rc.tempfile.gettempdir()).resolve()
+    for item in launched_environments:
+        home_path = item["home"]
+        smoke_root = item["smoke_root"]
+        assert isinstance(home_path, Path)
+        assert isinstance(smoke_root, Path)
+        smoke_root.resolve().relative_to(system_temp)
+        assert smoke_root.parent == home_path
+        assert item["smoke_root_exists"] is True
+        assert item["smoke_mode"] == "1"
+        assert item["bridge_url"].startswith("http://127.0.0.1:")
+        assert item["oha_home"] == str(home_path / ".oha-yachiyo")
+        assert item["skip_backend"] is None
+        assert Path(item["command"][0]).name == rc.PACKAGED_APP_EXECUTABLE_NAME
+        assert not smoke_root.exists()
 
 
 def test_release_candidate_verifier_runs_provider_smoke(tmp_path, monkeypatch, capsys):

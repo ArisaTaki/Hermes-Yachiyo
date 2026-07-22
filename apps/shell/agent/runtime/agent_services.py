@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -40,9 +41,12 @@ def build_runtime_agent_services(
     timeline_factory: Callable[..., dict[str, Any]],
     memory_context_limit: int,
     runtime_task_model_events: Any,
+    get_run: Callable[[str], dict[str, Any]],
     update_run: Callable[..., dict[str, Any]],
+    project_agent_run_group_if_root: Callable[[dict[str, Any]], Any] | None = None,
     model_output_metadata: Callable[[Any], dict[str, Any]],
     redact_secrets: Callable[[Any], str],
+    transaction_scope: Callable[[], AbstractContextManager[Any]] | None = None,
     tool_broker_factory: Callable[..., Any] | None = None,
     tool_brokers: Any | None = None,
     agent_desk_context: Callable[[dict[str, Any]], str] | None = None,
@@ -81,8 +85,11 @@ def build_runtime_agent_services(
             runtime_task_model_events=runtime_task_model_events,
             runtime_agent_timeline=runtime_agent_timeline,
             runtime_agent_run_events=runtime_agent_run_events,
+            get_run=get_run,
             update_run=update_run,
+            project_agent_run_group_if_root=project_agent_run_group_if_root,
             model_output_metadata=model_output_metadata,
             redact_secrets=redact_secrets,
+            transaction_scope=transaction_scope,
         ),
     )

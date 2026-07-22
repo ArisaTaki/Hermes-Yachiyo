@@ -46,6 +46,19 @@ class AppRuntime:
         self._task_runner_loop: asyncio.AbstractEventLoop | None = None
         self._task_runner_loop_ready = threading.Event()
         self._last_ready_command_probe_at = 0.0
+        self._lifecycle_lock = threading.RLock()
+        self._startup_reconciliation_lock = threading.RLock()
+        self._startup_reconciliation_timer: threading.Timer | None = None
+        self._startup_reconciliation_generation = 0
+        self._startup_reconciliation_timer_factory = threading.Timer
+        self._startup_reconciliation_cutoff = ""
+        self._runtime_lease_watchdog_interval_seconds = 5.0
+        self._runtime_instance_lock: Any | None = None
+        self._runtime_instance_service: Any | None = None
+        self._pending_activity_terminal_statuses: dict[str, str] = {}
+        self._pending_activity_orphan_task_ids: set[str] = set()
+        self._pending_activity_recovery_cutoff = ""
+        self._startup_reconciliation_diagnostic: dict[str, Any] = {}
 
     @property
     def state(self) -> AppState:
@@ -78,6 +91,12 @@ class AppRuntime:
         """任务调度器（启动后才有）"""
         return self._task_runner
 
+    @property
+    def startup_reconciliation_diagnostic(self) -> dict[str, Any]:
+        """Return the bounded fail-closed startup diagnostic, if any."""
+        diagnostic = getattr(self, "_startup_reconciliation_diagnostic", {})
+        return dict(diagnostic) if isinstance(diagnostic, dict) else {}
+
     def get_agent_runtime_service(self) -> Any:
         service = getattr(self, "agent_runtime_service", None)
         if service is not None:
@@ -88,29 +107,428 @@ class AppRuntime:
 
     def start(self) -> None:
         """启动运行时"""
-        if self._running:
+        with self._runtime_lifecycle_state_lock():
+            if self._running:
+                return
+
+            from apps.shell.agent.runtime.clock import utc_now_iso
+
+            service = self.get_agent_runtime_service()
+            if not self._acquire_runtime_instance_lock(service):
+                raise RuntimeError("runtime_instance_already_active")
+            try:
+                self._startup_reconciliation_cutoff = utc_now_iso()
+                logger.info("正在启动 App Runtime...")
+                self._start_time = time.time()
+                self._running = True
+
+                self._reconcile_runs_after_restart()
+
+                self._start_task_runner()
+            except Exception:
+                if self._running:
+                    self._mark_stopping_and_cancel_startup_reconciliation()
+                try:
+                    self._stop_task_runner()
+                except Exception as cleanup_exc:
+                    logger.warning(
+                        "TaskRunner 启动失败后清理异常: %s",
+                        cleanup_exc,
+                    )
+                finally:
+                    self._release_runtime_instance_lock()
+                raise
+
+            logger.info("App Runtime 已启动 (uptime=%.2fs)", self.uptime)
+
+    def _reconcile_activity_after_restart(
+        self,
+        cutoff: str,
+        service: Any,
+        interrupted_task_ids: list[str],
+    ) -> None:
+        projection_reader = getattr(service, "get_task_run_projections", None)
+        if not callable(projection_reader):
             return
+        try:
+            projections = projection_reader(interrupted_task_ids)
+            if not isinstance(projections, dict):
+                return
+            terminal_status_by_task = {
+                str(task_id): str(projection.get("status") or "")
+                for task_id, projection in projections.items()
+                if isinstance(projection, dict)
+                and str(projection.get("status") or "")
+                in {"completed", "success", "failed", "error", "cancelled", "canceled"}
+            }
+            self._enqueue_activity_recovery(
+                cutoff,
+                terminal_status_by_task=terminal_status_by_task,
+                orphan_task_ids={
+                    str(task_id or "")
+                    for task_id in interrupted_task_ids
+                    if str(task_id or "") not in projections
+                },
+            )
+        except Exception as exc:
+            logger.warning("ActivityStore 启动恢复异常: %s", exc)
+            return
+        self._flush_pending_activity_recovery()
 
-        logger.info("正在启动 App Runtime...")
-        self._start_time = time.time()
-        self._running = True
+    def _enqueue_activity_recovery(
+        self,
+        cutoff: str,
+        *,
+        terminal_status_by_task: dict[str, str],
+        orphan_task_ids: set[str],
+    ) -> None:
+        from apps.shell.agent.runtime.clock import parse_iso_utc
 
-        self._start_task_runner()
+        lock = self._startup_reconciliation_state_lock()
+        with lock:
+            pending_statuses = getattr(
+                self,
+                "_pending_activity_terminal_statuses",
+                None,
+            )
+            if not isinstance(pending_statuses, dict):
+                pending_statuses = {}
+                self._pending_activity_terminal_statuses = pending_statuses
+            pending_orphans = getattr(
+                self,
+                "_pending_activity_orphan_task_ids",
+                None,
+            )
+            if not isinstance(pending_orphans, set):
+                pending_orphans = set()
+                self._pending_activity_orphan_task_ids = pending_orphans
+            for task_id, status in terminal_status_by_task.items():
+                clean_task_id = str(task_id or "")
+                if clean_task_id:
+                    pending_statuses[clean_task_id] = str(status or "")
+                    pending_orphans.discard(clean_task_id)
+            pending_orphans.update(
+                str(task_id or "")
+                for task_id in orphan_task_ids
+                if str(task_id or "") and str(task_id or "") not in pending_statuses
+            )
+            clean_cutoff = str(cutoff or "").strip()
+            current_cutoff = str(
+                getattr(self, "_pending_activity_recovery_cutoff", "")
+            ).strip()
+            clean_cutoff_at = parse_iso_utc(clean_cutoff)
+            current_cutoff_at = parse_iso_utc(current_cutoff)
+            if clean_cutoff_at is not None and (
+                current_cutoff_at is None or clean_cutoff_at > current_cutoff_at
+            ):
+                self._pending_activity_recovery_cutoff = clean_cutoff
 
-        logger.info("App Runtime 已启动 (uptime=%.2fs)", self.uptime)
+    def _flush_pending_activity_recovery(self) -> None:
+        lock = self._startup_reconciliation_state_lock()
+        with lock:
+            pending_statuses = dict(
+                getattr(self, "_pending_activity_terminal_statuses", {}) or {}
+            )
+            pending_orphans = set(
+                getattr(self, "_pending_activity_orphan_task_ids", set()) or set()
+            )
+            cutoff = str(
+                getattr(self, "_pending_activity_recovery_cutoff", "")
+            ).strip()
+            if not cutoff or (not pending_statuses and not pending_orphans):
+                return
+            try:
+                recovered = self._activity_store.reconcile_interrupted_tasks(
+                    cutoff,
+                    terminal_status_by_task=pending_statuses,
+                    orphan_task_ids=pending_orphans,
+                )
+            except Exception as exc:
+                logger.warning("ActivityStore 恢复投影异常，将由 watchdog 重试: %s", exc)
+                return
+            current_statuses = getattr(
+                self,
+                "_pending_activity_terminal_statuses",
+                {},
+            )
+            if isinstance(current_statuses, dict):
+                for task_id, status in pending_statuses.items():
+                    if current_statuses.get(task_id) == status:
+                        current_statuses.pop(task_id, None)
+            current_orphans = getattr(
+                self,
+                "_pending_activity_orphan_task_ids",
+                set(),
+            )
+            if isinstance(current_orphans, set):
+                current_orphans.difference_update(pending_orphans)
+            if not current_statuses and not current_orphans:
+                self._pending_activity_recovery_cutoff = ""
+            if recovered:
+                logger.info(
+                    "ActivityStore 恢复投影完成 (interrupted=%d)",
+                    recovered,
+                )
 
     def stop(self) -> None:
         """停止运行时"""
-        if not self._running:
+        with self._runtime_lifecycle_state_lock():
+            if not self._running:
+                self._release_runtime_instance_lock()
+                return
+
+            self._mark_stopping_and_cancel_startup_reconciliation()
+
+            try:
+                # 停止 TaskRunner
+                self._stop_task_runner()
+                self._stop_native_runtime()
+                self._stop_activity_store()
+            finally:
+                self._release_runtime_instance_lock()
+
+            logger.info("App Runtime 已停止")
+
+    def _reconcile_runs_after_restart(self) -> None:
+        from apps.shell.agent.runtime.clock import parse_iso_utc, utc_now_iso
+        from apps.shell.agent.runtime.startup_reconciliation import (
+            StartupReconciliationIntegrityError,
+        )
+
+        try:
+            service = (
+                getattr(self, "_runtime_instance_service", None)
+                or self.get_agent_runtime_service()
+            )
+        except Exception as exc:
+            logger.warning("Agent Runtime 启动恢复异常: %s", exc)
             return
+        startup_reconciliation: dict[str, Any] = {}
+        observed_at = utc_now_iso()
+        startup_cutoff = str(
+            getattr(self, "_startup_reconciliation_cutoff", "")
+        ).strip()
+        if not startup_cutoff:
+            startup_cutoff = utc_now_iso()
+            self._startup_reconciliation_cutoff = startup_cutoff
+        try:
+            interrupted_task_ids = self._activity_store.list_interrupted_task_ids(
+                startup_cutoff,
+            )
+        except Exception as exc:
+            logger.warning("ActivityStore 中断任务扫描异常: %s", exc)
+            interrupted_task_ids = []
+        try:
+            startup_reconciliation = service.reconcile_startup_runs(
+                startup_cutoff,
+                observed_at=observed_at,
+            )
+            logger.info(
+                "Agent Runtime 启动恢复完成 "
+                "(failed=%d, preserved_approvals=%d, deferred_leases=%d)",
+                len(startup_reconciliation.get("failed_run_ids") or []),
+                len(startup_reconciliation.get("preserved_approval_run_ids") or []),
+                len(startup_reconciliation.get("deferred_lease_run_ids") or []),
+            )
+        except StartupReconciliationIntegrityError as exc:
+            self._startup_reconciliation_diagnostic = {
+                "code": exc.code,
+                "retryable": False,
+                "status": "quarantined",
+            }
+            logger.error(
+                "Agent Runtime 启动恢复完整性故障，已隔离启动 (code=%s)",
+                exc.code,
+            )
+            raise RuntimeError(
+                f"agent_runtime_startup_quarantined:{exc.code}"
+            ) from exc
+        except Exception as exc:
+            logger.warning("Agent Runtime 启动恢复异常: %s", exc)
+        else:
+            self._startup_reconciliation_diagnostic = {}
+        lease_watchdog = getattr(service, "reconcile_runtime_leases", None)
+        watchdog_enabled = callable(lease_watchdog)
+        lease_reconciliation: dict[str, Any] = {}
+        if watchdog_enabled:
+            try:
+                lease_reconciliation = lease_watchdog(observed_at)
+            except Exception as exc:
+                logger.warning("Agent Runtime 租约 watchdog 异常: %s", exc)
+        self._reconcile_activity_after_restart(
+            startup_cutoff,
+            service,
+            interrupted_task_ids,
+        )
+        expiries = [
+            expiry
+            for expiry in (
+                parse_iso_utc(startup_reconciliation.get("next_lease_expiry_at")),
+                parse_iso_utc(lease_reconciliation.get("next_lease_expiry_at")),
+            )
+            if expiry is not None
+        ]
+        self._schedule_deferred_startup_reconciliation(
+            {
+                "next_lease_expiry_at": min(expiries).isoformat() if expiries else "",
+            },
+            keep_alive=watchdog_enabled,
+        )
 
-        # 停止 TaskRunner
-        self._stop_task_runner()
-        self._stop_native_runtime()
-        self._stop_activity_store()
+    def _schedule_deferred_startup_reconciliation(
+        self,
+        reconciliation: dict[str, Any],
+        *,
+        keep_alive: bool = False,
+    ) -> None:
+        from apps.shell.agent.runtime.clock import parse_iso_utc
 
-        self._running = False
-        logger.info("App Runtime 已停止")
+        expiry = parse_iso_utc(reconciliation.get("next_lease_expiry_at"))
+        if expiry is None and not keep_alive:
+            return
+        watchdog_interval = max(
+            0.1,
+            float(getattr(self, "_runtime_lease_watchdog_interval_seconds", 5.0)),
+        )
+        delay = watchdog_interval
+        if expiry is not None:
+            expiry_delay = max(0.05, expiry.timestamp() - time.time() + 0.01)
+            delay = min(delay, expiry_delay) if keep_alive else expiry_delay
+        lock = self._startup_reconciliation_state_lock()
+        with lock:
+            if not self._running:
+                return
+            current = getattr(self, "_startup_reconciliation_timer", None)
+            if current is not None:
+                current.cancel()
+            generation = int(
+                getattr(self, "_startup_reconciliation_generation", 0)
+            ) + 1
+            self._startup_reconciliation_generation = generation
+            timer_factory = getattr(
+                self,
+                "_startup_reconciliation_timer_factory",
+                threading.Timer,
+            )
+            timer = timer_factory(
+                delay,
+                lambda: self._run_deferred_startup_reconciliation(generation),
+            )
+            timer.daemon = True
+            self._startup_reconciliation_timer = timer
+            timer.start()
+
+    def _run_deferred_startup_reconciliation(self, generation: int) -> None:
+        lock = self._startup_reconciliation_state_lock()
+        with lock:
+            if (
+                not self._running
+                or generation
+                != int(getattr(self, "_startup_reconciliation_generation", 0))
+            ):
+                return
+            self._startup_reconciliation_timer = None
+            self._run_runtime_lease_watchdog()
+
+    def _run_runtime_lease_watchdog(self) -> None:
+        from apps.shell.agent.runtime.clock import utc_now_iso
+
+        try:
+            service = (
+                getattr(self, "_runtime_instance_service", None)
+                or self.get_agent_runtime_service()
+            )
+        except Exception as exc:
+            logger.warning("Agent Runtime 租约 watchdog 异常: %s", exc)
+            self._schedule_deferred_startup_reconciliation({}, keep_alive=True)
+            return
+        lease_watchdog = getattr(service, "reconcile_runtime_leases", None)
+        if not callable(lease_watchdog):
+            return
+        try:
+            observed_at = utc_now_iso()
+            reconciliation = lease_watchdog(observed_at)
+        except Exception as exc:
+            logger.warning("Agent Runtime 租约 watchdog 异常: %s", exc)
+            reconciliation = {}
+        terminal_tasks = (
+            reconciliation.get("terminal_tasks")
+            if isinstance(reconciliation, dict)
+            else None
+        )
+        if isinstance(terminal_tasks, dict) and terminal_tasks:
+            self._enqueue_activity_recovery(
+                observed_at,
+                terminal_status_by_task={
+                    str(task_id): str(projection.get("status") or "")
+                    for task_id, projection in terminal_tasks.items()
+                    if isinstance(projection, dict)
+                },
+                orphan_task_ids=set(),
+            )
+        self._flush_pending_activity_recovery()
+        self._schedule_deferred_startup_reconciliation(
+            reconciliation if isinstance(reconciliation, dict) else {},
+            keep_alive=True,
+        )
+
+    def _mark_stopping_and_cancel_startup_reconciliation(self) -> None:
+        lock = self._startup_reconciliation_state_lock()
+        with lock:
+            self._running = False
+            self._startup_reconciliation_generation = int(
+                getattr(self, "_startup_reconciliation_generation", 0)
+            ) + 1
+            self._startup_reconciliation_cutoff = ""
+            timer = getattr(self, "_startup_reconciliation_timer", None)
+            self._startup_reconciliation_timer = None
+            if timer is not None:
+                timer.cancel()
+
+    def _startup_reconciliation_state_lock(self) -> Any:
+        lock = getattr(self, "_startup_reconciliation_lock", None)
+        if lock is None:
+            lock = threading.RLock()
+            self._startup_reconciliation_lock = lock
+        return lock
+
+    def _runtime_lifecycle_state_lock(self) -> Any:
+        lock = getattr(self, "_lifecycle_lock", None)
+        if lock is None:
+            lock = threading.RLock()
+            self._lifecycle_lock = lock
+        return lock
+
+    def _acquire_runtime_instance_lock(self, service: Any) -> bool:
+        if getattr(self, "_runtime_instance_lock", None) is not None:
+            return True
+        db_path = getattr(service, "db_path", None)
+        if db_path is None:
+            self._runtime_instance_service = service
+            return True
+        lock_factory = getattr(self, "_runtime_instance_lock_factory", None)
+        if lock_factory is None:
+            from apps.shell.agent.runtime.runtime_instance_lock import (
+                RuntimeProcessInstanceLock,
+            )
+
+            lock_factory = RuntimeProcessInstanceLock
+        lock = lock_factory(
+            db_path=db_path,
+            workspace_dir=getattr(service, "workspace_dir", None),
+        )
+        if not lock.acquire():
+            return False
+        self._runtime_instance_lock = lock
+        self._runtime_instance_service = service
+        return True
+
+    def _release_runtime_instance_lock(self) -> None:
+        lock = getattr(self, "_runtime_instance_lock", None)
+        self._runtime_instance_lock = None
+        self._runtime_instance_service = None
+        if lock is not None:
+            lock.release()
 
     def _stop_native_runtime(self) -> None:
         service = getattr(self, "agent_runtime_service", None)
@@ -146,19 +564,55 @@ class AppRuntime:
             activity_store=self._activity_store,
         )
         self._task_runner_loop_ready.clear()
+        startup_result: concurrent.futures.Future[None] = (
+            concurrent.futures.Future()
+        )
+        startup_errors: list[Exception] = []
 
-        def run_loop():
+        def run_loop() -> None:
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
             self._task_runner_loop = loop
+
+            async def start_runner() -> None:
+                try:
+                    await self._task_runner.start()
+                except asyncio.CancelledError:
+                    if not startup_result.done():
+                        startup_result.set_exception(
+                            RuntimeError("task_runner_startup_cancelled")
+                        )
+                except Exception as exc:
+                    startup_errors.append(exc)
+                    if not startup_result.done():
+                        startup_result.set_exception(exc)
+                else:
+                    if not startup_result.done():
+                        startup_result.set_result(None)
+
             try:
-                loop.run_until_complete(self._task_runner.start())
+                # create_task schedules the first TaskRunner.start() turn before the
+                # readiness callback.  An initialization error raised in that turn
+                # is therefore published before the main thread observes readiness;
+                # a start() coroutine that remains pending is a valid long-running
+                # runner rather than a startup timeout.
+                loop.create_task(start_runner(), name="task-runner-start")
                 loop.call_soon(self._task_runner_loop_ready.set)
                 loop.run_forever()
-            except Exception:
+            except Exception as exc:
+                startup_errors.append(exc)
+                if not startup_result.done():
+                    startup_result.set_exception(exc)
                 self._task_runner_loop_ready.set()
                 logger.exception("TaskRunner 事件循环异常退出")
             finally:
+                pending = asyncio.all_tasks(loop)
+                for task in pending:
+                    task.cancel()
+                if pending:
+                    loop.run_until_complete(
+                        asyncio.gather(*pending, return_exceptions=True)
+                    )
                 loop.close()
 
         self._task_runner_thread = threading.Thread(
@@ -167,8 +621,26 @@ class AppRuntime:
             daemon=True,
         )
         self._task_runner_thread.start()
+        startup_failure: BaseException | None = None
         if not self._task_runner_loop_ready.wait(timeout=3.0):
-            logger.warning("TaskRunner 事件循环未在超时时间内就绪")
+            startup_failure = RuntimeError("task_runner_startup_timeout")
+        elif startup_result.done():
+            try:
+                startup_result.result()
+            except BaseException as exc:
+                startup_failure = exc
+        if startup_failure is None and (
+            self._task_runner_thread is None
+            or not self._task_runner_thread.is_alive()
+        ):
+            startup_failure = (
+                startup_errors[0]
+                if startup_errors
+                else RuntimeError("task_runner_thread_exited_during_startup")
+            )
+        if startup_failure is not None:
+            self._stop_task_runner()
+            raise startup_failure
         logger.info(
             "TaskRunner 已在独立线程启动 (executor=%s)",
             type(self._task_runner.executor).__name__,
@@ -176,33 +648,38 @@ class AppRuntime:
 
     def _stop_task_runner(self) -> None:
         """停止 TaskRunner 及其事件循环"""
-        if self._task_runner is None:
+        task_runner = getattr(self, "_task_runner", None)
+        task_runner_thread = getattr(self, "_task_runner_thread", None)
+        loop = getattr(self, "_task_runner_loop", None)
+        loop_ready = getattr(self, "_task_runner_loop_ready", None)
+        if task_runner is None and task_runner_thread is None and loop is None:
             return
 
-        if self._task_runner_thread is not None and self._task_runner_thread.is_alive():
-            if not self._task_runner_loop_ready.wait(timeout=3.0):
+        if task_runner_thread is not None and task_runner_thread.is_alive():
+            if loop_ready is not None and not loop_ready.wait(timeout=3.0):
                 logger.warning("TaskRunner loop 尚未就绪，无法提交停止协程")
 
-        loop = self._task_runner_loop
         if loop is not None and loop.is_running():
-            future = asyncio.run_coroutine_threadsafe(self._task_runner.stop(), loop)
-            try:
-                future.result(timeout=3.0)
-            except concurrent.futures.TimeoutError:
-                logger.warning("TaskRunner stop 超时，将继续请求事件循环停止")
-            except Exception as exc:
-                logger.warning("TaskRunner stop 异常: %s", exc)
+            if task_runner is not None and hasattr(task_runner, "stop"):
+                future = asyncio.run_coroutine_threadsafe(task_runner.stop(), loop)
+                try:
+                    future.result(timeout=3.0)
+                except concurrent.futures.TimeoutError:
+                    logger.warning("TaskRunner stop 超时，将继续请求事件循环停止")
+                except Exception as exc:
+                    logger.warning("TaskRunner stop 异常: %s", exc)
             loop.call_soon_threadsafe(loop.stop)
 
-        if self._task_runner_thread is not None:
-            self._task_runner_thread.join(timeout=3.0)
-            if self._task_runner_thread.is_alive():
+        if task_runner_thread is not None and task_runner_thread.is_alive():
+            task_runner_thread.join(timeout=3.0)
+            if task_runner_thread.is_alive():
                 logger.warning("TaskRunner 线程未在超时时间内退出")
 
         self._task_runner = None
         self._task_runner_loop = None
         self._task_runner_thread = None
-        self._task_runner_loop_ready.clear()
+        if loop_ready is not None:
+            loop_ready.clear()
         logger.info("TaskRunner 已停止")
 
     def get_status(self) -> dict:
@@ -217,6 +694,9 @@ class AppRuntime:
             "native_agent": native_readiness,
             "native_agent_ready": bool(native_readiness.get("ready")),
         }
+        startup_diagnostic = self.startup_reconciliation_diagnostic
+        if startup_diagnostic:
+            status["startup_reconciliation"] = startup_diagnostic
 
         return status
 

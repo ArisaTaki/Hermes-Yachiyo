@@ -8,8 +8,6 @@ from __future__ import annotations
 
 import asyncio
 import base64
-from dataclasses import dataclass
-from datetime import datetime, timezone
 import json
 import logging
 import mimetypes
@@ -17,18 +15,27 @@ import os
 import re
 import time
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any, Callable, Optional
 
-from packages.protocol.schemas import TaskInfo
-from packages.security import redact_api_error_text
 from apps.core.special_sessions import is_proactive_chat_session
 from apps.core.title_generator import (
     build_session_title_prompt as build_direct_session_title_prompt,
+)
+from apps.core.title_generator import (
     generate_title_with_direct_api,
     looks_like_title_prompt_echo,
 )
+from apps.shell.agent.runtime.callbacks import supports_keyword
+from apps.shell.agent.runtime.outcome_evaluator import (
+    MainChatOutcomeEvaluation,
+    evaluate_main_chat_outcome,
+)
+from packages.protocol.schemas import TaskInfo
+from packages.security import redact_api_error_text
 
 if TYPE_CHECKING:
     from apps.core.activity_store import ActivityStore
@@ -66,6 +73,18 @@ class NativeAgentError(RuntimeError):
 
     def to_error_string(self) -> str:
         return str(self)
+
+
+class _AwaitingUserReply(str):
+    """Marks a successful interaction turn that must not complete its Native Run."""
+
+
+@dataclass(frozen=True)
+class _ClarificationContinuation:
+    """User-authored authority carried into a new Main Chat Run."""
+
+    user_goal: str
+    metadata: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -144,6 +163,17 @@ _MAIN_CHAT_HISTORY_MESSAGE_LIMIT = 20
 _MAIN_CHAT_HISTORY_CHAR_LIMIT = 32_000
 _MAIN_CHAT_IMAGE_ATTACHMENT_LIMIT = 4
 _MAIN_CHAT_IMAGE_MAX_BYTES = 12 * 1024 * 1024
+_OUTCOME_EVENT_PAGE_LIMIT = 1000
+_OUTCOME_EVENT_MAX_PAGES = 10
+_OUTCOME_EVENT_MAX_EVENTS = _OUTCOME_EVENT_PAGE_LIMIT * _OUTCOME_EVENT_MAX_PAGES
+
+
+def _incomplete_outcome_event_history() -> MainChatOutcomeEvaluation:
+    return MainChatOutcomeEvaluation(
+        kind="failed",
+        reason="outcome_event_history_incomplete",
+        message="无法确认任务结果：执行事件记录不完整，请重试。",
+    )
 
 
 def format_persona_description(
@@ -527,6 +557,222 @@ def _task_image_paths(task: TaskInfo) -> list[str]:
     return paths
 
 
+def _source_message_id_for_task(chat_session: Any | None, task_id: str) -> str:
+    """Resolve the user-authored message bound to a Task, never assistant trace."""
+
+    if chat_session is None or not str(task_id or "").strip():
+        return ""
+    try:
+        messages = chat_session.get_all_messages()
+    except Exception:
+        return ""
+    for message in reversed(messages):
+        role = str(
+            getattr(
+                getattr(message, "role", ""),
+                "value",
+                getattr(message, "role", ""),
+            )
+            or ""
+        )
+        if role != "user" or str(getattr(message, "task_id", "") or "") != task_id:
+            continue
+        return str(getattr(message, "message_id", "") or "").strip()
+    return ""
+
+
+_CLARIFICATION_REPLY_MAX_CHARS = 200
+_CLARIFICATION_GOAL_MAX_CHARS = 8000
+_CLARIFICATION_ABANDON_RE = re.compile(
+    r"^(?:算了|不用了?|不必了?|取消|停止|换个话题|聊点别的|"
+    r"never\s*mind|forget\s+it|cancel|stop|new\s+topic)"
+    r"[!,.?！，。？~～\s]*$",
+    flags=re.IGNORECASE,
+)
+_STANDALONE_REQUEST_PREFIX_RE = re.compile(
+    r"^(?:帮我|请|麻烦|能否|能不能|可以|我要|我想|给我|告诉我|"
+    r"解释|说明|总结|写|创建|新建|打开|启动|播放|搜索|查找|运行|执行|"
+    r"please\b|can\s+you\b|could\s+you\b|would\s+you\b|i\s+(?:want|need)\b|"
+    r"tell\s+me\b|explain\b|summari[sz]e\b|write\b|create\b|open\b|launch\b|"
+    r"play\b|search\b|find\b|run\b|execute\b)",
+    flags=re.IGNORECASE,
+)
+
+
+def _runtime_clarification_event(run: dict[str, Any]) -> dict[str, Any] | None:
+    """Return only a planner-authored clarification bound to this root goal."""
+
+    user_goal = str(run.get("user_goal") or "").strip()
+    result = str(run.get("result") or "").strip()
+    if (
+        str(run.get("kind") or "").strip() != "main_chat_run"
+        or str(run.get("status") or "").strip() != "awaiting_user"
+        or not user_goal
+        or not result
+    ):
+        return None
+    for raw_event in reversed(run.get("timeline") or []):
+        if not isinstance(raw_event, dict):
+            continue
+        nested = raw_event.get("payload")
+        payload = nested if isinstance(nested, dict) else {}
+        event_type = str(
+            raw_event.get("event")
+            or raw_event.get("event_type")
+            or payload.get("event")
+            or payload.get("event_type")
+            or ""
+        ).strip()
+        if event_type != "agent.plan.clarification_required":
+            continue
+        source = str(raw_event.get("source") or payload.get("source") or "").strip()
+        event_goal = str(
+            raw_event.get("original_goal") or payload.get("original_goal") or ""
+        ).strip()
+        question = str(raw_event.get("question") or payload.get("question") or "").strip()
+        if (
+            source == "runtime_model_intent_planner"
+            and event_goal == user_goal
+            and question == result
+        ):
+            return {**payload, **raw_event, "question": question}
+    return None
+
+
+def _clarification_reply_may_continue(reply: str) -> bool:
+    """Distinguish a concise slot answer from an explicit independent request.
+
+    Entity names can themselves look like executable intents to the Runtime
+    planner (for example, ``Apple Music``).  Continuation safety therefore
+    comes from the explicit lexical boundaries here plus the strict
+    same-session/message adjacency checks in the caller, not from classifying
+    the slot value as a standalone goal.
+    """
+
+    text = " ".join(str(reply or "").strip().split())
+    if (
+        not text
+        or len(text) > _CLARIFICATION_REPLY_MAX_CHARS
+        or _CLARIFICATION_ABANDON_RE.fullmatch(text)
+        or "?" in text
+        or "？" in text
+        or _STANDALONE_REQUEST_PREFIX_RE.match(text)
+    ):
+        return False
+    return True
+
+
+def _clarification_continuation_for_task(
+    service: Any,
+    chat_session: Any | None,
+    task: TaskInfo,
+) -> _ClarificationContinuation | None:
+    """Bind the immediately preceding clarification to one user reply.
+
+    Only the previous Run's immutable user goal and the current user-authored
+    message become authority.  The model's question, rationale, aliases, and
+    proposed tool data are deliberately excluded.
+    """
+
+    session_id = str(getattr(task, "chat_session_id", "") or "").strip()
+    lookup = getattr(service, "latest_awaiting_user_main_chat_run", None)
+    if not session_id or chat_session is None or not callable(lookup):
+        return None
+    if getattr(task, "attachments", None) or _is_oha_yachiyo_group_coordinator_task(
+        task.description
+    ):
+        return None
+    try:
+        pending = lookup(session_id)
+    except Exception:
+        logger.debug("Unable to inspect pending Main Chat clarification", exc_info=True)
+        return None
+    if not isinstance(pending, dict):
+        return None
+    event = _runtime_clarification_event(pending)
+    if event is None or str(pending.get("session_id") or "").strip() != session_id:
+        return None
+
+    try:
+        messages = list(chat_session.get_all_messages())
+    except Exception:
+        return None
+    current_index = -1
+    current_reply = ""
+    for index in range(len(messages) - 1, -1, -1):
+        message = messages[index]
+        role = str(
+            getattr(
+                getattr(message, "role", ""),
+                "value",
+                getattr(message, "role", ""),
+            )
+            or ""
+        )
+        if role != "user" or str(getattr(message, "task_id", "") or "") != task.task_id:
+            continue
+        current_index = index
+        current_reply = str(getattr(message, "content", "") or "").strip()
+        break
+    if current_index < 0 or not _clarification_reply_may_continue(current_reply):
+        return None
+
+    previous_message = None
+    for message in reversed(messages[:current_index]):
+        role = str(
+            getattr(
+                getattr(message, "role", ""),
+                "value",
+                getattr(message, "role", ""),
+            )
+            or ""
+        )
+        content = str(getattr(message, "content", "") or "").strip()
+        if role in {"user", "assistant"} and content:
+            previous_message = message
+            break
+    if previous_message is None:
+        return None
+    previous_role = str(
+        getattr(
+            getattr(previous_message, "role", ""),
+            "value",
+            getattr(previous_message, "role", ""),
+        )
+        or ""
+    )
+    previous_task_id = str(getattr(previous_message, "task_id", "") or "").strip()
+    previous_content = str(getattr(previous_message, "content", "") or "").strip()
+    pending_task_id = str(pending.get("task_id") or "").strip()
+    question = str(event.get("question") or "").strip()
+    if (
+        previous_role != "assistant"
+        or not pending_task_id
+        or previous_task_id != pending_task_id
+        or not question
+        or (question not in previous_content and previous_content not in question)
+    ):
+        return None
+
+    prior_goal = str(pending.get("user_goal") or "").strip()
+    continued_goal = f"{prior_goal}\n{current_reply}".strip()
+    if not prior_goal or len(continued_goal) > _CLARIFICATION_GOAL_MAX_CHARS:
+        return None
+    return _ClarificationContinuation(
+        user_goal=continued_goal,
+        metadata={
+            "runtime_clarification_continuation": True,
+            "continued_from_run_id": str(pending.get("run_id") or "").strip(),
+            "continued_from_task_id": pending_task_id,
+            "clarification_authority": {
+                "version": 1,
+                "original_goal": prior_goal,
+                "user_reply": current_reply,
+            },
+        },
+    )
+
+
 def _describe_day_period(hour: int) -> str:
     if 5 <= hour < 9:
         return "早上"
@@ -560,50 +806,31 @@ def build_cross_session_memory_context(
     current_session_id: str = "",
     *,
     store: Any | None = None,
+    memory_service: Any | None = None,
     max_items: int = _MEMORY_CONTEXT_MAX_ITEMS,
 ) -> str:
-    """Build lightweight durable memory from explicit user statements in chat history."""
+    """Recall managed, confirmed memory without scanning raw chat history.
+
+    ``store`` remains as a compatibility argument, but is intentionally not
+    read: ordinary chat text is not an authoritative durable-memory source.
+    """
     max_items = max(0, min(int(max_items or 0), 20))
-    if max_items <= 0:
+    if max_items <= 0 or memory_service is None:
         return ""
     try:
-        if store is None:
-            from apps.core.chat_store import get_chat_store
-
-            store = get_chat_store()
-        sessions = store.list_sessions(limit=_MEMORY_CONTEXT_MAX_SESSIONS)
-    except Exception:
-        logger.debug("读取长期记忆候选会话失败", exc_info=True)
-        return ""
-
-    current_session_id = str(current_session_id or "").strip()
-    candidates: list[tuple[str, str, str]] = []
-    seen: set[str] = set()
-    for session in sessions:
-        session_id = str(getattr(session, "session_id", "") or "")
-        try:
-            messages = store.load_messages(
-                session_id,
-                limit=0,
+        context = str(
+            memory_service.context_for(
+                session_id=str(current_session_id or "").strip(),
+                limit=max_items,
             )
-        except Exception:
-            logger.debug("读取长期记忆候选消息失败: %s", session_id, exc_info=True)
-            continue
-        for message in reversed(messages):
-            if str(getattr(message, "role", "") or "") != "user":
-                continue
-            memory = _extract_memory_statement(str(getattr(message, "content", "") or ""))
-            if not memory:
-                continue
-            key = memory.lower()
-            if key in seen:
-                continue
-            seen.add(key)
-            created_at = str(getattr(message, "created_at", "") or getattr(session, "created_at", "") or "")
-            candidates.append((created_at, session_id, memory))
-            if len(candidates) >= max_items:
-                return _format_memory_context(candidates, current_session_id)
-    return _format_memory_context(candidates, current_session_id)
+            or ""
+        ).strip()
+    except Exception:
+        logger.debug("读取托管长期记忆失败", exc_info=True)
+        return ""
+    if not context or context == "No durable memories yet.":
+        return ""
+    return f"[长期记忆]\n{context}"
 
 
 def build_runtime_profile_context(runtime: "AppRuntime") -> str:
@@ -617,7 +844,15 @@ def build_runtime_profile_context(runtime: "AppRuntime") -> str:
         logger.debug("读取配置资料上下文失败", exc_info=True)
     try:
         current_session_id = str(getattr(runtime.chat_session, "session_id", "") or "")
-        memory_context = build_cross_session_memory_context(current_session_id)
+        memory_service = getattr(
+            getattr(runtime, "agent_runtime_service", None),
+            "memory_services",
+            None,
+        )
+        memory_context = build_cross_session_memory_context(
+            current_session_id,
+            memory_service=memory_service,
+        )
         if memory_context:
             parts.append(memory_context)
     except Exception:
@@ -1027,6 +1262,7 @@ class NativeAgentExecutor(ExecutionStrategy):
         self._tool_policy_getter = tool_policy_getter
         self._workspace_policy_getter = workspace_policy_getter
         self._activity_store_getter = activity_store_getter
+        self._main_chat_run_snapshots: dict[str, dict[str, Any]] = {}
 
     @property
     def capabilities(self) -> dict[str, bool]:
@@ -1055,11 +1291,28 @@ class NativeAgentExecutor(ExecutionStrategy):
         chat_session = self._chat_session_for_task(task)
         run_id = ""
         try:
+            continuation = _clarification_continuation_for_task(
+                service,
+                chat_session,
+                task,
+            )
+            user_goal = continuation.user_goal if continuation else task.description
+            run_metadata: dict[str, Any] = {
+                "source_message_id": _source_message_id_for_task(
+                    chat_session,
+                    task.task_id,
+                )
+            }
+            runtime_execution_metadata: dict[str, Any] | None = None
+            if continuation is not None:
+                run_metadata.update(continuation.metadata)
+                runtime_execution_metadata = dict(continuation.metadata)
             run = await asyncio.to_thread(
                 service.start_main_chat_run,
                 task_id=task.task_id,
                 session_id=str(getattr(task, "chat_session_id", "") or ""),
-                user_goal=task.description,
+                user_goal=user_goal,
+                metadata=run_metadata,
             )
             run_id = str(run.get("run_id") or "")
             image_paths = _task_image_paths(task)
@@ -1112,11 +1365,18 @@ class NativeAgentExecutor(ExecutionStrategy):
                     messages,
                     chat_session,
                     task,
+                    runtime_execution_metadata=runtime_execution_metadata,
                 )
                 self._update_processing_message(chat_session, task.task_id, output)
+                if isinstance(output, _AwaitingUserReply):
+                    return str(output)
                 delegation_directive = None if group_coordinator else _parse_oha_delegation_directive(output)
                 if delegation_directive is None:
-                    await asyncio.to_thread(service.complete_main_chat_run, run_id, output)
+                    await self._complete_main_chat_run_with_outcome(
+                        service,
+                        run_id,
+                        output,
+                    )
                     _schedule_session_title_refresh(chat_session, assistant_text=output)
                     return output
                 if delegation_count >= 3:
@@ -1127,7 +1387,11 @@ class NativeAgentExecutor(ExecutionStrategy):
                         "单轮自动委派超过 3 次上限",
                         "failed",
                     )
-                    await asyncio.to_thread(service.complete_main_chat_run, run_id, result)
+                    await self._complete_main_chat_run_with_outcome(
+                        service,
+                        run_id,
+                        result,
+                    )
                     return result
                 delegation_count += 1
                 target = delegation_directive.target_label
@@ -1176,16 +1440,30 @@ class NativeAgentExecutor(ExecutionStrategy):
             raise
         except Exception as exc:
             skip_run_failure = False
-            if isinstance(exc, NativeAgentError) and exc.reason == "approval_timeout" and run_id:
+            if isinstance(exc, NativeAgentError) and run_id:
                 try:
                     current_run = await asyncio.to_thread(service.get_run, run_id)
-                    skip_run_failure = str(current_run.get("status") or "") in {
+                    current_status = str(current_run.get("status") or "").lower()
+                    if current_status in {
+                        "awaiting_user",
                         "cancelled",
                         "failed",
                         "completed",
-                    }
+                    }:
+                        skip_run_failure = True
+                    elif exc.reason == "approval_required":
+                        pending_approval = current_run.get("pending_approval")
+                        skip_run_failure = current_status == "approval_required" or bool(
+                            isinstance(pending_approval, dict) and pending_approval
+                        )
+                    elif exc.reason == "approval_timeout":
+                        skip_run_failure = current_status in {
+                            "cancelled",
+                            "failed",
+                            "completed",
+                        }
                 except Exception:
-                    logger.debug("检查 Native Run 超时终态失败: %s", run_id, exc_info=True)
+                    logger.debug("检查 Native Run 审批/超时状态失败: %s", run_id, exc_info=True)
             if run_id and not skip_run_failure:
                 try:
                     await asyncio.to_thread(service.fail_main_chat_run, run_id, exc)
@@ -1194,6 +1472,9 @@ class NativeAgentExecutor(ExecutionStrategy):
             if isinstance(exc, NativeAgentError):
                 raise
             raise NativeAgentError(redact_api_error_text(exc)) from exc
+        finally:
+            if run_id:
+                self._main_chat_run_snapshots.pop(run_id, None)
 
     def _messages_for_task(
         self,
@@ -1264,14 +1545,23 @@ class NativeAgentExecutor(ExecutionStrategy):
         messages: list[dict[str, Any]],
         chat_session: Optional["ChatSession"],
         task: TaskInfo,
+        *,
+        runtime_execution_metadata: dict[str, Any] | None = None,
     ) -> str:
         execute_loop = getattr(service, "execute_main_chat_model_loop", None)
         if not callable(execute_loop):
             return await asyncio.to_thread(service.call_main_chat_model, run_id, messages)
         kwargs = self._main_chat_runtime_policy_kwargs()
+        if runtime_execution_metadata:
+            kwargs["runtime_execution_metadata"] = runtime_execution_metadata
         run = await asyncio.to_thread(execute_loop, run_id, messages, **kwargs)
-        status = str(run.get("status") or "").strip()
+        status = str(run.get("status") or "").strip().lower()
         result = str(run.get("result") or "").strip()
+        if status == "awaiting_user":
+            self._main_chat_run_snapshots[run_id] = dict(run)
+            return _AwaitingUserReply(
+                result or "请补充任务目标、对象或期望结果。"
+            )
         if status == "approval_required":
             self._update_processing_message(
                 chat_session,
@@ -1293,6 +1583,138 @@ class NativeAgentExecutor(ExecutionStrategy):
         if result:
             return result
         return await asyncio.to_thread(service.call_main_chat_model, run_id, messages)
+
+    async def _complete_main_chat_run_with_outcome(
+        self,
+        service: Any,
+        run_id: str,
+        output: str,
+    ) -> None:
+        outcome = await self._evaluate_main_chat_outcome(service, run_id)
+        if outcome.kind == "failed":
+            raise NativeAgentError(
+                outcome.message,
+                reason=outcome.reason or "desktop_outcome_failed",
+            )
+        if outcome.kind == "approval_required":
+            raise NativeAgentError(
+                outcome.message or "Native Agent 仍在等待工具审批",
+                reason="approval_required",
+            )
+        if outcome.kind == "awaiting_user":
+            return
+        completed = await asyncio.to_thread(
+            service.complete_main_chat_run,
+            run_id,
+            output,
+        )
+        completed_payload = completed if isinstance(completed, dict) else {}
+        completed_status = str(completed_payload.get("status") or "").strip().lower()
+        pending_approval = completed_payload.get("pending_approval")
+        if completed_status == "completed":
+            return
+        if completed_status == "approval_required" or bool(
+            isinstance(pending_approval, dict) and pending_approval
+        ):
+            raise NativeAgentError(
+                str(completed_payload.get("result") or "Native Agent 仍在等待工具审批"),
+                reason="approval_required",
+            )
+        if completed_status in {"failed", "cancelled", "canceled"}:
+            reason = "cancelled" if completed_status in {"cancelled", "canceled"} else "failed"
+            raise NativeAgentError(
+                str(completed_payload.get("result") or f"Native Run {reason}"),
+                reason=reason,
+            )
+        raise NativeAgentError(
+            "Native Agent 未确认任务已完成，请重试。",
+            reason="run_completion_not_confirmed",
+        )
+
+    async def _evaluate_main_chat_outcome(
+        self,
+        service: Any,
+        run_id: str,
+    ) -> MainChatOutcomeEvaluation:
+        run_payload = self._main_chat_run_snapshots.pop(run_id, {})
+        get_run = getattr(service, "get_run", None)
+        if callable(get_run):
+            try:
+                current_run = await asyncio.to_thread(get_run, run_id)
+                if isinstance(current_run, dict):
+                    run_payload = current_run
+            except Exception:
+                logger.debug(
+                    "读取 Native Run outcome snapshot 失败: %s",
+                    run_id,
+                    exc_info=True,
+                )
+        list_events = getattr(service, "list_run_events", None)
+        if not callable(list_events):
+            # Older runtime ports may expose only the run snapshot/timeline.
+            return evaluate_main_chat_outcome(run_payload)
+        events: list[dict[str, Any]] = []
+        after_sequence = 0
+        for page_index in range(_OUTCOME_EVENT_MAX_PAGES):
+            try:
+                payload = await asyncio.to_thread(
+                    list_events,
+                    run_id,
+                    after_sequence=after_sequence,
+                    limit=_OUTCOME_EVENT_PAGE_LIMIT,
+                    include_internal=True,
+                )
+            except TypeError:
+                if page_index > 0:
+                    return _incomplete_outcome_event_history()
+                try:
+                    payload = await asyncio.to_thread(list_events, run_id)
+                except Exception:
+                    logger.debug(
+                        "读取 Native Run outcome events 失败: %s",
+                        run_id,
+                        exc_info=True,
+                    )
+                    # The runtime explicitly exposes a durable event stream, so
+                    # an unavailable stream must never be treated as an empty
+                    # history.  Falling back to the snapshot here can turn a
+                    # failed desktop action into a false completion.
+                    return _incomplete_outcome_event_history()
+            except Exception:
+                logger.debug(
+                    "读取 Native Run outcome events 失败: %s",
+                    run_id,
+                    exc_info=True,
+                )
+                return _incomplete_outcome_event_history()
+
+            if isinstance(payload, dict):
+                if "events" not in payload:
+                    return _incomplete_outcome_event_history()
+                page_events = payload["events"]
+            elif isinstance(payload, list):
+                page_events = payload
+            else:
+                return _incomplete_outcome_event_history()
+            if not isinstance(page_events, list) or any(
+                not isinstance(event, dict) for event in page_events
+            ):
+                return _incomplete_outcome_event_history()
+            events.extend(dict(event) for event in page_events)
+            has_more = bool(payload.get("has_more")) if isinstance(payload, dict) else False
+            if not has_more:
+                return evaluate_main_chat_outcome(run_payload, events)
+            if len(events) >= _OUTCOME_EVENT_MAX_EVENTS:
+                return _incomplete_outcome_event_history()
+            next_after_sequence = (
+                int(payload.get("next_after_sequence") or 0)
+                if isinstance(payload, dict)
+                else 0
+            )
+            if next_after_sequence <= after_sequence:
+                return _incomplete_outcome_event_history()
+            after_sequence = next_after_sequence
+        return _incomplete_outcome_event_history()
 
     def _main_chat_runtime_policy_kwargs(self) -> dict[str, dict[str, Any]]:
         kwargs: dict[str, dict[str, Any]] = {}
@@ -1327,44 +1749,84 @@ class NativeAgentExecutor(ExecutionStrategy):
         timeout_seconds = self._approval_wait_timeout_seconds()
         deadline = time.monotonic() + timeout_seconds
         last_status = ""
-        while time.monotonic() < deadline:
-            run = await asyncio.to_thread(service.get_run, run_id)
-            status = str(run.get("status") or "").strip()
-            result = str(run.get("result") or "").strip()
-            if status != last_status:
-                last_status = status
+        expected_approval_id = ""
+        while True:
+            while time.monotonic() < deadline:
+                run = await asyncio.to_thread(service.get_run, run_id)
+                if isinstance(run, dict):
+                    self._main_chat_run_snapshots[run_id] = dict(run)
+                status = str(run.get("status") or "").strip()
+                result = str(run.get("result") or "").strip()
+                if status != last_status:
+                    last_status = status
+                    if status == "approval_required":
+                        self._update_processing_message(
+                            chat_session,
+                            task.task_id,
+                            self._approval_required_content(run),
+                        )
                 if status == "approval_required":
-                    self._update_processing_message(
-                        chat_session,
-                        task.task_id,
-                        self._approval_required_content(run),
+                    current_approval_id = self._pending_approval_id(run)
+                    if current_approval_id and current_approval_id != expected_approval_id:
+                        expected_approval_id = current_approval_id
+                        deadline = time.monotonic() + timeout_seconds
+                    await asyncio.sleep(0.5)
+                    continue
+                if status == "awaiting_user":
+                    return _AwaitingUserReply(
+                        result or "请补充任务目标、对象或期望结果。"
                     )
-            if status == "approval_required":
+                if status in {"failed", "cancelled"}:
+                    raise NativeAgentError(result or f"Native Run {status}", reason=status)
+                if (
+                    status in {"running", "processing"}
+                    and result
+                    and result != previous_result
+                    and not result.startswith("已批准，")
+                ):
+                    return result
+                if status == "completed" and result:
+                    return result
                 await asyncio.sleep(0.5)
+            try:
+                timeout_result: dict[str, Any] = {}
+                timeout_approval = getattr(service, "timeout_run_approval", None)
+                if callable(timeout_approval):
+                    timeout_kwargs: dict[str, Any] = {"reason": "approval_wait_timeout"}
+                    if expected_approval_id and supports_keyword(
+                        timeout_approval,
+                        "expected_approval_id",
+                    ):
+                        timeout_kwargs["expected_approval_id"] = expected_approval_id
+                    result = await asyncio.to_thread(
+                        timeout_approval,
+                        run_id,
+                        **timeout_kwargs,
+                    )
+                    timeout_result = result if isinstance(result, dict) else {}
+                else:
+                    await asyncio.to_thread(service.cancel_run, run_id)
+            except Exception:
+                logger.debug(
+                    "Native Run 审批等待超时后取消失败: %s",
+                    run_id,
+                    exc_info=True,
+                )
+                timeout_result = {}
+            timeout_generation = self._pending_approval_id(timeout_result)
+            if (
+                str(timeout_result.get("status") or "").strip() == "approval_required"
+                and timeout_generation
+                and timeout_generation != expected_approval_id
+            ):
+                expected_approval_id = timeout_generation
+                deadline = time.monotonic() + timeout_seconds
                 continue
-            if status in {"failed", "cancelled"}:
-                raise NativeAgentError(result or f"Native Run {status}", reason=status)
-            if status in {"running", "processing"} and result and result != previous_result and not result.startswith("已批准，"):
-                return result
-            if status == "completed" and result:
-                return result
-            await asyncio.sleep(0.5)
-        try:
-            timeout_result: dict[str, Any] = {}
-            timeout_approval = getattr(service, "timeout_run_approval", None)
-            if callable(timeout_approval):
-                result = await asyncio.to_thread(timeout_approval, run_id, reason="approval_wait_timeout")
-                timeout_result = result if isinstance(result, dict) else {}
-            else:
-                await asyncio.to_thread(service.cancel_run, run_id)
-        except Exception:
-            logger.debug("Native Run 审批等待超时后取消失败: %s", run_id, exc_info=True)
-            timeout_result = {}
-        timeout_message = str(timeout_result.get("result") or "").strip()
-        raise NativeAgentError(
-            timeout_message or "Native Agent 等待工具审批超时",
-            reason="approval_timeout",
-        )
+            timeout_message = str(timeout_result.get("result") or "").strip()
+            raise NativeAgentError(
+                timeout_message or "Native Agent 等待工具审批超时",
+                reason="approval_timeout",
+            )
 
     @staticmethod
     def _approval_wait_timeout_seconds() -> float:
@@ -1376,6 +1838,13 @@ class NativeAgentExecutor(ExecutionStrategy):
         except ValueError:
             return 600.0
         return max(1.0, value)
+
+    @staticmethod
+    def _pending_approval_id(run: Any) -> str:
+        pending = run.get("pending_approval") if isinstance(run, dict) else None
+        if not isinstance(pending, dict):
+            return ""
+        return str(pending.get("approval_id") or "").strip()
 
     @staticmethod
     def _approval_required_content(run: dict[str, Any]) -> str:
@@ -1470,22 +1939,19 @@ class NativeAgentExecutor(ExecutionStrategy):
         current = self._chat_session
         if not session_id:
             return current
-        if current is not None and current.session_id == session_id:
-            return current
         try:
-            from apps.core.chat_session import ChatSession
+            from apps.core.chat_session import load_existing_chat_session
             from apps.core.chat_store import get_chat_store
 
-            session = ChatSession(session_id=session_id)
-            session.attach_store(
+            return load_existing_chat_session(
                 get_chat_store(),
-                load_existing=True,
+                session_id,
+                current=current,
                 fail_active_messages=False,
             )
-            return session
         except Exception:
             logger.debug("无法为 Native Agent 任务加载聊天会话: %s", session_id, exc_info=True)
-            return current
+            return None
 
 
 def _is_key_activity_event(event: dict[str, Any]) -> bool:

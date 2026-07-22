@@ -6,6 +6,9 @@ import re
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from apps.shell.agent.runtime.action_targets import action_target_matches
+from apps.shell.agent.runtime.dispatch_semantics import is_semantic_safe_shortcut
+
 from .app_name_hints import is_legacy_app_name_hint, legacy_app_name_hint
 from .capture_plan_hints import capture_tool_preview
 from .data_analysis_plan_hints import data_source_kind_hint
@@ -17,9 +20,21 @@ from .desktop_plan_hints import (
     media_tool_preview,
 )
 from .file_access_plan_hints import file_access_tool_preview
-from .runtime_planner import RuntimePlanner, _explicit_ui_observation_before_action_requested
+from .runtime_planner import (
+    RuntimePlanner,
+    _explicit_ui_observation_before_action_requested,
+)
 from .schedule_plan_hints import schedule_tool_preview
 from .system_plan_hints import system_tool_preview
+
+
+_MACOS_SYSTEM_SURFACE_APP_NAMES = frozenset(
+    {
+        "Launchpad",
+        "Control Center",
+        "Notification Center",
+    }
+)
 
 
 def planner_tool_requests(
@@ -62,7 +77,9 @@ def planner_execution_tool_requests(
         if str(tool or "").strip()
     }
     normalized_requests = [
-        dict(request) for request in requests if isinstance(request, Mapping)
+        _request_with_explicit_dispatch_contract(dict(request))
+        for request in requests
+        if isinstance(request, Mapping)
     ]
     if not normalized_requests:
         return []
@@ -106,23 +123,346 @@ def planner_execution_tool_requests(
     normalized_requests = _drop_redundant_execution_verification_requests(
         normalized_requests
     )
+    verified_requests = runtime_execution_verified_tool_requests(
+        normalized_requests,
+        allowed,
+    )
     return _execution_prefix_through_model_followup(
-        runtime_execution_verified_tool_requests(normalized_requests, allowed)
+        _request_with_explicit_dispatch_contract(request)
+        for request in verified_requests
     )
 
 
 def _execution_prefix_through_model_followup(
     requests: Iterable[Mapping[str, Any]],
 ) -> list[dict[str, Any]]:
+    normalized_requests = [
+        dict(request) for request in requests if isinstance(request, Mapping)
+    ]
     executable: list[dict[str, Any]] = []
-    for request in requests:
-        if not isinstance(request, Mapping):
-            continue
-        normalized = dict(request)
+    for index, normalized in enumerate(normalized_requests):
         executable.append(normalized)
         if normalized.get("continue_to_model"):
+            if index + 1 < len(normalized_requests):
+                dependent = normalized_requests[index + 1]
+                if _deterministic_dispatch_can_follow_exact_verifier(
+                    normalized,
+                    dependent,
+                    executable,
+                ):
+                    executable.append(dependent)
             break
     return executable
+
+
+_PLANNER_EXECUTION_DISPATCH_ACTIONS = frozenset(
+    {"dispatch_management", "dispatch_shortcut", "dispatch_submit"}
+)
+
+
+def _request_with_explicit_dispatch_contract(
+    request: Mapping[str, Any],
+) -> dict[str, Any]:
+    normalized = dict(request)
+    if _clipboard_transfer_shortcut_requires_exact_verification(normalized):
+        # Copy/paste receipts prove only key dispatch.  Keep them effectful so
+        # the Runtime inserts and evaluates an independent readback before a
+        # dependent submit is eligible.
+        normalized["requires_post_action_verification"] = True
+        return normalized
+    task_todo = (
+        normalized.get("task_todo")
+        if isinstance(normalized.get("task_todo"), Mapping)
+        else {}
+    )
+    todo_metadata = (
+        task_todo.get("metadata")
+        if isinstance(task_todo.get("metadata"), Mapping)
+        else {}
+    )
+    dispatch_action = _canonical_planner_dispatch_action(normalized)
+    if dispatch_action not in _PLANNER_EXECUTION_DISPATCH_ACTIONS:
+        return normalized
+
+    normalized["requires_post_action_verification"] = False
+    if task_todo:
+        normalized["task_todo"] = {
+            **dict(task_todo),
+            "metadata": {
+                **dict(todo_metadata),
+                "requires_post_action_verification": False,
+            },
+        }
+    checkpoints = normalized.get("task_checkpoints")
+    if isinstance(checkpoints, list):
+        normalized["task_checkpoints"] = [
+            {
+                **dict(checkpoint),
+                "verifies": [],
+                "payload": {
+                    **dict(
+                        checkpoint.get("payload")
+                        if isinstance(checkpoint.get("payload"), Mapping)
+                        else {}
+                    ),
+                    "requires_post_action_verification": False,
+                },
+            }
+            if isinstance(checkpoint, Mapping)
+            else checkpoint
+            for checkpoint in checkpoints
+        ]
+    checkpoint_policy = normalized.get("checkpoint_policy")
+    if isinstance(checkpoint_policy, Mapping):
+        normalized["checkpoint_policy"] = {
+            **dict(checkpoint_policy),
+            "requires_post_action_verification": False,
+            "verification_target_step_ids": [],
+            "verifies": [],
+        }
+    desktop_loop = normalized.get("desktop_loop")
+    if isinstance(desktop_loop, Mapping):
+        normalized["desktop_loop"] = {
+            **dict(desktop_loop),
+            "action": dispatch_action,
+            "requires_post_action_verification": False,
+            "can_auto_retry": False,
+            "retry_tool": "",
+            "retry_reason": "",
+            "retry_input": {},
+            "verification_target_step_ids": [],
+        }
+    action_target = normalized.get("action_target")
+    if isinstance(action_target, Mapping):
+        normalized["action_target"] = {
+            **dict(action_target),
+            "action": dispatch_action,
+        }
+    normalized["observation_retry"] = {}
+    normalized["replan_triggers"] = [
+        trigger
+        for trigger in _string_list(normalized.get("replan_triggers"))
+        if trigger not in {"verification_failed", "verification_unavailable"}
+    ]
+    return normalized
+
+
+def _clipboard_transfer_shortcut_requires_exact_verification(
+    request: Mapping[str, Any],
+) -> bool:
+    tool_name = str(request.get("tool") or request.get("tool_name") or "").strip()
+    if tool_name not in {
+        "desktop.safe_shortcut",
+        "desktop.shortcut",
+        "app.open_and_safe_shortcut",
+        "app.focus_and_safe_shortcut",
+    }:
+        return False
+    payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+    return str(payload.get("action") or "").strip().lower() in {"copy", "paste"}
+
+
+def _canonical_planner_dispatch_action(request: Mapping[str, Any]) -> str:
+    """Derive dispatch semantics from tool input and optional canonical todo.
+
+    Top-level ``request.action`` is projection metadata and is intentionally not
+    authoritative. A todo may only narrow the tool/input allowlist; it can never
+    upgrade an effectful operation into a receipt-only dispatch.
+    """
+
+    request_input = (
+        request.get("input")
+        if isinstance(request.get("input"), Mapping)
+        else {}
+    )
+    tool_input_dispatch_action = _planner_dispatch_action_for_tool_input(
+        str(request.get("tool") or request.get("tool_name") or "").strip(),
+        request_input,
+    )
+    task_todo = (
+        request.get("task_todo")
+        if isinstance(request.get("task_todo"), Mapping)
+        else {}
+    )
+    todo_metadata = (
+        task_todo.get("metadata")
+        if isinstance(task_todo.get("metadata"), Mapping)
+        else {}
+    )
+    todo_action = str(todo_metadata.get("action") or "").strip()
+    if todo_action:
+        return (
+            todo_action
+            if todo_action == tool_input_dispatch_action
+            and todo_action in _PLANNER_EXECUTION_DISPATCH_ACTIONS
+            else ""
+        )
+    return (
+        tool_input_dispatch_action
+        if tool_input_dispatch_action in _PLANNER_EXECUTION_DISPATCH_ACTIONS
+        else ""
+    )
+
+
+def _planner_dispatch_action_for_tool_input(
+    tool_name: str,
+    request_input: Mapping[str, Any],
+) -> str:
+    clean_tool = str(tool_name or "").strip()
+    if clean_tool in {
+        "desktop.hide_app",
+        "desktop.minimize_window",
+        "desktop.close_window",
+        "desktop.quit_app",
+    }:
+        return "dispatch_management" if not request_input else ""
+    if clean_tool == "desktop.search_submit":
+        return "dispatch_submit" if not request_input else ""
+    if clean_tool == "desktop.submit_foreground":
+        if not _planner_dispatch_input_has_only(request_input, {"action"}):
+            return ""
+        action = str(request_input.get("action") or "submit").strip().lower()
+        return "dispatch_submit" if action in {"send", "submit", "confirm"} else ""
+    if clean_tool in {"desktop.hotkey", "desktop.shortcut"}:
+        if not _planner_dispatch_input_has_only(
+            request_input,
+            {"key", "modifiers"},
+        ):
+            return ""
+        return (
+            "dispatch_shortcut"
+            if str(request_input.get("key") or "").strip()
+            else ""
+        )
+    if clean_tool == "desktop.safe_shortcut":
+        if is_semantic_safe_shortcut(clean_tool, request_input):
+            return ""
+        if not _planner_dispatch_input_has_only(request_input, {"action"}):
+            return ""
+        action = str(request_input.get("action") or "").strip().lower()
+        return "dispatch_shortcut" if action else ""
+    if clean_tool == "desktop.safe_key":
+        if not _planner_dispatch_input_has_only(
+            request_input,
+            {"action", "repeat_count"},
+        ):
+            return ""
+        return (
+            "dispatch_shortcut"
+            if str(request_input.get("action") or "").strip()
+            else ""
+        )
+    if clean_tool == "desktop.safe_scroll":
+        if not _planner_dispatch_input_has_only(
+            request_input,
+            {"direction", "pages"},
+        ):
+            return ""
+        direction = str(request_input.get("direction") or "").strip().lower()
+        return "dispatch_shortcut" if direction in {"up", "down"} else ""
+    if clean_tool == "desktop.safe_click":
+        if not _planner_dispatch_input_has_only(request_input, {"x", "y"}):
+            return ""
+        return (
+            "dispatch_shortcut"
+            if request_input.get("x") is not None
+            and request_input.get("y") is not None
+            else ""
+        )
+    return ""
+
+
+def _planner_dispatch_input_has_only(
+    request_input: Mapping[str, Any],
+    allowed_keys: set[str],
+) -> bool:
+    return set(request_input).issubset(allowed_keys)
+
+
+def _deterministic_dispatch_can_follow_exact_verifier(
+    verifier: Mapping[str, Any],
+    dependent: Mapping[str, Any],
+    executable_prefix: Iterable[Mapping[str, Any]],
+) -> bool:
+    if str(verifier.get("runtime_stage") or "").strip() != "verify":
+        return False
+    if str(verifier.get("runtime_role") or "").strip() != "verify_result":
+        return False
+    if any(
+        verifier.get(key) not in (None, "", [], {})
+        for key in (
+            "deferred_tool",
+            "deferred_input",
+            "deferred_context",
+            "deferred_continuation",
+        )
+    ):
+        return False
+    if str(verifier.get("status") or "").strip().lower() in {
+        "blocked",
+        "failed",
+        "unavailable",
+    }:
+        return False
+    verification_targets = verifier.get("verification_targets")
+    if not isinstance(verification_targets, list) or not any(
+        isinstance(target, Mapping)
+        and str(target.get("step_id") or "").strip()
+        for target in verification_targets
+    ):
+        return False
+
+    verifier_step_id = str(
+        verifier.get("step_id") or verifier.get("planner_step_id") or ""
+    ).strip()
+    dependencies = _string_list(dependent.get("depends_on"))
+    if not verifier_step_id or verifier_step_id not in dependencies:
+        return False
+    completed_step_ids = {
+        str(request.get("step_id") or request.get("planner_step_id") or "").strip()
+        for request in executable_prefix
+        if str(
+            request.get("step_id") or request.get("planner_step_id") or ""
+        ).strip()
+    }
+    if any(step_id not in completed_step_ids for step_id in dependencies):
+        return False
+    if dependent.get("approval_required") is True:
+        return False
+    if dependent.get("continue_to_model") is True:
+        return False
+    if dependent.get("requires_post_action_verification") is not False:
+        return False
+    if any(
+        dependent.get(key) not in (None, "", [], {})
+        for key in (
+            "deferred_tool",
+            "deferred_input",
+            "deferred_context",
+            "deferred_continuation",
+        )
+    ):
+        return False
+    dispatch_action = _canonical_planner_dispatch_action(dependent)
+    if dispatch_action not in {"dispatch_management", "dispatch_shortcut"}:
+        return False
+    return not _execution_request_has_unresolved_input(dependent)
+
+
+def _execution_request_has_unresolved_input(request: Mapping[str, Any]) -> bool:
+    payload = request.get("input")
+
+    def unresolved(value: Any) -> bool:
+        if isinstance(value, Mapping):
+            return any(unresolved(item) for item in value.values())
+        if isinstance(value, Iterable) and not isinstance(value, (str, bytes)):
+            return any(unresolved(item) for item in value)
+        if not isinstance(value, str):
+            return False
+        text = value.strip()
+        return bool(text.startswith("<") and text.endswith(">"))
+
+    return unresolved(payload)
 
 
 def planner_full_plan_execution_tool_requests(
@@ -212,17 +552,22 @@ def _prepend_unknown_app_discovery_requests(
             normalized.append(request)
             continue
         app_name = str(payload.get("app_name") or "").strip()
-        if _request_needs_app_discovery_first(tool_name, payload, request):
-            query_keys = _discovery_query_keys(app_name)
-            existing_query = next(
-                (
-                    discovered_queries[query_key]
-                    for query_key in query_keys
-                    if query_key in discovered_queries
-                ),
-                "",
+        query_keys = _discovery_query_keys(app_name)
+        existing_query = next(
+            (
+                discovered_queries[query_key]
+                for query_key in query_keys
+                if query_key in discovered_queries
+            ),
+            "",
+        )
+        if existing_query and not _is_macos_system_surface_app_name(app_name):
+            request = _request_with_desktop_app_selection_source(
+                request,
+                existing_query,
             )
-            if query_keys and not existing_query:
+        elif _request_needs_app_discovery_first(tool_name, payload, request):
+            if query_keys:
                 normalized.append(
                     _desktop_app_discovery_request_for_execution(
                         app_name,
@@ -273,6 +618,10 @@ def _request_needs_app_discovery_first(
     app_name = str(payload.get("app_name") or "").strip()
     if not app_name or _is_selected_desktop_app_placeholder(app_name):
         return False
+    if _is_macos_system_surface_app_name(app_name):
+        return False
+    if is_legacy_app_name_hint(app_name):
+        return False
     if _is_desktop_app_selection_source(payload.get("selection_source")):
         return False
     input_resolution = (
@@ -283,6 +632,11 @@ def _request_needs_app_discovery_first(
     if _is_desktop_app_selection_source(input_resolution.get("source_tool")):
         return False
     return True
+
+
+def _is_macos_system_surface_app_name(app_name: str) -> bool:
+    canonical = str(legacy_app_name_hint(app_name) or app_name or "").strip()
+    return canonical in _MACOS_SYSTEM_SURFACE_APP_NAMES
 
 
 def _request_with_desktop_app_selection_source(
@@ -379,18 +733,30 @@ def _defer_unknown_app_ui_element_operations_to_observation(
             continue
         if not _last_request_matches_tool_and_input(normalized, prepare_request):
             normalized.append(prepare_request)
-        normalized.append(
-            _unknown_app_ui_observation_request(
-                request,
+        observation = _unknown_app_ui_observation_request(
+            request,
+            allowed,
+            deferred_continuation=_unknown_app_ui_deferred_continuation(
+                requests,
+                index,
+                tool_name,
                 allowed,
-                deferred_continuation=_unknown_app_ui_deferred_continuation(
-                    requests,
-                    index,
-                    tool_name,
-                    allowed,
-                ),
-            )
+            ),
         )
+        immediate_verifier = requests[index + 1] if index + 1 < len(requests) else {}
+        if _is_execution_verification_request(immediate_verifier):
+            observation["deferred_verifier_context"] = {
+                **_deferred_request_context(immediate_verifier),
+                "tool": str(immediate_verifier.get("tool") or "").strip(),
+                "source": str(
+                    immediate_verifier.get("source") or "runtime_verification"
+                ).strip(),
+                "planning_reason": str(
+                    immediate_verifier.get("planning_reason")
+                    or "planner_desktop_operation"
+                ).strip(),
+            }
+        normalized.append(observation)
         return normalized
     return normalized
 
@@ -534,6 +900,17 @@ def _defer_search_result_clicks_to_observation(
         skip_indexes.add(index + 1)
         after_click = requests[index + 2] if index + 2 < len(requests) else {}
         if _is_execution_verification_request(after_click):
+            observation["deferred_verifier_context"] = {
+                **_deferred_request_context(after_click),
+                "tool": str(after_click.get("tool") or "").strip(),
+                "source": str(
+                    after_click.get("source") or "runtime_verification"
+                ).strip(),
+                "planning_reason": str(
+                    after_click.get("planning_reason")
+                    or "planner_desktop_operation"
+                ).strip(),
+            }
             skip_indexes.add(index + 2)
     return normalized
 
@@ -647,6 +1024,14 @@ def _defer_semantic_ui_clicks_to_observation(
         normalized.append(observation)
         after_click = requests[index + 1] if index + 1 < len(requests) else {}
         if _is_execution_verification_request(after_click):
+            observation["deferred_verifier_context"] = {
+                **_deferred_request_context(after_click),
+                "tool": str(after_click.get("tool") or "").strip(),
+                "source": str(after_click.get("source") or "runtime_verification").strip(),
+                "planning_reason": str(
+                    after_click.get("planning_reason") or "planner_desktop_operation"
+                ).strip(),
+            }
             skip_indexes.add(index + 1)
     return normalized
 
@@ -982,6 +1367,12 @@ def _deferred_request_context(source: Mapping[str, Any]) -> dict[str, Any]:
         "step_id",
         "planner_step_id",
         "capability_id",
+        "approval_required",
+        "risk_level",
+        "depends_on",
+        "runtime_stage",
+        "runtime_role",
+        "action_target",
         "task_todo",
         "task_checkpoints",
         "task_workspace_items",
@@ -991,7 +1382,45 @@ def _deferred_request_context(source: Mapping[str, Any]) -> dict[str, Any]:
         value = source.get(key)
         if value not in (None, "", [], {}):
             context[key] = value
+    canonical_action_target = _deferred_canonical_action_target(source)
+    if canonical_action_target:
+        context["action_target"] = canonical_action_target
     return context
+
+
+def _deferred_canonical_action_target(source: Mapping[str, Any]) -> dict[str, Any]:
+    """Keep the planner target that the immutable goal contract was bound to."""
+
+    raw_checkpoints = source.get("task_checkpoints")
+    for raw_checkpoint in (
+        raw_checkpoints if isinstance(raw_checkpoints, (list, tuple)) else ()
+    ):
+        if not isinstance(raw_checkpoint, Mapping):
+            continue
+        payload = (
+            raw_checkpoint.get("payload")
+            if isinstance(raw_checkpoint.get("payload"), Mapping)
+            else {}
+        )
+        action_target = payload.get("action_target")
+        if isinstance(action_target, Mapping) and action_target:
+            return dict(action_target)
+    raw_workspace_items = source.get("task_workspace_items")
+    for raw_item in (
+        raw_workspace_items if isinstance(raw_workspace_items, (list, tuple)) else ()
+    ):
+        if not isinstance(raw_item, Mapping):
+            continue
+        metadata = (
+            raw_item.get("metadata")
+            if isinstance(raw_item.get("metadata"), Mapping)
+            else {}
+        )
+        action_target = metadata.get("action_target")
+        if isinstance(action_target, Mapping) and action_target:
+            return dict(action_target)
+    action_target = source.get("action_target")
+    return dict(action_target) if isinstance(action_target, Mapping) else {}
 
 
 _REQUEST_CONTEXT_WITHOUT_STEP_KEYS = (
@@ -2099,6 +2528,22 @@ def _string_list(values: Any) -> list[str]:
     return result
 
 
+def _snapshot_mapping_list(values: Any) -> list[dict[str, Any]]:
+    if not isinstance(values, Iterable) or isinstance(values, (str, bytes, Mapping)):
+        return []
+    result: list[dict[str, Any]] = []
+    for value in values:
+        if isinstance(value, Mapping):
+            result.append(dict(value))
+            continue
+        model_dump = getattr(value, "model_dump", None)
+        if callable(model_dump):
+            payload = model_dump()
+            if isinstance(payload, Mapping):
+                result.append(dict(payload))
+    return result
+
+
 def _matching_trace_step(
     request: Mapping[str, Any],
     steps: list[Any],
@@ -2151,7 +2596,14 @@ def _annotate_request_trace(
         request["approval_required"] = True
     depends_on = _string_list(getattr(step, "depends_on", []))
     if depends_on:
-        request.setdefault("depends_on", depends_on)
+        request["depends_on"] = depends_on
+    else:
+        request.pop("depends_on", None)
+    input_bindings = _snapshot_mapping_list(getattr(step, "input_bindings", []))
+    if input_bindings:
+        request["input_bindings"] = input_bindings
+    else:
+        request.pop("input_bindings", None)
     fallback_tools = _string_list(getattr(step, "fallback_tools", []))
     if fallback_tools:
         request.setdefault("fallback_tools", fallback_tools)
@@ -2521,9 +2973,27 @@ def _looks_like_orchestration_action(prompt: str, orchestration_kind: str) -> bo
 
 
 def _first_allowed(candidates: Iterable[str], allowed: set[str]) -> str:
-    for candidate in candidates:
-        tool_name = str(candidate or "").strip()
-        if tool_name and tool_name in allowed:
+    ordered = tuple(
+        dict.fromkeys(
+            tool_name
+            for candidate in candidates
+            if (tool_name := str(candidate or "").strip())
+        )
+    )
+    if not ordered:
+        return ""
+
+    # This projection layer must not turn an allowlisted-looking string into
+    # execution authority.  Validate candidates through the Runtime-owned
+    # schema/dispatch boundary while retaining the historical stable order.
+    from apps.shell.agent.runtime.tool_candidate_selection import (
+        select_tool_candidate,
+    )
+
+    selection = select_tool_candidate(ordered, allowed)
+    eligible = {candidate.tool_name for candidate in selection.ranked_candidates}
+    for tool_name in ordered:
+        if tool_name in eligible:
             return tool_name
     return ""
 
@@ -2832,13 +3302,24 @@ def _selected_discovered_app_payload_needs_open_path_tool(payload: Mapping[str, 
     )
 
 
+def _runtime_resolvable_selected_app_consumer(
+    payload: Mapping[str, Any],
+    tool_name: str = "",
+) -> bool:
+    return bool(
+        str(payload.get("app_name") or "").strip()
+        == "<selected app from desktop.list_apps>"
+        and _runtime_resolvable_selected_app_payload(payload, tool_name)
+    )
+
+
 def _runtime_resolvable_discovered_app_plan(decision: Any) -> bool:
     steps = list(getattr(getattr(getattr(decision, "plan", None), "tool_plan", None), "steps", []) or [])
     if not steps or _discovered_app_plan_needs_model_reasoning(decision, steps):
         return False
     steps_by_id = _steps_by_id(steps)
     selected_communication_query = _selected_communication_app_query(steps_by_id)
-    has_resolvable_open_step = False
+    has_resolvable_selected_app_consumer = False
     for step in steps:
         if not _step_available(step):
             continue
@@ -2846,13 +3327,13 @@ def _runtime_resolvable_discovered_app_plan(decision: Any) -> bool:
         payload = input_preview if isinstance(input_preview, Mapping) else {}
         step_id = str(getattr(step, "step_id", "") or "").strip()
         tool_name = str(getattr(step, "tool_name", "") or "").strip()
-        if step_id == "open-selected-discovered-app":
-            has_resolvable_open_step = _runtime_resolvable_selected_app_payload(
-                payload,
-                tool_name,
-            )
+        if _runtime_resolvable_selected_app_consumer(payload, tool_name):
+            has_resolvable_selected_app_consumer = True
         if step_id == "open-discovered-file-with-app":
-            has_resolvable_open_step = _runtime_resolvable_dynamic_file_open_step(step)
+            has_resolvable_selected_app_consumer = (
+                has_resolvable_selected_app_consumer
+                or _runtime_resolvable_dynamic_file_open_step(step)
+            )
         payload_requires_model = _selected_discovered_app_payload_requires_model(
             payload,
             tool_name,
@@ -2863,9 +3344,10 @@ def _runtime_resolvable_discovered_app_plan(decision: Any) -> bool:
             selected_communication_query,
         ):
             payload_requires_model = False
+            has_resolvable_selected_app_consumer = True
         if payload_requires_model:
             return False
-    return has_resolvable_open_step
+    return has_resolvable_selected_app_consumer
 
 
 def _discovered_app_plan_needs_model_reasoning(
@@ -2915,7 +3397,7 @@ def _has_unavailable_required_desktop_step(
         tool_name = str(getattr(step, "tool_name", "") or "").strip()
         input_preview = getattr(step, "input_preview", None)
         payload = input_preview if isinstance(input_preview, Mapping) else {}
-        if step_id == "verify-desktop-result":
+        if _is_desktop_result_verification_step_id(step_id):
             continue
         if not tool_name and step_id == "submit-foreground-ui":
             continue
@@ -3406,8 +3888,8 @@ def _drop_redundant_post_inspect_app_prepare_requests(
             continue
         filtered.append(request)
         if tool_name == "desktop.inspect_app":
-            focus_requested = payload.get("focus", True) is not False
-            open_requested = payload.get("open_if_needed", True) is not False
+            focus_requested = payload.get("focus", False) is True
+            open_requested = payload.get("open_if_needed", False) is True
             inspect_app_name = app_name if focus_requested or open_requested else ""
         elif tool_name not in {"app.open", "app.focus", "desktop.open_app", "desktop.focus_app"}:
             inspect_app_name = ""
@@ -3417,6 +3899,16 @@ def _drop_redundant_post_inspect_app_prepare_requests(
 def _keep_pre_mutation_verification_request(request: dict[str, Any]) -> bool:
     tool_name = str(request.get("tool") or "").strip()
     payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+    if (
+        tool_name in {"desktop.ui_elements", "desktop.read_ui"}
+        and str(request.get("runtime_stage") or "").strip() == "discover"
+        and str(request.get("runtime_role") or "").strip() == "inspect_ui"
+        and request.get("requires_observation") is True
+    ):
+        # A semantic foreground action is grounded by this pre-action read.
+        # The later verifier proves the mutation; it does not supersede the
+        # observation that identified the target before input was sent.
+        return True
     if tool_name == "desktop.inspect_app":
         return bool(str(payload.get("app_name") or "").strip())
     if tool_name in {"desktop.windows", "desktop.list_windows", "desktop.verify"}:
@@ -3687,11 +4179,186 @@ def _desktop_step_planning_reason(step: Any, tool_name: str) -> str:
     return "planner_desktop_operation"
 
 
+_DESKTOP_OBSERVATION_MODEL_FOLLOWUP_STEP_IDS = frozenset(
+    {
+        "capture-screen",
+        "inspect-app",
+        "observe-selected-discovered-app",
+        "read-foreground-ui",
+        "verify-desktop-result",
+        "verify-opened-file",
+    }
+)
+_DESKTOP_OBSERVATION_MODEL_FOLLOWUP_TOOLS = frozenset(
+    {
+        "screen.capture",
+        "desktop.active_window",
+        "desktop.ui_elements",
+        "desktop.read_ui",
+        "desktop.inspect_app",
+        "desktop.list_windows",
+        "desktop.running_apps",
+        "desktop.verify",
+        "desktop.windows",
+    }
+)
+
+
+def _is_desktop_result_verification_step_id(step_id: str) -> bool:
+    return step_id == "verify-desktop-result" or step_id.startswith(
+        "verify-desktop-result-"
+    )
+
+
+def _is_desktop_observation_model_followup_step_id(step_id: str) -> bool:
+    return any(
+        step_id == candidate or step_id.startswith(f"{candidate}-")
+        for candidate in _DESKTOP_OBSERVATION_MODEL_FOLLOWUP_STEP_IDS
+    )
+
+
+def _is_planned_desktop_observation_step(
+    decision: Any,
+    step_id: str,
+    tool_name: str,
+) -> bool:
+    planned_step = _planned_step_by_id(decision, step_id)
+    return bool(
+        _is_desktop_observation_model_followup_step_id(step_id)
+        or tool_name in _DESKTOP_OBSERVATION_MODEL_FOLLOWUP_TOOLS
+        or str(getattr(planned_step, "action", "") or "").strip()
+        == "observe_ui_target"
+    )
+
+
+def planner_desktop_observation_step_needs_model_followup(
+    decision: Any,
+    step_id: str,
+    tool_name: str,
+) -> bool | None:
+    """Classify desktop observations without deciding non-desktop verifiers.
+
+    ``None`` preserves the caller's policy for non-desktop tools or incomplete
+    verifier contracts. A local terminal verdict requires both a GoalContract
+    and an exact task verification target.
+    """
+
+    if step_id == "read-desktop-content":
+        return True
+    if not _is_planned_desktop_observation_step(decision, step_id, tool_name):
+        return None
+    if _desktop_observation_step_needs_model_followup(
+        decision,
+        step_id,
+        tool_name,
+    ):
+        return True
+    runtime_stage = str(
+        _runtime_trace_metadata_for_step(decision, step_id).get("runtime_stage") or ""
+    ).strip()
+    if runtime_stage != "verify":
+        return False
+    task_core = getattr(getattr(decision, "plan", None), "task_core", None)
+    if task_core is None or getattr(task_core, "goal_contract", None) is None:
+        return None
+    verification_targets = _task_verification_targets_for_step(
+        decision,
+        task_core,
+        step_id,
+    )
+    if not verification_targets:
+        return None
+    if not _goal_contract_binds_task_verification_targets(
+        task_core,
+        step_id,
+        verification_targets,
+    ):
+        return None
+    return False
+
+
+def _goal_contract_binds_task_verification_targets(
+    task_core: Any,
+    verifier_step_id: str,
+    verification_targets: Iterable[Mapping[str, Any]],
+) -> bool:
+    goal_contract = getattr(task_core, "goal_contract", None)
+    targets_by_step_id = {
+        str(target.get("step_id") or "").strip(): target
+        for target in verification_targets
+        if str(target.get("step_id") or "").strip()
+    }
+    if goal_contract is None or not targets_by_step_id:
+        return False
+    bound_target_step_ids: set[str] = set()
+    for criterion in list(getattr(goal_contract, "criteria", None) or []):
+        source_step_ids = {
+            str(value or "").strip()
+            for value in (getattr(criterion, "source_step_ids", None) or [])
+            if str(value or "").strip()
+        }
+        verifier_step_ids = {
+            str(value or "").strip()
+            for value in (getattr(criterion, "verifier_step_ids", None) or [])
+            if str(value or "").strip()
+        }
+        expected = getattr(criterion, "expected", None)
+        expected_target = (
+            expected.get("target") if isinstance(expected, Mapping) else None
+        )
+        if (
+            verifier_step_id not in verifier_step_ids
+            or not isinstance(expected_target, Mapping)
+            or not expected_target
+        ):
+            continue
+        capability_ids = list(
+            getattr(criterion, "required_capabilities", None) or []
+        )
+        for source_step_id in source_step_ids.intersection(targets_by_step_id):
+            if _goal_expected_target_matches_task_verification_target(
+                expected_target,
+                targets_by_step_id[source_step_id],
+                capability_ids=capability_ids,
+                source_step_id=source_step_id,
+            ):
+                bound_target_step_ids.add(source_step_id)
+    return bound_target_step_ids == set(targets_by_step_id)
+
+
+def _goal_expected_target_matches_task_verification_target(
+    expected_target: Mapping[str, Any],
+    verification_target: Mapping[str, Any],
+    *,
+    capability_ids: Iterable[str],
+    source_step_id: str,
+) -> bool:
+    for checkpoint in list(verification_target.get("checkpoints") or []):
+        if not isinstance(checkpoint, Mapping):
+            continue
+        if str(checkpoint.get("after_step_id") or "").strip() != source_step_id:
+            continue
+        payload = checkpoint.get("payload")
+        action_target = (
+            payload.get("action_target") if isinstance(payload, Mapping) else None
+        )
+        if isinstance(action_target, Mapping) and action_target_matches(
+            expected_target,
+            action_target,
+            capability_ids=capability_ids,
+            source_step_id=source_step_id,
+        ):
+            return True
+    return False
+
+
 def _desktop_observation_step_needs_model_followup(
     decision: Any,
     step_id: str,
     tool_name: str,
 ) -> bool:
+    if not _is_planned_desktop_observation_step(decision, step_id, tool_name):
+        return False
     if step_id == "verify-opened-file":
         return _dynamic_file_open_step_needs_model_followup(decision)
     planned_step = _planned_step_by_id(decision, step_id)
@@ -3701,19 +4368,6 @@ def _desktop_observation_step_needs_model_followup(
         return True
     if _selected_discovered_app_observation_needs_model_followup(decision, step_id):
         return True
-    if step_id not in {
-        "capture-screen",
-        "read-foreground-ui",
-        "verify-desktop-result",
-        "inspect-app",
-    } and tool_name not in {
-        "screen.capture",
-        "desktop.ui_elements",
-        "desktop.read_ui",
-        "desktop.inspect_app",
-        "desktop.verify",
-    }:
-        return False
     prompt = str(getattr(getattr(decision, "selected_intent", None), "user_goal", "") or "")
     if not prompt:
         return False
@@ -3724,7 +4378,7 @@ def _desktop_observation_step_needs_model_followup(
     ):
         return _control_presence_prompt_needs_model_followup(prompt)
     if (
-        step_id == "verify-desktop-result"
+        _is_desktop_result_verification_step_id(step_id)
         and isinstance(inputs, Mapping)
         and (
             isinstance(inputs.get("creative_canvas_hint"), Mapping)
@@ -3745,7 +4399,7 @@ def _desktop_observation_step_depends_on_model_resolved_ui_step(
     decision: Any,
     step_id: str,
 ) -> bool:
-    if step_id != "verify-desktop-result":
+    if not _is_desktop_result_verification_step_id(step_id):
         return False
     steps = list(getattr(getattr(getattr(decision, "plan", None), "tool_plan", None), "steps", []) or [])
     step_indexes = {
@@ -4022,6 +4676,14 @@ def _desktop_observation_prompt_needs_model_followup(prompt: str, inputs: Any) -
             flags=re.IGNORECASE,
         )
         or re.search(
+            r"(?:看看|检查|确认|验证|核对|比较|对比).{0,16}"
+            r"(?:结果|内容|状态|是否|有没有|包含|存在|相同|一致)|"
+            r"(?:结果|内容|状态).{0,16}"
+            r"(?:是否|有没有|包含|存在|相同|一致)",
+            prompt_for_intent,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
             r"\b(?:judge|decide|analy[sz]e|identify|tell|explain|summari[sz]e|"
             r"determine|whether|what|which|where|should|next\s+step|closest|similar|"
             r"related|matching|appropriate|suitable|possible)\b",
@@ -4036,7 +4698,7 @@ def _desktop_verify_step_is_direct_control(
     tool_name: str,
     inputs: Any,
 ) -> bool:
-    if step_id != "verify-desktop-result" or tool_name not in {
+    if not _is_desktop_result_verification_step_id(step_id) or tool_name not in {
         "desktop.active_window",
         "desktop.ui_elements",
         "desktop.read_ui",
@@ -4187,6 +4849,11 @@ def _desktop_request_payload(tool_name: str, payload: dict[str, Any]) -> dict[st
             for key in ("role_filter", "limit")
             if key in payload and payload[key] not in (None, "")
         }
+        if (
+            tool_name == "desktop.verify"
+            and payload.get("verification_goal") not in (None, "")
+        ):
+            request_payload["verification_goal"] = payload["verification_goal"]
         if app_name:
             request_payload["app_name"] = _canonical_app_name(app_name)
             _copy_app_selection_metadata(payload, request_payload)
@@ -4707,6 +5374,41 @@ def _code_task_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str,
                     planning_reason="planner_fallback_terminal_command",
                 )
             ]
+    terminal_execution_hint = inputs.get("terminal_execution_request_hint")
+    if (
+        isinstance(terminal_execution_hint, Mapping)
+        and str(terminal_execution_hint.get("mode") or "").strip()
+        == "model_selected_approved_command"
+        and "terminal.run" in allowed
+    ):
+        step = _planned_step_by_id(
+            decision,
+            "run-model-selected-terminal-command",
+        )
+        input_preview = (
+            getattr(step, "input_preview", None)
+            if step is not None
+            else None
+        )
+        payload = (
+            dict(input_preview)
+            if isinstance(input_preview, Mapping)
+            else {}
+        )
+        if (
+            str(payload.get("body_source") or "").strip()
+            == "model_generated_content"
+            and str(payload.get("operation") or "").strip()
+            == "execute_user_delegated_terminal_task"
+            and not str(payload.get("command") or "").strip()
+        ):
+            request = _request(
+                "terminal.run",
+                payload,
+                planning_reason="planner_terminal_command_materialization",
+            )
+            request["continue_to_model"] = True
+            return [request]
     diagnostic_hint = inputs.get("code_diagnostic_command_hint")
     if isinstance(diagnostic_hint, Mapping):
         command = str(diagnostic_hint.get("command") or "").strip()
@@ -4807,7 +5509,14 @@ def _code_diagnostic_requires_model_followup(decision: Any) -> bool:
 
 
 def _media_tool_requests(inputs: dict[str, Any], allowed: set[str]) -> list[dict[str, Any]]:
-    app_query_plan = media_app_query_search_plan(inputs, allowed)
+    tool_name, payload = media_tool_preview(inputs, allowed)
+    direct_apple_query = bool(
+        tool_name == "media.apple_music_play"
+        and str(payload.get("query") or "").strip()
+    )
+    app_query_plan = (
+        [] if direct_apple_query else media_app_query_search_plan(inputs, allowed)
+    )
     if app_query_plan:
         requests = [
             _request(
@@ -4825,7 +5534,6 @@ def _media_tool_requests(inputs: dict[str, Any], allowed: set[str]) -> list[dict
             if requests:
                 requests[-1]["continue_to_model"] = True
         return requests
-    tool_name, payload = media_tool_preview(inputs, allowed)
     if not tool_name:
         prepare_plan = media_app_prepare_plan(inputs, allowed)
         if not prepare_plan:
@@ -4850,7 +5558,11 @@ def _media_tool_requests(inputs: dict[str, Any], allowed: set[str]) -> list[dict
             planning_reason="planner_fallback_media_playback",
         )
     ]
-    verify_request = _media_playback_verify_request(inputs, allowed)
+    verify_request = _media_playback_verify_request(
+        inputs,
+        allowed,
+        control_tool_name=tool_name,
+    )
     if verify_request:
         requests.append(verify_request)
     return requests
@@ -4880,9 +5592,14 @@ def _media_query_plan_needs_search_result_followup(
     return not any(str(tool_name or "").strip() in playback_tools for tool_name, _ in app_query_plan)
 
 
-def _media_playback_verify_request(inputs: Mapping[str, Any], allowed: set[str]) -> dict[str, Any]:
+def _media_playback_verify_request(
+    inputs: Mapping[str, Any],
+    allowed: set[str],
+    *,
+    control_tool_name: str,
+) -> dict[str, Any]:
     action = str(inputs.get("action") or "").strip() or "play"
-    if action == "status":
+    if action == "status" or control_tool_name.startswith("media."):
         return {}
     tool_name = _first_allowed(("desktop.ui_elements", "desktop.active_window", "screen.capture"), allowed)
     if not tool_name:
@@ -5134,6 +5851,7 @@ def _append_system_volume_status_verification_requests(
 ) -> list[dict[str, Any]]:
     if "system.volume" not in allowed:
         return requests
+    requests = _bind_system_volume_status_verification_requests(requests)
     if _has_native_tool_call_protocol(requests):
         return _append_system_volume_status_after_native_tool_calls(requests)
     normalized: list[dict[str, Any]] = []
@@ -5229,7 +5947,134 @@ def _system_volume_status_verification_request(
         "planning_reason": planning_reason,
         "continue_to_model": True,
     }
+    return _system_volume_status_request_with_exact_source(request, source_request)
+
+
+def _bind_system_volume_status_verification_requests(
+    requests: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Bind an existing volume status read to the exact preceding mutation."""
+
+    last_mutation: Mapping[str, Any] | None = None
+    normalized: list[dict[str, Any]] = []
+    for request in requests:
+        if _system_volume_request_needs_status_verification(request):
+            last_mutation = request
+            normalized.append(request)
+            continue
+        if last_mutation is not None and _request_is_system_volume_status(request):
+            normalized.append(
+                _system_volume_status_request_with_exact_source(
+                    request,
+                    last_mutation,
+                )
+            )
+            last_mutation = None
+            continue
+        normalized.append(request)
+    return normalized
+
+
+def _system_volume_status_request_with_exact_source(
+    status_request: Mapping[str, Any],
+    source_request: Mapping[str, Any],
+) -> dict[str, Any]:
+    source_step_id = str(
+        source_request.get("step_id")
+        or source_request.get("planner_step_id")
+        or ""
+    ).strip()
+    if not source_step_id:
+        return dict(status_request)
+    if not _system_volume_verification_scope_matches(status_request, source_request):
+        return dict(status_request)
+    existing_dependencies = _string_list(status_request.get("depends_on"))
+    if existing_dependencies and source_step_id not in existing_dependencies:
+        return dict(status_request)
+
+    request = dict(status_request)
+    for key in (
+        "run_id",
+        "decision_id",
+        "plan_id",
+        "tool_plan_id",
+        "intent_kind",
+        "core_id",
+        "workspace_id",
+        "task_id",
+    ):
+        value = source_request.get(key)
+        if value not in (None, "", [], {}):
+            request.setdefault(key, value)
+    verifier_step_id = str(
+        request.get("step_id") or request.get("planner_step_id") or ""
+    ).strip() or f"{source_step_id}:runtime-verify"
+    request["step_id"] = verifier_step_id
+    request["planner_step_id"] = verifier_step_id
+    request["source_step_id"] = source_step_id
+    request["depends_on"] = existing_dependencies or [source_step_id]
+    source_request_id = str(source_request.get("request_id") or "").strip()
+    if source_request_id:
+        request.setdefault("source_request_id", source_request_id)
+    source_tool_call_id = str(source_request.get("tool_call_id") or "").strip()
+    if source_tool_call_id:
+        request.setdefault("source_tool_call_id", source_tool_call_id)
+    request["source"] = "runtime_verification"
+    request["runtime_doctrine"] = "discover_operate_verify"
+    request["runtime_stage"] = "verify"
+    request["runtime_role"] = "verify_result"
+    request["requires_observation"] = True
+    request["requires_post_action_verification"] = False
+    request.setdefault("replan_triggers", ["verification_failed"])
+
+    verification_targets = request.get("verification_targets")
+    if not isinstance(verification_targets, list) or not any(
+        isinstance(target, Mapping)
+        and str(target.get("step_id") or "").strip() == source_step_id
+        for target in verification_targets
+    ):
+        target: dict[str, Any] = {"step_id": source_step_id}
+        source_todo = source_request.get("task_todo")
+        if isinstance(source_todo, Mapping) and source_todo:
+            target["todo"] = dict(source_todo)
+        source_checkpoints = source_request.get("task_checkpoints")
+        if isinstance(source_checkpoints, list):
+            checkpoints = [
+                dict(checkpoint)
+                for checkpoint in source_checkpoints
+                if isinstance(checkpoint, Mapping)
+            ]
+            if checkpoints:
+                target["checkpoints"] = checkpoints
+        source_workspace_items = source_request.get("task_workspace_items")
+        if isinstance(source_workspace_items, list):
+            workspace_items = [
+                dict(item)
+                for item in source_workspace_items
+                if isinstance(item, Mapping)
+            ]
+            if workspace_items:
+                target["workspace_items"] = workspace_items
+        verification_targets = [target]
+        request["verification_targets"] = verification_targets
+    request["task_verification_targets"] = [
+        dict(target)
+        for target in verification_targets
+        if isinstance(target, Mapping)
+    ]
     return request
+
+
+def _system_volume_verification_scope_matches(
+    status_request: Mapping[str, Any],
+    source_request: Mapping[str, Any],
+) -> bool:
+    for key in ("run_id", "decision_id", "plan_id"):
+        status_value = str(status_request.get(key) or "").strip()
+        source_value = str(source_request.get(key) or "").strip()
+        if status_value and source_value and status_value != source_value:
+            return False
+    return True
 
 
 def _system_settings_open_fallback_requests(
@@ -5742,7 +6587,7 @@ def _web_tool_requests(
                 if presentation:
                     post_request["presentation"] = presentation
                 if _web_request_needs_model_followup(
-                    decision.selected_intent.user_goal
+                    _decision_planning_goal(decision)
                 ) or any(
                     str(getattr(item, "tool_name", "") or "").strip()
                     in {"artifact.write", "clipboard.write"}
@@ -5857,7 +6702,9 @@ def _web_tool_requests(
         "browser.screenshot",
     }:
         return []
-    elif not browser_action and not _looks_like_current_page_request(decision.selected_intent.user_goal):
+    elif not browser_action and not _looks_like_current_page_request(
+        _decision_planning_goal(decision)
+    ):
         return []
     elif tool_name == "browser.screenshot":
         reason = str(decision.selected_intent.inputs.get("reason") or "").strip()
@@ -5869,7 +6716,7 @@ def _web_tool_requests(
         planning_reason="planner_fallback_web_research",
     )
     presentation = str(decision.selected_intent.inputs.get("presentation") or "").strip()
-    if presentation:
+    if presentation and _browser_tool_result_can_feed_model(tool_name):
         request["presentation"] = presentation
     if _web_read_request_needs_model_followup(decision, tool_name, presentation) and (
         not browser_action
@@ -5984,6 +6831,18 @@ def _tool_plan_step(decision: Any, step_id: str) -> Any | None:
     )
 
 
+def _decision_planning_goal(decision: Any) -> str:
+    """Return Runtime-validated planning text without changing root authority."""
+
+    intent = getattr(decision, "selected_intent", None)
+    inputs = getattr(intent, "inputs", None)
+    if isinstance(inputs, Mapping):
+        normalized = str(inputs.get("runtime_model_planning_goal") or "").strip()
+        if normalized:
+            return normalized
+    return str(getattr(intent, "user_goal", "") or "").strip()
+
+
 def _web_read_request_needs_model_followup(
     decision: Any,
     tool_name: str,
@@ -5993,7 +6852,7 @@ def _web_read_request_needs_model_followup(
         return False
     inputs = decision.selected_intent.inputs
     return bool(
-        _web_request_needs_model_followup(decision.selected_intent.user_goal)
+        _web_request_needs_model_followup(_decision_planning_goal(decision))
         or str(inputs.get("output_target_hint") or "").strip() == "clipboard"
         or any(
             str(getattr(item, "tool_name", "") or "").strip()
@@ -6021,6 +6880,13 @@ def _web_read_request_can_direct_present(
     inputs = decision.selected_intent.inputs
     if str(inputs.get("output_target_hint") or "").strip():
         return False
+    if (
+        str(inputs.get("query") or "").strip()
+        and not _looks_like_current_page_request(_decision_planning_goal(decision))
+    ):
+        # A search-results summary is synthesis, not deterministic formatting
+        # of one already-open page. Keep it in the model loop.
+        return False
     return not any(
         str(getattr(item, "tool_name", "") or "").strip()
         in {"artifact.write", "clipboard.write"}
@@ -6041,6 +6907,21 @@ def _browser_tool_result_can_feed_model(tool_name: str) -> bool:
 
 
 def _web_browser_prepare_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]:
+    inputs = decision.selected_intent.inputs
+    native_browser_tool = next(
+        (
+            str(getattr(item, "tool_name", "") or "").strip()
+            for item in getattr(getattr(decision.plan, "tool_plan", None), "steps", [])
+            if str(getattr(item, "tool_name", "") or "").strip().startswith("browser.")
+        ),
+        "",
+    )
+    if native_browser_tool:
+        # Browser tools operate on a run-owned target. Current-page tools
+        # without one fail closed in the broker; foreground app prep would
+        # only steal the user's Chrome/Safari session.
+        return []
+
     step = _planned_step_by_id(decision, "open-or-focus-browser")
     step_tool_name = str(getattr(step, "tool_name", "") or "").strip()
     if step_tool_name and step_tool_name in allowed and _step_available(step):
@@ -6053,7 +6934,6 @@ def _web_browser_prepare_requests(decision: Any, allowed: set[str]) -> list[dict
                 planning_reason="planner_fallback_web_research",
             )
         ]
-    inputs = decision.selected_intent.inputs
     app_name = str(inputs.get("app_name") or "").strip()
     if not app_name:
         return []
@@ -6530,7 +7410,10 @@ def _context_prefetch_payload(
 
 
 def _schedule_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]:
-    tool_name, payload = schedule_tool_preview(decision.selected_intent.user_goal, allowed)
+    tool_name, payload = schedule_tool_preview(
+        _decision_planning_goal(decision),
+        allowed,
+    )
     if not tool_name or not payload:
         return _context_source_tool_requests(
             decision,
@@ -6555,7 +7438,7 @@ def _direct_schedule_context_app_item_tool_requests(
     if source not in {"selection", "clipboard", "current_page_link", "current_page_content"}:
         return []
     app_name, shortcut_action = _schedule_context_app_item_target(
-        str(decision.selected_intent.user_goal or "")
+        _decision_planning_goal(decision)
     )
     if not app_name or not shortcut_action:
         return []
@@ -6769,13 +7652,22 @@ def _clipboard_tool_requests(inputs: dict[str, Any], allowed: set[str]) -> list[
         return []
     if tool_name == "clipboard.write" and not payload.get("text"):
         return []
-    return [
+    requests = [
         _request(
             tool_name,
             payload,
             planning_reason="planner_fallback_clipboard",
         )
     ]
+    if tool_name == "clipboard.write" and "clipboard.read" in allowed:
+        requests.append(
+            _request(
+                "clipboard.read",
+                {},
+                planning_reason="planner_fallback_clipboard_verify_write",
+            )
+        )
+    return requests
 
 
 def _looks_like_current_page_request(prompt: str) -> bool:

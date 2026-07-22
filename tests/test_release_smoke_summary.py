@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import zipfile
 
+import pytest
+
 from scripts import summarize_native_agent_capabilities as capability_summary
 from scripts import summarize_release_smoke as release_smoke
 
@@ -96,6 +98,22 @@ def _oha_desktop_agent_release_smoke_report() -> dict[str, object]:
     return {
         "ok": True,
         "mode": release_smoke.OHA_DESKTOP_AGENT_RELEASE_SMOKE_MODE,
+        "public_release_required": True,
+        "public_release_ready": True,
+        "default_daily_provider_release_ready": True,
+        "default_daily_provider_release_source": (
+            "local_packaged_tcc_acceptance"
+        ),
+        "default_daily_provider_release_blockers": [],
+        "daily_provider_acceptance": {
+            "ok": True,
+            "evidence_source": "local_packaged_tcc_acceptance",
+            "provider_kind": "background_desktop",
+            "provider_id": "cua-driver",
+            "transport": "cua_mcp_electron_bridge",
+            "build_revision": "0123456789abcdef0123456789abcdef01234567",
+            "foreground_takeover_required": False,
+        },
         "section_count": len(section_ids),
         "failed_sections": [],
         "checks": {"all_sections_passed": True},
@@ -204,17 +222,20 @@ def test_release_smoke_summary_passes_with_required_evidence(tmp_path, monkeypat
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(
         json.dumps(
-            _matrix_report(
-                "packaged_app_bridge_isolation",
-                "source_agent_entrypoint_desktop_execution",
-                "source_agent_studio_planner_orchestration",
-                "source_approval_resume_timeline",
-                "source_yachiyo_route_approval",
-                "source_group_run_timeline",
-                "source_workflow_run_timeline",
-                "source_agent_entrypoint_data_analysis",
-                "source_data_analysis_artifact",
-            )
+            {
+                **_matrix_report(
+                    "packaged_app_bridge_isolation",
+                    "source_agent_entrypoint_desktop_execution",
+                    "source_agent_studio_planner_orchestration",
+                    "source_approval_resume_timeline",
+                    "source_yachiyo_route_approval",
+                    "source_group_run_timeline",
+                    "source_workflow_run_timeline",
+                    "source_agent_entrypoint_data_analysis",
+                    "source_data_analysis_artifact",
+                ),
+                "dmg_chat_native_file_smoke": {"status": "passed"},
+            }
         ),
         encoding="utf-8",
     )
@@ -260,6 +281,7 @@ def test_release_smoke_summary_passes_with_required_evidence(tmp_path, monkeypat
     assert oha_item["present_evidence_ids"] == [
         release_smoke.OHA_DESKTOP_AGENT_RELEASE_SMOKE_MODE,
         "oha_direct_desktop_runtime",
+        release_smoke.OHA_DEFAULT_DAILY_PROVIDER_RELEASE_EVIDENCE,
     ]
     assert "oha_deepagent_core" in oha_item["related_evidence_ids"]
     assert "oha_direct_desktop_runtime" in oha_item["related_evidence_ids"]
@@ -294,6 +316,41 @@ def test_release_smoke_summary_rejects_standalone_entrypoint_smoke_without_task_
     assert "source_agent_entrypoint_desktop_execution" in chat_item[
         "missing_evidence_ids"
     ]
+
+
+@pytest.mark.parametrize(
+    "chat_smoke_section",
+    [
+        {"status": "skipped", "run_requested": False},
+        {"status": "failed", "ok": True, "run_requested": True},
+    ],
+)
+def test_release_smoke_summary_requires_passed_packaged_chat_native_file_smoke(
+    tmp_path,
+    monkeypatch,
+    chat_smoke_section,
+):
+    monkeypatch.setattr(release_smoke, "ROOT", tmp_path)
+    report_path = tmp_path / "tmp" / "rc.json"
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(
+        json.dumps(
+            {
+                **_matrix_report("source_agent_entrypoint_desktop_execution"),
+                "dmg_chat_native_file_smoke": chat_smoke_section,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    summary = release_smoke.summarize_release_smoke([report_path])
+
+    chat_item = _item_by_id(summary, "chat_desktop_task")
+    assert chat_item["status"] == "missing"
+    assert chat_item["present_evidence_ids"] == [
+        "source_agent_entrypoint_desktop_execution",
+    ]
+    assert chat_item["missing_evidence_ids"] == ["dmg_chat_native_file_smoke"]
 
 
 def test_release_smoke_summary_requires_agent_studio_planner_orchestration(
@@ -344,6 +401,7 @@ def test_release_smoke_summary_treats_isolated_desktop_provider_as_optional(
     assert oha_item["present_evidence_ids"] == [
         release_smoke.OHA_DESKTOP_AGENT_RELEASE_SMOKE_MODE,
         "oha_direct_desktop_runtime",
+        release_smoke.OHA_DEFAULT_DAILY_PROVIDER_RELEASE_EVIDENCE,
     ]
     assert oha_item["missing_evidence_ids"] == []
     assert oha_item["release_blockers"] == []
@@ -373,6 +431,7 @@ def test_release_smoke_summary_requires_direct_desktop_runtime_section(
     )
     assert oha_item["present_evidence_ids"] == [
         release_smoke.OHA_DESKTOP_AGENT_RELEASE_SMOKE_MODE,
+        release_smoke.OHA_DEFAULT_DAILY_PROVIDER_RELEASE_EVIDENCE,
     ]
     assert oha_item["missing_evidence_ids"] == ["oha_direct_desktop_runtime"]
     action = next(
@@ -380,6 +439,31 @@ def test_release_smoke_summary_requires_direct_desktop_runtime_section(
     )
     assert "--skip-isolated-provider-smoke" in action["command"]
     assert "--public-release" in action["command"]
+
+
+def test_release_smoke_summary_requires_default_daily_provider_evidence(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(release_smoke, "ROOT", tmp_path)
+    report_path = tmp_path / "tmp" / "oha-without-daily-provider-evidence.json"
+    payload = _oha_desktop_agent_release_smoke_report()
+    payload["public_release_required"] = True
+    payload["public_release_ready"] = False
+    payload["default_daily_provider_release_ready"] = False
+    payload["default_daily_provider_release_blockers"] = [
+        "default_daily_provider_release_evidence_required"
+    ]
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    summary = release_smoke.summarize_release_smoke([report_path])
+
+    oha_item = _item_by_id(summary, "oha_desktop_agent_product")
+    assert oha_item["status"] == "missing"
+    assert "oha_default_daily_provider_release_ready" in oha_item[
+        "missing_evidence_ids"
+    ]
 
 
 def test_release_smoke_summary_does_not_require_real_virtual_desktop_backend(
@@ -420,6 +504,7 @@ def test_release_smoke_summary_does_not_require_real_virtual_desktop_backend(
     assert oha_item["present_evidence_ids"] == [
         release_smoke.OHA_DESKTOP_AGENT_RELEASE_SMOKE_MODE,
         "oha_direct_desktop_runtime",
+        release_smoke.OHA_DEFAULT_DAILY_PROVIDER_RELEASE_EVIDENCE,
     ]
     assert oha_item["missing_evidence_ids"] == []
     assert oha_item["release_blockers"] == []
@@ -458,6 +543,7 @@ def test_release_smoke_summary_keeps_unverified_optional_provider_non_blocking(
     assert oha_item["present_evidence_ids"] == [
         release_smoke.OHA_DESKTOP_AGENT_RELEASE_SMOKE_MODE,
         "oha_direct_desktop_runtime",
+        release_smoke.OHA_DEFAULT_DAILY_PROVIDER_RELEASE_EVIDENCE,
     ]
     assert oha_item["missing_evidence_ids"] == []
     assert oha_item["release_blockers"] == []

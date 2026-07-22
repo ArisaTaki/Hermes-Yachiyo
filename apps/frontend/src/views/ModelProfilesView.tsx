@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react';
 
 import { useConfirmDialog } from '../components/ConfirmDialog';
 import { ProviderBrandIcon } from '../components/ProviderBrandIcon';
+import { SettingsDisclosure } from '../components/SettingsDisclosure';
 import { UiIcon } from '../components/UiIcon';
 import { currentParam, navigateTo, type AppView } from '../lib/view';
 import {
@@ -64,6 +65,12 @@ type ModelCatalogGroup = {
   label: string;
   iconProvider?: string;
   models: RemoteModelInfo[];
+};
+
+type ConsumerModelChoices = {
+  models: RemoteModelInfo[];
+  recommendedModelId: string;
+  usesFullCatalogFallback: boolean;
 };
 
 const providerPresets: ProviderPreset[] = [
@@ -335,9 +342,9 @@ const legacyProviderPresets: ProviderPreset[] = [
 const allProviderPresets = [...providerPresets, ...ttsProviderPresets, ...legacyProviderPresets];
 
 const capabilityLabels: Record<ModelCapability, string> = {
-  chat: '对话',
-  vision: '图片转述',
-  tts: '文字转语音',
+  chat: '主模型',
+  vision: '图片理解',
+  tts: '语音',
 };
 
 const catalogProviderMeta: Record<string, { label: string; iconProvider?: string }> = {
@@ -404,14 +411,6 @@ function nativeProviderLabel(provider?: string): string {
 
 function runtimeProviderLabel(provider?: string): string {
   return provider ? nativeProviderLabel(provider) : 'Agent 直连';
-}
-
-function runtimePillClass(provider?: string): string {
-  return provider ? 'model-key-pill model-runtime-pill is-native' : 'model-key-pill model-runtime-pill is-direct';
-}
-
-function presetRuntimePillClass(provider?: string): string {
-  return provider ? 'model-preset-runtime model-runtime-pill is-native' : 'model-preset-runtime model-runtime-pill is-direct';
 }
 
 function sourceNativeProvider(source: ModelSource): string {
@@ -589,10 +588,91 @@ function capabilityCatalogModels(models: RemoteModelInfo[], capability: ModelCap
   return models.filter((model) => modelSupportsCapability(model, capability));
 }
 
+function consumerModelChoices(
+  models: RemoteModelInfo[],
+  source: SourceDraft,
+  capability: ModelCapability,
+  savedModelIds: string[] = [],
+): ConsumerModelChoices {
+  const usableModels = capabilityCatalogModels(models, capability);
+  const modelById = new Map(usableModels.map((model) => [model.id.toLowerCase(), model]));
+  const recommended: RemoteModelInfo[] = [];
+  const seen = new Set<string>();
+  const append = (model?: RemoteModelInfo) => {
+    if (!model || seen.has(model.id)) return;
+    seen.add(model.id);
+    recommended.push(model);
+  };
+  const appendById = (modelId: string) => {
+    const normalized = modelId.trim().toLowerCase();
+    if (!normalized) return;
+    append(modelById.get(normalized) || usableModels.find((model) => (
+      model.id.toLowerCase().endsWith(`/${normalized}`)
+    )));
+  };
+
+  savedModelIds.forEach(appendById);
+  (providerPreset(source.provider).modelHints || []).forEach(appendById);
+  usableModels.forEach((model) => {
+    const tags = new Set((model.recommended_for || []).map((tag) => tag.trim().toLowerCase()));
+    const matchesCapability = tags.has(capability)
+      || tags.has('default')
+      || tags.has('recommended')
+      || (capability === 'chat' && (tags.has('general') || tags.has('text')))
+      || (capability === 'vision' && (tags.has('image') || tags.has('multimodal')));
+    if (matchesCapability) append(model);
+  });
+
+  if (recommended.length) {
+    return {
+      models: recommended,
+      recommendedModelId: recommended[0].id,
+      usesFullCatalogFallback: false,
+    };
+  }
+  if (usableModels.length === 1) {
+    return {
+      models: usableModels,
+      recommendedModelId: usableModels[0].id,
+      usesFullCatalogFallback: false,
+    };
+  }
+  return {
+    models: usableModels,
+    recommendedModelId: '',
+    usesFullCatalogFallback: true,
+  };
+}
+
+function consumerModelLabel(model: RemoteModelInfo): string {
+  const name = String(model.name || '').trim();
+  return name && name !== model.id ? name : model.id;
+}
+
+function consumerProfileLabel(profile: ModelProfileView): string {
+  const configuredName = String(profile.name || '').trim();
+  const modelId = String(profile.model || '').trim();
+  if (configuredName && configuredName !== modelId && !configuredName.endsWith(`/${modelId}`)) {
+    return configuredName;
+  }
+  const remoteModel = profile.options?.remote_model;
+  const remoteName = remoteModel && typeof remoteModel === 'object'
+    ? String((remoteModel as Record<string, unknown>).name || '').trim()
+    : '';
+  if (remoteName && remoteName !== modelId) return remoteName;
+  const provider = providerPreset(profile.source_provider || profile.provider);
+  return `${provider.label} ${capabilityLabels[profile.capability]}`;
+}
+
+function consumerProfileSummary(profile: ModelProfileView): string {
+  const provider = providerPreset(profile.source_provider || profile.provider);
+  return `${provider.label} · ${statusLabel(profile.status)}`;
+}
+
 function capabilityEmptyModelHint(capability: ModelCapability): string {
-  if (capability === 'vision') return '请先获取远端模型列表，再选择模型进行真实图片测试；通过后才会保存为可用视觉模型。';
-  if (capability === 'tts') return '选择 TTS 提供商后，在这里登记 voice / profile id；主动关怀实际播报参数在语音设置页维护。';
-  return '获取远端模型列表后选择模型并测试保存；通过后会出现在设置页和 Agent Studio。';
+  if (capability === 'vision') return '在高级模型列表中选择一个模型并完成图片测试。';
+  if (capability === 'tts') return '选择语音服务后，在这里添加要使用的音色。';
+  return '在高级模型列表中选择一个模型并完成连接测试。';
 }
 
 function sourceToDraft(source: ModelSourceView): SourceDraft {
@@ -636,14 +716,14 @@ function defaultModelName(source: SourceDraft, capability: ModelCapability): str
   const preset = providerPreset(source.provider);
   if (capability === 'tts') return preset.modelHints?.[0] || '';
   if (capability === 'vision') {
-    if (preset.id === 'openai' || preset.id === 'openai_compatible') return 'gpt-4.1-mini';
+    if (preset.id === 'openai') return 'gpt-4.1-mini';
     if (preset.id === 'gemini' || preset.id === 'google_gemini') return 'gemini-2.5-flash';
     if (preset.id === 'minimax') return 'MiniMax-M2.7';
     if (preset.id === 'xiaomi') return 'mimo-v2.5';
     return '';
   }
   if (preset.modelHints?.length) return preset.modelHints[0];
-  if (preset.id === 'openai' || preset.id === 'openai_compatible') return 'gpt-4.1-mini';
+  if (preset.id === 'openai') return 'gpt-4.1-mini';
   if (preset.id === 'deepseek') return 'deepseek-chat';
   if (preset.id === 'minimax') return 'MiniMax-M2.7';
   return '';
@@ -700,6 +780,43 @@ export function ModelProfilesView() {
       .filter((model) => `${model.id} ${model.name || ''} ${model.owned_by || ''} ${model.provider_key || ''}`.toLowerCase().includes(query));
   }, [activeCapability, modelCatalog, modelCatalogQuery]);
   const modelCatalogGroups = useMemo(() => groupCatalogModels(visibleCatalogModels), [visibleCatalogModels]);
+  const defaultCapabilityProfile = useMemo(() => {
+    const defaultProfileId = defaults[activeCapability];
+    return profiles.find((profile) => (
+      profile.profile_id === defaultProfileId
+      && profile.source_id === selectedSourceId
+    )) || null;
+  }, [activeCapability, defaults, profiles, selectedSourceId]);
+  const basicModelChoices = useMemo(
+    () => consumerModelChoices(
+      modelCatalog,
+      sourceDraft,
+      activeCapability,
+      [
+        defaultCapabilityProfile && profileSelectableForNative(defaultCapabilityProfile)
+          ? defaultCapabilityProfile.model || ''
+          : '',
+        ...visibleModels
+          .filter(profileSelectableForNative)
+          .map((profile) => profile.model || ''),
+      ],
+    ),
+    [activeCapability, defaultCapabilityProfile, modelCatalog, sourceDraft.provider, visibleModels],
+  );
+  const basicModelOptions = useMemo(() => {
+    const currentModel = capabilityCatalogModels(modelCatalog, activeCapability)
+      .find((model) => model.id === modelDraft.model);
+    if (!currentModel || basicModelChoices.models.some((model) => model.id === currentModel.id)) {
+      return basicModelChoices.models;
+    }
+    return [currentModel, ...basicModelChoices.models];
+  }, [activeCapability, basicModelChoices.models, modelCatalog, modelDraft.model]);
+  const basicModelHasCurrentOption = basicModelOptions.some((model) => model.id === modelDraft.model);
+  const modelSelectionDescription = !modelCatalogFetched
+    ? '填写访问密钥后，先获取当前服务的可用模型。'
+    : basicModelChoices.usesFullCatalogFallback
+      ? '该服务没有可靠的默认模型，请手动选择。'
+      : '已根据当前服务返回的可用模型优先展示推荐项。';
 
   async function refresh(nextSourceId = selectedSourceId, nextModelId = selectedModelId, capability = activeCapability) {
     const payload = await loadModelProfileData();
@@ -888,7 +1005,7 @@ export function ModelProfilesView() {
     if (existing) {
       const apply = () => {
         applySelectedSource(existing);
-        setStatus(`已切换到已有 ${preset.label} ${capabilityLabels[activeCapability]}源`);
+        setStatus(`已切换到已有的 ${preset.label} 服务`);
       };
       if (existing.source_id === selectedSourceId) apply();
       else runAfterDiscardConfirmation(apply);
@@ -1018,7 +1135,7 @@ export function ModelProfilesView() {
     }
     setModelCatalogFetched(false);
     setBusy('models-fetch');
-    setStatus('正在保存源并获取模型列表...');
+    setStatus('正在检查服务并获取可用模型...');
     try {
       const saved = await saveSource();
       if (saved.enabled === false) {
@@ -1031,6 +1148,29 @@ export function ModelProfilesView() {
       }
       const result = await fetchModelSourceModels(saved.source_id);
       const models = result.models || [];
+      const savedModelIds = profiles
+        .filter((profile) => (
+          profile.source_id === saved.source_id
+          && profile.capability === activeCapability
+          && profileSelectableForNative(profile)
+        ))
+        .sort((left, right) => (
+          Number(right.profile_id === defaults[activeCapability])
+          - Number(left.profile_id === defaults[activeCapability])
+        ))
+        .map((profile) => profile.model || '');
+      const choices = consumerModelChoices(
+        models,
+        sourceToDraft(saved as ModelSourceView),
+        activeCapability,
+        savedModelIds,
+      );
+      const usableModels = capabilityCatalogModels(models, activeCapability);
+      const currentModelId = modelDraft.model.trim();
+      const currentModelIsAvailable = usableModels.some((model) => model.id === currentModelId);
+      const nextModelId = currentModelIsAvailable
+        ? currentModelId
+        : choices.recommendedModelId;
       setModelCatalog(models);
       setModelCatalogFetched(true);
       setModelCatalogQuery('');
@@ -1038,8 +1178,22 @@ export function ModelProfilesView() {
         ? models.filter((model) => modelSupportsCapability(model, 'vision')).length
         : capabilityCatalogModels(models, activeCapability).length;
       const suffix = activeCapability === 'vision' ? ' 个已知或远端声明视觉能力的模型' : ' 个可用模型';
-      setStatus(models.length ? `已获取 ${models.length} 个模型，其中 ${usableCount}${suffix}；请选择模型后测试保存。` : '已连接源，但没有读取到模型列表');
       await refresh(saved.source_id, selectedModelId, activeCapability);
+      if (!modelDraft.profile_id || !currentModelIsAvailable) {
+        setModelDraft((current) => ({
+          ...current,
+          model: nextModelId,
+        }));
+      }
+      if (!models.length) {
+        setStatus('已连接服务，但没有读取到可用模型。请在高级设置中检查服务地址。');
+      } else if (!usableModels.length) {
+        setStatus(`已连接服务，但没有找到适合${capabilityLabels[activeCapability]}的模型。请在高级模型列表中检查服务返回结果。`);
+      } else if (!nextModelId && choices.usesFullCatalogFallback) {
+        setStatus(`已获取 ${models.length} 个模型，其中 ${usableCount}${suffix}。该服务没有可靠的默认模型，请手动选择。`);
+      } else {
+        setStatus(`已获取 ${models.length} 个模型，其中 ${usableCount}${suffix}；已准备好模型选择，可直接测试保存。`);
+      }
     } catch (err) {
       setStatus(err instanceof Error ? err.message : '获取模型列表失败');
     } finally {
@@ -1226,7 +1380,7 @@ export function ModelProfilesView() {
         if (!nativeResult.ok) throw new Error(nativeResult.error || nativeResult.message || '同步 Native 默认模型失败');
       }
       setDefaults(result.defaults || {});
-      setStatus(`${capabilityLabels[profile.capability]}默认模型已更新`);
+      setStatus(`${capabilityLabels[profile.capability]}设置已更新`);
     } catch (err) {
       setStatus(err instanceof Error ? err.message : '更新默认模型失败');
     } finally {
@@ -1237,10 +1391,10 @@ export function ModelProfilesView() {
   const sourceCountLabel = capabilitySources.length ? `${capabilitySources.length}` : '0';
   const activeProviderPresets = providerPresetsForCapability(activeCapability);
   const sourceFormHelp = activeCapability === 'tts'
-    ? 'TTS 使用语音服务专用来源；这里登记 provider、endpoint 和 voice/profile 名称。GPT-SoVITS 完整参数走主动关怀语音页。'
+    ? '选择八千代播报提醒时使用的语音服务。'
     : activeCapability === 'vision'
-      ? '图片转述使用独立视觉来源，不复用对话来源；模型最终以真实图片测试通过为准。'
-      : '对话使用独立文本来源；默认主模型只使用 Native Runtime 可执行 provider，Agent Studio 可选择已测试通过的文本 Profile。';
+      ? '选择八千代查看和理解图片时使用的 AI 服务。'
+      : '选择八千代聊天和完成日常任务时使用的 AI 服务。';
   const sourceDraftRuntimeProvider = selectedSource
     ? sourceNativeProvider(selectedSource)
     : (providerPreset(sourceDraft.provider).nativeProvider || sourceDraft.provider);
@@ -1249,9 +1403,9 @@ export function ModelProfilesView() {
     <section className="hy-route-page model-profiles-page">
       <header className="hy-page-header hy-stagger">
         <div>
-          <span className="hy-eyebrow">Model Providers</span>
-          <h2>模型提供商</h2>
-          <p>对话、图片转述、文字转语音分别维护独立服务商源；通过测试的模型会进入对应场景的选择列表。</p>
+          <span className="hy-eyebrow">AI Services</span>
+          <h2>AI 服务</h2>
+          <p>分别选择聊天、图片理解和语音所使用的服务。八千代会在保存前检查它是否可用。</p>
         </div>
       </header>
 
@@ -1277,8 +1431,8 @@ export function ModelProfilesView() {
         <div className="model-provider-layout">
           <aside className="model-source-panel">
             <div className="model-panel-title">
-              <h3>提供商源 <span>{sourceCountLabel}</span></h3>
-              <button type="button" className="hy-btn hy-btn-primary" disabled={Boolean(busy)} onClick={createNewSource} title="新增提供商源">
+              <h3>AI 服务 <span>{sourceCountLabel}</span></h3>
+              <button type="button" className="hy-btn hy-btn-primary" disabled={Boolean(busy)} onClick={createNewSource} title="新增 AI 服务">
                 <UiIcon name="plus" />
                 新增
               </button>
@@ -1288,7 +1442,6 @@ export function ModelProfilesView() {
                 const preset = providerPreset(source.provider);
                 const configured = Boolean(source.api_key_configured);
                 const hasCapabilityModel = sourceHasCapabilityModel(source, activeCapability);
-                const runtimeProvider = sourceNativeProvider(source);
                 return (
                   <button
                     key={source.source_id}
@@ -1301,11 +1454,10 @@ export function ModelProfilesView() {
                     </span>
                     <span className="model-source-main">
                       <strong>{source.name}</strong>
-                      <small>{source.base_url || source.provider_label || preset.label}</small>
+                      <small>{source.provider_label || preset.label}</small>
                     </span>
                     <span className="model-source-badges">
                       <em className={source.enabled === false ? 'model-key-pill warn' : 'model-key-pill ok'}>{source.enabled === false ? '已暂停' : '正在使用'}</em>
-                      {activeCapability !== 'tts' ? <em className={runtimePillClass(runtimeProvider)}>{runtimeProviderLabel(runtimeProvider)}</em> : null}
                       <em className={`status-pill ${statusClass(source.status)}`}>{statusLabel(source.status)}</em>
                       <em className={configured ? 'model-key-pill ok' : 'model-key-pill'}>{configured ? '密钥已配置' : activeCapability === 'tts' ? 'Token 可选' : '未配置 API'}</em>
                       {configured && !hasCapabilityModel ? <em className="model-key-pill warn">暂未选择模型</em> : null}
@@ -1316,8 +1468,8 @@ export function ModelProfilesView() {
               {!capabilitySources.length ? (
                 <button type="button" className="model-source-empty-action" disabled={Boolean(busy)} onClick={createNewSource}>
                   <UiIcon name="plus" />
-                  <strong>新增提供商源</strong>
-                  <span>{activeCapability === 'tts' ? '创建 HTTP / Command / API TTS 等语音来源' : '创建 OpenRouter / Xiaomi MiMo / MiniMax 等模型来源'}</span>
+                  <strong>连接 AI 服务</strong>
+                  <span>{activeCapability === 'tts' ? '选择本地或在线语音服务' : '选择常用服务并完成连接'}</span>
                 </button>
               ) : null}
             </div>
@@ -1329,7 +1481,7 @@ export function ModelProfilesView() {
                 <div className="model-preset-picker-head">
                   <div>
                     <span>选择预设</span>
-                    <h3>添加模型提供商源</h3>
+                    <h3>连接 AI 服务</h3>
                   </div>
                   <p>{sourceFormHelp}</p>
                 </div>
@@ -1346,9 +1498,7 @@ export function ModelProfilesView() {
                         <ProviderBrandIcon provider={preset.id} />
                       </span>
                       <strong>{preset.label}</strong>
-                      <small>{preset.route ? '打开完整设置页' : preset.baseUrl}</small>
-                      {activeCapability !== 'tts' ? <span className={presetRuntimePillClass(preset.nativeProvider || preset.id)}>{runtimeProviderLabel(preset.nativeProvider || preset.id)}</span> : null}
-                      <em>{preset.note}</em>
+                      <small>{preset.route ? '打开语音设置' : '使用推荐配置'}</small>
                     </button>
                   ))}
                 </div>
@@ -1372,27 +1522,17 @@ export function ModelProfilesView() {
                     </span>
                     <div>
                       <h3>{sourceDraft.name || providerPreset(sourceDraft.provider).label}</h3>
-                      <p>{sourceDraft.base_url || providerPreset(sourceDraft.provider).baseUrl || sourceFormHelp}</p>
+                      <p>{providerPreset(sourceDraft.provider).label} · {sourceDraft.enabled ? '正在使用' : '已暂停'}</p>
                     </div>
                     <div className="model-source-config-actions">
                       <span className={sourceDraft.enabled ? 'model-key-pill ok' : 'model-key-pill warn'}>{sourceDraft.enabled ? '正在使用' : '已暂停'}</span>
-                      {activeCapability !== 'tts' ? <span className={runtimePillClass(sourceDraftRuntimeProvider)}>{runtimeProviderLabel(sourceDraftRuntimeProvider)}</span> : null}
                       <button type="button" className="hy-btn hy-btn-ghost" disabled={Boolean(busy)} onClick={returnToPresetList}>返回列表</button>
-                      {activeCapability === 'tts' ? (
-                        <button type="submit" className="hy-btn hy-btn-primary" disabled={Boolean(busy)}>
-                          {busy === 'source-save' ? '保存中...' : '保存语音源'}
-                        </button>
-                      ) : (
-                        <button type="button" className="hy-btn hy-btn-primary" disabled={Boolean(busy)} onClick={() => void fetchModelsForSource()}>
-                          {busy === 'models-fetch' ? '获取中...' : sourceDraft.enabled ? '保存并获取模型列表' : '保存暂停状态'}
-                        </button>
-                      )}
                     </div>
                   </div>
                   <div className="model-inline-note">{sourceFormHelp}</div>
                   <div className="model-provider-grid">
                     <label className="model-provider-picker-field">
-                      <span>提供商</span>
+                      <span>AI 服务</span>
                       <div className="model-provider-picker">
                         <button
                           type="button"
@@ -1424,7 +1564,7 @@ export function ModelProfilesView() {
                                 </span>
                                 <span>
                                   <strong>{preset.label}</strong>
-                                  <small>{preset.baseUrl || '本地或自定义语音端点'}</small>
+                                  <small>{preset.route ? '打开语音设置' : '使用推荐配置'}</small>
                                 </span>
                               </button>
                             ))}
@@ -1433,30 +1573,58 @@ export function ModelProfilesView() {
                       </div>
                     </label>
                     <label>
-                      <span>ID</span>
-                      <input className="hy-input" value={sourceDraft.name} disabled={Boolean(busy)} onChange={(event) => setSourceDraft({ ...sourceDraft, name: event.target.value })} placeholder={activeCapability === 'tts' ? '例如 gpt-sovits-local' : '例如 openrouter / xiaomi-mimo'} />
-                    </label>
-                    <label>
-                      <span>{activeCapability === 'tts' ? 'Endpoint' : 'Base URL'}</span>
-                      <input className="hy-input" value={sourceDraft.base_url} disabled={Boolean(busy)} onChange={(event) => updateSourceConnectionDraft({ ...sourceDraft, base_url: event.target.value })} placeholder={providerPreset(sourceDraft.provider).baseUrl || (activeCapability === 'tts' ? 'http://127.0.0.1:9880' : 'https://api.example.com/v1')} />
-                    </label>
-                    <label>
-                      <span>{activeCapability === 'tts' ? 'Token / Key' : 'API Key'}</span>
+                      <span>{activeCapability === 'tts' ? '访问密钥（可选）' : '访问密钥'}</span>
                       <input className="hy-input" type="password" value={sourceDraft.api_key} disabled={Boolean(busy)} onChange={(event) => updateSourceConnectionDraft({ ...sourceDraft, api_key: event.target.value })} placeholder={selectedSource?.api_key_configured ? '已配置，留空不覆盖' : '仅保存在本机后端'} />
                     </label>
                   </div>
-                  <label className={sourceDraft.enabled ? 'model-profile-toggle' : 'model-profile-toggle paused'}>
-                    <input type="checkbox" checked={sourceDraft.enabled} disabled={Boolean(busy)} onChange={(event) => updateSourceConnectionDraft({ ...sourceDraft, enabled: event.target.checked })} />
-                    <span>{sourceDraft.enabled ? '正在使用这个提供商源' : '已暂停这个提供商源'}</span>
-                  </label>
                   <div className="agent-editor-actions">
-                    {sourceDraft.source_id ? <button type="button" className="hy-btn hy-btn-danger" disabled={Boolean(busy)} onClick={requestRemoveSource}>删除源</button> : null}
+                    {activeCapability === 'tts' ? (
+                      <button type="submit" className="hy-btn hy-btn-primary" disabled={Boolean(busy)}>
+                        {busy === 'source-save' ? '保存中...' : '保存语音服务'}
+                      </button>
+                    ) : (
+                      <button type="submit" className="hy-btn hy-btn-primary" disabled={Boolean(busy)}>
+                        {busy === 'models-fetch' ? '正在检查...' : sourceDraft.enabled ? '继续选择模型' : '保存暂停状态'}
+                      </button>
+                    )}
                   </div>
+                  <SettingsDisclosure
+                    summary="高级连接设置"
+                    description="仅在使用自定义服务或排查连接问题时需要修改"
+                    testId="model-source-advanced-settings"
+                  >
+                    <div className="model-provider-grid">
+                      {sourceDraft.source_id ? (
+                        <label>
+                          <span>服务来源 ID</span>
+                          <input className="hy-input" value={sourceDraft.source_id} disabled readOnly />
+                        </label>
+                      ) : null}
+                      <label>
+                        <span>服务配置名称</span>
+                        <input className="hy-input" value={sourceDraft.name} disabled={Boolean(busy)} onChange={(event) => setSourceDraft({ ...sourceDraft, name: event.target.value })} placeholder={activeCapability === 'tts' ? '例如 gpt-sovits-local' : '例如 openrouter / xiaomi-mimo'} />
+                      </label>
+                      <label>
+                        <span>{activeCapability === 'tts' ? '服务地址' : 'Base URL'}</span>
+                        <input className="hy-input" value={sourceDraft.base_url} disabled={Boolean(busy)} onChange={(event) => updateSourceConnectionDraft({ ...sourceDraft, base_url: event.target.value })} placeholder={providerPreset(sourceDraft.provider).baseUrl || (activeCapability === 'tts' ? 'http://127.0.0.1:9880' : 'https://api.example.com/v1')} />
+                      </label>
+                    </div>
+                    {activeCapability !== 'tts' ? (
+                      <p className="model-inline-note">运行时映射：{runtimeProviderLabel(sourceDraftRuntimeProvider)}</p>
+                    ) : null}
+                    <label className={sourceDraft.enabled ? 'model-profile-toggle' : 'model-profile-toggle paused'}>
+                      <input type="checkbox" checked={sourceDraft.enabled} disabled={Boolean(busy)} onChange={(event) => updateSourceConnectionDraft({ ...sourceDraft, enabled: event.target.checked })} />
+                      <span>{sourceDraft.enabled ? '正在使用这个提供商源' : '已暂停这个提供商源'}</span>
+                    </label>
+                    <div className="agent-editor-actions">
+                      {sourceDraft.source_id ? <button type="button" className="hy-btn hy-btn-danger" disabled={Boolean(busy)} onClick={requestRemoveSource}>删除源</button> : null}
+                    </div>
+                  </SettingsDisclosure>
                 </form>
 
                 <section className="model-source-models">
                   <div className="model-panel-title">
-                    <h3>{capabilityLabels[activeCapability]}模型</h3>
+                    <h3>{capabilityLabels[activeCapability]}</h3>
                     <span>{visibleModels.length} 个</span>
                     {selectedSource?.api_key_configured && !visibleModels.length ? <em className="model-key-pill warn">暂未选择模型</em> : null}
                   </div>
@@ -1471,23 +1639,88 @@ export function ModelProfilesView() {
                       void runModelTest();
                     }}
                   >
-                    <input
-                      className="hy-input"
-                      value={modelDraft.model}
-                      disabled={Boolean(busy) || sourceDraft.enabled === false}
-                      onChange={(event) => setModelDraft({ ...modelDraft, model: event.target.value })}
-                      placeholder={activeCapability === 'tts' ? 'voice / profile id，例如 default-voice' : activeCapability === 'vision' ? '多模态模型 ID，例如 openai/gpt-4o-mini' : '模型 ID，例如 gpt-4.1-mini'}
-                    />
-                    <input className="hy-input" value={modelDraft.name} disabled={Boolean(busy) || sourceDraft.enabled === false} onChange={(event) => setModelDraft({ ...modelDraft, name: event.target.value })} placeholder="显示名称，可留空" />
+                    {activeCapability === 'tts' ? (
+                      <label>
+                        <span>音色或语音模型</span>
+                        <input
+                          className="hy-input"
+                          value={modelDraft.model}
+                          disabled={Boolean(busy) || sourceDraft.enabled === false}
+                          onChange={(event) => setModelDraft({ ...modelDraft, model: event.target.value })}
+                          placeholder="选择或填写一个音色"
+                        />
+                      </label>
+                    ) : (
+                      <label>
+                        <span>推荐模型</span>
+                        <select
+                          className="hy-input"
+                          data-testid="model-basic-model-select"
+                          value={modelDraft.model}
+                          disabled={Boolean(busy) || sourceDraft.enabled === false || !modelCatalogFetched}
+                          onChange={(event) => {
+                            const model = modelCatalog.find((item) => item.id === event.target.value);
+                            if (model) applyCatalogModel(model);
+                            else setModelDraft({ ...modelDraft, model: event.target.value });
+                          }}
+                        >
+                          <option value="">{modelCatalogFetched ? '请选择模型' : '请先获取可用模型'}</option>
+                          {modelDraft.model && !basicModelHasCurrentOption ? (
+                            <option value={modelDraft.model}>
+                              {modelCatalogFetched ? '当前自定义模型' : '等待验证的推荐配置'}
+                            </option>
+                          ) : null}
+                          {basicModelOptions.map((model) => (
+                            <option value={model.id} key={model.id}>
+                              {consumerModelLabel(model)}
+                              {model.id === basicModelChoices.recommendedModelId ? '（推荐）' : ''}
+                              {model.id === defaultCapabilityProfile?.model ? '（当前默认）' : ''}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
                     {activeCapability === 'tts' ? (
                       <button type="submit" className="hy-btn hy-btn-primary" disabled={Boolean(busy)}>{modelDraft.profile_id ? '保存语音配置' : '添加语音配置'}</button>
                     ) : (
-                      <button type="submit" className="hy-btn hy-btn-primary" disabled={Boolean(busy) || sourceDraft.enabled === false || !modelCatalogFetched}>{busy === 'model-test' ? '测试中...' : '测试连接并保存'}</button>
+                      <button type="submit" className="hy-btn hy-btn-primary" disabled={Boolean(busy) || sourceDraft.enabled === false || !modelCatalogFetched || !modelDraft.model.trim()}>{busy === 'model-test' ? '测试中...' : '测试并保存'}</button>
                     )}
                   </form>
+                  {activeCapability !== 'tts' ? <p className="model-inline-note">{modelSelectionDescription}</p> : null}
+
+                  <SettingsDisclosure
+                    summary="高级模型设置"
+                    description="自定义模型 ID、显示名称等兼容选项"
+                    testId="model-advanced-model-settings"
+                  >
+                    <div className="model-provider-grid">
+                      {activeCapability !== 'tts' ? (
+                        <label>
+                          <span>原始模型 ID</span>
+                          <input
+                            className="hy-input"
+                            data-testid="model-raw-model-id"
+                            value={modelDraft.model}
+                            disabled={Boolean(busy) || sourceDraft.enabled === false}
+                            onChange={(event) => setModelDraft({ ...modelDraft, model: event.target.value })}
+                            placeholder="例如 provider/model-name"
+                          />
+                        </label>
+                      ) : null}
+                      <label>
+                        <span>显示名称</span>
+                        <input className="hy-input" value={modelDraft.name} disabled={Boolean(busy) || sourceDraft.enabled === false} onChange={(event) => setModelDraft({ ...modelDraft, name: event.target.value })} placeholder="可留空" />
+                      </label>
+                    </div>
+                  </SettingsDisclosure>
 
                   {activeCapability !== 'tts' && (modelCatalog.length || busy === 'models-fetch') ? (
-                    <div className="model-catalog-panel">
+                    <SettingsDisclosure
+                      summary="高级模型列表"
+                      description="查看服务返回的完整模型 ID 与能力元数据"
+                      testId="remote-model-catalog-disclosure"
+                    >
+                      <div className="model-catalog-panel">
                       <div className="model-catalog-head">
                         <div>
                           <strong>{activeCapability === 'vision' ? '远端模型列表（视觉实测为准）' : '远端模型列表'}</strong>
@@ -1537,18 +1770,18 @@ export function ModelProfilesView() {
                         ))}
                         {!visibleCatalogModels.length ? <span className="model-catalog-empty">没有匹配的模型</span> : null}
                       </div>
-                    </div>
+                      </div>
+                    </SettingsDisclosure>
                   ) : null}
 
                   <div className="model-table">
                     {visibleModels.map((model) => (
                       <div className={selectedModelId === model.profile_id ? 'model-row active' : 'model-row'} key={model.profile_id}>
                         <button type="button" onClick={() => { setSelectedModelId(model.profile_id); setModelDraft(modelToDraft(model)); }}>
-                          <strong>{model.name}</strong>
-                          <span>{sourceDraft.name}/{model.model}</span>
+                          <strong>{consumerProfileLabel(model)}</strong>
+                          <span>{consumerProfileSummary(model)}</span>
                         </button>
                         <em className={`status-pill ${statusClass(model.status)}`}>{statusLabel(model.status)}</em>
-                        {model.capability !== 'tts' ? <em className={runtimePillClass(profileNativeProvider(model))}>{runtimeProviderLabel(profileNativeProvider(model))}</em> : null}
                         {defaults[model.capability] === model.profile_id ? <small>默认</small> : null}
                         <button type="button" className="hy-btn hy-btn-ghost" disabled={Boolean(busy) || !profileSelectableForNative(model)} onClick={() => void setDefault(model)}>设为默认</button>
                         {model.capability !== 'tts' ? <button type="button" className="hy-btn hy-btn-ghost" disabled={Boolean(busy) || sourceDraft.enabled === false} onClick={() => void runModelTest(model.profile_id)}>重新测试</button> : null}
@@ -1557,11 +1790,27 @@ export function ModelProfilesView() {
                     ))}
                     {!visibleModels.length ? (
                       <div className="model-provider-empty compact">
-                        <strong>还没有{capabilityLabels[activeCapability]}模型</strong>
+                        <strong>还没有可用的{capabilityLabels[activeCapability]}</strong>
                         <span>{capabilityEmptyModelHint(activeCapability)}</span>
                       </div>
                     ) : null}
                   </div>
+                  {activeCapability !== 'tts' && visibleModels.length ? (
+                    <SettingsDisclosure
+                      summary="运行时映射"
+                      description="用于兼容不同 AI 服务的内部执行信息"
+                      testId="model-runtime-mapping-disclosure"
+                    >
+                      <div className="settings-meta-list">
+                        {visibleModels.map((model) => (
+                          <div className="settings-meta-row" key={model.profile_id}>
+                            <span>{model.name || model.model}</span>
+                            <strong>{runtimeProviderLabel(profileNativeProvider(model))}</strong>
+                          </div>
+                        ))}
+                      </div>
+                    </SettingsDisclosure>
+                  ) : null}
                 </section>
               </>
             )}

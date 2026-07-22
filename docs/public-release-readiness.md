@@ -42,6 +42,225 @@ evidence proves them:
 - A capability is roadmap-only when it lacks source, provider, packaged, UI, or
   manual evidence in the current release candidate.
 
+## Bundled macOS Background Driver Contract
+
+The macOS release carries Cua Driver as an Oha-Yachiyo sidecar. End users must
+not install `CuaDriver.app`, a global CLI, or a pip package, and the installed
+app must not download this executable at runtime. The release build reads
+`packaging/cua-driver.lock.json`, verifies the pinned official archive and
+license SHA256 values, and prepares exactly these package inputs:
+
+```text
+dist/cua-driver/macos/cua-driver
+dist/cua-driver/macos/LICENSE.md
+dist/cua-driver/macos/manifest.json
+```
+
+They are shipped at `Contents/Resources/computer-use/macos/`. A packaged app
+uses only that executable. The Electron main process, rather than the Python
+backend or a separately installed gateway, directly starts it as
+`cua-driver mcp --embedded --host-bundle-id io.github.arisataki.oha-yachiyo`.
+The Python backend talks to that child only through an authenticated loopback
+line-delimited JSON bridge. The bridge credential and non-secret generation id
+rotate on every backend restart; it permits at most one long-lived execution
+session plus one short health-probe session. Backend restart and application
+exit close the sessions and terminate their driver children.
+
+In packaged mode the bridge transport sentinel is authoritative. A missing
+component, failed listener, or malformed bridge configuration fails closed and
+cannot fall back to `PATH`, a custom command, or an unrelated machine-wide
+installation. No driver is downloaded at runtime. Source development without
+that sentinel may still use the explicit-command, `PATH`, or installed Cua
+Driver fallback. This process layout establishes the intended Oha-Yachiyo
+responsibility chain, but the exact final package still requires the real TCC
+checks below before permission attribution is claimed as verified.
+
+This is targeted background event delivery in the current macOS login session,
+not a VM, remote desktop, isolated cursor, or separate keyboard. Release copy
+must not imply stronger isolation. Targeted background support also depends on
+the Cua API and the target application's accessibility/event behavior; an
+unsupported app or operation must fail without a foreground fallback. The
+exact packaged RC must demonstrate that supported background operations do not
+steal the user's foreground focus, pointer, or keyboard.
+
+CI prepares the locked component before packaging and runs its focused tests.
+The release verifier and packaged-app workflow gate require the executable,
+license, and manifest to be regular non-symlink files; validate the executable
+bit, lock/license/manifest consistency, version, embedded invocation contract,
+and universal `arm64` plus `x86_64` architectures; and verify the nested binary
+signature. An offline build must supply the
+hash-matching archive and license through the build cache or the prepare
+script's `--archive` and `--license` inputs together with `--offline`.
+
+The sidecar must not inherit Electron's JIT entitlements. Electron packaging
+skips only the exact Cua Driver resource path. Every release mode then treats
+the nested driver as a separate signing unit: sign it first with
+`packaging/entitlements.cua-driver.plist`, then sign the outer app. The final
+driver entitlement dictionary must contain exactly Apple Events and Screen
+Capture;
+`allow-jit`, `allow-unsigned-executable-memory`, and
+`disable-library-validation` are forbidden on the driver. Certificate-free
+builds use the same order with ad-hoc identities, so every release mode can
+require a valid sidecar signature, exact sidecar entitlements, and deep strict
+app signature.
+
+In addition to the archive and license hashes, the lock pins a
+`mach-o-without-code-signature-v1` canonical content SHA256. Electron/codesign
+may legitimately rewrite raw Mach-O signature bytes, so the verifier removes
+the signature only from a temporary copy and never mutates the packaged
+original. The upstream binary contains Hermes compatibility help text; the
+legacy-token scan exemption applies only to the exact bundled resource path
+above and remains guarded by this canonical hash.
+
+To upgrade the driver, review the new upstream release and license, update all
+version/tag/URL/SHA256/architecture fields in the lock as one change, run
+`python scripts/prepare_cua_driver.py --clean`, run the focused runtime and
+distribution tests, build with `npm --prefix apps/frontend run pack:mac`, and
+verify the resulting app. Never update an untracked `dist/` binary by hand as
+the source of a release.
+
+The following checks remain mandatory for every exact final macOS package. Do
+not mark them passed from source tests alone:
+
+- Install the RC at its intended stable path. In Screen Recording and
+  Accessibility, only Oha-Yachiyo should need to be present and authorized;
+  CuaDriver, Python, and Terminal should not be required.
+- After reinstalling or changing the app signature, remove a stale
+  Oha-Yachiyo TCC entry when necessary, add the current app again, grant it,
+  and restart the app.
+- Confirm embedded permission status reports the host bundle id
+  `io.github.arisataki.oha-yachiyo` and host attribution.
+- Run a non-destructive open/read/search-or-input/verify task while observing
+  the current foreground app, pointer, and keyboard; none may be taken over.
+- Revoke or deny a permission and confirm the app reports an actionable
+  permission blocker instead of an Oha-Yachiyo execution failure or silent
+  foreground fallback.
+
+These source and packaging contracts do not claim that the outstanding real
+macOS TCC checks for the current final package have already passed.
+
+## Runtime Maturity Invariants (2026-07-12 Worktree)
+
+The current worktree has a stronger runtime-safety baseline, but this section
+is not a claim that the application is fully delivered or that a release
+candidate has passed every gate. The following invariants are covered by
+focused tests or smokes in this worktree:
+
+- **Public progress, not chain of thought.** Raw model reasoning is filtered
+  from Chat and task projections. Daily surfaces render compact structured
+  progress, approval state, results, and failure/recovery facts; detailed
+  execution evidence remains lazy in task cards and Run Timeline instead of
+  being dumped into the conversation.
+- **Fail-closed completion.** The shared `OutcomeEvaluator` requires fresh,
+  correlated RunEvent and tool evidence for the current attempt, step, target,
+  and app. Missing or malformed event history, an empty UI observation,
+  `count=0`, a mismatched app/target, or a generic `ok=true` cannot complete a
+  desktop task. Direct daily-desktop completion uses the same evaluator.
+- **Generation-fenced approval transitions.** Approval approve/reject/cancel
+  and resume paths use the current `approval_id`, approval generation, and
+  compare-and-set Run transitions. A stale approval, late pause projection, or
+  losing terminal transition cannot resurrect a cancelled/completed Run or
+  project a result for a different generation. Workflow Run and Group
+  transitions use status/version CAS, and their durable transition events
+  validate the expected Run status/version inside the event-write transaction.
+- **Atomic local lifecycle commits.** Nested repository transactions share one
+  locked SQLite connection, become rollback-only after an inner failure, and
+  commit Run state, approval state, durable events, task links, and local
+  projections together in the lifecycle paths covered by the regression
+  matrix. Crash-injection tests exercise rollback and retry rather than relying
+  only on happy-path ordering.
+- **One live runtime owner.** Async executions use durable leases, heartbeat,
+  takeover, and generation fencing. The desktop host also uses a runtime
+  process lock and Electron single-instance guard. Startup reconciliation runs
+  once per owning process, preserves still-valid approvals, and reclaims or
+  resolves interrupted ownership from durable state.
+- **One recovery owner per action.** Recovery requests have a stable identity
+  derived from their source step, action tool, and normalized input. A
+  continuation already consumed by the runner is not dispatched again by the
+  outer loop, and repeated observation/recovery actions are suppressed until
+  new user, model, or tool evidence exists.
+- **Canonical activity recovery.** Startup reconciliation repairs terminal and
+  orphaned Activity rows from authoritative task/Run links and keeps retry
+  semantics idempotent instead of leaving a second, conflicting activity
+  state machine behind.
+- **Server-authoritative approval UI.** Chat and Agent Studio wait for the
+  approval mutation response before clearing local cards. Conflict or network
+  failure triggers an authoritative refresh while retaining the current card;
+  retries reuse the real `approval_id`. Missing or stale IDs remain visible but
+  non-actionable instead of being replaced with a fabricated Run/child ID.
+
+Focused evidence actually run for this worktree includes:
+
+- The final runtime regressions passed `348/348` in the main Agent-runtime
+  file, `331/331` in the custom API Agent loop, `222/222` across tool execution
+  and the native OutcomeEvaluator, `543/543` across planner and desktop hints,
+  and `284/284` in the complete Chat API file. The daily-desktop and legacy
+  port matrix passed `241/241` after its final semantic-verifier expectation
+  was aligned.
+- Source release verification completed with exit code `0`. All maintained
+  source guards and source smokes passed, including desktop planner discovery,
+  planner/runtime tool parity, Agent entrypoint execution with zero model
+  calls, approvals, workflows, groups, and the native provider contract. The
+  generated report is `output/release-source-verification-final.json`.
+- A fresh local experimental RC was then rebuilt from this worktree. Artifact
+  guards, DMG mount, packaged App startup, packaged Bridge identity/isolation,
+  Gatekeeper diagnostics, packaged UI sampling, Chat native-file IPC, and
+  revision guards all passed. The required Native Agent capability matrix is
+  `29/29`; see `output/release-packaged-verification-final.json`. This local RC
+  is ad-hoc signed and not notarized. Three of seven manual checks have
+  automated evidence; Gatekeeper first launch, Screen Recording, real-provider,
+  and external-integration signoff remain open.
+- Frontend preservation, mature-flow, design acceptance, bundle-budget, CSP,
+  and Electron single-instance contracts passed `106/106`, and
+  `npm --prefix apps/frontend run build` completed successfully. The frozen
+  bundle budget passes all nine measured limits; the current build's largest
+  JavaScript chunk is about 271 kB, below the 600 kB release-budget ceiling.
+- The opt-in macOS real-process single-instance smoke passed normal secondary
+  launch plus primary `TERM`, primary `SIGKILL`, and kill-before-backend-ready
+  takeover cases. The backend parent watchdog also has deterministic invalid
+  owner, reparenting, missing-process, startup-order, and safe-ledger coverage.
+- Seven focused Electron UI smokes passed: public task, group
+  summary/replay/follow-up, Agent Studio groups, structured Agent progress,
+  Run Detail replay, image attachment, and Chat approval. The approval smoke
+  includes approve/reject plus a `409` authoritative refresh and same-ID retry;
+  no legacy approval fallback, CSP violation, or Electron security warning was
+  observed in the final runs.
+- The opt-in real macOS TextEdit launch chain passed discovery, open,
+  `launch_verified`, `desktop.verify`, status, and guarded cleanup. Its report
+  is `output/runtime-ui-baseline/real-desktop-app-open-textedit-launch-final.json`.
+  Strict foreground-action evidence was also attempted for Calculator and
+  TextEdit, but the current macOS session exposed only menu-level UI and was
+  correctly blocked as `foreground_focus_unavailable`; those reports are
+  `output/runtime-ui-baseline/real-desktop-app-open-final.json` and
+  `output/runtime-ui-baseline/real-desktop-app-open-textedit-final.json`.
+
+These results do not replace a clean full-repository Python regression,
+Developer ID signing/notarization, or the four remaining manual RC checks
+below.
+
+### P2 Work and Explicit Non-Claims
+
+- **Post-side-effect continuation outbox:** covered local state/event/projection
+  writes now share a transaction, but an external tool can succeed immediately
+  before the process dies and before the next approval generation or terminal
+  projection is durably queued. Recovery currently fences the stale owner and
+  fails that interrupted Run rather than automatically resuming it. A durable,
+  idempotent continuation outbox remains P2 work.
+- **External side-effect exactly-once:** leases, generations, and idempotent
+  projections prevent many duplicate local transitions, but they cannot roll
+  back an OS/app/tool side effect that happened immediately before a process
+  crash. Universal exactly-once execution for app launch, click/type, terminal,
+  or third-party calls is not promised; operation-specific idempotency and
+  postcondition verification remain required.
+- **Packaged Electron lifecycle evidence:** source contracts, the runtime lock,
+  parent watchdog, and opt-in real-process takeover smoke are tested, but the
+  same two-instance/process-death report still needs to be archived from the
+  exact signed/notarized release candidate.
+- **Packaged performance evidence:** route-level lazy loading and a deterministic
+  bundle budget are in place. Cold-start, first-interaction, long-conversation
+  render, and memory profiling still need measurements from the packaged RC on
+  the supported hardware baseline.
+
 ## Demo Flows
 
 Before presenting Oha-Yachiyo as Hanako/Hermes-level desktop execution, collect
@@ -158,7 +377,7 @@ python scripts/run_public_release_gate.py \
   --output-markdown tmp/public-release-gate.md
 python scripts/verify_release_artifacts.py
 python scripts/verify_secret_redaction.py
-python scripts/refresh_local_rc_signoff.py --channel experimental --repository kuguya-AI-app-develop/oha-yachiyo
+python scripts/refresh_local_rc_signoff.py --channel experimental --repository kuguya-AI-app-develop/Hermes-Yachiyo
 python scripts/refresh_local_rc_signoff.py --print-status
 ```
 
@@ -175,6 +394,37 @@ public-demo flows or missing 10-item release-smoke evidence make the command
 fail. Existing RC reports and diagnostics bundles can be folded into the same
 assessment with repeated `--release-smoke-report` and `--diagnostics-zip`
 arguments.
+
+The product smoke inside this gate always runs with `--public-release`. Its
+ordinary `ok` field still describes deterministic product coverage, while its
+process exit code follows `public_release_ready`. A successful local foreground
+broker probe is diagnostic fallback coverage only and can no longer satisfy the
+default daily-provider release gate. `summarize_release_smoke.py` likewise
+requires `oha_default_daily_provider_release_ready`, so publication fails closed
+unless the report contains either a successful configured, non-loopback virtual
+desktop provider smoke or explicit packaged background-provider acceptance.
+
+After granting Accessibility and Screen Recording to the final packaged app,
+record the local CUA acceptance in a JSON file and pass it through the gate:
+
+```bash
+python scripts/run_public_release_gate.py \
+  --daily-provider-acceptance-json tmp/oha-daily-provider-acceptance.json \
+  --require-release-ready \
+  --output-json tmp/public-release-gate.json
+```
+
+The evidence uses schema `oha-yachiyo.daily-provider-acceptance.v1` and must
+identify `local_packaged_tcc_acceptance`, `background_desktop`, `cua-driver`,
+the packaged `.app`, its 40-character build revision, the Oha-Yachiyo host
+bundle id, and the `cua_mcp_electron_bridge` transport. Both TCC permissions
+must be `authorized`; host attribution must be verified; foreground takeover
+must be false; and all nine packaged bridge, background launch, target-bound
+observation, background input, postcondition, foreground/pointer/keyboard
+non-takeover, and permission-denial fail-closed checks must be true. A generic
+`{"ok": true}` payload, source-mode run, or foreground automation result is
+rejected. Create this file only after the named checks have actually passed on
+the exact packaged candidate.
 
 When release evidence is still external, the gate also writes
 `external_requirement_count` and `external_requirements` in the JSON report and

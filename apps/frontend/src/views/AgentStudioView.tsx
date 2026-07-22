@@ -1,16 +1,12 @@
 import '@xyflow/react/dist/style.css';
 
-import { useEffect, useRef } from 'react';
+import { lazy, Suspense, type ReactNode, useEffect, useRef } from 'react';
 
 import { AgentDefinitionsTab } from '../features/agent-studio/components/AgentDefinitionsTab';
-import { AgentStudioGroupsTab } from '../features/agent-studio/components/AgentStudioGroupsTab';
 import { AgentStudioMemoryTab } from '../features/agent-studio/components/AgentStudioMemoryTab';
 import { AgentStudioPageFrame } from '../features/agent-studio/components/AgentStudioPageFrame';
-import { AgentStudioRunsTab } from '../features/agent-studio/components/AgentStudioRunsTab';
 import { AgentStudioSkillFoldersTab } from '../features/agent-studio/components/AgentStudioSkillFoldersTab';
 import { AgentStudioSkillsTab } from '../features/agent-studio/components/AgentStudioSkillsTab';
-import { AgentStudioToolsTab } from '../features/agent-studio/components/AgentStudioToolsTab';
-import { AgentStudioWorkflowsTab } from '../features/agent-studio/components/AgentStudioWorkflowsTab';
 import { useAgentAvatarActions } from '../features/agent-studio/hooks/useAgentAvatarActions';
 import { useAgentDeletionActions } from '../features/agent-studio/hooks/useAgentDeletionActions';
 import { useAgentDefinitions } from '../features/agent-studio/hooks/useAgentDefinitions';
@@ -90,7 +86,47 @@ import type {
   ToolCallSnapshot,
 } from '../features/yachiyo-studio/types';
 import { groupRunTimelineRunId } from '../features/agent-studio/utils/groups';
+import { AgentStudioLoadingState, type StudioTab } from '../features/agent-studio/studioTabs';
 import { openAppView } from '../lib/bridge';
+
+const loadAgentStudioGroupsTab = () => import(
+  '../features/agent-studio/components/AgentStudioGroupsTab'
+);
+const loadAgentStudioRunsTab = () => import(
+  '../features/agent-studio/components/AgentStudioRunsTab'
+);
+const loadAgentStudioToolsTab = () => import(
+  '../features/agent-studio/components/AgentStudioToolsTab'
+);
+const loadAgentStudioWorkflowsTab = () => import(
+  '../features/agent-studio/components/AgentStudioWorkflowsTab'
+);
+
+const AgentStudioGroupsTab = lazy(() => loadAgentStudioGroupsTab().then((module) => ({
+  default: module.AgentStudioGroupsTab,
+})));
+const AgentStudioRunsTab = lazy(() => loadAgentStudioRunsTab().then((module) => ({
+  default: module.AgentStudioRunsTab,
+})));
+const AgentStudioToolsTab = lazy(() => loadAgentStudioToolsTab().then((module) => ({
+  default: module.AgentStudioToolsTab,
+})));
+const AgentStudioWorkflowsTab = lazy(() => loadAgentStudioWorkflowsTab().then((module) => ({
+  default: module.AgentStudioWorkflowsTab,
+})));
+
+function preloadAgentStudioTab(tab: StudioTab): void {
+  let pendingModule: Promise<unknown> | null = null;
+  if (tab === 'groups') pendingModule = loadAgentStudioGroupsTab();
+  if (tab === 'runs') pendingModule = loadAgentStudioRunsTab();
+  if (tab === 'tools') pendingModule = loadAgentStudioToolsTab();
+  if (tab === 'workflows') pendingModule = loadAgentStudioWorkflowsTab();
+  if (pendingModule) void pendingModule.catch(() => undefined);
+}
+
+function StudioTabSuspense({ children }: { children: ReactNode }) {
+  return <Suspense fallback={<AgentStudioLoadingState />}>{children}</Suspense>;
+}
 
 function plannerOrchestrationRunId(result: PlannerOrchestrationStartSnapshot): string {
   if (result.run_id) return result.run_id;
@@ -1071,9 +1107,11 @@ export function AgentStudioView() {
       onBack={() => void openAppView('main')}
       onCancelConfirmDialog={closeConfirmDialog}
       onConfirmCurrentDialog={confirmCurrentDialog}
+      onPreloadTab={preloadAgentStudioTab}
     >
       {!loading && tab === 'groups' ? (
-        <AgentStudioGroupsTab
+        <StudioTabSuspense>
+          <AgentStudioGroupsTab
           agents={agents}
           agentGroups={agentGroups}
           agentGroupDefaultModel={agentGroupDefaultModel}
@@ -1113,8 +1151,9 @@ export function AgentStudioView() {
             setStatus('正在编辑新的 Agent Group 草稿');
             setError('');
           }}
-          onToggleAgentGroupMember={toggleAgentGroupMember}
-        />
+            onToggleAgentGroupMember={toggleAgentGroupMember}
+          />
+        </StudioTabSuspense>
       ) : null}
 
       {!loading && tab === 'agents' ? (
@@ -1246,7 +1285,8 @@ export function AgentStudioView() {
       ) : null}
 
       {!loading && tab === 'workflows' ? (
-        <AgentStudioWorkflowsTab
+        <StudioTabSuspense>
+          <AgentStudioWorkflowsTab
           agents={agents}
           agentIssueById={agentRunIssueById}
           allWorkflowsSelected={allWorkflowsSelected}
@@ -1291,8 +1331,9 @@ export function AgentStudioView() {
           workflowRunGoal={workflowRunGoal}
           workflowRunPreviewSteps={workflowRunPreviewSteps}
           workflows={workflows}
-          workflowValidation={workflowValidation}
-        />
+            workflowValidation={workflowValidation}
+          />
+        </StudioTabSuspense>
       ) : null}
 
       {!loading && tab === 'memory' ? (
@@ -1308,17 +1349,20 @@ export function AgentStudioView() {
       ) : null}
 
       {!loading && tab === 'tools' ? (
-        <AgentStudioToolsTab
-          catalog={toolCatalog}
-          error={toolCatalogError}
-          loading={toolCatalogLoading}
-          onReload={() => void reloadToolCatalog()}
-          onPlannerOrchestrationStarted={openPlannerOrchestrationRun}
-        />
+        <StudioTabSuspense>
+          <AgentStudioToolsTab
+            catalog={toolCatalog}
+            error={toolCatalogError}
+            loading={toolCatalogLoading}
+            onReload={() => void reloadToolCatalog()}
+            onPlannerOrchestrationStarted={openPlannerOrchestrationRun}
+          />
+        </StudioTabSuspense>
       ) : null}
 
       {!loading && tab === 'runs' ? (
-        <AgentStudioRunsTab
+        <StudioTabSuspense>
+          <AgentStudioRunsTab
           agents={agents}
           agentIssueById={agentRunIssueById}
           allHistoryRunsSelected={allHistoryRunsSelected}
@@ -1414,8 +1458,9 @@ export function AgentStudioView() {
           selectedWorkflowApprovalStep={selectedWorkflowApprovalStep}
           selectedWorkflowParentRun={selectedWorkflowParentRun}
           selectedWorkflowParentRunId={selectedWorkflowParentRunId}
-          selectedWorkflowSteps={selectedWorkflowSteps}
-        />
+            selectedWorkflowSteps={selectedWorkflowSteps}
+          />
+        </StudioTabSuspense>
       ) : null}
     </AgentStudioPageFrame>
   );

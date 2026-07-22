@@ -253,10 +253,10 @@ const NATIVE_TOOL_CATALOG: NativeToolCatalogItem[] = [
   },
   {
     id: 'browser-cdp',
-    label: '浏览器 CDP 高级控制',
+    label: 'Yachiyo 独立浏览器',
     category: '信息检索',
-    description: '连接本机 Chrome 调试端口，启用 CDP 级高级浏览器操作。',
-    requirement: '需要 browser.cdp_url 或本机 Chrome 调试端口',
+    description: '使用专属 Chrome 会话操作网页，不接管你当前的浏览器标签页。',
+    requirement: '首次使用时启动独立浏览器；来源不明的本机调试端口不会被连接',
   },
   {
     id: 'image_gen',

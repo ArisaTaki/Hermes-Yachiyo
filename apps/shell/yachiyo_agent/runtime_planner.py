@@ -9,11 +9,26 @@ from __future__ import annotations
 
 import posixpath
 import re
+import unicodedata
 from collections.abc import Iterable, Mapping
+from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import quote_plus
 
+from apps.shell.agent.runtime.dispatch_semantics import is_semantic_safe_shortcut
+from apps.shell.agent.runtime.action_targets import (
+    canonical_action_name,
+    canonical_action_target,
+)
+from apps.shell.agent.runtime.verification_receipts import (
+    EXACT_FILE_CONTENT_PRESENT_PREDICATE,
+    EXACT_FILE_READBACK_VERIFIER_TOOL_PREFERENCE,
+    EXACT_FILE_READBACK_VERIFIER_TOOLS,
+    SEMANTIC_ARTIFACT_ADEQUACY_PREDICATE,
+    declared_workspace_output_path,
+    normalized_workspace_relative_path,
+)
 from .app_name_hints import (
     compact_app_name_hint,
     explicit_app_action_target_hint as raw_explicit_app_action_target_hint,
@@ -27,8 +42,11 @@ from .clipboard_plan_hints import clipboard_operation_hint, clipboard_tool_previ
 from .contracts import (
     CapabilityPlanItemSnapshot,
     CapabilityPlanSnapshot,
+    GoalContractSnapshot,
+    GoalCriterionSnapshot,
     PlannerDecisionSnapshot,
     ReplanSignalSnapshot,
+    RuntimeInputBindingSnapshot,
     RuntimePlanSnapshot,
     TaskCheckpointSnapshot,
     TaskCoreSnapshot,
@@ -57,7 +75,10 @@ from .desktop_plan_hints import (
     app_control_mode,
     app_control_tool_candidates,
     app_foreground_tool_candidates,
+    affirmative_desktop_action_text,
     click_target_hint,
+    desktop_action_requested,
+    desktop_mutation_only_negated,
     discovered_app_open_needs_model_followup,
     discovered_app_pending_user_action,
     focus_window_hint,
@@ -72,6 +93,7 @@ from .desktop_plan_hints import (
     safe_key_hint,
     safe_scroll_hint,
     safe_type_text_hint,
+    standalone_safe_type_text_hint,
     safe_shortcut_hint,
     safe_shortcut_sequence_hint,
     screen_capture_hint,
@@ -82,6 +104,7 @@ from .desktop_plan_hints import (
     ui_control_presence_hint,
     ui_inspection_hint,
     window_list_hint,
+    _explicit_screen_capture_requested,
     _looks_like_ui_click_advice_request,
 )
 from .file_access_plan_hints import file_access_hint
@@ -111,6 +134,16 @@ from .web_destination_hints import (
 from packages.security import contains_sensitive_text
 
 
+def _planner_explicit_exact_response_goal(text: str) -> bool:
+    """Share Goal-layer exact-response framing without an import cycle."""
+
+    from apps.shell.agent.runtime.goal_runtime import (
+        _explicit_exact_response_goal,
+    )
+
+    return _explicit_exact_response_goal(text)
+
+
 class TaskIntentRouter:
     """Deterministic first-pass task intent router.
 
@@ -125,6 +158,10 @@ class TaskIntentRouter:
     ) -> list[TaskIntentSnapshot]:
         text = _clean_prompt(prompt)
         metadata = metadata or {}
+        if _planner_explicit_exact_response_goal(text):
+            # Framing owns the whole request. Domain-looking payload tokens
+            # such as CODE_REPORT are response data, not tool authority.
+            return []
         if _chat_status_meta_text_hint(text) and not _code_task_write_requested(text):
             return []
         invalid_palette_reason = _invalid_command_palette_request_reason(text)
@@ -208,6 +245,8 @@ class TaskIntentRouter:
         if _app_file_open_discovery_hint(text, metadata) and not _data_analysis_action_requested(text):
             return _empty_intent("data_analysis", text)
         if _looks_like_document_report_analysis_request(text, metadata):
+            return _empty_intent("data_analysis", text)
+        if _looks_like_data_analysis_concept_question(text):
             return _empty_intent("data_analysis", text)
         score = _score_terms(
             text,
@@ -315,14 +354,20 @@ class TaskIntentRouter:
             if source_scope_is_output
             else _scoped_data_source_path(source_hint, source_scope)
         )
+        source_kind = (
+            "text_table"
+            if app_search_result_source
+            and data_source_kind_hint(source_hint, text) == "unknown"
+            else data_source_kind_hint(source_hint, text)
+        )
+        expected_outputs = _data_analysis_expected_outputs(
+            text,
+            result_open_app_hint=result_open_app_hint,
+        )
         inputs = {
             "data_source_hint": scoped_source_hint,
-            "data_source_kind": (
-                "text_table"
-                if app_search_result_source
-                and data_source_kind_hint(source_hint, text) == "unknown"
-                else data_source_kind_hint(source_hint, text)
-            ),
+            "data_source_kind": source_kind,
+            "runtime_goal_capabilities": ["data.analysis"],
         }
         if spreadsheet_app_hint and spreadsheet_app_hint != result_open_app_hint:
             inputs["spreadsheet_app_hint"] = spreadsheet_app_hint
@@ -366,6 +411,28 @@ class TaskIntentRouter:
         output_target = _task_output_target_hint(text)
         if output_target:
             inputs["output_target_hint"] = output_target
+        terminal_effect_capabilities = _data_analysis_terminal_effect_capabilities(
+            output_target=output_target,
+            app_write_target=app_write_target,
+            communication_target=communication_target,
+        )
+        if terminal_effect_capabilities:
+            inputs["runtime_goal_terminal_effect_capabilities"] = (
+                terminal_effect_capabilities
+            )
+        artifact_paths = _artifact_output_paths(
+            text,
+            data_analysis_artifacts_expected(
+                expected_outputs,
+                text,
+            ),
+        )
+        inputs["runtime_goal_targets"] = {
+            "data.analysis": _data_analysis_semantic_goal_target(
+                inputs,
+                artifact_paths=artifact_paths,
+            )
+        }
         preferred_capabilities = [
             "data.analysis",
             *(["desktop.app_control"] if spreadsheet_app_hint else []),
@@ -408,10 +475,7 @@ class TaskIntentRouter:
             confidence=min(0.95, 0.48 + score),
             description="Analyze structured data and produce a report or artifact.",
             inputs=inputs,
-            expected_outputs=_data_analysis_expected_outputs(
-                text,
-                result_open_app_hint=result_open_app_hint,
-            ),
+            expected_outputs=expected_outputs,
             required_capabilities=(
                 [
                     "desktop.app_discovery",
@@ -448,6 +512,22 @@ class TaskIntentRouter:
         text: str,
         metadata: Mapping[str, Any],
     ) -> TaskIntentSnapshot:
+        app_control_text = _authorized_app_control_text(
+            _speech_act_strip_unauthorized_contextual_tails(text)
+        )
+        if (
+            _APP_CONTROL_AUTHORITY_ACTION_RE.search(text)
+            and not _APP_CONTROL_AUTHORITY_ACTION_RE.search(app_control_text)
+            and not _text_has_authorized_family_action(
+                text,
+                _DESKTOP_NON_APP_AUTHORITY_ACTION_RE,
+            )
+        ):
+            return _empty_intent("desktop_operation", text)
+        if not app_control_text and _negated_app_control_clause(text):
+            return _empty_intent("desktop_operation", text)
+        if _looks_like_non_action_desktop_validation_task(text):
+            return _empty_intent("desktop_operation", text)
         if _explicit_browser_url_hint(text) and not type_into_ui_hint(text):
             return _empty_intent("desktop_operation", text)
         if _chat_status_meta_text_hint(text):
@@ -483,7 +563,7 @@ class TaskIntentRouter:
         generic_browser_search = _generic_browser_app_search_hint(text)
         if _web_search_query(text) and (
             _generic_browser_app_target_requested(text)
-            or _is_generic_browser_app_label(_app_name_hint(text))
+            or _is_generic_browser_app_label(_app_name_hint(app_control_text))
         ):
             return _empty_intent("desktop_operation", text)
         if generic_browser_search and not app_capability:
@@ -509,7 +589,7 @@ class TaskIntentRouter:
         file_open_discovery = (
             {} if selected_app_target_path else file_open_discovery_candidate
         )
-        app_search_app_hint = "" if app_capability else _app_name_hint(text)
+        app_search_app_hint = "" if app_capability else _app_name_hint(app_control_text)
         if (
             _explicit_system_settings_request(text)
             and not spreadsheet_cell_edit
@@ -522,10 +602,19 @@ class TaskIntentRouter:
             _report_file_context_hint(text)
             and _desktop_content_artifact_requested(text)
             and not app_capability
-            and not _app_name_hint(text)
+            and not _app_name_hint(app_control_text)
         ):
             return _empty_intent("desktop_operation", text)
         ui_inspection = ui_inspection_hint(text)
+        window_verification_app = _explicit_app_window_verification_app_name_hint(
+            text
+        )
+        if ui_inspection is None and window_verification_app:
+            ui_inspection = {
+                "role_filter": "",
+                "limit": 80,
+                "app_name": window_verification_app,
+            }
         if (
             isinstance(ui_inspection, Mapping)
             and _desktop_window_text_context_hint(text)
@@ -537,6 +626,12 @@ class TaskIntentRouter:
                 str(ui_inspection.get("app_name") or "")
             )
         screen_capture = screen_capture_hint(text)
+        if (
+            screen_capture is not None
+            and _code_task_write_requested(text)
+            and not _explicit_screen_capture_requested(text, text.lower())
+        ):
+            screen_capture = None
         if (
             ui_inspection is None
             and screen_capture is None
@@ -612,13 +707,33 @@ class TaskIntentRouter:
         if safe_scroll is None and app_scoped_safe_operation.get("safe_scroll"):
             safe_scroll = app_scoped_safe_operation["safe_scroll"]
         safe_click = safe_click_hint(text)
+        standalone_safe_type_text = standalone_safe_type_text_hint(text)
         primary_click_target = click_target_hint(text)
+        scoped_safe_type_text = ""
+        if (
+            not primary_click_target
+            and str((safe_shortcut or {}).get("action") or "").strip()
+            not in {
+                "new_document",
+                "new_note",
+                "new_task",
+                "new_message",
+                "new_event",
+                "new_reminder",
+            }
+            and (
+                _current_or_foreground_app_scope_hint(text)
+                or bool(_app_name_hint(app_control_text))
+            )
+        ):
+            scoped_safe_type_text = safe_type_text_hint(text)
         foreground_compose_text = _foreground_compose_text_hint(text)
-        if _text_hint_is_ui_target_tail(
+        compose_text_is_ui_target_tail = _text_hint_is_ui_target_tail(
             text,
             foreground_compose_text,
             primary_click_target,
-        ):
+        )
+        if compose_text_is_ui_target_tail:
             foreground_compose_text = ""
         if (
             app_capability
@@ -629,10 +744,52 @@ class TaskIntentRouter:
             and not _generic_followup_compose_text_hint(text)
         ):
             foreground_compose_text = ""
-        model_generated_content = _model_generated_foreground_content_hint(
-            text,
-            foreground_compose_text,
+        # A click target such as ``写信按钮`` contains the authoring verb
+        # ``写`` but is still a UI-control label. If the target-tail guard
+        # removed the alleged compose text, do not reinterpret the whole prompt
+        # as a creative brief and erase the requested click operation.
+        model_generated_content = (
+            {}
+            if compose_text_is_ui_target_tail
+            else _model_generated_foreground_content_hint(
+                text,
+                foreground_compose_text,
+            )
         )
+        if (
+            model_generated_content
+            and primary_click_target
+            and _text_hint_is_ui_target_tail(
+                text,
+                str(model_generated_content.get("brief") or ""),
+                primary_click_target,
+            )
+        ):
+            model_generated_content = {}
+        if _model_generated_hint_is_bare_container_operand(
+            model_generated_content,
+            safe_shortcut,
+        ):
+            # "Create a new issue" names the container opened by the
+            # shortcut; it is not a request to author the issue body. Keep
+            # genuine briefs on the model-materialization path.
+            model_generated_content = {}
+        if model_generated_content and isinstance(ui_type_target, Mapping):
+            target = str(ui_type_target.get("target") or "").strip()
+            role_filter = str(ui_type_target.get("role_filter") or "").strip()
+            if target:
+                model_generated_content = {
+                    **model_generated_content,
+                    "target": target,
+                    **({"role_filter": role_filter} if role_filter else {}),
+                }
+            # The target remains useful model context, but the brief is never
+            # an executable literal payload for the type tool.
+            ui_type_target = None
+        if model_generated_content:
+            # English briefs such as "draft a press release" can otherwise be
+            # mistaken for a click request because of the word "press".
+            primary_click_target = None
         if model_generated_content and not str(model_generated_content.get("title") or "").strip():
             foreground_compose_text = ""
         if control_presence_inspection:
@@ -655,6 +812,13 @@ class TaskIntentRouter:
         if foreground_paste and safe_shortcut is None:
             safe_shortcut = {"action": "paste"}
         desktop_discovery = _desktop_discovery_hint(text)
+        affirmative_operation = _desktop_operation_hint(app_control_text)
+        if (
+            desktop_discovery is None
+            and desktop_mutation_only_negated(text)
+            and affirmative_operation in {"", "open", "focus", "open_app", "focus_app"}
+        ):
+            return _empty_intent("desktop_operation", text)
         if (
             str((desktop_discovery or {}).get("action") or "").strip()
             == "read_active_window"
@@ -669,7 +833,7 @@ class TaskIntentRouter:
             "read_running_apps",
         } or _looks_like_installed_apps_request(text, text.lower()):
             app_management = None
-        concrete_app_hint = explicit_capability_app_name or _app_name_hint(text)
+        concrete_app_hint = explicit_capability_app_name or _app_name_hint(app_control_text)
         if (
             desktop_discovery is not None
             and str((desktop_discovery or {}).get("action") or "").strip() == "discover_apps"
@@ -691,7 +855,7 @@ class TaskIntentRouter:
             desktop_discovery is not None
             and str((desktop_discovery or {}).get("action") or "").strip() == "discover_apps"
             and (screen_capture is not None or ui_inspection is not None)
-            and _app_name_hint(text)
+            and _app_name_hint(app_control_text)
         ):
             desktop_discovery = None
         if app_capability:
@@ -750,7 +914,7 @@ class TaskIntentRouter:
             else {}
         )
         browser_scoped_app = str(
-            app_scoped_desktop_mapping.get("app_name") or _app_name_hint(text) or ""
+            app_scoped_desktop_mapping.get("app_name") or _app_name_hint(app_control_text) or ""
         ).strip()
         if (
             browser_interaction_hint
@@ -769,10 +933,38 @@ class TaskIntentRouter:
         ):
             return _empty_intent("desktop_operation", text)
         foreground_submit_action = _foreground_submit_action_hint(text)
+        if foreground_submit_action and _foreground_submit_hotkey_only_hint(text):
+            # ``press enter to send`` describes the submit gesture; ``enter``
+            # is not a literal-input verb whose operand is the word ``to``.
+            ui_type_target = None
+            standalone_safe_type_text = ""
+            scoped_safe_type_text = ""
+            foreground_compose_text = ""
+            primary_click_target = None
+            hotkey = None
         if ui_inspection is not None and ui_control_presence_hint(text):
             foreground_submit_action = ""
         if hotkey and not _contains_any(text, ("发送", "提交", "send", "submit")):
             foreground_submit_action = ""
+        if foreground_submit_action and _communication_capability_query(
+            str((app_capability or {}).get("query") or "")
+        ):
+            # "Send the current message" is a submit instruction for the
+            # already-focused composer, not a request to discover an app and
+            # create a new message.  Generic capability parsing runs earlier,
+            # so discard only the synthetic communication discovery/new-item
+            # hints while preserving the explicit approval-gated submit.
+            app_capability = {}
+            if (
+                str((desktop_discovery or {}).get("action") or "").strip()
+                == "discover_apps"
+                and _communication_capability_query(
+                    str((desktop_discovery or {}).get("query") or "")
+                )
+            ):
+                desktop_discovery = None
+            if str((safe_shortcut or {}).get("action") or "").strip() == "new_message":
+                safe_shortcut = None
         foreground_search_submit = _foreground_search_submit_hint(text)
         if control_presence_inspection:
             foreground_search_submit = False
@@ -808,6 +1000,7 @@ class TaskIntentRouter:
                 "pause ",
                 "desktop",
                 "app",
+                "application",
                 "window",
                 "finder",
                 "browser",
@@ -821,6 +1014,8 @@ class TaskIntentRouter:
                 "拉起来",
                 "拉起",
                 "切到",
+                "切一下",
+                "切下",
                 "聚焦",
                 "点击",
                 "输入",
@@ -871,6 +1066,8 @@ class TaskIntentRouter:
             or foreground_compose_text
             or foreground_paste
             or foreground_app_search
+            or standalone_safe_type_text
+            or scoped_safe_type_text
         ):
             score = 0.18
         if score <= 0 and (app_scoped_desktop_operation or command_palette):
@@ -879,17 +1076,19 @@ class TaskIntentRouter:
             score = 0.24
         if score <= 0 and app_preferences:
             score = 0.2
-        if score <= 0 and _app_name_hint(text) and _explicit_app_open_request(text):
+        if score <= 0 and _app_name_hint(app_control_text) and _explicit_app_open_request(text):
+            score = 0.18
+        if score <= 0 and _app_name_hint(app_control_text) and _explicit_app_focus_request(text):
             score = 0.18
         if (
             score <= 0
-            and _app_name_hint(text)
+            and _app_name_hint(app_control_text)
             and _contains_any(text, ("搜索", "查找", "检索", "search", "find", "look up"))
         ):
             score = 0.18
         if (
             score <= 0
-            and _app_name_hint(text)
+            and _app_name_hint(app_control_text)
             and _looks_like_app_scoped_create_followup(text)
         ):
             score = 0.18
@@ -914,6 +1113,13 @@ class TaskIntentRouter:
         if (
             score <= 0
             and not metadata.get("daily_desktop_intent")
+            and not (
+                concrete_app_hint
+                and (
+                    _explicit_app_open_request(text)
+                    or _explicit_app_focus_request(text)
+                )
+            )
             and ui_inspection is None
             and screen_capture is None
             and app_management is None
@@ -923,6 +1129,8 @@ class TaskIntentRouter:
             and safe_key is None
             and safe_scroll is None
             and safe_click is None
+            and not standalone_safe_type_text
+            and not scoped_safe_type_text
             and not hotkey
             and not foreground_compose_text
             and not foreground_paste
@@ -940,6 +1148,8 @@ class TaskIntentRouter:
         ):
             return _empty_intent("desktop_operation", text)
         focus_window = focus_window_hint(text)
+        if focus_window:
+            app_management = None
         window_list = window_list_hint(text)
         if window_list is not None:
             ui_inspection = None
@@ -981,12 +1191,12 @@ class TaskIntentRouter:
             or app_type_scope.get("app_name")
             or explicit_capability_app_name
             or ("" if dynamic_context_transfer else _foreground_compose_app_name_hint(text))
-            or ("" if app_capability else _app_name_hint(text))
+            or ("" if app_capability else _app_name_hint(app_control_text))
             or ""
         ).strip()
         direct_app_name_hint = (
             explicit_capability_app_name
-            or ("" if app_capability else _app_name_hint(text))
+            or ("" if app_capability else _app_name_hint(app_control_text))
         )
         if (
             direct_app_name_hint
@@ -1042,7 +1252,9 @@ class TaskIntentRouter:
             app_management = None
             generic_file_manager_discovery = True
         generic_terminal_app_discovery = False
-        if desktop_discovery is None and _generic_terminal_app_target_requested(text):
+        if desktop_discovery is None and _generic_terminal_app_target_requested(
+            app_control_text
+        ):
             desktop_discovery = {
                 "action": "discover_apps",
                 "query": "terminal",
@@ -1180,12 +1392,13 @@ class TaskIntentRouter:
             or ("browser_internal_page" if browser_internal_page else "")
             or ("app_preferences" if app_preferences else "")
             or ("dynamic_context_ui_transfer" if dynamic_context_transfer else "")
+            or ("read_ui" if window_verification_app else "")
             or ("safe_shortcut_sequence" if safe_shortcut_sequence else "")
             or ("safe_shortcut" if safe_shortcut else "")
             or ("safe_key" if safe_key else "")
             or ("safe_scroll" if safe_scroll else "")
             or ("hotkey" if hotkey and foreground_management is None else "")
-            or _desktop_operation_hint(text)
+            or _desktop_operation_hint(app_control_text)
             or ("type" if app_type_scope else "")
         )
         if safe_shortcut_missing_required_scope and operation_hint == "safe_shortcut":
@@ -1253,6 +1466,36 @@ class TaskIntentRouter:
             and not app_search
             and not command_palette
             and not dynamic_context_transfer
+        ):
+            return _empty_intent("desktop_operation", text)
+        if (
+            operation_hint == "click"
+            and not desktop_action_requested(text, "click")
+            and not _looks_like_ui_operation(text)
+            and not app_name_hint
+            and not app_capability
+            and ui_inspection is None
+            and screen_capture is None
+            and app_management is None
+            and foreground_management is None
+            and safe_shortcut is None
+            and not safe_shortcut_sequence
+            and safe_key is None
+            and safe_scroll is None
+            and safe_click is None
+            and not hotkey
+            and not app_search
+            and not foreground_app_search
+            and not foreground_compose_text
+            and not foreground_paste
+            and not foreground_search_submit
+            and not foreground_submit_action
+            and not command_palette
+            and not dynamic_context_transfer
+            and not browser_internal_page
+            and not app_preferences
+            and not spotlight_search_query
+            and not spotlight_open
         ):
             return _empty_intent("desktop_operation", text)
         if _standalone_hotkey_request(text):
@@ -1374,6 +1617,33 @@ class TaskIntentRouter:
             safe_type_text_for_followup = (
                 safe_type_text_hint(text) or _app_search_field_input_query(text)
             )
+        if not safe_type_text_for_followup:
+            safe_type_text_for_followup = (
+                scoped_safe_type_text or standalone_safe_type_text
+            )
+        if (
+            not safe_type_text_for_followup
+            and not model_generated_content
+            and str((safe_shortcut or {}).get("action") or "").strip()
+            in {"new_document", "new_note", "new_task"}
+            and re.search(
+                r"(?:内容|正文|标题)\s*"
+                r"(?:写(?:成|为|下)?|输入|填入|填写|为|是|[:：])",
+                text,
+                flags=re.IGNORECASE,
+            )
+        ):
+            safe_type_text_for_followup = safe_type_text_hint(text)
+        if (
+            foreground_compose_text
+            and str((safe_shortcut or {}).get("action") or "").strip()
+            in {"new_document", "new_note", "new_task"}
+        ):
+            safe_type_text_for_followup = ""
+        if model_generated_content:
+            # A creative brief is model input, never text to type verbatim.  Keep
+            # this invariant independent of which broad compose parser found it.
+            safe_type_text_for_followup = ""
         if safe_type_text_for_followup:
             inputs["safe_type_text_hint"] = safe_type_text_for_followup
         if model_generated_content:
@@ -1456,11 +1726,12 @@ class TaskIntentRouter:
         text: str,
         metadata: Mapping[str, Any],
     ) -> TaskIntentSnapshot:
+        operand_text = _speech_act_strip_unauthorized_contextual_tails(text)
         if _looks_like_desktop_permissions_request(text, text.lower()):
             return _empty_intent("media_playback", text)
         if _browser_foreground_safe_shortcut_hint(safe_shortcut_hint(text)):
             return _empty_intent("media_playback", text)
-        if _generic_music_app_target_requested(text):
+        if _generic_music_app_target_requested(operand_text):
             return _empty_intent("media_playback", text)
         if _looks_like_report_app_delivery_request(text):
             return _empty_intent("media_playback", text)
@@ -1487,15 +1758,22 @@ class TaskIntentRouter:
                 "QQ 音乐",
             ],
         )
-        hint = media_playback_hint(text)
-        system_hint = system_control_hint(text)
+        operand_hint = media_playback_hint(operand_text)
+        hint = (
+            operand_hint
+            if operand_hint.get("action") or operand_hint.get("query")
+            else media_playback_hint(text)
+        )
+        system_hint = system_control_hint(operand_text)
         if str(system_hint.get("kind") or "").strip() in {"volume", "brightness"}:
             return _empty_intent("media_playback", text)
         if not hint.get("action") and not hint.get("query"):
             return _empty_intent("media_playback", text)
         if score <= 0 and not hint.get("action"):
             return _empty_intent("media_playback", text)
-        target_app_capability = _media_playback_target_app_capability_hint(text)
+        target_app_capability = _media_playback_target_app_capability_hint(
+            operand_text
+        )
         if target_app_capability and hint.get("action") == "play":
             hint = {
                 **hint,
@@ -1531,7 +1809,7 @@ class TaskIntentRouter:
             return _empty_intent("system_control", text)
         if _desktop_ui_field_edit_hint(text):
             return _empty_intent("system_control", text)
-        hint = system_control_hint(text)
+        hint = system_control_hint(affirmative_desktop_action_text(text, "focus"))
         if not hint:
             return _empty_intent("system_control", text)
         hint_kind = str(hint.get("kind") or "").strip()
@@ -1569,6 +1847,46 @@ class TaskIntentRouter:
         metadata: Mapping[str, Any],
     ) -> TaskIntentSnapshot:
         clean_text = _clean_prompt(text)
+        note_capture = capture_note_hint(text)
+        note_target = _dynamic_context_transfer_app_name_hint(text)
+        if (
+            str(note_capture.get("action") or "").strip()
+            == "create_note_from_context"
+            and str(note_capture.get("source") or "").strip()
+            and _is_structured_notes_app_target(note_target)
+        ):
+            # An explicit Notes sink is a structured capture task. Treating
+            # the word "webpage" as generic research would discard the
+            # dedicated notes.create handoff and replace it with a weaker UI
+            # paste path.
+            return _empty_intent("web_research", text)
+        if re.search(
+            r"^(?:基于|根据|结合|使用).{0,12}(?:研究|调研)"
+            r"(?:结果|结论|笔记|记录|资料)",
+            clean_text,
+            flags=re.IGNORECASE,
+        ) or re.search(
+            r"^(?:turn|use|apply|summari[sz]e|implement|write|build)\b.{0,32}"
+            r"\bresearch\s+(?:notes?|results?|findings?|outputs?)\b",
+            clean_text,
+            flags=re.IGNORECASE,
+        ):
+            return _empty_intent("web_research", text)
+        explicit_named_app_field = bool(
+            _app_name_hint(text)
+            and type_into_ui_hint(text)
+            and re.search(
+                r"(?:名为|叫做|named|called).{0,48}"
+                r"(?:输入框|输入栏|文本框|input\s+(?:field|box)|text\s+(?:field|box))",
+                clean_text,
+                flags=re.IGNORECASE,
+            )
+        )
+        if explicit_named_app_field:
+            # A URL-shaped value can still be literal text for a named native UI
+            # field. The explicit app + accessibility target is stronger than
+            # the value looking like a web destination.
+            return _empty_intent("web_research", text)
         if _looks_like_running_apps_request(
             clean_text,
             clean_text.lower(),
@@ -1588,7 +1906,11 @@ class TaskIntentRouter:
             return _empty_intent("web_research", text)
         if _foreground_find_query_hint(text) and not _looks_like_external_info_lookup(text):
             return _empty_intent("web_research", text)
-        if type_into_ui_hint(text) and not _has_browser_page_context(text):
+        if (
+            type_into_ui_hint(text)
+            and not _has_browser_page_context(text)
+            and not _browser_url_action_hint(text, "")
+        ):
             return _empty_intent("web_research", text)
         if ui_inspection_hint(text) is not None and _looks_like_local_ui_inspection_request(text):
             return _empty_intent("web_research", text)
@@ -1718,6 +2040,45 @@ class TaskIntentRouter:
             or _browser_url_action_hint(text, dynamic_source)
             or web_search
         )
+        explicit_url = _url_hint(text)
+        web_instruction = _web_output_instruction_text(
+            text,
+            url_hint=explicit_url,
+            query=str(web_search.get("query") or "").strip(),
+        )
+        if (
+            explicit_url
+            and not browser_action
+            and _contains_any(
+                web_instruction,
+                ("open", "visit", "go to", "navigate", "打开", "访问", "浏览"),
+            )
+        ):
+            # A keyword inside a URL path is data, not an instruction. Keep
+            # explicit navigation on the web route even for paths such as
+            # /research, /document, or /report.
+            browser_action = {
+                "browser_action": (
+                    "open_url_extract"
+                    if _contains_any(
+                        web_instruction,
+                        (
+                            "summarize",
+                            "summarise",
+                            "summary",
+                            "read",
+                            "extract",
+                            "总结",
+                            "摘要",
+                            "概括",
+                            "读取",
+                            "提取",
+                        ),
+                    )
+                    else "open_url"
+                ),
+                "url_hint": explicit_url,
+            }
         score = _score_terms(
             text,
             [
@@ -1759,20 +2120,26 @@ class TaskIntentRouter:
             and _contains_any(text, ["open", "打开", "search", "find", "查找", "搜索"])
         ):
             score = 0.16
+        if explicit_url and browser_action:
+            score = max(score, 0.42)
         if score <= 0 and browser_action:
             score = 0.28
         if score <= 0:
             return _empty_intent("web_research", text)
         browser_action_name = str(browser_action.get("browser_action") or "")
-        inputs = {"url_hint": _url_hint(text)}
+        inputs = {"url_hint": explicit_url}
         if dynamic_source and browser_action_name != "find_current_page":
             inputs["context_source"] = dynamic_source
-        output_target = _task_output_target_hint(text)
+        output_target = _task_output_target_hint(web_instruction)
         if output_target:
             inputs["output_target_hint"] = output_target
         if communication_target:
             inputs["communication_target_hint"] = communication_target
-        app_write_target = {} if communication_target else _app_write_followup_target_hint(text)
+        app_write_target = (
+            {}
+            if communication_target
+            else _web_research_app_write_followup_target_hint(text)
+        )
         if not app_write_target and not communication_target:
             app_write_target = _discovered_app_write_followup_target_hint(
                 text,
@@ -1808,6 +2175,18 @@ class TaskIntentRouter:
             if browser_action_name in {"click", "type_text"}
             else ("low" if browser_action else "medium")
         )
+        expected_outputs = _web_research_expected_outputs(
+            text,
+            browser_action=browser_action_name,
+            url_hint=str(inputs.get("url_hint") or ""),
+            query=str(inputs.get("query") or ""),
+        )
+        if (
+            "summary" in expected_outputs
+            and browser_action_name
+            in {"current_page", "extract_text", "open_url_extract"}
+        ):
+            inputs.setdefault("presentation", "summary")
         return TaskIntentSnapshot(
             intent_id=_stable_id("intent", "web_research", text),
             kind="web_research",
@@ -1816,7 +2195,7 @@ class TaskIntentRouter:
             confidence=min(0.9, 0.38 + score),
             description="Open, read, and summarize web content.",
             inputs=inputs,
-            expected_outputs=_expected_outputs(text, default=["summary"]),
+            expected_outputs=expected_outputs,
             required_capabilities=required_capabilities,
             preferred_capabilities=[
                 *(
@@ -1846,6 +2225,10 @@ class TaskIntentRouter:
         text: str,
         metadata: Mapping[str, Any],
     ) -> TaskIntentSnapshot:
+        if _looks_like_explicit_code_authoring_request(text):
+            return _empty_intent("report_generation", text)
+        if _looks_like_report_terminology_discussion(text):
+            return _empty_intent("report_generation", text)
         if (
             _explicit_app_open_request(text)
             and _app_capability_discovery_hint(text)
@@ -1858,6 +2241,9 @@ class TaskIntentRouter:
         transform_target = _dynamic_context_transform_target_hint(text)
         document_artifact_transform = _looks_like_document_artifact_transform_request(text)
         standalone_report_artifact = _looks_like_standalone_report_artifact_request(text)
+        explicit_artifact_output_path = (
+            _explicit_workspace_artifact_output_path_hint(text)
+        )
         plain_app_context_transfer = _app_scoped_dynamic_context_ui_transfer_hint(
             text,
             _app_name_hint(text),
@@ -1966,10 +2352,19 @@ class TaskIntentRouter:
             or _artifact_output_location_hint(text)
         ):
             return _empty_intent("report_generation", text)
-        file_context = {} if artifact_context_source else _report_file_context_hint(text)
+        file_context = (
+            {}
+            if artifact_context_source
+            else _report_file_context_hint(
+                text,
+                excluded_paths=(explicit_artifact_output_path,),
+            )
+        )
         if score <= 0 and transform_target:
             score = 0.24
         if score <= 0 and document_artifact_transform:
+            score = 0.22
+        if score <= 0 and explicit_artifact_output_path:
             score = 0.22
         if _looks_like_non_desktop_content_task(text):
             score = max(score, 0.24)
@@ -2030,6 +2425,23 @@ class TaskIntentRouter:
             ["生成", "输出", "写", "总结", "摘要", "summarize", "write", "report"],
         ):
             score = 0.16
+        persistent_report_requested = bool(
+            standalone_report_artifact
+            or document_artifact_transform
+            or transform_target
+            or app_write_target
+            or context_source
+            or file_context
+            or explicit_artifact_output_path
+            or _artifact_output_location_hint(text)
+            or _task_output_target_hint(text)
+        )
+        if score > 0 and not persistent_report_requested:
+            # A summary/report word describes response content, not by itself a
+            # request to create a durable artifact. Requiring an explicit sink
+            # keeps delegated advisory steps response-only while preserving
+            # file, clipboard, app, and context-transform report requests.
+            return _empty_intent("report_generation", text)
         if score <= 0:
             return _empty_intent("report_generation", text)
         inputs: dict[str, Any] = {}
@@ -2061,6 +2473,8 @@ class TaskIntentRouter:
             inputs["target_action_hint"] = "current_input_write"
         if file_context:
             inputs["file_context_hint"] = file_context
+        if explicit_artifact_output_path:
+            inputs["artifact_output_path_hint"] = explicit_artifact_output_path
         output_target = _task_output_target_hint(text)
         if output_target:
             inputs["output_target_hint"] = output_target
@@ -2152,7 +2566,8 @@ class TaskIntentRouter:
         )
 
     def _code_task_intent(self, text: str, metadata: Mapping[str, Any]) -> TaskIntentSnapshot:
-        terminal_hint = terminal_command_hint(text)
+        terminal_hint = _authorized_terminal_command_hint(text)
+        terminal_execution_requested = _authorized_terminal_execution_requested(text)
         if not terminal_hint and _desktop_ui_field_edit_hint(text):
             return _empty_intent("code_task", text)
         if (
@@ -2215,6 +2630,32 @@ class TaskIntentRouter:
                 preferred_capabilities=["artifact.write"],
                 risk_level="high",
             )
+        if terminal_execution_requested:
+            return TaskIntentSnapshot(
+                intent_id=_stable_id("intent", "code_task", text),
+                kind="code_task",
+                title="Terminal Command",
+                user_goal=text,
+                confidence=0.9,
+                description=(
+                    "Run one terminal command selected by the model and shown "
+                    "to the user at the approval gate."
+                ),
+                inputs={
+                    "terminal_execution_request_hint": {
+                        "mode": "model_selected_approved_command"
+                    }
+                },
+                expected_outputs=["command_output"],
+                required_capabilities=["terminal.execution"],
+                preferred_capabilities=[],
+                risk_level="high",
+            )
+        if _looks_like_contextual_advisory_response(text):
+            return _empty_intent("code_task", text)
+        explicit_workspace_file_read_target = (
+            _explicit_workspace_file_read_target_hint(text)
+        )
         score = _score_terms(
             text,
             [
@@ -2245,16 +2686,25 @@ class TaskIntentRouter:
             workspace_context_request
             or workspace_file_edit_request
             or workspace_ui_development_request
+            or explicit_workspace_file_read_target
         ):
             score = 0.22
         if score <= 0:
             return _empty_intent("code_task", text)
         diagnostic_command = _code_task_diagnostic_command_hint(text)
         write_requested = _code_task_write_requested(text)
+        explicit_workspace_file_read_only = bool(
+            explicit_workspace_file_read_target
+            and not diagnostic_command
+            and not write_requested
+        )
         inputs: dict[str, Any] = {}
         if diagnostic_command:
             inputs["code_diagnostic_command_hint"] = diagnostic_command
-        target_file = _code_task_target_file_hint(text)
+        target_file = (
+            explicit_workspace_file_read_target
+            or _code_task_target_file_hint(text)
+        )
         if target_file:
             inputs["code_file_context_hint"] = {"path": target_file}
         code_area_hints = _code_task_area_context_hints(text)
@@ -2264,25 +2714,60 @@ class TaskIntentRouter:
             inputs["code_change_hint"] = {
                 "mode": _code_task_change_mode(text),
             }
+        if explicit_workspace_file_read_only:
+            inputs.update(
+                {
+                    "runtime_goal_capabilities": ["file.workspace_read"],
+                    "runtime_goal_targets": {
+                        "file.workspace_read": {
+                            "kind": "workspace_file",
+                            "action": "read_file",
+                            "path": target_file,
+                        }
+                    },
+                }
+            )
         return TaskIntentSnapshot(
             intent_id=_stable_id("intent", "code_task", text),
             kind="code_task",
-            title="Code Task",
+            title=(
+                "Workspace File Read"
+                if explicit_workspace_file_read_only
+                else "Code Task"
+            ),
             user_goal=text,
             confidence=min(0.88, 0.4 + score),
-            description="Read, modify, or test code in the configured workspace.",
+            description=(
+                "Read the explicitly requested file from the configured workspace."
+                if explicit_workspace_file_read_only
+                else "Read, modify, or test code in the configured workspace."
+            ),
             inputs=inputs,
-            expected_outputs=[
-                *(["patch"] if write_requested else []),
-                *(["test_output"] if diagnostic_command else []),
-            ],
+            expected_outputs=(
+                ["file_content"]
+                if explicit_workspace_file_read_only
+                else [
+                    *(["patch"] if write_requested else []),
+                    *(["test_output"] if diagnostic_command else []),
+                ]
+            ),
             required_capabilities=[
                 "file.workspace_read",
                 *(["file.workspace_write"] if write_requested else []),
                 *(["terminal.execution"] if diagnostic_command else []),
             ],
-            preferred_capabilities=["terminal.execution", "artifact.write"],
-            risk_level="high" if write_requested else "medium",
+            preferred_capabilities=(
+                []
+                if explicit_workspace_file_read_only
+                else ["terminal.execution", "artifact.write"]
+            ),
+            risk_level=(
+                "low"
+                if explicit_workspace_file_read_only
+                else "high"
+                if write_requested
+                else "medium"
+            ),
         )
 
     def _file_organization_intent(self, text: str, metadata: Mapping[str, Any]) -> TaskIntentSnapshot:
@@ -2401,7 +2886,17 @@ class TaskIntentRouter:
         )
 
     def _file_access_intent(self, text: str, metadata: Mapping[str, Any]) -> TaskIntentSnapshot:
-        if _explicit_app_open_request(text) and _app_capability_discovery_hint(text):
+        hint = file_access_hint(text)
+        capability_app_target_path = (
+            _selected_discovered_app_target_path_hint(text)
+            if _app_capability_discovery_hint(text)
+            else ""
+        )
+        if (
+            _explicit_app_open_request(text)
+            and _app_capability_discovery_hint(text)
+            and (not hint or capability_app_target_path)
+        ):
             return _empty_intent("file_access", text)
         if _app_file_open_discovery_hint(text, metadata):
             return _empty_intent("file_access", text)
@@ -2413,7 +2908,6 @@ class TaskIntentRouter:
             return _empty_intent("file_access", text)
         if _finder_search_then_ui_action_hint(text):
             return _empty_intent("file_access", text)
-        hint = file_access_hint(text)
         if _looks_like_file_organization_request(text) and not (
             hint
             and str(hint.get("action") or "").strip() == "open_path"
@@ -2450,6 +2944,18 @@ class TaskIntentRouter:
             metadata,
             keys=("available_workflows", "workflow_names", "known_workflows"),
         )
+        if known_target_hint and not action_hint:
+            # The discovered target supplies the missing workflow noun, but an
+            # action verb is still mandatory (for example, "run Daily Summary").
+            action_hint = _workflow_action_hint(f"workflow {text}")
+        explicit_workflow_execution = bool(
+            action_hint or metadata.get("runnable_kind") == "workflow"
+        )
+        if not explicit_workflow_execution:
+            # Mentioning a workflow/flow as the subject of a summary or review
+            # is not authority to run one. Orchestration requires an action
+            # verb (run/create/debug) or an already selected workflow runnable.
+            return _empty_intent("workflow_orchestration", text)
         if score <= 0 and known_target_hint:
             score = 0.24
         if score <= 0 and action_hint:
@@ -2694,7 +3200,26 @@ class TaskIntentRouter:
             return _empty_intent("schedule", text)
         if _looks_like_meeting_content_task(text):
             return _empty_intent("schedule", text)
-        score = _score_terms(text, ["remind", "calendar", "schedule", "event", "提醒", "日历", "日程", "会议", "安排"])
+        score = _score_terms(
+            text,
+            [
+                "alarm",
+                "remind",
+                "wake me",
+                "calendar",
+                "schedule",
+                "event",
+                "闹钟",
+                "叫我",
+                "喊我",
+                "提醒我",
+                "提醒",
+                "日历",
+                "日程",
+                "会议",
+                "安排",
+            ],
+        )
         if score <= 0 and scheduled_runnable:
             score = 0.38
         if score <= 0:
@@ -2766,6 +3291,865 @@ class TaskIntentRouter:
         )
 
 
+_MODEL_INTENT_AUTHORITY_ACTION_KEYS = frozenset(
+    {
+        "action",
+        "browser_action",
+        "control_only",
+        "kind",
+        "operation",
+        "operation_hint",
+        "schedule_tool_hint",
+    }
+)
+_MODEL_INTENT_ACTION_EVIDENCE_RE = re.compile(
+    r"(?:"
+    r"打开|启动|运行|执行|读取|提取|查看|看看|看一下|看下|"
+    r"搜索(?!框|栏|按钮)|查找|找到|找出|播放|创建|新建|写入?|"
+    r"记录|记下|做成|安排|加入|产出|协作|分工|评审|复盘|组建|"
+    r"开(?=会|(?:一个|个).{0,16}(?:小组|团队|群组))|保存|发送|发给|"
+    r"发(?=消息|邮件|一封)|回复|"
+    r"删除|移动|复制|粘贴|改成|改为|更新为|置为|重命名|整理|分析|"
+    r"生成|输出|提醒(?!事项|应用|列表)|预约|"
+    r"关闭|调整|设置(?!按钮|项|页面|界面)|下载|上传|安装|卸载|导入|导出|"
+    r"点击|点开|输入(?!框|栏|按钮)|填入|填到|填进|选择|切换|切到|切回|"
+    r"聚焦|滚动|提交|确认|截(?:图|屏)|录屏|总结|汇总|翻译|"
+    r"调研|调查|研究|比较|转换|列出|列举|检查|发现|探测|起草|草拟|"
+    r"\b(?:open|launch|run|execute|read|extract|view|search|find|play|create|write|"
+    r"save|send|reply|delete|move|copy|paste|organize|analyse|analyze|generate|"
+    r"output|remind|schedule|close|adjust|set|download|upload|click|type|select|"
+    r"switch|focus|scroll|capture|summari[sz]e|translate|research|compare|"
+    r"convert|list|check|inspect|discover|draft|record|export|import|install|"
+    r"uninstall|submit|confirm|arrange|add|produce|collaborate|review|form)\b"
+    r")",
+    flags=re.IGNORECASE,
+)
+_MODEL_INTENT_ACTION_REQUEST_PREFIX_RE = re.compile(
+    r"(?:能不能|可不可以|能否|是否可以|请|麻烦|帮我|"
+    r"\b(?:can|could|would)\s+you|\bplease)\s*$",
+    flags=re.IGNORECASE,
+)
+_SPEECH_ACT_NEGATION_RE = re.compile(
+    r"(?:不要|不用|不必|(?<!能)不能|不该|(?<!可)不可|无需|"
+    r"(?:^|[，,。！!？?；;\s]|请|千万|可)别|禁止|停止|切勿|请勿|勿)|"
+    r"\b(?:never|do\s+not|don['’]t|cannot|can\s+not|can['’]t|"
+    r"should\s+not|shouldn['’]t|must\s+not|mustn['’]t|without)\b",
+    flags=re.IGNORECASE,
+)
+_SPEECH_ACT_CLAUSE_SEPARATOR_RE = re.compile(
+    r"[。；;\uff01!\uff1f?\n]+|\.(?=\s|$)|"
+    r"(?:但是|不过|然而|而是|反而|然后|接着|随后|而后|之后再|但|而)|"
+    r"\b(?:but|however|instead|then|afterwards|subsequently)\b",
+    flags=re.IGNORECASE,
+)
+_SPEECH_ACT_DIAGNOSTIC_PREFIX_RE = re.compile(
+    r"(?:^|[，,]\s*)"
+    r"(?:(?:你能|你可以|可以)\s*)?(?:请)?"
+    r"(?:解释|说明|告诉我|教我|演示|我想知道)?\s*"
+    r"(?:为什么|为何|如何|怎么(?:样)?|怎样|什么是|我想知道)|"
+    r"(?:^|[，,]\s*)(?:please\s+)?"
+    r"(?:explain|describe|tell\s+me|show\s+me|teach\s+me)?\s*"
+    r"(?:why|how(?:\s+do|\s+to|\s+can)|what\s+(?:is|does|happens?))",
+    flags=re.IGNORECASE,
+)
+_SPEECH_ACT_REPORTED_PREFIX_RE = re.compile(
+    r"(?:他说|她说|有人说|文档(?:说|写|写着)|命令是|例如|比如|示例|"
+    r"(?:消息|内容|正文)(?:(?:是|为)\s*|[:：]\s*)|"
+    r"(?:发|发送)(?:消息|邮件).{0,48}(?:说|称|[:：])|翻译)|"
+    r"\b(?:he|she|they|the\s+document)\s+(?:said|says)\b|"
+    r"\b(?:for\s+example|an\s+example|the\s+command\s+is|"
+    r"the\s+message\s+is|message\s*:|content\s*:|translate|"
+    r"send(?:ing)?\s+.{0,48}\b(?:message|email)\b.{0,48}\bsaying)\b",
+    flags=re.IGNORECASE,
+)
+_SPEECH_ACT_DIAGNOSTIC_SUFFIX_RE = re.compile(
+    r"(?:是什么意思|会发生什么|会怎样|会不会(?:失败|报错)|会(?:失败|报错)|"
+    r"如何工作|\bwhat\s+(?:does\s+it\s+mean|happens)|"
+    r"\bhow\s+does\s+it\s+work)",
+    flags=re.IGNORECASE,
+)
+_SPEECH_ACT_CONDITIONAL_PREFIX_RE = re.compile(
+    r"^(?:如果|假如|假设|若|万一)|^\b(?:if|when|unless)\b",
+    flags=re.IGNORECASE,
+)
+_SPEECH_ACT_POLITE_CONDITIONAL_PREFIX_RE = re.compile(
+    r"^(?:如果(?:可以|方便|可能)(?:的话)?|"
+    r"if\s+(?:(?:you\s+)?(?:can|could)|possible)\b)",
+    flags=re.IGNORECASE,
+)
+_SPEECH_ACT_LOCAL_CONDITIONAL_RE = re.compile(
+    r"(?:如果|假如|假设|若|万一|\b(?:if|when|unless)\b)"
+    r"[^；;。.!?！？\n]{0,80}$",
+    flags=re.IGNORECASE,
+)
+_SPEECH_ACT_NONNEGATING_IDIOM_RE = re.compile(
+    r"(?:\b(?:do\s+not|don['’]t)\s+(?:hesitate|wait|worry)\b|"
+    r"(?:不要|别)\s*(?:犹豫|等待?|担心))\s*[，,]\s*$",
+    flags=re.IGNORECASE,
+)
+_TERMINAL_AUTHORITY_ACTION_RE = re.compile(
+    r"(?:运行|执行|跑|\b(?:run|execute)\b)",
+    flags=re.IGNORECASE,
+)
+_APP_CONTROL_AUTHORITY_ACTION_RE = re.compile(
+    r"(?:打开|启动|开启|拉起|切换到?|切到|切回|聚焦|激活|置前|"
+    r"\b(?:open|launch|start(?:\s+up)?|switch(?:\s+to)?|focus|activate|bring)\b)",
+    flags=re.IGNORECASE,
+)
+_DESKTOP_NON_APP_AUTHORITY_ACTION_RE = re.compile(
+    r"(?:点击|点开|输入|填入|填到|填进|选择|滚动|复制|粘贴|"
+    r"搜索(?!框|栏|按钮)|查找|检索|"
+    r"改成|改为|修改|编辑|更新(?:为)?|置为|设置(?!按钮|项|页面|界面)|重命名|"
+    r"删除|移动|保存|导入|导出|播放|暂停|继续|"
+    r"创建|新建|写入?|撰写|起草|草拟|发送|发给|发(?=消息|邮件|一封)|"
+    r"截(?:图|屏)|录屏|提交|确认|列出|列举|发现|探测|检查|查看|读取|"
+    r"\b(?:click|type|input|fill|select|scroll|copy|paste|create|write|compose|"
+    r"search|find|look\s+up|edit|change|update|set|rename|delete|move|save|"
+    r"import|export|play|pause|resume|draft|send|capture|submit|confirm|"
+    r"list|discover|check|inspect|view|read)\b)",
+    flags=re.IGNORECASE,
+)
+_CLARIFICATION_AUTHORITY_FIELDS = frozenset(
+    {"version", "original_goal", "user_reply"}
+)
+_MODEL_INTENT_PATH_MISSING = object()
+
+
+def clarification_authority_for_goal(
+    metadata: Mapping[str, Any] | None,
+    current_goal: str,
+) -> tuple[str, str] | None:
+    """Return one exact user-authored clarification continuation or fail closed.
+
+    The previous goal and the reply are the only new authority.  The model's
+    question, paraphrase, rationale, and proposed inputs are intentionally not
+    part of this contract.
+    """
+
+    if not isinstance(metadata, Mapping) or "clarification_authority" not in metadata:
+        return None
+    raw = metadata.get("clarification_authority")
+    if not isinstance(raw, Mapping) or set(raw) != _CLARIFICATION_AUTHORITY_FIELDS:
+        raise ValueError("clarification_authority_invalid")
+    if type(raw.get("version")) is not int or raw.get("version") != 1:
+        raise ValueError("clarification_authority_version_invalid")
+    previous_goal_raw = raw.get("original_goal")
+    user_reply_raw = raw.get("user_reply")
+    if not isinstance(previous_goal_raw, str) or not isinstance(user_reply_raw, str):
+        raise ValueError("clarification_authority_text_invalid")
+    previous_goal = previous_goal_raw.strip()
+    user_reply = user_reply_raw.strip()
+    if (
+        not previous_goal
+        or not user_reply
+        or previous_goal != previous_goal_raw
+        or user_reply != user_reply_raw
+    ):
+        raise ValueError("clarification_authority_text_invalid")
+    immutable_goal = str(current_goal or "").strip()
+    if immutable_goal != f"{previous_goal}\n{user_reply}":
+        raise ValueError("clarification_authority_goal_mismatch")
+    return previous_goal, user_reply
+
+
+def _model_intent_authority_leaves(
+    value: Any,
+    prefix: tuple[str, ...] = (),
+) -> dict[tuple[str, ...], str]:
+    """Flatten planner inputs for conservative model-authority comparison."""
+
+    if isinstance(value, Mapping):
+        leaves: dict[tuple[str, ...], str] = {}
+        for raw_key, nested in value.items():
+            key = str(raw_key or "").strip()
+            if not key:
+                continue
+            leaves.update(
+                _model_intent_authority_leaves(nested, (*prefix, key))
+            )
+        return leaves
+    if isinstance(value, (list, tuple)):
+        leaves = {}
+        for index, nested in enumerate(value):
+            leaves.update(
+                _model_intent_authority_leaves(
+                    nested,
+                    (*prefix, str(index)),
+                )
+            )
+        return leaves
+    if value is None:
+        return {}
+    text = str(value).strip()
+    return {prefix: text} if prefix and text else {}
+
+
+def _model_intent_value_at_path(value: Any, path: tuple[str, ...]) -> Any:
+    current = value
+    for part in path:
+        if isinstance(current, Mapping):
+            if part not in current:
+                return _MODEL_INTENT_PATH_MISSING
+            current = current[part]
+            continue
+        if isinstance(current, (list, tuple)) and part.isdigit():
+            index = int(part)
+            if index >= len(current):
+                return _MODEL_INTENT_PATH_MISSING
+            current = current[index]
+            continue
+        return _MODEL_INTENT_PATH_MISSING
+    return current
+
+
+def _model_intent_path_is_declared(value: Any, path: tuple[str, ...]) -> bool:
+    """Return whether a leaf belongs to an existing user-derived slot family."""
+
+    current = value
+    for part in path:
+        if isinstance(current, Mapping):
+            if part not in current:
+                return False
+            current = current[part]
+            continue
+        if isinstance(current, (list, tuple)) and part.isdigit():
+            index = int(part)
+            if index >= len(current):
+                # An explicitly present list declares its element slots even
+                # when the user has not supplied the first value yet.
+                return True
+            current = current[index]
+            continue
+        return False
+    return True
+
+
+def _set_model_intent_value_at_path(
+    target: dict[str, Any],
+    path: tuple[str, ...],
+    value: Any,
+) -> None:
+    if not path:
+        raise ValueError("model_intent_authority_path_missing")
+    current: Any = target
+    for index, part in enumerate(path):
+        last = index == len(path) - 1
+        next_is_index = not last and path[index + 1].isdigit()
+        if isinstance(current, dict):
+            if last:
+                current[part] = deepcopy(value)
+                return
+            nested = current.get(part)
+            if not isinstance(nested, (dict, list)):
+                nested = [] if next_is_index else {}
+                current[part] = nested
+            current = nested
+            continue
+        if isinstance(current, list) and part.isdigit():
+            position = int(part)
+            while len(current) <= position:
+                current.append(None)
+            if last:
+                current[position] = deepcopy(value)
+                return
+            nested = current[position]
+            if not isinstance(nested, (dict, list)):
+                nested = [] if next_is_index else {}
+                current[position] = nested
+            current = nested
+            continue
+        raise ValueError("model_intent_authority_path_invalid")
+
+
+def _model_intent_value_is_grounded_in_reply(value: str, user_reply: str) -> bool:
+    normalized_value = " ".join(
+        unicodedata.normalize("NFKC", str(value or "")).casefold().split()
+    )
+    normalized_reply = " ".join(
+        unicodedata.normalize("NFKC", str(user_reply or "")).casefold().split()
+    )
+    if not normalized_value:
+        return False
+    if re.search(r"[a-z0-9]", normalized_value) and not re.search(
+        r"[\u3400-\u9fff]",
+        normalized_value,
+    ):
+        return bool(
+            re.search(
+                rf"(?<![a-z0-9_]){re.escape(normalized_value)}(?![a-z0-9_])",
+                normalized_reply,
+                flags=re.IGNORECASE,
+            )
+        )
+    return normalized_value in normalized_reply
+
+
+def _normalized_speech_act_text(value: str) -> str:
+    return " ".join(
+        unicodedata.normalize("NFKC", str(value or "")).casefold().split()
+    )
+
+
+def _speech_act_quote_spans(text: str) -> tuple[tuple[int, int], ...]:
+    """Return paired quote spans while ignoring apostrophes in contractions."""
+
+    def is_quote_marker(position: int, marker: str) -> bool:
+        if marker != "'":
+            return True
+        previous = text[position - 1 : position]
+        following = text[position + 1 : position + 2]
+        return not (previous.isalnum() and following.isalnum())
+
+    spans: list[tuple[int, int]] = []
+    for opener, closer in (("“", "”"), ("‘", "’"), ('"', '"'), ("'", "'"), ("`", "`")):
+        cursor = 0
+        while cursor < len(text):
+            start = text.find(opener, cursor)
+            if start < 0:
+                break
+            if not is_quote_marker(start, opener):
+                cursor = start + 1
+                continue
+            end_cursor = start + len(opener)
+            while True:
+                end = text.find(closer, end_cursor)
+                if end < 0:
+                    cursor = start + 1
+                    break
+                if is_quote_marker(end, closer):
+                    spans.append((start, end + len(closer)))
+                    cursor = end + len(closer)
+                    break
+                end_cursor = end + 1
+    return tuple(sorted(set(spans)))
+
+
+def _speech_act_clause_bounds(text: str, position: int) -> tuple[int, int]:
+    start = 0
+    end = len(text)
+    for separator in _SPEECH_ACT_CLAUSE_SEPARATOR_RE.finditer(text):
+        if separator.end() <= position:
+            start = separator.end()
+            continue
+        if separator.start() >= position:
+            end = separator.start()
+            break
+    return start, end
+
+
+def _speech_act_authorized_sibling_boundary(
+    text: str,
+    *,
+    action_end: int,
+    clause_end: int,
+    quote_spans: tuple[tuple[int, int], ...],
+) -> int | None:
+    """Find a soft comma boundary that directly introduces another command."""
+
+    for sibling in _MODEL_INTENT_ACTION_EVIDENCE_RE.finditer(
+        text,
+        action_end,
+        clause_end,
+    ):
+        if not _speech_act_action_occurrence_is_authorized(
+            text,
+            sibling.start(),
+            sibling.end(),
+        ):
+            continue
+        separators = tuple(
+            re.finditer(r"[，,]", text[action_end : sibling.start()])
+        )
+        for separator in reversed(separators):
+            boundary_start = action_end + separator.start()
+            boundary_end = action_end + separator.end()
+            if any(
+                quote_start < boundary_end and boundary_start < quote_end
+                for quote_start, quote_end in quote_spans
+            ):
+                continue
+            sibling_prefix = text[boundary_end : sibling.start()]
+            if re.fullmatch(
+                r"\s*(?:(?:并且|以及|然后|接着|随后|同时|并|再|但|而|请|麻烦)\s*|"
+                r"\b(?:and|or|but|then|please)\b\s*)*",
+                sibling_prefix,
+                flags=re.IGNORECASE,
+            ):
+                return boundary_start
+    return None
+
+
+def _speech_act_action_is_negated(clause: str, action_start: int) -> bool:
+    prefix = clause[:action_start]
+    cues = tuple(_SPEECH_ACT_NEGATION_RE.finditer(prefix))
+    if not cues:
+        return False
+    if _SPEECH_ACT_NONNEGATING_IDIOM_RE.search(prefix):
+        return False
+    between = prefix[cues[-1].end() :]
+    if len(between) > 100:
+        return False
+    intervening_actions = tuple(_MODEL_INTENT_ACTION_EVIDENCE_RE.finditer(between))
+    if not intervening_actions:
+        return True
+    return bool(
+        re.search(
+            r"(?:、|或|或者|以及|和|\b(?:and|or)\b)\s*$",
+            between,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _speech_act_action_occurrence_is_authorized(
+    text: str,
+    action_start: int,
+    action_end: int,
+) -> bool:
+    if any(
+        quote_start < action_end and action_start < quote_end
+        for quote_start, quote_end in _speech_act_quote_spans(text)
+    ):
+        return False
+    clause_start, clause_end = _speech_act_clause_bounds(text, action_start)
+    clause = text[clause_start:clause_end]
+    relative_start = action_start - clause_start
+    relative_end = action_end - clause_start
+    prefix = clause[:relative_start]
+    suffix = clause[relative_end:]
+    action_text = text[action_start:action_end].casefold()
+    compact_suffix = suffix.lstrip()
+    if compact_suffix.startswith("的"):
+        # Past/relative modifiers such as "刚刚下载的 PDF" or
+        # "当前选择的文字" describe an operand; they do not
+        # authorize replaying that verb as a new action.
+        return False
+    if (
+        action_text == "open"
+        and re.search(r"\b(?:currently|already)\s*$", prefix, flags=re.IGNORECASE)
+        and re.match(
+            r"(?:the\s+)?(?:[a-z][a-z0-9_-]*\s+){0,4}"
+            r"(?:browser|app|application|program|window)\b",
+            compact_suffix,
+            flags=re.IGNORECASE,
+        )
+    ):
+        # ``the currently open browser`` describes the execution target; the
+        # adjective ``open`` is not a second command.  A later affirmative UI
+        # verb can still authorize operating that target.
+        return False
+    nominal_suffixes = {
+        "研究": ("员", "组", "团队", "小组", "群组"),
+        "写": ("作者", "作组", "作团队"),
+        "research": ("team", "group", "staffer"),
+    }
+    if any(
+        compact_suffix.startswith(nominal_suffix)
+        for nominal_suffix in nominal_suffixes.get(action_text, ())
+    ):
+        return False
+    if _speech_act_action_is_negated(clause, relative_start):
+        return False
+    stripped_clause = clause.lstrip(" ，,")
+    if (
+        _SPEECH_ACT_CONDITIONAL_PREFIX_RE.search(stripped_clause)
+        and not _SPEECH_ACT_POLITE_CONDITIONAL_PREFIX_RE.search(stripped_clause)
+    ):
+        return False
+    local_conditional = _SPEECH_ACT_LOCAL_CONDITIONAL_RE.search(prefix)
+    if local_conditional:
+        conditional_fragment = prefix[local_conditional.start() :].lstrip(
+            " ，,"
+        )
+        conditional_fragment = re.sub(
+            r"^(?:\b(?:and|or|then)\b|并且|以及|然后|或者)\s*",
+            "",
+            conditional_fragment,
+            flags=re.IGNORECASE,
+        )
+        if not _SPEECH_ACT_POLITE_CONDITIONAL_PREFIX_RE.search(
+            conditional_fragment
+        ):
+            return False
+    if _SPEECH_ACT_DIAGNOSTIC_PREFIX_RE.search(prefix):
+        return False
+    if _SPEECH_ACT_REPORTED_PREFIX_RE.search(prefix):
+        return False
+    if _SPEECH_ACT_DIAGNOSTIC_SUFFIX_RE.search(suffix):
+        return False
+    if _MODEL_INTENT_ACTION_REQUEST_PREFIX_RE.search(prefix[-48:]):
+        return True
+    return True
+
+
+def text_has_authorized_action_request(value: str) -> bool:
+    """Whether at least one top-level action occurrence carries user authority."""
+
+    text = _normalized_speech_act_text(value)
+    return any(
+        _speech_act_action_occurrence_is_authorized(
+            text,
+            action_match.start(),
+            action_match.end(),
+        )
+        for action_match in _MODEL_INTENT_ACTION_EVIDENCE_RE.finditer(text)
+    )
+
+
+def _text_has_authorized_family_action(
+    value: str,
+    action_pattern: re.Pattern[str],
+) -> bool:
+    text = unicodedata.normalize("NFKC", str(value or ""))
+    return any(
+        _speech_act_action_occurrence_is_authorized(
+            text,
+            action_match.start(),
+            action_match.end(),
+        )
+        for action_match in action_pattern.finditer(text)
+    )
+
+
+def _speech_act_strip_unauthorized_contextual_tails(value: str) -> str:
+    """Remove non-executing sibling clauses before extracting tool operands.
+
+    Quoted payloads remain intact.  Only clauses with an explicit negation,
+    condition, report, or diagnostic frame are removed, so descriptive nouns
+    and ordinary search terms are not rewritten.
+    """
+
+    text = unicodedata.normalize("NFKC", str(value or ""))
+    if not text:
+        return ""
+    quote_spans = _speech_act_quote_spans(text)
+    removals: list[tuple[int, int]] = []
+    for action_match in _MODEL_INTENT_ACTION_EVIDENCE_RE.finditer(text):
+        if _speech_act_action_occurrence_is_authorized(
+            text,
+            action_match.start(),
+            action_match.end(),
+        ):
+            continue
+        if any(
+            quote_start < action_match.end() and action_match.start() < quote_end
+            for quote_start, quote_end in quote_spans
+        ):
+            continue
+        clause_start, clause_end = _speech_act_clause_bounds(
+            text,
+            action_match.start(),
+        )
+        prefix = text[clause_start : action_match.start()]
+        contextual_matches = [
+            *list(_SPEECH_ACT_LOCAL_CONDITIONAL_RE.finditer(prefix)),
+            *list(_SPEECH_ACT_REPORTED_PREFIX_RE.finditer(prefix)),
+            *list(_SPEECH_ACT_NEGATION_RE.finditer(prefix)),
+        ]
+        diagnostic_match = _SPEECH_ACT_DIAGNOSTIC_PREFIX_RE.search(prefix)
+        if contextual_matches:
+            removal_start = clause_start + max(
+                contextual_matches,
+                key=lambda match: match.start(),
+            ).start()
+        elif diagnostic_match:
+            removal_start = clause_start
+        else:
+            continue
+        sibling_boundary = _speech_act_authorized_sibling_boundary(
+            text,
+            action_end=action_match.end(),
+            clause_end=clause_end,
+            quote_spans=quote_spans,
+        )
+        removal_end = sibling_boundary if sibling_boundary is not None else clause_end
+        preceding = text[clause_start:removal_start]
+        connector = re.search(
+            r"(?:\b(?:and|or|but|then)\b|并且|以及|然后|或者|但|而)"
+            r"\s*(?:(?:please|请|麻烦)\s*)?$",
+            preceding,
+            flags=re.IGNORECASE,
+        )
+        if connector:
+            removal_start = clause_start + connector.start()
+        removals.append((removal_start, removal_end))
+    if not removals:
+        return text
+    characters = list(text)
+    for start, end in removals:
+        characters[start:end] = " " * (end - start)
+    sanitized = re.sub(r"\s+", " ", "".join(characters)).strip()
+    return sanitized.strip(" ，,;；")
+
+
+def _authorized_terminal_command_hint(value: str) -> dict[str, str]:
+    """Bind a parsed command to the exact user-authorized run occurrence."""
+
+    hint = terminal_command_hint(value)
+    command = str(hint.get("command") or "").strip()
+    if not command:
+        return {}
+    text = unicodedata.normalize("NFKC", str(value or ""))
+    normalized_command = unicodedata.normalize("NFKC", command)
+    action_matches = tuple(_TERMINAL_AUTHORITY_ACTION_RE.finditer(text))
+    for command_match in re.finditer(
+        re.escape(normalized_command),
+        text,
+        flags=re.IGNORECASE,
+    ):
+        preceding_actions = [
+            action_match
+            for action_match in action_matches
+            if action_match.end() <= command_match.start()
+        ]
+        if not preceding_actions:
+            continue
+        action_match = preceding_actions[-1]
+        if _speech_act_action_occurrence_is_authorized(
+            text,
+            action_match.start(),
+            action_match.end(),
+        ):
+            return hint
+    return {}
+
+
+def _authorized_terminal_execution_requested(value: str) -> bool:
+    text = unicodedata.normalize("NFKC", str(value or ""))
+    return bool(
+        _looks_like_explicit_terminal_execution_request(text)
+        and any(
+            _speech_act_action_occurrence_is_authorized(
+                text,
+                action_match.start(),
+                action_match.end(),
+            )
+            for action_match in _TERMINAL_AUTHORITY_ACTION_RE.finditer(text)
+        )
+    )
+
+
+def _speech_act_goal_requests_cached_diagnostic(value: str) -> bool:
+    text = _normalized_speech_act_text(value)
+    return bool(
+        _SPEECH_ACT_DIAGNOSTIC_PREFIX_RE.search(text)
+        or _SPEECH_ACT_DIAGNOSTIC_SUFFIX_RE.search(text)
+    )
+
+
+def _model_intent_goal_blocks_direct_execution(value: str) -> bool:
+    """Block only when every recognized action mention is non-executing."""
+
+    text = _normalized_speech_act_text(value)
+    action_mentions = tuple(_MODEL_INTENT_ACTION_EVIDENCE_RE.finditer(text))
+    return bool(action_mentions) and not any(
+        _speech_act_action_occurrence_is_authorized(
+            text,
+            action_match.start(),
+            action_match.end(),
+        )
+        for action_match in action_mentions
+    )
+
+
+def _runtime_plan_requests_effect(plan: RuntimePlanSnapshot) -> bool:
+    task_core = getattr(plan, "task_core", None)
+    contract = getattr(task_core, "goal_contract", None)
+    contract_requests_effect = any(
+        bool(getattr(criterion, "effectful", False))
+        for criterion in list(getattr(contract, "criteria", []) or [])
+    )
+    # The speech-act gate must cover every real tool execution, including
+    # low-risk reads such as clipboard.read.  Risk and approval levels govern
+    # consent mechanics; they do not turn a tool call into conversation.
+    has_uncontracted_effect_step = any(
+        bool(str(getattr(step, "tool_name", "") or "").strip())
+        for step in list(getattr(getattr(plan, "tool_plan", None), "steps", []) or [])
+    )
+    return contract_requests_effect or has_uncontracted_effect_step
+
+
+def _runtime_plan_is_cached_permission_diagnostic(plan: RuntimePlanSnapshot) -> bool:
+    tool_names = {
+        str(getattr(step, "tool_name", "") or "").strip()
+        for step in list(getattr(getattr(plan, "tool_plan", None), "steps", []) or [])
+        if str(getattr(step, "tool_name", "") or "").strip()
+    }
+    return tool_names == {"desktop.permissions"}
+
+
+def _model_intent_action_evidence_is_grounded(
+    immutable_goal: str,
+    planning_goal: str,
+    action_evidence: str,
+) -> bool:
+    evidence = _normalized_speech_act_text(action_evidence)
+    goal = _normalized_speech_act_text(immutable_goal)
+    planning = _normalized_speech_act_text(planning_goal)
+    if (
+        not evidence
+        or len(evidence) > 200
+        or not _model_intent_value_is_grounded_in_reply(evidence, goal)
+        or not _model_intent_value_is_grounded_in_reply(evidence, planning)
+    ):
+        return False
+    action_matches = list(_MODEL_INTENT_ACTION_EVIDENCE_RE.finditer(evidence))
+    if not action_matches:
+        return False
+    if re.search(r"[a-z0-9]", evidence) and not re.search(
+        r"[\u3400-\u9fff]",
+        evidence,
+    ):
+        evidence_occurrences = re.finditer(
+            rf"(?<![a-z0-9_]){re.escape(evidence)}(?![a-z0-9_])",
+            goal,
+            flags=re.IGNORECASE,
+        )
+    else:
+        evidence_occurrences = re.finditer(re.escape(evidence), goal)
+    for occurrence in evidence_occurrences:
+        occurrence_start = occurrence.start()
+        for action_match in action_matches:
+            action_start = occurrence_start + action_match.start()
+            action_end = occurrence_start + action_match.end()
+            if _speech_act_action_occurrence_is_authorized(
+                goal,
+                action_start,
+                action_end,
+            ):
+                return True
+    return False
+
+
+def _model_intent_candidate_is_user_grounded(
+    candidate: TaskIntentSnapshot,
+    immutable_goal: str,
+    planning_goal: str,
+    action_evidence: str,
+) -> bool:
+    """Allow a router-gap promotion only from quoted action and concrete values."""
+
+    if not _model_intent_action_evidence_is_grounded(
+        immutable_goal,
+        planning_goal,
+        action_evidence,
+    ):
+        return False
+    for path, value in _model_intent_authority_leaves(candidate.inputs).items():
+        if path[-1].casefold() in _MODEL_INTENT_AUTHORITY_ACTION_KEYS:
+            continue
+        if not _model_intent_value_is_grounded_in_reply(value, immutable_goal):
+            return False
+    return True
+
+
+def _clarification_merged_intent_candidate(
+    original: TaskIntentSnapshot,
+    combined: TaskIntentSnapshot | None,
+    proposed: TaskIntentSnapshot,
+    user_reply: str,
+) -> TaskIntentSnapshot:
+    """Fill non-action slots from user-authored continuation without action drift."""
+
+    original_leaves = _model_intent_authority_leaves(original.inputs)
+    proposed_leaves = _model_intent_authority_leaves(proposed.inputs)
+    for path, proposed_value in proposed_leaves.items():
+        if path[-1].casefold() not in _MODEL_INTENT_AUTHORITY_ACTION_KEYS:
+            continue
+        original_value = original_leaves.get(path, "")
+        if not original_value or proposed_value.casefold() != original_value.casefold():
+            raise ValueError("model_intent_clarification_action_expanded")
+
+    merged_inputs = deepcopy(dict(original.inputs or {}))
+    if combined is not None:
+        for path, combined_value in _model_intent_authority_leaves(
+            combined.inputs
+        ).items():
+            if path[-1].casefold() in _MODEL_INTENT_AUTHORITY_ACTION_KEYS:
+                continue
+            if original_leaves.get(path, ""):
+                continue
+            if (
+                proposed_leaves.get(path, "").casefold()
+                != combined_value.casefold()
+                and not _model_intent_value_is_grounded_in_reply(
+                    combined_value,
+                    user_reply,
+                )
+            ):
+                # Concatenated text can trigger a lossy parser branch (for
+                # example, treating the word "software" in the old question
+                # as the new target).  Accept a derived value only when the
+                # reply grounds it or both deterministic parses agree.
+                continue
+            raw_value = _model_intent_value_at_path(combined.inputs, path)
+            if raw_value is not _MODEL_INTENT_PATH_MISSING:
+                _set_model_intent_value_at_path(merged_inputs, path, raw_value)
+
+    for path, proposed_value in proposed_leaves.items():
+        if path[-1].casefold() in _MODEL_INTENT_AUTHORITY_ACTION_KEYS:
+            continue
+        merged_leaves = _model_intent_authority_leaves(merged_inputs)
+        current_value = merged_leaves.get(path, "")
+        if current_value and proposed_value.casefold() == current_value.casefold():
+            continue
+        if _model_intent_value_is_grounded_in_reply(proposed_value, user_reply):
+            if not _model_intent_path_is_declared(
+                original.inputs,
+                path,
+            ) and not (
+                combined is not None
+                and _model_intent_path_is_declared(combined.inputs, path)
+            ):
+                raise ValueError("model_intent_clarification_slot_not_declared")
+            raw_value = _model_intent_value_at_path(proposed.inputs, path)
+            if raw_value is _MODEL_INTENT_PATH_MISSING:
+                raise ValueError("model_intent_clarification_value_missing")
+            _set_model_intent_value_at_path(merged_inputs, path, raw_value)
+            continue
+        if not current_value:
+            raise ValueError("model_intent_clarification_authority_expanded")
+
+    return original.model_copy(
+        update={
+            "inputs": merged_inputs,
+            "missing_inputs": list(proposed.missing_inputs or []),
+            "confidence": max(
+                float(original.confidence or 0),
+                float(proposed.confidence or 0),
+            ),
+        }
+    )
+
+
+def _model_intent_hint_expands_authority(
+    original: TaskIntentSnapshot,
+    proposed: TaskIntentSnapshot,
+) -> bool:
+    """Reject model-only slots and changed action semantics.
+
+    The normalized planning text is not user authority.  It may help select a
+    route, but every concrete input used by that route must already have a
+    non-empty counterpart in the candidate parsed from the immutable user
+    text.  Values may differ for harmless normalization (for example an
+    encoded URL), because the Runtime will use the original value; action
+    fields themselves must remain identical.
+    """
+
+    original_leaves = _model_intent_authority_leaves(original.inputs)
+    proposed_leaves = _model_intent_authority_leaves(proposed.inputs)
+    for path, proposed_value in proposed_leaves.items():
+        original_value = original_leaves.get(path, "")
+        if not original_value:
+            return True
+        if (
+            path[-1].casefold() in _MODEL_INTENT_AUTHORITY_ACTION_KEYS
+            and proposed_value.casefold() != original_value.casefold()
+        ):
+            return True
+    return False
+
+
 class RuntimePlanner:
     def __init__(self, intent_router: TaskIntentRouter | None = None) -> None:
         self._intent_router = intent_router or TaskIntentRouter()
@@ -2788,7 +4172,27 @@ class RuntimePlanner:
             selected,
             allowed,
         )
-        plan = self.plan_intent(selected, allowed_tools=allowed_tools, metadata=metadata)
+        plan = self.plan_intent(
+            selected,
+            allowed_tools=allowed_tools,
+            metadata=metadata,
+            original_goal=str(prompt or "").strip(),
+        )
+        if (
+            _model_intent_goal_blocks_direct_execution(prompt)
+            and _runtime_plan_requests_effect(plan)
+            and not (
+                _speech_act_goal_requests_cached_diagnostic(prompt)
+                and _runtime_plan_is_cached_permission_diagnostic(plan)
+            )
+        ):
+            selected = _empty_intent("general", _clean_prompt(prompt))
+            plan = self.plan_intent(
+                selected,
+                allowed_tools=allowed_tools,
+                metadata=metadata,
+                original_goal=str(prompt or "").strip(),
+            )
         return PlannerDecisionSnapshot(
             decision_id=_stable_id("decision", selected.kind, prompt),
             prompt=_clean_prompt(prompt),
@@ -2796,6 +4200,265 @@ class RuntimePlanner:
             candidate_intents=candidates,
             plan=plan,
             created_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        )
+
+    def decision_from_model_intent_hint(
+        self,
+        original_goal: str,
+        planning_goal: str,
+        intent_kind: str,
+        allowed_tools: Iterable[str] | None = None,
+        metadata: Mapping[str, Any] | None = None,
+        *,
+        action_evidence: str = "",
+        _authority_source: str = "model_intent_hint",
+    ) -> PlannerDecisionSnapshot:
+        """Mint a trusted plan from one narrow, model-suggested intent hint.
+
+        The model hint is useful only as text for the deterministic router.  It
+        cannot choose tools, policy, risk, approval, identifiers, or completion
+        criteria.  Every authority-bearing snapshot remains Runtime-owned and
+        is rebound to the immutable original user goal.
+        """
+
+        immutable_goal = str(original_goal or "").strip()
+        normalized_planning_goal = _clean_prompt(planning_goal)
+        requested_kind = str(intent_kind or "").strip()
+        if not immutable_goal:
+            raise ValueError("model_intent_original_goal_missing")
+        if not normalized_planning_goal:
+            raise ValueError("model_intent_planning_goal_missing")
+        if len(normalized_planning_goal) > 2000:
+            raise ValueError("model_intent_planning_goal_too_long")
+        if not requested_kind:
+            raise ValueError("model_intent_kind_missing")
+
+        clarification_authority = clarification_authority_for_goal(
+            metadata,
+            immutable_goal,
+        )
+        authority_source = str(_authority_source or "").strip()
+        if authority_source not in {
+            "model_intent_hint",
+            "user_clarification",
+        }:
+            raise ValueError("model_intent_authority_source_invalid")
+        if authority_source == "user_clarification" and (
+            clarification_authority is None
+            or normalized_planning_goal != _clean_prompt(immutable_goal)
+        ):
+            raise ValueError("user_clarification_authority_invalid")
+
+        routed_candidates = self._intent_router.candidate_intents(
+            normalized_planning_goal,
+            metadata,
+        )
+        matching_candidates = [
+            candidate
+            for candidate in routed_candidates
+            if (
+                str(candidate.kind or "").strip() == requested_kind
+                and str(candidate.user_goal or "").strip()
+                and float(candidate.confidence or 0) > 0
+            )
+        ]
+        if not matching_candidates:
+            raise ValueError("model_intent_kind_not_routed")
+        if str(action_evidence or "").strip() and not (
+            _model_intent_action_evidence_is_grounded(
+                immutable_goal,
+                normalized_planning_goal,
+                action_evidence,
+            )
+        ):
+            raise ValueError("model_intent_action_evidence_rejected")
+
+        # The model may disambiguate among semantic routes, but it must not
+        # create new effect authority.  In particular, rebinding a model-only
+        # candidate to ``original_goal`` does not prove that an app name,
+        # path, recipient, time, or action came from the user.  Require the
+        # immutable user text itself to have produced the selected intent and
+        # use that original candidate as the sole source of plan inputs.
+        authority_goal = (
+            clarification_authority[0]
+            if clarification_authority is not None
+            else immutable_goal
+        )
+        original_candidates = self._intent_router.candidate_intents(
+            authority_goal,
+            metadata,
+        )
+        original_matching_candidates = [
+            candidate
+            for candidate in original_candidates
+            if (
+                str(candidate.kind or "").strip() == requested_kind
+                and str(candidate.user_goal or "").strip()
+                and float(candidate.confidence or 0) > 0
+            )
+        ]
+        proposed_candidate = matching_candidates[0]
+        if not original_matching_candidates:
+            if (
+                authority_source != "model_intent_hint"
+                or not _model_intent_candidate_is_user_grounded(
+                    proposed_candidate,
+                    immutable_goal,
+                    normalized_planning_goal,
+                    action_evidence,
+                )
+            ):
+                raise ValueError("model_intent_original_goal_authority_missing")
+            original_candidate = proposed_candidate
+            original_candidates = [proposed_candidate]
+        else:
+            original_candidate = original_matching_candidates[0]
+        authority_candidate = original_candidate
+        if clarification_authority is not None:
+            combined_candidates = self._intent_router.candidate_intents(
+                immutable_goal,
+                metadata,
+            )
+            combined_candidate = next(
+                (
+                    candidate
+                    for candidate in combined_candidates
+                    if (
+                        str(candidate.kind or "").strip() == requested_kind
+                        and str(candidate.user_goal or "").strip()
+                        and float(candidate.confidence or 0) > 0
+                    )
+                ),
+                None,
+            )
+            authority_candidate = _clarification_merged_intent_candidate(
+                original_candidate,
+                combined_candidate,
+                proposed_candidate,
+                clarification_authority[1],
+            )
+        elif _model_intent_hint_expands_authority(
+            original_candidate,
+            proposed_candidate,
+        ):
+            raise ValueError("model_intent_original_goal_authority_expanded")
+
+        audit_payload = {
+            "requested_intent_kind": requested_kind,
+            "source": (
+                "runtime_validated_user_clarification"
+                if authority_source == "user_clarification"
+                else "runtime_validated_model_intent_hint"
+            ),
+        }
+        if authority_source == "model_intent_hint":
+            audit_payload["planning_goal"] = normalized_planning_goal
+            if str(action_evidence or "").strip():
+                audit_payload["action_evidence"] = str(action_evidence).strip()
+        if clarification_authority is not None:
+            audit_payload["clarification_continuation"] = True
+
+        def bind_candidate(candidate: TaskIntentSnapshot) -> TaskIntentSnapshot:
+            candidate_kind = str(candidate.kind or "").strip()
+            inputs = dict(candidate.inputs or {})
+            if authority_source == "user_clarification":
+                inputs["runtime_user_clarification"] = dict(audit_payload)
+            else:
+                inputs["runtime_model_planning_goal"] = normalized_planning_goal
+                inputs["runtime_model_intent_hint"] = dict(audit_payload)
+            stable_source = (
+                "user-clarification"
+                if authority_source == "user_clarification"
+                else "model-assisted"
+            )
+            return candidate.model_copy(
+                update={
+                    "intent_id": _stable_id(
+                        "intent",
+                        f"{stable_source}:{candidate_kind}",
+                        f"{immutable_goal}\n{normalized_planning_goal}",
+                    ),
+                    "user_goal": immutable_goal,
+                    "inputs": inputs,
+                }
+            )
+
+        selected = bind_candidate(authority_candidate)
+        allowed = _allowed_tool_set(allowed_tools)
+        selected = _normalize_intent_for_allowed_tools(selected, allowed)
+        plan = self.plan_intent(
+            selected,
+            allowed_tools=allowed_tools,
+            metadata=metadata,
+            original_goal=immutable_goal,
+        )
+        if (
+            _model_intent_goal_blocks_direct_execution(immutable_goal)
+            and _runtime_plan_requests_effect(plan)
+            and not (
+                _speech_act_goal_requests_cached_diagnostic(immutable_goal)
+                and _runtime_plan_is_cached_permission_diagnostic(plan)
+            )
+        ):
+            raise ValueError("model_intent_non_execution_goal")
+        candidates = [
+            bind_candidate(
+                authority_candidate
+                if candidate.intent_id == original_candidate.intent_id
+                else candidate
+            )
+            for candidate in original_candidates
+        ]
+        return PlannerDecisionSnapshot(
+            decision_id=_stable_id(
+                "decision",
+                (
+                    f"user-clarification:{selected.kind}"
+                    if authority_source == "user_clarification"
+                    else f"model-assisted:{selected.kind}"
+                ),
+                f"{immutable_goal}\n{normalized_planning_goal}",
+            ),
+            prompt=immutable_goal,
+            selected_intent=selected,
+            candidate_intents=candidates,
+            plan=plan,
+            created_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        )
+
+    def decision_from_user_clarification(
+        self,
+        current_goal: str,
+        allowed_tools: Iterable[str] | None = None,
+        metadata: Mapping[str, Any] | None = None,
+    ) -> PlannerDecisionSnapshot:
+        """Resume a prior intent directly when user-authored text is sufficient."""
+
+        immutable_goal = str(current_goal or "").strip()
+        authority = clarification_authority_for_goal(metadata, immutable_goal)
+        if authority is None:
+            raise ValueError("clarification_authority_missing")
+        previous_candidates = self._intent_router.candidate_intents(
+            authority[0],
+            metadata,
+        )
+        allowed = _allowed_tool_set(allowed_tools)
+        previous = (
+            _select_intent_for_allowed_tools(previous_candidates, allowed)
+            if previous_candidates
+            else self._intent_router.route(authority[0], metadata)
+        )
+        previous = _normalize_intent_for_allowed_tools(previous, allowed)
+        previous_kind = str(previous.kind or "").strip()
+        if not previous_kind or previous_kind == "general":
+            raise ValueError("clarification_original_intent_missing")
+        return self.decision_from_model_intent_hint(
+            immutable_goal,
+            immutable_goal,
+            previous_kind,
+            allowed_tools,
+            metadata,
+            _authority_source="user_clarification",
         )
 
     def plan(
@@ -2813,11 +4476,116 @@ class RuntimePlanner:
         *,
         allowed_tools: Iterable[str] | None = None,
         metadata: Mapping[str, Any] | None = None,
+        original_goal: str | None = None,
     ) -> RuntimePlanSnapshot:
         allowed = _allowed_tool_set(allowed_tools)
         intent = _normalize_intent_for_allowed_tools(intent, allowed)
-        steps = self._steps_for_intent(intent, allowed)
         readiness = _planner_readiness_context(metadata)
+        prefer_background = _planner_prefers_background_desktop(metadata)
+        tool_readiness = _planner_tool_readiness_context(
+            metadata,
+            allowed=allowed,
+            capability_readiness=readiness,
+        )
+        # Imported lazily: the selector's trusted capability registry belongs
+        # to the agent Runtime and imports this package's capability
+        # definitions.  Keeping the dependency at the planning boundary avoids
+        # a package-initialisation cycle when the selector is imported first.
+        from apps.shell.agent.runtime.tool_candidate_selection import (
+            tool_candidate_selection_context,
+        )
+
+        with tool_candidate_selection_context(
+            readiness_by_tool=tool_readiness,
+            prefer_background=prefer_background,
+        ):
+            steps = self._steps_for_intent(
+                intent,
+                allowed,
+                prefer_background_desktop=prefer_background,
+            )
+            steps = _select_best_runtime_step_tools(
+                steps,
+                allowed=allowed,
+                readiness_by_tool=tool_readiness,
+                prefer_background=prefer_background,
+            )
+        return self._finalize_plan_steps(
+            intent,
+            steps,
+            allowed_tools=allowed_tools,
+            metadata=metadata,
+            original_goal=original_goal,
+            readiness=readiness,
+        )
+
+    def plan_compiled_steps(
+        self,
+        intent: TaskIntentSnapshot,
+        steps: Iterable[ToolPlanStepSnapshot],
+        *,
+        allowed_tools: Iterable[str] | None = None,
+        metadata: Mapping[str, Any] | None = None,
+        original_goal: str | None = None,
+    ) -> RuntimePlanSnapshot:
+        """Finalize trusted semantic steps through the standard plan pipeline.
+
+        Callers must compile semantic actions before entering this method.  It
+        deliberately reselects concrete adapters and mints every capability,
+        TaskCore, GoalContract, execution-strategy, and timeline snapshot so a
+        model-authored proposal cannot supply those authority-bearing fields.
+        """
+
+        compiled_steps = list(steps)
+        if any(not isinstance(step, ToolPlanStepSnapshot) for step in compiled_steps):
+            raise TypeError("compiled plan steps must be ToolPlanStepSnapshot values")
+        step_ids = [str(step.step_id or "").strip() for step in compiled_steps]
+        if any(not step_id for step_id in step_ids) or len(step_ids) != len(set(step_ids)):
+            raise ValueError("compiled plan step ids must be non-empty and unique")
+
+        allowed = _allowed_tool_set(allowed_tools)
+        intent = _normalize_intent_for_allowed_tools(intent, allowed)
+        readiness = _planner_readiness_context(metadata)
+        prefer_background = _planner_prefers_background_desktop(metadata)
+        tool_readiness = _planner_tool_readiness_context(
+            metadata,
+            allowed=allowed,
+            capability_readiness=readiness,
+        )
+        from apps.shell.agent.runtime.tool_candidate_selection import (
+            tool_candidate_selection_context,
+        )
+
+        with tool_candidate_selection_context(
+            readiness_by_tool=tool_readiness,
+            prefer_background=prefer_background,
+        ):
+            compiled_steps = _select_best_runtime_step_tools(
+                compiled_steps,
+                allowed=allowed,
+                readiness_by_tool=tool_readiness,
+                prefer_background=prefer_background,
+                use_selected_candidate_policy=True,
+            )
+        return self._finalize_plan_steps(
+            intent,
+            compiled_steps,
+            allowed_tools=allowed_tools,
+            metadata=metadata,
+            original_goal=original_goal,
+            readiness=readiness,
+        )
+
+    def _finalize_plan_steps(
+        self,
+        intent: TaskIntentSnapshot,
+        steps: list[ToolPlanStepSnapshot],
+        *,
+        allowed_tools: Iterable[str] | None,
+        metadata: Mapping[str, Any] | None,
+        original_goal: str | None,
+        readiness: Mapping[str, Mapping[str, Iterable[str]]],
+    ) -> RuntimePlanSnapshot:
         if readiness:
             steps = _apply_readiness_to_steps(steps, readiness)
         required_capabilities = _required_capabilities_for_plan(intent, steps)
@@ -2827,6 +4595,17 @@ class RuntimePlanner:
             capability_ids=capabilities,
         )
         missing = _missing_capabilities(snapshots, required_capability_ids=required_capabilities)
+        planned_capabilities = {
+            str(step.capability_id or "").strip()
+            for step in steps
+            if str(step.tool_name or "").strip()
+            and str(step.status or "planned").strip() not in {"unavailable", "skipped"}
+        }
+        missing = [
+            capability_id
+            for capability_id in missing
+            if capability_id not in planned_capabilities
+        ]
         for capability_id in _unavailable_required_step_capabilities(
             steps,
             required_capability_ids=required_capabilities,
@@ -2854,6 +4633,7 @@ class RuntimePlanner:
             steps,
             artifacts_expected=tool_plan.artifacts_expected,
             open_questions=tool_plan.open_questions,
+            original_goal=original_goal,
         )
         return RuntimePlanSnapshot(
             plan_id=_stable_id("runtime-plan", intent.kind, intent.user_goal),
@@ -2875,11 +4655,17 @@ class RuntimePlanner:
         self,
         intent: TaskIntentSnapshot,
         allowed: set[str] | None,
+        *,
+        prefer_background_desktop: bool = False,
     ) -> list[ToolPlanStepSnapshot]:
         if intent.kind == "data_analysis":
             return self._data_analysis_steps(intent, allowed)
         if intent.kind == "desktop_operation":
-            return self._desktop_operation_steps(intent, allowed)
+            return self._desktop_operation_steps(
+                intent,
+                allowed,
+                prefer_background_desktop=prefer_background_desktop,
+            )
         if intent.kind == "media_playback":
             return self._media_playback_steps(intent, allowed)
         if intent.kind == "system_control":
@@ -2934,7 +4720,7 @@ class RuntimePlanner:
                 orchestration_kind="group_run",
                 depends_on="group-multi_agent",
             )
-        return self._report_steps(intent, allowed)
+        return []
 
     def _data_analysis_steps(
         self,
@@ -3050,7 +4836,10 @@ class RuntimePlanner:
                     "Run reproducible data analysis",
                     "data.analysis",
                     _first_allowed(("python.run", "terminal.run"), allowed),
-                    input_preview={"command": "python - <<'PY'\n# analyze captured tabular data\nPY"},
+                    input_preview=_data_analysis_support_method_input_preview(
+                        "python - <<'PY'\n# analyze captured tabular data\nPY",
+                        artifact_paths,
+                    ),
                     risk_level="high",
                     approval_required=True,
                     depends_on=depends_on,
@@ -3074,7 +4863,13 @@ class RuntimePlanner:
                         reason="Return a durable data-analysis artifact that Studio and Chat can replay.",
                     )
                 )
-                depends_on_step = "write-analysis-artifact"
+                _append_data_analysis_artifact_verifier(
+                    intent,
+                    allowed,
+                    steps,
+                    artifact_paths=artifact_paths,
+                )
+                depends_on_step = "verify-analysis-artifact"
             return _append_data_analysis_followup_steps(
                 intent,
                 allowed,
@@ -3186,24 +4981,33 @@ class RuntimePlanner:
                 intent.user_goal,
             ),
         )
+        can_plan_builtin_after_discovery = (
+            _can_plan_builtin_data_analysis_after_source_discovery(intent, allowed)
+        )
+        inspect_input_preview = _data_source_inspect_input_preview(
+            source_hint or source_scope,
+            source_kind,
+            str(intent.inputs.get("data_source_name_hint") or ""),
+            str(intent.inputs.get("data_source_selection_hint") or ""),
+        )
+        if can_plan_builtin_after_discovery and source_kind == "unknown":
+            inspect_input_preview["pattern"] = _builtin_data_source_discovery_pattern(
+                source_kind
+            )
+        inspect_tool = _first_allowed(inspect_tool_candidates, allowed)
         steps = [
             _step(
                 intent,
                 "inspect-data-source",
                 "Inspect data source",
                 "file.workspace_read",
-                _first_allowed(inspect_tool_candidates, allowed),
-                input_preview=_data_source_inspect_input_preview(
-                    source_hint or source_scope,
-                    source_kind,
-                    str(intent.inputs.get("data_source_name_hint") or ""),
-                    str(intent.inputs.get("data_source_selection_hint") or ""),
-                ),
+                inspect_tool,
+                input_preview=inspect_input_preview,
                 reason="Find and inspect the dataset before analysis.",
                 fallback_tools=["desktop.open_path", "browser.current_page"],
             ),
         ]
-        if _can_plan_builtin_data_analysis_after_source_discovery(intent, allowed):
+        if can_plan_builtin_after_discovery:
             steps.extend([*spreadsheet_steps, *file_open_steps])
             steps.append(
                 _step(
@@ -3215,6 +5019,7 @@ class RuntimePlanner:
                     input_preview=_discovered_data_analysis_input_preview(
                         intent,
                         artifact_paths=artifact_paths,
+                        selection_source=inspect_tool or "workspace.list",
                     ),
                     depends_on=[
                         "inspect-data-source",
@@ -3245,7 +5050,10 @@ class RuntimePlanner:
                     "Run reproducible data analysis",
                     "data.analysis",
                     _first_allowed(("python.run", "terminal.run"), allowed),
-                    input_preview={"command": "python - <<'PY'\n# inspect data, compute summary, generate charts\nPY"},
+                    input_preview=_data_analysis_support_method_input_preview(
+                        "python - <<'PY'\n# inspect data, compute summary, generate charts\nPY",
+                        artifact_paths,
+                    ),
                     risk_level="high",
                     approval_required=True,
                     depends_on=[
@@ -3273,7 +5081,13 @@ class RuntimePlanner:
                     reason="Return a durable report artifact that Studio and Chat can replay.",
                 )
             )
-            depends_on_step = "write-analysis-artifact"
+            _append_data_analysis_artifact_verifier(
+                intent,
+                allowed,
+                steps,
+                artifact_paths=artifact_paths,
+            )
+            depends_on_step = "verify-analysis-artifact"
         return _append_data_analysis_followup_steps(
             intent,
             allowed,
@@ -3286,6 +5100,8 @@ class RuntimePlanner:
         self,
         intent: TaskIntentSnapshot,
         allowed: set[str] | None,
+        *,
+        prefer_background_desktop: bool = False,
     ) -> list[ToolPlanStepSnapshot]:
         if str(intent.inputs.get("invalid_command_palette_request") or "").strip():
             return []
@@ -3305,6 +5121,8 @@ class RuntimePlanner:
             window_list = None
         screen_capture = screen_capture_hint(intent.user_goal)
         app_management = app_management_hint(intent.user_goal)
+        if focus_window:
+            app_management = None
         foreground_management = foreground_management_hint(intent.user_goal)
         safe_shortcut = safe_shortcut_hint(intent.user_goal)
         intent_safe_shortcut = intent.inputs.get("safe_shortcut_hint")
@@ -3553,7 +5371,7 @@ class RuntimePlanner:
             or _app_management_prepare_mode(intent.user_goal, app_name, app_management)
             or ""
         ).strip()
-        mode = app_control_mode(intent.user_goal)
+        mode = app_control_mode(_affirmative_app_control_text(intent.user_goal))
         if foreground_paste and _current_or_foreground_app_scope_hint(intent.user_goal):
             mode = "focus"
         if (
@@ -3668,6 +5486,10 @@ class RuntimePlanner:
                 app_name=app_name,
                 mode=mode,
             )
+            and not _explicit_app_search_field_click_target(
+                intent.user_goal,
+                app_search,
+            )
         ):
             app_search = {}
         generated_content_hint = (
@@ -3678,6 +5500,12 @@ class RuntimePlanner:
         generated_content_title = str(
             (generated_content_hint or {}).get("title") or ""
         ).strip()
+        if generated_content_hint:
+            # UI-target and click parsers are allowed to provide context, but
+            # they must never execute an authoring brief as if it were literal
+            # text (or treat "press release" as a click instruction).
+            type_target = None
+            click_target = None
         foreground_compose_text = (
             ""
             if (
@@ -3714,9 +5542,16 @@ class RuntimePlanner:
             else (
                 foreground_compose_text
                 if safe_shortcut_action in {"new_note", "new_document", "new_task"} and foreground_compose_text
-                else safe_type_text_hint(intent.user_goal) or foreground_compose_text
+                else str(intent.inputs.get("safe_type_text_hint") or "").strip()
+                or foreground_compose_text
             )
         )
+        if _foreground_submit_hotkey_only_hint(intent.user_goal):
+            type_target = None
+            click_target = None
+            hotkey = None
+            foreground_compose_text = ""
+            safe_type_text = ""
         if _looks_like_discovered_app_capability_phrase(safe_type_text):
             safe_type_text = ""
         if _text_hint_is_ui_target_tail(intent.user_goal, safe_type_text, click_target):
@@ -3871,6 +5706,19 @@ class RuntimePlanner:
             allow_app_tools=not bool(focus_window),
         )
         operation_uses_app_tool = bool(operation_tool and operation_tool.startswith("app."))
+        combined_app_search_field_type = bool(
+            app_search
+            and type_target
+            and operation_uses_app_tool
+            and str(operation_tool or "").endswith("_and_type_into_ui_element")
+            and _looks_like_app_search_field_input(intent.user_goal)
+        )
+        if combined_app_search_field_type:
+            # A semantic app-scoped field tool already prepares the named app,
+            # focuses the requested field, and types the literal query. Keep
+            # this as one observable operation instead of forcing the separate
+            # app-search path to require unrelated app-control capabilities.
+            app_search = {}
         if file_open_discovery and app_name:
             return _file_open_with_app_discovery_steps(
                 intent,
@@ -3909,15 +5757,23 @@ class RuntimePlanner:
             ]
         if spotlight_search:
             query = str(spotlight_search.get("query") or "").strip()
+            spotlight_tool = _first_allowed(("desktop.safe_shortcut",), allowed)
+            spotlight_input = {"action": "spotlight_search"}
             steps = [
                 _step(
                     intent,
                     "open-spotlight-search",
                     "Open Spotlight search",
                     "desktop.ui_operation",
-                    _first_allowed(("desktop.safe_shortcut",), allowed),
-                    input_preview={"action": "spotlight_search"},
-                    action="shortcut",
+                    spotlight_tool,
+                    input_preview=spotlight_input,
+                    action=(
+                        _runtime_dispatch_receipt_action(
+                            spotlight_tool,
+                            spotlight_input,
+                        )
+                        or "shortcut"
+                    ),
                     risk_level="low",
                     approval_required=False,
                     reason="Open Spotlight with the dedicated safe shortcut.",
@@ -4204,6 +6060,39 @@ class RuntimePlanner:
                 )
                 selected_discovered_app_step_id = "open-selected-discovered-app"
                 intent = _with_selected_app_selection_source(intent, selection_source)
+        elif (
+            app_name
+            and is_legacy_app_name_hint(app_name)
+            and (
+                foreground_management
+                or (
+                    foreground_submit_action
+                    and not any(
+                        item
+                        for item in (
+                            app_search,
+                            click_target,
+                            type_target,
+                            safe_type_text,
+                            hotkey,
+                            primary_safe_shortcut,
+                            safe_key,
+                            safe_scroll,
+                            safe_click,
+                            browser_search_url_after_shortcut,
+                        )
+                        if item
+                    )
+                )
+            )
+        ):
+            # Canonical built-in aliases (for example WeChat or Chrome) are
+            # already resolved identities. Do not make a later approval depend
+            # on an unnecessary discovery read that may be unavailable; the
+            # app-scoped focus/open operation remains the authoritative
+            # identity check immediately before the foreground action.
+            steps = []
+            desktop_discovery_step_id = ""
         else:
             discovery_tool = _first_allowed(
                 (
@@ -4271,8 +6160,9 @@ class RuntimePlanner:
                 "close_window": "desktop.close_window",
                 "quit_app": "desktop.quit_app",
             }.get(action)
+            dispatch_action = _runtime_dispatch_receipt_action(tool_name, {})
             requires_approval = action in {"close_window", "quit_app"}
-            manage_depends_on = ["discover-desktop-state"]
+            manage_depends_on: list[str] = []
             if app_name:
                 foreground_prepare_mode = (
                     "open"
@@ -4290,11 +6180,17 @@ class RuntimePlanner:
                             allowed,
                         ),
                         input_preview={"app_name": app_name},
-                        depends_on=["discover-desktop-state"],
+                        depends_on=_planned_step_dependency(
+                            steps,
+                            desktop_discovery_step_id,
+                        ),
                         reason="Focus the named app before running the foreground window management action.",
                     )
                 )
-                manage_depends_on = ["open-or-focus-app"]
+                manage_depends_on = _planned_step_dependency(
+                    steps,
+                    "open-or-focus-app",
+                )
             steps.append(
                 _step(
                     intent,
@@ -4306,23 +6202,25 @@ class RuntimePlanner:
                     approval_required=requires_approval,
                     depends_on=manage_depends_on,
                     reason="Run the requested foreground app/window management action through the desktop policy gate.",
+                    action=dispatch_action,
                 )
             )
-            steps.append(
-                _step(
-                    intent,
-                    "verify-desktop-result",
-                    "Verify desktop result",
-                    "desktop.app_discovery",
-                    _first_allowed(
-                        ("desktop.active_window", "desktop.running_apps", "desktop.windows"),
-                        allowed,
-                    ),
-                    input_preview={},
-                    depends_on=["manage-foreground"],
-                    reason="Observe desktop state after the foreground management action.",
+            if not dispatch_action:
+                steps.append(
+                    _step(
+                        intent,
+                        "verify-desktop-result",
+                        "Verify desktop result",
+                        "desktop.app_discovery",
+                        _first_allowed(
+                            ("desktop.active_window", "desktop.running_apps", "desktop.windows"),
+                            allowed,
+                        ),
+                        input_preview={},
+                        depends_on=["manage-foreground"],
+                        reason="Observe desktop state after the foreground management action.",
+                    )
                 )
-            )
             return steps
         if window_list is not None and not focus_window and not _looks_like_ui_operation(intent.user_goal):
             steps.append(
@@ -4654,7 +6552,10 @@ class RuntimePlanner:
                 if str(tool_name or "").startswith("desktop.")
                 else {"app_name": app_name}
             )
-            manage_depends_on = ["discover-desktop-state"]
+            manage_depends_on = _planned_step_dependency(
+                steps,
+                desktop_discovery_step_id,
+            )
             if app_management_prepare_mode in {"open", "focus"}:
                 steps.append(
                     _step(
@@ -4667,11 +6568,17 @@ class RuntimePlanner:
                             allowed,
                         ),
                         input_preview={"app_name": app_name},
-                        depends_on=["discover-desktop-state"],
+                        depends_on=_planned_step_dependency(
+                            steps,
+                            desktop_discovery_step_id,
+                        ),
                         reason="Resolve the requested app before the follow-up management action.",
                     )
                 )
-                manage_depends_on = ["open-or-focus-app"]
+                manage_depends_on = _planned_step_dependency(
+                    steps,
+                    "open-or-focus-app",
+                )
             steps.append(
                 _step(
                     intent,
@@ -4687,32 +6594,12 @@ class RuntimePlanner:
                 )
             )
             if action == "status":
-                verify_tool = _first_allowed(
-                    (
-                        "desktop.list_windows",
-                        "desktop.windows",
-                        "desktop.active_window",
-                        "desktop.verify",
-                    ),
-                    allowed,
-                )
-                if verify_tool:
-                    steps.append(
-                        _step(
-                            intent,
-                            "verify-desktop-result",
-                            "Verify desktop result",
-                            "desktop.app_discovery",
-                            verify_tool,
-                            input_preview=_desktop_verify_input_preview(
-                                verify_tool,
-                                app_name=app_name,
-                                operation_preview={},
-                            ),
-                            depends_on=["manage-app"],
-                            reason="Verify the app status with an observable desktop/window check.",
-                        )
-                    )
+                # ``app.status`` is itself the authoritative, non-mutating
+                # observation.  A follow-up window query is neither stronger
+                # nor equivalent: a running menu-bar/background app may have
+                # no visible windows.  Treating that as post-action evidence
+                # can turn a successful status answer into a false task
+                # failure, and wastes a second desktop provider round-trip.
                 return steps
             verify_tool = _first_allowed(
                 (
@@ -4978,7 +6865,7 @@ class RuntimePlanner:
                 if app_search
                 else None
             )
-            if prepare_tool or not scoped_search_focus_tool:
+            if not scoped_search_focus_tool:
                 steps.append(
                     _step(
                         intent,
@@ -4987,7 +6874,10 @@ class RuntimePlanner:
                         "desktop.app_control",
                         prepare_tool,
                         input_preview={"app_name": app_name},
-                        depends_on=["discover-desktop-state"],
+                        depends_on=_planned_step_dependency(
+                            steps,
+                            desktop_discovery_step_id,
+                        ),
                         reason="Resolve the requested app by name at runtime.",
                     )
                 )
@@ -5060,10 +6950,61 @@ class RuntimePlanner:
         ):
             inspect_tool = _first_allowed(("desktop.inspect_app",), allowed)
             if inspect_tool:
+                prepared_app_step_id = next(
+                    (
+                        step.step_id
+                        for step in reversed(steps)
+                        if step.step_id
+                        in {
+                            "open-or-focus-app",
+                            "focus-opened-app",
+                            "focus-app-window",
+                            "open-selected-discovered-app",
+                        }
+                    ),
+                    "",
+                )
+                explicit_open_tool = (
+                    _first_allowed(("app.open",), allowed)
+                    if prefer_background_desktop
+                    and str(operation_tool or "").startswith("app.open_and_")
+                    else None
+                )
+                if explicit_open_tool and not prepared_app_step_id:
+                    steps.append(
+                        _step(
+                            intent,
+                            "open-or-focus-app",
+                            "Open or focus app",
+                            "desktop.app_control",
+                            explicit_open_tool,
+                            input_preview={"app_name": app_name},
+                            depends_on=_planned_step_dependency(
+                                steps,
+                                desktop_discovery_step_id,
+                            ),
+                            reason=(
+                                "Launch the requested app before observing its agent-owned "
+                                "window for the app-scoped operation."
+                            ),
+                        )
+                    )
+                    prepared_app_step_id = "open-or-focus-app"
+                separate_open_preparation = bool(
+                    explicit_open_tool and prepared_app_step_id
+                )
                 inspect_depends_on = (
-                    []
-                    if len(steps) == 1 and steps[0].step_id == "discover-desktop-state"
-                    else [steps[-1].step_id]
+                    _planned_step_dependency(steps, prepared_app_step_id)
+                    if separate_open_preparation
+                    else (
+                        []
+                        if not steps
+                        or (
+                            len(steps) == 1
+                            and steps[0].step_id == "discover-desktop-state"
+                        )
+                        else [steps[-1].step_id]
+                    )
                 )
                 inspect_payload = dict(operation_preview)
                 if isinstance(ui_inspection, Mapping):
@@ -5073,12 +7014,15 @@ class RuntimePlanner:
                 if screen_capture is not None or ui_inspection is not None:
                     inspect_payload.setdefault("limit", 80)
                 inspect_readonly = (
-                    screen_capture is None
-                    and creative_canvas is None
-                    and not safe_type_text
-                    and _inspect_app_can_remain_readonly_before_operation(
-                        operation_tool,
-                        operation_preview,
+                    separate_open_preparation
+                    or (
+                        screen_capture is None
+                        and creative_canvas is None
+                        and not safe_type_text
+                        and _inspect_app_can_remain_readonly_before_operation(
+                            operation_tool,
+                            operation_preview,
+                        )
                     )
                 )
                 inspect_step = _step(
@@ -5121,6 +7065,17 @@ class RuntimePlanner:
             if item
         )
         if foreground_submit_action and not pre_submit_operation:
+            submit_depends_on = (
+                _planned_step_dependency(
+                    steps,
+                    "focus-app-window",
+                    "focus-opened-app",
+                    "open-or-focus-app",
+                    "inspect-app",
+                )
+                if app_name
+                else []
+            )
             steps.append(
                 _step(
                     intent,
@@ -5131,8 +7086,9 @@ class RuntimePlanner:
                     input_preview={"action": foreground_submit_action},
                     risk_level="high",
                     approval_required=True,
-                    depends_on=["open-or-focus-app"] if app_name else ["discover-desktop-state"],
+                    depends_on=submit_depends_on,
                     reason="Submit the current foreground input only through the approval-gated submit tool.",
+                    action="dispatch_submit",
                 )
             )
         if app_search:
@@ -5140,6 +7096,10 @@ class RuntimePlanner:
             search_target = str(app_search.get("target") or "").strip() or "Search"
             search_followup = _app_search_followup_hint(intent.user_goal)
             app_search_needs_verify = False
+            explicit_search_field_click = _explicit_app_search_field_click_target(
+                intent.user_goal,
+                app_search,
+            )
             app_search_context_source = _app_search_query_context_source(app_search)
             context_shortcut_tool = _first_allowed(("desktop.safe_shortcut",), allowed)
             selected_app_payload = (
@@ -5148,6 +7108,12 @@ class RuntimePlanner:
                 else {}
             )
             search_app_name = str(selected_app_payload.get("app_name") or app_name).strip()
+            if not search_app_name:
+                # A current/foreground-app search has no stable app identity
+                # for desktop.inspect_app. Focus its search affordance through
+                # the generic safe-search operation rather than returning after
+                # discovery because the prompt happened to say "click".
+                explicit_search_field_click = {}
             search_mode = (
                 "focus"
                 if selected_app_payload
@@ -5189,7 +7155,7 @@ class RuntimePlanner:
                     app_foreground_tool_candidates(prepare_mode, "safe_shortcut"),
                     allowed,
                 )
-                if prepare_tool or not scoped_search_focus_tool:
+                if not scoped_search_focus_tool:
                     steps.append(
                         _step(
                             intent,
@@ -5205,16 +7171,54 @@ class RuntimePlanner:
                     app_search_prepare_step_id = "open-or-focus-app"
                 elif app_search_prepare_step_id == "open-or-focus-app":
                     app_search_prepare_step_id = "discover-desktop-state"
+            if explicit_search_field_click:
+                inspect_tool = _first_allowed(("desktop.inspect_app",), allowed)
+                if not inspect_tool:
+                    return steps
+                inspect_step = _step(
+                    intent,
+                    "inspect-app-search-field",
+                    "Inspect app search field",
+                    "desktop.app_discovery",
+                    inspect_tool,
+                    input_preview=_desktop_inspect_app_input_preview(
+                        search_app_name,
+                        {"role_filter": "text", "limit": 80},
+                        open_if_needed=search_mode == "open",
+                        focus=True,
+                    ),
+                    depends_on=(
+                        []
+                        if len(steps) == 1
+                        and steps[0].step_id == "discover-desktop-state"
+                        else _planned_step_dependency(
+                            steps,
+                            app_search_prepare_step_id,
+                            desktop_discovery_step_id,
+                        )
+                    ),
+                    reason=(
+                        "Observe the explicitly named search field before the "
+                        "approval-gated semantic click."
+                    ),
+                )
+                if len(steps) == 1 and steps[0].step_id == "discover-desktop-state":
+                    steps = [inspect_step]
+                else:
+                    steps.append(inspect_step)
+                app_search_prepare_step_id = "inspect-app-search-field"
             search_focus_tool = _app_search_focus_operation_tool(
                 allowed,
                 app_name=search_app_name,
                 mode=search_mode,
+                explicit_click_target=explicit_search_field_click,
             )
             search_focus_tool_name = str(search_focus_tool or "")
             search_focus_preview = _app_search_focus_input_preview(
                 search_focus_tool_name,
                 app_name=search_app_name,
                 search_target=search_target,
+                explicit_click_target=explicit_search_field_click,
             )
             search_focus_preview = _with_selected_app_payload(
                 search_focus_tool,
@@ -5228,6 +7232,8 @@ class RuntimePlanner:
             ]
             if focus_step_added:
                 search_depends_on = ["focus-app-window"]
+            elif explicit_search_field_click:
+                search_depends_on = ["inspect-app-search-field"]
             elif app_name:
                 search_depends_on = [app_search_prepare_step_id]
             steps.append(
@@ -5239,10 +7245,24 @@ class RuntimePlanner:
                     search_focus_tool,
                     input_preview=search_focus_preview,
                     depends_on=search_depends_on,
-                    action="click" if search_focus_tool == "desktop.click_ui_element" else "shortcut",
-                    reason="Focus the requested app's search affordance without relying on app-specific aliases.",
+                    action=(
+                        "click"
+                        if str(search_focus_tool or "").endswith("click_ui_element")
+                        else "shortcut"
+                    ),
+                    risk_level=_desktop_operation_risk_level(search_focus_tool),
+                    approval_required=_desktop_operation_approval_required(
+                        search_focus_tool
+                    ),
+                    reason=(
+                        "Click the exact observed search field after approval."
+                        if explicit_search_field_click
+                        else "Focus the requested app's search affordance without relying on app-specific aliases."
+                    ),
                 )
             )
+            if not search_focus_tool:
+                return steps
             if app_search_context_source in {"selection", "clipboard"}:
                 paste_shortcut_tool = _app_search_selected_shortcut_tool(
                     allowed,
@@ -5270,6 +7290,7 @@ class RuntimePlanner:
                     )
                 )
                 search_terminal_step_id = "paste-app-search-query"
+                app_search_needs_verify = True
             else:
                 search_type_tool = _app_search_type_operation_tool(
                     allowed,
@@ -5301,6 +7322,7 @@ class RuntimePlanner:
                     )
                 )
                 search_terminal_step_id = "type-app-search-query"
+                app_search_needs_verify = True
             if search_followup.get("action") == "arrow_down_confirm":
                 steps.append(
                     _step(
@@ -5359,7 +7381,9 @@ class RuntimePlanner:
                         _app_search_operation_candidates(
                             "click_ui_element",
                             app_name=search_app_name,
-                            mode=search_mode,
+                            # The search field was already prepared and used;
+                            # result selection must focus that app, not relaunch it.
+                            mode="focus",
                             generic=("desktop.click_ui_element",),
                         ),
                         allowed,
@@ -5442,7 +7466,7 @@ class RuntimePlanner:
             verify_preview = _desktop_verify_input_preview(
                 verify_tool,
                 app_name=search_app_name or app_name,
-                operation_preview={},
+                operation_preview={"role_filter": "text", "limit": 80},
             )
             if (
                 selected_app_payload
@@ -5463,9 +7487,11 @@ class RuntimePlanner:
             )
             return steps
         operation_hint_value = str(intent.inputs.get("operation_hint") or "").strip()
-        ui_operation_requested = _looks_like_ui_operation(
-            intent.user_goal
-        ) and operation_hint_value not in {"open", "focus"}
+        ui_operation_requested = (
+            not generated_content_hint
+            and _looks_like_ui_operation(intent.user_goal)
+            and operation_hint_value not in {"open", "focus"}
+        )
         preflight_ui_before_action = bool(
             intent.inputs.get("preflight_ui_before_action")
         )
@@ -5480,14 +7506,43 @@ class RuntimePlanner:
             or hotkey
             or safe_type_text
         ) and (not foreground_submit_action or pre_submit_operation):
+            explicit_preflight_requested = (
+                _explicit_ui_observation_before_action_requested(intent.user_goal)
+            )
+            operation_tool_name = str(operation_tool or "").strip()
             preflight_requested = (
                 preflight_ui_before_action
-                or _explicit_ui_observation_before_action_requested(intent.user_goal)
+                or explicit_preflight_requested
+                or bool(
+                    type_target
+                    and operation_tool_name.endswith("type_into_ui_element")
+                )
+            )
+            preflight_target_operation = bool(
+                click_target
+                or type_target
+                or operation_tool_name.endswith(
+                    ("click_ui_element", "type_into_ui_element")
+                )
+                or (
+                    explicit_preflight_requested
+                    and (
+                        safe_click
+                        or safe_type_text
+                        or operation_tool_name.endswith(
+                            ("safe_click", "safe_type_text")
+                        )
+                    )
+                )
             )
             if (
                 not inspect_preflight_step_id
                 and preflight_requested
-                and any(item for item in (click_target, type_target, safe_type_text, safe_click) if item)
+                and preflight_target_operation
+                and not (
+                    operation_hint_value == "safe_shortcut"
+                    and not explicit_preflight_requested
+                )
             ):
                 observe_tool = _first_allowed(("desktop.ui_elements", "desktop.read_ui"), allowed)
                 if observe_tool:
@@ -5519,7 +7574,10 @@ class RuntimePlanner:
                                     "desktop.app_control",
                                     prepare_tool,
                                     input_preview={"app_name": app_name},
-                                    depends_on=["discover-desktop-state"],
+                                    depends_on=_planned_step_dependency(
+                                        steps,
+                                        desktop_discovery_step_id,
+                                    ),
                                     reason=(
                                         "Prepare the requested app before reading its UI "
                                         "and running the foreground operation."
@@ -5532,13 +7590,25 @@ class RuntimePlanner:
                     )
                     if _contains_any(intent.user_goal, ["按钮", "button", "buttons"]):
                         observe_payload["role_filter"] = "button"
-                    observe_depends_on = ["discover-desktop-state"]
+                    observe_depends_on = _planned_step_dependency(
+                        steps,
+                        desktop_discovery_step_id,
+                    )
                     if focus_step_added:
-                        observe_depends_on = ["focus-app-window"]
+                        observe_depends_on = _planned_step_dependency(
+                            steps,
+                            "focus-app-window",
+                        )
                     elif any(step.step_id == "focus-opened-app" for step in steps):
-                        observe_depends_on = ["focus-opened-app"]
+                        observe_depends_on = _planned_step_dependency(
+                            steps,
+                            "focus-opened-app",
+                        )
                     elif any(step.step_id == "open-or-focus-app" for step in steps):
-                        observe_depends_on = ["open-or-focus-app"]
+                        observe_depends_on = _planned_step_dependency(
+                            steps,
+                            "open-or-focus-app",
+                        )
                     steps.append(
                         _step(
                             intent,
@@ -5555,17 +7625,35 @@ class RuntimePlanner:
                         )
                     )
                     inspect_preflight_step_id = "read-foreground-ui"
-            operation_depends_on = ["discover-desktop-state"]
+            operation_depends_on = _planned_step_dependency(
+                steps,
+                desktop_discovery_step_id,
+            )
             if inspect_preflight_step_id:
-                operation_depends_on = [inspect_preflight_step_id]
+                operation_depends_on = _planned_step_dependency(
+                    steps,
+                    inspect_preflight_step_id,
+                )
             elif focus_step_added:
-                operation_depends_on = ["focus-app-window"]
+                operation_depends_on = _planned_step_dependency(
+                    steps,
+                    "focus-app-window",
+                )
             elif any(step.step_id == "focus-opened-app" for step in steps):
-                operation_depends_on = ["focus-opened-app"]
+                operation_depends_on = _planned_step_dependency(
+                    steps,
+                    "focus-opened-app",
+                )
             elif any(step.step_id == "capture-screen" for step in steps):
-                operation_depends_on = ["capture-screen"]
+                operation_depends_on = _planned_step_dependency(
+                    steps,
+                    "capture-screen",
+                )
             elif not operation_uses_app_tool and app_name:
-                operation_depends_on = ["open-or-focus-app"]
+                operation_depends_on = _planned_step_dependency(
+                    steps,
+                    "open-or-focus-app",
+                )
             resolved_operation_tool = operation_tool or _desktop_operation_fallback_tool(
                 allowed=allowed,
                 click_target=click_target,
@@ -5577,12 +7665,41 @@ class RuntimePlanner:
                 type_target=type_target,
                 safe_type_text=operation_safe_type_text,
             )
+            if (
+                inspect_preflight_step_id
+                and _desktop_plan_has_prepared_foreground_app(steps)
+            ):
+                resolved_operation_tool, operation_preview = (
+                    _desktop_operation_after_prepared_preflight(
+                        resolved_operation_tool,
+                        operation_preview,
+                        allowed=allowed,
+                    )
+                )
             operation_title = "Operate foreground UI"
             operation_action = ""
             operation_reason = "Use observable UI operations after discovery, then verify."
-            operation_risk_level = _desktop_operation_risk_level(resolved_operation_tool)
+            dispatch_action = _runtime_dispatch_receipt_action(
+                resolved_operation_tool,
+                operation_preview,
+            )
+            if dispatch_action:
+                operation_action = dispatch_action
+                operation_reason = (
+                    "Send the requested foreground input and retain the native dispatch "
+                    "receipt; a generic UI read cannot prove an arbitrary key or shortcut effect."
+                )
+            literal_safe_type_text = _safe_type_text_has_literal_user_provenance(
+                intent,
+                operation_safe_type_text,
+            )
+            operation_risk_level = _desktop_operation_risk_level(
+                resolved_operation_tool,
+                literal_user_text=literal_safe_type_text,
+            )
             operation_approval_required = _desktop_operation_approval_required(
-                resolved_operation_tool
+                resolved_operation_tool,
+                literal_user_text=literal_safe_type_text,
             )
             if resolved_operation_tool is None and not hotkey and (
                 click_target or type_target or _looks_like_ui_operation(intent.user_goal)
@@ -5651,6 +7768,56 @@ class RuntimePlanner:
                     if index == 0
                     else f"operate-foreground-ui-followup-{index + 1}"
                 )
+                followup_action = _runtime_dispatch_receipt_action(
+                    "desktop.safe_shortcut",
+                    followup,
+                )
+                followup_is_semantic_shortcut = is_semantic_safe_shortcut(
+                    "desktop.safe_shortcut",
+                    followup,
+                )
+                previous_step = next(
+                    (
+                        step
+                        for step in reversed(steps)
+                        if step.step_id == previous_step_id
+                    ),
+                    None,
+                )
+                if (
+                    (followup_action or followup_is_semantic_shortcut)
+                    and previous_step is not None
+                    and _step_requires_post_action_verification(previous_step)
+                ):
+                    verify_step_id = _next_available_step_id(
+                        steps,
+                        "verify-desktop-result",
+                    )
+                    verify_tool = _first_allowed(
+                        _desktop_verify_tool_candidates(
+                            [previous_step.step_id],
+                            source_tools=[previous_step.tool_name],
+                        ),
+                        allowed,
+                    )
+                    if verify_tool:
+                        steps.append(
+                            _step(
+                                intent,
+                                verify_step_id,
+                                "Verify desktop result",
+                                "desktop.app_discovery",
+                                verify_tool,
+                                input_preview=_desktop_verify_input_preview(
+                                    verify_tool,
+                                    app_name=app_name,
+                                    operation_preview=previous_step.input_preview,
+                                ),
+                                depends_on=[previous_step.step_id],
+                                reason=_desktop_verify_reason([previous_step.step_id]),
+                            )
+                        )
+                        previous_step_id = verify_step_id
                 steps.append(
                     _step(
                         intent,
@@ -5661,6 +7828,7 @@ class RuntimePlanner:
                         input_preview=dict(followup),
                         depends_on=[previous_step_id],
                         reason="Run the requested follow-up safe shortcut after the previous foreground operation.",
+                        action=followup_action,
                     )
                 )
                 previous_step_id = followup_step_id
@@ -5670,19 +7838,40 @@ class RuntimePlanner:
             and safe_type_text
             and any(step.step_id == "operate-foreground-ui" for step in steps)
         ):
+            followup_type_tool = _first_allowed(
+                ("desktop.safe_type_text", "desktop.type_text"),
+                allowed,
+            )
+            literal_followup_text = _safe_type_text_has_literal_user_provenance(
+                intent,
+                safe_type_text,
+            )
             steps.append(
                 _step(
                     intent,
                     "operate-foreground-ui-followup-type",
                     "Type after foreground click",
                     "desktop.ui_operation",
-                    _first_allowed(("desktop.safe_type_text", "desktop.type_text"), allowed),
+                    followup_type_tool,
                     input_preview={"text": safe_type_text},
+                    risk_level=_desktop_operation_risk_level(
+                        followup_type_tool,
+                        literal_user_text=literal_followup_text,
+                    ),
+                    approval_required=_desktop_operation_approval_required(
+                        followup_type_tool,
+                        literal_user_text=literal_followup_text,
+                    ),
                     depends_on=["operate-foreground-ui"],
                     reason="Type the explicit text only after the requested UI target is selected.",
                 )
             )
-        if type_target and click_target and any(step.step_id == "operate-foreground-ui" for step in steps):
+        if (
+            type_target
+            and click_target
+            and not combined_app_search_field_type
+            and any(step.step_id == "operate-foreground-ui" for step in steps)
+        ):
             followup_click_tool = _first_allowed(("desktop.click_ui_element",), allowed)
             followup_click_payload = {**click_target, "limit": 80}
             if not followup_click_tool and app_name:
@@ -5714,16 +7903,35 @@ class RuntimePlanner:
             and safe_type_text
             and any(step.step_id == "operate-foreground-ui" for step in steps)
         ):
+            followup_type_tool = _first_allowed(
+                ("desktop.safe_type_text", "desktop.type_text"),
+                allowed,
+            )
+            literal_followup_text = _safe_type_text_has_literal_user_provenance(
+                intent,
+                safe_type_text,
+            )
             steps.append(
                 _step(
                     intent,
                     "operate-foreground-ui-followup-type",
                     "Type after foreground create action",
                     "desktop.ui_operation",
-                    _first_allowed(("desktop.safe_type_text", "desktop.type_text"), allowed),
+                    followup_type_tool,
                     input_preview={"text": safe_type_text},
+                    risk_level=_desktop_operation_risk_level(
+                        followup_type_tool,
+                        literal_user_text=literal_followup_text,
+                    ),
+                    approval_required=_desktop_operation_approval_required(
+                        followup_type_tool,
+                        literal_user_text=literal_followup_text,
+                    ),
                     depends_on=["operate-foreground-ui"],
-                    reason="Type the explicit text only after creating the requested foreground item.",
+                    reason=(
+                        "Type only after creating the requested foreground item; literal user "
+                        "text remains low risk while derived content stays approval-gated."
+                    ),
                 )
             )
         if (
@@ -5738,14 +7946,30 @@ class RuntimePlanner:
                 for step in steps
                 if step.step_id.startswith("operate-foreground-ui-followup")
             ]
+            followup_type_tool = _first_allowed(
+                ("desktop.safe_type_text", "desktop.type_text"),
+                allowed,
+            )
+            literal_followup_text = _safe_type_text_has_literal_user_provenance(
+                intent,
+                safe_type_text,
+            )
             steps.append(
                 _step(
                     intent,
                     "operate-foreground-ui-followup-type",
                     "Type after foreground hotkey",
                     "desktop.ui_operation",
-                    _first_allowed(("desktop.safe_type_text", "desktop.type_text"), allowed),
+                    followup_type_tool,
                     input_preview={"text": safe_type_text},
+                    risk_level=_desktop_operation_risk_level(
+                        followup_type_tool,
+                        literal_user_text=literal_followup_text,
+                    ),
+                    approval_required=_desktop_operation_approval_required(
+                        followup_type_tool,
+                        literal_user_text=literal_followup_text,
+                    ),
                     depends_on=[followup_step_ids[-1] if followup_step_ids else "operate-foreground-ui"],
                     reason="Type the explicit text only after the requested foreground hotkey is sent.",
                 )
@@ -5775,6 +7999,7 @@ class RuntimePlanner:
                     approval_required=True,
                     depends_on=[followup_step_ids[-1] if followup_step_ids else "operate-foreground-ui"],
                     reason="Press Return only after the explicit foreground input sequence is complete.",
+                    action="submit",
                 )
             )
         operation_step = next(
@@ -5831,20 +8056,45 @@ class RuntimePlanner:
         elif not verify_depends_on and any(step.step_id == "open-or-focus-app" for step in steps):
             verify_depends_on = ["open-or-focus-app"]
         if verify_depends_on:
-            verify_tools = _desktop_verify_tool_candidates(verify_depends_on)
+            verification_sources = [
+                step
+                for step in steps
+                if step.step_id in set(verify_depends_on)
+            ]
+            if verification_sources and not any(
+                _step_requires_post_action_verification(step)
+                for step in verification_sources
+            ):
+                verify_depends_on = []
+        if verify_depends_on:
+            verify_tools = _desktop_verify_tool_candidates(
+                verify_depends_on,
+                source_tools=[step.tool_name for step in verification_sources],
+            )
             verify_tool = _first_allowed(verify_tools, allowed)
+            verify_input_preview = _desktop_verify_input_preview(
+                verify_tool,
+                app_name=app_name,
+                operation_preview=operation_preview,
+            )
+            if verify_tool == "desktop.verify" and any(
+                step.step_id in set(verify_depends_on)
+                and step.tool_name in {"app.open", "desktop.open_app"}
+                for step in steps
+            ):
+                verify_input_preview["verification_goal"] = "app_running"
+            verify_step_id = _next_available_step_id(
+                steps,
+                "verify-desktop-result",
+            )
             steps.append(
                 _step(
                     intent,
-                    "verify-desktop-result",
+                    verify_step_id,
                     "Verify desktop result",
                     "desktop.app_discovery",
                     verify_tool,
-                    input_preview=_desktop_verify_input_preview(
-                        verify_tool,
-                        app_name=app_name,
-                        operation_preview=operation_preview,
-                    ),
+                    input_preview=verify_input_preview,
                     depends_on=verify_depends_on,
                     reason=_desktop_verify_reason(verify_depends_on),
                 )
@@ -5856,7 +8106,16 @@ class RuntimePlanner:
         intent: TaskIntentSnapshot,
         allowed: set[str] | None,
     ) -> list[ToolPlanStepSnapshot]:
-        app_query_plan = media_app_query_search_plan(intent.inputs, allowed)
+        tool_name, input_preview = media_tool_preview(intent.inputs, allowed)
+        direct_apple_query = bool(
+            tool_name == "media.apple_music_play"
+            and str(input_preview.get("query") or "").strip()
+        )
+        app_query_plan = (
+            []
+            if direct_apple_query
+            else media_app_query_search_plan(intent.inputs, allowed)
+        )
         if app_query_plan:
             steps: list[ToolPlanStepSnapshot] = []
             previous_step_id = ""
@@ -5969,7 +8228,6 @@ class RuntimePlanner:
                 previous_step_id = step_id
             return steps
 
-        tool_name, input_preview = media_tool_preview(intent.inputs, allowed)
         if not tool_name:
             prepare_plan = media_app_prepare_plan(intent.inputs, allowed)
             if prepare_plan:
@@ -6065,6 +8323,8 @@ class RuntimePlanner:
                         "media.playback",
                         None,
                         depends_on=playback_depends_on,
+                        action=str(intent.inputs.get("action") or "play").strip()
+                        or "play",
                         reason=(
                             "No dedicated media playback tool is available; the app can be "
                             "opened, but playback itself remains a missing capability."
@@ -6094,10 +8354,16 @@ class RuntimePlanner:
                 "media.playback",
                 tool_name,
                 input_preview=input_preview,
+                action=str(intent.inputs.get("action") or "play").strip()
+                or "play",
                 reason="Use dedicated media tools for playback instead of explaining manual steps.",
             )
         ]
-        verify_step = _media_playback_verify_step(intent, allowed)
+        verify_step = _media_playback_verify_step(
+            intent,
+            allowed,
+            control_tool_name=tool_name,
+        )
         if verify_step is not None:
             steps.append(verify_step)
         return steps
@@ -6224,6 +8490,14 @@ class RuntimePlanner:
             app_name = str(intent.inputs.get("app_name") or "").strip()
             app_mode = str(intent.inputs.get("app_mode") or "focus").strip() or "focus"
             app_prepare_action = str(intent.inputs.get("app_prepare_action") or "").strip()
+            tool_name = _first_allowed(
+                _browser_action_tool_candidates(browser_action, intent.inputs),
+                allowed,
+            )
+            browser_tool_owns_target = _browser_navigation_tool_owns_target(
+                browser_action,
+                tool_name,
+            )
             if app_name and browser_action == "open_search" and not app_prepare_action:
                 app_prepare_action = _browser_search_prepare_action_hint(intent.user_goal)
             if not app_name and browser_action == "open_search":
@@ -6240,7 +8514,11 @@ class RuntimePlanner:
             prepare_step_id = ""
             prepare_step: ToolPlanStepSnapshot | None = None
             discover_step: ToolPlanStepSnapshot | None = None
-            if app_name and browser_action != "find_current_page":
+            if (
+                app_name
+                and browser_action != "find_current_page"
+                and not browser_tool_owns_target
+            ):
                 prepare_tool = _first_allowed(
                     _browser_app_prepare_tool_candidates(app_mode, app_prepare_action),
                     allowed,
@@ -6276,10 +8554,6 @@ class RuntimePlanner:
                     depends_on=["discover-browser-app"] if discover_step is not None else [],
                     reason="Prepare the requested browser before running the browser tool.",
                 )
-            tool_name = _first_allowed(
-                _browser_action_tool_candidates(browser_action, intent.inputs),
-                allowed,
-            )
             input_preview: dict[str, Any] = {}
             if browser_action == "click":
                 selector = str(intent.inputs.get("selector") or "").strip()
@@ -6784,7 +9058,7 @@ class RuntimePlanner:
                     body_source="web_content",
                 )
             )
-        else:
+        elif _web_research_artifact_requested(intent):
             artifact_path = _artifact_output_path(intent.user_goal, "research-summary.md")
             steps.append(
                 _step(
@@ -6823,6 +9097,7 @@ class RuntimePlanner:
     ) -> list[ToolPlanStepSnapshot]:
         context_source = str(intent.inputs.get("context_source") or "").strip()
         file_context = intent.inputs.get("file_context_hint")
+        planned_artifact_path = _report_intent_artifact_path(intent)
         if isinstance(file_context, Mapping) and file_context:
             target_path = str(file_context.get("path") or "").strip()
             location = str(file_context.get("location") or "").strip()
@@ -6830,10 +9105,7 @@ class RuntimePlanner:
             pattern = str(file_context.get("pattern") or "").strip()
             selection = str(file_context.get("selection") or "").strip()
             if target_path and _report_text_file_path(target_path):
-                artifact_path = _artifact_output_path(
-                    intent.user_goal,
-                    _report_artifact_filename(intent.user_goal),
-                )
+                artifact_path = planned_artifact_path
                 steps = [
                     _step(
                         intent,
@@ -6891,10 +9163,7 @@ class RuntimePlanner:
                 }.items()
                 if value
             }
-            artifact_path = _artifact_output_path(
-                intent.user_goal,
-                _report_artifact_filename(intent.user_goal),
-            )
+            artifact_path = planned_artifact_path
             steps = [
                 _step(
                     intent,
@@ -6985,10 +9254,7 @@ class RuntimePlanner:
                 )
             )
             depends_on = [step.step_id for step in context_steps]
-            artifact_path = _artifact_output_path(
-                intent.user_goal,
-                _report_artifact_filename(intent.user_goal),
-            )
+            artifact_path = planned_artifact_path
             target_app = str(intent.inputs.get("target_app_hint") or "").strip()
             if target_app:
                 return _append_report_app_write_target_steps(
@@ -7060,10 +9326,7 @@ class RuntimePlanner:
             )
             artifact_tool = _first_allowed(("artifact.write",), allowed)
             if research_tool and artifact_tool:
-                artifact_path = _artifact_output_path(
-                    intent.user_goal,
-                    _report_artifact_filename(intent.user_goal),
-                )
+                artifact_path = planned_artifact_path
                 research_input = (
                     {"query": research_query}
                     if research_tool == "browser.search"
@@ -7135,6 +9398,45 @@ class RuntimePlanner:
                     artifact_paths=[artifact_path],
                     depends_on="write-report-artifact",
                 )
+        explicit_artifact_path = normalized_workspace_relative_path(
+            intent.inputs.get("artifact_output_path_hint")
+        )
+        if (
+            explicit_artifact_path
+            and not research_query
+            and _task_output_target_hint(intent.user_goal) != "clipboard"
+            and not str(intent.inputs.get("target_app_hint") or "").strip()
+            and not isinstance(
+                intent.inputs.get("target_app_capability_hint"),
+                Mapping,
+            )
+            and str(intent.inputs.get("target_action_hint") or "").strip()
+            != "current_input_write"
+        ):
+            steps = [
+                _step(
+                    intent,
+                    "write-report-artifact",
+                    "Write report artifact",
+                    "artifact.write",
+                    _first_allowed(("artifact.write",), allowed),
+                    input_preview={
+                        "path": explicit_artifact_path,
+                        "body_source": "model_generated_content",
+                    },
+                    reason=(
+                        "Materialize and persist the content at the exact "
+                        "workspace-relative output path requested by the user."
+                    ),
+                )
+            ]
+            return _append_artifact_reveal_step(
+                intent,
+                allowed,
+                steps,
+                artifact_paths=[explicit_artifact_path],
+                depends_on="write-report-artifact",
+            )
         steps = [
             _step(
                 intent,
@@ -7166,10 +9468,7 @@ class RuntimePlanner:
                 )
             )
         else:
-            artifact_path = _artifact_output_path(
-                intent.user_goal,
-                _report_artifact_filename(intent.user_goal),
-            )
+            artifact_path = planned_artifact_path
             target_app = str(intent.inputs.get("target_app_hint") or "").strip()
             if target_app:
                 return _append_report_app_write_target_steps(
@@ -7230,6 +9529,63 @@ class RuntimePlanner:
                     risk_level="high",
                     approval_required=True,
                     reason="Run exactly the terminal command explicitly requested by the user.",
+                )
+            ]
+        terminal_execution_hint = intent.inputs.get(
+            "terminal_execution_request_hint"
+        )
+        if (
+            isinstance(terminal_execution_hint, Mapping)
+            and str(terminal_execution_hint.get("mode") or "").strip()
+            == "model_selected_approved_command"
+        ):
+            # Keep a Runtime-owned semantic step without inventing executable
+            # command text. The model may materialize one concrete command
+            # from this late-bound operation, after which the normal terminal
+            # approval gate binds that exact command and fingerprint.
+            return [
+                _step(
+                    intent,
+                    "run-model-selected-terminal-command",
+                    "Run model-selected terminal command",
+                    "terminal.execution",
+                    _first_allowed(("terminal.run",), allowed),
+                    input_preview={
+                        "body_source": "model_generated_content",
+                        "operation": "execute_user_delegated_terminal_task",
+                    },
+                    risk_level="high",
+                    approval_required=True,
+                    reason=(
+                        "Materialize one concrete terminal command for the "
+                        "explicitly delegated task, then request approval for "
+                        "that exact command before execution."
+                    ),
+                )
+            ]
+        if _code_task_intent_reads_explicit_workspace_file(intent):
+            file_context = intent.inputs.get("code_file_context_hint")
+            target_path = str(
+                file_context.get("path")
+                if isinstance(file_context, Mapping)
+                else ""
+            ).strip()
+            return [
+                _step(
+                    intent,
+                    "read-code-target-file",
+                    "Read workspace target file",
+                    "file.workspace_read",
+                    _first_allowed(
+                        ("workspace.read", "fs.read_file", "file.read"),
+                        allowed,
+                    ),
+                    input_preview={"path": target_path},
+                    action="read_file",
+                    reason=(
+                        "Read the exact workspace-relative file explicitly requested "
+                        "by the user."
+                    ),
                 )
             ]
         inspect_tool = _first_allowed(
@@ -7691,6 +10047,8 @@ class RuntimePlanner:
                                     else {}
                                 ),
                             },
+                            risk_level="medium",
+                            approval_required=True,
                             depends_on=["prepare-note-discovered-target-app"],
                             action="type",
                             reason=(
@@ -7877,6 +10235,7 @@ class RuntimePlanner:
                     "clipboard.read_write",
                     _first_allowed(("desktop.safe_shortcut",), allowed),
                     input_preview={"action": "copy"},
+                    action="dispatch_shortcut",
                     reason="Use the standard copy shortcut only for an explicit selected-text read request.",
                 ),
                 _step(
@@ -7890,8 +10249,7 @@ class RuntimePlanner:
                 ),
             ]
         if action == "write":
-            return [
-                _step(
+            write_step = _step(
                     intent,
                     "write-clipboard",
                     "Write clipboard",
@@ -7900,6 +10258,24 @@ class RuntimePlanner:
                     input_preview=input_preview,
                     reason="Write only explicit user-provided text to the clipboard.",
                 )
+            verify_tool = _first_allowed(("clipboard.read",), allowed)
+            if not verify_tool:
+                return [write_step]
+            return [
+                write_step,
+                _step(
+                    intent,
+                    "verify-clipboard-write",
+                    "Verify clipboard write",
+                    "clipboard.read_write",
+                    verify_tool,
+                    action="verify",
+                    depends_on=[write_step.step_id],
+                    reason=(
+                        "Read the clipboard after writing and require exact content "
+                        "before reporting the write as complete."
+                    ),
+                ),
             ]
         return [
             _step(
@@ -7934,6 +10310,7 @@ def _step(
     risk_level: str = "low",
     approval_required: bool = False,
     depends_on: list[str] | None = None,
+    input_bindings: list[RuntimeInputBindingSnapshot] | None = None,
     reason: str = "",
     fallback_tools: list[str] | None = None,
     action: str = "",
@@ -7954,6 +10331,7 @@ def _step(
         else None,
         approval_required=approval_required,
         depends_on=depends_on or [],
+        input_bindings=input_bindings or [],
         reason=reason,
         fallback_tools=fallback_tools or [],
         status="planned" if tool_name else "unavailable",
@@ -7972,6 +10350,28 @@ def _step_is_unavailable(
         and str(step.status or "").strip() == "unavailable"
         for step in steps
     )
+
+
+def _planned_step_dependency(
+    steps: Iterable[ToolPlanStepSnapshot],
+    *step_ids: str,
+) -> list[str]:
+    indexed_steps = {
+        str(step.step_id or "").strip(): step
+        for step in steps
+        if str(step.step_id or "").strip()
+    }
+    for step_id in step_ids:
+        target = str(step_id or "").strip()
+        step = indexed_steps.get(target)
+        if (
+            target
+            and step is not None
+            and str(step.status or "").strip() == "planned"
+            and str(step.tool_name or "").strip()
+        ):
+            return [target]
+    return []
 
 
 def _file_open_with_app_discovery_steps(
@@ -8388,6 +10788,35 @@ def _code_task_intent_writes_code(intent: TaskIntentSnapshot) -> bool:
     return isinstance(intent.inputs.get("code_change_hint"), Mapping)
 
 
+def _code_task_intent_reads_explicit_workspace_file(
+    intent: TaskIntentSnapshot,
+) -> bool:
+    """Recognize only the Runtime-owned exact-file read declaration."""
+
+    file_context = intent.inputs.get("code_file_context_hint")
+    target_path = normalized_workspace_relative_path(
+        file_context.get("path") if isinstance(file_context, Mapping) else None
+    )
+    capabilities = intent.inputs.get("runtime_goal_capabilities")
+    targets = intent.inputs.get("runtime_goal_targets")
+    semantic_target = (
+        targets.get("file.workspace_read")
+        if isinstance(targets, Mapping)
+        else None
+    )
+    return bool(
+        target_path
+        and isinstance(capabilities, (list, tuple))
+        and list(capabilities) == ["file.workspace_read"]
+        and isinstance(semantic_target, Mapping)
+        and set(semantic_target) == {"kind", "action", "path"}
+        and str(semantic_target.get("kind") or "").strip() == "workspace_file"
+        and str(semantic_target.get("action") or "").strip() == "read_file"
+        and normalized_workspace_relative_path(semantic_target.get("path"))
+        == target_path
+    )
+
+
 def _code_change_step(
     intent: TaskIntentSnapshot,
     allowed: set[str] | None,
@@ -8643,13 +11072,53 @@ def _is_open_path_with_app_tool(tool_name: str | None) -> bool:
 
 
 def _first_allowed(tools: Iterable[str], allowed: set[str] | None) -> str | None:
-    for tool in tools:
-        if allowed is None or tool in allowed:
-            return tool
+    candidates: list[str] = []
+    for raw_tool in tools:
+        tool = str(raw_tool or "").strip()
+        if not tool:
+            continue
+        if tool not in candidates:
+            candidates.append(tool)
         alias = _DESKTOP_OPERATION_TOOL_ALIASES.get(tool)
-        if allowed is not None and alias in allowed:
-            return alias
-    return None
+        if alias and alias not in candidates:
+            candidates.append(alias)
+    if not candidates:
+        return None
+    legacy_selected = next(
+        (
+            candidate
+            for candidate in candidates
+            if allowed is None or candidate in allowed
+        ),
+        None,
+    )
+    if not legacy_selected:
+        return None
+
+    # Keep legacy candidate order at this low-level compatibility seam.  The
+    # capability/action-aware per-step pass performs readiness ranking after
+    # the step has enough semantic context to do so safely.
+    from apps.shell.agent.runtime.tool_candidate_selection import (
+        current_tool_candidate_selection_context,
+        select_tool_candidate,
+    )
+
+    selection_context = current_tool_candidate_selection_context()
+    readiness_tools = {
+        tool_name for tool_name, _facts in selection_context.readiness_by_tool
+    }
+    if not any(candidate in readiness_tools for candidate in candidates):
+        return legacy_selected
+    selection = select_tool_candidate(
+        candidates,
+        allowed if allowed is not None else candidates,
+    )
+    if any(
+        candidate.readiness_class in {"ready", "blocked"}
+        for candidate in selection.ranked_candidates
+    ):
+        return selection.selected_tool or legacy_selected
+    return legacy_selected
 
 
 def _return_followup_tool(
@@ -9731,6 +12200,11 @@ def _direct_communication_steps(
     steps: list[ToolPlanStepSnapshot] = []
     source_step_id = ""
     generated_body = _direct_message_requires_generated_body(direct_message)
+    literal_body = bool(
+        body
+        and not generated_body
+        and body_source in {"", "explicit_user_text"}
+    )
     if (
         body_source == "current_page_link"
         and not _first_allowed(("desktop.safe_shortcut",), allowed)
@@ -9859,6 +12333,8 @@ def _direct_communication_steps(
                         "role_filter": "text",
                         "limit": 80,
                     },
+                    risk_level="medium",
+                    approval_required=True,
                     depends_on=["inspect-communication-compose-ui"],
                     action="type",
                     reason="Type only the explicit recipient after observing the communication UI.",
@@ -9903,6 +12379,8 @@ def _direct_communication_steps(
                         "role_filter": "text",
                         "limit": 80,
                     },
+                    risk_level="medium",
+                    approval_required=True,
                     depends_on=["inspect-communication-message-ui"],
                     action="draft_message",
                     reason=(
@@ -9980,6 +12458,14 @@ def _direct_communication_steps(
                 "communication.compose",
                 type_tool,
                 input_preview=recipient_type_input,
+                risk_level=_desktop_operation_risk_level(
+                    type_tool,
+                    literal_user_text=True,
+                ),
+                approval_required=_desktop_operation_approval_required(
+                    type_tool,
+                    literal_user_text=True,
+                ),
                 depends_on=["focus-communication-recipient-search"],
                 action="type",
                 reason="Type only the explicit recipient from the user prompt.",
@@ -10021,6 +12507,8 @@ def _direct_communication_steps(
                 "communication.compose",
                 paste_tool,
                 input_preview=paste_input,
+                risk_level=_desktop_operation_risk_level(paste_tool),
+                approval_required=_desktop_operation_approval_required(paste_tool),
                 depends_on=["submit-communication-recipient-search"],
                 action="paste",
                 reason="Paste the requested clipboard-backed context into the message draft.",
@@ -10050,6 +12538,14 @@ def _direct_communication_steps(
                 "communication.compose",
                 draft_tool,
                 input_preview=draft_input,
+                risk_level=_desktop_operation_risk_level(
+                    draft_tool,
+                    literal_user_text=literal_body,
+                ),
+                approval_required=_desktop_operation_approval_required(
+                    draft_tool,
+                    literal_user_text=literal_body,
+                ),
                 depends_on=["submit-communication-recipient-search"],
                 action="draft_message",
                 reason=(
@@ -10738,11 +13234,13 @@ def _append_selected_discovered_foreground_compose_steps(
             "desktop.ui_operation",
             type_tool,
             input_preview=type_input_preview,
+            risk_level="medium",
+            approval_required=True,
             depends_on=[depends_on],
             action="type",
             reason=(
                 "After runtime resolves and opens a capable app, type only the explicit "
-                "text requested by the user."
+                "text requested by the user; writing into the selected app remains approval-gated."
             ),
         )
     )
@@ -11390,8 +13888,10 @@ def _append_selected_discovered_generic_action_steps(
                     ),
                     depends_on=[previous_step],
                     action="shortcut",
-                    risk_level="medium",
-                    approval_required=True,
+                    risk_level=_desktop_operation_risk_level(shortcut_tool),
+                    approval_required=_desktop_operation_approval_required(
+                        shortcut_tool
+                    ),
                     reason=(
                         "After opening and observing the runtime-resolved selected app, execute the "
                         "requested safe foreground shortcut without adding app-specific rules."
@@ -11461,8 +13961,8 @@ def _append_selected_discovered_generic_action_steps(
                     ),
                     depends_on=[previous_step],
                     action="key",
-                    risk_level="medium",
-                    approval_required=True,
+                    risk_level=_desktop_operation_risk_level(key_tool),
+                    approval_required=_desktop_operation_approval_required(key_tool),
                     reason=(
                         "Press the requested safe key in the runtime-resolved selected app through "
                         "the generic foreground operation path."
@@ -11496,8 +13996,8 @@ def _append_selected_discovered_generic_action_steps(
                     ),
                     depends_on=[previous_step],
                     action="scroll",
-                    risk_level="medium",
-                    approval_required=True,
+                    risk_level=_desktop_operation_risk_level(scroll_tool),
+                    approval_required=_desktop_operation_approval_required(scroll_tool),
                     reason=(
                         "Scroll the runtime-resolved selected app after discovery instead of falling "
                         "back to app-specific rules."
@@ -11542,6 +14042,10 @@ def _append_selected_discovered_generic_action_steps(
             previous_step = "type-selected-discovered-app-ui"
             planned_action = True
     elif safe_type_text:
+        literal_user_text = _safe_type_text_has_literal_user_provenance(
+            intent,
+            safe_type_text,
+        )
         type_text_tool = _first_allowed(
             (
                 "app.focus_and_safe_type_text",
@@ -11566,8 +14070,14 @@ def _append_selected_discovered_generic_action_steps(
                     ),
                     depends_on=[previous_step],
                     action="type",
-                    risk_level="medium",
-                    approval_required=True,
+                    risk_level=_desktop_operation_risk_level(
+                        type_text_tool,
+                        literal_user_text=literal_user_text,
+                    ),
+                    approval_required=_desktop_operation_approval_required(
+                        type_text_tool,
+                        literal_user_text=literal_user_text,
+                    ),
                     reason=(
                         "Type explicit user-provided text into the foreground selected app "
                         "through the normal safe typing tool."
@@ -11602,8 +14112,8 @@ def _append_selected_discovered_generic_action_steps(
                     ),
                     depends_on=[previous_step],
                     action="click",
-                    risk_level="medium",
-                    approval_required=True,
+                    risk_level=_desktop_operation_risk_level(click_tool),
+                    approval_required=_desktop_operation_approval_required(click_tool),
                     reason=(
                         "Use the requested safe point click after opening the discovered "
                         "app, without relying on an app-specific branch."
@@ -12444,8 +14954,37 @@ def _desktop_operation_action(tool_name: str | None) -> str:
     return "operate_ui"
 
 
-def _desktop_operation_risk_level(tool_name: str | None) -> str:
+def _safe_type_text_has_literal_user_provenance(
+    intent: TaskIntentSnapshot,
+    text: str,
+) -> bool:
+    literal_text = str(text or "").strip()
+    if not literal_text:
+        return False
+    if isinstance(intent.inputs.get("model_generated_content_hint"), Mapping):
+        return False
+    if isinstance(intent.inputs.get("foreground_paste_hint"), Mapping):
+        return False
+    routed_texts = {
+        str(intent.inputs.get("safe_type_text_hint") or "").strip(),
+        str(intent.inputs.get("foreground_compose_text_hint") or "").strip(),
+    }
+    if literal_text not in routed_texts:
+        return False
+    return _foreground_text_has_explicit_literal_provenance(
+        intent.user_goal,
+        literal_text,
+    )
+
+
+def _desktop_operation_risk_level(
+    tool_name: str | None,
+    *,
+    literal_user_text: bool = False,
+) -> str:
     clean_tool = str(tool_name or "")
+    if "safe_type_text" in clean_tool:
+        return "low" if literal_user_text else "medium"
     if (
         "safe_shortcut" in clean_tool
         or "safe_key" in clean_tool
@@ -12456,8 +14995,18 @@ def _desktop_operation_risk_level(tool_name: str | None) -> str:
     return "medium"
 
 
-def _desktop_operation_approval_required(tool_name: str | None) -> bool:
-    return _desktop_operation_risk_level(tool_name) != "low"
+def _desktop_operation_approval_required(
+    tool_name: str | None,
+    *,
+    literal_user_text: bool = False,
+) -> bool:
+    return (
+        _desktop_operation_risk_level(
+            tool_name,
+            literal_user_text=literal_user_text,
+        )
+        != "low"
+    )
 
 
 def _app_scoped_operation_should_inspect(
@@ -12467,9 +15016,76 @@ def _app_scoped_operation_should_inspect(
     ui_inspection: Mapping[str, Any] | None,
 ) -> bool:
     clean_tool = str(tool_name or "").strip()
+    if clean_tool in {
+        "app.focus_and_safe_shortcut",
+        "app.open_and_safe_shortcut",
+    }:
+        return screen_capture is not None or ui_inspection is not None
     if clean_tool.startswith(("app.focus_and_", "app.open_and_")):
         return True
     return screen_capture is not None or ui_inspection is not None
+
+
+def _desktop_plan_has_prepared_foreground_app(
+    steps: Iterable[ToolPlanStepSnapshot],
+) -> bool:
+    for step in steps:
+        tool_name = str(step.tool_name or "").strip()
+        preview = step.input_preview if isinstance(step.input_preview, Mapping) else {}
+        if tool_name == "desktop.inspect_app" and (
+            bool(preview.get("open_if_needed")) or bool(preview.get("focus"))
+        ):
+            return True
+        if step.step_id in {
+            "open-or-focus-app",
+            "focus-opened-app",
+            "focus-app-window",
+            "open-selected-discovered-app",
+        } and (
+            tool_name in {
+                "app.open",
+                "desktop.open_app",
+                "app.focus",
+                "desktop.focus_app",
+            }
+            or tool_name.startswith(("app.open_and_", "app.focus_and_"))
+        ):
+            return True
+    return False
+
+
+def _desktop_operation_after_prepared_preflight(
+    tool_name: str | None,
+    input_preview: Mapping[str, Any] | None,
+    *,
+    allowed: set[str] | None,
+) -> tuple[str | None, dict[str, Any]]:
+    """Revalidate the prepared app identity immediately before acting.
+
+    A preflight observation is not an authorization to later mutate whichever
+    app happens to be frontmost. Approval and model latency can create a gap in
+    which the foreground app changes, so keep an app-scoped composite and only
+    narrow ``open`` to ``focus`` after the preflight has opened the target.
+    """
+
+    clean_tool = str(tool_name or "").strip()
+    if clean_tool.startswith("app.focus_and_"):
+        return tool_name, dict(input_preview or {})
+    if not clean_tool.startswith("app.open_and_"):
+        return tool_name, dict(input_preview or {})
+    if (
+        clean_tool == "app.open_and_type_into_ui_element"
+        and _first_allowed(("desktop.verify",), allowed)
+    ):
+        # Keep the app-scoped action on the receipt-producing path.  The
+        # focus-only variant cannot mint the private, agent-owned-window
+        # exact-content receipt consumed by desktop.verify.
+        return tool_name, dict(input_preview or {})
+    focus_tool = clean_tool.replace("app.open_and_", "app.focus_and_", 1)
+    resolved_tool = _first_allowed((focus_tool,), allowed)
+    if not resolved_tool:
+        return tool_name, dict(input_preview or {})
+    return resolved_tool, dict(input_preview or {})
 
 
 def _inspect_app_can_remain_readonly_before_operation(
@@ -12514,7 +15130,27 @@ def _foreground_management_action(tool_name: str | None) -> str:
     return "manage_foreground"
 
 
-def _desktop_verify_tool_candidates(depends_on: list[str]) -> tuple[str, ...]:
+def _desktop_verify_tool_candidates(
+    depends_on: list[str],
+    *,
+    source_tools: list[str | None] | None = None,
+) -> tuple[str, ...]:
+    if any(
+        str(tool_name or "").strip()
+        in {
+            "app.open_and_type_into_ui_element",
+            "desktop.type_into_ui_element",
+        }
+        for tool_name in source_tools or []
+    ):
+        return (
+            "desktop.verify",
+            "desktop.ui_elements",
+            "desktop.read_ui",
+            "desktop.windows",
+            "desktop.active_window",
+            "screen.capture",
+        )
     if _desktop_verify_depends_on_ui_operation(depends_on):
         return (
             "desktop.ui_elements",
@@ -12552,7 +15188,7 @@ def _preflight_ui_observation_input_preview(
 ) -> dict[str, Any]:
     preview = {
         key: operation_preview[key]
-        for key in ("target", "role_filter", "limit", "selection_source", "query")
+        for key in ("role_filter", "limit", "selection_source", "query")
         if key in operation_preview and operation_preview[key] not in (None, "")
     }
     if app_name:
@@ -12602,9 +15238,11 @@ def _desktop_inspect_app_input_preview(
 def _media_playback_verify_step(
     intent: TaskIntentSnapshot,
     allowed: set[str] | None,
+    *,
+    control_tool_name: str | None = None,
 ) -> ToolPlanStepSnapshot | None:
     action = str(intent.inputs.get("action") or "").strip() or "play"
-    if action == "status":
+    if action == "status" or str(control_tool_name or "").strip().startswith("media."):
         return None
     tool_name = _first_allowed(
         ("desktop.ui_elements", "desktop.active_window", "screen.capture"),
@@ -12625,7 +15263,9 @@ def _media_playback_verify_step(
     )
 
 
-def _media_playback_verify_input_preview(tool_name: str | None) -> dict[str, Any]:
+def _media_playback_verify_input_preview(
+    tool_name: str | None,
+) -> dict[str, Any]:
     if tool_name in {"desktop.ui_elements", "desktop.read_ui"}:
         return {"role_filter": "", "limit": 80}
     if tool_name == "screen.capture":
@@ -12729,6 +15369,34 @@ def _allowed_tool_set(allowed_tools: Iterable[str] | None) -> set[str] | None:
     return {str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()}
 
 
+def _planner_prefers_background_desktop(
+    metadata: Mapping[str, Any] | None,
+) -> bool:
+    if not isinstance(metadata, Mapping):
+        return False
+    value = metadata.get("prefer_background_desktop")
+    if value is True or str(value or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }:
+        return True
+    for key in (
+        "desktop_execution_policy",
+        "yachiyo_desktop_execution_policy",
+        "desktop_interaction_policy",
+    ):
+        nested = metadata.get(key)
+        if (
+            nested is not metadata
+            and isinstance(nested, Mapping)
+            and _planner_prefers_background_desktop(nested)
+        ):
+            return True
+    return False
+
+
 def _planner_readiness_context(
     metadata: Mapping[str, Any] | None,
 ) -> dict[str, dict[str, list[str]]]:
@@ -12766,6 +15434,337 @@ def _planner_readiness_context(
     if blocking:
         context["blocking_conditions"] = blocking
     return context
+
+
+_TOOL_READINESS_METADATA_KEYS = (
+    "tool_readiness_by_tool",
+    "runtime_tool_readiness_by_tool",
+    "provider_tool_readiness",
+    "desktop_tool_readiness_by_tool",
+)
+
+_TOOL_READINESS_NESTED_METADATA_KEYS = (
+    "metadata",
+    "readiness",
+    "provider_readiness",
+    "desktop_execution_policy",
+    "yachiyo_desktop_execution_policy",
+    "desktop_interaction_policy",
+)
+
+
+def _planner_tool_readiness_context(
+    metadata: Mapping[str, Any] | None,
+    *,
+    allowed: set[str] | None,
+    capability_readiness: Mapping[str, Mapping[str, Iterable[str]]],
+) -> dict[str, dict[str, Any]]:
+    """Build conservative per-tool facts for deterministic route selection.
+
+    Capability-level permission failures remain useful as hard blockers, while
+    unchecked/unknown provider health is accepted only as explicit per-tool
+    status and never promoted to a failure here.
+    """
+
+    facts_by_tool: dict[str, dict[str, Any]] = {}
+    candidate_tools = set(allowed or ())
+    if allowed is None:
+        candidate_tools.update(
+            tool_name
+            for tools in DESKTOP_CAPABILITY_TOOLS.values()
+            for tool_name in tools
+        )
+    for tool_name in candidate_tools:
+        capability_id = _desktop_policy_capability_id_for_tool(tool_name)
+        if not capability_id:
+            continue
+        missing = desktop_tool_missing_permissions(
+            tool_name,
+            capability_id=capability_id,
+            missing_permissions=capability_readiness.get("missing_permissions") or {},
+        )
+        blocking = desktop_tool_blocking_conditions(
+            tool_name,
+            capability_id=capability_id,
+            blocking_conditions=capability_readiness.get("blocking_conditions") or {},
+        )
+        blockers = _unique_capabilities((*missing, *blocking))
+        if blockers:
+            facts_by_tool[tool_name] = {
+                "status": "blocked",
+                "blocked": True,
+                "blockers": blockers,
+            }
+
+    explicit = _explicit_tool_readiness_metadata(metadata)
+    for tool_name, facts in explicit.items():
+        facts_by_tool[tool_name] = {
+            **facts_by_tool.get(tool_name, {}),
+            **facts,
+        }
+    return facts_by_tool
+
+
+def _explicit_tool_readiness_metadata(
+    metadata: Mapping[str, Any] | None,
+) -> dict[str, dict[str, Any]]:
+    if not isinstance(metadata, Mapping):
+        return {}
+    seen: set[int] = set()
+
+    def collect(source: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
+        source_id = id(source)
+        if source_id in seen:
+            return {}
+        seen.add(source_id)
+        collected: dict[str, dict[str, Any]] = {}
+        for key in _TOOL_READINESS_NESTED_METADATA_KEYS:
+            nested = source.get(key)
+            if not isinstance(nested, Mapping):
+                continue
+            for tool_name, facts in collect(nested).items():
+                collected[tool_name] = {**collected.get(tool_name, {}), **facts}
+        for key in _TOOL_READINESS_METADATA_KEYS:
+            payload = source.get(key)
+            if not isinstance(payload, Mapping):
+                continue
+            for raw_tool_name, raw_facts in payload.items():
+                tool_name = str(raw_tool_name or "").strip()
+                if not tool_name:
+                    continue
+                facts = _normalise_planner_tool_readiness_facts(raw_facts)
+                if facts:
+                    collected[tool_name] = {
+                        **collected.get(tool_name, {}),
+                        **facts,
+                    }
+        return collected
+
+    return collect(metadata)
+
+
+def _normalise_planner_tool_readiness_facts(value: Any) -> dict[str, Any]:
+    if isinstance(value, str):
+        return {"status": value.strip()} if value.strip() else {}
+    if not isinstance(value, Mapping):
+        return {}
+    facts = dict(value)
+    for nested_key in ("route", "provider", "adapter"):
+        nested = facts.get(nested_key)
+        if isinstance(nested, Mapping):
+            facts = {**dict(nested), **facts}
+    health = facts.get("health")
+    if isinstance(health, Mapping):
+        if not str(facts.get("status") or "").strip():
+            facts["status"] = health.get("status")
+        if health.get("checked") is True:
+            facts.setdefault("health_checked", True)
+            if isinstance(health.get("ok"), bool):
+                facts.setdefault("health_ok", health.get("ok"))
+        # ``ok=false`` before a probe is not evidence of failure.
+        elif str(health.get("status") or "").strip() in {
+            "",
+            "not_checked",
+            "unknown",
+            "installed_not_checked",
+        }:
+            facts.pop("health_ok", None)
+    return {
+        str(key): item
+        for key, item in facts.items()
+        if key not in {"route", "provider", "adapter", "health"}
+        and item is not None
+    }
+
+
+def _select_best_runtime_step_tools(
+    steps: list[ToolPlanStepSnapshot],
+    *,
+    allowed: set[str] | None,
+    readiness_by_tool: Mapping[str, Mapping[str, Any]],
+    prefer_background: bool,
+    use_selected_candidate_policy: bool = False,
+) -> list[ToolPlanStepSnapshot]:
+    """Select one trusted route per semantic step without exposing reasoning."""
+
+    from apps.shell.agent.runtime.tool_candidate_selection import (
+        select_tool_candidate,
+    )
+    from apps.shell.agent.runtime.tool_capabilities import (
+        action_ids_for_tool,
+        registered_tool_names_for_capability,
+    )
+
+    updated: list[ToolPlanStepSnapshot] = []
+    for step in steps:
+        primary = str(step.tool_name or "").strip()
+        original_fallbacks = _unique_capabilities(step.fallback_tools)
+        candidates = _unique_capabilities((primary, *original_fallbacks))
+        dynamic_candidates: set[str] = set()
+        if step.capability_id and step.action:
+            for tool_name in registered_tool_names_for_capability(step.capability_id):
+                if (
+                    step.action in action_ids_for_tool(tool_name)
+                    and _dynamic_tool_accepts_step_input(tool_name, step.input_preview)
+                    and tool_name not in candidates
+                ):
+                    candidates.append(tool_name)
+                    dynamic_candidates.add(tool_name)
+        if not candidates:
+            updated.append(step)
+            continue
+        if not dynamic_candidates and not any(
+            candidate in readiness_by_tool for candidate in candidates
+        ):
+            updated.append(step)
+            continue
+
+        allowed_candidates: Iterable[str] = (
+            allowed if allowed is not None else candidates
+        )
+        selection = select_tool_candidate(
+            candidates,
+            allowed_candidates,
+            required_capability=step.capability_id or None,
+            # A dynamically registered adapter entered this candidate set only
+            # through an exact capability/action binding and schema check. Pass
+            # that action through so the explicit adapter outranks a generic
+            # built-in fallback without applying action validation to legacy-
+            # only steps whose historical action vocabulary is broader.
+            required_action=step.action if dynamic_candidates else None,
+            readiness_by_tool=readiness_by_tool,
+            prefer_background=prefer_background,
+        )
+        eligible = {
+            candidate.tool_name: candidate
+            for candidate in selection.ranked_candidates
+        }
+        ranking_signal = any(
+            candidate.readiness_class in {"ready", "blocked"}
+            for candidate in selection.ranked_candidates
+        )
+        if not ranking_signal and not dynamic_candidates:
+            # The selector is an incremental route chooser, not a migration of
+            # every historical planner semantic.  With no route evidence and
+            # no explicitly bound adapter to add, preserve the complete step
+            # byte-for-byte (including specialised approval and fallback
+            # policy) so legacy intent templates retain their contract.
+            updated.append(step)
+            continue
+        selected_tool = (
+            primary
+            if not ranking_signal and not dynamic_candidates and primary in eligible
+            else selection.selected_tool
+        )
+        if not selected_tool:
+            updated.append(
+                step.model_copy(
+                    update={
+                        "tool_name": None,
+                        "execution_mode": None,
+                        "status": "unavailable",
+                        "fallback_tools": [],
+                    }
+                )
+            )
+            continue
+
+        selected_candidate = eligible[selected_tool]
+        ranked_fallbacks = (
+            [candidate.tool_name for candidate in selection.ranked_candidates]
+            if ranking_signal
+            else [candidate for candidate in candidates if candidate in eligible]
+        )
+        fallback_tools = [
+            candidate
+            for candidate in ranked_fallbacks
+            if candidate != selected_tool
+        ]
+        # Preserve explicitly declared cross-capability recovery routes only
+        # when they still satisfy the Runtime's schema/dispatch trust boundary.
+        generic_fallback_selection = select_tool_candidate(
+            original_fallbacks,
+            allowed_candidates,
+        )
+        trusted_fallbacks = {
+            candidate.tool_name
+            for candidate in generic_fallback_selection.ranked_candidates
+        }
+        for candidate in original_fallbacks:
+            if (
+                candidate != selected_tool
+                and candidate in trusted_fallbacks
+                and candidate not in fallback_tools
+            ):
+                fallback_tools.append(candidate)
+
+        status = str(step.status or "planned")
+        if status != "skipped":
+            status = "unavailable" if selected_candidate.blocked else "planned"
+        updated.append(
+            step.model_copy(
+                update={
+                    "tool_name": selected_tool,
+                    "fallback_tools": fallback_tools,
+                    "execution_mode": desktop_tool_execution_mode_for_input(
+                        selected_tool,
+                        step.input_preview,
+                    ),
+                    "risk_level": (
+                        selected_candidate.risk_level
+                        if use_selected_candidate_policy
+                        else (
+                            _higher_runtime_risk_level(
+                                str(step.risk_level or "low"),
+                                selected_candidate.risk_level,
+                            )
+                            if selected_tool in dynamic_candidates
+                            else step.risk_level
+                        )
+                    ),
+                    "approval_required": (
+                        selected_candidate.approval_required
+                        if use_selected_candidate_policy
+                        else bool(
+                            step.approval_required
+                            or (
+                                selected_tool in dynamic_candidates
+                                and selected_candidate.approval_required
+                            )
+                        )
+                    ),
+                    "status": status,
+                }
+            )
+        )
+    return updated
+
+
+def _dynamic_tool_accepts_step_input(
+    tool_name: str,
+    input_preview: Mapping[str, Any] | None,
+) -> bool:
+    from apps.shell.agent.tools.policy import TOOL_DESCRIPTORS
+
+    descriptor = TOOL_DESCRIPTORS.get(str(tool_name or "").strip())
+    if descriptor is None or not callable(getattr(descriptor, "validate_payload", None)):
+        return False
+    try:
+        descriptor.validate_payload(dict(input_preview or {}))
+    except Exception:
+        return False
+    return True
+
+
+def _higher_runtime_risk_level(current: str, candidate: str) -> str:
+    order = {"none": 0, "low": 1, "medium": 2, "high": 3, "critical": 4}
+    current_level = str(current or "low").strip().lower()
+    candidate_level = str(candidate or "low").strip().lower()
+    return (
+        candidate_level
+        if order.get(candidate_level, 2) > order.get(current_level, 2)
+        else current_level
+    )
 
 
 def _apply_readiness_to_steps(
@@ -13088,6 +16087,13 @@ def _capability_plan_snapshot(
         missing_tools = _unique_capabilities(getattr(snapshot, "missing_tools", None) or [])
         tools = _unique_capabilities(getattr(snapshot, "tools", None) or [])
         selected_tools = step_tools.get(capability_id, [])
+        # Explicitly bound plugin adapters are discovered by the trusted
+        # selector rather than by capability-registry name prefixes.  Reflect
+        # a selected adapter in the consumer-safe capability summary without
+        # exposing ranking internals.
+        tools = _unique_capabilities((*tools, *selected_tools))
+        available_tools = _unique_capabilities((*available_tools, *selected_tools))
+        missing_tools = [tool for tool in missing_tools if tool not in selected_tools]
         status = _capability_plan_item_status(
             tools=tools,
             available_tools=available_tools,
@@ -13402,6 +16408,111 @@ def _append_artifact_reveal_step(
     ]
 
 
+def _data_analysis_support_method_input_preview(
+    command: str,
+    artifact_paths: Iterable[str],
+) -> dict[str, Any]:
+    paths = [
+        str(path or "").strip()
+        for path in artifact_paths
+        if str(path or "").strip()
+    ]
+    preview: dict[str, Any] = {
+        "command": str(command or ""),
+        "artifact_path": paths[0] if paths else "analysis-report.md",
+    }
+    if len(paths) > 1:
+        preview["artifact_paths"] = paths
+    return preview
+
+
+def _data_analysis_semantic_goal_target(
+    inputs: Mapping[str, Any],
+    *,
+    artifact_paths: Iterable[str],
+) -> dict[str, Any]:
+    """Describe the analysis result without naming its execution adapter."""
+
+    paths = [
+        str(path or "").strip()
+        for path in artifact_paths
+        if str(path or "").strip()
+    ]
+    target: dict[str, Any] = {
+        "kind": "data_analysis",
+        "action": "analyze",
+    }
+    source_fields = (
+        ("data_source_hint", "path"),
+        ("data_source_kind", "source_kind"),
+        ("context_source", "context_source"),
+        ("data_source_scope_hint", "source_scope"),
+        ("data_source_name_hint", "source_name"),
+        ("data_source_selection_hint", "selection"),
+    )
+    for input_key, target_key in source_fields:
+        value = inputs.get(input_key)
+        if value not in (None, "", [], {}):
+            target[target_key] = deepcopy(value)
+    if not target.get("path") and not target.get("context_source"):
+        target.update(
+            {
+                "expected_path": "<selected file from workspace.list>",
+                "resolution_required": True,
+            }
+        )
+    target["artifact_path"] = paths[0] if paths else "analysis-report.md"
+    return target
+
+
+def _data_analysis_terminal_effect_capabilities(
+    *,
+    output_target: str,
+    app_write_target: Mapping[str, Any],
+    communication_target: Mapping[str, Any],
+) -> list[str]:
+    """Declare only output effects that the user's analysis request names."""
+
+    capabilities: list[str] = []
+    if str(output_target or "").strip() == "clipboard":
+        capabilities.append("clipboard.read_write")
+    if app_write_target:
+        capabilities.append("desktop.ui_operation")
+    if communication_target:
+        capabilities.append("communication.compose")
+    return list(dict.fromkeys(capabilities))
+
+
+def _append_data_analysis_artifact_verifier(
+    intent: TaskIntentSnapshot,
+    allowed: set[str] | None,
+    steps: list[ToolPlanStepSnapshot],
+    *,
+    artifact_paths: Iterable[str],
+) -> None:
+    paths = [
+        str(path or "").strip()
+        for path in artifact_paths
+        if str(path or "").strip()
+    ]
+    verification_path = paths[0] if paths else "analysis-report.md"
+    steps.append(
+        _step(
+            intent,
+            "verify-analysis-artifact",
+            "Read back analysis artifact",
+            "file.workspace_read",
+            _first_allowed(EXACT_FILE_READBACK_VERIFIER_TOOL_PREFERENCE, allowed),
+            input_preview={"path": verification_path},
+            depends_on=["run-analysis", "write-analysis-artifact"],
+            reason=(
+                "Independently read back the produced analysis artifact before "
+                "the Runtime may complete the data-analysis goal."
+            ),
+        )
+    )
+
+
 def _append_data_analysis_followup_steps(
     intent: TaskIntentSnapshot,
     allowed: set[str] | None,
@@ -13588,9 +16699,6 @@ def _append_analysis_app_write_target_steps(
             )
         )
         previous_step = "prepare-analysis-target-app"
-
-    if _step_is_unavailable(next_steps, previous_step):
-        return next_steps
 
     insert_tool, insert_input = _safe_type_text_operation_preview(
         app_name=target_app,
@@ -14387,39 +17495,116 @@ def _append_web_research_app_write_target_steps(
     container_action = str(
         intent.inputs.get("target_container_action_hint") or ""
     ).strip()
-    return [
+    artifact_path = _artifact_output_path(intent.user_goal, "research-summary.md")
+    next_steps = [
         *steps,
         _step(
             intent,
-            "prepare-research-target-app",
-            "Prepare target app",
-            "desktop.app_control",
-            _first_allowed(
-                (
-                    "app.focus",
-                    "app.open",
-                    "app.focus_and_safe_shortcut",
-                    "app.open_and_safe_shortcut",
-                ),
-                allowed,
-            ),
-            input_preview={
-                "app_name": target_app,
-                "target_action": target_action,
-                **(
-                    {"container_action": container_action}
-                    if container_action
-                    else {}
-                ),
-                "body_source": "model_generated_content",
-            },
+            "write-research-artifact",
+            "Write research artifact",
+            "artifact.write",
+            _first_allowed(("artifact.write",), allowed),
+            input_preview={"path": artifact_path},
             depends_on=[depends_on],
             reason=(
-                "After the browser content is inspected, focus the requested app "
-                "before inserting the model-generated research output."
+                "Persist the browser-derived research output before writing it "
+                "into the requested app."
             ),
         ),
     ]
+    previous_step = "write-research-artifact"
+    if container_action:
+        previous_step = _append_app_scoped_safe_shortcut_steps(
+            next_steps,
+            intent,
+            step_id="prepare-research-target-app",
+            title="Prepare target app",
+            app_name=target_app,
+            mode="open",
+            shortcut_action=container_action,
+            allowed=allowed,
+            depends_on=[previous_step],
+            prepare_reason=(
+                "Open or focus the requested app after the research artifact is ready."
+            ),
+            shortcut_reason=(
+                "Create the requested target container before inserting the research output."
+            ),
+            fallback_reason=(
+                "Open or focus the requested app and create the target container with "
+                "one safe app-scoped action."
+            ),
+        )
+    else:
+        next_steps.append(
+            _step(
+                intent,
+                "prepare-research-target-app",
+                "Prepare target app",
+                "desktop.app_control",
+                _first_allowed(("app.open", "app.focus"), allowed),
+                input_preview={
+                    "app_name": target_app,
+                    "target_action": target_action,
+                    "body_source": "research_artifact",
+                    "artifact_path": artifact_path,
+                },
+                depends_on=[previous_step],
+                reason=(
+                    "Open or focus the requested app after the research artifact is ready."
+                ),
+            )
+        )
+        previous_step = "prepare-research-target-app"
+
+    insert_tool, insert_input = _safe_type_text_operation_preview(
+        app_name=target_app,
+        mode="focus",
+        allowed=allowed,
+        payload={
+            "body_source": "research_artifact",
+            "artifact_path": artifact_path,
+            "target_action": target_action,
+            **(
+                {"container_action": container_action}
+                if container_action
+                else {}
+            ),
+        },
+    )
+    next_steps.append(
+        _step(
+            intent,
+            "insert-research-into-target-app",
+            "Insert research into target app",
+            "desktop.ui_operation",
+            insert_tool,
+            input_preview=insert_input,
+            risk_level=_desktop_operation_risk_level(insert_tool),
+            approval_required=_desktop_operation_approval_required(insert_tool),
+            depends_on=list(
+                dict.fromkeys([previous_step, "write-research-artifact"])
+            ),
+            input_bindings=[
+                _artifact_path_input_binding(
+                    intent,
+                    source_step_id="write-research-artifact",
+                    target_step_id="insert-research-into-target-app",
+                )
+            ],
+            action="type",
+            reason=(
+                "Insert the generated research artifact into the prepared foreground target app."
+            ),
+        )
+    )
+    return _append_research_target_app_verification_step(
+        intent,
+        allowed,
+        next_steps,
+        app_name=target_app,
+        depends_on="insert-research-into-target-app",
+    )
 
 
 def _append_web_research_discovered_app_write_target_steps(
@@ -14540,7 +17725,17 @@ def _append_web_research_discovered_app_write_target_steps(
             input_preview=insert_input,
             risk_level=_desktop_operation_risk_level(insert_tool),
             approval_required=_desktop_operation_approval_required(insert_tool),
-            depends_on=["prepare-research-discovered-target-app"],
+            depends_on=[
+                "prepare-research-discovered-target-app",
+                "write-research-artifact",
+            ],
+            input_bindings=[
+                _artifact_path_input_binding(
+                    intent,
+                    source_step_id="write-research-artifact",
+                    target_step_id="insert-research-into-target-app",
+                )
+            ],
             action="type",
             reason=(
                 "Insert the generated research artifact into the selected foreground target app."
@@ -14554,6 +17749,35 @@ def _append_web_research_discovered_app_write_target_steps(
         app_name="<selected app from desktop.list_apps>",
         depends_on="insert-research-into-target-app",
         selected_app_payload={"selection_source": "desktop.list_apps", "query": query},
+    )
+
+
+def _artifact_path_input_binding(
+    intent: TaskIntentSnapshot,
+    *,
+    source_step_id: str,
+    target_step_id: str,
+) -> RuntimeInputBindingSnapshot:
+    """Bind an app sink to the exact artifact produced by its source step.
+
+    The binding transfers only the bounded relative path.  Runtime then reads
+    the artifact through its existing broker-owned resolver; model prose never
+    supplies or replaces the durable handoff identity.
+    """
+
+    return RuntimeInputBindingSnapshot(
+        binding_id=_stable_id(
+            "input-binding",
+            intent.intent_id,
+            f"{source_step_id}|{target_step_id}|artifact_path",
+        ),
+        source_step_id=source_step_id,
+        source_tool_name="artifact.write",
+        source_result_path="/path",
+        target_input_path="/input/artifact_path",
+        value_type="string",
+        required=True,
+        max_bytes=1024,
     )
 
 
@@ -14944,11 +18168,22 @@ def _append_research_target_app_verification_step(
     depends_on: str,
     selected_app_payload: Mapping[str, Any] | None = None,
 ) -> list[ToolPlanStepSnapshot]:
-    verify_tool = _first_allowed(("desktop.ui_elements", "desktop.read_ui", "screen.capture"), allowed)
+    # The terminal app sink needs a target-bound postcondition receipt.  A
+    # generic UI read or screenshot is useful observation, but it cannot prove
+    # that the exact broker-owned artifact reached the correlated target.
+    verify_tool = _first_allowed(
+        ("desktop.verify", "desktop.ui_elements", "desktop.read_ui", "screen.capture"),
+        allowed,
+    )
     if not verify_tool:
         return steps
     if verify_tool == "screen.capture":
         input_preview = {"reason": "Verify the research output was inserted into the target app."}
+    elif verify_tool == "desktop.verify":
+        input_preview = {
+            "app_name": app_name,
+            **dict(selected_app_payload or {}),
+        }
     else:
         input_preview = {
             "app_name": app_name,
@@ -14966,7 +18201,13 @@ def _append_research_target_app_verification_step(
             verify_tool,
             input_preview=input_preview,
             depends_on=[depends_on],
-            action="read_ui" if verify_tool != "screen.capture" else "capture_screen",
+            action=(
+                "verify"
+                if verify_tool == "desktop.verify"
+                else "read_ui"
+                if verify_tool != "screen.capture"
+                else "capture_screen"
+            ),
             reason=(
                 "Inspect the target app after insertion so the runtime can replan if the research output is not visible."
             ),
@@ -15427,7 +18668,16 @@ def _can_plan_builtin_data_analysis_after_source_discovery(
     if _first_allowed(("data.analyze",), allowed) != "data.analyze":
         return False
     source_kind = str(intent.inputs.get("data_source_kind") or "").strip()
-    if source_kind not in {"csv", "tsv", "json", "jsonl", "xlsx", "text", "text_table"}:
+    if source_kind not in {
+        "unknown",
+        "csv",
+        "tsv",
+        "json",
+        "jsonl",
+        "xlsx",
+        "text",
+        "text_table",
+    }:
         return False
     source_scope = str(intent.inputs.get("data_source_scope_hint") or "").strip()
     if source_scope and not _workspace_listable_discovered_data_scope(source_scope):
@@ -15435,7 +18685,7 @@ def _can_plan_builtin_data_analysis_after_source_discovery(
     return bool(
         source_scope
         or str(intent.inputs.get("data_source_name_hint") or "").strip()
-        or _data_source_pattern_hint(source_kind)
+        or _builtin_data_source_discovery_pattern(source_kind)
     )
 
 
@@ -15447,16 +18697,23 @@ def _workspace_listable_discovered_data_scope(scope_hint: str) -> bool:
     return not any(part == ".." for part in scope_hint.replace("\\", "/").split("/"))
 
 
+def _builtin_data_source_discovery_pattern(source_kind: str) -> str:
+    if str(source_kind or "").strip() == "unknown":
+        return "*.{csv,tsv,xlsx,json,jsonl}"
+    return _data_source_pattern_hint(source_kind)
+
+
 def _discovered_data_analysis_input_preview(
     intent: TaskIntentSnapshot,
     *,
     artifact_paths: list[str],
+    selection_source: str = "workspace.list",
 ) -> dict[str, Any]:
     source_kind = str(intent.inputs.get("data_source_kind") or "").strip()
     source_scope = str(intent.inputs.get("data_source_scope_hint") or "").strip()
     source_name = str(intent.inputs.get("data_source_name_hint") or "").strip()
     selection_hint = str(intent.inputs.get("data_source_selection_hint") or "").strip()
-    pattern = _data_source_pattern_hint(source_kind)
+    pattern = _builtin_data_source_discovery_pattern(source_kind)
     clean_name = _clean_data_source_name_pattern(source_name)
     if clean_name and pattern:
         pattern = _named_data_source_pattern(clean_name, pattern)
@@ -15469,12 +18726,14 @@ def _discovered_data_analysis_input_preview(
     )
     preview: dict[str, Any] = {
         "path": selected_path,
-        "selection_source": "workspace.list",
+        "selection_source": str(selection_source or "workspace.list").strip()
+        or "workspace.list",
         "artifact_path": artifact_paths[0] if artifact_paths else "analysis-report.md",
-        "source_kind": source_kind,
         "requested_outputs": list(intent.expected_outputs),
         "artifact_manifest": data_analysis_artifact_manifest(artifact_paths),
     }
+    if source_kind and source_kind != "unknown":
+        preview["source_kind"] = source_kind
     if source_scope:
         preview["source_scope"] = source_scope
     if pattern:
@@ -15497,6 +18756,7 @@ def _task_core_snapshot(
     *,
     artifacts_expected: list[str],
     open_questions: list[str],
+    original_goal: str | None = None,
 ) -> TaskCoreSnapshot:
     workspace_id = _stable_id("task-workspace", intent.kind, intent.user_goal)
     workspace = TaskWorkspaceSnapshot(
@@ -15521,7 +18781,1049 @@ def _task_core_snapshot(
         todos=_task_todo_items(steps),
         checkpoints=_task_checkpoints(intent, steps, artifacts_expected),
         replan_signals=_task_replan_signals(steps),
+        goal_contract=_goal_contract_snapshot(
+            intent,
+            steps,
+            original_goal=original_goal,
+        ),
     )
+
+
+def _goal_contract_snapshot(
+    intent: TaskIntentSnapshot,
+    steps: list[ToolPlanStepSnapshot],
+    *,
+    original_goal: str | None = None,
+) -> GoalContractSnapshot:
+    """Compile task-level completion semantics from capability plan facts.
+
+    The result deliberately refers to capabilities, actions, targets and plan
+    step ids, never application implementations.  It is a run-unbound
+    template; the trusted Runtime binds ``run_id`` when execution starts.
+    """
+
+    immutable_original_goal = str(
+        intent.user_goal if original_goal is None else original_goal
+    ).strip()
+    explicit_goal_steps = _goal_explicit_subgoal_steps(intent, steps)
+    if explicit_goal_steps:
+        return GoalContractSnapshot(
+            contract_id=_stable_id(
+                "goal-contract",
+                intent.intent_id,
+                immutable_original_goal,
+            ),
+            original_goal=immutable_original_goal,
+            intent_kind=str(intent.kind),
+            criteria=_goal_explicit_subgoal_criteria(
+                intent,
+                explicit_goal_steps,
+                steps,
+            ),
+        )
+    declared_goal_bindings = _goal_declared_capability_bindings(intent, steps)
+    if declared_goal_bindings is not None:
+        criteria: list[GoalCriterionSnapshot] = []
+        for (
+            capability_id,
+            semantic_target,
+            source_steps,
+            verifier_steps,
+        ) in declared_goal_bindings:
+            primary_step = source_steps[-1]
+            criteria.append(
+                GoalCriterionSnapshot(
+                    criterion_id=_stable_id(
+                        "goal-criterion",
+                        intent.intent_id,
+                        capability_id,
+                    ),
+                    description=f"Fulfil declared goal capability: {capability_id}",
+                    effectful=(
+                        _goal_step_is_effectful(primary_step)
+                        and not _step_is_dispatch_receipt(primary_step)
+                    ),
+                    required=True,
+                    response_satisfiable=False,
+                    required_capabilities=[capability_id],
+                    expected=_goal_expected_state(
+                        intent,
+                        capability_id=capability_id,
+                        primary_step=primary_step,
+                        semantic_target=semantic_target,
+                    ),
+                    required_verification_predicates=(
+                        _goal_required_artifact_verification_predicates(
+                            intent,
+                            source_steps,
+                            verifier_steps,
+                            steps=steps,
+                        )
+                    ),
+                    source_step_ids=[step.step_id for step in source_steps],
+                    verifier_step_ids=[step.step_id for step in verifier_steps],
+                )
+            )
+        criteria.extend(
+            _goal_declared_terminal_effect_criteria(
+                intent,
+                steps,
+                declared_capability_ids={
+                    capability_id
+                    for capability_id, _target, _sources, _verifiers
+                    in declared_goal_bindings
+                },
+            )
+        )
+        return GoalContractSnapshot(
+            contract_id=_stable_id(
+                "goal-contract",
+                intent.intent_id,
+                immutable_original_goal,
+            ),
+            original_goal=immutable_original_goal,
+            intent_kind=str(intent.kind),
+            criteria=criteria,
+        )
+    terminal_effect_steps = _goal_terminal_effectful_sink_steps(steps)
+    explicit_goal_step_ids = _goal_explicit_subgoal_step_ids(intent)
+    planned_capabilities = {
+        str(step.capability_id or "").strip()
+        for step in steps
+        if str(step.capability_id or "").strip()
+    }
+    plan_goal_capabilities = [
+        str(capability_id or "").strip()
+        for capability_id in intent.required_capabilities
+        if str(capability_id or "").strip() in planned_capabilities
+    ]
+    intent_goal_capabilities = [
+        capability_id
+        for capability_id in plan_goal_capabilities
+        if not _goal_capability_is_observation_precondition(
+            capability_id,
+            steps=steps,
+            terminal_effect_steps=terminal_effect_steps,
+            explicit_goal_step_ids=explicit_goal_step_ids,
+        )
+    ]
+    required_capabilities = _unique_capabilities(
+        [
+            *intent_goal_capabilities,
+            *(
+                str(step.capability_id or "").strip()
+                for step in terminal_effect_steps
+                if str(step.capability_id or "").strip()
+            ),
+        ]
+    )
+    criteria: list[GoalCriterionSnapshot] = []
+    for capability_id in required_capabilities:
+        terminal_capability_steps = [
+            step
+            for step in terminal_effect_steps
+            if str(step.capability_id or "").strip() == capability_id
+        ]
+        source_steps = terminal_capability_steps or _goal_source_steps_for_capability(
+            capability_id,
+            steps,
+        )
+        verifier_steps = _goal_verifier_steps(source_steps, steps)
+        primary_step = source_steps[-1] if source_steps else None
+        effectful = bool(
+            primary_step is not None
+            and _goal_step_is_effectful(primary_step)
+            and not _step_is_dispatch_receipt(primary_step)
+        )
+        expected = _goal_expected_state(
+            intent,
+            capability_id=capability_id,
+            primary_step=primary_step,
+        )
+        criteria.append(
+            GoalCriterionSnapshot(
+                criterion_id=_stable_id(
+                    "goal-criterion",
+                    intent.intent_id,
+                    capability_id,
+                ),
+                description=f"Fulfil required capability: {capability_id}",
+                effectful=effectful,
+                required=True,
+                response_satisfiable=False,
+                required_capabilities=[capability_id],
+                required_verification_predicates=(
+                    _goal_required_artifact_verification_predicates(
+                        intent,
+                        source_steps,
+                        verifier_steps,
+                        steps=steps,
+                    )
+                ),
+                expected=expected,
+                source_step_ids=[step.step_id for step in source_steps],
+                verifier_step_ids=[step.step_id for step in verifier_steps],
+            )
+        )
+    if not criteria:
+        criteria.append(
+            GoalCriterionSnapshot(
+                criterion_id=_stable_id(
+                    "goal-criterion",
+                    intent.intent_id,
+                    "response",
+                ),
+                description="Provide the response requested by the original user goal",
+                response_satisfiable=True,
+            )
+        )
+    return GoalContractSnapshot(
+        contract_id=_stable_id(
+            "goal-contract",
+            intent.intent_id,
+            immutable_original_goal,
+        ),
+        original_goal=immutable_original_goal,
+        intent_kind=str(intent.kind),
+        criteria=criteria,
+    )
+
+
+def _goal_declared_capability_bindings(
+    intent: TaskIntentSnapshot,
+    steps: list[ToolPlanStepSnapshot],
+) -> list[
+    tuple[
+        str,
+        dict[str, Any],
+        list[ToolPlanStepSnapshot],
+        list[ToolPlanStepSnapshot],
+    ]
+] | None:
+    """Resolve an optional Runtime-owned semantic Goal declaration exactly."""
+
+    declarations = _goal_declared_capability_declarations(intent)
+    if declarations is None:
+        return None
+    bindings: list[
+        tuple[
+            str,
+            dict[str, Any],
+            list[ToolPlanStepSnapshot],
+            list[ToolPlanStepSnapshot],
+        ]
+    ] = []
+    for capability_id, semantic_target in declarations:
+        source_steps = [
+            step
+            for step in steps
+            if str(step.capability_id or "").strip() == capability_id
+            and _goal_step_can_source_criterion(step)
+        ]
+        if not source_steps:
+            raise ValueError(
+                "runtime_goal_capabilities must resolve to semantic source steps"
+            )
+        bindings.append(
+            (
+                capability_id,
+                _goal_semantic_target_for_source_step(
+                    semantic_target,
+                    source_steps[-1],
+                    steps=steps,
+                ),
+                source_steps,
+                _goal_verifier_steps(source_steps, steps),
+            )
+        )
+    return bindings
+
+
+def _goal_declared_terminal_effect_criteria(
+    intent: TaskIntentSnapshot,
+    steps: list[ToolPlanStepSnapshot],
+    *,
+    declared_capability_ids: set[str],
+) -> list[GoalCriterionSnapshot]:
+    """Compile only user-declared, distinct terminal output effects.
+
+    A semantic capability such as data analysis remains implementation
+    independent.  When the intent router also records that the user explicitly
+    requested a different output sink, bind that sink to the final effect step
+    in the dependency graph.  Preparatory app actions, discovery, verification,
+    and artifact materialization are therefore never promoted implicitly.
+    """
+
+    effect_capabilities = _goal_declared_terminal_effect_capabilities(intent)
+    if not effect_capabilities:
+        return []
+    overlap = declared_capability_ids.intersection(effect_capabilities)
+    if overlap:
+        raise ValueError(
+            "runtime_goal_terminal_effect_capabilities must be distinct from "
+            "runtime_goal_capabilities"
+        )
+    terminal_steps = _goal_terminal_effectful_sink_steps(steps)
+    criteria: list[GoalCriterionSnapshot] = []
+    seen_targets: list[tuple[str, dict[str, Any]]] = []
+    for capability_id in effect_capabilities:
+        source_steps = [
+            step
+            for step in terminal_steps
+            if str(step.capability_id or "").strip() == capability_id
+            and _goal_step_can_source_criterion(step)
+        ]
+        if not source_steps:
+            raise ValueError(
+                "runtime_goal_terminal_effect_capabilities must resolve to "
+                "terminal semantic source steps"
+            )
+        for source_step in source_steps:
+            expected = _goal_expected_state(
+                intent,
+                capability_id=capability_id,
+                primary_step=source_step,
+            )
+            target = (
+                dict(expected.get("target"))
+                if isinstance(expected.get("target"), Mapping)
+                else {}
+            )
+            target_identity = (capability_id, target)
+            if target_identity in seen_targets:
+                continue
+            seen_targets.append(target_identity)
+            verifier_steps = _goal_verifier_steps([source_step], steps)
+            criteria.append(
+                GoalCriterionSnapshot(
+                    criterion_id=_stable_id(
+                        "goal-criterion",
+                        intent.intent_id,
+                        (
+                            "terminal-output|"
+                            f"{capability_id}|{source_step.action}|{target!r}"
+                        ),
+                    ),
+                    description=(
+                        "Fulfil declared terminal output effect: "
+                        f"{capability_id}"
+                    ),
+                    effectful=True,
+                    required=True,
+                    response_satisfiable=False,
+                    required_capabilities=[capability_id],
+                    expected=expected,
+                    source_step_ids=[source_step.step_id],
+                    verifier_step_ids=[step.step_id for step in verifier_steps],
+                )
+            )
+    return criteria
+
+
+def _goal_declared_terminal_effect_capabilities(
+    intent: TaskIntentSnapshot,
+) -> list[str]:
+    marker_key = "runtime_goal_terminal_effect_capabilities"
+    if marker_key not in intent.inputs:
+        return []
+    raw_capabilities = intent.inputs.get(marker_key)
+    if not isinstance(raw_capabilities, (list, tuple)) or not raw_capabilities:
+        raise ValueError(
+            "runtime_goal_terminal_effect_capabilities must be a non-empty "
+            "ordered sequence"
+        )
+    capabilities: list[str] = []
+    for raw_capability_id in raw_capabilities:
+        if not isinstance(raw_capability_id, str):
+            raise ValueError(
+                "runtime_goal_terminal_effect_capabilities must contain "
+                "non-empty strings"
+            )
+        capability_id = raw_capability_id.strip()
+        if not capability_id or capability_id in capabilities:
+            raise ValueError(
+                "runtime_goal_terminal_effect_capabilities must contain unique "
+                "non-empty strings"
+            )
+        capabilities.append(capability_id)
+    return capabilities
+
+
+def _goal_declared_capability_declarations(
+    intent: TaskIntentSnapshot,
+) -> list[tuple[str, dict[str, Any]]] | None:
+    """Validate paired semantic capabilities and their method-free targets."""
+
+    marker_key = "runtime_goal_capabilities"
+    targets_key = "runtime_goal_targets"
+    if marker_key not in intent.inputs:
+        if targets_key in intent.inputs or (
+            "runtime_goal_terminal_effect_capabilities" in intent.inputs
+        ):
+            raise ValueError(
+                "runtime_goal_targets and runtime_goal_terminal_effect_capabilities "
+                "require runtime_goal_capabilities"
+            )
+        return None
+    raw_capabilities = intent.inputs.get(marker_key)
+    if not isinstance(raw_capabilities, (list, tuple)) or not raw_capabilities:
+        raise ValueError(
+            "runtime_goal_capabilities must be a non-empty ordered sequence"
+        )
+    capabilities: list[str] = []
+    for raw_capability_id in raw_capabilities:
+        if not isinstance(raw_capability_id, str):
+            raise ValueError(
+                "runtime_goal_capabilities must contain non-empty strings"
+            )
+        capability_id = raw_capability_id.strip()
+        if not capability_id:
+            raise ValueError(
+                "runtime_goal_capabilities must contain non-empty strings"
+            )
+        if capability_id in capabilities:
+            raise ValueError("runtime_goal_capabilities must be unique")
+        capabilities.append(capability_id)
+
+    raw_targets = intent.inputs.get(targets_key)
+    if not isinstance(raw_targets, Mapping) or not raw_targets:
+        raise ValueError(
+            "runtime_goal_targets must be a non-empty capability mapping"
+        )
+    targets: dict[str, dict[str, Any]] = {}
+    for raw_capability_id, raw_target in raw_targets.items():
+        if not isinstance(raw_capability_id, str):
+            raise ValueError(
+                "runtime_goal_targets keys must be non-empty capability strings"
+            )
+        capability_id = raw_capability_id.strip()
+        if not capability_id or capability_id in targets:
+            raise ValueError(
+                "runtime_goal_targets keys must be unique non-empty capabilities"
+            )
+        if not isinstance(raw_target, Mapping) or not raw_target:
+            raise ValueError(
+                "runtime_goal_targets values must be non-empty target mappings"
+            )
+        target = {
+            str(key or "").strip(): deepcopy(value)
+            for key, value in raw_target.items()
+            if str(key or "").strip() and value not in (None, "", [], {})
+        }
+        if not target:
+            raise ValueError(
+                "runtime_goal_targets values must contain semantic target fields"
+            )
+        targets[capability_id] = target
+    if set(targets) != set(capabilities):
+        raise ValueError(
+            "runtime_goal_targets keys must exactly match runtime_goal_capabilities"
+        )
+    return [(capability_id, targets[capability_id]) for capability_id in capabilities]
+
+
+def _goal_semantic_target_for_source_step(
+    semantic_target: Mapping[str, Any],
+    source_step: ToolPlanStepSnapshot,
+    *,
+    steps: Iterable[ToolPlanStepSnapshot] = (),
+) -> dict[str, Any]:
+    """Bind generic workspace-selection lineage without changing goal meaning."""
+
+    target = deepcopy(dict(semantic_target))
+    selected_paths = {
+        "<selected file from workspace.list>",
+        "<selected files from workspace.list>",
+    }
+    expected_path = str(target.get("expected_path") or "").strip()
+    source_preview = (
+        source_step.input_preview
+        if isinstance(source_step.input_preview, Mapping)
+        else {}
+    )
+    selected_path = str(source_preview.get("path") or "").strip()
+    selection_source = str(source_preview.get("selection_source") or "").strip()
+    selection_sources = {"workspace.list", "file.search", "fs.find_files"}
+    if selected_path not in selected_paths:
+        selected_path = expected_path if expected_path in selected_paths else ""
+    if selection_source not in selection_sources:
+        by_step_id = {
+            str(step.step_id or "").strip(): step
+            for step in steps
+            if str(step.step_id or "").strip()
+        }
+        candidates = [
+            by_step_id[dependency]
+            for dependency in source_step.depends_on
+            if dependency in by_step_id
+            and str(by_step_id[dependency].tool_name or "").strip()
+            in selection_sources
+        ]
+        if len(candidates) == 1:
+            selection_step = candidates[0]
+            selection_source = str(selection_step.tool_name or "").strip()
+            source_preview = (
+                selection_step.input_preview
+                if isinstance(selection_step.input_preview, Mapping)
+                else {}
+            )
+    if (
+        target.get("resolution_required") is not True
+        or selected_path not in selected_paths
+        or selection_source not in selection_sources
+    ):
+        return target
+    target.update(
+        {
+            "path": selected_path,
+            "expected_path": selected_path,
+            "resolution_required": True,
+            "selection_source": selection_source,
+        }
+    )
+    source_values = (
+        ("source_scope", "source_scope"),
+        ("pattern", "pattern"),
+        ("source_kind", "source_kind"),
+        ("selection", "selection"),
+    )
+    for source_key, target_key in source_values:
+        value = source_preview.get(source_key)
+        if value not in (None, "", [], {}):
+            target[target_key] = deepcopy(value)
+    if "source_scope" not in target:
+        source_scope = source_preview.get("path")
+        if source_scope not in (None, "", [], {}) and str(source_scope) not in selected_paths:
+            target["source_scope"] = deepcopy(source_scope)
+    if "source_kind" not in target:
+        source_kind = source_preview.get("file_type")
+        if source_kind not in (None, "", [], {}):
+            target["source_kind"] = deepcopy(source_kind)
+    return target
+
+
+def _goal_capability_is_observation_precondition(
+    capability_id: str,
+    *,
+    steps: list[ToolPlanStepSnapshot],
+    terminal_effect_steps: list[ToolPlanStepSnapshot],
+    explicit_goal_step_ids: set[str],
+) -> bool:
+    """Keep pure observations as plan dependencies, not extra effect goals.
+
+    An observation-only request still has no terminal effect and therefore
+    remains a required criterion.  In an effectful plan, a capability whose
+    concrete source steps only discover state is preparatory evidence; the
+    terminal effect and its verifier own completion.  Capabilities such as web
+    research that also perform an explicit operation remain independent goal
+    criteria.
+    """
+
+    clean_capability = str(capability_id or "").strip()
+    if not clean_capability or not terminal_effect_steps:
+        return False
+    terminal_capabilities = {
+        str(step.capability_id or "").strip()
+        for step in terminal_effect_steps
+        if str(step.capability_id or "").strip()
+    }
+    if clean_capability in terminal_capabilities:
+        return False
+    source_steps = _goal_source_steps_for_capability(clean_capability, steps)
+    if not source_steps:
+        return False
+    if any(step.step_id in explicit_goal_step_ids for step in source_steps):
+        return False
+    return all(
+        str(_runtime_dov_step_metadata(step).get("runtime_stage") or "").strip()
+        in {"discover", "verify"}
+        for step in source_steps
+    )
+
+
+def _goal_explicit_subgoal_step_ids(intent: TaskIntentSnapshot) -> set[str]:
+    raw_subgoals = intent.inputs.get("runtime_explicit_goal_subgoals")
+    if not isinstance(raw_subgoals, (list, tuple)):
+        return set()
+    return {
+        step_id
+        for item in raw_subgoals
+        if isinstance(item, Mapping)
+        and (step_id := str(item.get("step_id") or "").strip())
+    }
+
+
+def _goal_explicit_subgoal_steps(
+    intent: TaskIntentSnapshot,
+    steps: list[ToolPlanStepSnapshot],
+) -> list[ToolPlanStepSnapshot]:
+    """Resolve Runtime-minted semantic subgoals to their exact source steps.
+
+    Only an absent marker selects the legacy capability-aggregated contract
+    path.  Present but invalid or partial Runtime metadata fails closed.  A
+    support verifier is intentionally absent from this list; it is attached to
+    its semantic source criterion below.
+    """
+
+    marker_key = "runtime_explicit_goal_subgoals"
+    if marker_key not in intent.inputs:
+        return []
+    raw_subgoals = intent.inputs.get(marker_key)
+    if not isinstance(raw_subgoals, (list, tuple)) or not raw_subgoals:
+        raise ValueError(
+            "runtime_explicit_goal_subgoals must be a non-empty ordered sequence"
+        )
+    steps_by_id = {
+        str(step.step_id or "").strip(): step
+        for step in steps
+        if str(step.step_id or "").strip()
+    }
+    resolved: list[ToolPlanStepSnapshot] = []
+    seen_step_ids: set[str] = set()
+    for item in raw_subgoals:
+        if not isinstance(item, Mapping):
+            raise ValueError(
+                "runtime_explicit_goal_subgoals must contain mapping entries"
+            )
+        step_id = str(item.get("step_id") or "").strip()
+        capability_id = str(item.get("capability_id") or "").strip()
+        action_id = str(item.get("action_id") or "").strip()
+        step = steps_by_id.get(step_id)
+        if (
+            step is None
+            or not capability_id
+            or not action_id
+            or step_id in seen_step_ids
+            or str(step.capability_id or "").strip() != capability_id
+            or str(step.action or "").strip() != action_id
+            or not _goal_step_can_source_criterion(step)
+        ):
+            raise ValueError(
+                "runtime_explicit_goal_subgoals must resolve exactly to unique "
+                "semantic plan steps"
+            )
+        seen_step_ids.add(step_id)
+        resolved.append(step)
+    return resolved
+
+
+def _goal_explicit_subgoal_criteria(
+    intent: TaskIntentSnapshot,
+    explicit_steps: list[ToolPlanStepSnapshot],
+    all_steps: list[ToolPlanStepSnapshot],
+) -> list[GoalCriterionSnapshot]:
+    criteria: list[GoalCriterionSnapshot] = []
+    for source_step in explicit_steps:
+        capability_id = str(source_step.capability_id or "").strip()
+        action_id = str(source_step.action or "").strip()
+        expected = _goal_expected_state(
+            intent,
+            capability_id=capability_id,
+            primary_step=source_step,
+        )
+        verifier_steps = _goal_verifier_steps([source_step], all_steps)
+        criteria.append(
+            GoalCriterionSnapshot(
+                criterion_id=_stable_id(
+                    "goal-criterion",
+                    intent.intent_id,
+                    f"{source_step.step_id}|{action_id}|{expected!r}",
+                ),
+                description=(
+                    f"Fulfil explicit subgoal: {capability_id}/{action_id}"
+                ),
+                effectful=(
+                    _goal_step_is_effectful(source_step)
+                    and not _step_is_dispatch_receipt(source_step)
+                ),
+                required=True,
+                response_satisfiable=False,
+                required_capabilities=[capability_id],
+                required_verification_predicates=(
+                    _goal_required_artifact_verification_predicates(
+                        intent,
+                        [source_step],
+                        verifier_steps,
+                        steps=all_steps,
+                    )
+                ),
+                expected=expected,
+                source_step_ids=[source_step.step_id],
+                verifier_step_ids=[step.step_id for step in verifier_steps],
+            )
+        )
+    return criteria
+
+
+def _goal_source_steps_for_capability(
+    capability_id: str,
+    steps: list[ToolPlanStepSnapshot],
+) -> list[ToolPlanStepSnapshot]:
+    direct = [
+        step
+        for step in steps
+        if str(step.capability_id or "").strip() == capability_id
+        and _goal_step_can_source_criterion(step)
+    ]
+    if direct:
+        return direct
+    # A capability may be implemented through a lower-level adapter (for
+    # example media playback through a generic UI action).  Bind it to the
+    # final operate/produce step rather than teaching this compiler app names.
+    fallback = [step for step in steps if _goal_step_is_source(step)]
+    return fallback[-1:] if fallback else []
+
+
+def _goal_step_is_source(step: ToolPlanStepSnapshot) -> bool:
+    stage = str(_runtime_dov_step_metadata(step).get("runtime_stage") or "").strip()
+    return stage in {"operate", "produce"} and not _step_is_dispatch_receipt(step)
+
+
+def _goal_step_can_source_criterion(step: ToolPlanStepSnapshot) -> bool:
+    stage = str(_runtime_dov_step_metadata(step).get("runtime_stage") or "").strip()
+    return stage in {"discover", "operate", "produce"} and not _step_is_dispatch_receipt(step)
+
+
+def _goal_step_is_effectful(step: ToolPlanStepSnapshot) -> bool:
+    stage = str(_runtime_dov_step_metadata(step).get("runtime_stage") or "").strip()
+    if stage not in {"operate", "produce"}:
+        return False
+    action = str(step.action or "").strip()
+    return action not in {
+        "",
+        "analyze",
+        "current_page",
+        "discover",
+        "extract_text",
+        "inspect",
+        "list",
+        "read",
+        "search",
+        "status",
+        "verify",
+    }
+
+
+def _goal_terminal_effectful_sink_steps(
+    steps: list[ToolPlanStepSnapshot],
+) -> list[ToolPlanStepSnapshot]:
+    """Return effect steps that are not merely support for a later effect.
+
+    A cross-app plan may contain browser navigation, artifact materialization,
+    app preparation, and a final insertion.  Only the final insertion is the
+    terminal effectful sink; discovery and verification never become new root
+    criteria, and intermediate effects remain represented by plan dependencies.
+    """
+
+    effectful = [step for step in steps if _goal_step_is_effectful(step)]
+    if not effectful:
+        return []
+    dependencies = {
+        str(step.step_id or "").strip(): {
+            str(value or "").strip()
+            for value in step.depends_on
+            if str(value or "").strip()
+        }
+        for step in steps
+        if str(step.step_id or "").strip()
+    }
+
+    def _depends_on(step_id: str, ancestor_id: str) -> bool:
+        pending = list(dependencies.get(step_id, set()))
+        visited: set[str] = set()
+        while pending:
+            dependency = pending.pop()
+            if dependency == ancestor_id:
+                return True
+            if dependency in visited:
+                continue
+            visited.add(dependency)
+            pending.extend(dependencies.get(dependency, set()))
+        return False
+
+    terminal: list[ToolPlanStepSnapshot] = []
+    for candidate in effectful:
+        candidate_id = str(candidate.step_id or "").strip()
+        if not candidate_id:
+            continue
+        if any(
+            other is not candidate
+            and _depends_on(str(other.step_id or "").strip(), candidate_id)
+            for other in effectful
+        ):
+            continue
+        terminal.append(candidate)
+    return terminal
+
+
+def _goal_verifier_steps(
+    source_steps: list[ToolPlanStepSnapshot],
+    steps: list[ToolPlanStepSnapshot],
+) -> list[ToolPlanStepSnapshot]:
+    source_ids = {step.step_id for step in source_steps}
+    if not source_ids:
+        return []
+    verifier_steps: list[ToolPlanStepSnapshot] = []
+    reachable = set(source_ids)
+    for step in steps:
+        dependencies = {str(value or "").strip() for value in step.depends_on}
+        stage = str(_runtime_dov_step_metadata(step).get("runtime_stage") or "").strip()
+        follows_source = bool(dependencies & reachable)
+        if stage == "verify" and follows_source:
+            verifier_steps.append(step)
+            continue
+        if follows_source and not (
+            _goal_step_is_effectful(step) and step.step_id not in source_ids
+        ):
+            reachable.add(step.step_id)
+    return verifier_steps
+
+
+def _goal_required_artifact_verification_predicates(
+    intent: TaskIntentSnapshot,
+    source_steps: list[ToolPlanStepSnapshot],
+    verifier_steps: list[ToolPlanStepSnapshot],
+    *,
+    steps: list[ToolPlanStepSnapshot],
+) -> list[str]:
+    """Declare semantic artifact gates only for one executable exact-readback pair.
+
+    The completion policy is derived from generic producer/verifier semantics,
+    not from an intent kind or application name.  Mirroring the Runtime binder
+    here prevents a plan from promising predicates that its concrete request
+    lineage could never mint.
+    """
+
+    if len(source_steps) != 1:
+        return []
+    source_step = source_steps[0]
+    source_tool = str(source_step.tool_name or "").strip()
+    source_stage = str(
+        _runtime_dov_step_metadata(source_step).get("runtime_stage") or ""
+    ).strip()
+    if (
+        source_tool not in {"terminal.run", "python.run"}
+        or str(source_step.status or "").strip() != "planned"
+        or source_stage not in {"operate", "produce"}
+    ):
+        return []
+    source_metadata = _task_step_target_metadata_for_intent(
+        intent,
+        source_step,
+        steps=steps,
+    )
+    action_target = source_metadata.get("action_target")
+    output_path = declared_workspace_output_path(
+        action_target if isinstance(action_target, Mapping) else None
+    )
+    if not output_path:
+        return []
+
+    candidates: list[ToolPlanStepSnapshot] = []
+    for verifier_step in verifier_steps:
+        verifier_tool = str(verifier_step.tool_name or "").strip()
+        verifier_stage = str(
+            _runtime_dov_step_metadata(verifier_step).get("runtime_stage") or ""
+        ).strip()
+        verifier_preview = (
+            verifier_step.input_preview
+            if isinstance(verifier_step.input_preview, Mapping)
+            else {}
+        )
+        if (
+            verifier_tool in EXACT_FILE_READBACK_VERIFIER_TOOLS
+            and str(verifier_step.status or "").strip() == "planned"
+            and verifier_stage == "verify"
+            and verifier_step.approval_required is not True
+            and source_step.step_id in verifier_step.depends_on
+            and normalized_workspace_relative_path(verifier_preview.get("path"))
+            == output_path
+        ):
+            candidates.append(verifier_step)
+    if len(candidates) != 1:
+        return []
+    return [
+        EXACT_FILE_CONTENT_PRESENT_PREDICATE,
+        SEMANTIC_ARTIFACT_ADEQUACY_PREDICATE,
+    ]
+
+
+def _goal_expected_state(
+    intent: TaskIntentSnapshot,
+    *,
+    capability_id: str,
+    primary_step: ToolPlanStepSnapshot | None,
+    semantic_target: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    state = _goal_capability_state(capability_id, primary_step)
+    target = (
+        _goal_expected_semantic_target(semantic_target)
+        if semantic_target is not None
+        else _goal_expected_action_target(intent, primary_step)
+    )
+    expected: dict[str, Any] = {}
+    if state:
+        expected["state"] = state
+    action = str(primary_step.action or "").strip() if primary_step is not None else ""
+    if capability_id == "media.playback" and action in {"next", "previous"}:
+        expected["track_change_verified"] = True
+    if isinstance(target, Mapping) and target:
+        expected["target"] = dict(target)
+    return expected
+
+
+def _goal_expected_semantic_target(
+    semantic_target: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Keep a dynamic placeholder as a required receipt, not a final path."""
+
+    target = deepcopy(dict(semantic_target))
+    selected_path = str(target.get("path") or "").strip()
+    if target.get("resolution_required") is True and selected_path in {
+        "<selected file from workspace.list>",
+        "<selected files from workspace.list>",
+    }:
+        target.pop("path", None)
+        target["expected_path"] = selected_path
+    return target
+
+
+def _goal_expected_action_target(
+    intent: TaskIntentSnapshot,
+    primary_step: ToolPlanStepSnapshot | None,
+) -> Mapping[str, Any] | None:
+    if primary_step is None:
+        return None
+    if _step_is_dispatch_receipt(primary_step):
+        # Runtime dispatch receipts intentionally prove only that a bounded
+        # command was accepted.  Their authoritative target omits an app kind
+        # because no postcondition about the foreground app is being claimed.
+        action = str(primary_step.action or "").strip()
+        target = {"action": action} if action else {}
+        if action == "dispatch_management":
+            requested_app_name = str(intent.inputs.get("app_name_hint") or "").strip()
+            if requested_app_name:
+                target.update(
+                    {
+                        "kind": "desktop_app",
+                        "app_name": legacy_app_name_hint(requested_app_name),
+                        "query": requested_app_name,
+                        "selection_source": "direct_app_name",
+                    }
+                )
+        if action == "dispatch_shortcut":
+            input_preview = (
+                primary_step.input_preview
+                if isinstance(primary_step.input_preview, Mapping)
+                else {}
+            )
+            shortcut_action = str(input_preview.get("action") or "").strip().lower()
+            if shortcut_action:
+                target["shortcut_action"] = shortcut_action
+            for key in (
+                "key",
+                "modifiers",
+                "app_name",
+                "target",
+                "window_title",
+            ):
+                value = input_preview.get(key)
+                if value not in (None, "", [], {}):
+                    target[key] = value
+        return target or None
+    input_preview = (
+        primary_step.input_preview
+        if isinstance(primary_step.input_preview, Mapping)
+        else {}
+    )
+    if (
+        str(primary_step.capability_id or "").strip() == "desktop.ui_operation"
+        and str(primary_step.action or "").strip() == "type"
+        and str(input_preview.get("target_action") or "").strip() == "app_paste"
+    ):
+        # Match the Runtime's dependency-inherited action target rather than
+        # the raw foreground tool input.  This keeps the immutable criterion
+        # bound to the requested app (or capability-selected app scope) while
+        # the trusted verifier proves exact content on that same owned window.
+        target: dict[str, Any] = {
+            "kind": "desktop_app",
+            "action": "type_ui",
+        }
+        app_name = str(intent.inputs.get("target_app_hint") or "").strip()
+        if app_name:
+            target["app_name"] = app_name
+        target_capability = intent.inputs.get("target_app_capability_hint")
+        if isinstance(target_capability, Mapping):
+            query = str(target_capability.get("query") or "").strip()
+            target["selection_source"] = "desktop.list_apps"
+            if query:
+                target["query"] = query
+        return target
+    target = _task_step_target_metadata_for_intent(
+        intent,
+        primary_step,
+    ).get("action_target")
+    if not isinstance(target, Mapping):
+        return target
+    expected_target = dict(target)
+    selected_path = str(expected_target.get("path") or "").strip()
+    if (
+        str(expected_target.get("selection_source") or "").strip()
+        in {"workspace.list", "file.search", "fs.find_files"}
+        and selected_path
+        in {
+            "<selected file from workspace.list>",
+            "<selected files from workspace.list>",
+        }
+    ):
+        expected_target.pop("path", None)
+        expected_target["expected_path"] = selected_path
+        expected_target["resolution_required"] = True
+    return expected_target
+
+
+def _goal_capability_state(
+    capability_id: str,
+    primary_step: ToolPlanStepSnapshot | None,
+) -> str:
+    action = str(primary_step.action or "").strip() if primary_step is not None else ""
+    role = (
+        str(_runtime_dov_step_metadata(primary_step).get("runtime_role") or "").strip()
+        if primary_step is not None
+        else ""
+    )
+    if capability_id == "media.playback" or role == "play_media":
+        if action in {"play", "resume"}:
+            return "playing"
+        if action == "pause":
+            return "paused"
+        if action == "stop":
+            return "stopped"
+        if action in {"next", "previous", "status"}:
+            return ""
+        return "fulfilled"
+    if action == "play":
+        return "playing"
+    if action in {"open", "open_app", "open_settings", "open_url"}:
+        return "open"
+    if action in {"focus", "focus_app"}:
+        return "focused"
+    if action in {"send", "send_message", "submit"}:
+        return "sent"
+    if action in {"schedule", "schedule_task"}:
+        return "scheduled"
+    if action in {
+        "apply_file_changes",
+        "apply_patch",
+        "create_note",
+        "move_file",
+        "rename_file",
+        "write_artifact",
+        "write_clipboard",
+        "write_file",
+    }:
+        return "persisted"
+    return "fulfilled"
 
 
 def _task_workspace_items(
@@ -15580,7 +19882,11 @@ def _task_workspace_items(
                     "approval_required": step.approval_required,
                     "input_preview": dict(step.input_preview),
                     **_runtime_dov_step_metadata(step),
-                    **_task_step_target_metadata(step),
+                    **_task_step_target_metadata_for_intent(
+                        intent,
+                        step,
+                        steps=steps,
+                    ),
                 },
             )
         )
@@ -15685,6 +19991,8 @@ def _first_step_id_with_input_path(
 
 
 def _task_workspace_input_key(key: str) -> bool:
+    if str(key or "").strip().startswith("runtime_goal_"):
+        return False
     return bool(
         re.search(
             r"(?:path|file|source|data|url|query|target|app|artifact|context|body|recipient)",
@@ -15756,30 +20064,40 @@ def _task_checkpoints(
 ) -> list[TaskCheckpointSnapshot]:
     checkpoints: list[TaskCheckpointSnapshot] = []
     for index, step in enumerate(steps, start=1):
+        is_dispatch_receipt = _step_is_dispatch_receipt(step)
+        checkpoint_verb = "Dispatch" if is_dispatch_receipt else "Verify"
         checkpoints.append(
             TaskCheckpointSnapshot(
                 checkpoint_id=_stable_id("checkpoint", step.step_id, str(index)),
-                title=f"Verify {step.title}",
+                title=f"{checkpoint_verb} {step.title}",
                 status="waiting_approval" if step.approval_required else "planned",
                 after_step_id=step.step_id,
                 depends_on=[step.step_id],
-                verifies=[
-                    item
-                    for item in (
-                        step.step_id,
-                        step.capability_id,
-                        step.action,
-                        step.tool_name or "",
-                    )
-                    if item
-                ],
+                verifies=(
+                    []
+                    if is_dispatch_receipt
+                    else [
+                        item
+                        for item in (
+                            step.step_id,
+                            step.capability_id,
+                            step.action,
+                            step.tool_name or "",
+                        )
+                        if item
+                    ]
+                ),
                 replan_on_failure=True,
                 payload={
                     "intent_id": intent.intent_id,
                     "approval_required": step.approval_required,
                     "risk_level": step.risk_level,
                     **_runtime_dov_step_metadata(step),
-                    **_task_step_target_metadata(step),
+                    **_task_step_target_metadata_for_intent(
+                        intent,
+                        step,
+                        steps=steps,
+                    ),
                 },
             )
         )
@@ -15830,6 +20148,8 @@ def _task_replan_signals(steps: list[ToolPlanStepSnapshot]) -> list[ReplanSignal
             )
         if fallback_tools and not _step_requires_post_action_verification(step):
             continue
+        if _step_is_dispatch_receipt(step):
+            continue
         if _step_should_verify_before_continuing(step):
             signals.append(
                 ReplanSignalSnapshot(
@@ -15842,6 +20162,19 @@ def _task_replan_signals(steps: list[ToolPlanStepSnapshot]) -> list[ReplanSignal
                 )
             )
     return signals
+
+
+def _step_is_dispatch_receipt(step: ToolPlanStepSnapshot) -> bool:
+    return bool(
+        str(step.action or "").strip()
+        in {
+            "dispatch_management",
+            "dispatch_shortcut",
+            "dispatch_submit",
+        }
+        or str(step.tool_name or "").strip()
+        in _RUNTIME_DOV_MANAGEMENT_DISPATCH_RECEIPT_TOOLS
+    )
 
 
 def _task_step_target_metadata(step: ToolPlanStepSnapshot) -> dict[str, Any]:
@@ -15863,6 +20196,129 @@ def _task_step_target_metadata(step: ToolPlanStepSnapshot) -> dict[str, Any]:
     return metadata
 
 
+def _task_step_target_metadata_for_intent(
+    intent: TaskIntentSnapshot,
+    step: ToolPlanStepSnapshot,
+    *,
+    steps: Iterable[ToolPlanStepSnapshot] = (),
+) -> dict[str, Any]:
+    """Bind an app-search action to its app, query, field, and exact step.
+
+    Tool inputs stay schema-valid (for example ``desktop.search_submit`` takes
+    no query argument), while TaskCore owns the richer target used by the
+    immutable GoalContract and Runtime receipts.
+    """
+
+    declarations = _goal_declared_capability_declarations(intent)
+    if declarations is not None and _goal_step_can_source_criterion(step):
+        step_capability_id = str(step.capability_id or "").strip()
+        for capability_id, semantic_target in declarations:
+            if capability_id != step_capability_id:
+                continue
+            return {
+                "action_target": canonical_action_target(
+                    _goal_semantic_target_for_source_step(
+                        semantic_target,
+                        step,
+                        steps=steps,
+                    ),
+                    capability_id=capability_id,
+                    runtime_stage=str(
+                        _runtime_dov_step_metadata(step).get("runtime_stage") or ""
+                    ).strip(),
+                )
+            }
+
+    metadata = _task_step_target_metadata(step)
+    foreground_management = intent.inputs.get("foreground_management_hint")
+    foreground_action = str(
+        foreground_management.get("action")
+        if isinstance(foreground_management, Mapping)
+        else ""
+    ).strip()
+    if (
+        str(step.step_id or "").strip() == "manage-foreground"
+        and foreground_action in {"close_window", "quit_app"}
+    ):
+        requested_app_name = str(intent.inputs.get("app_name_hint") or "").strip()
+        if requested_app_name:
+            planned_management = (
+                dict(metadata.get("action_target"))
+                if isinstance(metadata.get("action_target"), Mapping)
+                else {}
+            )
+            planned_management.update(
+                {
+                    "kind": "desktop_app",
+                    "app_name": legacy_app_name_hint(requested_app_name),
+                    "query": requested_app_name,
+                    "selection_source": "direct_app_name",
+                }
+            )
+            metadata["action_target"] = canonical_action_target(
+                planned_management,
+                capability_id=str(step.capability_id or "").strip(),
+                tool_name=str(step.tool_name or "").strip(),
+                runtime_stage=str(
+                    _runtime_dov_step_metadata(step).get("runtime_stage") or ""
+                ).strip(),
+            )
+    app_search = intent.inputs.get("app_search_hint")
+    if not isinstance(app_search, Mapping) or not app_search:
+        return metadata
+    if str(step.step_id or "").strip() not in {
+        "focus-app-search-field",
+        "paste-app-search-query",
+        "type-app-search-query",
+        "submit-app-search",
+        "confirm-app-search-result",
+    }:
+        return metadata
+    query = str(app_search.get("query") or "").strip()
+    target_label = str(app_search.get("target") or "Search").strip()
+    if not query or not target_label:
+        return metadata
+    planned = (
+        dict(metadata.get("action_target"))
+        if isinstance(metadata.get("action_target"), Mapping)
+        else {}
+    )
+    app_name = str(
+        app_search.get("app_name")
+        or intent.inputs.get("app_name_hint")
+        or planned.get("app_name")
+        or ""
+    ).strip()
+    planned.update(
+        {
+            "kind": "desktop_app" if app_name else "desktop_ui",
+            "action": canonical_action_name(
+                step.action,
+                tool_name=str(step.tool_name or "").strip(),
+                capability_id=str(step.capability_id or "").strip(),
+                runtime_stage=str(
+                    _runtime_dov_step_metadata(step).get("runtime_stage") or ""
+                ).strip(),
+            ),
+            "query": query,
+            "target": target_label,
+            "role_filter": "text",
+        }
+    )
+    if app_name:
+        planned["app_name"] = app_name
+        planned.setdefault("selection_source", "direct_app_name")
+    metadata["action_target"] = canonical_action_target(
+        planned,
+        capability_id=str(step.capability_id or "").strip(),
+        tool_name=str(step.tool_name or "").strip(),
+        runtime_stage=str(
+            _runtime_dov_step_metadata(step).get("runtime_stage") or ""
+        ).strip(),
+    )
+    return metadata
+
+
 def _task_step_action_target(
     step: ToolPlanStepSnapshot,
     input_preview: Mapping[str, Any],
@@ -15875,6 +20331,12 @@ def _task_step_action_target(
     action = str(step.action or "").strip()
     if action:
         target["action"] = action
+    if "shortcut" in str(step.tool_name or "") or "hotkey" in str(
+        step.tool_name or ""
+    ):
+        shortcut_action = str(input_preview.get("action") or "").strip().lower()
+        if shortcut_action:
+            target["shortcut_action"] = shortcut_action
     for key in (
         "app_name",
         "selection_source",
@@ -15889,6 +20351,7 @@ def _task_step_action_target(
         "recipient",
         "command",
         "key",
+        "modifiers",
         "direction",
         "x",
         "y",
@@ -15900,9 +20363,31 @@ def _task_step_action_target(
         value = input_preview.get(key)
         if value not in (None, "", [], {}):
             target[key] = value
+    if str(input_preview.get("selection_source") or "").strip() in {
+        "workspace.list",
+        "file.search",
+        "fs.find_files",
+    }:
+        for key in (
+            "source_scope",
+            "source_path",
+            "pattern",
+            "file_type",
+            "source_kind",
+            "selection",
+            "selection_hint",
+        ):
+            value = input_preview.get(key)
+            if value not in (None, "", [], {}):
+                target[key] = value
     if len(target) <= (1 if kind else 0):
         return {}
-    return target
+    return canonical_action_target(
+        target,
+        capability_id=str(step.capability_id or "").strip(),
+        tool_name=str(step.tool_name or "").strip(),
+        runtime_stage=str(runtime_metadata.get("runtime_stage") or "").strip(),
+    )
 
 
 def _task_step_target_kind(
@@ -15957,6 +20442,23 @@ def _task_step_target_kind(
 
 def _step_requires_post_action_verification(step: ToolPlanStepSnapshot) -> bool:
     return bool(_runtime_dov_step_metadata(step).get("requires_post_action_verification"))
+
+
+def _next_available_step_id(
+    steps: Iterable[ToolPlanStepSnapshot],
+    base_step_id: str,
+) -> str:
+    existing = {
+        str(step.step_id or "").strip()
+        for step in steps
+        if str(step.step_id or "").strip()
+    }
+    if base_step_id not in existing:
+        return base_step_id
+    suffix = 2
+    while f"{base_step_id}-{suffix}" in existing:
+        suffix += 1
+    return f"{base_step_id}-{suffix}"
 
 
 def _step_should_verify_before_continuing(step: ToolPlanStepSnapshot) -> bool:
@@ -16050,6 +20552,51 @@ _RUNTIME_DOV_DESKTOP_POST_ACTION_ACTIONS = frozenset(
     }
 )
 
+_RUNTIME_DOV_MANAGEMENT_DISPATCH_RECEIPT_TOOLS = frozenset(
+    {
+        "desktop.close_window",
+        "desktop.hide_app",
+        "desktop.minimize_window",
+        "desktop.quit_app",
+        "desktop.show_all_apps",
+    }
+)
+
+_RUNTIME_DOV_DISPATCH_RECEIPT_TOOLS = frozenset(
+    {
+        *_RUNTIME_DOV_MANAGEMENT_DISPATCH_RECEIPT_TOOLS,
+        "desktop.hotkey",
+        "desktop.shortcut",
+        "desktop.safe_shortcut",
+        "desktop.safe_key",
+        "desktop.safe_scroll",
+        "desktop.safe_click",
+    }
+)
+
+
+def _runtime_dispatch_receipt_action(
+    tool_name: str | None,
+    input_preview: Mapping[str, Any] | None,
+) -> str:
+    clean_tool = str(tool_name or "").strip()
+    if clean_tool not in _RUNTIME_DOV_DISPATCH_RECEIPT_TOOLS:
+        return ""
+    if clean_tool in _RUNTIME_DOV_MANAGEMENT_DISPATCH_RECEIPT_TOOLS:
+        return "dispatch_management"
+    payload = input_preview if isinstance(input_preview, Mapping) else {}
+    if is_semantic_safe_shortcut(clean_tool, payload):
+        return ""
+    return "dispatch_shortcut"
+
+_RUNTIME_DOV_TERMINAL_MEDIA_PREPARATION_STEPS = frozenset(
+    {
+        "focus-media-app-search",
+        "type-media-search-query",
+        "submit-media-search",
+    }
+)
+
 
 def _runtime_dov_step_metadata(step: ToolPlanStepSnapshot) -> dict[str, Any]:
     if not _runtime_dov_step_applies(step):
@@ -16075,8 +20622,18 @@ def _runtime_dov_step_requires_post_action_verification(
 ) -> bool:
     if stage != "operate":
         return False
+    # These are implementation steps for one media-search transaction. Their
+    # tool failures remain blocking, while the terminal media action owns the
+    # playback postcondition (player state / track / playback_ok).
+    if str(step.step_id or "").strip() in _RUNTIME_DOV_TERMINAL_MEDIA_PREPARATION_STEPS:
+        return False
     tool_name = str(step.tool_name or "").strip()
     action = str(step.action or "").strip()
+    if (
+        action in {"dispatch_management", "dispatch_shortcut", "dispatch_submit"}
+        or tool_name in _RUNTIME_DOV_MANAGEMENT_DISPATCH_RECEIPT_TOOLS
+    ):
+        return False
     if tool_name.startswith(("app.open_and_", "app.focus_and_")):
         return True
     if tool_name in _RUNTIME_DOV_DESKTOP_POST_ACTION_TOOLS:
@@ -16161,6 +20718,8 @@ def _runtime_dov_stage(step: ToolPlanStepSnapshot) -> str:
         "current_page",
         "screenshot",
     }:
+        return "discover"
+    if action in {"list_files", "read_file", "search"}:
         return "discover"
     if tool_name == "clipboard.read" or action == "read_clipboard":
         return "discover"
@@ -16412,6 +20971,18 @@ def _artifact_output_paths(text: str, filenames: Iterable[str]) -> list[str]:
     return [_artifact_output_path(text, filename) for filename in filenames]
 
 
+def _report_intent_artifact_path(intent: TaskIntentSnapshot) -> str:
+    explicit_path = normalized_workspace_relative_path(
+        intent.inputs.get("artifact_output_path_hint")
+    )
+    if explicit_path:
+        return explicit_path
+    return _artifact_output_path(
+        intent.user_goal,
+        _report_artifact_filename(intent.user_goal),
+    )
+
+
 def _report_artifact_filename(text: str) -> str:
     value = _clean_prompt(text)
     if _looks_like_meeting_content_task(value):
@@ -16508,10 +21079,16 @@ _COMMUNICATION_ACTION_TERMS = (
 )
 
 _SCHEDULE_ACTION_TERMS = (
+    "alarm",
     "remind",
+    "wake me",
     "calendar",
     "schedule",
     "event",
+    "闹钟",
+    "叫我",
+    "喊我",
+    "提醒我",
     "提醒",
     "日历",
     "日程",
@@ -16547,6 +21124,16 @@ _BROWSER_TEXT_INPUT_SELECTOR = (
 def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
     score = float(intent.confidence or 0)
     external_info_lookup = _looks_like_external_info_lookup(text)
+    explicit_file_access = file_access_hint(text)
+    explicit_finder_reveal = (
+        str(explicit_file_access.get("action") or "").strip() == "reveal_path"
+        and bool(str(explicit_file_access.get("path") or "").strip())
+    )
+    if explicit_finder_reveal:
+        if intent.kind == "file_access":
+            score += 0.48
+        elif intent.kind == "code_task":
+            score -= 0.48
     app_scoped_ui_operation = _app_scoped_ui_operation_hint(text)
     desktop_communication_discovery = (
         intent.kind == "desktop_operation"
@@ -17137,24 +21724,67 @@ def _looks_like_report_app_delivery_request(text: str) -> bool:
 
 
 def _web_research_artifact_requested(intent: TaskIntentSnapshot) -> bool:
-    if _task_output_target_hint(intent.user_goal) == "clipboard":
+    instruction_text = _web_output_instruction_text(
+        intent.user_goal,
+        url_hint=str(intent.inputs.get("url_hint") or ""),
+        query=str(intent.inputs.get("query") or ""),
+    )
+    if _task_output_target_hint(instruction_text) == "clipboard":
+        return False
+    explicit_artifact_request = _contains_any(
+        instruction_text,
+        [
+            "write a report",
+            "report file",
+            "presentation",
+            "outline",
+            "markdown",
+            "md file",
+            "document",
+            "artifact",
+            "save",
+            "export",
+            "报告",
+            "文档",
+            "文件",
+            "产物",
+            "演示文稿",
+            "大纲",
+            "保存",
+            "导出",
+            "生成报告",
+            "输出报告",
+        ],
+    )
+    browser_action = str(intent.inputs.get("browser_action") or "").strip()
+    click_search_result = (
+        browser_action == "open_search"
+        and str(intent.inputs.get("followup_action") or "").strip()
+        == "click_search_result"
+    )
+    if (
+        browser_action in {"click", "type_text", "open_url_screenshot"}
+        or click_search_result
+    ) and not explicit_artifact_request:
+        return False
+    if (
+        browser_action in {"current_page", "extract_text", "screenshot"}
+        and not explicit_artifact_request
+    ):
         return False
     outputs = {
         str(item or "").strip()
         for item in intent.expected_outputs
         if str(item or "").strip()
     }
-    if outputs.intersection({"report", "summary", "table", "links", "presentation"}):
+    # A conversational summary is a presentation mode, not an implicit request
+    # to create a durable file. Only artifact-shaped output or explicit
+    # save/export/file language should add artifact.write to the plan.
+    if outputs.intersection({"report", "table", "links", "presentation"}):
         return True
-    return _contains_any(
-        intent.user_goal,
+    return explicit_artifact_request or _contains_any(
+        instruction_text,
         [
-            "summarize",
-            "summarise",
-            "summary",
-            "write summary",
-            "output summary",
-            "write up",
             "write a report",
             "report",
             "table",
@@ -17162,15 +21792,10 @@ def _web_research_artifact_requested(intent: TaskIntentSnapshot) -> bool:
             "md file",
             "document",
             "artifact",
-            "总结",
-            "摘要",
             "报告",
             "文档",
             "文件",
             "产物",
-            "输出总结",
-            "生成总结",
-            "整理总结",
             "链接清单",
             "链接列表",
             "列出链接",
@@ -17479,6 +22104,168 @@ def _code_task_area_context_hints(text: str) -> list[dict[str, str]]:
     return hints[:4]
 
 
+_WORKSPACE_NAMED_FILE_RE = re.compile(
+    r"(?<![A-Za-z0-9_./:~-])"
+    r"(?P<path>(?:\./)?(?:[\w.-]+/)*[\w.-]+"
+    r"\.(?:md|mdx|txt|py|ts|tsx|js|jsx|json|toml|yaml|yml|css|html))\b",
+    flags=re.IGNORECASE,
+)
+
+_WORKSPACE_FILE_READ_ACTION_RE = re.compile(
+    r"\b(?:read(?![- ]only\b)|view|inspect)\b|(?:读取|阅读|查看|检查)",
+    flags=re.IGNORECASE,
+)
+
+_REPORT_ARTIFACT_AUTHORING_ACTION_RE = re.compile(
+    r"\b(?:create|write|generate|produce|save|export|output|draft|make)\b|"
+    r"(?:创建|新建|生成|写入|写|编写|保存|另存|输出|导出|产出|制作)",
+    flags=re.IGNORECASE,
+)
+
+
+def _workspace_named_file_occurrences(
+    text: str,
+) -> list[tuple[str, int, int]]:
+    value = unicodedata.normalize("NFKC", str(text or ""))
+    occurrences: list[tuple[str, int, int]] = []
+    for match in _WORKSPACE_NAMED_FILE_RE.finditer(value):
+        path = normalized_workspace_relative_path(match.group("path"))
+        if path and path not in {item[0] for item in occurrences}:
+            occurrences.append((path, match.start("path"), match.end("path")))
+    return occurrences
+
+
+def _artifact_path_follows_authoring_action(
+    clause: str,
+    *,
+    action_end: int,
+    path_start: int,
+) -> bool:
+    if path_start < action_end:
+        return False
+    bridge = clause[action_end:path_start].strip(" \t\r\n\"'`“”‘’：:，,")
+    if not bridge:
+        return True
+    if len(bridge) > 96:
+        return False
+    if re.fullmatch(
+        r"(?:(?:a|an|the|one|new|named|called|file|artifact|report|summary|"
+        r"document|markdown|text)\s*)+|"
+        r"(?:(?:一个|一份|一篇|新的?|名为|叫|名称为|文件|产物|报告|总结|"
+        r"摘要|文档|markdown|文本)\s*)+",
+        bridge,
+        flags=re.IGNORECASE,
+    ):
+        return True
+    return bool(
+        re.search(
+            r"(?:\b(?:to|as|into|at|named|called)\b|"
+            r"(?:到|至|进|入|为|成|作为|名为|叫|名称为))\s*"
+            r"(?:(?:a|an|the|new|file|artifact|report|document|markdown)\s*|"
+            r"(?:一个|一份|一篇|新的?|文件|产物|报告|文档)\s*)*$",
+            bridge,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _artifact_path_precedes_authoring_action(
+    clause: str,
+    *,
+    path_start: int,
+    path_end: int,
+    action_start: int,
+) -> bool:
+    if path_end > action_start:
+        return False
+    prefix = clause[:path_start]
+    bridge = clause[path_end:action_start].strip(" \t\r\n\"'`“”‘’：:，,")
+    return bool(
+        re.search(r"(?:^|[\s，把将])(?:在|向)\s*$", prefix)
+        and re.fullmatch(r"(?:中|里|内)?", bridge)
+    )
+
+
+def _explicit_workspace_artifact_output_path_hint(text: str) -> str:
+    """Return a path syntactically owned by one authorized authoring action."""
+
+    value = unicodedata.normalize("NFKC", str(text or ""))
+    if not value.strip():
+        return ""
+    for action_match in _REPORT_ARTIFACT_AUTHORING_ACTION_RE.finditer(value):
+        if not _speech_act_action_occurrence_is_authorized(
+            value,
+            action_match.start(),
+            action_match.end(),
+        ):
+            continue
+        clause_start, clause_end = _speech_act_clause_bounds(
+            value,
+            action_match.start(),
+        )
+        clause = value[clause_start:clause_end]
+        local_action_start = action_match.start() - clause_start
+        local_action_end = action_match.end() - clause_start
+        for path, path_start, path_end in _workspace_named_file_occurrences(clause):
+            if _artifact_path_follows_authoring_action(
+                clause,
+                action_end=local_action_end,
+                path_start=path_start,
+            ) or _artifact_path_precedes_authoring_action(
+                clause,
+                path_start=path_start,
+                path_end=path_end,
+                action_start=local_action_start,
+            ):
+                return path
+    return ""
+
+
+def _explicit_workspace_file_read_target_hint(text: str) -> str:
+    """Return an exact workspace-relative file from one authorized read clause.
+
+    The action and path must occur in the same top-level clause.  This avoids
+    binding a negated or quoted example to an unrelated affirmative action,
+    while URL, absolute, home-relative, and parent-traversal operands stay on
+    their existing external/desktop routes.
+    """
+
+    value = unicodedata.normalize("NFKC", str(text or ""))
+    if not value.strip():
+        return ""
+    if (
+        _desktop_content_artifact_requested(value)
+        or _looks_like_document_artifact_transform_request(value)
+    ):
+        return ""
+    for action_match in _WORKSPACE_FILE_READ_ACTION_RE.finditer(value):
+        if not _speech_act_action_occurrence_is_authorized(
+            value,
+            action_match.start(),
+            action_match.end(),
+        ):
+            continue
+        clause_start, clause_end = _speech_act_clause_bounds(
+            value,
+            action_match.start(),
+        )
+        clause = value[clause_start:clause_end]
+        if _explicit_browser_url_hint(clause):
+            continue
+        if re.search(
+            r"(?<![\w.])(?:~[/\\]|(?:\.\.[/\\])+|/[^\s/]|[a-z]:[/\\])",
+            clause,
+            flags=re.IGNORECASE,
+        ):
+            continue
+        target_path = normalized_workspace_relative_path(
+            _code_task_target_file_hint(clause)
+        )
+        if target_path:
+            return target_path
+    return ""
+
+
 def _code_task_target_file_hint(text: str) -> str:
     value = _clean_prompt(text)
     if not value:
@@ -17507,23 +22294,141 @@ def _code_task_target_file_hint(text: str) -> str:
     return ""
 
 
+_CODE_TASK_WRITE_ACTION_RE = re.compile(
+    r"\b(?:fix|repair|change|modify|edit|implement|add|create|write|generate|"
+    r"scaffold|refactor|patch|update)\b|"
+    r"(?:修复|修正|修改|改一下|改成|实现|新增|添加|增加|创建|新建|生成|编写|"
+    r"写一个|写个|写出|重构|补上|接入|调整|更新|改造)",
+    flags=re.IGNORECASE,
+)
+
+
 def _code_task_write_requested(text: str) -> bool:
     value = _clean_prompt(text)
     if not value:
         return False
+    return _text_has_authorized_family_action(
+        value,
+        _CODE_TASK_WRITE_ACTION_RE,
+    )
+
+
+def _looks_like_contextual_advisory_response(text: str) -> bool:
+    """Return true for context-to-advice work without mutation authority.
+
+    Workflow child prompts commonly ask an Agent to turn upstream research or
+    design into a proposal, review, or verification plan. Code nouns inside
+    that brief describe the response; they do not authorize workspace writes.
+    An explicit terminal, file, workspace, or mutation request always wins.
+    """
+
+    value = _clean_prompt(text)
+    if not value:
+        return False
+    if (
+        terminal_command_hint(value)
+        or _looks_like_explicit_terminal_execution_request(value)
+        or _code_task_target_file_hint(value)
+        or _looks_like_workspace_file_edit_request(value)
+        or _looks_like_workspace_ui_development_request(value)
+    ):
+        return False
     if re.search(
-        r"\b(?:fix|repair|change|modify|edit|implement|add|create|write|generate|"
-        r"scaffold|refactor|patch|update)\b",
+        r"\b(?:fix|repair|edit|modify|patch|refactor|apply|commit|change|update)\b|"
+        r"(?:修复|修正|修改|改动|重构|编写|写入|提交|应用补丁|改造|"
+        r"落地(?:代码|变更)|实现(?:功能|代码|修复|改动))",
         value,
         flags=re.IGNORECASE,
     ):
-        return True
+        return False
+    contextual_source = bool(
+        re.search(
+            r"\b(?:upstream|research\s+(?:notes?|results?|findings?)|"
+            r"provided\s+(?:context|design|notes?)|design\s+(?:constraints?|notes?|results?)|"
+            r"global\s+goal)\b|"
+            r"(?:上游|研究(?:结果|结论|笔记|资料)|设计(?:结果|约束|方案)|"
+            r"全局目标|已有(?:方案|结论|材料))",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
+    if not contextual_source:
+        return False
+    advisory_action = bool(
+        re.search(
+            r"^(?:based\s+on|using|from|turn|review|assess|propose|outline|"
+            r"summari[sz]e|identify|list|explain|provide)\b|"
+            r"^(?:基于|根据|结合|审查|评审|整理|提出|给出|列出|识别|说明|总结|拆解)",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
+    advisory_output = bool(
+        re.search(
+            r"\b(?:plan|proposal|review|risks?|tradeoffs?|verification|test\s+gaps?)\b|"
+            r"(?:方案|计划|风险|结论|要点|验证|缺失测试|汇报|依据)",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
+    return advisory_action and advisory_output
+
+
+def _looks_like_explicit_terminal_execution_request(text: str) -> bool:
+    value = _clean_prompt(text)
+    if not value:
+        return False
     return bool(
         re.search(
-            r"(?:修复|修正|修改|改一下|改成|实现|新增|添加|增加|创建|新建|生成|编写|"
-            r"写一个|写个|写出|重构|补上|接入|调整|更新|改造)",
+            r"\b(?:run|execute)\b.{0,48}\b(?:terminal|shell)\s+command\b|"
+            r"\b(?:run|execute)\b.{0,48}\bcommand\b.{0,24}\b(?:in|through|via)\s+"
+            r"(?:the\s+)?(?:terminal|shell)\b",
             value,
+            flags=re.IGNORECASE,
         )
+        or re.search(
+            r"(?:运行|执行).{0,36}(?:终端|命令行|shell).{0,12}(?:命令|指令)|"
+            r"(?:在|通过)(?:终端|命令行|shell).{0,12}(?:运行|执行).{0,24}(?:命令|指令)",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _looks_like_explicit_code_authoring_request(text: str) -> bool:
+    value = _clean_prompt(text)
+    if not value or not _code_task_write_requested(value):
+        return False
+    if not _contains_any(
+        value,
+        (
+            "code",
+            "script",
+            "python",
+            "javascript",
+            "typescript",
+            "代码",
+            "脚本",
+            "程序",
+            "编程",
+        ),
+    ):
+        return False
+    # Explicit report/document wording owns the route even when its subject is
+    # code; otherwise a request to generate executable code must not fall into
+    # the generic written-artifact route.
+    return not _contains_any(
+        value,
+        (
+            "report",
+            "summary",
+            "document",
+            "brief",
+            "报告",
+            "总结",
+            "文档",
+            "简报",
+        ),
     )
 
 
@@ -17546,7 +22451,18 @@ def _score_terms(text: str, terms: Iterable[str]) -> float:
     lowered = text.lower()
     score = 0.0
     for term in terms:
-        if str(term).lower() in lowered:
+        clean_term = str(term).lower()
+        present = (
+            bool(
+                re.search(
+                    rf"(?<![a-z0-9]){re.escape(clean_term)}(?![a-z0-9])",
+                    lowered,
+                )
+            )
+            if clean_term == "app"
+            else clean_term in lowered
+        )
+        if present:
             score += 0.08
     return min(score, 0.45)
 
@@ -18113,6 +23029,48 @@ def _data_analysis_action_requested(text: str) -> bool:
     )
 
 
+def _looks_like_data_analysis_concept_question(text: str) -> bool:
+    value = _clean_prompt(text)
+    if not value or not _contains_any(
+        value,
+        ("data analysis", "data analytics", "数据分析"),
+    ):
+        return False
+    value = re.sub(r"[?？。.!！]+$", "", value).strip()
+    if re.fullmatch(
+        r"(?:"
+        r"what\s+is\s+data\s+(?:analysis|analytics)"
+        r"|what\s+does\s+data\s+(?:analysis|analytics)\s+mean"
+        r"|how\s+does\s+data\s+(?:analysis|analytics)\s+work"
+        r"|(?:define|explain|describe|introduce)\s+(?:the\s+concept\s+of\s+)?"
+        r"data\s+(?:analysis|analytics)"
+        r"|(?:what|which)\s+(?:methods|techniques|approaches|types|steps|tools)\s+"
+        r"(?:are\s+(?:there|used)\s+)?(?:in|for|of)\s+data\s+(?:analysis|analytics)"
+        r"|what\s+are\s+(?:the\s+)?(?:methods|techniques|approaches|types|steps|tools)\s+"
+        r"(?:of|for)\s+data\s+(?:analysis|analytics)"
+        r"|data\s+(?:analysis|analytics)\s+"
+        r"(?:methods|techniques|approaches|types|steps|tools)"
+        r")",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        return True
+    return bool(
+        re.fullmatch(
+            r"(?:"
+            r"什么是数据分析"
+            r"|数据分析(?:是)?(?:什么|什么意思)"
+            r"|数据分析(?:这一)?(?:概念|定义|含义)(?:是)?什么"
+            r"|数据分析(?:通常|一般)?(?:有|包括)?哪些(?:常见的)?"
+            r"(?:方法|技术|方式|类型|步骤|流程|工具|用途|应用)"
+            r"|数据分析(?:通常|一般)?(?:怎么做|如何进行|如何工作)"
+            r"|(?:请)?(?:解释|介绍|说明)数据分析(?:这一)?(?:概念)?"
+            r")",
+            value,
+        )
+    )
+
+
 def _app_search_result_analysis_action_requested(
     text: str,
     app_search_result_source: Mapping[str, Any],
@@ -18391,6 +23349,11 @@ def _clipboard_output_target_requested(text: str) -> bool:
         or re.search(
             r"\b(?:copy|write|put|save|output)\b.{0,80}\bback\s+to\s+"
             r"(?:the\s+)?(?:system\s+)?clipboard\b",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:复制|拷贝)(?:一下|下)?(?:分析)?(?:结论|结果|摘要|总结|报告|输出)(?:到剪贴板)?(?:[。.!！]|$)",
             value,
             flags=re.IGNORECASE,
         )
@@ -19002,31 +23965,86 @@ def _looks_like_standalone_report_artifact_request(text: str) -> bool:
             "文档",
             "产物",
             "分析报告",
+            "周报",
+            "日报",
+            "月报",
+            "年报",
+            "纪要",
+            "复盘",
+            "发布说明",
+            "变更说明",
+            "更新说明",
+            "release notes",
+            "changelog",
         ],
     ):
         return False
+    if _markdown_marker_is_output_format(value):
+        return True
+    artifact_term = (
+        r"(?:report|summary|brief|document|artifact|markdown|"
+        r"报告|总结|摘要|简报|文档|产物|分析报告|"
+        r"周报|日报|月报|年报|纪要|复盘|"
+        r"发布说明|变更说明|更新说明|release\s+notes|changelog)"
+    )
+    authoring_verb = (
+        r"(?:create|make|write|generate|produce|draft|"
+        r"创建|新建|生成|写|撰写|产出|整理成)"
+    )
+    persistence_verb = r"(?:save|export|output|保存|输出|导出)"
     return bool(
-        _contains_any(
+        re.search(
+            rf"{authoring_verb}[^。！？!?]{{0,64}}{artifact_term}",
             value,
-            [
-                "create",
-                "make",
-                "write",
-                "save",
-                "export",
-                "output",
-                "generate",
-                "创建",
-                "新建",
-                "生成",
-                "写",
-                "保存",
-                "输出",
-                "导出",
-                "整理成",
-            ],
+            flags=re.IGNORECASE,
         )
-        or _markdown_marker_is_output_format(value)
+        or re.search(
+            rf"{artifact_term}[^。！？!?]{{0,40}}{persistence_verb}",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _looks_like_report_terminology_discussion(text: str) -> bool:
+    value = _clean_prompt(text)
+    if not value or not _contains_any(
+        value,
+        (
+            "report",
+            "summary",
+            "brief",
+            "报告",
+            "总结",
+            "摘要",
+            "简报",
+        ),
+    ):
+        return False
+    if _looks_like_standalone_report_artifact_request(value):
+        return False
+    if re.search(
+        r"^(?:what\s+(?:is|are)|what\s+does\b.*\bmean|"
+        r"define|explain\s+(?:the\s+)?(?:term|concept))\b",
+        value,
+        flags=re.IGNORECASE,
+    ) or re.search(
+        r"(?:报告|总结|摘要|简报)(?:这个词|这一概念)?(?:是)?(?:什么|什么意思|怎么理解|有何含义)",
+        value,
+    ):
+        return True
+    if not _contains_any(value, ("reasoning summary", "reasoning summaries", "推理摘要")):
+        return False
+    return not bool(
+        re.search(
+            r"\b(?:summari[sz]e|draft|write|create|make|produce|generate|save|export|output)\b",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:写|撰写|起草|总结|汇总|概括|生成|创建|新建|制作|保存|输出|导出|整理成|做成)",
+            value,
+        )
     )
 
 
@@ -19717,8 +24735,25 @@ def _file_pattern_hint(file_type: str) -> str:
     }.get(file_type, "")
 
 
-def _report_file_context_hint(text: str) -> dict[str, str]:
-    target_path = _code_task_target_file_hint(text)
+def _report_file_context_hint(
+    text: str,
+    *,
+    excluded_paths: Iterable[str] = (),
+) -> dict[str, str]:
+    excluded = {
+        normalized
+        for value in excluded_paths
+        if (normalized := normalized_workspace_relative_path(value))
+    }
+    occurrences = _workspace_named_file_occurrences(text)
+    target_path = next(
+        (path for path, _start, _end in occurrences if path not in excluded),
+        "",
+    )
+    if not target_path and not occurrences:
+        fallback_path = _code_task_target_file_hint(text)
+        if fallback_path not in excluded:
+            target_path = fallback_path
     if target_path:
         return {"path": target_path}
     if not _contains_any(
@@ -20663,7 +25698,7 @@ def _explicit_known_app_action_target_hint(text: str) -> str:
 
 
 def _app_name_hint(text: str) -> str:
-    system_hint = system_control_hint(text)
+    system_hint = system_control_hint(affirmative_desktop_action_text(text, "focus"))
     if str(system_hint.get("kind") or "").strip() == "settings_open":
         settings_target = str(
             (system_hint.get("payload") or {}).get("target") or ""
@@ -20717,16 +25752,22 @@ def _app_name_hint(text: str) -> str:
     if _target_first_foreground_type_hint(text):
         return ""
     patterns = [
+        r"^(?:帮我|请|麻烦|能否|能不能|能|可以|可不可以)?(?:直接)?"
+        r"(?:切换到|切到|切回|切)(?:一下|下)?\s*"
+        r"(?P<focus_app_cn>[\w .·-]{1,40}?)\s*"
+        r"(?:吗|嘛|呢|吧|么|可以|可不可以|行不行|好不好|好吗|好么)?[?？。！!]*$",
         r"(?:把|将)\s*(?P<app>[\w .·-]{1,40}?)\s*(?:打开|启动|开启|切到|聚焦)(?:起来|到前台|前台)?",
         r"^(?!(?:在|用|通过|点击|点按|把|将))(?P<app>[\w .·-]{1,40}?)\s*"
         r"(?:打开起来|启动起来|开启起来|开起来|打开|启动|开启|运行|拉起|开)"
         r"(?:一下|下|起来)?\s*(?:吗|嘛|呢|吧|么|可以|可不可以|行不行|好不好|好吗|好么)?[?？。！!]*$",
         r"^(?!(?:在|用|通过|点击|点按|把|将))(?P<app>[\w .·-]{1,40}?)\s*"
-        r"(?:切到|切回|聚焦|激活)(?:一下|下|到前台|前台)?\s*"
+        r"(?:切到|切回|切|聚焦|激活)(?:一下|下|到前台|前台)?\s*"
         r"(?:吗|嘛|呢|吧|么|可以|可不可以|行不行|好不好|好吗|好么)?[?？。！!]*$",
         r"(?:go\s+back\s+to|switch\s+back\s+to|back\s+to)\s+(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40})",
         r"^(?:帮我|请|麻烦|能否|能不能|能|可以|可不可以)?(?:直接)?"
-        r"(?:打开|启动|开启|运行|拉起|开)(?:一下|下|起来)?\s*"
+        r"(?:打开|启动|开启|运行|拉起|"
+        r"开(?!展|发|始|放|会|通|设|创|具|销|源|票|幕|工|课|心))"
+        r"(?:一下|下|起来)?\s*"
         r"(?P<polite_app_cn>[\w .·-]{1,40}?)\s*"
         r"(?:这个|那个|该)?(?:应用(?:程序)?|app|软件)?"
         r"(?:吗|嘛|呢|吧|么|可以|可不可以|行不行|好不好|好吗|好么)?[?？。！!]*$",
@@ -20754,7 +25795,7 @@ def _app_name_hint(text: str) -> str:
         r"(?:里|中|上|内)?\s*(?:打开|启动|开启|运行|查看|编辑)(?:\s+|(?=[^。！？!?，,]))",
         r"(?:open|launch|focus|start)\s+(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40})",
         r"(?:打开|启动|切到|聚焦)\s*(?P<app>[\w .·-]{1,40})",
-        r"^(?!(?:在|用|通过|点击|点按))(?P<app>[\w .·-]{2,40}?)\s*点\s*[^。！？!?，,]+",
+        r"^(?!(?:在|用|通过|点击|点按))(?P<app>[\w .·-]{2,40}?)\s*点(?!名)\s*[^。！？!?，,]+",
         r"^(?!(?:在|用|通过|点击|点按|把|将))(?P<app>[\w .·-]{1,40}?)"
         r"(?:关闭|隐藏|最小化|退出)(?:窗口|应用|app|application)?",
         r"^(?!(?:在|用|通过|点击|点按))(?P<app>[\w .·-]{1,40}?)"
@@ -20801,6 +25842,12 @@ def _looks_like_non_desktop_content_task(text: str) -> bool:
     value = str(text or "").strip()
     if not value:
         return False
+    # A content verb can describe the action to perform *inside* a discovered
+    # application (for example, "create a document in an app that can write
+    # markdown").  Preserve that explicit desktop scope before considering the
+    # same verb as an unscoped model-only authoring request.
+    if _app_capability_discovery_hint(value):
+        return False
     if _looks_like_unscoped_content_generation_task(value):
         return True
     if not re.match(
@@ -20820,6 +25867,129 @@ def _looks_like_non_desktop_content_task(text: str) -> bool:
             flags=re.IGNORECASE,
         )
     )
+
+
+_MODEL_GENERATED_CHINESE_CONTENT_NOUN = (
+    r"(?:诗(?:歌)?|信件|(?:道歉|感谢|邀请|求职|辞职|推荐|慰问|告别|情书)?信(?!息|号|用|任)|"
+    r"邮件|文章|作文|故事|报告|文案|方案|计划|总结|摘要|简历|提纲|大纲|"
+    r"说明|介绍|脚本|演讲稿|歌词|回复)"
+)
+_MODEL_GENERATED_ENGLISH_CONTENT_NOUN = (
+    r"(?:poem|letter|email|story|essay|article|report|proposal|brief|plan|summary|"
+    r"outline|script|speech|copy|bio|introduction|lyrics|reply)"
+)
+_MODEL_GENERATED_CHINESE_AUTHORING_VERB = (
+    r"(?:写(?!入|下)|撰写|起草|拟写|生成|创作|产出|输出|制作)"
+)
+_MODEL_GENERATED_ENGLISH_AUTHORING_VERB = (
+    r"(?:write|draft|compose|create|produce|generate)"
+)
+
+
+def _authoring_brief_requires_model_generation(
+    brief: str,
+    *,
+    verb: str,
+    language: str,
+) -> bool:
+    """Classify an authoring operand by syntax, not a closed noun list.
+
+    ``type``/``enter`` are literal-input verbs elsewhere in the parser.  An
+    authoring verb is model work when its operand has natural-language shape;
+    a bare ASCII token such as ``hello`` remains compatible with the legacy
+    literal shortcut unless the user explicitly asks the model to draft it.
+    """
+
+    value = _clean_foreground_compose_text(brief)
+    if not value or _looks_like_discovered_app_capability_phrase(value):
+        return False
+    clean_verb = str(verb or "").strip().lower()
+    if language == "zh":
+        if clean_verb != "写":
+            return True
+        if re.search(r"[\u3400-\u9fff]", value):
+            return True
+        return bool(
+            re.search(
+                _MODEL_GENERATED_CHINESE_CONTENT_NOUN,
+                value,
+                flags=re.IGNORECASE,
+            )
+        )
+    if clean_verb != "write":
+        return True
+    if re.match(r"^(?:a|an|the|some|one|two|three|several)\b", value, flags=re.IGNORECASE):
+        return True
+    if re.search(
+        rf"\b{_MODEL_GENERATED_ENGLISH_CONTENT_NOUN}\b",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        return True
+    return len(re.findall(r"[A-Za-z]+", value)) > 1
+
+
+def _authoring_match_uses_literal_delimiter(match: re.Match[str]) -> bool:
+    raw = str(match.groupdict().get("raw_brief") or "")
+    return bool(re.match(r"\s*(?:[:：]|[\"'`“‘])", raw))
+
+
+def _model_generated_content_phrase_brief(
+    text: str,
+    *,
+    anchored: bool = False,
+) -> str:
+    """Return a creative-content brief without treating literal typing as generation.
+
+    The same semantic vocabulary is used for both unscoped routing and app-scoped
+    model follow-up. Keeping it centralized prevents one entry point from typing a
+    short creative brief while another correctly asks the model to author it.
+    """
+
+    value = _clean_prompt(text)
+    if not value:
+        return ""
+    chinese_prefix = (
+        r"^(?:帮我|请|麻烦(?:你)?|给我)?\s*"
+        if anchored
+        else ""
+    )
+    chinese_pattern = (
+        chinese_prefix
+        + rf"(?P<verb>{_MODEL_GENERATED_CHINESE_AUTHORING_VERB})"
+        + r"(?P<raw_brief>\s*[^。！？!?，,]{1,120})"
+    )
+    for chinese_match in re.finditer(chinese_pattern, value, flags=re.IGNORECASE):
+        if _authoring_match_uses_literal_delimiter(chinese_match):
+            continue
+        brief = _clean_foreground_compose_text(chinese_match.group("raw_brief"))
+        if _authoring_brief_requires_model_generation(
+            brief,
+            verb=chinese_match.group("verb"),
+            language="zh",
+        ):
+            return brief
+    english_prefix = (
+        r"^(?:please\s+|could\s+you\s+|can\s+you\s+)?"
+        if anchored
+        else ""
+    )
+    english_pattern = (
+        english_prefix
+        + rf"\b(?P<verb_en>{_MODEL_GENERATED_ENGLISH_AUTHORING_VERB})\b"
+        + r"(?P<raw_brief>\s*[^.!?,]{1,160})"
+    )
+    for english_match in re.finditer(english_pattern, value, flags=re.IGNORECASE):
+        if _authoring_match_uses_literal_delimiter(english_match):
+            continue
+        brief = _clean_foreground_compose_text(english_match.group("raw_brief"))
+        if _authoring_brief_requires_model_generation(
+            brief,
+            verb=english_match.group("verb_en"),
+            language="en",
+        ):
+            return brief
+    return ""
 
 
 def _looks_like_unscoped_content_generation_task(text: str) -> bool:
@@ -20848,25 +26018,7 @@ def _looks_like_unscoped_content_generation_task(text: str) -> bool:
         ),
     ):
         return False
-    if re.search(
-        r"^(?:帮我|请|麻烦(?:你)?|给我)?\s*"
-        r"(?:写(?!入)|撰写|起草|生成|创作|产出|输出|做|制作)\s*"
-        r"(?:一|1)?(?:首|篇|份|个|段|封|则)?\s*"
-        r"(?:诗|诗歌|文章|作文|故事|报告|文案|方案|计划|总结|摘要|邮件|简历|提纲|大纲|说明|介绍|脚本|演讲稿)",
-        value,
-        flags=re.IGNORECASE,
-    ):
-        return True
-    return bool(
-        re.search(
-            r"^(?:write|draft|create|produce|generate)\s+"
-            r"(?:a|an|the|some)?\s*"
-            r"(?:poem|story|essay|article|email|report|proposal|brief|plan|summary|"
-            r"outline|script|speech|copy|bio|introduction)\b",
-            value,
-            flags=re.IGNORECASE,
-        )
-    )
+    return bool(_model_generated_content_phrase_brief(value, anchored=True))
 
 
 def _app_first_click_scope_hint(text: str) -> dict[str, Any]:
@@ -21112,6 +26264,25 @@ def _app_first_control_app_name_hint(text: str) -> str:
 
 def _clean_app_name_hint(value: str) -> str:
     raw_app = str(value or "").strip()
+    raw_app = re.split(
+        r"[。！!？?;\n]|\.\s+(?=(?:do\s+not|don['’]t|dont|then|reply|"
+        r"click|type|input|press|open|launch|focus|switch)\b)",
+        raw_app,
+        maxsplit=1,
+        flags=re.IGNORECASE,
+    )[0].strip(" .，,。")
+    raw_app = re.sub(
+        r"\s+(?:(?:only|just)\s+)?(?:in|into)\s+(?:the\s+)?background\b.*$",
+        "",
+        raw_app,
+        flags=re.IGNORECASE,
+    ).strip(" .，,。")
+    raw_app = re.sub(
+        r"\s+without\b.*$",
+        "",
+        raw_app,
+        flags=re.IGNORECASE,
+    ).strip(" .，,。")
     folder_aliases = {"folder", "folders", "afolder", "directory", "directories", "文件夹", "目录"}
     if compact_app_name_hint(raw_app) in folder_aliases:
         return "Finder"
@@ -21210,6 +26381,27 @@ def _clean_app_name_hint(value: str) -> str:
     )
     if english_called_app_match:
         app = english_called_app_match.group("app")
+    owned_app_instance_match = re.fullmatch(
+        r"^(?:一个|一款|这个|那个)?\s*"
+        r"(?:由\s*(?:Agent|Runtime|智能体|代理(?:程序)?|助手|系统)\s*"
+        r"(?:(?:单独|独立|专属)\s*)?(?:拥有|控制|管理)(?:的)?)\s*"
+        r"(?:新(?:的)?\s*)?(?P<owned_app>.+?)\s*"
+        r"(?:应用(?:程序)?|软件)?\s*(?:实例|窗口|副本|进程)$",
+        app,
+        flags=re.IGNORECASE,
+    )
+    if owned_app_instance_match:
+        app = owned_app_instance_match.group("owned_app")
+    english_owned_app_instance_match = re.fullmatch(
+        r"^(?:(?:an?|the)\s+)?"
+        r"(?:(?:agent|assistant|runtime)[ -]owned\s+)?"
+        r"(?:new\s+)?(?P<owned_app_en>.+?)\s+"
+        r"(?:(?:app|application)\s+)?(?:instance|window|process|copy)$",
+        app,
+        flags=re.IGNORECASE,
+    )
+    if english_owned_app_instance_match:
+        app = english_owned_app_instance_match.group("owned_app_en")
     app = re.sub(
         r"^(?:一个|一款|这个|那个)?"
         r"(?:任意(?:的)?|(?:(?:我)?(?:没|没有)提过的|从未提过的|没见过的|未知(?:的)?|陌生的|新(?:的)?|"
@@ -21356,10 +26548,18 @@ def _clean_app_name_hint(value: str) -> str:
         "can you",
         "could you",
         "would you",
+        "do not",
+        "don't",
+        "dont",
+        "never",
+        "without",
         "你",
         "我",
         "帮我",
         "请",
+        "不要",
+        "别",
+        "请勿",
         "点",
         "点击",
         "切换",
@@ -21634,7 +26834,8 @@ def _looks_like_chinese_foreground_send_verb(text: str) -> bool:
             )
             and re.search(
                 r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
-                r"(?:打开|启动|切到|聚焦)?\s*[\w .·-]{1,40}?\s*(?<!开)发\s*[^。！？!?，,]+$",
+                r"(?:打开|启动|切到|聚焦)?\s*[\w .·-]{1,40}?\s*"
+                r"(?<![开派转分研触首补签颁印])发\s*[^。！？!?，,]+$",
                 value,
                 flags=re.IGNORECASE,
             )
@@ -21667,7 +26868,9 @@ def _explicit_return_key_followup_hint(text: str) -> dict[str, Any] | None:
     value = _clean_prompt(text)
     if not re.search(
         r"(?:并|再|然后|接着|之后|后|and\s+then|then)?.{0,8}"
-        r"(?:按|敲|触发|press|hit|tap)?\s*(?:回车键?|enter|return)(?:\s|$|[。！？!?，,])",
+        r"(?:按|敲|触发|press|hit|tap)?\s*"
+        r"(?:回车键?|(?<![A-Za-z])(?:enter|return)(?![A-Za-z]))"
+        r"(?:\s|$|[。！？!?，,])",
         value,
         flags=re.IGNORECASE,
     ):
@@ -21675,6 +26878,53 @@ def _explicit_return_key_followup_hint(text: str) -> dict[str, Any] | None:
     if re.search(r"(?:发送|提交|send|submit).{0,8}(?:回车|enter|return)", value, flags=re.IGNORECASE):
         return None
     return {"key": "return", "modifiers": []}
+
+
+def _model_generated_hint_is_bare_container_operand(
+    hint: Mapping[str, Any] | None,
+    safe_shortcut: Mapping[str, Any] | None,
+) -> bool:
+    if not isinstance(hint, Mapping) or not isinstance(safe_shortcut, Mapping):
+        return False
+    if str(hint.get("title") or "").strip():
+        return False
+    action = str(safe_shortcut.get("action") or "").strip()
+    patterns = {
+        "new_task": (
+            r"(?:(?:a|an|the)\s+)?(?:new\s+)?(?:issue|task|ticket|bug\s+ticket)|"
+            r"(?:一个|一条|新的)?(?:问题|任务|事项|工单|bug)"
+        ),
+        "new_message": (
+            r"(?:(?:a|an|the)\s+)?(?:new\s+)?(?:message|email|chat)|"
+            r"(?:一封|一条|一个|新的)?(?:消息|邮件|聊天)"
+        ),
+        "new_document": (
+            r"(?:(?:a|an|the)\s+)?(?:new\s+)?(?:document|page|workspace|project|"
+            r"presentation|slide\s+deck|spreadsheet|table)|"
+            r"(?:一个|一份|一篇|新的)?(?:文档|页面|工作区|项目|演示文稿|幻灯片|表格)"
+        ),
+        "new_note": (
+            r"(?:(?:a|an|the)\s+)?(?:new\s+)?(?:note|journal\s+entry)|"
+            r"(?:一条|一篇|一个|新的)?(?:笔记|备忘录|便签|日志)"
+        ),
+        "new_event": (
+            r"(?:(?:a|an|the)\s+)?(?:new\s+)?(?:event|meeting)|"
+            r"(?:一个|一场|新的)?(?:日程|事件|会议)"
+        ),
+        "new_reminder": (
+            r"(?:(?:a|an|the)\s+)?(?:new\s+)?reminder|"
+            r"(?:一个|一条|新的)?提醒"
+        ),
+    }
+    pattern = patterns.get(action)
+    if not pattern:
+        return False
+    brief = re.sub(
+        r"\s+",
+        " ",
+        str(hint.get("brief") or "").strip(" .，,。"),
+    ).casefold()
+    return bool(re.fullmatch(pattern, brief, flags=re.IGNORECASE))
 
 
 def _model_generated_foreground_content_hint(
@@ -21705,7 +26955,12 @@ def _model_generated_foreground_content_hint(
         brief = _model_generated_foreground_content_brief(value)
     if not brief:
         return {}
-    if _looks_like_explicit_literal_foreground_content_brief(brief):
+    if _foreground_text_has_delimited_literal_provenance(value, brief):
+        return {}
+    if _foreground_text_has_explicit_literal_provenance(value, brief) and (
+        _foreground_text_has_strong_literal_command_provenance(value, brief)
+        or not _foreground_content_brief_requires_generation(brief)
+    ):
         return {}
     if not _looks_like_model_generated_foreground_content_request(value, brief):
         return {}
@@ -21719,6 +26974,18 @@ def _title_scoped_model_generated_content_brief(text: str) -> str:
     value = _clean_prompt(text)
     if not value:
         return ""
+    title_then_body = re.search(
+        r"(?:标题|名称|名字|题目)\s*(?:是|为|叫|:|：)\s*"
+        r"[^。！？!?，,]{1,80}?\s*(?:[，,]\s*)?"
+        r"(?:并|然后|再|接着|之后|后|and\s+then|then)\s*"
+        r"(?P<body>[^。！？!?]{1,160})",
+        value,
+        flags=re.IGNORECASE,
+    )
+    if title_then_body:
+        brief = _model_generated_content_phrase_brief(title_then_body.group("body"))
+        if brief:
+            return brief
     patterns = (
         r"(?:内容|正文)\s*(?:写成|写下|写入|写|撰写|生成|创建|制作|列出|总结|整理|摘要|输出|包含|包括)\s*"
         r"(?P<brief>[^。！？!?，,]{1,100})",
@@ -21742,6 +27009,9 @@ def _title_scoped_model_generated_content_brief(text: str) -> str:
 
 def _model_generated_foreground_content_brief(text: str) -> str:
     value = _clean_prompt(text)
+    creative_brief = _model_generated_content_phrase_brief(value)
+    if creative_brief:
+        return creative_brief
     patterns = (
         r"(?:画|绘制|画出|绘出|生成|创建|制作|做|输出|撰写|写一份|写一篇)\s*"
         r"(?P<brief>[^。！？!?，,]{1,80}?"
@@ -21764,59 +27034,169 @@ def _model_generated_foreground_content_brief(text: str) -> str:
     return ""
 
 
-def _looks_like_explicit_literal_foreground_content_brief(brief: str) -> bool:
+def _foreground_text_literal_candidates(
+    text: str,
+    literal_text: str,
+) -> tuple[str, str, set[str]]:
+    value = _clean_prompt(text)
+    literal = _clean_foreground_compose_text(literal_text)
+    candidates = {
+        _clean_foreground_compose_text(safe_type_text_hint(value)),
+        _clean_foreground_compose_text(standalone_safe_type_text_hint(value)),
+        _clean_foreground_compose_text(_foreground_compose_text_hint(value)),
+    }
+    candidates.discard("")
+    return value, literal, candidates
+
+
+def _foreground_text_has_delimited_literal_provenance(
+    text: str,
+    literal_text: str,
+) -> bool:
+    value, literal, extracted_candidates = _foreground_text_literal_candidates(
+        text,
+        literal_text,
+    )
+    if not value or not literal or literal not in extracted_candidates:
+        return False
+    escaped_literal = re.escape(literal)
+    if re.search(
+        rf"[\"'`“‘]\s*{escaped_literal}\s*[\"'`”’]",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        return True
+    if re.search(
+        rf"(?:task|issue|ticket|note|message|email|event|meeting|reminder|"
+        rf"任务|问题|工单|笔记|备忘录|消息|邮件|日程|会议|提醒)\s*"
+        rf"[:：]\s*{escaped_literal}(?=$|[。！？!?，,])",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        return True
+    return bool(
+        re.search(
+            r"(?:输入|键入|填写|填入|写入|写下|记录下|记下|写|撰写|起草|创作|"
+            r"type|enter|fill|write|draft|compose)\s*[:：]",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _foreground_text_has_strong_literal_command_provenance(
+    text: str,
+    literal_text: str,
+) -> bool:
+    value, literal, extracted_candidates = _foreground_text_literal_candidates(
+        text,
+        literal_text,
+    )
+    if not value or not literal or literal not in extracted_candidates:
+        return False
+    return bool(
+        re.search(
+            r"(?:帮我打(?:字|上|入)?|打字|打上|打入|输入(?!框|栏)|键入|"
+            r"\btype\b|\benter\b)",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _foreground_content_brief_requires_generation(brief: str) -> bool:
     value = _clean_foreground_compose_text(brief)
     if not value:
-        return True
-    if _contains_any(
-        value,
-        (
-            "页",
-            "行",
-            "列",
-            "张",
-            "段",
-            "示例",
-            "样例",
-            "数据",
-            "项目计划",
-            "预算表",
-            "流程图",
-            "思维导图",
-            "脑图",
-            "图表",
-            "报告",
-            "方案",
-            "大纲",
-            "演示文稿",
-            "幻灯片",
-            "表格",
-            "slide",
-            "slides",
-            "row",
-            "rows",
-            "sample",
-            "data",
-            "flowchart",
-            "diagram",
-            "chart",
-            "report",
-            "plan",
-            "outline",
-            "presentation",
-            "table",
-        ),
-    ):
         return False
-    if re.search(r"[A-Za-z0-9]", value) and len(value) <= 40:
+    if re.search(
+        _MODEL_GENERATED_CHINESE_CONTENT_NOUN,
+        value,
+        flags=re.IGNORECASE,
+    ) or re.search(
+        rf"\b{_MODEL_GENERATED_ENGLISH_CONTENT_NOUN}\b",
+        value,
+        flags=re.IGNORECASE,
+    ):
         return True
-    return len(value) <= 12
+    if re.search(
+        r"(?:检查清单|待办(?:清单)?|会议纪要|新闻(?:发布)?稿|合同|产品描述|"
+        r"日记|推文|press\s+release|checklist|meeting\s+minutes|contract|"
+        r"product\s+description|journal\s+entry|tweet)",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        return True
+    return bool(
+        re.search(
+            r"(?:\d+\s*(?:页|行|列|张|段)|"
+            r"[一二两三四五六七八九十几多]+\s*(?:页|行|列|张|段)|"
+            r"示例数据|样例数据|项目计划|预算表|流程图|思维导图|脑图|图表|"
+            r"演示文稿|幻灯片|表格|工作簿|"
+            r"slides?|rows?|columns?|sample\s+data|project\s+plan|budget|"
+            r"flowchart|diagram|chart|presentation|table)",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _foreground_text_has_explicit_literal_provenance(
+    text: str,
+    literal_text: str,
+) -> bool:
+    """Return true only when the user explicitly supplied text to type.
+
+    Shortness is not provenance: `一首诗` is a generation brief, while
+    `输入：“一首诗”` is a literal payload.  Require an explicit typing verb or
+    a quoted/colon-delimited payload so unknown creative nouns fail closed.
+    """
+
+    value, literal, extracted_candidates = _foreground_text_literal_candidates(
+        text,
+        literal_text,
+    )
+    if not value or not literal or literal not in extracted_candidates:
+        return False
+    if _foreground_text_has_delimited_literal_provenance(value, literal):
+        return True
+    escaped_literal = re.escape(literal)
+    if re.search(
+        rf"(?:内容|正文)\s*(?:写|写入|写下|填入|填写)\s*"
+        rf"{escaped_literal}(?=$|[。！？!?，,])",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        return True
+    if re.search(
+        rf"\b(?:saying|that\s+says?|with\s+(?:the\s+)?(?:content|body|text))\s+"
+        rf"{escaped_literal}(?=$|[.!?,])",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        return True
+    if re.search(
+        r"(?:帮我打(?:字|上|入)?|打字|打上|打入|输入(?!框|栏)|键入|填写|填入|"
+        r"写入|写下|记录下|记下|\btype\b|\benter\b|\bfill\b)",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        return True
+    if re.search(
+        r"(?:标题|名称|名字|题目)\s*(?:是|为|叫|[:：])|"
+        r"\b(?:titled|called|named)\b",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        return True
+    return False
 
 
 def _looks_like_model_generated_foreground_content_request(text: str, brief: str) -> bool:
     value = _clean_prompt(text)
     if not value:
         return False
+    if _model_generated_content_phrase_brief(value):
+        return True
     content_shape = (
         r"(?:\d+\s*(?:页|行|列|张|段)|[一二两三四五六七八九十几多]+\s*(?:页|行|列|张|段)|"
         r"示例数据|样例数据|项目计划|预算表|流程图|思维导图|脑图|图表|报告|方案|大纲|"
@@ -21868,7 +27248,9 @@ def _foreground_compose_text_hint(text: str) -> str:
         r"(?P<app>[\w .·-]{1,40}?)\s*(?:输入|键入|填写|写入|写下|记录下|记下|写)\s*(?P<text>[^。！？!?，,]+?)"
         r"\s*(?:并|然后|再|后)?\s*(?:发送|发出|send)?$",
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:打开|启动|切到|聚焦)?\s*"
-        r"(?P<app>[\w .·-]{1,40}?)\s*(?:发送|发出|(?<!开)发)\s*(?P<text>[^。！？!?，,]+)$",
+        r"(?P<app>[\w .·-]{1,40}?)\s*"
+        r"(?:发送|发出|(?<![开派转分研触首补签颁印])发)\s*"
+        r"(?P<text>[^。！？!?，,]+)$",
         r"^(?:open|launch|focus|switch\s+to)?\s*(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s+"
         r"(?:type|enter|write|send)\s+(?P<text>[^.!?]+?)(?:\s+(?:and|then)\s+send)?$",
     )
@@ -21882,7 +27264,7 @@ def _foreground_compose_text_hint(text: str) -> str:
         if re.search(r"(?:回车|return|enter)", raw_app, flags=re.IGNORECASE):
             continue
         app = _canonical_app_name_hint(raw_app)
-        if _is_generic_foreground_app_label(raw_app) or _is_generic_foreground_app_label(app):
+        if not _credible_foreground_compose_app_target(raw_app, app):
             continue
         typed_text = _clean_foreground_compose_text(match.group("text"))
         if not typed_text:
@@ -22460,6 +27842,45 @@ def _app_write_followup_target_hint(text: str) -> dict[str, Any]:
     }
 
 
+def _web_research_app_write_followup_target_hint(text: str) -> dict[str, Any]:
+    """Resolve any explicit app sink for a web-derived value.
+
+    Some local-note capture routes intentionally reserve structured note apps.
+    That reservation cannot erase an explicit sink from a cross-application
+    research task, so the web route falls back to the same general named-app
+    extractor without changing the routing rules for simple note capture.
+    """
+
+    existing = _app_write_followup_target_hint(text)
+    if existing:
+        return existing
+    value = _clean_prompt(text)
+    if (
+        _running_browser_page_context_hint(value)
+        or not _looks_like_dynamic_context_transfer(value)
+        or _app_capability_discovery_hint(value)
+    ):
+        return {}
+    app_name = _dynamic_context_transfer_app_name_hint(value)
+    if (
+        not app_name
+        or _normalize_artifact_output_location(app_name)
+        or _looks_like_file_output_target(app_name)
+        or _looks_like_non_app_dynamic_context_target(app_name)
+    ):
+        return {}
+    container_action = _dynamic_context_target_container_action_hint(value)
+    return {
+        "target_app_hint": app_name,
+        "target_action_hint": "app_paste",
+        **(
+            {"target_container_action_hint": container_action}
+            if container_action
+            else {}
+        ),
+    }
+
+
 def _opened_app_transform_target_hint(text: str) -> dict[str, Any]:
     value = _clean_prompt(text)
     if not (
@@ -22604,8 +28025,20 @@ def _looks_like_non_app_dynamic_context_target(app_name: str) -> bool:
     normalized = re.sub(r"[\s._·-]+", " ", str(app_name or "").strip().lower())
     if not normalized:
         return True
+    if re.fullmatch(
+        r"(?:当前)?(?:网页|页面)(?:坐标|位置)?(?:\s+\d+(?:\s+\d+)?)?",
+        normalized,
+        flags=re.IGNORECASE,
+    ) or re.fullmatch(
+        r"(?:current\s+)?(?:web\s+)?page(?:\s+(?:coordinates?|position))?"
+        r"(?:\s+\d+(?:\s+\d+)?)?",
+        normalized,
+        flags=re.IGNORECASE,
+    ):
+        return True
     if normalized in {
         "current page",
+        "current web",
         "current webpage",
         "current web page",
         "current window",
@@ -22619,7 +28052,7 @@ def _looks_like_non_app_dynamic_context_target(app_name: str) -> bool:
         return True
     return bool(
         re.search(
-            r"\b(?:current\s+(?:web\s+)?page|current\s+window|selected\s+text|clipboard)\b",
+            r"\b(?:current\s+web|current\s+(?:web\s+)?page|current\s+window|selected\s+text|clipboard)\b",
             normalized,
             flags=re.IGNORECASE,
         )
@@ -22960,7 +28393,9 @@ def _foreground_compose_app_name_hint(text: str) -> str:
     value = _clean_prompt(text)
     patterns = (
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:打开|启动|切到|聚焦)?\s*"
-        r"(?P<app>[\w .·-]{1,40}?)\s*(?:输入|键入|填写|写入|写|发送|发出|(?<!开)发|粘贴|paste)",
+        r"(?P<app>[\w .·-]{1,40}?)\s*"
+        r"(?:输入|键入|填写|写入|写|发送|发出|"
+        r"(?<![开派转分研触首补签颁印])发|粘贴|paste)",
         r"^(?:open|launch|focus|switch\s+to)?\s*(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s+"
         r"(?:type|enter|write|send|paste)\b",
     )
@@ -22972,13 +28407,34 @@ def _foreground_compose_app_name_hint(text: str) -> str:
         if _looks_like_too_short_cjk_app_label(raw_app):
             continue
         app = _clean_dynamic_context_target_app(raw_app)
-        if app and not _is_generic_foreground_app_label(app):
+        if _credible_foreground_compose_app_target(raw_app, app):
             return app
     return ""
 
 
+def _credible_foreground_compose_app_target(raw_app: str, app: str) -> bool:
+    """Reject task clauses that a bare compose regex mistook for app names."""
+
+    raw = str(raw_app or "").strip()
+    clean_app = str(app or "").strip()
+    if not clean_app or _is_generic_foreground_app_label(clean_app):
+        return False
+    if is_legacy_app_name_hint(raw) or is_legacy_app_name_hint(clean_app):
+        return True
+    return not bool(
+        re.match(
+            r"(?:做|完成|执行|进行|开展|处理|安排|实现|验证|校验|检查|"
+            r"确认|评估|测试|模拟|演示)|"
+            r"(?:perform|complete|execute|conduct|validate|verify|check|test)\b",
+            raw,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
 def _clean_foreground_compose_text(value: str) -> str:
     text = str(value or "").strip()
+    text = re.sub(r"^(?:[:：]\s*)+", "", text).strip()
     text = re.sub(r"^[\"'`“”‘’]+|[\"'`“”‘’]+$", "", text).strip()
     text = re.sub(r"^(?:[:：]\s*)+", "", text).strip()
     text = re.sub(
@@ -23365,13 +28821,168 @@ def _desktop_content_artifact_hint(text: str) -> dict[str, str]:
     }
 
 
+def _negated_app_control_clause(text: str) -> bool:
+    value = str(text or "").strip()
+    return bool(
+        re.search(
+            r"(?:不要|不需要|无需|不用|不必|不可|别|禁止|避免|不)\s*(?:再\s*)?"
+            r"(?:打开|启动|开启|运行|拉起|切换到?|切到|切回|聚焦|激活|置前)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:不要|不需要|无需|不用|不必|不可|别|禁止|避免|不)\s*(?:再\s*)?(?:把|将)\s*"
+            r"[^，,。；;！!？?\n]{1,60}?\s*"
+            r"(?:打开|启动|开启|运行|拉起|切换到?|切到|切回|聚焦|激活|置前)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:do\s+not|don['’]t|dont|never|without)\s+"
+            r"(?:open|launch|start(?:\s+up)?|run|switch(?:\s+to)?|focus|activate|bring)\b",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\bwithout\s+(?:opening|launching|starting|running|switching(?:\s+to)?|"
+            r"focusing|activating|bringing)\b",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _affirmative_app_control_text(text: str) -> str:
+    value = _clean_prompt(text)
+    separator_pattern = re.compile(
+        r"[，,。；;！!？?\n]+|(?:但是|不过|然而|然后|接着|随后|同时|并且|但)|"
+        r"\b(?:but|however|then|and|without)\b",
+        flags=re.IGNORECASE,
+    )
+    kept: list[str] = []
+    pending_separator = ""
+    cursor = 0
+    for separator in separator_pattern.finditer(value):
+        clause = value[cursor : separator.start()]
+        if clause.strip():
+            if not _negated_app_control_clause(pending_separator + clause):
+                kept.extend((pending_separator if kept else "", clause))
+            pending_separator = separator.group(0)
+        else:
+            pending_separator += clause + separator.group(0)
+        cursor = separator.end()
+    clause = value[cursor:]
+    if clause.strip() and not _negated_app_control_clause(pending_separator + clause):
+        kept.extend((pending_separator if kept else "", clause))
+    return "".join(kept).strip()
+
+
+def _authorized_app_control_text(text: str) -> str:
+    """Remove app-control mentions that lack authority while preserving payloads."""
+
+    value = _affirmative_app_control_text(text)
+    if not value:
+        return ""
+    action_matches = tuple(_APP_CONTROL_AUTHORITY_ACTION_RE.finditer(value))
+    unauthorized = [
+        action_match
+        for action_match in action_matches
+        if not _speech_act_action_occurrence_is_authorized(
+            value,
+            action_match.start(),
+            action_match.end(),
+        )
+    ]
+    if not unauthorized:
+        return value
+
+    quote_spans = _speech_act_quote_spans(value)
+    removals: list[tuple[int, int]] = []
+    for action_match in unauthorized:
+        quoted_span = next(
+            (
+                (quote_start, quote_end)
+                for quote_start, quote_end in quote_spans
+                if quote_start < action_match.end()
+                and action_match.start() < quote_end
+            ),
+            None,
+        )
+        if quoted_span is not None:
+            removals.append(quoted_span)
+            continue
+        clause_start, clause_end = _speech_act_clause_bounds(
+            value,
+            action_match.start(),
+        )
+        relative_start = action_match.start() - clause_start
+        prefix = value[clause_start : action_match.start()]
+        removal_start = clause_start
+        contextual_matches = [
+            *list(_SPEECH_ACT_REPORTED_PREFIX_RE.finditer(prefix)),
+            *list(_SPEECH_ACT_LOCAL_CONDITIONAL_RE.finditer(prefix)),
+        ]
+        if contextual_matches:
+            removal_start = clause_start + max(
+                contextual_matches,
+                key=lambda match: match.start(),
+            ).start()
+        elif _SPEECH_ACT_DIAGNOSTIC_PREFIX_RE.search(prefix):
+            removal_start = clause_start
+        else:
+            negation_matches = tuple(_SPEECH_ACT_NEGATION_RE.finditer(prefix))
+            if negation_matches:
+                removal_start = clause_start + negation_matches[-1].start()
+            elif relative_start > 0:
+                removal_start = action_match.start()
+        removals.append((removal_start, clause_end))
+
+    characters = list(value)
+    for start, end in removals:
+        characters[start:end] = " " * (end - start)
+    sanitized = re.sub(r"\s+", " ", "".join(characters)).strip()
+    sanitized = re.sub(
+        r"(?:\b(?:and|or|then)\b|并且|以及|然后|或者)\s*$",
+        "",
+        sanitized,
+        flags=re.IGNORECASE,
+    ).strip(" ，,;；")
+    return sanitized
+
+
 def _explicit_app_open_request(text: str) -> bool:
+    text = _affirmative_app_control_text(text)
     return _contains_any(
         text,
         ("打开", "启动", "开启", "运行", "拉起", "open ", "launch ", "start "),
     ) or bool(
         re.search(r"(?:开了|开起来|开一下|开下|\bstart\s+up\b)", text, flags=re.IGNORECASE)
         or re.search(r"开\s+[\w.·-]", text, flags=re.IGNORECASE)
+    )
+
+
+def _explicit_app_focus_request(text: str) -> bool:
+    return _contains_any(
+        _affirmative_app_control_text(text),
+        (
+            "切换到",
+            "切到",
+            "切回",
+            "回到",
+            "切一下",
+            "切下",
+            "聚焦",
+            "激活",
+            "置前",
+            "focus",
+            "switch to",
+            "switch ",
+            "activate ",
+            "bring ",
+            "go back to",
+            "switch back to",
+            "back to",
+        ),
     )
 
 
@@ -23414,7 +29025,29 @@ def _looks_like_foreground_submit_scope(value: str, lowered: str) -> bool:
                 "current message",
             ),
         )
-        or re.search(r"(?:按|敲|点|tap|press|hit).{0,8}(?:回车|return|enter)", lowered, flags=re.IGNORECASE)
+        or re.search(
+            r"(?:按|敲|点|tap|press|hit).{0,8}(?:回车|return|enter)",
+            lowered,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:回车|return|enter).{0,12}(?:发送|提交|send|submit)",
+            lowered,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _foreground_submit_hotkey_only_hint(text: str) -> bool:
+    value = _clean_prompt(text)
+    return bool(
+        re.search(
+            r"(?:(?:按|敲|点|tap|press|hit).{0,8})?"
+            r"(?:回车键?|return|enter).{0,12}"
+            r"(?:发送|提交|send|submit)",
+            value,
+            flags=re.IGNORECASE,
+        )
     )
 
 
@@ -23422,9 +29055,6 @@ def _foreground_submit_app_name_hint(text: str, action: str) -> str:
     if not action:
         return ""
     value = _clean_prompt(text)
-    app_scoped_submit = _app_scoped_foreground_submit_app_name_hint(value)
-    if app_scoped_submit:
-        return app_scoped_submit
     patterns = (
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?P<app>[\w .·-]{1,40}?)"
         r"(?:按|敲|点|tap|press|hit).{0,8}(?:回车|return|enter).{0,8}(?:发送|提交|send|submit)",
@@ -23438,6 +29068,9 @@ def _foreground_submit_app_name_hint(text: str, action: str) -> str:
         app = _canonical_app_name_hint(match.group("app"))
         if app:
             return app
+    app_scoped_submit = _app_scoped_foreground_submit_app_name_hint(value)
+    if app_scoped_submit:
+        return app_scoped_submit
     return ""
 
 
@@ -23461,7 +29094,7 @@ def _app_scoped_foreground_submit_app_name_hint(text: str) -> str:
             continue
         if re.search(
             r"(?:粘贴|输入|键入|填写|写入|点击|搜索|查找|复制|剪贴板|"
-            r"paste|type|enter|click|search|copy|clipboard)",
+            r"按|敲|回车|paste|type|enter|return|press|hit|tap|click|search|copy|clipboard)",
             raw_app,
             flags=re.IGNORECASE,
         ):
@@ -24213,9 +29846,9 @@ def _desktop_operation_hint(text: str) -> str:
         flags=re.IGNORECASE,
     ):
         return "focus"
-    if _contains_any(text, ["click", "点击"]):
+    if desktop_action_requested(text, "click"):
         return "click"
-    if _contains_any(text, ["type", "input", "输入"]):
+    if desktop_action_requested(text, "type"):
         return "type"
     if _looks_like_app_scoped_create_followup(text):
         return "create"
@@ -26045,9 +31678,19 @@ def _app_scoped_followup_hint(text: str) -> dict[str, str]:
 
 
 def _invalid_app_scoped_followup_app(app_name: str) -> bool:
-    normalized = re.sub(r"[\s._·-]+", "", str(app_name or "").strip().lower())
+    raw_app_name = str(app_name or "").strip()
+    normalized = re.sub(r"[\s._·-]+", "", raw_app_name.lower())
     if normalized.endswith(("点", "点击", "点按")):
         return True
+    if not is_legacy_app_name_hint(raw_app_name):
+        if re.search(r"(?:命令|指令|脚本|代码|任务|测试)", normalized):
+            return True
+        if re.search(
+            r"\b(?:command|shell|script|code|task|test)\b",
+            raw_app_name,
+            flags=re.IGNORECASE,
+        ):
+            return True
     return normalized in {
         "",
         "你",
@@ -27189,8 +32832,22 @@ def _app_search_safe_sequence_available(
 ) -> bool:
     allowed_tools = allowed
     context_source = _app_search_query_context_source(app_search)
+    explicit_field_click = _explicit_app_search_field_click_target(text, app_search)
     if context_source in {"selection", "clipboard"}:
         if _first_allowed(("desktop.safe_shortcut",), allowed_tools) is None:
+            return False
+    elif explicit_field_click:
+        if _first_allowed(("desktop.inspect_app",), allowed_tools) is None:
+            return False
+        if _first_allowed(
+            _app_search_operation_candidates(
+                "click_ui_element",
+                app_name=app_name,
+                mode=mode,
+                generic=("desktop.click_ui_element",),
+            ),
+            allowed_tools,
+        ) is None:
             return False
     elif _first_allowed(
         _app_search_focus_operation_candidates(app_name=app_name, mode=mode),
@@ -27257,7 +32914,18 @@ def _app_search_focus_operation_tool(
     *,
     app_name: str,
     mode: str,
+    explicit_click_target: Mapping[str, Any] | None = None,
 ) -> str | None:
+    if explicit_click_target:
+        return _first_allowed(
+            _app_search_operation_candidates(
+                "click_ui_element",
+                app_name=app_name,
+                mode=mode,
+                generic=("desktop.click_ui_element",),
+            ),
+            allowed,
+        )
     return _first_allowed(
         _app_search_focus_operation_candidates(app_name=app_name, mode=mode),
         allowed,
@@ -27269,7 +32937,20 @@ def _app_search_focus_input_preview(
     *,
     app_name: str,
     search_target: str,
+    explicit_click_target: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
+    if explicit_click_target and tool_name.endswith("click_ui_element"):
+        payload = {
+            "target": str(explicit_click_target.get("target") or search_target).strip(),
+            "role_filter": str(
+                explicit_click_target.get("role_filter") or "text"
+            ).strip(),
+            "click_count": int(explicit_click_target.get("click_count") or 1),
+            "limit": int(explicit_click_target.get("limit") or 80),
+        }
+        if tool_name.startswith("app."):
+            payload = {"app_name": app_name, **payload}
+        return payload
     if tool_name == "desktop.click_ui_element":
         return {
             "target": search_target,
@@ -27461,16 +33142,38 @@ def _app_search_should_submit(text: str, search_followup: Mapping[str, Any]) -> 
     return bool(
         re.search(r"(?:搜索|查找|检索)(?!框|栏|输入|结果)", value)
         or re.search(r"\b(?:search|find|look\s+up|look)\b", lowered)
-        or (
-            not _contains_any(value, ("打开", "启动", "开启", "open ", "launch ", "start "))
-            and re.search(r"^[\w .·-]{1,40}?\s*找\s*\S+", value)
-        )
+        or re.search(r"^[\w .·-]{1,40}?\s*找\s*\S+", value)
         or re.search(r"(?:并|然后|再|后|之后)?\s*(?:搜索|查找|检索|提交|确认|回车)$", value)
         or re.search(
             r"\b(?:and|then)?\s*(?:search|submit|confirm|press\s+enter|hit\s+enter)$",
             lowered,
         )
     )
+
+
+def _explicit_app_search_field_click_target(
+    text: str,
+    app_search: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Preserve an explicit semantic field click instead of inventing Cmd+F."""
+
+    if not app_search or not _looks_like_app_search_field_input(text):
+        return {}
+    target = click_target_hint(text)
+    if not isinstance(target, Mapping) or not target:
+        return {}
+    role = str(target.get("role_filter") or "").strip()
+    if role and role != "text":
+        return {}
+    label = str(target.get("target") or app_search.get("target") or "").strip()
+    if not label:
+        return {}
+    return {
+        "target": label,
+        "role_filter": "text",
+        "click_count": int(target.get("click_count") or 1),
+        "limit": 80,
+    }
 
 
 def _app_search_followup_hint(text: str) -> dict[str, Any]:
@@ -27584,6 +33287,73 @@ def _desktop_window_text_context_hint(text: str) -> bool:
             r"\b(?:read|extract|show|list|inspect)\s+"
             r"(?:the\s+)?(?:current|active|foreground|this)\s+window\s+"
             r"(?:content|text)\b",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _explicit_app_window_verification_app_name_hint(text: str) -> str:
+    """Extract an app only from an explicit, read-only window verification."""
+
+    value = _clean_prompt(text)
+    patterns = (
+        r"^(?:帮我|请|麻烦)?(?:验证|校验|检查|确认)\s*"
+        r"(?P<app>[^。！？!?，,]{1,40}?)\s*(?:应用(?:程序)?)?窗口"
+        r"(?:是否|有没有|有无|状态|内容)?[^。！？!?，,]*$",
+        r"^(?:please\s+)?(?:verify|validate|check|confirm)\s+"
+        r"(?:the\s+)?(?P<app_en>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s+"
+        r"(?:app(?:lication)?\s+)?window\b[^.!?]*$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        app_name = _clean_app_name_hint(
+            match.groupdict().get("app")
+            or match.groupdict().get("app_en")
+            or ""
+        )
+        if (
+            app_name
+            and not _is_generic_foreground_app_label(app_name)
+            and not _invalid_app_scoped_followup_app(app_name)
+        ):
+            return app_name
+    return ""
+
+
+def _looks_like_non_action_desktop_validation_task(text: str) -> bool:
+    """Keep product/runtime validation briefs out of desktop execution routes."""
+
+    value = _clean_prompt(text)
+    if not value or not re.search(
+        r"(?:验证|校验|测试|验收|评估|检查)|"
+        r"\b(?:validate|validation|verify|verification|test|testing|check|review)\b",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        return False
+    if _explicit_app_window_verification_app_name_hint(value):
+        return False
+    if any(
+        desktop_action_requested(value, action)
+        for action in ("click", "type", "open", "focus")
+    ):
+        return False
+    if (
+        ui_control_presence_hint(value)
+        or ui_inspection_hint(value) is not None
+        or screen_capture_hint(value) is not None
+        or _desktop_discovery_hint(value) is not None
+    ):
+        return False
+    return bool(
+        re.search(
+            r"(?:派发|分发|调度|委派|路由|链路|流程|逻辑|机制|行为|"
+            r"群聊|群组|桌面\s*Agent|应用路由)|"
+            r"\b(?:dispatch|routing|router|pipeline|flow|logic|mechanism|"
+            r"behavior|behaviour|desktop\s+agent|native\s+agent)\b",
             value,
             flags=re.IGNORECASE,
         )
@@ -27983,7 +33753,9 @@ def _web_search_post_followup_hint(text: str) -> dict[str, Any]:
 
 def _web_search_results_output_hint(text: str) -> dict[str, Any]:
     value = _clean_prompt(text)
-    if _looks_like_url_screenshot_request(value):
+    query = _web_search_query(value)
+    instruction_value = _web_output_instruction_text(value, query=query)
+    if _looks_like_url_screenshot_request(instruction_value):
         return {
             "browser_action": "open_url_screenshot",
             "reason": "user asked to capture the browser page after opening a URL",
@@ -27991,28 +33763,28 @@ def _web_search_results_output_hint(text: str) -> dict[str, Any]:
     if re.search(
         r"(?:并|然后|并且|再|接着|之后|后).{0,4}"
         r"(?:读|读取|看看|看一下|看下|概括|总结|摘要).{0,8}(?:结果|内容|搜索结果)$",
-        value,
+        instruction_value,
         flags=re.IGNORECASE,
     ) or re.search(
         r"(?:并|然后|并且|再|接着|之后|后).{0,4}"
         r"(?:读|读取|看看|看一下|看下|概括|总结|摘要).{0,8}"
         r"(?:当前|这个|该)?(?:网页|页面|页|current\s+page)$",
-        value,
+        instruction_value,
         flags=re.IGNORECASE,
     ) or re.search(
         r"\b(?:and|then)\s+(?:read|extract|summari[sz]e)\s+results?\b",
-        value,
+        instruction_value,
         flags=re.IGNORECASE,
     ) or re.search(
         r"\b(?:and|then)\s+(?:read|extract|summari[sz]e)\s+(?:the\s+)?(?:current\s+)?page\b",
-        value,
+        instruction_value,
         flags=re.IGNORECASE,
     ):
         hint: dict[str, Any] = {"browser_action": "open_url_extract"}
-        if _looks_like_url_summary_request(value):
+        if _looks_like_url_summary_request(instruction_value):
             hint["presentation"] = "summary"
         return hint
-    if _browser_search_deliverable_extract_requested(value):
+    if _browser_search_deliverable_extract_requested(instruction_value):
         return {"browser_action": "open_url_extract"}
     return {}
 
@@ -28080,6 +33852,7 @@ def _plain_web_search_deliverable_extract_requested(text: str) -> bool:
 
 
 def _web_search_query(text: str) -> str:
+    text = _speech_act_strip_unauthorized_contextual_tails(text)
     if _url_hint(text):
         return ""
     direct_engine_query = _direct_web_search_query(text)
@@ -28117,7 +33890,8 @@ def _web_search_query(text: str) -> str:
         return research_report_query
     lowered = text.lower()
     patterns = (
-        r"\b(?:can\s+you\s+)?(?:research|look\s+up|find\s+out\s+about)\s+(.+)$",
+        r"^(?:(?:please|can|could|would)\s+(?:you\s+)?)?"
+        r"(?:research|look\s+up|find\s+out\s+about)\s+(.+)$",
         r"\b(?:can\s+you\s+)?search\s+(?:google\s+chrome|chrome|safari|browser|web|google)\s+for\s+(.+)$",
         r"\b(?:can\s+you\s+)?search\s+for\s+(.+)$",
         r"\b(?:google|search)\s+(.+)$",
@@ -28155,9 +33929,17 @@ def _generic_web_research_query_hint(text: str) -> str:
     if _url_hint(value):
         return ""
     patterns = (
-        r"(?:调研|研究|了解|查找|查询|检索|搜索)\s*(?P<query>[^，,。！？!?]+)",
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?"
+        r"(?:做|制作|写|生成|输出|整理)\s*(?:一份|一个|一篇|个)?"
+        r"[^，,。！？!?]{0,48}(?:报告|分析)[，,]\s*"
+        r"(?:调研|研究|了解|查找|查询|检索|搜索)\s*"
+        r"(?P<query>[^，,。！？!?]+)",
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:调研|研究|了解|查找|查询|检索|搜索)\s*"
+        r"(?P<query>[^，,。！？!?]+)",
         r"(?P<query>[^，,。！？!?]{2,80})(?:，|,)?\s*(?:找资料|查资料|搜集资料|收集资料)",
-        r"\b(?:research|investigate|look\s+up|find\s+sources\s+for|gather\s+info(?:rmation)?\s+for)\s+"
+        r"^(?:(?:please|can|could|would)\s+(?:you\s+)?)?"
+        r"(?:research|investigate|look\s+up|find\s+sources\s+for|gather\s+info(?:rmation)?\s+for)\s+"
         r"(?P<query>[^.!?,]+)",
     )
     for pattern in patterns:
@@ -28310,7 +34092,9 @@ def _clean_report_research_query(text: str, *, fallback: str) -> str:
 
 
 def _direct_web_search_query(text: str) -> str:
-    value = _clean_prompt(text)
+    value = _clean_prompt(
+        _speech_act_strip_unauthorized_contextual_tails(text)
+    )
     patterns = (
         r"^(?:(?:please|can\s+you|could\s+you|would\s+you)\s+)?"
         r"search\s+(?:google|baidu|chrome|google\s+chrome|browser|safari)\s+"
@@ -28676,6 +34460,14 @@ def _clean_web_search_query(query: str) -> str:
         r"(?:并|然后|并且|再|接着|之后|后)?\s*"
         r"(?:把|将)?(?:报告|总结|摘要|结果|内容|表格|清单|文档)?"
         r"\s*(?:发给|发送给|发到|发送到|转发给|转发到).*$",
+        "",
+        value,
+        flags=re.IGNORECASE,
+    ).strip()
+    value = re.sub(
+        r"(?:[，,]\s*)?(?:并|然后|并且|再|接着|之后|后)\s*"
+        r"(?:把|将)?(?:搜索)?(?:结果|内容|信息|报告|摘要|总结|表格|清单|文档)?\s*"
+        r"(?:写进|写入|写到|保存到|记录到|记到|放到|粘贴到|贴到|输入到|输入进|填到|填入|填写到)\s*.+$",
         "",
         value,
         flags=re.IGNORECASE,
@@ -29265,6 +35057,31 @@ def _browser_action_tool_candidates(
     }.get(browser_action, ())
 
 
+def _browser_navigation_tool_owns_target(
+    browser_action: str,
+    tool_name: str,
+) -> bool:
+    """Navigation tools create the run-owned target; no foreground app prep."""
+
+    return bool(
+        browser_action
+        in {
+            "open_search",
+            "open_url",
+            "open_url_extract",
+            "open_url_screenshot",
+        }
+        and tool_name
+        in {
+            "browser.open",
+            "browser.open_url",
+            "browser.search",
+            "browser.open_url_and_extract_text",
+            "browser.open_url_and_screenshot",
+        }
+    )
+
+
 def _browser_click_desktop_preview(selector: str, click_count: Any) -> dict[str, Any]:
     target = _desktop_target_from_browser_selector(selector)
     if not target:
@@ -29533,7 +35350,7 @@ def _looks_like_browser_current_page_screenshot(value: str, lowered: str) -> boo
             flags=re.IGNORECASE,
         )
         or re.search(
-            r"(?:截图|截屏).{0,8}(?:当前|这个|本页).{0,8}(?:网页|页面|标签页)",
+            r"(?:截图|截屏|截取).{0,8}(?:当前|这个|本页).{0,8}(?:网页|页面|标签页)",
             value,
             flags=re.IGNORECASE,
         )
@@ -30665,7 +36482,7 @@ def _discovered_app_open_requested(intent: TaskIntentSnapshot) -> bool:
         safe_shortcut = intent.inputs.get("safe_shortcut_hint")
         if _explicit_app_open_request(text):
             return True
-        if app_control_mode(text) == "focus":
+        if _explicit_app_focus_request(text):
             return True
         if str(intent.inputs.get("selected_app_target_path_hint") or "").strip():
             return True
@@ -30710,7 +36527,7 @@ def _discovered_app_open_requested(intent: TaskIntentSnapshot) -> bool:
     if (
         isinstance(desktop_discovery, Mapping)
         and str(desktop_discovery.get("action") or "").strip() == "discover_apps"
-        and (_explicit_app_open_request(text) or app_control_mode(text) == "focus")
+        and (_explicit_app_open_request(text) or _explicit_app_focus_request(text))
     ):
         return True
     return bool(
@@ -30849,7 +36666,7 @@ def _explicit_system_settings_request(text: str) -> bool:
         or _app_preferences_hint(text)
     ):
         return False
-    hint = system_control_hint(text)
+    hint = system_control_hint(affirmative_desktop_action_text(text, "focus"))
     if str(hint.get("kind") or "").strip() != "settings_open":
         return False
     payload = hint.get("payload") if isinstance(hint.get("payload"), Mapping) else {}
@@ -30866,6 +36683,12 @@ def _looks_like_active_window_request(value: str, lowered: str) -> bool:
         or re.search(r"(?:当前|现在)?前台是不是\s*.+", value, flags=re.IGNORECASE)
         or re.search(r"现在是不是在\s*.+", value, flags=re.IGNORECASE)
         or re.search(r"我正在用什么(?:应用|app|软件)?", value, flags=re.IGNORECASE)
+        or re.search(
+            r"(?:当前|现在)?\s*(?:正在用|在用|用的是|用的)\s*"
+            r"(?:哪个|什么).{0,4}(?:app|应用|软件)?",
+            value,
+            flags=re.IGNORECASE,
+        )
         or re.search(r"\bwhat\s+app\s+am\s+i\s+using\b", lowered)
         or re.search(r"\bwhat\s+is\s+(?:the\s+)?(?:frontmost|active|foreground)\s+window\b", lowered)
         or re.search(r"\bwhich\s+(?:app|application)\s+is\s+(?:frontmost|active|foreground)\b", lowered)
@@ -31121,6 +36944,14 @@ def _explicit_hotkey_should_override_safe_shortcut(
 ) -> bool:
     if not hotkey or not safe_shortcut:
         return False
+    if (
+        str(hotkey.get("key") or "").strip().lower() == "space"
+        and not list(hotkey.get("modifiers") or [])
+        and str((safe_shortcut or {}).get("action") or "").strip()
+        == "finder_quick_look"
+        and not re.search(r"(?:finder|访达)", text, flags=re.IGNORECASE)
+    ):
+        return True
     if str((safe_shortcut or {}).get("action") or "").strip() != "focus_address_bar":
         return False
     return not _contains_any(text, ["地址栏", "address bar", "omnibox"])
@@ -31372,6 +37203,79 @@ def _desktop_operation_fallback_tool(
         ),
         allowed,
     )
+
+
+def _web_research_expected_outputs(
+    text: str,
+    *,
+    browser_action: str,
+    url_hint: str = "",
+    query: str = "",
+) -> list[str]:
+    """Describe the requested web result without inventing a file artifact."""
+
+    instruction_text = _web_output_instruction_text(
+        text,
+        url_hint=url_hint,
+        query=query,
+    )
+    explicit_outputs = _expected_outputs(instruction_text, default=[])
+    if explicit_outputs:
+        return explicit_outputs
+    if _contains_any(
+        instruction_text,
+        (
+            "summarize",
+            "summarise",
+            "summary",
+            "write up",
+            "research",
+            "总结",
+            "摘要",
+            "概括",
+            "研究",
+            "调研",
+        ),
+    ):
+        return ["summary"]
+    clean_action = str(browser_action or "").strip()
+    return {
+        "open_url": ["opened_page"],
+        "open_search": ["search_results"],
+        "open_url_extract": ["web_text"],
+        "open_url_screenshot": ["screenshot"],
+        "current_page": ["page_metadata"],
+        "extract_text": ["web_text"],
+        "screenshot": ["screenshot"],
+        "find_current_page": ["browser_state"],
+        "click": ["browser_state"],
+        "type_text": ["browser_state"],
+    }.get(clean_action, ["summary"])
+
+
+def _web_output_instruction_text(
+    text: str,
+    *,
+    url_hint: str = "",
+    query: str = "",
+) -> str:
+    """Return command language with navigational data operands removed.
+
+    Output words inside a URL path or a search query (for example
+    ``/document`` or ``annual report``) describe what to navigate to, not a
+    request to create a file. Delivery clauses remain in the command and are
+    still recognized after removing those operands.
+    """
+
+    value = _clean_prompt(text)
+    operands = [str(url_hint or "").strip(), str(query or "").strip()]
+    operands.extend(
+        match.group(0).rstrip(".,;:!?，。；：！？")
+        for match in re.finditer(r"https?://[^\s<>\"']+", value, flags=re.IGNORECASE)
+    )
+    for operand in sorted({item for item in operands if item}, key=len, reverse=True):
+        value = re.sub(re.escape(operand), " ", value, count=1, flags=re.IGNORECASE)
+    return re.sub(r"\s+", " ", value).strip()
 
 
 def _expected_outputs(text: str, *, default: list[str]) -> list[str]:

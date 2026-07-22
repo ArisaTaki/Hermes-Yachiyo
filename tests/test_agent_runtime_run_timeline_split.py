@@ -207,6 +207,71 @@ def test_runtime_run_timeline_service_delegates_event_append_and_replay() -> Non
     ]
 
 
+def test_runtime_run_timeline_service_forwards_explicit_append_fences() -> None:
+    class _FencedRuntimeEvents(_FakeRuntimeEvents):
+        def append(
+            self,
+            run_id: str,
+            event_type: str,
+            payload: dict[str, Any] | None = None,
+            *,
+            actor: str = "native_runtime",
+            visibility: str = "user",
+            sensitivity: str = "public",
+            expected_status: str | None = None,
+            expected_updated_at: str | None = None,
+        ) -> dict[str, Any]:
+            self.calls.append(
+                (
+                    "append",
+                    {
+                        "run_id": run_id,
+                        "event_type": event_type,
+                        "payload": payload or {},
+                        "actor": actor,
+                        "visibility": visibility,
+                        "sensitivity": sensitivity,
+                        "expected_status": expected_status,
+                        "expected_updated_at": expected_updated_at,
+                    },
+                )
+            )
+            return {"event_id": "event-fenced", "event_type": event_type}
+
+    runtime_events = _FencedRuntimeEvents()
+    service = RuntimeRunTimelineService(
+        runs=_FakeRuns(),
+        run_groups=_FakeRunGroups(),
+        runtime_events=runtime_events,
+        run_artifacts=_FakeArtifacts(),
+    )
+
+    appended = service.append_event(
+        "run-1",
+        "agent.tool.call",
+        {"tool": "terminal.run"},
+        expected_status="running",
+        expected_updated_at="2026-07-12T00:00:00Z",
+    )
+
+    assert appended == {"event_id": "event-fenced", "event_type": "agent.tool.call"}
+    assert runtime_events.calls == [
+        (
+            "append",
+            {
+                "run_id": "run-1",
+                "event_type": "agent.tool.call",
+                "payload": {"tool": "terminal.run"},
+                "actor": "native_runtime",
+                "visibility": "user",
+                "sensitivity": "public",
+                "expected_status": "running",
+                "expected_updated_at": "2026-07-12T00:00:00Z",
+            },
+        )
+    ]
+
+
 def test_runtime_run_timeline_service_normalizes_run_event_page_requests() -> None:
     runtime_events = _FakeRuntimeEvents()
     service = RuntimeRunTimelineService(

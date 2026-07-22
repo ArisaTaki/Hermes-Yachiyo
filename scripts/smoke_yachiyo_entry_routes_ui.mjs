@@ -464,6 +464,18 @@ async function main() {
   ), 'top-level tasks route');
   console.log('[electron-smoke] tasks route rendered');
 
+  await win.webContents.executeJavaScript(
+    "document.querySelector('[data-testid=\\\"yachiyo-agent-task-runtime-details\\\"] summary').click()",
+    true,
+  );
+  await waitFor(win, () => (
+    document.querySelector('[data-testid="yachiyo-agent-task-runtime-details"]')?.open === true
+    && document.querySelector('[data-testid="yachiyo-agent-task-runtime-details-body"]')
+    && document.querySelector('[data-testid="yachiyo-agent-task-card"]')?.getAttribute('data-event-source') === 'run_event_page'
+    && document.querySelectorAll('[data-testid="yachiyo-agent-task-timeline-event"]').length === 2
+  ), 'lazy task event replay');
+  console.log('[electron-smoke] tasks event replay loaded after opening runtime details');
+
   await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"yachiyo-agent-task-open-studio\\"]').click()", true);
   await waitFor(win, () => (
     window.location.hash.includes('#/agents')

@@ -24,6 +24,15 @@ on:
         options:
           - safe
           - full
+      publish_release:
+        description: Publish GitHub Release assets (branch must match channel)
+        required: true
+        default: false
+        type: boolean
+
+concurrency:
+  group: release-macos-${{ github.ref }}
+  cancel-in-progress: false
 
 permissions:
   contents: write
@@ -39,6 +48,29 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Validate GitHub Release publication target
+        if: github.event_name == 'push' || inputs.publish_release == true
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
+            CHANNEL="${{ inputs.channel }}"
+          elif [[ "${GITHUB_REF_NAME}" == "main" ]]; then
+            CHANNEL="stable"
+          else
+            CHANNEL="experimental"
+          fi
+          case "${CHANNEL}" in
+            stable) EXPECTED_BRANCH="main" ;;
+            alpha) EXPECTED_BRANCH="alpha" ;;
+            experimental) EXPECTED_BRANCH="oha-develop" ;;
+            *) echo "Unsupported release channel: ${CHANNEL}" >&2; exit 1 ;;
+          esac
+          if [[ "${GITHUB_REF_NAME}" != "${EXPECTED_BRANCH}" ]]; then
+            echo "Refusing to publish ${CHANNEL} from ${GITHUB_REF_NAME}; expected ${EXPECTED_BRANCH}." >&2
+            exit 1
+          fi
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -66,6 +98,15 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci --prefix apps/frontend
 
+      - name: Prepare embedded Cua Driver
+        run: python scripts/prepare_cua_driver.py --clean
+
+      - name: Test passive background-control readiness states
+        run: npm --prefix apps/frontend run test:background-control-readiness
+
+      - name: Test Electron-owned Cua MCP bridge
+        run: npm --prefix apps/frontend run test:cua-mcp-bridge
+
       - name: Run public release preflight gate
         env:
           PUBLIC_DEMO_MODE: ${{ inputs.public_demo || 'safe' }}
@@ -87,6 +128,18 @@ jobs:
       - name: Run smoke tests
         run: |
           python -m pytest \
+            tests/test_prepare_cua_driver.py \
+            tests/test_cua_embedded_distribution.py \
+            tests/test_cua_background_provider.py \
+            tests/test_cua_socket_transport.py \
+            tests/test_agent_runtime_desktop_execution_providers.py \
+            tests/test_background_desktop_integration.py \
+            tests/test_background_desktop_policy.py \
+            tests/test_background_desktop_safety.py \
+            tests/test_background_desktop_lifecycle.py \
+            tests/test_background_media_routing.py \
+            tests/test_passive_desktop_readiness.py \
+            tests/test_release_artifact_verifier.py \
             tests/test_macos_notarization_script.py \
             tests/test_protocol.py \
             tests/test_state.py \
@@ -579,7 +632,8 @@ jobs:
           if [[ "${MACOS_SIGNING_ENABLED}" == "true" ]]; then
             scripts/build_macos_self_signed_dmg.sh "${MACOS_CODESIGN_IDENTITY}"
           else
-            CSC_IDENTITY_AUTO_DISCOVERY=false npm --prefix apps/frontend run dist:mac
+            MACOS_SIGNING_MODE=self-signed-app-unsigned-dmg \
+              scripts/build_macos_self_signed_dmg.sh -
           fi
 
       - name: Notarize and staple Developer ID DMG
@@ -612,10 +666,30 @@ jobs:
           APPLE_NOTARY_KEY_PATH="${KEY_PATH}" \
             scripts/notarize_macos_dmg.sh "${dmg_files[0]}"
 
-      - name: Verify packaged app resources
+      - name: Inspect final macOS signing evidence
         shell: bash
         env:
-          MACOS_SIGNING_ENABLED: ${{ steps.macos_signing.outputs.enabled }}
+          EXPECTED_SIGNING_MODE: ${{ steps.macos_signing.outputs.signing_mode }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          dmg_files=(dist/electron/*.dmg)
+          if [[ "${#dmg_files[@]}" -ne 1 ]]; then
+            echo "Expected exactly one final DMG for signing inspection; found ${#dmg_files[@]}." >&2
+            exit 1
+          fi
+          python scripts/release_integrity.py \
+            "${dmg_files[0]}" \
+            --output-json release/macos-signing-inspection.json
+          DETECTED_SIGNING_MODE="$(python -c 'import json; from pathlib import Path; print(json.loads(Path("release/macos-signing-inspection.json").read_text())["signing"])')"
+          if [[ "${DETECTED_SIGNING_MODE}" != "${EXPECTED_SIGNING_MODE:-unsigned}" ]]; then
+            echo "Packaged signing mode ${DETECTED_SIGNING_MODE} does not match expected ${EXPECTED_SIGNING_MODE:-unsigned}." >&2
+            exit 1
+          fi
+          echo "Detected macOS signing mode: ${DETECTED_SIGNING_MODE}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Verify packaged app resources
+        shell: bash
         run: |
           set -euo pipefail
           if [[ ! -d dist/electron ]]; then
@@ -634,16 +708,149 @@ jobs:
             exit 1
           fi
 
-          if [[ "${MACOS_SIGNING_ENABLED:-false}" == "true" ]]; then
-            for resources_dir in "${app_resource_dirs[@]}"; do
-              app_path="${resources_dir%/Contents/Resources}"
-              echo "Verifying final packaged app code signature: ${app_path}"
-              codesign --verify --deep --strict --verbose=2 "${app_path}"
-              codesign -dv "${app_path}" 2>&1 | sed 's/^/codesign: /'
+          LOCKED_CUA_VERSION="$(python -c 'import json; from pathlib import Path; print(json.loads(Path("packaging/cua-driver.lock.json").read_text())["version"])')"
+          for resources_dir in "${app_resource_dirs[@]}"; do
+            cua_parent_dir="${resources_dir}/computer-use"
+            cua_sidecar_dir="${cua_parent_dir}/macos"
+            cua_helper="${cua_sidecar_dir}/OhaCuaDriver.app"
+            cua_helper_contents="${cua_helper}/Contents"
+            cua_helper_macos="${cua_helper_contents}/MacOS"
+            cua_driver="${cua_helper_macos}/cua-driver"
+            cua_license="${cua_sidecar_dir}/LICENSE.md"
+            cua_manifest="${cua_sidecar_dir}/manifest.json"
+            for packaged_cua_dir in \
+              "${cua_parent_dir}" \
+              "${cua_sidecar_dir}" \
+              "${cua_helper}" \
+              "${cua_helper_contents}" \
+              "${cua_helper_macos}"; do
+              if ! test ! -L "${packaged_cua_dir}"; then
+                echo "Packaged Cua Driver resource directory must not be a symlink: ${packaged_cua_dir}" >&2
+                exit 1
+              fi
+              if ! test -d "${packaged_cua_dir}"; then
+                echo "Packaged Cua Driver resource directory is missing: ${packaged_cua_dir}" >&2
+                exit 1
+              fi
             done
-          else
-            echo "Skipping final packaged app codesign verification because macOS signing is disabled."
-          fi
+            python -c '
+          import plistlib
+          import sys
+
+          with open(sys.argv[1], "rb") as handle:
+              info = plistlib.load(handle)
+          expected = {
+              "CFBundleExecutable": "cua-driver",
+              "CFBundleIdentifier": "io.github.arisataki.oha-yachiyo.cua-driver",
+              "CFBundlePackageType": "APPL",
+              "LSBackgroundOnly": True,
+          }
+          if any(info.get(key) != value for key, value in expected.items()):
+              raise SystemExit("Packaged Cua Driver helper is not background-only.")
+          ' "${cua_helper_contents}/Info.plist"
+            for packaged_cua_file in "${cua_driver}" "${cua_license}" "${cua_manifest}"; do
+              if ! test ! -L "${packaged_cua_file}"; then
+                echo "Packaged Cua Driver resource must not be a symlink: ${packaged_cua_file}" >&2
+                exit 1
+              fi
+              if ! test -f "${packaged_cua_file}"; then
+                echo "Packaged Cua Driver resource is missing: ${packaged_cua_file}" >&2
+                exit 1
+              fi
+            done
+            if ! test -x "${cua_driver}"; then
+              echo "Packaged Cua Driver is not executable: ${cua_driver}" >&2
+              exit 1
+            fi
+
+            CUA_VERSION_OUTPUT="$("${cua_driver}" --version)"
+            if [[ "${CUA_VERSION_OUTPUT}" != "cua-driver ${LOCKED_CUA_VERSION}" ]]; then
+              echo "Packaged Cua Driver version does not match packaging/cua-driver.lock.json." >&2
+              exit 1
+            fi
+            "${cua_driver}" manifest | python -c '
+          import json
+          import sys
+
+          expected_version = sys.argv[1]
+          payload = json.load(sys.stdin)
+          if str(payload.get("schema_version") or "") != "1":
+              raise SystemExit("Packaged Cua Driver manifest schema is unsupported.")
+          if str(payload.get("binary_version") or "") != expected_version:
+              raise SystemExit("Packaged Cua Driver manifest version does not match the lock.")
+          invocation = payload.get("mcp_invocation")
+          if not isinstance(invocation, dict) or invocation.get("args") != ["mcp"]:
+              raise SystemExit("Packaged Cua Driver manifest has an invalid MCP invocation.")
+          subcommands = payload.get("subcommands")
+          mcp = next(
+              (item for item in subcommands if isinstance(item, dict) and item.get("name") == "mcp"),
+              None,
+          ) if isinstance(subcommands, list) else None
+          argument_names = {
+              item.get("name")
+              for item in (mcp or {}).get("args", [])
+              if isinstance(item, dict)
+          }
+          if not {"--embedded", "--host-bundle-id"}.issubset(argument_names):
+              raise SystemExit("Packaged Cua Driver manifest lacks the embedded host contract.")
+          ' "${LOCKED_CUA_VERSION}"
+
+            CUA_ARCHITECTURES="$(lipo -archs "${cua_driver}")"
+            python -c '
+          import sys
+
+          architectures = set(sys.argv[1].split())
+          required = {"arm64", "x86_64"}
+          if not required.issubset(architectures):
+              raise SystemExit(
+                  "Packaged Cua Driver is not universal arm64+x86_64: "
+                  + " ".join(sorted(architectures))
+              )
+          ' "${CUA_ARCHITECTURES}"
+          done
+
+          for resources_dir in "${app_resource_dirs[@]}"; do
+            app_path="${resources_dir%/Contents/Resources}"
+            cua_helper="${resources_dir}/computer-use/macos/OhaCuaDriver.app"
+            cua_driver="${cua_helper}/Contents/MacOS/cua-driver"
+            python -c '
+          import plistlib
+          import sys
+
+          with open(sys.argv[1], "rb") as handle:
+              info = plistlib.load(handle)
+          expected = {
+              "CFBundleExecutable": "cua-driver",
+              "CFBundleIdentifier": "io.github.arisataki.oha-yachiyo.cua-driver",
+              "CFBundlePackageType": "APPL",
+              "LSBackgroundOnly": True,
+          }
+          if any(info.get(key) != value for key, value in expected.items()):
+              raise SystemExit("Packaged Cua Driver helper is not background-only.")
+          ' "${cua_helper}/Contents/Info.plist"
+            echo "Verifying nested Cua Driver helper signature: ${cua_helper}"
+            codesign --verify --strict --verbose=2 "${cua_helper}"
+            echo "Verifying nested Cua Driver code signature: ${cua_driver}"
+            codesign --verify --strict --verbose=2 "${cua_driver}"
+            codesign -d --entitlements - --xml "${cua_driver}" 2>/dev/null | python -c '
+          import plistlib
+          import sys
+
+          expected = {
+              "com.apple.security.automation.apple-events": True,
+              "com.apple.security.device.screen-capture": True,
+          }
+          actual = plistlib.loads(sys.stdin.buffer.read())
+          if actual != expected:
+              raise SystemExit(
+                  "Packaged Cua Driver entitlements must contain exactly "
+                  "Apple Events and Screen Capture."
+              )
+          '
+            echo "Verifying final packaged app code signature: ${app_path}"
+            codesign --verify --deep --strict --verbose=2 "${app_path}"
+            codesign -dv "${app_path}" 2>&1 | sed 's/^/codesign: /'
+          done
 
           package_scan_paths+=("${app_resource_dirs[@]}")
           python scripts/verify_release_artifacts.py --allow-binary --check-packaged-app "${package_scan_paths[@]}"
@@ -655,18 +862,30 @@ jobs:
           MACOS_SIGNING_MODE: ${{ steps.macos_signing.outputs.signing_mode }}
         run: |
           set -euo pipefail
-          SIGNING_MODE="${MACOS_SIGNING_MODE:-unsigned}"
+          EXPECTED_SIGNING_MODE="${MACOS_SIGNING_MODE:-unsigned}"
+          SIGNING_MODE="$(python -c 'import json; from pathlib import Path; print(json.loads(Path("release/macos-signing-inspection.json").read_text())["signing"])')"
+          SIGNATURE_KIND="$(python -c 'import json; from pathlib import Path; print(json.loads(Path("release/macos-signing-inspection.json").read_text())["signature_kind"])')"
+          if [[ "${SIGNING_MODE}" != "${EXPECTED_SIGNING_MODE}" ]]; then
+            echo "Final signing evidence does not match the configured packaging mode." >&2
+            exit 1
+          fi
           VERSION="$(python scripts/app_version.py current)"
           RELEASE_VERSION="${VERSION}"
+          ARCHITECTURE="$(node -p 'process.arch')"
+          if [[ "${ARCHITECTURE}" != "arm64" && "${ARCHITECTURE}" != "x64" ]]; then
+            echo "Unsupported macOS release architecture: ${ARCHITECTURE}" >&2
+            exit 1
+          fi
           BUILD_NUMBER="${GITHUB_RUN_NUMBER}"
           BUILD_LABEL="build.${BUILD_NUMBER}"
           SHORT_SHA="${GITHUB_SHA::7}"
-          STAMP="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
           if [[ "${SIGNING_MODE}" == "developer-id-app-notarized-dmg" ]]; then
             SIGNING_NOTE="本构建使用 Apple Developer ID Application 签名、Hardened Runtime、secure timestamp 和 Apple notarization，并已将公证票据 staple 到 DMG。"
           elif [[ "${SIGNING_MODE}" == "self-signed-app-unsigned-dmg" ]]; then
             SIGNING_NOTE="当前免费分发回退链路只自签名 .app，未使用 Apple Developer ID 签名或 notarization，DMG 保持未签名。首次启动仍会显示未知开发者 / Gatekeeper 提示；请在 Finder 中按住 Control 点击应用并选择“打开”，或在系统设置的“隐私与安全性”中允许打开。"
+          elif [[ "${SIGNATURE_KIND}" == "adhoc" ]]; then
+            SIGNING_NOTE="本构建的 .app 只有 macOS ad-hoc 签名，DMG 未签名；未使用 Apple Developer ID 或 notarization。首次启动会显示未知开发者 / Gatekeeper 提示；请在 Finder 中按住 Control 点击应用并选择“打开”，或在系统设置的“隐私与安全性”中允许打开。"
           else
             SIGNING_NOTE="本构建未配置 macOS 签名证书，DMG 与应用均为 unsigned；首次启动会显示未知开发者 / Gatekeeper 提示。"
           fi
@@ -697,8 +916,10 @@ jobs:
           TITLE="Oha-Yachiyo ${CHANNEL_LABEL} v${RELEASE_VERSION} #${BUILD_NUMBER} (${SHORT_SHA})"
           LATEST_TAG="${LATEST_BRANCH}-latest"
           LATEST_TITLE="Oha-Yachiyo ${CHANNEL_LABEL} latest"
-          VERSIONED_DMG="Oha-Yachiyo-${CHANNEL}-v${RELEASE_VERSION}-${BUILD_LABEL}-${SHORT_SHA}.dmg"
+          VERSIONED_DMG="Oha-Yachiyo-${CHANNEL}-v${RELEASE_VERSION}-${BUILD_LABEL}-${SHORT_SHA}-${ARCHITECTURE}.dmg"
           LATEST_DMG="Oha-Yachiyo-${LATEST_BRANCH}-latest.dmg"
+          VERSIONED_ZIP="Oha-Yachiyo-${CHANNEL}-v${RELEASE_VERSION}-${BUILD_LABEL}-${SHORT_SHA}-${ARCHITECTURE}.zip"
+          LATEST_ZIP="Oha-Yachiyo-${LATEST_BRANCH}-latest-${ARCHITECTURE}.zip"
           LATEST_JSON="Oha-Yachiyo-${LATEST_BRANCH}-latest.json"
 
           mkdir -p release
@@ -713,46 +934,46 @@ jobs:
             printf '  %s\n' "${dmg_files[@]}" >&2
             exit 1
           fi
-          cp "${dmg_files[0]}" "release/${VERSIONED_DMG}"
-          cp "${dmg_files[0]}" "release/${LATEST_DMG}"
-          VERSIONED_SHA256="$(shasum -a 256 "release/${VERSIONED_DMG}" | tee "release/${VERSIONED_DMG}.sha256" | awk '{print $1}')"
-          LATEST_SHA256="$(shasum -a 256 "release/${LATEST_DMG}" | tee "release/${LATEST_DMG}.sha256" | awk '{print $1}')"
-          python scripts/generate_release_changelog.py \
-            --channel "${CHANNEL}" \
-            --tag "${TAG}" \
-            --repository "${GITHUB_REPOSITORY}" \
-            --output-json release/changelog.json \
-            --output-markdown release/changelog.md
-          CHANGELOG_JSON="$(python - <<'PY'
-          import json
-          from pathlib import Path
-          print(json.dumps(json.loads(Path("release/changelog.json").read_text()), ensure_ascii=False, indent=12))
-          PY
-          )"
+          EXPECTED_SOURCE_DMG="Oha-Yachiyo-${RELEASE_VERSION}-${ARCHITECTURE}.dmg"
+          if [[ "$(basename "${dmg_files[0]}")" != "${EXPECTED_SOURCE_DMG}" ]]; then
+            echo "Electron DMG name does not match version/architecture: expected ${EXPECTED_SOURCE_DMG}." >&2
+            exit 1
+          fi
+          app_paths=()
+          while IFS= read -r -d '' app_path; do
+            app_paths+=("${app_path}")
+          done < <(find dist/electron -mindepth 2 -maxdepth 2 -name 'Oha-Yachiyo.app' -type d -print0)
+          if [[ "${#app_paths[@]}" -ne 1 ]]; then
+            echo "Expected exactly one unpacked Oha-Yachiyo.app for ZIP packaging; found ${#app_paths[@]}." >&2
+            exit 1
+          fi
+          APP_EXECUTABLE="${app_paths[0]}/Contents/MacOS/Oha-Yachiyo"
+          if [[ ! -x "${APP_EXECUTABLE}" ]]; then
+            echo "Packaged app executable is missing or not executable: ${APP_EXECUTABLE}" >&2
+            exit 1
+          fi
+          APP_ARCHITECTURES="$(lipo -archs "${APP_EXECUTABLE}")"
+          NORMALIZED_APP_ARCHITECTURE="$(python -c 'import sys; from scripts.release_integrity import normalize_macos_lipo_architecture; print(normalize_macos_lipo_architecture(sys.argv[1]))' "${APP_ARCHITECTURES}")"
+          if [[ "${NORMALIZED_APP_ARCHITECTURE}" != "${ARCHITECTURE}" ]]; then
+            echo "Packaged app architecture ${APP_ARCHITECTURES} (${NORMALIZED_APP_ARCHITECTURE}) does not match release architecture ${ARCHITECTURE}." >&2
+            exit 1
+          fi
 
-          cat > "release/${LATEST_JSON}" <<EOF
-          {
-            "name": "Oha-Yachiyo",
-            "channel": "${CHANNEL}",
-            "branch": "${LATEST_BRANCH}",
-            "source_branch": "${GITHUB_REF_NAME}",
-            "version": "${RELEASE_VERSION}",
-            "base_version": "${VERSION}",
-            "commit": "${GITHUB_SHA}",
-            "short_commit": "${SHORT_SHA}",
-            "build_number": ${BUILD_NUMBER},
-            "run_number": ${GITHUB_RUN_NUMBER},
-            "run_id": "${GITHUB_RUN_ID}",
-            "tag": "${TAG}",
-            "signing": "${SIGNING_MODE}",
-            "dmg_name": "${LATEST_DMG}",
-            "sha256": "${LATEST_SHA256}",
-            "download_url": "https://github.com/${GITHUB_REPOSITORY}/releases/download/${LATEST_TAG}/${LATEST_DMG}",
-            "latest_json_url": "https://github.com/${GITHUB_REPOSITORY}/releases/download/${LATEST_TAG}/${LATEST_JSON}",
-            "published_at": "${STAMP}",
-            "changelog": ${CHANGELOG_JSON}
-          }
-          EOF
+          python scripts/build_release_candidate_artifacts.py \
+            --stage-existing \
+            --dmg "${dmg_files[0]}" \
+            --app "${app_paths[0]}" \
+            --build-metadata apps/frontend/public/oha-yachiyo-build.json \
+            --signing-inspection-json release/macos-signing-inspection.json \
+            --architecture "${ARCHITECTURE}" \
+            --signing-mode "${SIGNING_MODE}"
+
+          cp "${dmg_files[0]}" "release/${VERSIONED_DMG}"
+          cp "release/${LATEST_ZIP}" "release/${VERSIONED_ZIP}"
+          VERSIONED_SHA256="$(shasum -a 256 "release/${VERSIONED_DMG}" | awk '{print $1}')"
+          VERSIONED_ZIP_SHA256="$(shasum -a 256 "release/${VERSIONED_ZIP}" | awk '{print $1}')"
+          printf '%s  %s\n' "${VERSIONED_SHA256}" "${VERSIONED_DMG}" > "release/${VERSIONED_DMG}.sha256"
+          printf '%s  %s\n' "${VERSIONED_ZIP_SHA256}" "${VERSIONED_ZIP}" > "release/${VERSIONED_ZIP}.sha256"
 
           cat > release/notes.md <<EOF
           Oha-Yachiyo ${CHANNEL_LABEL}
@@ -762,9 +983,11 @@ jobs:
           - Channel: ${CHANNEL}
           - Product version: ${VERSION}
           - Build: #${BUILD_NUMBER}
-          - Signing: ${SIGNING_MODE}
-          - Package: macOS DMG
+          - Architecture: ${ARCHITECTURE}
+          - Signing: ${SIGNING_MODE} (${SIGNATURE_KIND})
+          - Packages: macOS DMG and app ZIP
           - Latest channel download: https://github.com/${GITHUB_REPOSITORY}/releases/download/${LATEST_TAG}/${LATEST_DMG}
+          - Latest channel app ZIP: https://github.com/${GITHUB_REPOSITORY}/releases/download/${LATEST_TAG}/${LATEST_ZIP}
 
           $(cat release/changelog.md)
 
@@ -785,8 +1008,10 @@ jobs:
           - Channel: ${CHANNEL}
           - Product version: ${VERSION}
           - Build: #${BUILD_NUMBER}
-          - Signing: ${SIGNING_MODE}
+          - Architecture: ${ARCHITECTURE}
+          - Signing: ${SIGNING_MODE} (${SIGNATURE_KIND})
           - DMG: https://github.com/${GITHUB_REPOSITORY}/releases/download/${LATEST_TAG}/${LATEST_DMG}
+          - App ZIP: https://github.com/${GITHUB_REPOSITORY}/releases/download/${LATEST_TAG}/${LATEST_ZIP}
 
           $(cat release/changelog.md)
 
@@ -802,12 +1027,15 @@ jobs:
           echo "latest_title=${LATEST_TITLE}" >> "$GITHUB_OUTPUT"
           echo "versioned_dmg=${VERSIONED_DMG}" >> "$GITHUB_OUTPUT"
           echo "latest_dmg=${LATEST_DMG}" >> "$GITHUB_OUTPUT"
+          echo "versioned_zip=${VERSIONED_ZIP}" >> "$GITHUB_OUTPUT"
+          echo "latest_zip=${LATEST_ZIP}" >> "$GITHUB_OUTPUT"
           echo "latest_json=${LATEST_JSON}" >> "$GITHUB_OUTPUT"
 
       - name: Verify packaged release artifacts
         run: python scripts/verify_release_artifacts.py --allow-binary release
 
       - name: Verify release candidate artifacts
+        id: release_smoke
         shell: bash
         env:
           OHA_YACHIYO_SMOKE_BASE_URL: ${{ secrets.OHA_YACHIYO_SMOKE_BASE_URL }}
@@ -824,32 +1052,36 @@ jobs:
             provider_smoke_args+=(--run-provider-smoke)
           fi
           python scripts/verify_release_candidate.py --write-manual-checks-template release/manual-rc-checks.template.json
-          python scripts/verify_release_candidate.py --require-artifacts --check-dmg-mount --check-gatekeeper-readiness --run-packaged-backend-bridge-smoke --run-dmg-app-smoke "${provider_smoke_args[@]}" "${provider_smoke_status_args[@]}" --report-json release/rc-verification.json
+          python scripts/verify_release_candidate.py --require-artifacts --check-dmg-mount --check-gatekeeper-readiness --run-packaged-backend-bridge-smoke --run-dmg-app-smoke --run-dmg-chat-native-file-smoke --run-electron-native-bridge-smoke "${provider_smoke_args[@]}" "${provider_smoke_status_args[@]}" --report-json release/rc-verification.json
           release_smoke_status=0
           python scripts/summarize_release_smoke.py \
             release/rc-verification.json \
             release/public-release-gate/oha-desktop-agent-release-smoke.json \
             release/public-release-gate/public-demo.json \
+            release/electron-ui-smoke.json \
             release/virtual-desktop-provider-smoke.json \
             --diagnostics-zip release/public-release-gate/diagnostics.zip \
             --output-json release/release-smoke.json \
             --output-markdown release/release-smoke.md || release_smoke_status=$?
           if [[ ! -s release/release-smoke.json ]]; then
             echo "Release smoke summary did not produce release/release-smoke.json."
-            exit 1
+            release_smoke_status=1
           fi
           if [[ "${release_smoke_status}" -ne 0 ]]; then
             echo "Release smoke evidence is incomplete; see release/release-smoke.json."
           fi
+          echo "release_smoke_status=${release_smoke_status}" >> "$GITHUB_OUTPUT"
           python scripts/verify_release_candidate.py --manual-checks-json release/rc-verification.json --manual-checks-json release/electron-ui-smoke.json --write-manual-checks-draft release/manual-rc-checks.draft.json "${provider_smoke_status_args[@]}"
           python scripts/verify_release_candidate.py --manual-checks-json release/manual-rc-checks.draft.json --write-manual-checks-markdown release/manual-rc-checks.md "${provider_smoke_status_args[@]}"
 
       - name: Upload DMG artifact
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: oha-yachiyo-${{ steps.meta.outputs.tag }}
           path: |
             release/*.dmg
+            release/*.zip
             release/*.sha256
             release/*.json
             release/*.md
@@ -857,7 +1089,24 @@ jobs:
             release/public-release-gate/*.md
             release/public-release-gate/*.zip
 
+      - name: Enforce release smoke readiness
+        if: always() && (github.event_name == 'push' || inputs.publish_release == true)
+        shell: bash
+        env:
+          RELEASE_SMOKE_STATUS: ${{ steps.release_smoke.outputs.release_smoke_status }}
+        run: |
+          set -euo pipefail
+          if [[ ! "${RELEASE_SMOKE_STATUS}" =~ ^[0-9]+$ ]]; then
+            echo "Release smoke readiness status is missing or invalid; inspect the uploaded release evidence." >&2
+            exit 1
+          fi
+          if [[ "${RELEASE_SMOKE_STATUS}" -ne 0 ]]; then
+            echo "Release smoke evidence is incomplete; publication is blocked." >&2
+            exit 1
+          fi
+
       - name: Create or update versioned GitHub release
+        if: success() && (github.event_name == 'push' || inputs.publish_release == true)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
@@ -868,11 +1117,15 @@ jobs:
           PRERELEASE="${{ steps.meta.outputs.prerelease }}"
           VERSIONED_DMG="${{ steps.meta.outputs.versioned_dmg }}"
           LATEST_DMG="${{ steps.meta.outputs.latest_dmg }}"
+          VERSIONED_ZIP="${{ steps.meta.outputs.versioned_zip }}"
+          LATEST_ZIP="${{ steps.meta.outputs.latest_zip }}"
           LATEST_JSON="${{ steps.meta.outputs.latest_json }}"
           extra_flags=()
           release_assets=(
             "release/${VERSIONED_DMG}"
             "release/${VERSIONED_DMG}.sha256"
+            "release/${VERSIONED_ZIP}"
+            "release/${VERSIONED_ZIP}.sha256"
           )
           if [[ "${PRERELEASE}" == "true" ]]; then
             extra_flags+=(--prerelease --latest=false)
@@ -881,6 +1134,8 @@ jobs:
             release_assets+=(
               "release/${LATEST_DMG}"
               "release/${LATEST_DMG}.sha256"
+              "release/${LATEST_ZIP}"
+              "release/${LATEST_ZIP}.sha256"
               "release/${LATEST_JSON}"
             )
           fi
@@ -904,6 +1159,7 @@ jobs:
           fi
 
       - name: Create or update latest channel release
+        if: success() && (github.event_name == 'push' || inputs.publish_release == true)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
@@ -913,11 +1169,14 @@ jobs:
           LATEST_TITLE="${{ steps.meta.outputs.latest_title }}"
           PRERELEASE="${{ steps.meta.outputs.prerelease }}"
           LATEST_DMG="${{ steps.meta.outputs.latest_dmg }}"
+          LATEST_ZIP="${{ steps.meta.outputs.latest_zip }}"
           LATEST_JSON="${{ steps.meta.outputs.latest_json }}"
           latest_flags=(--latest=false)
           latest_assets=(
             "release/${LATEST_DMG}"
             "release/${LATEST_DMG}.sha256"
+            "release/${LATEST_ZIP}"
+            "release/${LATEST_ZIP}.sha256"
             "release/${LATEST_JSON}"
           )
           if [[ "${PRERELEASE}" == "true" ]]; then

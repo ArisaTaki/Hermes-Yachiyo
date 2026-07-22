@@ -28,11 +28,14 @@ def call_model_profile_chat_message(
     messages: list[dict[str, Any]],
     *,
     tools: list[dict[str, Any]] | None = None,
+    tool_choice: str | dict[str, Any] | None = None,
     stream: bool = False,
 ) -> Any:
     kwargs: dict[str, Any] = {}
     if tools is not None:
         kwargs["tools"] = tools
+    if tool_choice is not None and callable_accepts_keyword(chat_message, "tool_choice"):
+        kwargs["tool_choice"] = tool_choice
     if stream and callable_accepts_keyword(chat_message, "stream"):
         kwargs["stream"] = True
     return chat_message(base_url, model, api_key, messages, **kwargs)
@@ -52,6 +55,7 @@ class RuntimeModelProfileChatAdapter:
         messages: list[dict[str, Any]],
         *,
         tools: list[dict[str, Any]] | None = None,
+        tool_choice: str | dict[str, Any] | None = None,
         stream: bool = False,
     ) -> Any:
         return call_model_profile_chat_message(
@@ -61,6 +65,7 @@ class RuntimeModelProfileChatAdapter:
             api_key,
             messages,
             tools=tools,
+            tool_choice=tool_choice,
             stream=stream,
         )
 

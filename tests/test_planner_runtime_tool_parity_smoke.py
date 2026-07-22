@@ -25,6 +25,12 @@ def test_planner_runtime_tool_parity_covers_runtime_executable_tools():
     assert case_by_id["app_scoped_ui_click"]["approval_required_tools"] == [
         "app.focus_and_click_ui_element"
     ]
+    assert case_by_id["app_issue_create"]["request_tools"] == [
+        "desktop.list_apps",
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.ui_elements",
+    ]
     assert case_by_id["builtin_data_analysis"]["request_tools"] == ["data.analyze"]
     assert case_by_id["visible_table_analysis"]["plan_tools"] == [
         "desktop.ui_elements",

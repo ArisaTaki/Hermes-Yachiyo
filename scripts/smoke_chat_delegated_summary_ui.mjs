@@ -11,6 +11,7 @@ const FRONTEND = path.join(ROOT, 'apps', 'frontend');
 const ELECTRON = path.join(FRONTEND, 'node_modules', '.bin', process.platform === 'win32' ? 'electron.cmd' : 'electron');
 const VITE = path.join(FRONTEND, 'node_modules', '.bin', process.platform === 'win32' ? 'vite.cmd' : 'vite');
 const SESSION_ID = 'chat_delegated_summary_ui_smoke_session';
+const SECOND_SESSION_ID = 'chat_delegated_summary_ui_smoke_second_session';
 const SOURCE_TASK_ID = 'task-chat-delegated-summary-source-ui-smoke';
 const SUMMARY_TASK_ID = 'task-chat-delegated-summary-ui-smoke';
 const DELEGATED_RUN_ID = 'agent_run_chat_delegated_summary_ui_smoke';
@@ -28,6 +29,8 @@ const REJECTED_SUMMARY_RESULT = 'Delegated summary UI smoke rejected summary.';
 const now = new Date().toISOString();
 
 const bridgeState = {
+  currentSessionId: SESSION_ID,
+  delayNextSummary: false,
   delegatedStatus: 'approval_required',
   approveCalls: 0,
   rejectCalls: 0,
@@ -35,6 +38,7 @@ const bridgeState = {
   summaryVisible: false,
   summaryStatus: '',
   summaryPayload: null,
+  summaryRequestStarted: false,
   summaryRequests: [],
 };
 
@@ -334,6 +338,19 @@ function chatMessages() {
 }
 
 function messagesPayload() {
+  const currentSessionId = bridgeState.currentSessionId;
+  if (currentSessionId !== SESSION_ID) {
+    return {
+      ok: true,
+      session_id: currentSessionId,
+      messages: [],
+      session_context: { conversation_kind: 'main' },
+      is_processing: false,
+      processing_count: 0,
+      approval_count: 0,
+      token_count: 0,
+    };
+  }
   const pending = bridgeState.delegatedStatus === 'approval_required';
   return {
     ok: true,
@@ -351,7 +368,7 @@ function sessionsPayload() {
   const pending = bridgeState.delegatedStatus === 'approval_required';
   return {
     ok: true,
-    current_session_id: SESSION_ID,
+    current_session_id: bridgeState.currentSessionId,
     sessions: [
       {
         session_id: SESSION_ID,
@@ -369,6 +386,18 @@ function sessionsPayload() {
               ? REJECTED_RESULT
               : DELEGATED_RESULT,
         latest_message_status: pending ? 'processing' : 'completed',
+        updated_at: now,
+      },
+      {
+        session_id: SECOND_SESSION_ID,
+        title: 'Second delegated summary smoke conversation',
+        conversation_kind: 'main',
+        message_count: 0,
+        token_count: 0,
+        is_processing: false,
+        processing_count: 0,
+        latest_message_preview: '',
+        latest_message_status: 'completed',
         updated_at: now,
       },
     ],
@@ -533,12 +562,15 @@ async function startMockBridge() {
       }
       if (request.method === 'GET' && url.pathname === '/__smoke/state') {
         sendJson(response, 200, {
+          currentSessionId: bridgeState.currentSessionId,
+          delayNextSummary: bridgeState.delayNextSummary,
           delegatedStatus: bridgeState.delegatedStatus,
           approveCalls: bridgeState.approveCalls,
           rejectCalls: bridgeState.rejectCalls,
           summaryCalls: bridgeState.summaryCalls,
           summaryVisible: bridgeState.summaryVisible,
           summaryStatus: bridgeState.summaryStatus,
+          summaryRequestStarted: bridgeState.summaryRequestStarted,
           summaryRequests: bridgeState.summaryRequests,
         });
         return;
@@ -559,9 +591,14 @@ async function startMockBridge() {
         const body = await readRequestJson(request);
         bridgeState.summaryPayload = body;
         bridgeState.summaryStatus = bridgeState.delegatedStatus;
-        bridgeState.summaryVisible = true;
         bridgeState.summaryCalls += 1;
+        bridgeState.summaryRequestStarted = true;
         bridgeState.summaryRequests.push({ body, status: bridgeState.delegatedStatus });
+        if (bridgeState.delayNextSummary) {
+          bridgeState.delayNextSummary = false;
+          await new Promise((resolve) => setTimeout(resolve, 800));
+        }
+        bridgeState.summaryVisible = true;
         sendJson(response, 200, {
           ok: true,
           summary_created: true,
@@ -575,11 +612,26 @@ async function startMockBridge() {
         return;
       }
       if (request.method === 'POST' && url.pathname === '/__smoke/reset-delegated-approval') {
+        bridgeState.currentSessionId = SESSION_ID;
         bridgeState.delegatedStatus = 'approval_required';
+        bridgeState.delayNextSummary = false;
         bridgeState.summaryVisible = false;
         bridgeState.summaryStatus = '';
         bridgeState.summaryPayload = null;
+        bridgeState.summaryRequestStarted = false;
         sendJson(response, 200, { ok: true });
+        return;
+      }
+      if (request.method === 'POST' && url.pathname === '/__smoke/delay-next-summary') {
+        bridgeState.delayNextSummary = true;
+        bridgeState.summaryRequestStarted = false;
+        sendJson(response, 200, { ok: true });
+        return;
+      }
+      if (request.method === 'POST' && url.pathname === '/ui/chat/sessions/load') {
+        const body = await readRequestJson(request);
+        bridgeState.currentSessionId = String(body.session_id || bridgeState.currentSessionId);
+        sendJson(response, 200, { ok: true, session_id: bridgeState.currentSessionId });
         return;
       }
       sendJson(response, 404, { ok: false, error: `not found: ${request.method} ${url.pathname}` });
@@ -669,6 +721,9 @@ function requestBridgeJson(pathname, method = 'GET') {
 function postBridgeReset() {
   return requestBridgeJson('/__smoke/reset-delegated-approval', 'POST');
 }
+function delayNextSummary() {
+  return requestBridgeJson('/__smoke/delay-next-summary', 'POST');
+}
 function waitForBridgeState(predicate, label, timeout = 18000) {
   const started = Date.now();
   return new Promise((resolve, reject) => {
@@ -749,23 +804,26 @@ async function waitForActivityApproval(win) {
   await waitFor(win, () => {
     const notice = document.querySelector('[data-testid="chat-composer-approval-notice"]');
     const openRun = document.querySelector('[data-testid="chat-composer-approval-open-run-detail"]');
-    const approve = document.querySelector('[data-testid="chat-composer-approval-approve"]');
-    const reject = document.querySelector('[data-testid="chat-composer-approval-reject"]');
-    const row = document.querySelector('[data-testid="chat-message-activity-row"]');
+    const canonicalHint = document.querySelector('[data-testid="chat-composer-approval-canonical-hint"]');
+    const messageCard = document.querySelector('[data-testid="chat-message-approval-card"]');
+    const messageActions = document.querySelector('[data-testid="chat-message-approval-actions"]');
+    const approve = document.querySelector('[data-testid="chat-message-approval-approve"]');
+    const reject = document.querySelector('[data-testid="chat-message-approval-reject"]');
     return notice?.getAttribute('data-approval-source') === 'activity'
       && notice?.getAttribute('data-run-id') === ${JSON.stringify(DELEGATED_RUN_ID)}
       && notice?.getAttribute('data-approval-id') === ${JSON.stringify(APPROVAL_ID)}
       && notice?.getAttribute('data-approval-tool') === 'terminal.run'
       && notice.textContent.includes(${JSON.stringify(APPROVAL_COMMAND)})
-      && row?.getAttribute('data-activity-status') === 'approval_required'
-      && row?.getAttribute('data-run-id') === ${JSON.stringify(DELEGATED_RUN_ID)}
-      && row?.getAttribute('data-run-status') === 'approval_required'
-      && row.textContent.includes('Coding Agent')
+      && canonicalHint?.textContent.includes('任务卡或消息')
+      && messageCard?.getAttribute('data-approval-id') === ${JSON.stringify(APPROVAL_ID)}
+      && messageActions?.getAttribute('data-approval-id') === ${JSON.stringify(APPROVAL_ID)}
       && openRun?.getAttribute('data-run-id') === ${JSON.stringify(DELEGATED_RUN_ID)}
       && openRun?.getAttribute('data-run-status') === 'approval_required'
       && openRun.textContent.includes('Agent Studio')
       && approve
-      && reject;
+      && reject
+      && !document.querySelector('[data-testid="chat-composer-approval-approve"]')
+      && !document.querySelector('[data-testid="chat-composer-approval-reject"]');
   }, 'activity approval composer notice');
 }
 async function waitForApprovalRunDetail(win) {
@@ -789,74 +847,6 @@ async function waitForApprovalRunDetail(win) {
       && request?.textContent.includes(${JSON.stringify(APPROVAL_COMMAND)});
   }, 'delegated approval Run Detail handoff');
 }
-async function waitForCompletedRunDetail(win) {
-  await waitFor(win, () => {
-    const detail = document.querySelector('[data-testid="agent-run-detail"]');
-    const result = document.querySelector('[data-testid="agent-run-detail-result"]');
-    const events = Array.from(document.querySelectorAll('[data-testid="agent-run-detail-execution-event"]'));
-    const eventTypes = events.map((node) => node.getAttribute('data-run-event'));
-    const outputEvent = events.find((node) => node.getAttribute('data-run-event') === 'model.output.completed');
-    const completedEvent = events.find((node) => node.getAttribute('data-run-event') === 'agent.run.completed');
-    return window.location.hash.includes(${JSON.stringify(DELEGATED_RUN_ID)})
-      && detail?.getAttribute('data-run-id') === ${JSON.stringify(DELEGATED_RUN_ID)}
-      && detail?.getAttribute('data-run-kind') === 'agent_run'
-      && detail?.getAttribute('data-run-status') === 'completed'
-      && detail?.getAttribute('data-run-group-id') === ${JSON.stringify(RUN_GROUP_ID)}
-      && detail?.getAttribute('data-task-id') === ${JSON.stringify(SOURCE_TASK_ID)}
-      && detail?.getAttribute('data-session-id') === ${JSON.stringify(SESSION_ID)}
-      && result?.textContent.includes(${JSON.stringify(DELEGATED_RESULT)})
-      && eventTypes.includes('agent.tool.approval_required')
-      && eventTypes.includes('agent.tool.approval_approved')
-      && eventTypes.includes('model.output.completed')
-      && eventTypes.includes('agent.run.completed')
-      && outputEvent?.textContent.includes(${JSON.stringify(DELEGATED_RESULT)})
-      && completedEvent?.textContent.includes(${JSON.stringify(DELEGATED_RESULT)})
-      && events.every((node) => node.getAttribute('data-run-event-run-id') === ${JSON.stringify(DELEGATED_RUN_ID)});
-  }, 'delegated completed Run Detail replay');
-}
-async function waitForSummaryRunDetail(win) {
-  await waitFor(win, () => {
-    const detail = document.querySelector('[data-testid="agent-run-detail"]');
-    const result = document.querySelector('[data-testid="agent-run-detail-result"]');
-    const events = Array.from(document.querySelectorAll('[data-testid="agent-run-detail-execution-event"]'));
-    const eventTypes = events.map((node) => node.getAttribute('data-run-event'));
-    const outputEvent = events.find((node) => node.getAttribute('data-run-event') === 'model.output.completed');
-    const completedEvent = events.find((node) => node.getAttribute('data-run-event') === 'run.completed');
-    return window.location.hash.includes(${JSON.stringify(SUMMARY_RUN_ID)})
-      && detail?.getAttribute('data-run-id') === ${JSON.stringify(SUMMARY_RUN_ID)}
-      && detail?.getAttribute('data-run-kind') === 'main_chat_run'
-      && detail?.getAttribute('data-run-status') === 'completed'
-      && detail?.getAttribute('data-run-group-id') === ${JSON.stringify(RUN_GROUP_ID)}
-      && detail?.getAttribute('data-task-id') === ${JSON.stringify(SUMMARY_TASK_ID)}
-      && detail?.getAttribute('data-session-id') === ${JSON.stringify(SESSION_ID)}
-      && result?.textContent.includes(${JSON.stringify(SUMMARY_RESULT)})
-      && eventTypes.includes('model.output.completed')
-      && eventTypes.includes('run.completed')
-      && outputEvent?.textContent.includes(${JSON.stringify(SUMMARY_RESULT)})
-      && completedEvent?.textContent.includes(${JSON.stringify(SUMMARY_RESULT)})
-      && events.every((node) => node.getAttribute('data-run-event-run-id') === ${JSON.stringify(SUMMARY_RUN_ID)});
-  }, 'delegated summary Run Detail replay');
-}
-async function waitForCancelledRunDetail(win) {
-  await waitFor(win, () => {
-    const detail = document.querySelector('[data-testid="agent-run-detail"]');
-    const result = document.querySelector('[data-testid="agent-run-detail-result"]');
-    const events = Array.from(document.querySelectorAll('[data-testid="agent-run-detail-execution-event"]'));
-    const eventTypes = events.map((node) => node.getAttribute('data-run-event'));
-    return window.location.hash.includes(${JSON.stringify(DELEGATED_RUN_ID)})
-      && detail?.getAttribute('data-run-id') === ${JSON.stringify(DELEGATED_RUN_ID)}
-      && detail?.getAttribute('data-run-kind') === 'agent_run'
-      && detail?.getAttribute('data-run-status') === 'cancelled'
-      && detail?.getAttribute('data-run-group-id') === ${JSON.stringify(RUN_GROUP_ID)}
-      && detail?.getAttribute('data-task-id') === ${JSON.stringify(SOURCE_TASK_ID)}
-      && detail?.getAttribute('data-session-id') === ${JSON.stringify(SESSION_ID)}
-      && result?.textContent.includes(${JSON.stringify(REJECTED_RESULT)})
-      && eventTypes.includes('agent.tool.approval_required')
-      && eventTypes.includes('agent.tool.approval_rejected')
-      && eventTypes.includes('agent.run.cancelled')
-      && events.every((node) => node.getAttribute('data-run-event-run-id') === ${JSON.stringify(DELEGATED_RUN_ID)});
-  }, 'delegated cancelled Run Detail replay');
-}
 async function main() {
   await app.whenReady();
   console.log('[electron-smoke] app ready');
@@ -877,7 +867,7 @@ async function main() {
   await loadChat(win);
   console.log('[electron-smoke] chat loaded');
   await waitForActivityApproval(win);
-  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"chat-composer-approval-reject\\"]').click()", true);
+  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"chat-message-approval-reject\\"]').click()", true);
   await waitForBridgeState((state) => (
     state.rejectCalls === 1
     && state.summaryRequests?.some((request) => request.status === 'cancelled')
@@ -886,24 +876,12 @@ async function main() {
   await waitFor(win, () => {
     const summary = document.querySelector('[data-message-id="assistant-chat-delegated-summary-ui-smoke-summary"]');
     const notice = document.querySelector('[data-testid="chat-composer-approval-notice"]');
-    const row = document.querySelector('[data-testid="chat-message-activity-row"]');
-    const openRun = document.querySelector('[data-testid="chat-message-activity-open-run-detail"]');
     return summary?.textContent.includes(${JSON.stringify(REJECTED_SUMMARY_RESULT)})
       && !summary.textContent.includes('run_oha_agent')
       && !document.body.textContent.includes('<oha_delegation>')
-      && !notice
-      && row?.getAttribute('data-activity-status') === 'cancelled'
-      && row?.getAttribute('data-run-id') === ${JSON.stringify(DELEGATED_RUN_ID)}
-      && row?.getAttribute('data-run-status') === 'cancelled'
-      && row.textContent.includes(${JSON.stringify(REJECTED_RESULT)})
-      && openRun?.getAttribute('data-run-id') === ${JSON.stringify(DELEGATED_RUN_ID)}
-      && openRun?.getAttribute('data-run-status') === 'cancelled'
-      && openRun.textContent.includes('Agent Studio');
+      && !notice;
   }, 'delegated reject summary created in Chat');
   console.log('[electron-smoke] delegated reject summary rendered');
-  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"chat-message-activity-open-run-detail\\"]').click()", true);
-  await waitForCancelledRunDetail(win);
-  console.log('[electron-smoke] delegated cancelled Run Detail replay verified');
   await postBridgeReset();
   await loadChat(win);
   await waitForActivityApproval(win);
@@ -911,7 +889,7 @@ async function main() {
   await waitForApprovalRunDetail(win);
   await loadChat(win);
   await waitForActivityApproval(win);
-  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"chat-composer-approval-approve\\"]').click()", true);
+  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"chat-message-approval-approve\\"]').click()", true);
   await waitForBridgeState((state) => (
     state.approveCalls === 1
     && state.summaryRequests?.some((request) => request.status === 'completed')
@@ -919,18 +897,10 @@ async function main() {
   await waitFor(win, () => {
     const summary = document.querySelector('[data-message-id="assistant-chat-delegated-summary-ui-smoke-summary"]');
     const notice = document.querySelector('[data-testid="chat-composer-approval-notice"]');
-    const row = document.querySelector('[data-testid="chat-message-activity-row"]');
-    const openSummary = summary?.querySelector('[data-testid="chat-message-open-run-detail"]');
-    const openRun = document.querySelector('[data-testid="chat-message-activity-open-run-detail"]');
     return summary?.textContent.includes(${JSON.stringify(SUMMARY_RESULT)})
       && !summary.textContent.includes('run_oha_agent')
       && !document.body.textContent.includes('<oha_delegation>')
-      && !notice
-      && row?.getAttribute('data-activity-status') === 'completed'
-      && row.textContent.includes(${JSON.stringify(DELEGATED_RESULT)})
-      && openSummary
-      && openRun
-      && openRun.textContent.includes('Agent Studio');
+      && !notice;
   }, 'delegated summary created in Chat');
   console.log('[electron-smoke] delegated summary rendered');
   await loadChat(win, {
@@ -941,30 +911,50 @@ async function main() {
   await waitFor(win, () => {
     const summary = document.querySelector('[data-message-id="assistant-chat-delegated-summary-ui-smoke-summary"]');
     return summary?.className.includes('search-highlighted')
-      && summary.textContent.includes(${JSON.stringify(SUMMARY_RESULT)})
-      && document.body.textContent.includes(${JSON.stringify(DELEGATED_RESULT)});
+      && summary.textContent.includes(${JSON.stringify(SUMMARY_RESULT)});
   }, 'launcher task handoff highlights delegated summary message');
   console.log('[electron-smoke] launcher task handoff highlighted delegated summary');
-  await win.webContents.executeJavaScript("document.querySelector('[data-message-id=\\"assistant-chat-delegated-summary-ui-smoke-summary\\"] [data-testid=\\"chat-message-open-run-detail\\"]').click()", true);
-  await waitForSummaryRunDetail(win);
-  console.log('[electron-smoke] delegated summary Run Detail replay verified');
   await loadChat(win);
   await waitFor(win, () => {
     const summary = document.querySelector('[data-message-id="assistant-chat-delegated-summary-ui-smoke-summary"]');
-    const row = document.querySelector('[data-testid="chat-message-activity-row"]');
-    const openRun = document.querySelector('[data-testid="chat-message-activity-open-run-detail"]');
-    return summary?.textContent.includes(${JSON.stringify(SUMMARY_RESULT)})
-      && row?.getAttribute('data-activity-status') === 'completed'
-      && row?.getAttribute('data-run-id') === ${JSON.stringify(DELEGATED_RUN_ID)}
-      && row?.getAttribute('data-run-status') === 'completed'
-      && row.textContent.includes(${JSON.stringify(DELEGATED_RESULT)})
-      && openRun?.getAttribute('data-run-id') === ${JSON.stringify(DELEGATED_RUN_ID)}
-      && openRun?.getAttribute('data-run-status') === 'completed'
-      && openRun.textContent.includes('Agent Studio');
+    return summary?.textContent.includes(${JSON.stringify(SUMMARY_RESULT)});
   }, 'delegated summary chat restored after Run Detail');
-  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"chat-message-activity-open-run-detail\\"]').click()", true);
-  await waitForCompletedRunDetail(win);
-  console.log('[electron-smoke] delegated Run Detail replay verified');
+  await postBridgeReset();
+  await delayNextSummary();
+  await loadChat(win);
+  await waitForActivityApproval(win);
+  await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"chat-message-approval-reject\\"]').click()", true);
+  await waitForBridgeState((state) => state.summaryRequestStarted === true, 'delayed delegated summary POST started');
+  await win.webContents.executeJavaScript(
+    ${JSON.stringify(`window.location.hash = '#/chat?session_id=${encodeURIComponent(SECOND_SESSION_ID)}'`)},
+    true
+  );
+  await waitForBridgeState(
+    (state) => state.currentSessionId === ${JSON.stringify(SECOND_SESSION_ID)},
+    'switch to second conversation'
+  );
+  await waitForBridgeState(
+    (state) => state.summaryCalls === 3 && state.summaryVisible === true,
+    'delayed delegated summary settled'
+  );
+  await waitFor(win, () => document.querySelectorAll('.chat-messages [data-message-id]').length === 0, 'second conversation stays empty');
+  const switchedConversation = await win.webContents.executeJavaScript(
+    "({" +
+      "messageCount: document.querySelectorAll('.chat-messages [data-message-id]').length," +
+      "status: document.querySelector('.chat-header-status')?.textContent || ''" +
+    "})",
+    true
+  );
+  const delayedState = await requestBridgeJson('/__smoke/state');
+  const delayedRequest = delayedState.summaryRequests?.[2];
+  if (
+    delayedRequest?.body?.conversation_id !== ${JSON.stringify(SESSION_ID)}
+    || switchedConversation.messageCount !== 0
+    || switchedConversation.status.includes('整理')
+  ) {
+    throw new Error('delegated summary crossed conversation boundary: ' + JSON.stringify({ delayedRequest, switchedConversation }));
+  }
+  console.log('[electron-smoke] delegated summary remains anchored after switching conversations');
   clearTimeout(watchdog);
   await win.close();
   app.quit();
@@ -1007,18 +997,21 @@ function assertMockBridgeContract() {
   if (bridgeState.approveCalls !== 1) {
     throw new Error(`expected one delegated approval approve call, saw ${bridgeState.approveCalls}`);
   }
-  if (bridgeState.rejectCalls !== 1) {
-    throw new Error(`expected one delegated approval reject call, saw ${bridgeState.rejectCalls}`);
+  if (bridgeState.rejectCalls !== 2) {
+    throw new Error(`expected two delegated approval reject calls, saw ${bridgeState.rejectCalls}`);
   }
-  if (bridgeState.summaryCalls !== 2) {
-    throw new Error(`expected two delegated summary calls, saw ${bridgeState.summaryCalls}`);
+  if (bridgeState.summaryCalls !== 3) {
+    throw new Error(`expected three delegated summary calls, saw ${bridgeState.summaryCalls}`);
   }
   if (bridgeState.summaryRequests.some((request) => request.body?.run_id !== DELEGATED_RUN_ID)) {
     throw new Error(`unexpected delegated summary payloads: ${JSON.stringify(bridgeState.summaryRequests)}`);
   }
+  if (bridgeState.summaryRequests.some((request) => request.body?.conversation_id !== SESSION_ID)) {
+    throw new Error(`delegated summaries were not anchored to their source conversation: ${JSON.stringify(bridgeState.summaryRequests)}`);
+  }
   const summaryStatuses = bridgeState.summaryRequests.map((request) => request.status).join(',');
-  if (summaryStatuses !== 'cancelled,completed') {
-    throw new Error(`expected cancelled then completed delegated summaries, saw ${summaryStatuses}`);
+  if (summaryStatuses !== 'cancelled,completed,cancelled') {
+    throw new Error(`expected cancelled, completed, then cancelled delegated summaries, saw ${summaryStatuses}`);
   }
 }
 

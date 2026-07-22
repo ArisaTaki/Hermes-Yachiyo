@@ -257,7 +257,7 @@ Live2D 是角色桌面入口：
 
 为了避免仓库过大，Live2D 模型不直接放进主仓库。资源包从 GitHub Releases 下载：
 
-<https://github.com/kuguya-AI-app-develop/oha-yachiyo/releases>
+<https://github.com/kuguya-AI-app-develop/Hermes-Yachiyo/releases>
 
 推荐目录：
 
@@ -293,7 +293,7 @@ unzip oha-yachiyo-live2d-yachiyo-20260423.zip -d ~/.oha-yachiyo/assets/live2d/
 
 主动关怀 TTS 的八千代 GPT-SoVITS 音色包也是可选资源，并且和应用 DMG 分开发布。应用 release 只包含程序本体；音色包放在独立资源 release 中：
 
-<https://github.com/kuguya-AI-app-develop/oha-yachiyo/releases/tag/tts-assets-yachiyo-gpt-sovits-v4>
+<https://github.com/kuguya-AI-app-develop/Hermes-Yachiyo/releases/tag/tts-assets-yachiyo-gpt-sovits-v4>
 
 下载 `Oha-Yachiyo-yachiyo-gpt-sovits-v4.zip` 后，在主控台打开“主动关怀语音”，选择 `GPT-SoVITS 本地服务`，再点击“导入音色包 ZIP”。
 

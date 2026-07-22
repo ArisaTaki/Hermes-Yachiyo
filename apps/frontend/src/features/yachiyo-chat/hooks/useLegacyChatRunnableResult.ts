@@ -3,15 +3,16 @@ import { useCallback } from 'react';
 import { legacyChatRunnableResult, type LegacyChatMessageResult } from '../api';
 import { chatRunnableRunningStatusText, chatRunnableSettledStatusText } from '../taskStatusText';
 import { yachiyoTaskRunId } from '../taskSnapshots';
-import type { AgentTaskSnapshot } from '../types';
+import type { AgentTaskSnapshot, ConversationIdentity } from '../types';
 
 type UseLegacyChatRunnableResultOptions = {
   clearPendingReplyTask: () => void;
   expectPendingAssistantReply: (taskId: string) => void;
+  isConversationCurrent: (identity: ConversationIdentity) => boolean;
   loadSessions: () => Promise<void>;
   onRunning: () => void;
   onSettled: () => void;
-  pollAgentRunInBackground: (runId: string) => void;
+  pollAgentRunInBackground: (runId: string, options: { identity: ConversationIdentity }) => void;
   refreshMessages: () => Promise<unknown>;
   refreshYachiyoTaskById: (taskId: string) => unknown;
   rememberYachiyoTasks: (tasks: Array<AgentTaskSnapshot | null | undefined>) => void;
@@ -19,12 +20,14 @@ type UseLegacyChatRunnableResultOptions = {
 };
 
 type HandleLegacyChatRunnableResultOptions = {
+  identity: ConversationIdentity;
   refreshTaskSnapshot?: boolean;
 };
 
 export function useLegacyChatRunnableResult({
   clearPendingReplyTask,
   expectPendingAssistantReply,
+  isConversationCurrent,
   loadSessions,
   onRunning,
   onSettled,
@@ -36,8 +39,9 @@ export function useLegacyChatRunnableResult({
 }: UseLegacyChatRunnableResultOptions) {
   const handleLegacyChatRunnableResult = useCallback(async (
     result: LegacyChatMessageResult,
-    options: HandleLegacyChatRunnableResultOptions = {},
+    options: HandleLegacyChatRunnableResultOptions,
   ) => {
+    if (!isConversationCurrent(options.identity)) return true;
     const agentTask = legacyChatAgentTask(result);
     if (agentTask) {
       rememberYachiyoTasks([agentTask]);
@@ -48,8 +52,10 @@ export function useLegacyChatRunnableResult({
       if (isActiveAgentTaskStatus(taskStatus) && taskRunId) {
         setStatus(chatRunnableRunningStatusText('八千代'));
         onRunning();
-        await refreshMessages();
-        pollAgentRunInBackground(taskRunId);
+        const refreshed = await refreshMessages();
+        if (!isConversationCurrent(options.identity)) return true;
+        if (!refreshed) setStatus('消息已发送，正在同步对话…');
+        pollAgentRunInBackground(taskRunId, { identity: options.identity });
         return true;
       }
       onSettled();
@@ -59,8 +65,11 @@ export function useLegacyChatRunnableResult({
         label: '八千代',
         status: taskStatus,
       }));
-      await refreshMessages();
+      const refreshed = await refreshMessages();
+      if (!isConversationCurrent(options.identity)) return true;
       await loadSessions();
+      if (!isConversationCurrent(options.identity)) return true;
+      if (!refreshed) setStatus('消息已发送，正在同步对话…');
       return true;
     }
 
@@ -76,8 +85,10 @@ export function useLegacyChatRunnableResult({
       setStatus(chatRunnableRunningStatusText(runnableLabel));
       onRunning();
       if (options.refreshTaskSnapshot) void refreshYachiyoTaskById(resultRunId);
-      await refreshMessages();
-      pollAgentRunInBackground(resultRunId);
+      const refreshed = await refreshMessages();
+      if (!isConversationCurrent(options.identity)) return true;
+      if (!refreshed) setStatus('消息已发送，正在同步对话…');
+      pollAgentRunInBackground(resultRunId, { identity: options.identity });
       return true;
     }
 
@@ -89,12 +100,16 @@ export function useLegacyChatRunnableResult({
       label: runnableLabel,
       status: resultRunStatus,
     }));
-    await refreshMessages();
+    const refreshed = await refreshMessages();
+    if (!isConversationCurrent(options.identity)) return true;
     await loadSessions();
+    if (!isConversationCurrent(options.identity)) return true;
+    if (!refreshed) setStatus('消息已发送，正在同步对话…');
     return true;
   }, [
     clearPendingReplyTask,
     expectPendingAssistantReply,
+    isConversationCurrent,
     loadSessions,
     onRunning,
     onSettled,

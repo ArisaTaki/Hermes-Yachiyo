@@ -6,6 +6,15 @@ import json
 from typing import Any
 
 
+_INTERRUPTED_TOOL_RESULT = {
+    "ok": False,
+    "status": "skipped",
+    "skipped": True,
+    "error": "tool_batch_interrupted_before_execution",
+    "summary": "The tool call was not reached before this tool batch stopped.",
+}
+
+
 def tool_loop_limit_detail(timeline: list[dict[str, Any]]) -> str:
     for event in reversed(timeline):
         if event.get("event") != "agent.tool.call":
@@ -110,6 +119,77 @@ def assistant_message_for_history(message: dict[str, Any]) -> dict[str, Any]:
     return history
 
 
+def _assistant_tool_call_ids(message: dict[str, Any]) -> list[str]:
+    tool_calls = message.get("tool_calls")
+    if not isinstance(tool_calls, list):
+        return []
+    call_ids: list[str] = []
+    for call in tool_calls:
+        if not isinstance(call, dict):
+            continue
+        call_id = ""
+        for key in ("tool_call_id", "call_id", "id"):
+            call_id = str(call.get(key) or "").strip()
+            if call_id:
+                break
+        if call_id and call_id not in call_ids:
+            call_ids.append(call_id)
+    return call_ids
+
+
+def stage_tool_result_messages(messages: list[dict[str, Any]]) -> None:
+    """Reserve one contiguous tool result for every native assistant tool call.
+
+    The runner may stop a batch early or execute internal recovery requests in
+    between model-authored calls. Reserving the full native result group keeps
+    OpenAI-compatible histories valid; completed calls replace their staged
+    result in place.
+    """
+
+    if not messages:
+        return
+    assistant = messages[-1]
+    if assistant.get("role") != "assistant":
+        return
+    tool_call_ids = _assistant_tool_call_ids(assistant)
+    if not tool_call_ids:
+        return
+    content = json.dumps(_INTERRUPTED_TOOL_RESULT, ensure_ascii=False)
+    for tool_call_id in tool_call_ids:
+        messages.append(
+            {
+                "role": "tool",
+                "tool_call_id": tool_call_id,
+                "content": content,
+            }
+        )
+
+
+def _replace_staged_tool_result_message(
+    messages: list[dict[str, Any]],
+    tool_call_id: str,
+    content: str,
+) -> bool:
+    assistant_index = -1
+    for index in range(len(messages) - 1, -1, -1):
+        message = messages[index]
+        if message.get("role") != "assistant":
+            continue
+        if tool_call_id in _assistant_tool_call_ids(message):
+            assistant_index = index
+            break
+    if assistant_index < 0:
+        return False
+    for message in messages[assistant_index + 1 :]:
+        if (
+            message.get("role") == "tool"
+            and str(message.get("tool_call_id") or "").strip() == tool_call_id
+        ):
+            message["content"] = content
+            return True
+    return False
+
+
 def append_tool_result_message(
     messages: list[dict[str, Any]],
     tool_request: dict[str, Any],
@@ -117,10 +197,17 @@ def append_tool_result_message(
 ) -> None:
     content = json.dumps(tool_result, ensure_ascii=False)
     if tool_request.get("protocol") == "tool_calls":
+        tool_call_id = str(tool_request.get("tool_call_id") or "").strip()
+        if tool_call_id and _replace_staged_tool_result_message(
+            messages,
+            tool_call_id,
+            content,
+        ):
+            return
         messages.append(
             {
                 "role": "tool",
-                "tool_call_id": str(tool_request.get("tool_call_id") or ""),
+                "tool_call_id": tool_call_id,
                 "content": content,
             }
         )

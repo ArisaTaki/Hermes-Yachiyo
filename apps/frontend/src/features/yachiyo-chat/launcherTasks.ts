@@ -38,8 +38,10 @@ export function launcherAgentTaskFromPublicTasks(
 
 export function launcherAgentTaskIsActive(task: AgentTaskSnapshot | null | undefined) {
   if (!task) return false;
+  const status = String(task.status || '').toLowerCase();
+  if (['completed', 'success', 'succeeded', 'failed', 'cancelled', 'canceled'].includes(status)) return false;
   if (task.needs_user_action || task.pending_approvals?.length) return true;
-  return task.status === 'queued' || task.status === 'running' || task.status === 'waiting_approval';
+  return status === 'queued' || status === 'running' || status === 'waiting_approval';
 }
 
 export async function refreshLauncherAgentTaskAfterAction({

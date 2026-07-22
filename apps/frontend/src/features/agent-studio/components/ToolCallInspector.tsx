@@ -49,7 +49,7 @@ export function ToolCallInspector({
             testId={cardTestId}
           />
         ))}
-        {!toolCalls.length ? <span>No tool calls</span> : null}
+        {!toolCalls.length ? <span>暂无工具调用</span> : null}
       </div>
     </details>
   );

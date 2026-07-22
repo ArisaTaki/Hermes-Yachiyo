@@ -32,6 +32,24 @@ export function approvalPreviewTarget(record: Record<string, unknown>, toolName 
     const text = textInputPreview(record, ['text']);
     return text ? `输入 ${text}` : '';
   }
+  if (
+    tool === 'desktop.click_ui_element'
+    || tool === 'app.open_and_click_ui_element'
+    || tool === 'app.focus_and_click_ui_element'
+  ) {
+    const target = approvalPreviewValue(record, ['target']);
+    return target ? `点击「${target}」` : '';
+  }
+  if (
+    tool === 'desktop.type_into_ui_element'
+    || tool === 'app.open_and_type_into_ui_element'
+    || tool === 'app.focus_and_type_into_ui_element'
+  ) {
+    const target = approvalPreviewValue(record, ['target']);
+    const text = textInputPreview(record, ['text']);
+    if (target && text) return `在「${target}」输入 ${text}`;
+    return text || target;
+  }
   if (tool === 'desktop.safe_click') return coordinateClickPreview(record);
   if (tool === 'desktop.click') return coordinateClickPreview(record);
   if (tool === 'browser.click') {
@@ -106,7 +124,7 @@ function coordinateClickPreview(
   return `${action} ${x}, ${y}`;
 }
 
-export function runtimeToolDisplayLabel(toolName: string): string {
+export function runtimeToolDisplayLabel(toolName: string, desktopExecutionRoute?: unknown): string {
   const tool = String(toolName || '').trim();
   if (tool === 'terminal.run') return '运行终端命令';
   if (tool === 'workspace.write_patch') return '写入工作区文件';
@@ -122,11 +140,45 @@ export function runtimeToolDisplayLabel(toolName: string): string {
   if (tool === 'app.focus_and_safe_type_text') return '聚焦应用并输入文字';
   if (tool === 'app.open_and_safe_shortcut') return '打开应用并执行快捷动作';
   if (tool === 'app.focus_and_safe_shortcut') return '聚焦应用并执行快捷动作';
+  if (tool === 'app.open_and_click_ui_element') {
+    return runtimeDesktopExecutionSurface(desktopExecutionRoute) === 'background'
+      ? '后台打开应用并点击界面'
+      : '打开应用并点击界面';
+  }
+  if (tool === 'app.focus_and_click_ui_element') return '在指定应用中点击界面';
+  if (tool === 'app.open_and_type_into_ui_element') {
+    return runtimeDesktopExecutionSurface(desktopExecutionRoute) === 'background'
+      ? '后台打开应用并填写文字'
+      : '打开应用并填写文字';
+  }
+  if (tool === 'app.focus_and_type_into_ui_element') return '在指定应用中填写文字';
   if (tool === 'media.apple_music_play') return '播放 Apple Music';
   if (tool === 'media.apple_music_control') return '控制 Apple Music';
   if (tool === 'desktop.safe_shortcut') return '执行快捷动作';
-  if (tool === 'desktop.safe_type_text') return '输入前台文字';
-  if (tool === 'desktop.safe_click') return '点击前台界面';
+  if (tool === 'desktop.safe_type_text') {
+    const surface = runtimeDesktopExecutionSurface(desktopExecutionRoute);
+    if (surface === 'background') return '后台向指定应用输入文字';
+    if (surface === 'foreground') return '输入前台文字';
+    return '输入文字';
+  }
+  if (tool === 'desktop.safe_click') {
+    const surface = runtimeDesktopExecutionSurface(desktopExecutionRoute);
+    if (surface === 'background') return '后台点击指定应用界面';
+    if (surface === 'foreground') return '点击前台界面';
+    return '点击界面';
+  }
+  if (tool === 'desktop.click_ui_element') {
+    const surface = runtimeDesktopExecutionSurface(desktopExecutionRoute);
+    if (surface === 'background') return '后台点击指定应用控件';
+    if (surface === 'foreground') return '点击前台应用控件';
+    return '点击应用控件';
+  }
+  if (tool === 'desktop.type_into_ui_element') {
+    const surface = runtimeDesktopExecutionSurface(desktopExecutionRoute);
+    if (surface === 'background') return '后台向指定应用控件输入文字';
+    if (surface === 'foreground') return '向前台应用控件输入文字';
+    return '向应用控件输入文字';
+  }
   if (tool === 'desktop.hotkey') return '发送快捷键';
   if (tool === 'desktop.type_text') return '输入前台文字';
   if (tool === 'desktop.click') return '点击前台界面';
@@ -141,9 +193,9 @@ export function runtimeToolDisplayLabel(toolName: string): string {
   return '工具调用';
 }
 
-export function runtimeToolDisplayLabelOrName(toolName: string): string {
+export function runtimeToolDisplayLabelOrName(toolName: string, desktopExecutionRoute?: unknown): string {
   const tool = String(toolName || '').trim();
-  const display = runtimeToolDisplayLabel(tool);
+  const display = runtimeToolDisplayLabel(tool, desktopExecutionRoute);
   if (display !== '工具调用') return display;
   if (runtimeToolLooksInternalId(tool)) return display;
   return tool || display;
@@ -156,6 +208,10 @@ export function runtimeToolFamily(toolName: string): string {
     || tool === 'desktop.active_window'
     || tool === 'app.open'
     || tool === 'app.focus'
+    || tool === 'app.open_and_click_ui_element'
+    || tool === 'app.focus_and_click_ui_element'
+    || tool === 'app.open_and_type_into_ui_element'
+    || tool === 'app.focus_and_type_into_ui_element'
     || tool === 'media.apple_music_play'
     || tool === 'media.apple_music_control'
     || tool === 'desktop.safe_shortcut'
@@ -164,6 +220,8 @@ export function runtimeToolFamily(toolName: string): string {
     || tool === 'desktop.hotkey'
     || tool === 'desktop.type_text'
     || tool === 'desktop.click'
+    || tool === 'desktop.click_ui_element'
+    || tool === 'desktop.type_into_ui_element'
   ) {
     return 'desktop';
   }
@@ -180,4 +238,39 @@ export function runtimeToolFamily(toolName: string): string {
 function runtimeToolLooksInternalId(toolName: string): boolean {
   return /^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$/i.test(toolName)
     || /^[a-z][a-z0-9]+(?:_[a-z0-9]+)+$/i.test(toolName);
+}
+
+function runtimeDesktopExecutionSurface(route: unknown): 'background' | 'foreground' | 'neutral' {
+  if (!route || typeof route !== 'object' || Array.isArray(route)) return 'neutral';
+  const record = route as Record<string, unknown>;
+  const providerKind = runtimeRouteString(record, ['selected_provider_kind', 'provider_kind']);
+  const providerId = runtimeRouteString(record, ['selected_provider_id', 'provider_id']);
+  const sessionKind = runtimeRouteString(record, ['desktop_session_kind']);
+  const backendKind = runtimeRouteString(record, ['desktop_backend_kind']);
+  if (
+    providerKind === 'background_desktop'
+    || sessionKind === 'background_desktop'
+    || providerId === 'cua-driver'
+    || backendKind === 'cua_driver'
+    || backendKind === 'cua-driver'
+  ) {
+    return 'background';
+  }
+  if (
+    providerKind === 'local_desktop'
+    || sessionKind === 'user_foreground'
+    || record.requires_user_foreground_session === true
+    || record.foreground_takeover_required === true
+  ) {
+    return 'foreground';
+  }
+  return 'neutral';
+}
+
+function runtimeRouteString(record: Record<string, unknown>, keys: string[]): string {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === 'string' && value.trim()) return value.trim().toLowerCase();
+  }
+  return '';
 }

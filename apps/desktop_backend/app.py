@@ -95,6 +95,10 @@ def main() -> None:
     from apps.core.activity_store import close_activity_store
     from apps.core.chat_store import close_chat_store
     from apps.core.runtime import AppRuntime
+    from apps.desktop_backend.parent_watchdog import (
+        record_electron_smoke_event,
+        start_electron_parent_watchdog,
+    )
     from apps.shell.agent_runtime import close_agent_runtime_service
     from apps.shell.config import load_config
     from apps.shell.model_profiles import close_model_profile_service
@@ -104,8 +108,6 @@ def main() -> None:
     config.bridge_host = bridge_host
     config.bridge_port = bridge_port
     runtime = AppRuntime(config)
-    runtime.start()
-    set_runtime(runtime)
 
     def _shutdown(_signum: int, _frame: object) -> None:
         stop_bridge()
@@ -118,15 +120,23 @@ def main() -> None:
 
     signal.signal(signal.SIGINT, _shutdown)
     signal.signal(signal.SIGTERM, _shutdown)
+    parent_watchdog = start_electron_parent_watchdog()
 
     try:
+        runtime.start()
+        set_runtime(runtime)
         start_bridge(host=bridge_host, port=bridge_port)
     finally:
-        runtime.stop()
-        close_agent_runtime_service()
-        close_model_profile_service()
-        close_chat_store()
-        close_activity_store()
+        try:
+            if parent_watchdog is not None:
+                parent_watchdog.stop()
+            runtime.stop()
+            close_agent_runtime_service()
+            close_model_profile_service()
+            close_chat_store()
+            close_activity_store()
+        finally:
+            record_electron_smoke_event("backend.exit")
 
 
 if __name__ == "__main__":

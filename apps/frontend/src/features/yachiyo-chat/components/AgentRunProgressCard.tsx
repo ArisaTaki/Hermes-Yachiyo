@@ -6,6 +6,7 @@ export function AgentRunProgressCard({
   runStatus,
   runnableId,
   runnableKind,
+  showTechnicalDetails = false,
   title,
 }: {
   detail: string;
@@ -15,6 +16,7 @@ export function AgentRunProgressCard({
   runStatus: string;
   runnableId: string;
   runnableKind: string;
+  showTechnicalDetails?: boolean;
   title: string;
 }) {
   return (
@@ -31,7 +33,7 @@ export function AgentRunProgressCard({
       <div>
         <strong>{title}</strong>
         <span>{detail}</span>
-        {runId ? (
+        {showTechnicalDetails && runId ? (
           <button
             type="button"
             data-run-id={runId}

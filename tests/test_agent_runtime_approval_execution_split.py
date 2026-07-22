@@ -31,8 +31,19 @@ def test_build_runtime_approval_runtime_services_wires_gate_preserving_services(
     execution_lock = threading.RLock()
     in_progress: set[str] = set()
     setup = build_runtime_approval_runtime_services(
-        get_run=lambda run_id: {"run_id": run_id, "status": "approval_required", "kind": "agent_run"},
-        pending_approval_private=lambda _run_id: {"tool": "workspace.read"},
+        get_run=lambda run_id: {
+            "run_id": run_id,
+            "status": "approval_required",
+            "kind": "agent_run",
+            "pending_approval": {"approval_id": "approval-1"},
+        },
+        pending_approval_private=lambda _run_id: {
+            "approval_id": "approval-1",
+            "tool": "workspace.read",
+        },
+        assert_approval_resume_active=lambda _run_id, _approval_id: None,
+        claim_pending_rejection=lambda *_args, **_kwargs: True,
+        claim_pending_timeout=lambda *_args, **_kwargs: True,
         approvals=object(),
         project_child_run_transition=lambda result: result,
         project_cancelled_workflow_group_if_root=lambda _run, result: result,
@@ -100,22 +111,43 @@ def test_runtime_approval_run_dispatcher_routes_by_run_kind() -> None:
         error_type=agent_runtime.AgentRuntimeError,
     )
 
-    assert dispatcher.approve_once({"run_id": "wf", "status": "approval_required", "kind": "workflow_run"}) == {
+    assert dispatcher.approve_once({
+        "run_id": "wf",
+        "status": "approval_required",
+        "kind": "workflow_run",
+        "pending_approval": {"approval_id": "approval-wf"},
+    }, expected_approval_id="approval-wf") == {
         "status": "workflow"
     }
-    assert dispatcher.approve_once({"run_id": "chat", "status": "approval_required", "kind": "main_chat_run"}) == {
+    assert dispatcher.approve_once({
+        "run_id": "chat",
+        "status": "approval_required",
+        "kind": "main_chat_run",
+        "pending_approval": {"approval_id": "approval-chat"},
+    }, expected_approval_id="approval-chat") == {
         "status": "main_chat"
     }
-    assert dispatcher.approve_once({"run_id": "agent", "status": "approval_required", "kind": "agent_run"}) == {
+    assert dispatcher.approve_once({
+        "run_id": "agent",
+        "status": "approval_required",
+        "kind": "agent_run",
+        "pending_approval": {"approval_id": "approval-agent"},
+    }, expected_approval_id="approval-agent") == {
         "status": "agent"
     }
     current = {"run_id": "done", "status": "completed", "kind": "agent_run"}
-    assert dispatcher.approve_once(current) is current
+    assert dispatcher.approve_once(current, expected_approval_id="ignored") is current
     assert calls == [("workflow", "wf"), ("main_chat", "chat"), ("agent", "agent")]
 
 
 def test_runtime_approval_execution_service_serializes_approval_resume() -> None:
-    runs = {"run-1": {"run_id": "run-1", "status": "approval_required"}}
+    runs = {
+        "run-1": {
+            "run_id": "run-1",
+            "status": "approval_required",
+            "pending_approval": {"approval_id": "approval-1"},
+        }
+    }
     in_progress: set[str] = set()
     calls: list[dict[str, Any]] = []
 
@@ -131,17 +163,25 @@ def test_runtime_approval_execution_service_serializes_approval_resume() -> None
         approve_once=approve_once,
     )
 
-    first = service.approve_run_approval("run-1")
-    second = service.approve_run_approval("run-1")
+    first = service.approve_run_approval("run-1", "approval-1")
+    second = service.approve_run_approval("run-1", "approval-1")
 
     assert first["status"] == "completed"
     assert second["status"] == "completed"
-    assert calls == [{"run_id": "run-1", "status": "approval_required"}]
+    assert calls == [{
+        "run_id": "run-1",
+        "status": "approval_required",
+        "pending_approval": {"approval_id": "approval-1"},
+    }]
     assert in_progress == set()
 
 
 def test_runtime_approval_execution_service_returns_current_run_when_already_in_progress() -> None:
-    run = {"run_id": "run-1", "status": "approval_required"}
+    run = {
+        "run_id": "run-1",
+        "status": "approval_required",
+        "pending_approval": {"approval_id": "approval-1"},
+    }
     in_progress = {"run-1"}
     service = RuntimeApprovalExecutionService(
         execution_lock=threading.RLock(),
@@ -150,5 +190,5 @@ def test_runtime_approval_execution_service_returns_current_run_when_already_in_
         approve_once=lambda _run: {"run_id": "run-1", "status": "completed"},
     )
 
-    assert service.approve_run_approval("run-1") is run
+    assert service.approve_run_approval("run-1", "approval-1") is run
     assert in_progress == {"run-1"}

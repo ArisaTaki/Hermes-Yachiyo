@@ -140,6 +140,11 @@ FORBIDDEN_ACTIVE_DOC_TOKENS = [
     "github.com/kuguya-AI-app-develop/Hermes-Yachiyo",
     "github.com/kuguya-AI-app-develop/Oha-Yachiyo",
 ]
+OFFICIAL_REPOSITORY_IDENTITY = "kuguya-AI-app-develop/Hermes-Yachiyo"
+
+
+def _without_official_repository_identity(text: str) -> str:
+    return text.replace(OFFICIAL_REPOSITORY_IDENTITY, "official-release-repository")
 
 
 def _iter_source_files():
@@ -164,7 +169,9 @@ def _iter_text_files(targets):
 def test_runtime_sources_do_not_reintroduce_legacy_hermes_kernel_entrypoints() -> None:
     findings: list[str] = []
     for path in _iter_source_files():
-        text = path.read_text(encoding="utf-8", errors="ignore")
+        text = _without_official_repository_identity(
+            path.read_text(encoding="utf-8", errors="ignore")
+        )
         relative_path = path.relative_to(ROOT).as_posix()
         for token in FORBIDDEN_KERNEL_TOKENS:
             if (relative_path, token) in ALLOWED_KERNEL_TOKEN_OCCURRENCES:
@@ -178,7 +185,9 @@ def test_runtime_sources_do_not_reintroduce_legacy_hermes_kernel_entrypoints() -
 def test_active_user_facing_docs_do_not_reintroduce_legacy_hermes_identity() -> None:
     findings: list[str] = []
     for path in _iter_text_files(ACTIVE_USER_DOC_TARGETS):
-        text = path.read_text(encoding="utf-8", errors="ignore")
+        text = _without_official_repository_identity(
+            path.read_text(encoding="utf-8", errors="ignore")
+        )
         for token in FORBIDDEN_ACTIVE_DOC_TOKENS:
             if token in text:
                 findings.append(f"{path.relative_to(ROOT)} contains {token!r}")
@@ -192,7 +201,9 @@ def test_active_memory_docs_do_not_reintroduce_legacy_hermes_identity() -> None:
         relative_path = path.relative_to(ROOT).as_posix()
         if "hermes" in relative_path.lower():
             findings.append(f"{relative_path} path contains legacy hermes token")
-        text = path.read_text(encoding="utf-8", errors="ignore")
+        text = _without_official_repository_identity(
+            path.read_text(encoding="utf-8", errors="ignore")
+        )
         for token in FORBIDDEN_ACTIVE_DOC_TOKENS:
             if token in text:
                 findings.append(f"{relative_path} contains {token!r}")

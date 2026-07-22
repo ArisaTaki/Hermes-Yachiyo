@@ -5,8 +5,12 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import Any
 
-from .contracts import PlannerDecisionSnapshot, TaskCoreSnapshot
 from .capability_registry import runtime_execution_tool_names
+from .contracts import PlannerDecisionSnapshot, TaskCoreSnapshot
+from .daily_desktop import (
+    DailyDesktopEntrypointRuntimePlan,
+    daily_desktop_entrypoint_runtime_plan,
+)
 from .desktop_execution_policy import (
     desktop_provider_session_auto_start_recommended_for_requests,
     with_daily_entrypoint_desktop_execution_policy,
@@ -15,22 +19,31 @@ from .desktop_plan_hints import (
     discovered_app_open_needs_model_followup,
     discovered_app_pending_user_action,
 )
+from .discovered_app_followups import (
+    discovered_app_click_followup_target_from_planned_requests,
+)
 from .isolated_provider_session import (
     annotate_envelope_with_desktop_provider_session,
     ensure_isolated_desktop_provider_session_for_envelope,
 )
 from .planner_execution import planner_orchestration_requests
+from .recovery_actions import (
+    COMPILED_RECOVERY_CONTINUATION_METADATA_KEY,
+    RECOVERY_ACTION_TASK_METADATA_KEYS,
+)
 from .replans import (
     task_replan_request_from_failure,
     task_replan_run_event_payload,
     task_replan_timeline_event,
 )
-from .runtime_planner import RuntimePlanner
 from .runtime_execution import (
+    RUNTIME_EXECUTION_READINESS_BLOCKED,
     runtime_execution_blocked_requests_from_envelope_payload,
     runtime_execution_envelope_payload,
+    runtime_execution_readiness_state,
     runtime_execution_requests_from_envelope_payload,
 )
+from .runtime_planner import RuntimePlanner
 from .task_core_event_projection import (
     task_core_initial_progress_event_payloads,
     task_core_progress_event_detail,
@@ -121,8 +134,25 @@ def planner_enriched_chat_request(
     runnable_id = str(payload.get("agent_id") or payload.get("runnable_id") or "").strip()
     if runnable_id and runnable_id != _MAIN_CHAT_AGENT_ID:
         return payload
+    request_metadata = (
+        dict(payload.get("metadata"))
+        if isinstance(payload.get("metadata"), Mapping)
+        else {}
+    )
+    direct_tool_requests = payload.get("direct_tool_requests")
+    if (
+        request_metadata.get(COMPILED_RECOVERY_CONTINUATION_METADATA_KEY) is True
+        and isinstance(direct_tool_requests, (list, tuple))
+        and any(isinstance(item, Mapping) for item in direct_tool_requests)
+    ):
+        # Runtime already selected, policy-checked, and bound these requests
+        # while compiling the replan continuation. Do not feed that trusted
+        # handoff back through prompt planning as if it were fresh user input.
+        request_metadata.pop(COMPILED_RECOVERY_CONTINUATION_METADATA_KEY, None)
+        payload["metadata"] = request_metadata
+        return payload
     metadata = _normalized_entrypoint_metadata(
-        payload.get("metadata") if isinstance(payload.get("metadata"), Mapping) else {}
+        request_metadata
     )
     attachments = [
         item
@@ -136,39 +166,90 @@ def planner_enriched_chat_request(
         return payload
     request_allowed_tools = _request_allowed_tools(payload)
     effective_allowed_tools = allowed_tools or request_allowed_tools
-    decision = runtime_planner_decision(
-        str(payload.get("prompt") or payload.get("goal") or ""),
+    existing_execution_envelope = payload.get("runtime_execution_envelope")
+    if isinstance(existing_execution_envelope, Mapping):
+        return _planner_enriched_existing_execution_envelope(
+            payload,
+            metadata=metadata,
+            envelope=existing_execution_envelope,
+            allowed_tools=effective_allowed_tools,
+        )
+    planning_goal = str(payload.get("prompt") or payload.get("goal") or "")
+    structured_recovery_metadata = _structured_recovery_planning_metadata(
+        request_metadata,
+        normalized_metadata=metadata,
+    )
+    structured_recovery_plan = _trusted_structured_recovery_runtime_plan(
+        planning_goal,
+        metadata=structured_recovery_metadata,
         allowed_tools=effective_allowed_tools,
-        metadata=metadata,
+    )
+    if structured_recovery_plan is not None:
+        structured_recovery_metadata = (
+            _structured_recovery_metadata_with_bound_execution_policy(
+                structured_recovery_metadata,
+                structured_recovery_plan,
+            )
+        )
+    planning_metadata = (
+        structured_recovery_metadata
+        if structured_recovery_plan is not None
+        else metadata
+    )
+    decision = (
+        structured_recovery_plan.decision
+        if structured_recovery_plan is not None
+        else runtime_planner_decision(
+            planning_goal,
+            allowed_tools=effective_allowed_tools,
+            metadata=planning_metadata,
+        )
     )
     if decision is None:
+        if structured_recovery_plan is not None:
+            return _planner_payload_without_unbound_recovery_authority(
+                payload,
+                metadata=planning_metadata,
+            )
         return payload
     orchestration_metadata = _planner_orchestration_metadata(
-        str(payload.get("prompt") or payload.get("goal") or ""),
-        metadata=metadata,
+        planning_goal,
+        metadata=planning_metadata,
     )
     planner_metadata = runtime_planner_metadata(
         decision,
         allowed_tools=effective_allowed_tools,
-        metadata=metadata,
+        metadata=planning_metadata,
     )
-    execution_allowed_tools = _entrypoint_runtime_execution_allowed_tools(
-        decision,
-        explicit_allowed_tools=effective_allowed_tools,
+    execution_allowed_tools = (
+        list(structured_recovery_plan.allowed_tools)
+        if structured_recovery_plan is not None
+        else _entrypoint_runtime_execution_allowed_tools(
+            decision,
+            explicit_allowed_tools=effective_allowed_tools,
+        )
     )
     execution_decision = (
-        runtime_planner_decision(
-            str(payload.get("prompt") or payload.get("goal") or ""),
-            allowed_tools=execution_allowed_tools,
-            metadata=metadata,
+        decision
+        if structured_recovery_plan is not None
+        else (
+            runtime_planner_decision(
+                planning_goal,
+                allowed_tools=execution_allowed_tools,
+                metadata=planning_metadata,
+            )
+            or decision
         )
-        or decision
     )
-    runtime_execution_envelope = _runtime_execution_envelope_payload_for_chat_start(
-        execution_decision,
-        allowed_tools=execution_allowed_tools,
-        full_plan=True,
-        metadata=metadata,
+    runtime_execution_envelope = (
+        dict(structured_recovery_plan.runtime_execution_envelope)
+        if structured_recovery_plan is not None
+        else _runtime_execution_envelope_payload_for_chat_start(
+            execution_decision,
+            allowed_tools=execution_allowed_tools,
+            full_plan=True,
+            metadata=planning_metadata,
+        )
     )
     if runtime_execution_envelope:
         _apply_execution_envelope_metadata(
@@ -180,11 +261,14 @@ def planner_enriched_chat_request(
         planner_metadata["yachiyo_entrypoint_allowed_tools"] = list(
             execution_allowed_tools
         )
-    compatible_plan_tools = _daily_desktop_compatible_plan_tools(decision, metadata)
+    compatible_plan_tools = _daily_desktop_compatible_plan_tools(
+        decision,
+        planning_metadata,
+    )
     if compatible_plan_tools:
         planner_metadata["yachiyo_plan_tools"] = compatible_plan_tools
     payload_metadata = {
-        **dict(metadata),
+        **dict(planning_metadata),
         **planner_metadata,
         **orchestration_metadata,
     }
@@ -200,9 +284,16 @@ def planner_enriched_chat_request(
     if runtime_execution_envelope:
         payload["runtime_execution_envelope"] = runtime_execution_envelope
         if "direct_tool_requests" not in payload:
-            direct_tool_requests = runtime_execution_requests_from_envelope_payload(
-                runtime_execution_envelope,
-                allowed_tools=execution_allowed_tools,
+            direct_tool_requests = (
+                [
+                    dict(request)
+                    for request in structured_recovery_plan.executable_requests
+                ]
+                if structured_recovery_plan is not None
+                else runtime_execution_requests_from_envelope_payload(
+                    runtime_execution_envelope,
+                    allowed_tools=execution_allowed_tools,
+                )
             )
             direct_tool_requests = [
                 request
@@ -211,9 +302,17 @@ def planner_enriched_chat_request(
             ]
             if direct_tool_requests:
                 payload["direct_tool_requests"] = direct_tool_requests
-            blocked_requests = runtime_execution_blocked_requests_from_envelope_payload(
-                runtime_execution_envelope,
-                allowed_tools=execution_allowed_tools,
+            blocked_requests = (
+                [
+                    dict(request)
+                    for request in structured_recovery_plan.entrypoint_requests
+                ]
+                if structured_recovery_plan is not None
+                and not structured_recovery_plan.executable_requests
+                else runtime_execution_blocked_requests_from_envelope_payload(
+                    runtime_execution_envelope,
+                    allowed_tools=execution_allowed_tools,
+                )
             )
             if blocked_requests:
                 payload["blocked_direct_tool_requests"] = blocked_requests
@@ -231,11 +330,214 @@ def planner_enriched_chat_request(
     return payload
 
 
+def _trusted_structured_recovery_runtime_plan(
+    planning_goal: str,
+    *,
+    metadata: Mapping[str, Any],
+    allowed_tools: Iterable[str] | None,
+) -> DailyDesktopEntrypointRuntimePlan | None:
+    """Bind Runtime-owned recovery metadata before generic prompt planning."""
+
+    if (
+        metadata.get("desktop_permission_recovery") is not True
+        or not str(metadata.get("recovery_tool") or "").strip()
+    ):
+        return None
+    clean_allowed_tools = [
+        str(tool or "").strip()
+        for tool in (allowed_tools or [])
+        if str(tool or "").strip()
+    ]
+    plan = daily_desktop_entrypoint_runtime_plan(
+        planning_goal,
+        metadata=metadata,
+        allowed_tools=clean_allowed_tools or None,
+        metadata_allowed_tools=clean_allowed_tools or None,
+        allow_legacy_fallback=False,
+    )
+    if (
+        plan.selected_source != "metadata_runtime_planner"
+        or plan.decision is None
+        or not plan.runtime_execution_envelope
+    ):
+        # A recovery selection that cannot be bound to the immutable Goal is
+        # not reinterpreted as a new prompt-planned action.
+        return DailyDesktopEntrypointRuntimePlan(
+            decision=None,
+            entrypoint_requests=[],
+            executable_requests=[],
+            runtime_execution_envelope={},
+            selected_source="metadata_unbound",
+            allowed_tools=tuple(clean_allowed_tools),
+        )
+    return plan
+
+
+def _structured_recovery_planning_metadata(
+    request_metadata: Mapping[str, Any],
+    *,
+    normalized_metadata: Mapping[str, Any],
+) -> dict[str, Any]:
+    metadata = dict(normalized_metadata)
+    for key in (
+        "desktop_execution_policy",
+        "yachiyo_desktop_execution_policy",
+    ):
+        if key not in request_metadata:
+            metadata.pop(key, None)
+    return metadata
+
+
+def _structured_recovery_metadata_with_bound_execution_policy(
+    metadata: Mapping[str, Any],
+    plan: DailyDesktopEntrypointRuntimePlan,
+) -> dict[str, Any]:
+    payload = dict(metadata)
+    if "desktop_execution_policy" in payload:
+        return payload
+    for request in plan.executable_requests:
+        route = request.get("desktop_execution_route")
+        if (
+            isinstance(route, Mapping)
+            and route.get("can_execute") is True
+            and (
+                str(route.get("status") or "").strip() == "supervised_live"
+                or route.get("requires_user_foreground_session") is True
+            )
+            and request.get("approval_required") is not True
+        ):
+            payload["desktop_execution_policy"] = {
+                "mode": "allow",
+                "allow_live_foreground": True,
+                "prefer_background_desktop": False,
+                "prefer_isolated_desktop": False,
+                "avoid_user_foreground_takeover": False,
+                "require_sandbox_for_keyboard_mouse": False,
+                "source": "runtime_structured_recovery_binding",
+                "reason": (
+                    "The user selected a goal-bound supervised recovery action."
+                ),
+            }
+            break
+    return payload
+
+
+def _planner_payload_without_unbound_recovery_authority(
+    payload: Mapping[str, Any],
+    *,
+    metadata: Mapping[str, Any],
+) -> dict[str, Any]:
+    clean = dict(payload)
+    for key in (
+        "blocked_direct_tool_requests",
+        "direct_tool_request",
+        "direct_tool_requests",
+        "runtime_execution_envelope",
+    ):
+        clean.pop(key, None)
+    clean_metadata = {
+        str(key): value
+        for key, value in metadata.items()
+        if str(key) not in RECOVERY_ACTION_TASK_METADATA_KEYS
+        and not str(key).startswith(("recovery_", "runtime_recovery_"))
+    }
+    clean_metadata["yachiyo_runtime_blocked"] = True
+    clean_metadata["yachiyo_runtime_block_reason"] = (
+        "structured_recovery_goal_binding_failed"
+    )
+    clean["metadata"] = clean_metadata
+    return clean
+
+
+def _planner_enriched_existing_execution_envelope(
+    payload: dict[str, Any],
+    *,
+    metadata: Mapping[str, Any],
+    envelope: Mapping[str, Any],
+    allowed_tools: Iterable[str] | None,
+) -> dict[str, Any]:
+    """Keep plan -> execute handoffs on one immutable planner envelope."""
+
+    preserved_envelope = dict(envelope)
+    execution_allowed_tools = [
+        str(tool or "").strip()
+        for tool in (allowed_tools or [])
+        if str(tool or "").strip()
+    ]
+    if not execution_allowed_tools:
+        execution_allowed_tools = _unique_strings(
+            request.get("tool_name") or request.get("tool")
+            for request in _execution_request_payloads(preserved_envelope)
+        )
+
+    payload_metadata = dict(metadata)
+    _apply_execution_envelope_metadata(payload_metadata, preserved_envelope)
+    payload_metadata.setdefault("yachiyo_runtime_planner", True)
+    payload_metadata.setdefault("yachiyo_plan_source", "runtime_planner")
+    for metadata_key, envelope_key in (
+        ("yachiyo_decision_id", "decision_id"),
+        ("yachiyo_plan_id", "plan_id"),
+        ("yachiyo_intent_kind", "intent_kind"),
+    ):
+        value = preserved_envelope.get(envelope_key)
+        if value not in (None, "", [], {}):
+            payload_metadata.setdefault(metadata_key, value)
+    if execution_allowed_tools:
+        payload_metadata["yachiyo_entrypoint_allowed_tools"] = list(
+            execution_allowed_tools
+        )
+        payload.setdefault("allowed_tools", list(execution_allowed_tools))
+    if (
+        desktop_provider_session_auto_start_recommended_for_requests(
+            preserved_envelope
+        )
+        and not _metadata_declares_desktop_provider_auto_start(payload_metadata)
+    ):
+        payload_metadata["desktop_provider_session_auto_start"] = True
+
+    payload["runtime_execution_envelope"] = preserved_envelope
+    if "direct_tool_requests" not in payload:
+        direct_tool_requests = runtime_execution_requests_from_envelope_payload(
+            preserved_envelope,
+            allowed_tools=execution_allowed_tools,
+        )
+        direct_tool_requests = [
+            request
+            for request in direct_tool_requests
+            if not _direct_request_route_blocked(request)
+        ]
+        if direct_tool_requests:
+            payload["direct_tool_requests"] = direct_tool_requests
+    if "blocked_direct_tool_requests" not in payload:
+        blocked_requests = runtime_execution_blocked_requests_from_envelope_payload(
+            preserved_envelope,
+            allowed_tools=execution_allowed_tools,
+        )
+        if blocked_requests:
+            payload["blocked_direct_tool_requests"] = blocked_requests
+            payload_metadata["yachiyo_runtime_blocked"] = True
+            payload_metadata["yachiyo_blocked_direct_tool_requests"] = blocked_requests
+            payload_metadata["yachiyo_blocked_execution_requests"] = [
+                request.get("tool")
+                for request in blocked_requests
+                if request.get("tool")
+            ]
+            payload_metadata["yachiyo_blocked_execution_reasons"] = _unique_strings(
+                request.get("policy_reason") or request.get("blocked_by")
+                for request in blocked_requests
+            )
+    payload["metadata"] = payload_metadata
+    return payload
+
+
 def _direct_request_route_blocked(request: Mapping[str, Any]) -> bool:
     route = request.get("desktop_execution_route")
     if not isinstance(route, Mapping):
         return False
-    return route.get("can_execute") is False
+    return (
+        runtime_execution_readiness_state(route)
+        == RUNTIME_EXECUTION_READINESS_BLOCKED
+    )
 
 
 def _runtime_execution_envelope_payload_for_chat_start(
@@ -1138,7 +1440,10 @@ def _desktop_discovered_app_followup_target(
 ) -> dict[str, Any]:
     desktop_discovery = inputs.get("desktop_discovery_hint")
     if not isinstance(desktop_discovery, Mapping):
-        return {}
+        return _desktop_discovered_app_click_followup_target_from_plan(
+            inputs,
+            decision,
+        )
     if str(desktop_discovery.get("action") or "").strip() != "discover_apps":
         return {}
     app_capability = _desktop_discovery_capability_hint(inputs)
@@ -1150,6 +1455,19 @@ def _desktop_discovered_app_followup_target(
         "app_query": query,
         "app_name_source": "desktop.list_apps",
     }
+    planned_click_target = _desktop_discovered_app_click_followup_target_from_plan(
+        inputs,
+        decision,
+        app_query=query,
+    )
+    if planned_click_target:
+        payload.update(
+            {
+                key: value
+                for key, value in planned_click_target.items()
+                if key not in {"kind", "app_query", "app_name_source"}
+            }
+        )
     description = str(app_capability.get("description") or "").strip()
     if description:
         payload["capability_description"] = description
@@ -1227,6 +1545,47 @@ def _desktop_discovered_app_followup_target(
         if pending_user_action:
             payload["pending_user_action"] = pending_user_action
     return payload
+
+
+def _desktop_discovered_app_click_followup_target_from_plan(
+    inputs: Mapping[str, Any],
+    decision: Any | None,
+    *,
+    app_query: str = "",
+) -> dict[str, Any]:
+    if str(inputs.get("operation_hint") or "").strip() != "click":
+        return {}
+    query = str(
+        app_query
+        or inputs.get("app_name_hint")
+        or inputs.get("target_app_hint")
+        or ""
+    ).strip()
+    if not query:
+        return {}
+    steps = list(
+        getattr(
+            getattr(getattr(decision, "plan", None), "tool_plan", None),
+            "steps",
+            [],
+        )
+        or []
+    )
+    planned_requests = [
+        {
+            "tool_name": str(getattr(step, "tool_name", "") or "").strip(),
+            "input": dict(input_preview),
+        }
+        for step in steps
+        if isinstance(
+            (input_preview := getattr(step, "input_preview", None)),
+            Mapping,
+        )
+    ]
+    return discovered_app_click_followup_target_from_planned_requests(
+        query,
+        planned_requests,
+    )
 
 
 def _dynamic_context_discovered_app_followup_target(

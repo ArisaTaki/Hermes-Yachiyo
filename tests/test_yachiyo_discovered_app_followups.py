@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from apps.shell.yachiyo_agent.discovered_app_followups import (
+    discovered_app_click_followup_target_from_planned_requests,
     discovered_app_followup_target_can_direct_execute,
     planner_discovered_app_followup_can_direct_execute,
 )
@@ -34,6 +35,46 @@ def test_discovered_app_followup_allows_open_or_focus_actions() -> None:
     assert discovered_app_followup_target_can_direct_execute(
         _target(target_action="focus_app"),
         ["desktop.focus_app"],
+    )
+
+
+def test_discovered_app_followup_allows_grounded_click_with_app_scope_or_preparation() -> None:
+    target = _target(target_action="click", target="登录")
+
+    assert not discovered_app_followup_target_can_direct_execute(
+        target,
+        ["app.focus_and_click_ui_element"],
+    )
+    assert discovered_app_followup_target_can_direct_execute(
+        target,
+        ["app.open_and_click_ui_element"],
+    )
+    assert not discovered_app_followup_target_can_direct_execute(
+        target,
+        ["app.focus", "desktop.click_ui_element"],
+    )
+    assert discovered_app_followup_target_can_direct_execute(
+        target,
+        ["desktop.open_app", "desktop.click_ui_element"],
+    )
+
+
+def test_discovered_app_followup_click_fails_closed_without_target_or_complete_capability() -> None:
+    assert not discovered_app_followup_target_can_direct_execute(
+        _target(target_action="click"),
+        ["app.focus_and_click_ui_element"],
+    )
+    assert not discovered_app_followup_target_can_direct_execute(
+        _target(target_action="click", target="   "),
+        ["app.open_and_click_ui_element"],
+    )
+    assert not discovered_app_followup_target_can_direct_execute(
+        _target(target_action="click", target="登录"),
+        ["desktop.click_ui_element"],
+    )
+    assert not discovered_app_followup_target_can_direct_execute(
+        _target(target_action="click", target="登录"),
+        ["app.focus"],
     )
 
 
@@ -228,3 +269,73 @@ def test_planner_discovered_app_followup_requires_list_apps_continuation() -> No
         [{"tool": "workspace.read", "continue_to_model": True}],
         ["app.open"],
     )
+
+
+def test_planner_discovered_app_followup_can_continue_to_grounded_click() -> None:
+    request = {"tool": "desktop.list_apps", "continue_to_model": True}
+
+    assert planner_discovered_app_followup_can_direct_execute(
+        {"followup_target": _target(target_action="click", target="登录")},
+        [request],
+        ["app.open_and_click_ui_element"],
+    )
+    assert not planner_discovered_app_followup_can_direct_execute(
+        {"followup_target": _target(target_action="click", target="登录")},
+        [request],
+        ["app.focus_and_click_ui_element"],
+    )
+    assert not planner_discovered_app_followup_can_direct_execute(
+        {"followup_target": _target(target_action="click")},
+        [request],
+        ["app.focus_and_click_ui_element"],
+    )
+
+
+def test_discovered_app_click_followup_target_comes_only_from_planned_semantic_tool() -> None:
+    target = discovered_app_click_followup_target_from_planned_requests(
+        "Chrome",
+        [
+            {
+                "tool_name": "app.focus_and_click_ui_element",
+                "input": {
+                    "app_name": "Chrome",
+                    "target": "登录",
+                    "role_filter": "button",
+                    "limit": 40,
+                    "click_count": 1,
+                    "x": 120,
+                    "y": 240,
+                },
+            }
+        ],
+    )
+
+    assert target == {
+        "kind": "desktop_discovered_app_action",
+        "app_query": "Chrome",
+        "app_name_source": "desktop.list_apps",
+        "target_action": "click",
+        "target": "登录",
+        "role_filter": "button",
+        "limit": 40,
+        "click_count": 1,
+    }
+    assert "x" not in target
+    assert "y" not in target
+    assert discovered_app_click_followup_target_from_planned_requests(
+        "Chrome",
+        [{"tool_name": "desktop.click", "input": {"x": 120, "y": 240}}],
+    ) == {}
+    assert discovered_app_click_followup_target_from_planned_requests(
+        "Chrome",
+        [
+            {
+                "tool_name": "app.focus_and_click_ui_element",
+                "input": {"target": "登录"},
+            },
+            {
+                "tool_name": "app.open_and_click_ui_element",
+                "input": {"target": "注册"},
+            },
+        ],
+    ) == {}

@@ -98,6 +98,46 @@ def test_refresh_local_rc_signoff_build_uses_venv_entrypoint_when_it_is_symlink(
     ]
 
 
+def test_refresh_local_rc_signoff_build_explicitly_forwards_dirty_local_rc(
+    monkeypatch,
+    tmp_path,
+):
+    commands: list[tuple[list[str], bool]] = []
+    venv_python = tmp_path / ".venv" / "bin" / "python"
+    venv_python.parent.mkdir(parents=True)
+    venv_python.write_text("#!/bin/sh\n", encoding="utf-8")
+    monkeypatch.setattr(refresh, "ROOT", tmp_path)
+    monkeypatch.setattr(
+        refresh,
+        "_run",
+        lambda command, *, allow_failure=False: commands.append(
+            (command, allow_failure)
+        )
+        or 0,
+    )
+
+    refresh._build_release_candidate_artifacts(
+        channel="experimental",
+        repository="owner/repo",
+        allow_dirty_local_rc=True,
+    )
+
+    assert commands == [
+        (
+            [
+                str(venv_python),
+                "scripts/build_release_candidate_artifacts.py",
+                "--channel",
+                "experimental",
+                "--repository",
+                "owner/repo",
+                "--allow-dirty-local-rc",
+            ],
+            False,
+        )
+    ]
+
+
 def test_refresh_local_rc_signoff_runs_batch_screen_draft_and_preview(
     monkeypatch,
     tmp_path,
@@ -381,6 +421,50 @@ def test_refresh_local_rc_signoff_rejects_non_manual_preview_failure(
         assert exc.returncode == 1
     else:
         raise AssertionError("non-manual preview findings must fail the refresh")
+
+
+def test_refresh_local_rc_signoff_accepts_only_expected_dirty_preview_blockers(
+    tmp_path,
+):
+    report_path = tmp_path / "preview.json"
+    expected_message = (
+        "public/latest/final release verification requires clean, "
+        "publishable source provenance"
+    )
+    report_path.write_text(
+        json.dumps(
+            {
+                "manual_release_candidate_check_summary": {"remaining_count": 0},
+                "source_revision_final_signoff_findings": [
+                    {"path": str(tmp_path), "message": "clean source required"}
+                ],
+                "manual_release_candidate_check_source_revision_findings": [],
+                "built_artifact_guards": {
+                    "status": "failed",
+                    "findings": [
+                        {"path": "release/latest.json", "message": expected_message}
+                    ],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert refresh._preview_failure_is_only_manual_incomplete(
+        report_path,
+        allow_dirty_local_rc=True,
+    )
+    assert not refresh._preview_failure_is_only_manual_incomplete(report_path)
+
+    payload = json.loads(report_path.read_text(encoding="utf-8"))
+    payload["built_artifact_guards"]["findings"].append(
+        {"path": "release/latest.dmg", "message": "checksum mismatch"}
+    )
+    report_path.write_text(json.dumps(payload), encoding="utf-8")
+    assert not refresh._preview_failure_is_only_manual_incomplete(
+        report_path,
+        allow_dirty_local_rc=True,
+    )
 
 
 def test_refresh_local_rc_signoff_forwards_provider_manifest_to_oha_smoke(
@@ -752,7 +836,13 @@ def test_refresh_local_rc_signoff_does_not_reuse_failed_batch_report(
         skip_screen_smoke=True,
     )
 
-    assert build_calls == [{"channel": "experimental", "repository": None}]
+    assert build_calls == [
+        {
+            "channel": "experimental",
+            "repository": None,
+            "allow_dirty_local_rc": False,
+        }
+    ]
     assert commands[0][0] == [
         sys.executable,
         "scripts/verify_release_candidate.py",
@@ -835,7 +925,13 @@ def test_refresh_local_rc_signoff_reruns_batch_for_provider_smoke(
         skip_screen_smoke=True,
     )
 
-    assert build_calls == [{"channel": "experimental", "repository": None}]
+    assert build_calls == [
+        {
+            "channel": "experimental",
+            "repository": None,
+            "allow_dirty_local_rc": False,
+        }
+    ]
     batch_command = commands[0][0]
     assert "tmp/rc-verification-abc12345-packaged-batch.json" in batch_command
     assert "--run-provider-smoke" in batch_command
@@ -1250,6 +1346,7 @@ def test_refresh_local_rc_signoff_cli_passes_public_demo_reports(
         [
             "--short-commit",
             "abc12345",
+            "--allow-dirty-local-rc",
             "--public-demo-report",
             "tmp/public-demo-smokes-real-desktop-missing.json",
             "--public-demo-report",
@@ -1261,6 +1358,7 @@ def test_refresh_local_rc_signoff_cli_passes_public_demo_reports(
         Path("tmp/public-demo-smokes-real-desktop-missing.json"),
         Path("tmp/public-demo-smokes-ui-missing.json"),
     )
+    assert captured["allow_dirty_local_rc"] is True
     output = capsys.readouterr().out
     assert "release_smoke_report: tmp/rc-verification-abc12345-release-smoke.json" in output
 

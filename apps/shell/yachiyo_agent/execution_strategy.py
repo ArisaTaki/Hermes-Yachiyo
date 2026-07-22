@@ -32,10 +32,13 @@ def execution_strategy_snapshot(
         decision_context.update(metadata)
     decision_context.update(policy)
     foreground_takeover_allowed = user_foreground_takeover_allowed(decision_context)
+    background_desktop_preferred = _strategy_truthy(
+        decision_context,
+        "prefer_background_desktop",
+    )
     isolated_desktop_preferred = _strategy_truthy(
         decision_context,
         "prefer_isolated_desktop",
-        "avoid_user_foreground_takeover",
         "require_sandbox_for_keyboard_mouse",
     )
     foreground_control_count = sum(
@@ -65,26 +68,47 @@ def execution_strategy_snapshot(
         foreground_control_count=foreground_control_count,
         keyboard_mouse_count=keyboard_mouse_count,
     )
-    if sandbox_recommended_count and not foreground_takeover_allowed:
+    if (
+        not foreground_takeover_allowed
+        and (background_desktop_preferred or isolated_desktop_preferred)
+    ):
+        local_foreground_fallback_allowed = False
+    if (
+        sandbox_recommended_count
+        and not foreground_takeover_allowed
+        and not background_desktop_preferred
+    ):
         isolated_desktop_preferred = True
     sandbox_required = bool(
         keyboard_mouse_count
         and (
             _strategy_truthy(decision_context, "require_sandbox_for_keyboard_mouse")
-            or (sandbox_recommended_count and not foreground_takeover_allowed)
-            or not foreground_takeover_allowed
+            or (
+                sandbox_recommended_count
+                and not foreground_takeover_allowed
+                and not background_desktop_preferred
+            )
         )
     )
     if handoff_count:
         preferred_environment = "user_handoff"
         interaction_mode = "handoff"
     elif foreground_control_count or keyboard_mouse_count:
-        preferred_environment = (
-            "user_foreground"
-            if foreground_takeover_allowed and not isolated_desktop_preferred
-            else "isolated_desktop"
-        )
-        interaction_mode = "foreground"
+        if isolated_desktop_preferred:
+            preferred_environment = "isolated_desktop"
+            interaction_mode = "foreground"
+        elif background_desktop_preferred:
+            preferred_environment = "background_desktop"
+            interaction_mode = "background"
+        elif foreground_takeover_allowed:
+            preferred_environment = "user_foreground"
+            interaction_mode = "foreground"
+        else:
+            preferred_environment = "user_handoff"
+            interaction_mode = "handoff"
+    elif read_only_count and background_desktop_preferred:
+        preferred_environment = "background_desktop"
+        interaction_mode = "read_only"
     elif read_only_count and isolated_desktop_preferred:
         preferred_environment = "isolated_desktop"
         interaction_mode = "read_only"
@@ -110,6 +134,7 @@ def execution_strategy_snapshot(
     )
     reasons = _execution_strategy_reasons(
         step_count=len(step_list),
+        background_desktop_preferred=background_desktop_preferred,
         isolated_desktop_preferred=isolated_desktop_preferred,
         foreground_control_count=foreground_control_count,
         keyboard_mouse_count=keyboard_mouse_count,
@@ -138,6 +163,7 @@ def execution_strategy_snapshot(
         preferred_environment=preferred_environment,
         interaction_mode=interaction_mode,
         policy_mode=policy_mode,
+        background_desktop_preferred=background_desktop_preferred,
         isolated_desktop_preferred=isolated_desktop_preferred,
         foreground_takeover_allowed=foreground_takeover_allowed,
         user_foreground_takeover_risk=user_foreground_takeover_risk,
@@ -264,6 +290,7 @@ def _strategy_provider_auto_start_recommended(
 def _execution_strategy_reasons(
     *,
     step_count: int,
+    background_desktop_preferred: bool,
     isolated_desktop_preferred: bool,
     foreground_control_count: int,
     keyboard_mouse_count: int,
@@ -277,6 +304,8 @@ def _execution_strategy_reasons(
     reasons: list[str] = []
     if not step_count:
         reasons.append("no_executable_steps_planned")
+    if background_desktop_preferred:
+        reasons.append("policy_prefers_background_desktop")
     if isolated_desktop_preferred:
         reasons.append("policy_prefers_isolated_desktop")
     if foreground_control_count:
@@ -309,6 +338,8 @@ def _execution_strategy_mitigations(
     local_foreground_fallback_allowed: bool,
 ) -> list[str]:
     mitigations: list[str] = []
+    if preferred_environment == "background_desktop":
+        mitigations.append("run_in_background_desktop_provider")
     if preferred_environment == "isolated_desktop":
         mitigations.append("run_in_controlled_desktop_provider")
     if interaction_mode in {"foreground", "handoff"}:

@@ -27,7 +27,10 @@ def _load_screen_route_module():
 
 
 def test_chat_ui_bridge_contract_preserves_message_image_idempotency_attachment_and_cancel(monkeypatch, tmp_path):
-    runtime = SimpleNamespace(name="runtime")
+    runtime = SimpleNamespace(
+        name="runtime",
+        chat_session=SimpleNamespace(session_id="session-current"),
+    )
     calls: list[tuple[str, dict]] = []
     monkeypatch.setattr(ui, "get_runtime", lambda: runtime)
     attachment_path = tmp_path / "screen.png"
@@ -37,7 +40,16 @@ def test_chat_ui_bridge_contract_preserves_message_image_idempotency_attachment_
         def __init__(self, received_runtime):
             assert received_runtime is runtime
 
-        def send_message(self, text, attachments=None, runnable_id="", client_message_id=""):
+        def send_message_in_session(
+            self,
+            session_id,
+            text,
+            attachments=None,
+            *,
+            runnable_id="",
+            client_message_id="",
+        ):
+            assert session_id == runtime.chat_session.session_id
             calls.append(
                 (
                     "send",
@@ -111,7 +123,10 @@ def test_chat_ui_bridge_contract_preserves_message_image_idempotency_attachment_
 
 
 def test_chat_ui_bridge_contract_preserves_session_lifecycle(monkeypatch):
-    runtime = SimpleNamespace(name="runtime")
+    runtime = SimpleNamespace(
+        name="runtime",
+        chat_session=SimpleNamespace(session_id="session-current"),
+    )
     calls: list[tuple[str, dict]] = []
     monkeypatch.setattr(ui, "get_runtime", lambda: runtime)
 
@@ -152,6 +167,7 @@ def test_chat_ui_bridge_contract_preserves_session_lifecycle(monkeypatch):
 
         def clear_session(self):
             calls.append(("clear_session", {}))
+            runtime.chat_session.session_id = "session-new"
             return {
                 "ok": True,
                 "session_id": "session-new",
@@ -159,8 +175,10 @@ def test_chat_ui_bridge_contract_preserves_session_lifecycle(monkeypatch):
                 "cancelled_tasks": 0,
             }
 
-        def discard_empty_current_session(self):
+        def discard_empty_current_session(self, session_id):
+            assert session_id == "session-new"
             calls.append(("discard_empty_current_session", {}))
+            runtime.chat_session.session_id = "session-current"
             return {
                 "ok": True,
                 "discarded": True,
@@ -169,8 +187,10 @@ def test_chat_ui_bridge_contract_preserves_session_lifecycle(monkeypatch):
                 "empty": False,
             }
 
-        def delete_current_session(self):
+        def delete_session(self, session_id):
+            assert session_id == "session-current"
             calls.append(("delete_current_session", {}))
+            runtime.chat_session.session_id = "session-after-delete"
             return {
                 "ok": True,
                 "deleted_session_id": "session-current",
@@ -260,7 +280,8 @@ def test_chat_ui_bridge_contract_preserves_group_and_delegated_summary(monkeypat
             calls.append(("update_group", payload))
             return {"ok": True, **payload}
 
-        def summarize_delegated_run(self, run_id):
+        def summarize_delegated_run(self, run_id, *, conversation_id=""):
+            assert conversation_id == ""
             calls.append(("summarize_delegated_run", {"run_id": run_id}))
             return {
                 "ok": True,
@@ -783,12 +804,12 @@ def test_run_detail_approval_bridge_contract_preserves_approve_reject_and_cancel
     calls: list[tuple[str, str, str]] = []
 
     class FakeRuntimeService:
-        def approve_run_approval(self, run_id):
-            calls.append(("approve", run_id, ""))
+        def approve_run_approval(self, run_id, expected_approval_id):
+            calls.append(("approve", run_id, expected_approval_id))
             return {"run_id": run_id, "status": "running", "pending_approval": {}}
 
-        def reject_run_approval(self, run_id, reason):
-            calls.append(("reject", run_id, reason))
+        def reject_run_approval(self, run_id, reason, expected_approval_id):
+            calls.append(("reject", run_id, f"{reason}:{expected_approval_id}"))
             return {"run_id": run_id, "status": "cancelled", "result": reason}
 
         def cancel_run(self, run_id):
@@ -797,11 +818,17 @@ def test_run_detail_approval_bridge_contract_preserves_approve_reject_and_cancel
 
     monkeypatch.setattr(agents, "get_agent_runtime_service", lambda: FakeRuntimeService())
 
-    approved = asyncio.run(agents.approve_run_approval("run_approval"))
+    approved = asyncio.run(agents.approve_run_approval(
+        "run_approval",
+        agents.ApprovalRejectRequest(approval_id="approval-approve"),
+    ))
     rejected = asyncio.run(
         agents.reject_run_approval(
             "run_reject",
-            agents.ApprovalRejectRequest(reason="Rejected from chat"),
+            agents.ApprovalRejectRequest(
+                approval_id="approval-reject",
+                reason="Rejected from chat",
+            ),
         )
     )
     cancelled = asyncio.run(agents.cancel_run("run_cancel"))
@@ -810,8 +837,8 @@ def test_run_detail_approval_bridge_contract_preserves_approve_reject_and_cancel
     assert rejected == {"run_id": "run_reject", "status": "cancelled", "result": "Rejected from chat"}
     assert cancelled == {"run_id": "run_cancel", "status": "cancelled"}
     assert calls == [
-        ("approve", "run_approval", ""),
-        ("reject", "run_reject", "Rejected from chat"),
+        ("approve", "run_approval", "approval-approve"),
+        ("reject", "run_reject", "Rejected from chat:approval-reject"),
         ("cancel", "run_cancel", ""),
     ]
 
@@ -820,8 +847,11 @@ def test_workflow_child_approval_bridge_contract_preserves_parent_child_replay_r
     calls: list[tuple[str, dict]] = []
 
     class FakeRuntimeService:
-        def approve_run_approval(self, run_id):
-            calls.append(("approve", {"run_id": run_id}))
+        def approve_run_approval(self, run_id, expected_approval_id):
+            calls.append(("approve", {
+                "run_id": run_id,
+                "expected_approval_id": expected_approval_id,
+            }))
             return {
                 "run_id": run_id,
                 "kind": "agent_run",
@@ -883,7 +913,10 @@ def test_workflow_child_approval_bridge_contract_preserves_parent_child_replay_r
     monkeypatch.setattr(agents, "get_agent_runtime_service", lambda: service)
     monkeypatch.setattr(run_routes, "get_native_run_engine", lambda: service)
 
-    approved_child = asyncio.run(agents.approve_run_approval("run_child_approval"))
+    approved_child = asyncio.run(agents.approve_run_approval(
+        "run_child_approval",
+        agents.ApprovalRejectRequest(approval_id="approval-child"),
+    ))
     refreshed_child = asyncio.run(agents.get_any_run("run_child_approval"))
     refreshed_parent = asyncio.run(agents.get_workflow_run("run_workflow_parent"))
     replay = asyncio.run(run_routes.list_run_events("run_child_approval", after_sequence=0, limit=200))
@@ -895,7 +928,13 @@ def test_workflow_child_approval_bridge_contract_preserves_parent_child_replay_r
     assert replay["events"][0]["event_type"] == "agent.tool.approval_approved"
     assert replay["events"][1]["event_type"] == "agent.run.resumed"
     assert calls == [
-        ("approve", {"run_id": "run_child_approval"}),
+        (
+            "approve",
+            {
+                "run_id": "run_child_approval",
+                "expected_approval_id": "approval-child",
+            },
+        ),
         ("get_run", {"run_id": "run_child_approval"}),
         ("get_run", {"run_id": "run_workflow_parent"}),
         (
@@ -909,8 +948,12 @@ def test_workflow_child_approval_reject_bridge_contract_preserves_parent_child_r
     calls: list[tuple[str, dict]] = []
 
     class FakeRuntimeService:
-        def reject_run_approval(self, run_id, reason):
-            calls.append(("reject", {"run_id": run_id, "reason": reason}))
+        def reject_run_approval(self, run_id, reason, expected_approval_id):
+            calls.append(("reject", {
+                "run_id": run_id,
+                "reason": reason,
+                "expected_approval_id": expected_approval_id,
+            }))
             return {
                 "run_id": run_id,
                 "kind": "agent_run",
@@ -991,7 +1034,10 @@ def test_workflow_child_approval_reject_bridge_contract_preserves_parent_child_r
     rejected_child = asyncio.run(
         agents.reject_run_approval(
             "run_child_approval",
-            agents.ApprovalRejectRequest(reason="not now"),
+            agents.ApprovalRejectRequest(
+                approval_id="approval-child",
+                reason="not now",
+            ),
         )
     )
     refreshed_child = asyncio.run(agents.get_any_run("run_child_approval"))
@@ -1013,7 +1059,14 @@ def test_workflow_child_approval_reject_bridge_contract_preserves_parent_child_r
     assert parent_replay["events"][0]["event_type"] == "workflow.run.cancelled"
     assert parent_replay["events"][0]["payload"]["child_run_id"] == "run_child_approval"
     assert calls == [
-        ("reject", {"run_id": "run_child_approval", "reason": "not now"}),
+        (
+            "reject",
+            {
+                "run_id": "run_child_approval",
+                "reason": "not now",
+                "expected_approval_id": "approval-child",
+            },
+        ),
         ("get_run", {"run_id": "run_child_approval"}),
         ("get_run", {"run_id": "run_workflow_parent"}),
         (
@@ -1798,13 +1851,19 @@ def test_run_detail_bridge_contract_preserves_replay_events(monkeypatch):
 
 def test_chat_approval_run_detail_bridge_contract_preserves_detail_and_replay(monkeypatch):
     calls: list[tuple[str, dict]] = []
-    runtime = SimpleNamespace(name="runtime")
+    runtime = SimpleNamespace(
+        name="runtime",
+        chat_session=SimpleNamespace(session_id="session-chat-approval"),
+    )
     approved = False
 
     class FakeRuntimeService:
-        def approve_run_approval(self, run_id):
+        def approve_run_approval(self, run_id, expected_approval_id):
             nonlocal approved
-            calls.append(("approve", {"run_id": run_id}))
+            calls.append(("approve", {
+                "run_id": run_id,
+                "expected_approval_id": expected_approval_id,
+            }))
             approved = True
             return {
                 "run_id": run_id,
@@ -1923,7 +1982,8 @@ def test_chat_approval_run_detail_bridge_contract_preserves_detail_and_replay(mo
         def __init__(self, received_runtime):
             assert received_runtime is runtime
 
-        def get_messages(self, limit=0, anchor_message_id=""):
+        def get_messages_in_session(self, session_id, limit=0, anchor_message_id=""):
+            assert session_id == runtime.chat_session.session_id
             calls.append(("get_messages", {"limit": limit, "anchor_message_id": anchor_message_id}))
             if approved:
                 return {
@@ -1975,7 +2035,10 @@ def test_chat_approval_run_detail_bridge_contract_preserves_detail_and_replay(mo
     run_detail = asyncio.run(agents.get_any_run("run_chat_approval"))
     replay = asyncio.run(run_routes.list_run_events("run_chat_approval", after_sequence=0, limit=200))
     chat_waiting = asyncio.run(ui.get_chat_messages(limit=20))
-    approved_run = asyncio.run(agents.approve_run_approval("run_chat_approval"))
+    approved_run = asyncio.run(agents.approve_run_approval(
+        "run_chat_approval",
+        agents.ApprovalRejectRequest(approval_id="approval-1"),
+    ))
     chat_completed = asyncio.run(ui.get_chat_messages(limit=20))
     refreshed_detail = asyncio.run(agents.get_any_run("run_chat_approval"))
     after_approval_replay = asyncio.run(
@@ -2013,7 +2076,13 @@ def test_chat_approval_run_detail_bridge_contract_preserves_detail_and_replay(mo
             {"run_id": "run_chat_approval", "after_sequence": 0, "limit": 200},
         ),
         ("get_messages", {"limit": 20, "anchor_message_id": ""}),
-        ("approve", {"run_id": "run_chat_approval"}),
+        (
+            "approve",
+            {
+                "run_id": "run_chat_approval",
+                "expected_approval_id": "approval-1",
+            },
+        ),
         ("get_messages", {"limit": 20, "anchor_message_id": ""}),
         ("get_run", {"run_id": "run_chat_approval"}),
         (
@@ -2025,14 +2094,20 @@ def test_chat_approval_run_detail_bridge_contract_preserves_detail_and_replay(mo
 
 def test_chat_approval_failure_run_detail_bridge_contract_preserves_failed_replay(monkeypatch):
     calls: list[tuple[str, dict]] = []
-    runtime = SimpleNamespace(name="runtime")
+    runtime = SimpleNamespace(
+        name="runtime",
+        chat_session=SimpleNamespace(session_id="session-chat-approval"),
+    )
     approved = False
     failure = "terminal.run 执行失败；退出码：7；stdout：main-chat-terminal-failure"
 
     class FakeRuntimeService:
-        def approve_run_approval(self, run_id):
+        def approve_run_approval(self, run_id, expected_approval_id):
             nonlocal approved
-            calls.append(("approve", {"run_id": run_id}))
+            calls.append(("approve", {
+                "run_id": run_id,
+                "expected_approval_id": expected_approval_id,
+            }))
             approved = True
             return {
                 "run_id": run_id,
@@ -2155,7 +2230,8 @@ def test_chat_approval_failure_run_detail_bridge_contract_preserves_failed_repla
         def __init__(self, received_runtime):
             assert received_runtime is runtime
 
-        def get_messages(self, limit=0, anchor_message_id=""):
+        def get_messages_in_session(self, session_id, limit=0, anchor_message_id=""):
+            assert session_id == runtime.chat_session.session_id
             calls.append(("get_messages", {"limit": limit, "anchor_message_id": anchor_message_id}))
             if approved:
                 return {
@@ -2207,7 +2283,10 @@ def test_chat_approval_failure_run_detail_bridge_contract_preserves_failed_repla
     run_detail = asyncio.run(agents.get_any_run("run_chat_approval"))
     replay = asyncio.run(run_routes.list_run_events("run_chat_approval", after_sequence=0, limit=200))
     chat_waiting = asyncio.run(ui.get_chat_messages(limit=20))
-    approved_run = asyncio.run(agents.approve_run_approval("run_chat_approval"))
+    approved_run = asyncio.run(agents.approve_run_approval(
+        "run_chat_approval",
+        agents.ApprovalRejectRequest(approval_id="approval-1"),
+    ))
     chat_failed = asyncio.run(ui.get_chat_messages(limit=20))
     refreshed_detail = asyncio.run(agents.get_any_run("run_chat_approval"))
     after_approval_replay = asyncio.run(
@@ -2243,7 +2322,13 @@ def test_chat_approval_failure_run_detail_bridge_contract_preserves_failed_repla
             {"run_id": "run_chat_approval", "after_sequence": 0, "limit": 200},
         ),
         ("get_messages", {"limit": 20, "anchor_message_id": ""}),
-        ("approve", {"run_id": "run_chat_approval"}),
+        (
+            "approve",
+            {
+                "run_id": "run_chat_approval",
+                "expected_approval_id": "approval-1",
+            },
+        ),
         ("get_messages", {"limit": 20, "anchor_message_id": ""}),
         ("get_run", {"run_id": "run_chat_approval"}),
         (

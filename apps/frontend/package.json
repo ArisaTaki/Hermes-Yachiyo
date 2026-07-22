@@ -9,8 +9,14 @@
   "scripts": {
     "dev": "concurrently -k -s first \"vite --host 127.0.0.1 --port 5174 --strictPort\" \"wait-on http-get://127.0.0.1:5174 && tsc -p tsconfig.electron.json && electron dist-electron/main.js\"",
     "build": "tsc -b && vite build && tsc -p tsconfig.electron.json",
-    "dist:mac": "npm run build && electron-builder --config electron-builder.yml --mac dmg",
-    "pack:mac": "npm run build && electron-builder --config electron-builder.yml --mac dir",
+    "test:consumer-presentations": "node --test scripts/consumer-presentations.test.mjs",
+    "test:cua-mcp-bridge": "tsc -p tsconfig.electron.json && node --test electron/cuaMcpBridge.test.mjs",
+    "test:background-control-readiness": "node scripts/test-background-control-readiness.mjs",
+    "bundle:budget": "vite build --manifest manifest.json && node ../../scripts/check_frontend_bundle_budget.mjs --dist dist --manifest dist/manifest.json --mode freeze",
+    "bundle:budget:target": "vite build --manifest manifest.json && node ../../scripts/check_frontend_bundle_budget.mjs --dist dist --manifest dist/manifest.json --mode target",
+    "prepare:cua-driver": "python3 ../../scripts/prepare_cua_driver.py",
+    "dist:mac": "npm run prepare:cua-driver && npm run build && electron-builder --config electron-builder.yml --mac dmg",
+    "pack:mac": "npm run prepare:cua-driver && npm run build && electron-builder --config electron-builder.yml --mac dir",
     "preview": "vite preview --host 127.0.0.1 --port 4173",
     "start": "electron dist-electron/main.js"
   },

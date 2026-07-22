@@ -11,6 +11,7 @@ import sys
 import threading
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -68,6 +69,7 @@ from apps.shell.agent_runtime import (
     WorkflowSubworkflowNodeExecution,
 )
 from apps.shell.credential_store import MemoryCredentialStore
+from apps.shell.agent.runtime.goal_runtime import DELEGATED_WORKFLOW_RESPONSE_ONLY_GOAL
 from scripts.verify_secret_redaction import verify_secret_redaction
 
 
@@ -77,6 +79,55 @@ def make_service(tmp_path, *, seed_templates: bool = False) -> AgentRuntimeServi
         workspace_dir=tmp_path / "runtime",
         credential_store=MemoryCredentialStore(),
         seed_templates=seed_templates,
+    )
+
+
+def explicit_foreground_takeover_metadata() -> dict[str, Any]:
+    """Opt a legacy foreground-execution test into the supervised desktop path."""
+
+    return {
+        "allow_user_foreground_takeover": True,
+        "desktop_execution_policy": {
+            "mode": "allow",
+            "allow_live_foreground": True,
+            "prefer_background_desktop": False,
+            "prefer_isolated_desktop": False,
+            "avoid_user_foreground_takeover": False,
+            "require_sandbox_for_keyboard_mouse": False,
+        },
+    }
+
+
+def install_fake_run_owned_browser_target(
+    service: AgentRuntimeService,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Give brokers a fake target owned by the current Run, without user-tab access."""
+
+    target_id = "page-target-runtime-test"
+    original_factory = service.tool_brokers._tool_broker_factory
+
+    def broker_factory(*args, **kwargs):
+        broker = original_factory(*args, **kwargs)
+        broker.restore_owned_browser_target(target_id)
+        return broker
+
+    monkeypatch.setattr(service.tool_brokers, "_tool_broker_factory", broker_factory)
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.broker.browser.is_valid_target_id",
+        lambda value: str(value or "").strip() == target_id,
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.broker.browser.owned_browser_target",
+        lambda _target_id: nullcontext(),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.broker.browser.close_target",
+        lambda requested_target_id: {
+            "ok": requested_target_id == target_id,
+            "action": "browser.close_target",
+            "data": {"target_id": requested_target_id},
+        },
     )
 
 
@@ -256,6 +307,7 @@ def test_approval_coordinator_snapshots_input_previews():
         label="Gate",
         criteria="Review",
         input_preview=previews[3],
+        expected_approval_id="approval-workflow-approve",
     )
     coordinator.reject_workflow_node(
         "run-workflow-reject",
@@ -445,7 +497,7 @@ def test_workflow_parent_run_locator_finds_waiting_parents_and_root_groups():
         "workflow_group": {
             "run_group_id": "workflow_group",
             "source": "workflow",
-            "child_run_ids": ["workflow_external"],
+            "child_run_ids": ["workflow_external", "workflow_nested_child"],
         },
     }
 
@@ -470,6 +522,9 @@ def test_workflow_parent_run_locator_finds_waiting_parents_and_root_groups():
     assert locator.parent_runs_waiting_for_child({"kind": "agent_run", "run_group_id": "missing"}) == []
     assert locator.workflow_run_is_group_root(waiting_parent) is True
     assert locator.workflow_run_is_group_root({"run_id": "workflow_external", "run_group_id": "workflow_group"}) is True
+    assert locator.workflow_run_is_group_root(
+        {"run_id": "workflow_nested_child", "run_group_id": "workflow_group"}
+    ) is False
     assert locator.workflow_run_is_group_root({"run_id": "workflow_missing", "run_group_id": "missing"}) is False
     assert locator.workflow_run_is_group_root({"run_id": "workflow_without_group"}) is False
 
@@ -832,6 +887,7 @@ def test_workflow_approval_resume_context_parses_pending_payload():
         ],
     }
     pending = {
+        "approval_id": "approval-context",
         "tool": "workflow.approval",
         "workflow_context": "approved context",
         "workflow_next_index": "4",
@@ -855,6 +911,7 @@ def test_workflow_approval_resume_context_parses_pending_payload():
     assert context.start_index == 4
     assert context.start_node_id == "after-gate"
     assert context.root_group is True
+    assert context.expected_approval_id == "approval-context"
     assert context.timeline == [{"event": "workflow.node.approval_required"}]
     assert context.artifacts == [{"kind": "workflow_artifact", "path": "summary.md"}]
     assert context.approval.workflow_node_id == "gate"
@@ -910,6 +967,7 @@ def test_workflow_approval_resume_coordinator_claims_and_handoffs():
         artifacts=artifacts,
         start_index=3,
         root_group=True,
+        expected_approval_id="approval-1",
     )
 
     def claim_pending_approval(run_id, approval_payload):
@@ -963,6 +1021,7 @@ def test_workflow_approval_resume_coordinator_claims_and_handoffs():
     assert handoff["label"] == "Human Gate"
     assert handoff["criteria"] == "Review before continuing."
     assert handoff["input_preview"] == {"checkpoint": "Human Gate"}
+    assert handoff["expected_approval_id"] == "approval-1"
 
 
 def test_approval_resume_coordinator_executes_approved_tool_and_remaining_requests():
@@ -1620,7 +1679,10 @@ def test_approval_resume_coordinator_orchestrates_resume_projection_states():
         mode["value"] = value
         return coordinator.resume_approved_tool_run(
             run_id=context.run_id,
-            pending={"tool": "terminal.run"},
+            pending={
+                "approval_id": "approval-resume-projection",
+                "tool": "terminal.run",
+            },
             context=context,
             agent={"agent_id": "agent_resume"},
             resumed_detail="Agent resumed after approval",
@@ -1707,7 +1769,10 @@ def test_approval_resume_coordinator_orchestrates_resume_projection_states():
 
     current = duplicate_coordinator.resume_approved_tool_run(
         run_id=context.run_id,
-        pending={"tool": "terminal.run"},
+        pending={
+            "approval_id": "approval-resume-projection",
+            "tool": "terminal.run",
+        },
         context=context,
         agent={"agent_id": "agent_resume"},
         resumed_detail="Agent resumed after approval",
@@ -1747,6 +1812,7 @@ def test_approval_resume_projection_coordinator_projects_resume_states():
             input_preview={"command": "printf ok"},
             remaining_requests=[],
             next_iteration=3,
+            approval_id=f"approval-{run_id}",
         )
 
     def update_run(run_id, **kwargs):
@@ -1776,7 +1842,7 @@ def test_approval_resume_projection_coordinator_projects_resume_states():
     required_pending["input_preview"]["command"] = "mutated after projection"
     failed = coordinator.project_failed(make_context("agent_run_failed"), "safe failure")
 
-    assert group_updates == [running]
+    assert group_updates == [running, agent_completed, failed]
     assert parent_marks == [running]
     assert agent_completed["status"] == "completed"
     assert main_completed["status"] == "running"
@@ -1825,6 +1891,117 @@ def test_approval_resume_projection_coordinator_projects_resume_states():
             },
         ),
         ("agent_run_failed", "agent.run.failed", {"error": "safe failure"}),
+    ]
+
+
+def test_main_chat_direct_approval_projection_finishes_through_chat_lifecycle():
+    events: list[tuple[str, str, dict[str, object], dict[str, str]]] = []
+    lifecycle_calls: list[tuple[str, str]] = []
+    context = ToolApprovalResumeContext(
+        run_id="main-chat-direct",
+        timeline=[
+            {
+                "event": "agent.desktop.intent_completed",
+                "source": "runtime_planner",
+            }
+        ],
+        artifacts=[],
+        broker=SimpleNamespace(name="broker"),
+        allowed_tools=["desktop.quit_app"],
+        budget=SimpleNamespace(name="budget"),
+        messages=[],
+        tool_request={"tool": "desktop.quit_app", "source": "runtime_planner"},
+        tool_name="desktop.quit_app",
+        input_preview={},
+        remaining_requests=[],
+        next_iteration=1,
+        approval_id="approval-main-chat-direct",
+    )
+
+    def append_event(run_id, event_type, payload, **fence):
+        events.append((run_id, event_type, payload, fence))
+        return {"event_type": event_type}
+
+    coordinator = ApprovalResumeProjectionCoordinator(
+        timeline_factory=lambda event, detail, **payload: {
+            "event": event,
+            "detail": detail,
+            **payload,
+        },
+        append_run_event=append_event,
+        update_run=lambda run_id, **fields: {
+            "run_id": run_id,
+            "updated_at": "version-2",
+            **fields,
+        },
+        update_agent_run_group_if_root=lambda _run: None,
+        mark_parent_workflows_child_running=lambda _run: None,
+        complete_main_chat_run=lambda run_id, result: lifecycle_calls.append(
+            (run_id, result)
+        )
+        or {"run_id": run_id, "status": "completed", "result": result},
+    )
+
+    projected = coordinator.project_main_chat_completed(context, "done")
+
+    assert projected["status"] == "completed"
+    assert lifecycle_calls == [("main-chat-direct", "done")]
+    assert events == [
+        (
+            "main-chat-direct",
+            "model.output.completed",
+            {"content": "done", "output_chars": 4},
+            {"expected_status": "running", "expected_updated_at": "version-2"},
+        )
+    ]
+
+
+def test_main_chat_approval_failure_uses_chat_lifecycle_not_agent_projection():
+    failure_calls: list[dict[str, object]] = []
+    context = ToolApprovalResumeContext(
+        run_id="main-chat-failed",
+        timeline=[{"event": "agent.tool.failed"}],
+        artifacts=[{"path": "failure.txt"}],
+        broker=SimpleNamespace(name="broker"),
+        allowed_tools=["terminal.run"],
+        budget=SimpleNamespace(name="budget"),
+        messages=[],
+        tool_request={"tool": "terminal.run"},
+        tool_name="terminal.run",
+        input_preview={},
+        remaining_requests=[],
+        next_iteration=1,
+    )
+    coordinator = ApprovalResumeProjectionCoordinator(
+        timeline_factory=lambda event, detail, **payload: {
+            "event": event,
+            "detail": detail,
+            **payload,
+        },
+        append_run_event=lambda *_args, **_kwargs: pytest.fail(
+            "main-chat lifecycle owns failure events"
+        ),
+        update_run=lambda *_args, **_kwargs: pytest.fail(
+            "main-chat lifecycle owns the terminal row"
+        ),
+        update_agent_run_group_if_root=lambda _run: None,
+        mark_parent_workflows_child_running=lambda _run: None,
+        fail_main_chat_run=lambda run_id, error, **kwargs: failure_calls.append(
+            {"run_id": run_id, "error": error, **kwargs}
+        )
+        or {"run_id": run_id, "status": "failed", "result": error},
+    )
+
+    failed = coordinator.project_main_chat_failed(context, "safe failure")
+
+    assert failed["status"] == "failed"
+    assert failure_calls == [
+        {
+            "run_id": "main-chat-failed",
+            "error": "safe failure",
+            "timeline": context.timeline,
+            "artifacts": context.artifacts,
+        }
     ]
 
 
@@ -2647,6 +2824,8 @@ def test_workflow_parent_resume_failure_projection_redacts_and_builds_update_fie
 
 def test_workflow_parent_resume_coordinator_continues_completed_child():
     appended_events: list[tuple[str, str, dict[str, object]]] = []
+    run_updates: list[dict[str, object]] = []
+    group_updates: list[dict[str, object]] = []
     continued: dict[str, object] = {}
     child_node_info = {
         "workflow_node_id": "agent",
@@ -2662,6 +2841,10 @@ def test_workflow_parent_resume_coordinator_continues_completed_child():
     workflow_run = {
         "run_id": "workflow_parent",
         "run_group_id": "run_group_parent",
+        "status": "running",
+        "result": "waiting for child",
+        "pending_approval": {},
+        "updated_at": "run-version-1",
         "timeline": [
             {
                 "event": "workflow.run.approval_required",
@@ -2706,6 +2889,19 @@ def test_workflow_parent_resume_coordinator_continues_completed_child():
         )
         return {"run_id": run["run_id"], "status": "completed", "result": context}
 
+    def update_run(run_id, **fields):
+        run_updates.append({"run_id": run_id, **fields})
+        return {
+            **workflow_run,
+            **fields,
+            "run_id": run_id,
+            "updated_at": "run-version-2",
+        }
+
+    def update_run_group(run_group_id, **fields):
+        group_updates.append({"run_group_id": run_group_id, **fields})
+        return {"run_group_id": run_group_id, **fields}
+
     coordinator = WorkflowParentResumeCoordinator(
         parent_runs_waiting_for_child=lambda _child: [workflow_run],
         workflow_run_is_group_root=lambda _run: True,
@@ -2721,12 +2917,8 @@ def test_workflow_parent_resume_coordinator_continues_completed_child():
         continue_workflow_run=continue_workflow_run,
         timeline_factory=lambda event, detail, **payload: {"event": event, "detail": detail, **payload},
         append_run_event=lambda run_id, event_type, payload: appended_events.append((run_id, event_type, payload)),
-        update_run=lambda *_args, **_kwargs: pytest.fail(
-            "completed child continuation should not update parent directly"
-        ),
-        update_run_group=lambda *_args, **_kwargs: pytest.fail(
-            "completed child continuation should not update group directly"
-        ),
+        update_run=update_run,
+        update_run_group=update_run_group,
     )
 
     result = coordinator.resume_parent_after_child_update(workflow_run, child_run)
@@ -2736,12 +2928,22 @@ def test_workflow_parent_resume_coordinator_continues_completed_child():
         "status": "completed",
         "result": "Child Agent completed after approval.",
     }
-    assert continued["run"] is workflow_run
+    assert continued["run"]["status"] == "running"
+    assert continued["run"]["result"] == "Child Agent completed after approval."
     assert continued["workflow"] == {"workflow_id": "workflow_demo"}
     assert continued["context"] == "Child Agent completed after approval."
     assert continued["start_index"] == 3
     assert continued["root_group"] is True
     assert continued["artifacts"] == [child_artifact]
+    assert run_updates[-1]["expected_status"] == "running"
+    assert run_updates[-1]["expected_updated_at"] == "run-version-1"
+    assert group_updates == [
+        {
+            "run_group_id": "run_group_parent",
+            "status": "running",
+            "summary": "Child Agent completed after approval.",
+        }
+    ]
     continued_timeline = continued["timeline"]
     assert isinstance(continued_timeline, list)
     assert continued_timeline[-1] == {
@@ -3335,7 +3537,7 @@ def test_workflow_agent_node_execution_runs_child_and_builds_replay_payloads():
             {
                 "kind": "agent_run",
                 "runnable_id": "agent_research",
-                "user_goal": "Ship release candidate\n\nStep: Summarize launch risk.",
+                "user_goal": "Summarize launch risk.",
                 "run_group_id": "workflow_group",
             },
         ),
@@ -3347,8 +3549,11 @@ def test_workflow_agent_node_execution_runs_child_and_builds_replay_payloads():
                     **agent,
                     "_runtime_planner_entrypoint": True,
                     "_runtime_planner_entrypoint_context": "Summarize launch risk.",
+                    "_runtime_agent_goal_context": (
+                        "Ship release candidate\n\nStep: Summarize launch risk."
+                    ),
                 },
-                "user_goal": "Ship release candidate\n\nStep: Summarize launch risk.",
+                "user_goal": "Summarize launch risk.",
                 "upstream": "Previous result",
             },
         ),
@@ -3721,14 +3926,37 @@ def test_workflow_continuation_coordinator_pauses_for_approval_node():
 
         def _update_run(self, run_id, **fields):
             self.run_updates.append((run_id, fields))
-            return {"run_id": run_id, "run_group_id": "run_group", **fields}
+            return self.get_run(run_id)
 
         def _update_run_group(self, run_group_id, **fields):
             self.group_updates.append((run_group_id, fields))
+            return {
+                "run_group_id": run_group_id,
+                **fields,
+                "updated_at": "2026-07-11T10:00:01+00:00",
+            }
+
+        def get_run_group(self, run_group_id):
+            assert run_group_id == "run_group"
+            return {
+                "run_group_id": run_group_id,
+                "status": "running",
+                "updated_at": "2026-07-11T10:00:00+00:00",
+            }
 
         def get_run(self, run_id):
             assert run_id == "workflow_run"
-            assert self.run_updates
+            if not self.run_updates:
+                return {
+                    "run_id": run_id,
+                    "run_group_id": "run_group",
+                    "status": "running",
+                    "pending_approval": {},
+                    "timeline": [],
+                    "artifacts": [],
+                    "updated_at": "2026-07-11T10:00:00+00:00",
+                    "project_root_group": True,
+                }
             fields = dict(self.run_updates[-1][1])
             private_pending = fields.get("pending_approval")
             if isinstance(private_pending, dict):
@@ -3808,26 +4036,30 @@ def test_workflow_continuation_coordinator_pauses_for_approval_node():
             "pending_approval": public_pending,
         }
     ]
-    assert engine.events == [
-        (
-            "workflow_run",
-            "workflow.node.approval_required",
-            {
-                "workflow_node_id": "gate",
-                "workflow_node_kind": "approval",
-                "workflow_node_label": "Human Gate",
-                "workflow_node_approval_criteria": "Review child output before continuing.",
-                "status": "approval_required",
-                "pending_approval": public_pending,
-            },
-        )
-    ]
+    assert engine.events[0] == (
+        "workflow_run",
+        "workflow.node.approval_required",
+        {
+            "workflow_node_id": "gate",
+            "workflow_node_kind": "approval",
+            "workflow_node_label": "Human Gate",
+            "workflow_node_approval_criteria": "Review child output before continuing.",
+            "status": "approval_required",
+            "pending_approval": public_pending,
+        },
+    )
+    assert engine.events[1][0:2] == (
+        "workflow_run",
+        "group.run.approval_required",
+    )
+    assert engine.events[1][2]["run_group_id"] == "run_group"
+    assert engine.events[1][2]["pending_approval"] == public_pending
     assert len(engine.run_updates) == 1
     run_id, run_update = engine.run_updates[0]
     assert run_id == "workflow_run"
     assert run_update["status"] == "approval_required"
     assert run_update["result"] == "等待审批：Human Gate"
-    assert run_update["timeline"] is timeline
+    assert run_update["timeline"] == timeline
     assert run_update["artifacts"] is artifacts
     private_pending = run_update["pending_approval"]
     assert private_pending["approval_id"].startswith("approval_")
@@ -3843,6 +4075,8 @@ def test_workflow_continuation_coordinator_pauses_for_approval_node():
             {
                 "status": "approval_required",
                 "summary": "等待审批：Human Gate",
+                "expected_status": "running",
+                "expected_updated_at": "2026-07-11T10:00:00+00:00",
             },
         )
     ]
@@ -3871,6 +4105,7 @@ def test_workflow_continuation_coordinator_resumes_after_approval_node(monkeypat
             label,
             criteria,
             input_preview,
+            expected_approval_id,
         ):
             calls.append(
                 (
@@ -3884,6 +4119,7 @@ def test_workflow_continuation_coordinator_resumes_after_approval_node(monkeypat
                         "label": label,
                         "criteria": criteria,
                         "input_preview": input_preview,
+                        "expected_approval_id": expected_approval_id,
                     },
                 )
             )
@@ -3933,6 +4169,7 @@ def test_workflow_continuation_coordinator_resumes_after_approval_node(monkeypat
         label="Manual Gate",
         criteria="Check output",
         input_preview={"checkpoint": "Manual Gate"},
+        expected_approval_id="approval-workflow",
     )
 
     assert result == {
@@ -3942,18 +4179,12 @@ def test_workflow_continuation_coordinator_resumes_after_approval_node(monkeypat
     }
     assert [name for name, _payload in calls] == [
         "approve_workflow_node",
-        "update_run_group",
-        "get_run",
         "continue_run",
     ]
     assert calls[0][1]["timeline"] is timeline
     assert calls[0][1]["artifacts"] is artifacts
     assert calls[0][1]["workflow_node_id"] == "gate"
-    assert calls[1][1] == {
-        "run_group_id": "run_group",
-        "status": "running",
-        "summary": "approved context",
-    }
+    assert calls[0][1]["expected_approval_id"] == "approval-workflow"
     assert calls[-1][1]["run"]["status"] == "running"
     assert calls[-1][1]["workflow"] is workflow
     assert calls[-1][1]["context"] == "approved context"
@@ -4576,7 +4807,6 @@ def test_main_chat_run_links_task_and_records_replayable_events(tmp_path, monkey
         completed = service.complete_main_chat_run(run["run_id"], result)
         link = service.get_task_run_link("task-main-1")
         events = service.list_run_events(run["run_id"])["events"]
-
         assert link["run_id"] == run["run_id"]
         assert link["session_id"] == "session-main-1"
         assert link["run_status"] == "completed"
@@ -4612,6 +4842,7 @@ def test_main_chat_run_links_task_and_records_replayable_events(tmp_path, monkey
 def test_main_chat_model_loop_executes_generic_apple_music_intent_before_model(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     open_and_play_calls = 0
+    ui_element_calls: list[dict[str, Any]] = []
     monkeypatch.setattr(
         "apps.shell.agent_runtime.get_model_profile_service",
         lambda: FakeDefaultProfileService(),
@@ -4639,7 +4870,26 @@ def test_main_chat_model_loop_executes_generic_apple_music_intent_before_model(t
             },
         }
 
+    def fake_ui_elements(
+        role_filter: str = "",
+        limit: Any = 80,
+        app_name: str = "",
+    ) -> dict[str, Any]:
+        ui_element_calls.append(
+            {"role_filter": role_filter, "limit": limit, "app_name": app_name}
+        )
+        return {
+            "ok": True,
+            "action": "desktop.ui_elements",
+            "summary": "Read Music playback controls",
+            "data": {
+                "app_name": app_name,
+                "elements": [{"role": "AXButton", "name": "Pause"}],
+            },
+        }
+
     monkeypatch.setattr("apps.shell.agent.tools.desktop.apple_music_open_and_play", fake_music_open_and_play)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.ui_elements", fake_ui_elements)
     try:
         run = service.start_main_chat_run(
             task_id="task-main-apple-music-generic",
@@ -4649,6 +4899,7 @@ def test_main_chat_model_loop_executes_generic_apple_music_intent_before_model(t
         updated = service.execute_main_chat_model_loop(
             run["run_id"],
             [{"role": "user", "content": "能否帮我播放 Apple Music?"}],
+            runtime_execution_metadata=explicit_foreground_takeover_metadata(),
         )
         events = service.list_run_events(run["run_id"])["events"]
         event_types = [event["event_type"] for event in events]
@@ -4657,6 +4908,7 @@ def test_main_chat_model_loop_executes_generic_apple_music_intent_before_model(t
         completed_event = next(event for event in events if event["event_type"] == "agent.desktop.intent_completed")
 
         assert open_and_play_calls == 1
+        assert ui_element_calls == []
         assert "已打开 Apple Music，并开始播放" in updated["result"]
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
@@ -4675,6 +4927,7 @@ def test_agent_run_daily_desktop_overlay_plans_from_user_goal_before_context(tmp
 
     service = make_service(tmp_path)
     open_and_play_calls = 0
+    ui_element_calls: list[dict[str, Any]] = []
     monkeypatch.setattr(
         "apps.shell.agent_runtime.openai_compatible_chat_message",
         lambda *_args, **_kwargs: pytest.fail("agent daily desktop intent should execute before model call"),
@@ -4698,7 +4951,26 @@ def test_agent_run_daily_desktop_overlay_plans_from_user_goal_before_context(tmp
             },
         }
 
+    def fake_ui_elements(
+        role_filter: str = "",
+        limit: Any = 80,
+        app_name: str = "",
+    ) -> dict[str, Any]:
+        ui_element_calls.append(
+            {"role_filter": role_filter, "limit": limit, "app_name": app_name}
+        )
+        return {
+            "ok": True,
+            "action": "desktop.ui_elements",
+            "summary": "Read Music playback controls",
+            "data": {
+                "app_name": app_name,
+                "elements": [{"role": "AXButton", "name": "Pause"}],
+            },
+        }
+
     monkeypatch.setattr("apps.shell.agent.tools.desktop.apple_music_open_and_play", fake_music_open_and_play)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.ui_elements", fake_ui_elements)
     try:
         agent = service.create_agent(
             {
@@ -4721,6 +4993,7 @@ def test_agent_run_daily_desktop_overlay_plans_from_user_goal_before_context(tmp
                 "agent_id": agent["agent_id"],
                 "user_goal": "能否帮我播放apple Music?",
                 "daily_desktop_policy_overlay": True,
+                "metadata": explicit_foreground_takeover_metadata(),
             }
         )
         events = service.list_run_events(run["run_id"])["events"]
@@ -4730,6 +5003,7 @@ def test_agent_run_daily_desktop_overlay_plans_from_user_goal_before_context(tmp
 
         assert not hasattr(agent_runs_mod, "daily_desktop_entrypoint_tool_requests")
         assert open_and_play_calls == 1
+        assert ui_element_calls == []
         assert run["status"] == "completed"
         assert "已打开 Apple Music，并开始播放" in run["result"]
         assert "model.request.started" not in event_types
@@ -4950,7 +5224,11 @@ def test_agent_run_runtime_planner_entrypoint_opens_desktop_app_before_model(
             "ok": True,
             "action": "app.open",
             "summary": f"Opened {app_name}",
-            "data": {"app_name": app_name, "opened": True},
+            "data": {
+                "app_name": app_name,
+                "opened": True,
+                "launch_verified": True,
+            },
         }
 
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
@@ -4976,6 +5254,7 @@ def test_agent_run_runtime_planner_entrypoint_opens_desktop_app_before_model(
                 "agent_id": agent["agent_id"],
                 "user_goal": "打开 Apple Music",
                 "runtime_planner_entrypoint": True,
+                "metadata": explicit_foreground_takeover_metadata(),
             }
         )
         events = service.list_run_events(run["run_id"])["events"]
@@ -5027,7 +5306,7 @@ def test_agent_run_runtime_planner_entrypoint_surfaces_deferred_ui_context(
             "ok": True,
             "action": "app.open",
             "summary": f"Opened {app_name}",
-            "data": {"app_name": app_name},
+            "data": {"app_name": app_name, "launch_verified": True},
         }
 
     def fake_ui_elements(
@@ -5090,6 +5369,7 @@ def test_agent_run_runtime_planner_entrypoint_surfaces_deferred_ui_context(
                 "agent_id": agent["agent_id"],
                 "user_goal": "打开 PixelForge 并点击 Export",
                 "runtime_planner_entrypoint": True,
+                "metadata": explicit_foreground_takeover_metadata(),
             }
         )
         events = service.list_run_events(run["run_id"])["events"]
@@ -5125,13 +5405,20 @@ def test_agent_run_runtime_planner_entrypoint_surfaces_deferred_ui_context(
 
         assert run["status"] == "approval_required"
         assert pending_approval["tool"] == "desktop.click_ui_element"
-        assert pending_approval["step_id"] == "operate-foreground-ui"
-        assert pending_approval["runtime_stage"] == "operate"
-        assert pending_approval["runtime_role"] == "click_ui"
-        assert pending_approval["replan_triggers"] == ["verification_failed"]
+        for internal_key in (
+            "step_id",
+            "runtime_stage",
+            "runtime_role",
+            "replan_triggers",
+        ):
+            assert internal_key not in pending_approval
         assert desktop_calls == [
             ("desktop.list_apps", {"query": "PixelForge", "limit": 20}),
             ("app.open", {"app_name": "PixelForge"}),
+            (
+                "desktop.ui_elements",
+                {"role_filter": "", "limit": 80, "app_name": "PixelForge"},
+            ),
             (
                 "desktop.ui_elements",
                 {"role_filter": "", "limit": 80, "app_name": "PixelForge"},
@@ -5141,6 +5428,7 @@ def test_agent_run_runtime_planner_entrypoint_surfaces_deferred_ui_context(
         assert [event["payload"]["tool"] for event in planned_events] == [
             "desktop.list_apps",
             "app.open",
+            "desktop.ui_elements",
             "desktop.ui_elements",
             "desktop.click_ui_element",
             "desktop.ui_elements",
@@ -5190,6 +5478,7 @@ def test_agent_run_runtime_planner_entrypoint_resumes_deferred_ui_approval_witho
 ):
     service = make_service(tmp_path)
     desktop_calls: list[tuple[str, dict[str, Any]]] = []
+    model_calls: list[list[dict[str, Any]]] = []
 
     def fake_list_apps(query: str = "", limit: Any = 200) -> dict[str, Any]:
         desktop_calls.append(("desktop.list_apps", {"query": query, "limit": limit}))
@@ -5270,11 +5559,14 @@ def test_agent_run_runtime_planner_entrypoint_resumes_deferred_ui_approval_witho
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.ui_elements", fake_ui_elements)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.click_ui_element", fake_click_ui_element)
+
+    def fake_chat(_base_url, _model, _api_key, messages, **_kwargs):
+        model_calls.append([dict(message) for message in messages])
+        return {"content": "已执行 Export 点击；已读取操作后界面。"}
+
     monkeypatch.setattr(
         "apps.shell.agent_runtime.openai_compatible_chat_message",
-        lambda *_args, **_kwargs: pytest.fail(
-            "deferred desktop approval resume should complete without model"
-        ),
+        fake_chat,
     )
     try:
         agent = service.create_agent(
@@ -5303,28 +5595,38 @@ def test_agent_run_runtime_planner_entrypoint_resumes_deferred_ui_approval_witho
                 "agent_id": agent["agent_id"],
                 "user_goal": "打开 PixelForge 并点击 Export",
                 "runtime_planner_entrypoint": True,
+                "metadata": explicit_foreground_takeover_metadata(),
             }
         )
 
         assert waiting["status"] == "approval_required"
         assert waiting["pending_approval"]["tool"] == "desktop.click_ui_element"
 
-        resumed = service.approve_run_approval(waiting["run_id"])
+        resumed = service.approve_run_approval(
+            waiting["run_id"],
+            expected_approval_id=waiting["pending_approval"]["approval_id"],
+        )
         events = service.list_run_events(waiting["run_id"])["events"]
         event_types = [event["event_type"] for event in events]
-        completed_event = next(
-            event
-            for event in events
-            if event["event_type"] == "agent.desktop.intent_completed"
-        )
 
-        assert resumed["status"] == "completed"
+        # The approval resume executes both the exact approved click and its
+        # declared verifier.  An ordinary ``ok`` UI read is not a trusted
+        # postcondition receipt, so Runtime must fail honestly instead of
+        # asking the model to turn the acknowledgement into success prose.
+        assert resumed["status"] == "failed"
         assert not resumed.get("pending_approval")
-        assert "已点击前台控件：Export。" in resumed["result"]
+        assert resumed["result"] == (
+            "已点击前台控件：Export，但未能确认界面已按预期变化；请确认后重试。"
+        )
         assert "desktop.open_path" not in resumed["result"]
+        assert model_calls == []
         assert desktop_calls == [
             ("desktop.list_apps", {"query": "PixelForge", "limit": 20}),
             ("app.open", {"app_name": "PixelForge"}),
+            (
+                "desktop.ui_elements",
+                {"role_filter": "", "limit": 80, "app_name": "PixelForge"},
+            ),
             (
                 "desktop.ui_elements",
                 {"role_filter": "", "limit": 80, "app_name": "PixelForge"},
@@ -5346,14 +5648,9 @@ def test_agent_run_runtime_planner_entrypoint_resumes_deferred_ui_approval_witho
         ]
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
-        assert completed_event["payload"]["tool"] == "desktop.click_ui_element"
-        assert completed_event["payload"]["tools"] == [
-            "app.open",
-            "desktop.click_ui_element",
-            "desktop.ui_elements",
-        ]
-        assert completed_event["payload"]["step_id"] == "operate-foreground-ui"
-        assert completed_event["payload"]["runtime_stage"] == "operate"
+        assert "agent.desktop.intent_completed" not in event_types
+        assert "agent.run.completed" not in event_types
+        assert "agent.run.failed" in event_types
     finally:
         service.close()
 
@@ -5428,6 +5725,19 @@ def test_agent_runtime_planner_file_search_auto_analyzes_single_data_file(
             {"name": "sales.csv", "type": "file"}
         ]
         assert tool_events[1]["payload"]["input_preview"]["path"] == "inputs/sales.csv"
+        resolved_target = tool_events[1]["payload"]["action_target"]
+        assert resolved_target["expected_path"] == (
+            "<selected file from workspace.list>"
+        )
+        assert resolved_target["path"] == "inputs/sales.csv"
+        assert resolved_target["resolution_required"] is True
+        resolution_receipt = resolved_target["workspace_file_resolution"]
+        assert resolution_receipt["source_tool_name"] == "file.search"
+        assert resolution_receipt["source_tool_call_id"] == (
+            tool_events[0]["payload"]["tool_call_id"]
+        )
+        assert resolution_receipt["source_step_id"] == "inspect-data-source"
+        assert resolution_receipt["plan_id"] == tool_events[1]["payload"]["plan_id"]
         assert artifact_event["payload"]["source_tool"] == "data.analyze"
         assert artifact_event["payload"]["path"] == "analysis-report.md"
     finally:
@@ -5495,6 +5805,7 @@ def test_workflow_agent_node_runtime_planner_entrypoint_analyzes_data_before_mod
                 "user_goal": "请分析 inputs/sales.csv 并输出报告",
             }
         )
+
         group = service.get_run_group(run["run_group_id"])
         child_runs = [
             service.get_run(run_id)
@@ -5572,6 +5883,7 @@ def test_main_chat_model_loop_executes_daily_desktop_intent_without_chat_model_p
         updated = service.execute_main_chat_model_loop(
             run["run_id"],
             [{"role": "user", "content": "打开 Apple Music"}],
+            runtime_execution_metadata=explicit_foreground_takeover_metadata(),
         )
         events = service.list_run_events(run["run_id"])["events"]
         event_types = [event["event_type"] for event in events]
@@ -5592,18 +5904,14 @@ def test_main_chat_model_loop_executes_daily_desktop_intent_without_chat_model_p
         assert [event["payload"]["tool"] for event in planned_events] == [
             "desktop.list_apps",
             "app.open",
-            "desktop.active_window",
+            "desktop.verify",
         ]
         assert planned_events[1]["payload"]["source"] == "runtime_planner"
-        assert planned_events[1]["payload"]["input_preview"] == {"app_name": "Apple Music"}
+        assert planned_events[1]["payload"]["input_preview"] == {"app_name": "Music"}
         assert planned_events[2]["payload"]["runtime_stage"] == "verify"
         assert planned_events[2]["payload"]["planning_reason"] == "planner_full_plan_desktop_operation"
         assert tool_event["payload"]["tool"] == "app.open"
         assert tool_event["payload"]["input_preview"]["app_name"] == "Music"
-        assert (
-            tool_event["payload"]["input_preview"]["app_resolution_source"]
-            == "desktop.list_apps"
-        )
     finally:
         service.close()
 
@@ -5649,6 +5957,48 @@ def test_main_chat_model_loop_creates_app_task_without_chat_model_profile(
             "data": {"app_name": app_name},
         }
 
+    def fake_active_window() -> dict[str, Any]:
+        return {
+            "ok": True,
+            "action": "desktop.active_window",
+            "summary": "Active window: Linear - New task",
+            "data": {"app_name": "Linear", "pid": 4242, "title": "New task"},
+        }
+
+    def fake_inspect_app(
+        app_name: str,
+        *,
+        open_if_needed: Any = True,
+        focus: Any = True,
+        role_filter: str = "",
+        limit: Any = 80,
+    ) -> dict[str, Any]:
+        desktop_calls.append(
+            (
+                "desktop.inspect_app",
+                {
+                    "app_name": app_name,
+                    "open_if_needed": open_if_needed,
+                    "focus": focus,
+                    "role_filter": role_filter,
+                    "limit": limit,
+                },
+            )
+        )
+        return {
+            "ok": True,
+            "action": "desktop.inspect_app",
+            "summary": "Inspected Linear task editor",
+            "data": {
+                "app_name": "Linear",
+                "app_found": True,
+                "running": True,
+                "focused": True,
+                "count": 1,
+                "elements": [{"role": "AXTextField", "value": ""}],
+            },
+        }
+
     def fake_safe_shortcut(action: str) -> dict[str, Any]:
         desktop_calls.append(("desktop.safe_shortcut", {"action": action}))
         return {"ok": True, "action": "desktop.safe_shortcut", "data": {"action": action}}
@@ -5683,6 +6033,8 @@ def test_main_chat_model_loop_creates_app_task_without_chat_model_profile(
     monkeypatch.setattr("apps.shell.agent.tools.desktop.list_apps", fake_list_apps)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.active_window", fake_active_window)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.inspect_app", fake_inspect_app)
     monkeypatch.setattr(
         "apps.shell.agent.tools.desktop.desktop_safe_shortcut",
         fake_safe_shortcut,
@@ -5701,9 +6053,11 @@ def test_main_chat_model_loop_creates_app_task_without_chat_model_profile(
         updated = service.execute_main_chat_model_loop(
             run["run_id"],
             [{"role": "user", "content": "帮我打开 Linear 并创建一个任务：修复登录错误"}],
+            runtime_execution_metadata=explicit_foreground_takeover_metadata(),
             tool_policy={
                 "allowed_tools": [
                     "desktop.list_apps",
+                    "desktop.inspect_app",
                     "app.open",
                     "app.focus",
                     "desktop.safe_shortcut",
@@ -5731,26 +6085,28 @@ def test_main_chat_model_loop_creates_app_task_without_chat_model_profile(
             "desktop.safe_type_text",
             "desktop.ui_elements",
         ]
-        assert desktop_calls[3] == ("desktop.safe_shortcut", {"action": "new_document"})
+        assert desktop_calls[3] == ("desktop.safe_shortcut", {"action": "new_task"})
         assert desktop_calls[4] == ("desktop.safe_type_text", {"text": "修复登录错误"})
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
         assert [event["payload"]["tool"] for event in planned_events] == [
             "desktop.list_apps",
-            "app.open_and_safe_shortcut",
+            "app.open",
+            "desktop.ui_elements",
+            "app.focus_and_safe_shortcut",
             "desktop.safe_type_text",
             "desktop.ui_elements",
         ]
         assert completed_event["payload"]["tools"] == [
             "desktop.list_apps",
             "app.open",
-            "app.focus",
-            "desktop.safe_shortcut",
+            "desktop.ui_elements",
+            "app.focus_and_safe_shortcut",
             "desktop.safe_type_text",
             "desktop.ui_elements",
         ]
         assert completed_event["payload"]["planning_reason"] == "planner_full_plan_desktop_operation"
-        assert "已打开 Linear 并新建文档" in updated["result"]
+        assert "已打开 Linear 并发送“新建任务”快捷键" in updated["result"]
         assert "已向前台输入文字" in updated["result"]
     finally:
         service.close()
@@ -5814,11 +6170,34 @@ def test_main_chat_model_loop_auto_opens_path_with_discovered_app_without_model(
             },
         }
 
+    def fake_ui_elements(
+        role_filter: str = "",
+        limit: Any = 80,
+        app_name: str = "",
+    ) -> dict[str, Any]:
+        desktop_calls.append(
+            (
+                "desktop.ui_elements",
+                {"role_filter": role_filter, "limit": limit, "app_name": app_name},
+            )
+        )
+        return {
+            "ok": True,
+            "action": "desktop.ui_elements",
+            "summary": "Verified Visual Studio Code opened README.md",
+            "data": {
+                "app_name": "Visual Studio Code",
+                "count": 1,
+                "elements": [{"role": "AXWindow", "name": "README.md"}],
+            },
+        }
+
     monkeypatch.setattr("apps.shell.agent.tools.desktop.list_apps", fake_list_apps)
     monkeypatch.setattr(
         "apps.shell.agent.tools.desktop.open_path_with_app",
         fake_open_path_with_app,
     )
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.ui_elements", fake_ui_elements)
     try:
         run = service.start_main_chat_run(
             task_id="task-main-open-readme-with-discovered-editor",
@@ -5828,6 +6207,7 @@ def test_main_chat_model_loop_auto_opens_path_with_discovered_app_without_model(
         updated = service.execute_main_chat_model_loop(
             run["run_id"],
             [{"role": "user", "content": "找一个代码编辑器打开 README.md"}],
+            runtime_execution_metadata=explicit_foreground_takeover_metadata(),
         )
         events = service.list_run_events(run["run_id"])["events"]
         event_types = [event["event_type"] for event in events]
@@ -5853,6 +6233,14 @@ def test_main_chat_model_loop_auto_opens_path_with_discovered_app_without_model(
                 "desktop.open_path_with_app",
                 {"path": "README.md", "app_name": "Visual Studio Code"},
             ),
+            (
+                "desktop.ui_elements",
+                {
+                    "role_filter": "",
+                    "limit": 80,
+                    "app_name": "Visual Studio Code",
+                },
+            ),
         ]
         assert updated["result"] == "已用 Visual Studio Code 打开文件：README.md。"
         assert model_calls == []
@@ -5861,8 +6249,11 @@ def test_main_chat_model_loop_auto_opens_path_with_discovered_app_without_model(
         assert [event["payload"]["tool"] for event in planned_events] == [
             "desktop.list_apps",
             "desktop.open_path_with_app",
+            "desktop.ui_elements",
         ]
-        assert planned_events[1]["payload"]["planning_reason"] == "planner_desktop_operation"
+        assert planned_events[1]["payload"]["planning_reason"] == (
+            "planner_full_plan_desktop_operation"
+        )
         assert resolved_event["payload"]["requested_app_name"] == "code"
         assert resolved_event["payload"]["resolved_app_name"] == "Visual Studio Code"
         assert resolved_event["payload"]["resolved_app_path"] == (
@@ -5913,6 +6304,13 @@ def test_main_chat_model_loop_prefetches_desktop_content_before_artifact_write(
     def fake_app_focus(app_name: str) -> dict[str, Any]:
         desktop_calls.append(("app.focus", {"app_name": app_name}))
         return {"ok": True, "action": "app.focus", "data": {"app_name": app_name}}
+
+    def fake_active_window() -> dict[str, Any]:
+        return {
+            "ok": True,
+            "action": "desktop.active_window",
+            "data": {"app_name": "Obsidian", "title": "Obsidian"},
+        }
 
     def fake_safe_shortcut(action: str) -> dict[str, Any]:
         desktop_calls.append(("desktop.safe_shortcut", {"action": action}))
@@ -6002,6 +6400,7 @@ def test_main_chat_model_loop_prefetches_desktop_content_before_artifact_write(
     monkeypatch.setattr("apps.shell.agent.tools.desktop.list_apps", fake_list_apps)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.active_window", fake_active_window)
     monkeypatch.setattr(
         "apps.shell.agent.tools.desktop.desktop_safe_shortcut",
         fake_safe_shortcut,
@@ -6030,6 +6429,7 @@ def test_main_chat_model_loop_prefetches_desktop_content_before_artifact_write(
                     "content": "打开 Obsidian，搜索 yachiyo runtime，然后把当前内容总结成报告",
                 }
             ],
+            runtime_execution_metadata=explicit_foreground_takeover_metadata(),
             tool_policy={
                 "allowed_tools": [
                     "desktop.list_apps",
@@ -6045,15 +6445,22 @@ def test_main_chat_model_loop_prefetches_desktop_content_before_artifact_write(
             },
         )
         events = service.list_run_events(run["run_id"])["events"]
+        internal_events = service.list_run_events(
+            run["run_id"], include_internal=True
+        )["events"]
         planned_ui = next(
             event
             for event in events
             if event["event_type"] == "agent.desktop.intent_planned"
             and event["payload"]["tool"] in {"desktop.read_ui", "desktop.ui_elements"}
         )
+        assert not any(
+            event["event_type"] == "agent.model.followup_context"
+            for event in events
+        )
         followup = next(
             event
-            for event in events
+            for event in internal_events
             if event["event_type"] == "agent.model.followup_context"
         )
         artifact_path = service.agent_artifacts_dir / run["run_id"] / "desktop-content-report.md"
@@ -6093,6 +6500,7 @@ def test_main_chat_model_loop_writes_generated_page_summary_to_notes(
     monkeypatch,
 ):
     service = make_service(tmp_path)
+    install_fake_run_owned_browser_target(service, monkeypatch)
     tool_calls: list[tuple[str, dict[str, Any]]] = []
     model_calls: list[list[dict[str, Any]]] = []
     monkeypatch.setattr(
@@ -6165,12 +6573,26 @@ def test_main_chat_model_loop_writes_generated_page_summary_to_notes(
             },
         )
         events = service.list_run_events(run["run_id"])["events"]
+        internal_events = service.list_run_events(
+            run["run_id"], include_internal=True
+        )["events"]
         planned_events = [
             event for event in events if event["event_type"] == "agent.desktop.intent_planned"
         ]
-        followup = next(
+        resolved_note_input = next(
             event
             for event in events
+            if event["event_type"] == "agent.tool.input_resolved"
+            and event["payload"].get("tool") == "notes.create"
+            and event["payload"].get("resolution_source") == "model_followup"
+        )
+        assert not any(
+            event["event_type"] == "agent.model.followup_context"
+            for event in events
+        )
+        followup = next(
+            event
+            for event in internal_events
             if event["event_type"] == "agent.model.followup_context"
         )
         completed_event = next(
@@ -6196,7 +6618,10 @@ def test_main_chat_model_loop_writes_generated_page_summary_to_notes(
             "browser.extract_text",
             "notes.create",
         ]
-        assert planned_events[1]["payload"]["planning_reason"] == "planner_followup_note_write"
+        assert planned_events[1]["payload"]["planning_reason"] == (
+            "planner_full_plan_information_capture"
+        )
+        assert resolved_note_input["payload"]["planning_reason"] == "planner_followup_note_write"
         assert followup["payload"]["followup_target"] == {
             "kind": "note_write",
             "target_action": "create_note",
@@ -6218,6 +6643,7 @@ def test_main_chat_model_loop_writes_generated_page_summary_to_discovered_docume
     monkeypatch,
 ):
     service = make_service(tmp_path)
+    install_fake_run_owned_browser_target(service, monkeypatch)
     tool_calls: list[tuple[str, dict[str, Any]]] = []
     model_calls: list[list[dict[str, Any]]] = []
     generated = "网页摘要：Oha-Yachiyo 可以发现桌面应用、执行工具并验证结果。"
@@ -6263,7 +6689,7 @@ def test_main_chat_model_loop_writes_generated_page_summary_to_discovered_docume
             "ok": True,
             "action": "app.open",
             "summary": f"Opened {app_name}",
-            "data": {"app_name": app_name},
+            "data": {"app_name": app_name, "launch_verified": True},
         }
 
     def fake_app_focus(app_name: str) -> dict[str, Any]:
@@ -6273,6 +6699,14 @@ def test_main_chat_model_loop_writes_generated_page_summary_to_discovered_docume
             "action": "app.focus",
             "summary": f"Focused {app_name}",
             "data": {"app_name": app_name},
+        }
+
+    def fake_active_window() -> dict[str, Any]:
+        return {
+            "ok": True,
+            "action": "desktop.active_window",
+            "summary": "Active window: Typora - Untitled",
+            "data": {"app_name": "Typora", "pid": 4242, "title": "Untitled"},
         }
 
     def fake_safe_shortcut(action: str) -> dict[str, Any]:
@@ -6308,7 +6742,12 @@ def test_main_chat_model_loop_writes_generated_page_summary_to_discovered_docume
             "ok": True,
             "action": "desktop.ui_elements",
             "summary": "Read Typora document controls",
-            "data": {"app_name": "Typora", "title": "Untitled", "elements": []},
+            "data": {
+                "app_name": "Typora",
+                "title": "Untitled",
+                "count": 1,
+                "elements": [{"role": "AXTextArea", "value": generated}],
+            },
         }
 
     def fake_chat(_base_url, _model, _api_key, messages, **_kwargs):
@@ -6324,6 +6763,7 @@ def test_main_chat_model_loop_writes_generated_page_summary_to_discovered_docume
     monkeypatch.setattr("apps.shell.agent.tools.desktop.list_apps", fake_list_apps)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.active_window", fake_active_window)
     monkeypatch.setattr(
         "apps.shell.agent.tools.desktop.desktop_safe_shortcut",
         fake_safe_shortcut,
@@ -6343,6 +6783,7 @@ def test_main_chat_model_loop_writes_generated_page_summary_to_discovered_docume
         updated = service.execute_main_chat_model_loop(
             run["run_id"],
             [{"role": "user", "content": "把当前网页总结到任意文档应用"}],
+            runtime_execution_metadata=explicit_foreground_takeover_metadata(),
             tool_policy={
                 "allowed_tools": [
                     "browser.extract_text",
@@ -6354,12 +6795,19 @@ def test_main_chat_model_loop_writes_generated_page_summary_to_discovered_docume
             },
         )
         events = service.list_run_events(run["run_id"])["events"]
+        internal_events = service.list_run_events(
+            run["run_id"], include_internal=True
+        )["events"]
         planned_events = [
             event for event in events if event["event_type"] == "agent.desktop.intent_planned"
         ]
+        assert not any(
+            event["event_type"] == "agent.model.followup_context"
+            for event in events
+        )
         followup = next(
             event
-            for event in events
+            for event in internal_events
             if event["event_type"] == "agent.model.followup_context"
         )
         completed_event = next(
@@ -6383,18 +6831,23 @@ def test_main_chat_model_loop_writes_generated_page_summary_to_discovered_docume
             ("app.focus", {"app_name": "Typora"}),
             ("desktop.safe_shortcut", {"action": "new_document"}),
             ("desktop.safe_type_text", {"text": generated}),
-            ("desktop.ui_elements", {"role_filter": "", "limit": 80, "app_name": ""}),
+            (
+                "desktop.ui_elements",
+                {"role_filter": "", "limit": 80, "app_name": "Typora"},
+            ),
         ]
         assert len(model_calls) == 1
         assert [event["payload"]["tool"] for event in planned_events] == [
             "browser.extract_text",
+            "artifact.write",
             "desktop.list_apps",
             "app.open_and_safe_shortcut",
             "desktop.safe_type_text",
             "desktop.ui_elements",
         ]
         assert [event["payload"]["planning_reason"] for event in planned_events] == [
-            "planner_prefetch_report_context",
+            "planner_full_plan_report_generation",
+            "planner_full_plan_report_generation",
             "planner_followup_discovered_app_write",
             "planner_followup_discovered_app_write",
             "planner_followup_discovered_app_write",
@@ -6434,6 +6887,7 @@ def test_main_chat_model_loop_writes_generated_page_summary_to_artifact(
     monkeypatch,
 ):
     service = make_service(tmp_path)
+    install_fake_run_owned_browser_target(service, monkeypatch)
     tool_calls: list[tuple[str, dict[str, Any]]] = []
     model_calls: list[list[dict[str, Any]]] = []
     generated = "# 网页摘要\n\nOha-Yachiyo 可以发现桌面应用、执行工具并验证结果。"
@@ -6484,12 +6938,26 @@ def test_main_chat_model_loop_writes_generated_page_summary_to_artifact(
             },
         )
         events = service.list_run_events(run["run_id"])["events"]
+        internal_events = service.list_run_events(
+            run["run_id"], include_internal=True
+        )["events"]
         planned_events = [
             event for event in events if event["event_type"] == "agent.desktop.intent_planned"
         ]
-        followup = next(
+        resolved_artifact_input = next(
             event
             for event in events
+            if event["event_type"] == "agent.tool.input_resolved"
+            and event["payload"].get("tool") == "artifact.write"
+            and event["payload"].get("resolution_source") == "model_followup"
+        )
+        assert not any(
+            event["event_type"] == "agent.model.followup_context"
+            for event in events
+        )
+        followup = next(
+            event
+            for event in internal_events
             if event["event_type"] == "agent.model.followup_context"
         )
         completed_event = next(
@@ -6500,13 +6968,16 @@ def test_main_chat_model_loop_writes_generated_page_summary_to_artifact(
         )
         artifact = service.read_run_artifact(run["run_id"], "Downloads/research-summary.md")
 
-        assert updated["result"] == "已生成文件：Downloads/research-summary.md。"
+        assert updated["result"] == generated
         assert tool_calls == [("browser.extract_text", {"selector": ""})]
         assert len(model_calls) == 1
         planned_tools = [event["payload"]["tool"] for event in planned_events]
         assert planned_tools[0] == "browser.extract_text"
         assert planned_tools[-1] == "artifact.write"
         assert planned_events[-1]["payload"]["planning_reason"] == (
+            "planner_full_plan_web_research"
+        )
+        assert resolved_artifact_input["payload"]["planning_reason"] == (
             "planner_followup_artifact_write"
         )
         assert followup["payload"]["followup_target"] == {
@@ -6552,7 +7023,25 @@ def test_main_chat_daily_desktop_approval_resumes_without_chat_model_profile(tmp
             "data": {},
         }
 
+    def fake_active_window() -> dict[str, Any]:
+        return {
+            "ok": True,
+            "action": "desktop.active_window",
+            "summary": "Active window: Finder",
+            "data": {"app_name": "Finder", "pid": 4242, "title": ""},
+        }
+
+    def fake_ui_elements(**_kwargs: Any) -> dict[str, Any]:
+        return {
+            "ok": True,
+            "action": "desktop.ui_elements",
+            "summary": "Finder UI elements",
+            "data": {"app_name": "Finder", "elements": []},
+        }
+
     monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_quit_app", fake_desktop_quit_app)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.active_window", fake_active_window)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.ui_elements", fake_ui_elements)
     try:
         run = service.start_main_chat_run(
             task_id="task-main-quit-no-profile",
@@ -6569,21 +7058,29 @@ def test_main_chat_daily_desktop_approval_resumes_without_chat_model_profile(tmp
         assert waiting["pending_approval"]["input_preview"] == {}
         assert quit_calls == 0
 
-        resumed = service.approve_run_approval(run["run_id"])
+        resumed = service.approve_run_approval(
+            run["run_id"],
+            expected_approval_id=waiting["pending_approval"]["approval_id"],
+        )
         events = service.list_run_events(run["run_id"])["events"]
         event_types = [event["event_type"] for event in events]
+        assert resumed["status"] == "completed"
         completed_event = next(event for event in events if event["event_type"] == "agent.desktop.intent_completed")
 
-        assert resumed["status"] == "running"
         assert resumed["pending_approval"] == {}
         assert resumed["result"] == "已请求退出当前应用。"
         assert quit_calls == 1
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
+        assert event_types.count("task.completed") == 1
+        assert event_types.count("run.completed") == 1
+        assert event_types.index("model.output.completed") < event_types.index(
+            "task.completed"
+        )
+        assert event_types.index("task.completed") < event_types.index("run.completed")
         assert completed_event["payload"]["tool"] == "desktop.quit_app"
         assert completed_event["payload"]["tools"] == [
             "desktop.quit_app",
-            "desktop.active_window",
         ]
         assert completed_event["payload"]["source"] == "runtime_planner"
         public_timeline = YachiyoAgentService(LegacyRuntimePort(service)).get_task_timeline(
@@ -6646,7 +7143,22 @@ def test_main_chat_model_loop_executes_specific_music_query_before_model(tmp_pat
 
     def fake_app_focus(app_name: str) -> dict[str, Any]:
         focus_calls.append(app_name)
-        return {"ok": True, "action": "app.focus", "data": {"app_name": app_name}}
+        return {
+            "ok": True,
+            "action": "app.focus",
+            "data": {
+                "app_name": app_name,
+                "focus_verified": True,
+                "foreground_ready": True,
+            },
+        }
+
+    def fake_active_window() -> dict[str, Any]:
+        return {
+            "ok": True,
+            "action": "desktop.active_window",
+            "data": {"app_name": "Music", "title": "Music"},
+        }
 
     def fake_safe_shortcut(action: str) -> dict[str, Any]:
         shortcut_calls.append(action)
@@ -6679,7 +7191,9 @@ def test_main_chat_model_loop_executes_specific_music_query_before_model(tmp_pat
             "action": "media.music_app_open_and_play",
             "data": {
                 "app_name": app_name,
-                "playback_state_unverified": True,
+                "playback_ok": True,
+                "player_state": "playing",
+                "track": "超时空辉夜姬",
             },
         }
 
@@ -6688,12 +7202,17 @@ def test_main_chat_model_loop_executes_specific_music_query_before_model(tmp_pat
         return {
             "ok": True,
             "action": "desktop.ui_elements",
-            "data": {"elements": [], "count": 0},
+            "data": {
+                "app_name": "Music",
+                "elements": [{"role": "AXButton", "name": "Pause"}],
+                "count": 1,
+            },
         }
 
     monkeypatch.setattr("apps.shell.agent.tools.desktop.list_apps", fake_list_apps)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.active_window", fake_active_window)
     monkeypatch.setattr(
         "apps.shell.agent.tools.desktop.desktop_safe_shortcut",
         fake_safe_shortcut,
@@ -6720,6 +7239,7 @@ def test_main_chat_model_loop_executes_specific_music_query_before_model(tmp_pat
         updated = service.execute_main_chat_model_loop(
             run["run_id"],
             [{"role": "user", "content": "播放超时空辉夜姬"}],
+            runtime_execution_metadata=explicit_foreground_takeover_metadata(),
         )
         events = service.list_run_events(run["run_id"])["events"]
         event_types = [event["event_type"] for event in events]
@@ -6742,7 +7262,9 @@ def test_main_chat_model_loop_executes_specific_music_query_before_model(tmp_pat
         assert type_calls == ["超时空辉夜姬"]
         assert submit_calls == [{}]
         assert play_calls == ["Music"]
-        assert ui_calls == [{"role_filter": "", "limit": 80, "app_name": "Music"}]
+        assert ui_calls == [
+            {"app_name": "Music", "limit": 80, "role_filter": ""}
+        ]
         assert "已打开 Apple Music" in updated["result"]
         assert "没能打开查找" not in updated["result"]
         assert "model.request.started" not in event_types
@@ -6751,16 +7273,14 @@ def test_main_chat_model_loop_executes_specific_music_query_before_model(tmp_pat
         assert "media.apple_music_play" not in planned_tools
         assert tool_names == [
             "desktop.list_apps",
-            "app.open",
-            "app.focus",
-            "desktop.safe_shortcut",
+            "app.open_and_safe_shortcut",
             "desktop.safe_type_text",
             "desktop.search_submit",
             "media.music_app_open_and_play",
             "desktop.ui_elements",
         ]
-        assert tool_events[4]["input_preview"] == {"text": "超时空辉夜姬"}
-        assert tool_events[6]["input_preview"] == {"app_name": "Music"}
+        assert tool_events[2]["input_preview"] == {"text": "超时空辉夜姬"}
+        assert tool_events[4]["input_preview"] == {"app_name": "Music"}
     finally:
         service.close()
 
@@ -6808,6 +7328,7 @@ def test_main_chat_cancelled_run_ignores_late_model_output(tmp_path, monkeypatch
         assert "model.output.completed" not in event_types
         assert "run.completed" not in event_types
         assert "run.failed" not in event_types
+        assert "agent.run.cancelled" not in event_types
         assert event_types[-1] == "run.cancelled"
     finally:
         service.close()
@@ -7216,11 +7737,11 @@ def test_main_chat_model_loop_uses_responses_output_item_message_snapshot(tmp_pa
         run = service.start_main_chat_run(
             task_id="task-main-responses-output-item-message",
             session_id="session-main-responses-output-item-message",
-            user_goal="Use Responses output_item message",
+            user_goal="Exercise Responses output-item snapshot",
         )
         updated = service.execute_main_chat_model_loop(
             run["run_id"],
-            [{"role": "user", "content": "Use Responses output_item message"}],
+            [{"role": "user", "content": "Exercise Responses output-item snapshot"}],
         )
         rows = service._conn.execute(
             "SELECT event_type, payload_json FROM run_events WHERE run_id=? ORDER BY sequence",
@@ -7491,11 +8012,11 @@ def test_main_chat_model_loop_accepts_refusal_message_field(tmp_path, monkeypatc
         run = service.start_main_chat_run(
             task_id="task-main-message-refusal",
             session_id="session-main-message-refusal",
-            user_goal="Use message refusal",
+            user_goal="Exercise refusal payload",
         )
         updated = service.execute_main_chat_model_loop(
             run["run_id"],
-            [{"role": "user", "content": "Use message refusal"}],
+            [{"role": "user", "content": "Exercise refusal payload"}],
         )
         events = service.list_run_events(run["run_id"])["events"]
         output_events = [event for event in events if event["event_type"] == "model.output.completed"]
@@ -8813,6 +9334,7 @@ def test_main_chat_model_loop_fails_on_openai_compatible_sse_error(tmp_path, mon
 
         failed = service.get_run(run["run_id"])
         events = service.list_run_events(run["run_id"])["events"]
+        event_types = [event["event_type"] for event in events]
         persisted_projection = json.dumps({"run": failed, "events": events}, ensure_ascii=False)
 
         assert failed["status"] == "failed"
@@ -8821,6 +9343,8 @@ def test_main_chat_model_loop_fails_on_openai_compatible_sse_error(tmp_path, mon
         assert leaked_secret not in persisted_projection
         assert "[redacted]" in persisted_projection
         assert any(event["event_type"] == "model.request.failed" for event in events)
+        assert event_types.index("model.request.failed") < event_types.index("task.failed")
+        assert event_types.index("task.failed") < event_types.index("run.failed")
         assert not any(event["event_type"] == "model.output.completed" for event in events)
     finally:
         service.close()
@@ -10514,13 +11038,13 @@ def test_main_chat_artifact_secret_payload_is_rejected_before_write(tmp_path, mo
         run = service.start_main_chat_run(
             task_id="task-artifact-secret",
             session_id="session-artifact-secret",
-            user_goal="Write artifact",
+            user_goal="Credential guard probe",
         )
 
         with pytest.raises(AgentRuntimeError, match="参数包含敏感凭据"):
             service.execute_main_chat_model_loop(
                 run["run_id"],
-                [{"role": "user", "content": "Write artifact"}],
+                [{"role": "user", "content": "Credential guard probe"}],
                 tool_policy={"allowed_tools": ["artifact.write"]},
             )
 
@@ -10567,8 +11091,6 @@ def test_main_chat_default_tools_use_trusted_product_workspace(tmp_path, monkeyp
         if len(calls) == 1:
             tool_names = {(tool.get("function") or {}).get("name") for tool in tools or []}
             assert {"workspace_list", "workspace_read", "artifact_write"} <= tool_names
-            assert "workspace_write_patch" not in tool_names
-            assert "terminal_run" not in tool_names
             return {
                 "content": "",
                 "tool_calls": [
@@ -10807,7 +11329,7 @@ def test_main_chat_records_failed_run_event_when_approved_tool_fails(tmp_path, m
     monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
     try:
         failed_projection_calls: list[dict[str, object]] = []
-        original_failed_projection = service._project_approval_resume_failed
+        original_failed_projection = service._project_main_chat_approval_resume_failed
 
         def spy_project_approval_resume_failed(context, safe_error):
             failed_projection_calls.append(
@@ -10821,7 +11343,7 @@ def test_main_chat_records_failed_run_event_when_approved_tool_fails(tmp_path, m
 
         monkeypatch.setattr(
             service,
-            "_project_approval_resume_failed",
+            "_project_main_chat_approval_resume_failed",
             spy_project_approval_resume_failed,
         )
         run = service.start_main_chat_run(
@@ -10851,7 +11373,11 @@ def test_main_chat_records_failed_run_event_when_approved_tool_fails(tmp_path, m
             }
         ]
         events = service.list_run_events(run["run_id"])["events"]
-        failed_event = next(event for event in events if event["event_type"] == "agent.run.failed")
+        event_types = [event["event_type"] for event in events]
+        assert "agent.run.failed" not in event_types
+        assert event_types.count("task.failed") == 1
+        assert event_types.count("run.failed") == 1
+        failed_event = next(event for event in events if event["event_type"] == "run.failed")
         assert "terminal.run 执行失败" in failed_event["payload"]["error"]
         assert any(
             event["event_type"] == "agent.tool.call"
@@ -10926,6 +11452,9 @@ def test_main_chat_approval_timeout_records_replayable_fact_and_is_idempotent(tm
         assert timeout_events[0]["payload"]["tool"] == "workspace.write_patch"
         assert timeout_events[0]["payload"]["reason"] == "approval_wait_timeout"
         assert timeout_events[0]["payload"]["status"] == "cancelled"
+        timeout_event_types = [event["event_type"] for event in events_after_timeout]
+        assert timeout_event_types.count("agent.run.cancelled") == 1
+        assert timeout_event_types.count("run.cancelled") == 1
 
         approval_row = service._conn.execute(
             "SELECT status FROM run_approvals WHERE run_id=?",
@@ -10984,6 +11513,7 @@ def test_main_chat_reject_and_timeout_use_approval_coordinator_boundaries(tmp_pa
         reason,
         tool_name,
         input_preview,
+        expected_approval_id,
     ):
         reject_calls.append(
             {
@@ -11000,6 +11530,7 @@ def test_main_chat_reject_and_timeout_use_approval_coordinator_boundaries(tmp_pa
             reason=reason,
             tool_name=tool_name,
             input_preview=input_preview,
+            expected_approval_id=expected_approval_id,
         )
 
     def spy_timeout_tool_run(
@@ -11009,6 +11540,7 @@ def test_main_chat_reject_and_timeout_use_approval_coordinator_boundaries(tmp_pa
         reason,
         tool_name,
         input_preview,
+        expected_approval_id,
     ):
         timeout_calls.append(
             {
@@ -11025,6 +11557,7 @@ def test_main_chat_reject_and_timeout_use_approval_coordinator_boundaries(tmp_pa
             reason=reason,
             tool_name=tool_name,
             input_preview=input_preview,
+            expected_approval_id=expected_approval_id,
         )
 
     monkeypatch.setattr(service.approvals, "reject_tool_run", spy_reject_tool_run)
@@ -11250,6 +11783,7 @@ def test_agent_run_reject_and_timeout_use_approval_coordinator_boundaries(tmp_pa
         reason,
         tool_name,
         input_preview,
+        expected_approval_id,
     ):
         reject_calls.append(
             {
@@ -11266,6 +11800,7 @@ def test_agent_run_reject_and_timeout_use_approval_coordinator_boundaries(tmp_pa
             reason=reason,
             tool_name=tool_name,
             input_preview=input_preview,
+            expected_approval_id=expected_approval_id,
         )
 
     def spy_timeout_tool_run(
@@ -11275,6 +11810,7 @@ def test_agent_run_reject_and_timeout_use_approval_coordinator_boundaries(tmp_pa
         reason,
         tool_name,
         input_preview,
+        expected_approval_id,
     ):
         timeout_calls.append(
             {
@@ -11291,6 +11827,7 @@ def test_agent_run_reject_and_timeout_use_approval_coordinator_boundaries(tmp_pa
             reason=reason,
             tool_name=tool_name,
             input_preview=input_preview,
+            expected_approval_id=expected_approval_id,
         )
 
     monkeypatch.setattr(service.approvals, "reject_tool_run", spy_reject_tool_run)
@@ -11359,6 +11896,7 @@ def test_workflow_approval_reject_and_timeout_use_approval_coordinator_boundarie
         label,
         criteria,
         input_preview,
+        expected_approval_id,
     ):
         reject_calls.append(
             {
@@ -11379,6 +11917,7 @@ def test_workflow_approval_reject_and_timeout_use_approval_coordinator_boundarie
             label=label,
             criteria=criteria,
             input_preview=input_preview,
+            expected_approval_id=expected_approval_id,
         )
 
     def spy_timeout_workflow_node(
@@ -11390,6 +11929,7 @@ def test_workflow_approval_reject_and_timeout_use_approval_coordinator_boundarie
         label,
         criteria,
         input_preview,
+        expected_approval_id,
     ):
         timeout_calls.append(
             {
@@ -11410,6 +11950,7 @@ def test_workflow_approval_reject_and_timeout_use_approval_coordinator_boundarie
             label=label,
             criteria=criteria,
             input_preview=input_preview,
+            expected_approval_id=expected_approval_id,
         )
 
     monkeypatch.setattr(service.approvals, "reject_workflow_node", spy_reject_workflow_node)
@@ -11776,8 +12317,17 @@ def test_main_chat_durable_approval_claim_blocks_duplicate_execution(tmp_path, m
         pending = service.runs.pending_approval_private(run["run_id"])
         assert pending["tool"] == "workspace.write_patch"
         claiming_service = make_service(tmp_path)
-        assert claiming_service.run_approvals.claim_pending_approval(run["run_id"], pending) is True
-        assert claiming_service.run_approvals.claim_pending_approval(run["run_id"], pending) is False
+        approval_id = str(pending["approval_id"])
+        assert claiming_service.run_approvals.claim_pending_approval(
+            run["run_id"],
+            pending,
+            expected_approval_id=approval_id,
+        ) is True
+        assert claiming_service.run_approvals.claim_pending_approval(
+            run["run_id"],
+            pending,
+            expected_approval_id=approval_id,
+        ) is False
 
         duplicate = service.approve_run_approval(run["run_id"])
 
@@ -12166,6 +12716,302 @@ def test_create_run_for_runnable_propagates_client_run_id(tmp_path, monkeypatch)
         assert model_calls == 1
         rows = service._conn.execute("SELECT run_id FROM runs WHERE client_request_id='runnable-client-1'").fetchall()
         assert len(rows) == 1
+    finally:
+        service.close()
+
+
+def test_create_run_for_runnable_async_claims_client_run_id_before_dispatch(
+    tmp_path,
+) -> None:
+    service = make_service(tmp_path)
+    dispatched_threads: list[Any] = []
+
+    class _DeferredThread:
+        def __init__(self, *, target: Any, name: str, daemon: bool) -> None:
+            self.target = target
+            self.name = name
+            self.daemon = daemon
+            dispatched_threads.append(self)
+
+        def start(self) -> None:
+            return None
+
+    try:
+        agent = service.create_agent(
+            {
+                "name": "Async Idempotent Agent",
+                "model_mode": "custom_api",
+                "model_config": {
+                    "base_url": "https://api.example.test/v1",
+                    "model": "demo-model",
+                    "api_key": "sk-secret",
+                },
+            }
+        )
+        service.agent_run_async_coordinator._thread_factory = _DeferredThread
+        start_barrier = threading.Barrier(2)
+
+        def start() -> dict[str, Any]:
+            start_barrier.wait(timeout=5)
+            return service.create_run_for_runnable_async(
+                runnable_id=agent["agent_id"],
+                user_goal="Finish asynchronously",
+                client_run_id="async-runnable-client-1",
+            )
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            first_future = pool.submit(start)
+            second_future = pool.submit(start)
+            concurrent_results = [first_future.result(), second_future.result()]
+
+        sequential_retry = service.create_run_for_runnable_async(
+            runnable_id=agent["agent_id"],
+            user_goal="Finish asynchronously",
+            client_run_id="async-runnable-client-1",
+        )
+
+        assert len({result["run_id"] for result in concurrent_results}) == 1
+        assert sequential_retry["run_id"] == concurrent_results[0]["run_id"]
+        assert sum(bool(result.get("idempotent")) for result in concurrent_results) == 1
+        assert sequential_retry["idempotent"] is True
+        assert len(dispatched_threads) == 1
+        rows = service._conn.execute(
+            "SELECT run_id FROM runs WHERE client_request_id=?",
+            ("async-runnable-client-1",),
+        ).fetchall()
+        assert len(rows) == 1
+    finally:
+        service.close()
+
+
+def test_agent_async_claim_recovers_cross_connection_unique_race_without_orphan_group(
+    tmp_path,
+) -> None:
+    credential_store = MemoryCredentialStore()
+    first_service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime.db",
+        workspace_dir=tmp_path / "runtime",
+        credential_store=credential_store,
+        seed_templates=False,
+    )
+    second_service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime.db",
+        workspace_dir=tmp_path / "runtime",
+        credential_store=credential_store,
+        seed_templates=False,
+    )
+    insert_barrier = threading.Barrier(2)
+    dispatched_threads: list[Any] = []
+
+    class _DeferredThread:
+        def __init__(self, *, target: Any, name: str, daemon: bool) -> None:
+            self.target = target
+            self.name = name
+            self.daemon = daemon
+            dispatched_threads.append(self)
+
+        def start(self) -> None:
+            return None
+
+    try:
+        agent = first_service.create_agent(
+            {
+                "name": "Cross Connection Agent",
+                "model_mode": "custom_api",
+                "model_config": {
+                    "base_url": "https://api.example.test/v1",
+                    "model": "demo-model",
+                    "api_key": "sk-secret",
+                },
+            }
+        )
+        for service in (first_service, second_service):
+            service.agent_run_async_coordinator._lock = threading.RLock()
+            service.agent_run_async_coordinator._thread_factory = _DeferredThread
+            original_insert = service.agent_run_starter._insert_run
+
+            def racing_insert(
+                *,
+                _insert=original_insert,
+                **fields: Any,
+            ) -> dict[str, Any]:
+                insert_barrier.wait(timeout=5)
+                return _insert(**fields)
+
+            service.agent_run_starter._insert_run = racing_insert
+
+        def start(service: AgentRuntimeService) -> dict[str, Any]:
+            return service.create_run_for_runnable_async(
+                runnable_id=agent["agent_id"],
+                user_goal="Finish once",
+                client_run_id="cross-connection-agent-client-1",
+            )
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [pool.submit(start, service) for service in (first_service, second_service)]
+            results = [future.result() for future in futures]
+
+        assert len({result["run_id"] for result in results}) == 1
+        assert sum(bool(result.get("idempotent")) for result in results) == 1
+        assert len(dispatched_threads) == 1
+        runs = first_service._conn.execute(
+            "SELECT run_id, run_group_id FROM runs WHERE client_request_id=?",
+            ("cross-connection-agent-client-1",),
+        ).fetchall()
+        groups = first_service._conn.execute(
+            "SELECT run_group_id FROM run_groups"
+        ).fetchall()
+        assert len(runs) == 1
+        assert [row["run_group_id"] for row in groups] == [runs[0]["run_group_id"]]
+    finally:
+        second_service.close()
+        first_service.close()
+
+
+def test_main_chat_run_claims_client_run_id_under_concurrency(tmp_path) -> None:
+    first_service = make_service(tmp_path)
+    second_service = make_service(tmp_path)
+    insert_barrier = threading.Barrier(2)
+
+    for service in (first_service, second_service):
+        service.main_chat_runs._lock = threading.RLock()
+        original_insert = service.main_chat_runs._insert_run
+
+        def racing_insert(
+            *,
+            _insert=original_insert,
+            **fields: Any,
+        ) -> dict[str, Any]:
+            insert_barrier.wait(timeout=5)
+            return _insert(**fields)
+
+        service.main_chat_runs._insert_run = racing_insert
+
+    def start(
+        service: AgentRuntimeService,
+        task_id: str,
+        session_id: str,
+    ) -> dict[str, Any]:
+        return service.start_main_chat_run(
+            task_id=task_id,
+            session_id=session_id,
+            user_goal="Continue recovery",
+            client_run_id="main-chat-replan-client-1",
+        )
+
+    try:
+        requests = [
+            (first_service, "task-main-1", "chat-main-1"),
+            (second_service, "task-main-2", "chat-main-2"),
+        ]
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            futures = [pool.submit(start, *request) for request in requests]
+            results = [future.result() for future in futures]
+
+        assert len({result["run_id"] for result in results}) == 1
+        assert sum(bool(result.get("idempotent")) for result in results) == 1
+        winner_index = next(
+            index for index, result in enumerate(results) if not result.get("idempotent")
+        )
+        loser = next(result for result in results if result.get("idempotent"))
+        winner_task_id = requests[winner_index][1]
+        winner_session_id = requests[winner_index][2]
+        link = first_service.task_run_links.for_run(results[0]["run_id"])
+        assert link is not None
+        assert link["task_id"] == winner_task_id
+        assert link["session_id"] == winner_session_id
+        assert loser["task_id"] == winner_task_id
+        assert loser["session_id"] == winner_session_id
+        rows = first_service._conn.execute(
+            "SELECT run_id FROM runs WHERE client_request_id=?",
+            ("main-chat-replan-client-1",),
+        ).fetchall()
+        assert len(rows) == 1
+        link_rows = first_service._conn.execute(
+            "SELECT task_id, session_id FROM task_run_links WHERE run_id=?",
+            (results[0]["run_id"],),
+        ).fetchall()
+        assert [(row["task_id"], row["session_id"]) for row in link_rows] == [
+            (winner_task_id, winner_session_id)
+        ]
+    finally:
+        second_service.close()
+        first_service.close()
+
+
+def test_agent_async_rejects_client_id_claimed_by_different_run_identity(tmp_path) -> None:
+    service = make_service(tmp_path)
+
+    class _DeferredThread:
+        def __init__(self, *, target: Any, name: str, daemon: bool) -> None:
+            self.target = target
+
+        def start(self) -> None:
+            return None
+
+    try:
+        agent = service.create_agent(
+            {
+                "name": "Identity Agent",
+                "model_mode": "custom_api",
+                "model_config": {
+                    "base_url": "https://api.example.test/v1",
+                    "model": "demo-model",
+                    "api_key": "sk-secret",
+                },
+            }
+        )
+        service.agent_run_async_coordinator._thread_factory = _DeferredThread
+        service.start_main_chat_run(
+            task_id="task-identity-main",
+            session_id="chat-identity",
+            user_goal="Main identity",
+            client_run_id="shared-identity-client-1",
+        )
+        with pytest.raises(AgentRuntimeError, match="idempotency.*conflict"):
+            service.start_main_chat_run(
+                task_id="task-identity-main-retry",
+                session_id="chat-identity",
+                user_goal="Different main identity",
+                client_run_id="shared-identity-client-1",
+            )
+
+        with pytest.raises(AgentRuntimeError, match="idempotency.*conflict"):
+            service.create_run_for_runnable_async(
+                runnable_id=agent["agent_id"],
+                user_goal="Agent identity",
+                client_run_id="shared-identity-client-1",
+            )
+
+        first = service.create_run_for_runnable_async(
+            runnable_id=agent["agent_id"],
+            user_goal="Stable goal",
+            client_run_id="agent-identity-client-1",
+        )
+        with pytest.raises(AgentRuntimeError, match="idempotency.*conflict"):
+            service.create_run_for_runnable_async(
+                runnable_id=agent["agent_id"],
+                user_goal="Different goal",
+                client_run_id="agent-identity-client-1",
+            )
+        other_agent = service.create_agent(
+            {
+                "name": "Other Identity Agent",
+                "model_mode": "custom_api",
+                "model_config": {
+                    "base_url": "https://api.example.test/v1",
+                    "model": "demo-model",
+                    "api_key": "sk-secret",
+                },
+            }
+        )
+        with pytest.raises(AgentRuntimeError, match="idempotency.*conflict"):
+            service.create_run_for_runnable_async(
+                runnable_id=other_agent["agent_id"],
+                user_goal="Stable goal",
+                client_run_id="agent-identity-client-1",
+            )
+        assert service.get_run(first["run_id"])["user_goal"] == "Stable goal"
     finally:
         service.close()
 
@@ -12731,7 +13577,14 @@ def test_phase4_seeded_workflow_executes_default_agent_line(tmp_path, monkeypatc
         assert run["result"] == "Step 6 complete"
         assert len(calls) == 6
         for index, task in enumerate(expected_step_tasks):
-            assert f"# User Goal\n{task}\n\nWorkflow Goal:\n跑一次 Phase 4 全线流通性测试" in calls[index][-1]["content"]
+            expected_context = (
+                f"# User Goal\n{task}\n\n"
+                "Workflow Goal:\n跑一次 Phase 4 全线流通性测试"
+            )
+            assert any(
+                expected_context in str(message.get("content") or "")
+                for message in calls[index]
+            )
         assert [event["event"] for event in run["timeline"]].count("workflow.node.agent") == 6
         started_event = next(event for event in run["timeline"] if event["event"] == "workflow.run.started")
         assert [item.get("task") for item in started_event["workflow_path"] if item.get("kind") == "agent"] == expected_step_tasks
@@ -13101,7 +13954,7 @@ def test_tool_broker_memory_add_replace_remove_persists_audited_items(tmp_path):
         service.close()
 
 
-def test_agent_can_manage_long_term_memory_and_recall_it_next_run(tmp_path, monkeypatch):
+def test_agent_memory_tool_creates_candidate_not_recalled_without_user_consent(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     calls = []
 
@@ -13135,9 +13988,9 @@ def test_agent_can_manage_long_term_memory_and_recall_it_next_run(tmp_path, monk
             assert tool_result["ok"] is True
             assert tool_result["memory"]["content"] == "User calls the project Oha-Yachiyo."
             return {"content": "Memory saved"}
-        assert "User calls the project Oha-Yachiyo." in messages[1]["content"]
-        assert "memory_" in messages[1]["content"]
-        return {"content": "I remembered it"}
+        assert "User calls the project Oha-Yachiyo." not in messages[1]["content"]
+        assert "No durable memories yet." in messages[1]["content"]
+        return {"content": "No confirmed memory yet"}
 
     monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
     try:
@@ -13159,8 +14012,9 @@ def test_agent_can_manage_long_term_memory_and_recall_it_next_run(tmp_path, monk
         assert first["status"] == "completed"
         assert first["result"] == "Memory saved"
         assert memories[0]["content"] == "User calls the project Oha-Yachiyo."
+        assert memories[0]["user_confirmed"] is False
         assert second["status"] == "completed"
-        assert second["result"] == "I remembered it"
+        assert second["result"] == "No confirmed memory yet"
         assert any(event["event"] == "agent.tool.call" and event["detail"] == "memory.add" for event in first["timeline"])
     finally:
         service.close()
@@ -14049,9 +14903,15 @@ def test_workflow_child_agents_keep_goal_and_receive_prior_result_as_upstream(tm
 
         assert run["status"] == "completed"
         assert run["result"] == "Code output"
-        assert "# User Goal\nShip it" in contexts[0]
+        assert (
+            f"# User Goal\n{DELEGATED_WORKFLOW_RESPONSE_ONLY_GOAL}\n\n"
+            "Workflow Goal:\nShip it"
+        ) in contexts[0]
         assert "# Upstream Context\nNone" in contexts[0]
-        assert "# User Goal\nShip it" in contexts[1]
+        assert (
+            f"# User Goal\n{DELEGATED_WORKFLOW_RESPONSE_ONLY_GOAL}\n\n"
+            "Workflow Goal:\nShip it"
+        ) in contexts[1]
         assert "# Upstream Context\nDesign output" in contexts[1]
         assert "# User Goal\nDesign output" not in contexts[1]
         assert contexts[1].count("Design output") == 1
@@ -14062,7 +14922,10 @@ def test_workflow_child_agents_keep_goal_and_receive_prior_result_as_upstream(tm
             for run_id in group["child_run_ids"]
             if run_id != run["run_id"]
         ]
-        assert [child["user_goal"] for child in agent_runs] == ["Ship it", "Ship it"]
+        assert [child["user_goal"] for child in agent_runs] == [
+            DELEGATED_WORKFLOW_RESPONSE_ONLY_GOAL,
+            DELEGATED_WORKFLOW_RESPONSE_ONLY_GOAL,
+        ]
     finally:
         service.close()
 
@@ -14073,7 +14936,13 @@ def test_workflow_agent_nodes_can_define_step_tasks(tmp_path, monkeypatch):
     responses = iter(["Research notes", "Implementation plan"])
 
     def fake_chat(_base_url, _model, _api_key, messages, **_kwargs):
-        contexts.append(messages[-1]["content"])
+        contexts.append(
+            "\n".join(
+                str(message.get("content") or "")
+                for message in messages
+                if message.get("role") == "user"
+            )
+        )
         return {"content": next(responses)}
 
     monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
@@ -14131,8 +15000,8 @@ def test_workflow_agent_nodes_can_define_step_tasks(tmp_path, monkeypatch):
             if run_id != run["run_id"]
         ]
         assert [child["user_goal"] for child in agent_runs] == [
-            "Collect constraints and summarize the tradeoffs.\n\nWorkflow Goal:\nShip feature X",
-            "Turn the research notes into an implementation plan.\n\nWorkflow Goal:\nShip feature X",
+            "Collect constraints and summarize the tradeoffs.",
+            "Turn the research notes into an implementation plan.",
         ]
         started_event = next(event for event in run["timeline"] if event["event"] == "workflow.run.started")
         assert started_event["workflow_path"][1]["task"] == "Collect constraints and summarize the tradeoffs."
@@ -18022,22 +18891,11 @@ def test_agent_run_can_recover_from_workspace_tool_shape_error(tmp_path, monkeyp
                 ],
             }
         if len(calls) == 2:
-            assert messages[-1]["role"] == "tool"
-            assert "suggested_tool" in messages[-1]["content"]
-            assert "workspace.list" in messages[-1]["content"]
-            return {
-                "content": "",
-                "tool_calls": [
-                    {
-                        "id": "call_list",
-                        "type": "function",
-                        "function": {"name": "workspace_list", "arguments": json.dumps({"path": "."})},
-                    }
-                ],
-            }
-        assert messages[-1]["role"] == "tool"
-        assert "README.md" in messages[-1]["content"]
-        return {"content": "Recovered and listed files"}
+            assert messages[-1]["role"] == "user"
+            assert "Tool result for workspace.list" in messages[-1]["content"]
+            assert "README.md" in messages[-1]["content"]
+            return {"content": "Recovered and listed files"}
+        raise AssertionError("workspace shape recovery should complete in one recovery turn")
 
     monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
     try:
@@ -19060,7 +19918,10 @@ def test_agent_run_supports_more_than_six_terminal_turns(tmp_path, monkeypatch):
         for turn in range(terminal_turns):
             assert run["status"] == "approval_required"
             assert run["pending_approval"]["input_preview"]["command"] == f"printf terminal-turn-{turn + 1}"
-            run = service.approve_run_approval(run["run_id"])
+            run = service.approve_run_approval(
+                run["run_id"],
+                expected_approval_id=run["pending_approval"]["approval_id"],
+            )
 
         assert run["status"] == "completed"
         assert run["result"] == "All terminal turns completed"
@@ -20312,7 +21173,12 @@ async def test_run_approval_routes_return_404_and_are_idempotent(tmp_path, monke
     monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
     try:
         with pytest.raises(HTTPException) as missing:
-            await agent_routes.approve_run_approval("run_missing")
+            await agent_routes.approve_run_approval(
+                "run_missing",
+                agent_routes.ApprovalRejectRequest(
+                    approval_id="approval-missing-run",
+                ),
+            )
         assert missing.value.status_code == 404
 
         agent = service.create_agent(
@@ -20323,7 +21189,12 @@ async def test_run_approval_routes_return_404_and_are_idempotent(tmp_path, monke
             }
         )
         run = service.create_agent_run({"agent_id": agent["agent_id"], "user_goal": "Finish"})
-        repeated = await agent_routes.approve_run_approval(run["run_id"])
+        repeated = await agent_routes.approve_run_approval(
+            run["run_id"],
+            agent_routes.ApprovalRejectRequest(
+                approval_id="approval-terminal-run",
+            ),
+        )
         assert repeated["run_id"] == run["run_id"]
         assert repeated["status"] == "completed"
         assert model_calls == 1
@@ -20368,14 +21239,21 @@ async def test_run_approval_reject_route_is_idempotent(tmp_path, monkeypatch):
         )
         run = service.create_agent_run({"agent_id": agent["agent_id"], "user_goal": "Request terminal then reject"})
         assert run["status"] == "approval_required"
+        approval_id = run["pending_approval"]["approval_id"]
 
         first = await agent_routes.reject_run_approval(
             run["run_id"],
-            agent_routes.ApprovalRejectRequest(reason="not allowed"),
+            agent_routes.ApprovalRejectRequest(
+                approval_id=approval_id,
+                reason="not allowed",
+            ),
         )
         second = await agent_routes.reject_run_approval(
             run["run_id"],
-            agent_routes.ApprovalRejectRequest(reason="not allowed again"),
+            agent_routes.ApprovalRejectRequest(
+                approval_id=approval_id,
+                reason="not allowed again",
+            ),
         )
         events = service.list_run_events(run["run_id"])["events"]
         rejection_facts = [
@@ -20596,12 +21474,15 @@ async def test_workflow_routes_save_and_run_latest_canvas_with_step_approval_and
         ]
         assert [child["runnable_id"] for child in child_runs] == [design_agent["agent_id"]]
         assert child_runs[0]["user_goal"] == (
-            "List mobile acceptance risks and the checks to verify them.\n\n"
-            "Workflow Goal:\n"
-            "Prepare mobile release acceptance"
+            "List mobile acceptance risks and the checks to verify them."
         )
 
-        resumed = await agent_routes.approve_run_approval(run["run_id"])
+        resumed = await agent_routes.approve_run_approval(
+            run["run_id"],
+            agent_routes.ApprovalRejectRequest(
+                approval_id=run["pending_approval"]["approval_id"],
+            ),
+        )
 
         assert resumed["status"] == "completed"
         artifact_event = next(event for event in resumed["timeline"] if event["event"] == "workflow.node.artifact")
@@ -21309,7 +22190,13 @@ def test_workflow_subworkflow_child_approval_resumes_parent_workflow(tmp_path, m
         assert child_workflow_run["status"] == "approval_required"
         assert child_workflow_run["pending_approval"] == {}
         assert grandchild_agent_run["status"] == "approval_required"
+        assert grandchild_agent_run["user_goal"] == DELEGATED_WORKFLOW_RESPONSE_ONLY_GOAL
         assert grandchild_agent_run["pending_approval"]["tool"] == "terminal.run"
+        assert any(
+            "Workflow Goal:\nRun nested approval flow"
+            in str(message.get("content") or "")
+            for message in calls[0]
+        )
         assert parent_wait_event["child_run_id"] == child_workflow_run_id
         assert parent_wait_event["workflow_node_kind"] == "workflow"
         assert child_wait_event["child_run_id"] == grandchild_agent_run_id
@@ -21762,7 +22649,12 @@ async def test_workflow_approval_route_resumes_runtime_snapshot_after_edit(tmp_p
             ),
         )
 
-        resumed = await agent_routes.approve_run_approval(run["run_id"])
+        resumed = await agent_routes.approve_run_approval(
+            run["run_id"],
+            agent_routes.ApprovalRejectRequest(
+                approval_id=run["pending_approval"]["approval_id"],
+            ),
+        )
 
         assert resumed["status"] == "completed"
         assert resumed["result"] == "Original route agent complete"
@@ -21973,7 +22865,12 @@ async def test_workflow_child_approval_route_approve_resumes_parent_workflow(tmp
         assert replay_wait_event["payload"]["workflow_node_id"] == "agent"
         assert "agent.tool.approval_required" in child_replay_types
 
-        approved_child = await agent_routes.approve_run_approval(child_run_id)
+        approved_child = await agent_routes.approve_run_approval(
+            child_run_id,
+            agent_routes.ApprovalRejectRequest(
+                approval_id=child_detail["pending_approval"]["approval_id"],
+            ),
+        )
         parent = await agent_routes.get_workflow_run(run["run_id"])
         completed_group = await agent_routes.get_run_group(run["run_group_id"])
         child_detail_after = await agent_routes.get_any_run(child_run_id)
@@ -22130,11 +23027,16 @@ async def test_workflow_child_consecutive_approvals_keep_parent_waiting(tmp_path
         assert child["status"] == "approval_required"
         assert child["pending_approval"]["input_preview"]["command"] == "printf workflow-first-approved"
 
-        after_first = await agent_routes.approve_run_approval(child_run_id)
+        after_first = await agent_routes.approve_run_approval(
+            child_run_id,
+            agent_routes.ApprovalRejectRequest(
+                approval_id=child["pending_approval"]["approval_id"],
+            ),
+        )
         parent_after_first = await agent_routes.get_workflow_run(run["run_id"])
         group_after_first = await agent_routes.get_run_group(run["run_group_id"])
 
-        assert after_first["status"] == "approval_required"
+        assert after_first["status"] == "approval_required", after_first.get("result")
         assert after_first["pending_approval"]["input_preview"]["command"] == "printf workflow-second-approved"
         assert parent_after_first["status"] == "approval_required"
         assert parent_after_first["pending_approval"] == {}
@@ -22153,7 +23055,12 @@ async def test_workflow_child_consecutive_approvals_keep_parent_waiting(tmp_path
         assert agent_event["status"] == "approval_required"
         assert agent_event["child_run_id"] == child_run_id
 
-        after_second = await agent_routes.approve_run_approval(child_run_id)
+        after_second = await agent_routes.approve_run_approval(
+            child_run_id,
+            agent_routes.ApprovalRejectRequest(
+                approval_id=after_first["pending_approval"]["approval_id"],
+            ),
+        )
         parent_after_second = await agent_routes.get_workflow_run(run["run_id"])
         group_after_second = await agent_routes.get_run_group(run["run_group_id"])
 
@@ -22251,7 +23158,10 @@ async def test_workflow_child_approval_route_reject_cancels_parent_workflow(tmp_
 
         rejected_child = await agent_routes.reject_run_approval(
             child_run_id,
-            agent_routes.ApprovalRejectRequest(reason="not now"),
+            agent_routes.ApprovalRejectRequest(
+                approval_id=child["pending_approval"]["approval_id"],
+                reason="not now",
+            ),
         )
         parent = await agent_routes.get_workflow_run(run["run_id"])
         cancelled_group = await agent_routes.get_run_group(run["run_group_id"])

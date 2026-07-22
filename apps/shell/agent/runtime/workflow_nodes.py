@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from apps.shell.agent.runtime.callbacks import supports_keyword
@@ -11,6 +11,7 @@ from apps.shell.agent.runtime.direct_request_policy import (
     agent_with_direct_request_approvals,
 )
 from apps.shell.agent.runtime.events import tool_input_preview as _tool_input_preview
+from apps.shell.agent.runtime.goal_runtime import DELEGATED_WORKFLOW_RESPONSE_ONLY_GOAL
 from apps.shell.agent.runtime.tool_brokers import write_artifact_with_tool_broker
 from apps.shell.agent.tools.policy import DAILY_DESKTOP_TOOL_NAMES, RuntimePolicyCompiler
 from apps.shell.yachiyo_agent.entrypoint_tool_selection import (
@@ -69,12 +70,16 @@ def _agent_with_runtime_planner_entrypoint(
     agent: dict[str, Any],
     *,
     planning_context: str,
+    goal_context: str = "",
 ) -> dict[str, Any]:
     enriched = {
         **agent,
         "_runtime_planner_entrypoint": True,
         "_runtime_planner_entrypoint_context": str(planning_context or "").strip(),
     }
+    clean_goal_context = str(goal_context or "").strip()
+    if clean_goal_context:
+        enriched["_runtime_agent_goal_context"] = clean_goal_context
     return _agent_with_daily_desktop_policy_overlay(
         enriched,
         planning_context=planning_context,
@@ -470,6 +475,21 @@ def _agent_allowed_tools(agent: dict[str, Any]) -> list[str] | None:
     return [str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()]
 
 
+def _workflow_agent_authority_goal(
+    agent: Mapping[str, Any],
+    step_task: str,
+) -> str:
+    """Return the immutable objective owned by one delegated Agent Run."""
+
+    clean_step_task = str(step_task or "").strip()
+    if clean_step_task:
+        return clean_step_task
+    configured_instructions = agent.get("instructions")
+    if isinstance(configured_instructions, str) and configured_instructions.strip():
+        return configured_instructions.strip()
+    return DELEGATED_WORKFLOW_RESPONSE_ONLY_GOAL
+
+
 @dataclass(frozen=True)
 class WorkflowAgentNodeHandoff:
     """Child Agent run payload derived from a Workflow agent node."""
@@ -483,6 +503,16 @@ class WorkflowAgentNodeHandoff:
     child_goal: str
     upstream: str
     node_info_extra: dict[str, str] | None = None
+    authority_goal: str = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        """Snapshot authority even for compatibility callers using the constructor."""
+
+        object.__setattr__(
+            self,
+            "authority_goal",
+            _workflow_agent_authority_goal(self.agent, self.step_task),
+        )
 
     @classmethod
     def from_agent(
@@ -511,6 +541,17 @@ class WorkflowAgentNodeHandoff:
             upstream=context if has_agent_upstream else "",
             node_info_extra=dict(node_info_extra or {}),
         )
+
+    @property
+    def run_goal(self) -> str:
+        return str(self.authority_goal or "").strip()
+
+    @property
+    def model_goal_context(self) -> str:
+        lineage_context = str(self.child_goal or "").strip()
+        if self.step_task or not lineage_context or lineage_context == self.run_goal:
+            return lineage_context or self.run_goal
+        return f"{self.run_goal}\n\nWorkflow Goal:\n{lineage_context}"
 
     @classmethod
     def from_node(
@@ -638,19 +679,22 @@ class WorkflowAgentNodeExecution:
             engine,
             "_workflow_child_artifact_refs",
         )
+        run_goal = handoff.run_goal
         child = insert_run(
             kind="agent_run",
             runnable_id=handoff.agent_id,
-            user_goal=handoff.child_goal,
+            user_goal=run_goal,
             run_group_id=run_group_id,
         )
         execute_kwargs = {"upstream": handoff.upstream}
         planning_context = str(
-            daily_desktop_planning_context or handoff.step_task or handoff.child_goal
+            daily_desktop_planning_context
+            or run_goal
         ).strip()
         execution_agent = _agent_with_runtime_planner_entrypoint(
             handoff.agent,
             planning_context=planning_context,
+            goal_context=handoff.model_goal_context,
         )
         node_direct_tool_requests = _workflow_node_direct_tool_requests(
             handoff,
@@ -703,7 +747,7 @@ class WorkflowAgentNodeExecution:
         child = execute_agent_run(
             child["run_id"],
             execution_agent,
-            handoff.child_goal,
+            run_goal,
             **execute_kwargs,
         )
         if callable(prepare_child_run):

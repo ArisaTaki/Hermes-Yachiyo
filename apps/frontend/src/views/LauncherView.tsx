@@ -4,20 +4,19 @@ import logoUrl from '../../../../docs/open-design/logo.png';
 import { apiGet, apiPost, getLauncherPointerState, moveLauncherWindow, openAppView, openLauncherMenu, setLauncherHitRegions, setLauncherPointerInteractive, type LauncherHitRegionRect } from '../lib/bridge';
 import {
   LauncherAgentTaskLight,
+  launcherAgentTaskChatParams,
   launcherAgentTaskSummary,
 } from '../features/yachiyo-chat/components/LauncherAgentTaskLight';
 import {
   approveYachiyoTask,
   cancelYachiyoTask,
   getYachiyoTask,
-  listYachiyoTasks,
   rejectYachiyoTask,
   startYachiyoTask,
   getYachiyoReadiness,
 } from '../features/yachiyo-chat/api';
 import {
   LAUNCHER_MAIN_AGENT_ID,
-  launcherAgentTaskFromPublicTasks,
   launcherAgentTaskIsActive,
   refreshLauncherAgentTaskAfterAction,
   launcherTaskConversationId,
@@ -29,6 +28,7 @@ import { chatDesktopPermissionNotice } from '../features/yachiyo-chat/readiness'
 import type { AgentTaskSnapshot, ApprovalCardSnapshot, ChatNotice } from '../features/yachiyo-chat/types';
 import type { RuntimeToolRecoveryAction } from '../features/runtime-shared/toolRecoveryActions';
 import type { AppView } from '../lib/view';
+import { startLauncherPolling } from './launcherPolling';
 import {
   LIVE2D_DEFAULT_RENDER_FPS,
   destroyLive2DRenderer,
@@ -204,33 +204,38 @@ function useLauncher(mode: 'bubble' | 'live2d') {
   const [data, setData] = useState<LauncherPayload | null>(null);
   const [publicAgentTask, setPublicAgentTask] = useState<AgentTaskSnapshot | null>(null);
   const [desktopReadinessNotice, setDesktopReadinessNotice] = useState<LauncherDesktopReadinessNotice>(null);
+  const canUpdateRef = useRef(true);
+
+  useEffect(() => {
+    canUpdateRef.current = true;
+    return () => {
+      canUpdateRef.current = false;
+    };
+  }, []);
 
   const refresh = useCallback(async () => {
     try {
       const payload = await apiGet<LauncherPayload>(`/ui/launcher?mode=${mode}`);
-      if (payload.ok !== false) {
-        setData(payload);
-        try {
-          const tasks = await listYachiyoTasks();
-          setPublicAgentTask(launcherAgentTaskFromPublicTasks(tasks, payload.chat?.agent_task || null));
-        } catch {
-          setPublicAgentTask((current) => payload.chat?.agent_task || current || null);
-        }
-      }
+      if (!canUpdateRef.current || payload.ok === false) return;
+      setData(payload);
+      setPublicAgentTask(payload.chat?.agent_task || null);
     } catch {
+      if (!canUpdateRef.current) return;
       setData((current) => current || { ok: false, mode });
     }
   }, [mode]);
 
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
+  const processing = Boolean(
+    data?.chat?.is_processing
+    || launcherAgentTaskIsActive(publicAgentTask || data?.chat?.agent_task),
+  );
+  const pollIntervalRef = useRef(IDLE_POLL_INTERVAL_MS);
+  pollIntervalRef.current = processing ? ACTIVE_POLL_INTERVAL_MS : IDLE_POLL_INTERVAL_MS;
 
-  useEffect(() => {
-    const processing = Boolean(data?.chat?.is_processing || launcherAgentTaskIsActive(publicAgentTask || data?.chat?.agent_task));
-    const timer = window.setInterval(refresh, processing ? ACTIVE_POLL_INTERVAL_MS : IDLE_POLL_INTERVAL_MS);
-    return () => window.clearInterval(timer);
-  }, [data?.chat?.agent_task, data?.chat?.is_processing, publicAgentTask, refresh]);
+  useEffect(() => startLauncherPolling({
+    intervalMs: () => pollIntervalRef.current,
+    refresh,
+  }), [refresh]);
 
   const refreshDesktopReadiness = useCallback(async () => {
     try {
@@ -324,7 +329,11 @@ function useLauncher(mode: 'bubble' | 'live2d') {
   };
 }
 
-async function acknowledgeAndOpenChat(mode: 'bubble' | 'live2d', data: LauncherPayload | null) {
+async function acknowledgeAndOpenChat(
+  mode: 'bubble' | 'live2d',
+  data: LauncherPayload | null,
+  task: AgentTaskSnapshot | null = null,
+) {
   let sessionId = data?.proactive?.has_attention ? '' : String(data?.chat?.session_id || '');
   try {
     const result = await apiPost<{ session_id?: string }>('/ui/launcher/ack', { mode });
@@ -332,13 +341,17 @@ async function acknowledgeAndOpenChat(mode: 'bubble' | 'live2d', data: LauncherP
       ? result.session_id || ''
       : String(data?.chat?.session_id || result.session_id || sessionId);
   } catch {}
-  const params = launcherChatOpenParams(data, sessionId);
+  const params = launcherAgentTaskChatParams(task) || launcherChatOpenParams(data, sessionId);
   await openAppView('chat', params);
 }
 
-async function openLauncherPrimaryTarget(mode: 'bubble' | 'live2d', data: LauncherPayload | null) {
-  if (shouldOpenChatFromLauncher(data)) {
-    await acknowledgeAndOpenChat(mode, data);
+async function openLauncherPrimaryTarget(
+  mode: 'bubble' | 'live2d',
+  data: LauncherPayload | null,
+  task: AgentTaskSnapshot | null = null,
+) {
+  if (task || shouldOpenChatFromLauncher(data)) {
+    await acknowledgeAndOpenChat(mode, data, task);
     return;
   }
   await openAppView('main', { restore: 'last' });
@@ -434,15 +447,28 @@ function BubbleLauncher({
   const agentTask = publicAgentTask || payloadAgentTask;
   const latestReply = latestAssistantText(data?.chat, launcher);
   const taskSummary = launcherAgentTaskSummary(agentTask);
-  const summaryText = taskSummary || latestReply || latestLauncherSessionSummary(data?.chat) || statusLabel;
+  const compactTaskStatus = bubbleCompactTaskStatus(agentTask, desktopReadinessNotice);
+  const summaryText = launcherAgentTaskIsActive(agentTask)
+    ? compactTaskStatus
+    : latestReply || taskSummary || latestLauncherSessionSummary(data?.chat) || statusLabel;
   const showSummary = displayMode !== 'icon' && Boolean(summaryText);
   const [quickText, setQuickText] = useState('');
   const [quickBusy, setQuickBusy] = useState<'chat' | 'task' | ''>('');
   const [quickInputVisible, setQuickInputVisible] = useState(launcher.default_open_behavior === 'chat_input');
-  const title = bubbleTitle(displayMode, hasAttention, statusLabel, proactive);
-  const ariaLabel = displayMode === 'icon'
-    ? 'Yachiyo Bubble'
-    : `Yachiyo Bubble - ${hasAttention ? '有新消息' : statusLabel}`;
+  const compactActionHint = compactTaskStatus
+    ? desktopReadinessNotice && !launcherAgentTaskIsActive(agentTask)
+      ? `${compactTaskStatus}，点击打开诊断`
+      : agentTask
+        ? `${compactTaskStatus}，点击查看任务`
+        : compactTaskStatus
+    : '';
+  const baseTitle = bubbleTitle(displayMode, hasAttention, statusLabel, proactive);
+  const title = compactActionHint ? `${baseTitle}\n${compactActionHint}` : baseTitle;
+  const ariaLabel = compactActionHint
+    ? `Yachiyo Bubble - ${compactActionHint}`
+    : displayMode === 'icon'
+      ? 'Yachiyo Bubble'
+      : `Yachiyo Bubble - ${hasAttention ? '有新消息' : statusLabel}`;
   const avatarUrl = launcher.avatar_url || logoUrl;
   const style = {
     opacity: idleHidden ? Math.max(0.24, opacity * 0.52) : opacity,
@@ -549,7 +575,14 @@ function BubbleLauncher({
       return;
     }
     clickSuppressedRef.current = false;
-    void openLauncherPrimaryTarget('bubble', data);
+    if (desktopReadinessNotice && !launcherAgentTaskIsActive(agentTask)) {
+      void openAppView(
+        desktopReadinessNotice.action_view || 'diagnostics',
+        desktopReadinessNotice.action_params || {},
+      );
+      return;
+    }
+    void openLauncherPrimaryTarget('bubble', data, agentTask || null);
   }
 
   async function sendQuickMessage(event: FormEvent) {
@@ -615,6 +648,14 @@ function BubbleLauncher({
         <span className={showSummary && !quickInputVisible ? 'bubble-summary' : 'bubble-summary hidden'} data-testid="bubble-launcher-summary">
           {summaryText}
         </span>
+        {compactTaskStatus ? (
+          <span
+            className={`bubble-task-status ${bubbleCompactTaskTone(agentTask, desktopReadinessNotice)}`}
+            data-testid="bubble-launcher-task-status"
+          >
+            {compactTaskStatus}
+          </span>
+        ) : null}
       </button>
       <LauncherAgentTaskLight
         mode="bubble"
@@ -689,7 +730,7 @@ function LauncherDesktopReadinessNotice({
     <button
       ref={noticeRef}
       className={`launcher-desktop-readiness-notice ${notice.kind}`}
-      data-testid={`${mode}-launcher-readiness-notice`}
+      data-testid={mode === 'bubble' ? 'bubble-launcher-readiness-notice' : 'live2d-launcher-readiness-notice'}
       type="button"
       title={notice.detail}
       aria-label={`${notice.title}：${notice.detail}`}
@@ -724,6 +765,38 @@ function bubbleDotClass(showDot: boolean, hasAttention: boolean, status: string,
     className += ` ${status}`;
   }
   return className;
+}
+
+export function bubbleCompactTaskStatus(
+  task: AgentTaskSnapshot | null | undefined,
+  readinessNotice: LauncherDesktopReadinessNotice = null,
+) {
+  const status = String(task?.status || '').toLowerCase();
+  if (['completed', 'success', 'succeeded', 'failed', 'cancelled', 'canceled'].includes(status)) {
+    if (readinessNotice) return '需要授权';
+    if (['completed', 'success', 'succeeded'].includes(status)) return '已完成';
+    if (status === 'cancelled' || status === 'canceled') return '已取消';
+    return '需要查看';
+  }
+  if (task?.needs_user_action || task?.pending_approvals?.length || status === 'waiting_approval') {
+    return '需要你确认';
+  }
+  if (status === 'queued' || status === 'running') return '处理中';
+  if (readinessNotice) return '需要授权';
+  return '';
+}
+
+function bubbleCompactTaskTone(
+  task: AgentTaskSnapshot | null | undefined,
+  readinessNotice: LauncherDesktopReadinessNotice,
+) {
+  const status = String(task?.status || '').toLowerCase();
+  if (status === 'failed' || readinessNotice?.kind === 'danger') return 'danger';
+  if (readinessNotice) return 'attention';
+  if (['completed', 'success', 'succeeded'].includes(status)) return 'success';
+  if (status === 'cancelled' || status === 'canceled') return 'neutral';
+  if (task?.needs_user_action || task?.pending_approvals?.length || status === 'waiting_approval') return 'attention';
+  return 'neutral';
 }
 
 function bubbleTitle(
@@ -768,6 +841,7 @@ function Live2DLauncher({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const characterRef = useRef<HTMLDivElement | null>(null);
   const previewRef = useRef<HTMLImageElement | null>(null);
+  const agentTaskRef = useRef<HTMLElement | null>(null);
   const desktopReadinessRef = useRef<HTMLButtonElement | null>(null);
   const resourceHintRef = useRef<HTMLDivElement | null>(null);
   const replyRef = useRef<HTMLButtonElement | null>(null);
@@ -888,6 +962,7 @@ function Live2DLauncher({
       frame = window.requestAnimationFrame(() => {
         frame = 0;
         reportLive2DRegions({
+          agentTask: agentTaskRef.current,
           canvas: canvasRef.current,
           character: characterRef.current,
           preview: previewRef.current,
@@ -913,7 +988,7 @@ function Live2DLauncher({
       timers.forEach((timer) => window.clearTimeout(timer));
       window.removeEventListener('resize', scheduleReport);
     };
-  }, [rendererReady, rendererLoading, renderer?.model_url, launcher.preview_url, launcher.scale, positionAnchor, showReply, quickInputVisible, showResourceHint, dismissedHintKey, renderSettings.hitRegionPrecision]);
+  }, [rendererReady, rendererLoading, renderer?.model_url, launcher.preview_url, launcher.scale, positionAnchor, showReply, quickInputVisible, showResourceHint, dismissedHintKey, renderSettings.hitRegionPrecision, agentTask?.task_id, agentTask?.status, agentTask?.needs_user_action, agentTask?.pending_approvals?.length, agentTask?.updated_at]);
 
   useEffect(() => {
     return () => {
@@ -1156,6 +1231,7 @@ function Live2DLauncher({
               src={launcher.preview_url}
               alt=""
               onLoad={() => reportLive2DRegions({
+                agentTask: agentTaskRef.current,
                 canvas: canvasRef.current,
                 character: characterRef.current,
                 preview: previewRef.current,
@@ -1221,6 +1297,7 @@ function Live2DLauncher({
       ) : null}
 
       <LauncherAgentTaskLight
+        containerRef={agentTaskRef}
         mode="live2d"
         onApproveApproval={onApproveTaskApproval}
         onCancelTask={onCancelTask}
@@ -1329,7 +1406,7 @@ function dragLauncherWindow(
 }
 
 function live2dInteractiveTarget(target: EventTarget | null) {
-  return target instanceof Element && Boolean(target.closest('.live2d-resource-hint, .live2d-reply, .live2d-quick-input, .launcher-desktop-readiness-notice'));
+  return target instanceof Element && Boolean(target.closest('.live2d-resource-hint, .live2d-reply, .live2d-quick-input, .launcher-agent-task-light, .launcher-agent-task-compact, .launcher-desktop-readiness-notice'));
 }
 
 function latestAssistantText(chat: LauncherPayload['chat'], launcher: NonNullable<LauncherPayload['launcher']>) {
@@ -1850,6 +1927,7 @@ function live2dExpressionCallCandidates(name: string) {
 }
 
 function reportLive2DRegions({
+  agentTask,
   canvas,
   character,
   preview,
@@ -1865,6 +1943,7 @@ function reportLive2DRegions({
   hitRegionPrecision,
   uiRegionsRef,
 }: {
+  agentTask: HTMLElement | null;
   canvas: HTMLCanvasElement | null;
   character: HTMLDivElement | null;
   preview: HTMLImageElement | null;
@@ -1886,7 +1965,7 @@ function reportLive2DRegions({
   const previewRegion = preview ? live2DPreviewHitRegion(preview) : null;
   const hitRegion = canvasRegion || rendererRegion || previewRegion || null;
   positionLive2DReply(reply, hitRegion);
-  const uiRegions = [resourceHint, reply, readinessNotice, quickInput]
+  const uiRegions = [resourceHint, reply, agentTask, readinessNotice, quickInput]
     .map((element) => elementRegion(element))
     .filter((region): region is Live2DHitRegion => Boolean(region));
   hitRegionRef.current = hitRegion;

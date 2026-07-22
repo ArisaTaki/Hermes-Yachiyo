@@ -30,6 +30,8 @@ DesktopIsolationKind = Literal[
     "none",
     "process",
     "browser_profile",
+    "browser_target",
+    "background_desktop",
     "sandbox_desktop",
     "headless",
     "user_handoff",
@@ -44,6 +46,7 @@ DesktopExecutionPolicyMode = Literal[
 ]
 RuntimeExecutionPreferredEnvironment = Literal[
     "structured_runtime",
+    "background_desktop",
     "isolated_desktop",
     "user_foreground",
     "user_handoff",
@@ -166,6 +169,7 @@ class DesktopExecutionModeSnapshot(_PublicSnapshot):
 class DesktopExecutionPolicySnapshot(_PublicSnapshot):
     mode: DesktopExecutionPolicyMode | str = "allow"
     allow_live_foreground: bool | None = None
+    prefer_background_desktop: bool = False
     prefer_isolated_desktop: bool = False
     avoid_user_foreground_takeover: bool = False
     require_sandbox_for_keyboard_mouse: bool = False
@@ -184,6 +188,9 @@ class DesktopProviderHealthSnapshot(_PublicSnapshot):
     provider_version: str = ""
     endpoint_origin: str = ""
     endpoint_path: str = ""
+    transport: str = ""
+    health_report: dict[str, Any] = Field(default_factory=dict)
+    cached: bool = False
     blocking_conditions: list[str] = Field(default_factory=list)
     supported_tools: list[str] = Field(default_factory=list)
     capabilities: list[str] = Field(default_factory=list)
@@ -325,11 +332,13 @@ class DesktopExecutionRouteSnapshot(_PublicSnapshot):
     requested_mode: DesktopExecutionPolicyMode | str = "allow"
     selected_provider_kind: DesktopIsolationKind | str = "none"
     selected_provider_id: str = ""
+    provider_readiness_status: str = ""
     status: str = "ready"
     can_execute: bool = True
     can_auto_start: bool = True
     provider_execution_required: bool = False
     sandbox_required: bool = False
+    background_desktop_preferred: bool = False
     isolated_desktop_preferred: bool = False
     foreground_takeover_allowed: bool = False
     desktop_execution_session_policy: str = ""
@@ -580,6 +589,19 @@ class TaskIntentSnapshot(_PublicSnapshot):
     source: str = "task_intent_router"
 
 
+class RuntimeInputBindingSnapshot(_PublicSnapshot):
+    """Planner-declared, Runtime-resolved dataflow between two exact steps."""
+
+    binding_id: str
+    source_step_id: str
+    source_tool_name: str
+    source_result_path: str
+    target_input_path: str
+    value_type: Literal["string", "string_list", "number", "bool"] | str = "string"
+    required: bool = True
+    max_bytes: int = 4096
+
+
 class ToolPlanStepSnapshot(_PublicSnapshot):
     step_id: str
     title: str
@@ -591,6 +613,7 @@ class ToolPlanStepSnapshot(_PublicSnapshot):
     execution_mode: DesktopExecutionModeSnapshot | None = None
     approval_required: bool = False
     depends_on: list[str] = Field(default_factory=list)
+    input_bindings: list[RuntimeInputBindingSnapshot] = Field(default_factory=list)
     reason: str = ""
     fallback_tools: list[str] = Field(default_factory=list)
     status: Literal["planned", "unavailable", "skipped"] | str = "planned"
@@ -613,6 +636,7 @@ class RuntimeExecutionStrategySnapshot(_PublicSnapshot):
     preferred_environment: RuntimeExecutionPreferredEnvironment | str = "structured_runtime"
     interaction_mode: RuntimeExecutionInteractionMode | str = "background"
     policy_mode: DesktopExecutionPolicyMode | str = "allow"
+    background_desktop_preferred: bool = False
     isolated_desktop_preferred: bool = False
     foreground_takeover_allowed: bool = False
     user_foreground_takeover_risk: bool = False
@@ -684,12 +708,41 @@ class ReplanSignalSnapshot(_PublicSnapshot):
     reason: str = ""
 
 
+class GoalCriterionSnapshot(_PublicSnapshot):
+    """Planner-owned completion condition, independent of any application."""
+
+    criterion_id: str
+    description: str
+    effectful: bool = False
+    required: bool = True
+    response_satisfiable: bool = False
+    required_capabilities: list[str] = Field(default_factory=list)
+    required_effects: list[str] = Field(default_factory=list)
+    required_verification_predicates: list[str] = Field(default_factory=list)
+    expected: dict[str, Any] = Field(default_factory=dict)
+    source_step_ids: list[str] = Field(default_factory=list)
+    verifier_step_ids: list[str] = Field(default_factory=list)
+
+
+class GoalContractSnapshot(_PublicSnapshot):
+    """Immutable root-goal template carried by plan/envelope snapshots."""
+
+    contract_id: str
+    original_goal: str
+    intent_kind: str = "general"
+    criteria: list[GoalCriterionSnapshot] = Field(default_factory=list)
+    max_total_attempts: int = 12
+    max_subgoal_attempts: int = 2
+    source: str = "runtime_planner"
+
+
 class TaskCoreSnapshot(_PublicSnapshot):
     core_id: str
     workspace: TaskWorkspaceSnapshot
     todos: list[TaskTodoItemSnapshot] = Field(default_factory=list)
     checkpoints: list[TaskCheckpointSnapshot] = Field(default_factory=list)
     replan_signals: list[ReplanSignalSnapshot] = Field(default_factory=list)
+    goal_contract: GoalContractSnapshot | None = None
     source: str = "runtime_planner"
 
 
@@ -960,6 +1013,7 @@ class RuntimeExecutionRequestSnapshot(_PublicSnapshot):
     protocol: str = "json_fallback"
     input: dict[str, Any] = Field(default_factory=dict)
     planning_reason: str = ""
+    presentation: str = ""
     approval_required: bool = False
     risk_level: str = "low"
     execution_mode: DesktopExecutionModeSnapshot | None = None
@@ -974,6 +1028,7 @@ class RuntimeExecutionRequestSnapshot(_PublicSnapshot):
     deferred_context: dict[str, Any] = Field(default_factory=dict)
     deferred_continuation: list[dict[str, Any]] = Field(default_factory=list)
     depends_on: list[str] = Field(default_factory=list)
+    input_bindings: list[RuntimeInputBindingSnapshot] = Field(default_factory=list)
     fallback_tools: list[str] = Field(default_factory=list)
     status: str = "planned"
     runtime_doctrine: str = ""
@@ -1679,6 +1734,8 @@ class MemorySnapshot(_PublicSnapshot):
     scope: str
     kind: str
     content: str
+    content_hash: str | None = None
+    project_id: str | None = None
     source_session_id: str | None = None
     source_message_id: str | None = None
     source_task_id: str | None = None
@@ -1686,6 +1743,8 @@ class MemorySnapshot(_PublicSnapshot):
     confidence: float = 0.0
     pinned: bool = False
     user_confirmed: bool = False
+    enabled: bool = True
+    actor: str = "agent_tool"
     created_at: str = ""
     updated_at: str = ""
     deleted_at: str | None = None

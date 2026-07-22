@@ -70,6 +70,7 @@ def build_runtime_workflow_planning_services(
     run_by_client_request_id: Callable[[str], dict[str, Any] | None],
     client_request_id_from_payload: Callable[[dict[str, Any]], str],
     workflow_path: Callable[[dict[str, Any]], list[dict[str, Any]]],
+    run_group_attachment_transaction: Callable[[], Any] | None = None,
 ) -> RuntimeWorkflowPlanningServiceBundle:
     workflow_path_planner = WorkflowPathPlanner(node_kind=node_kind)
     return RuntimeWorkflowPlanningServiceBundle(
@@ -97,10 +98,12 @@ def build_runtime_workflow_planning_services(
         ),
         workflow_run_starter=RuntimeWorkflowRunStarter(
             get_run_group=get_run_group,
+            get_run=get_run,
             insert_run_group=insert_run_group,
             insert_run=insert_run,
             run_by_client_request_id=run_by_client_request_id,
             client_request_id_from_payload=client_request_id_from_payload,
+            run_group_attachment_transaction=run_group_attachment_transaction,
         ),
         workflow_resume_planner=WorkflowResumePlanner(
             get_workflow=get_workflow,
@@ -138,6 +141,8 @@ def build_runtime_workflow_execution_services(
         Callable[[str, dict[str, Any]], tuple[list[dict[str, Any]], dict[str, Any]]] | None
     ) = None,
     workflow_artifact_write: Callable[[dict[str, Any], str, str], dict[str, Any]] | None = None,
+    get_run_group: Callable[[str], dict[str, Any]] | None = None,
+    transaction_scope: Callable[..., Any] | None = None,
 ) -> RuntimeWorkflowExecutionServiceBundle:
     def execute_agent_run(
         run_id: str,
@@ -245,6 +250,8 @@ def build_runtime_workflow_execution_services(
         update_run=update_run,
         update_run_group=update_run_group,
         get_run=get_run,
+        get_run_group=get_run_group,
+        transaction_scope=transaction_scope,
         pending_approval_private=pending_approval_private,
         approve_workflow_node=approve_workflow_node,
         runtime_limits=lambda: engine.runtime_limits,
@@ -266,6 +273,11 @@ def build_runtime_workflow_execution_services(
             claim_pending_approval=claim_pending_approval,
             get_current_run=get_current_run,
             resume_after_approval_node=workflow_continuation.resume_after_approval_node,
+            project_approved_node=workflow_continuation.project_approved_node,
+            continue_after_approval_node=(
+                workflow_continuation.continue_after_approval_node
+            ),
+            transaction_scope=transaction_scope,
         ),
         workflow_cancellation=WorkflowCancellationProjectionCoordinator(
             pending_approval_private=pending_approval_private,
@@ -297,6 +309,10 @@ def build_runtime_workflow_transition_services(
     mark_parent_workflows_child_running: Callable[[dict[str, Any]], None],
     resume_parent_workflows_after_child_update: Callable[[dict[str, Any]], None],
     get_run: Callable[[str], dict[str, Any]],
+    get_run_group: Callable[[str], dict[str, Any]] | None = None,
+    complete_main_chat_run: Callable[[str, str], dict[str, Any]] | None = None,
+    fail_main_chat_run: Callable[..., dict[str, Any]] | None = None,
+    transaction_scope: Callable[..., Any] | None = None,
 ) -> RuntimeWorkflowTransitionServiceBundle:
     workflow_parent_resume = WorkflowParentResumeCoordinator(
         parent_runs_waiting_for_child=parent_runs_waiting_for_child,
@@ -311,6 +327,9 @@ def build_runtime_workflow_transition_services(
         append_run_event=append_run_event,
         update_run=update_run,
         update_run_group=update_run_group,
+        get_run=get_run,
+        get_run_group=get_run_group,
+        transaction_scope=transaction_scope,
     )
     return RuntimeWorkflowTransitionServiceBundle(
         workflow_parent_resume=workflow_parent_resume,
@@ -320,6 +339,9 @@ def build_runtime_workflow_transition_services(
             update_run=update_run,
             update_agent_run_group_if_root=update_agent_run_group_if_root,
             mark_parent_workflows_child_running=mark_parent_workflows_child_running,
+            get_run=get_run,
+            complete_main_chat_run=complete_main_chat_run,
+            fail_main_chat_run=fail_main_chat_run,
         ),
         run_transition_projection=RunTransitionProjectionCoordinator(
             update_agent_run_group_if_root=update_agent_run_group_if_root,
@@ -327,5 +349,6 @@ def build_runtime_workflow_transition_services(
             workflow_run_is_group_root=workflow_run_is_group_root,
             update_run_group=update_run_group,
             get_run=get_run,
+            get_run_group=get_run_group,
         ),
     )

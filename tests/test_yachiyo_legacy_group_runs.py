@@ -15,6 +15,10 @@ from apps.shell.yachiyo_agent.legacy_group_runs import (
 )
 from apps.shell.yachiyo_agent import legacy_group_orchestration
 from apps.shell.agent.runtime import group_facade
+from apps.shell.agent.runtime.group_runs import start_agent_group_run
+from apps.shell.agent.runtime.run_group_attachments import (
+    RunGroupChildAttachment,
+)
 from apps.shell.yachiyo_agent.legacy_ports import LegacyStudioPort
 
 
@@ -198,6 +202,137 @@ def test_legacy_group_run_status_and_summary_project_from_child_runs() -> None:
     assert group_run_status_from_child_runs(
         [{"status": "waiting_approval"}, {"status": "completed"}]
     ) == "approval_required"
+
+
+def test_native_group_run_authorizes_later_member_attachment() -> None:
+    class Runtime:
+        def __init__(self) -> None:
+            self.calls: list[dict] = []
+            self.runs: list[dict] = []
+
+        def create_run_for_runnable_async(self, **payload):
+            self.calls.append(dict(payload))
+            run = {
+                "run_id": f"run-{payload['runnable_id']}",
+                "run_group_id": "group-run-authorized-1",
+                "runnable_id": payload["runnable_id"],
+                "status": "processing",
+                "timeline": [],
+                "artifacts": [],
+            }
+            self.runs.append(run)
+            return dict(run)
+
+        def append_run_event(self, _run_id, _event_type, _payload):
+            return None
+
+        def get_run_group(self, run_group_id):
+            return {
+                "run_group_id": run_group_id,
+                "status": "running",
+                "child_run_ids": [run["run_id"] for run in self.runs],
+            }
+
+    runtime = Runtime()
+    result = start_agent_group_run(
+        runtime,
+        {"group_id": "group-1", "objective": "Prepare report"},
+        group={
+            "group_id": "group-1",
+            "name": "Research",
+            "members": [{"agent_id": "agent-a"}, {"agent_id": "agent-b"}],
+        },
+    )
+
+    assert result["child_run_ids"] == ["run-agent-a", "run-agent-b"]
+    assert "run_group_attachment" not in runtime.calls[0]
+    attachment = runtime.calls[1]["run_group_attachment"]
+    assert isinstance(attachment, RunGroupChildAttachment)
+    assert attachment.run_group_id == "group-run-authorized-1"
+    assert attachment.parent_run_id == "run-agent-a"
+    assert attachment.workflow_run_id == ""
+    assert attachment.child_kind == "agent_run"
+    assert attachment.child_runnable_id == "agent-b"
+    assert attachment.child_identity == "group-member:group-run-authorized-1:1:agent-b"
+    assert runtime.calls[1]["client_run_id"] == attachment.child_identity
+
+
+def test_native_group_run_returns_failed_after_later_member_start_fails() -> None:
+    class Runtime:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, object]] = []
+            self.runs: dict[str, dict] = {}
+            self.group_status = "running"
+            self.group_summary = ""
+
+        def create_run_for_runnable_async(self, **payload):
+            self.calls.append(("create_run_for_runnable_async", dict(payload)))
+            if payload["runnable_id"] == "agent-b":
+                raise RuntimeError("private provider failure")
+            run = {
+                "run_id": f"run-{payload['runnable_id']}",
+                "run_group_id": "group-run-partial-1",
+                "runnable_id": payload["runnable_id"],
+                "status": "processing",
+                "timeline": [],
+                "artifacts": [],
+            }
+            self.runs[run["run_id"]] = run
+            return dict(run)
+
+        def append_run_event(self, run_id, event_type, payload):
+            self.calls.append(("append_run_event", {"run_id": run_id, "event_type": event_type}))
+            return {"event_type": event_type}
+
+        def cancel_run(self, run_id):
+            self.calls.append(("cancel_run", run_id))
+            self.runs[run_id]["status"] = "cancelled"
+            return dict(self.runs[run_id])
+
+        def _update_run_group(self, run_group_id, **payload):
+            self.calls.append(("_update_run_group", {"run_group_id": run_group_id, **payload}))
+            self.group_status = str(payload.get("status") or self.group_status)
+            self.group_summary = str(payload.get("summary") or self.group_summary)
+            return self.get_run_group(run_group_id)
+
+        def get_run_group(self, run_group_id):
+            return {
+                "run_group_id": run_group_id,
+                "status": self.group_status,
+                "summary": self.group_summary,
+                "child_run_ids": list(self.runs),
+            }
+
+    runtime = Runtime()
+    result = start_agent_group_run(
+        runtime,
+        {
+            "group_id": "group-1",
+            "objective": "Prepare report",
+            "client_run_id": "group-partial-client-1",
+        },
+        group={
+            "group_id": "group-1",
+            "name": "Research",
+            "members": [
+                {"agent_id": "agent-a"},
+                {"agent_id": "agent-b"},
+                {"agent_id": "agent-c"},
+            ],
+        },
+    )
+
+    assert result["status"] == "failed"
+    assert result["child_run_ids"] == ["run-agent-a"]
+    assert result["runs"][0]["status"] == "cancelled"
+    assert "private provider failure" not in str(result)
+    assert ("cancel_run", "run-agent-a") in runtime.calls
+    started_agents = [
+        payload["runnable_id"]
+        for name, payload in runtime.calls
+        if name == "create_run_for_runnable_async"
+    ]
+    assert started_agents == ["agent-a", "agent-b"]
 
 
 def test_legacy_group_run_scopes_replan_planner_events() -> None:

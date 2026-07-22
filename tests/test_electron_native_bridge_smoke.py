@@ -118,3 +118,79 @@ def test_electron_native_bridge_smoke_reports_compile_failure(monkeypatch, tmp_p
     assert result["ok"] is False
     assert result["error"] == "electron_main_compile_failed"
     assert result["compile"]["stderr"] == "compile failed"
+
+
+def test_electron_native_bridge_focus_success_is_not_failed_by_best_effort_cleanup(
+    monkeypatch,
+    tmp_path,
+):
+    electron_bin = tmp_path / "electron"
+    electron_main = tmp_path / "main.js"
+    electron_bin.write_text("", encoding="utf-8")
+    electron_main.write_text("", encoding="utf-8")
+    monkeypatch.setattr(smoke, "ELECTRON_BIN", electron_bin)
+    monkeypatch.setattr(smoke, "ELECTRON_MAIN", electron_main)
+    monkeypatch.setattr(smoke, "FRONTEND_DIR", tmp_path)
+    monkeypatch.setattr(
+        smoke,
+        "_run_compile",
+        lambda: {"ok": True, "returncode": 0, "stdout": "", "stderr": ""},
+    )
+    statuses = iter([False, True])
+    monkeypatch.setattr(
+        smoke.desktop_tools,
+        "app_status",
+        lambda app_name: {
+            "ok": True,
+            "data": {"app_name": app_name, "running": next(statuses)},
+        },
+    )
+    monkeypatch.setattr(
+        smoke.desktop_tools,
+        "app_quit",
+        lambda app_name: {
+            "ok": False,
+            "error": "automation_permission_denied",
+            "permission_error": True,
+            "data": {"app_name": app_name},
+        },
+    )
+    payload = {
+        "ok": True,
+        "mode": "electron_native_bridge_smoke",
+        "focus_app": "Music",
+        "focus_result": {
+            "status_code": 200,
+            "payload": {
+                "ok": True,
+                "data": {
+                    "app_name": "Music",
+                    "frontmost_app": "Music",
+                    "focus_verified": True,
+                },
+            },
+        },
+        "checks": {
+            "native_bridge_started": True,
+            "authenticated_status_ok": True,
+            "focus_attempted": True,
+            "focus_verified": True,
+        },
+    }
+    monkeypatch.setattr(
+        smoke.subprocess,
+        "run",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            returncode=0,
+            stdout=f"{smoke.SMOKE_PREFIX}{json.dumps(payload)}\n",
+            stderr="",
+        ),
+    )
+
+    result = smoke.run_smoke(focus_app="Music")
+
+    assert result["ok"] is True
+    assert result["checks"]["focus_verified"] is True
+    assert result["checks"]["focus_cleanup_ok"] is False
+    assert result["checks"]["focus_cleanup_advisory"] is True
+    assert result["focus_cleanup"]["result"]["permission_error"] is True

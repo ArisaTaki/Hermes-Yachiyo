@@ -10,7 +10,6 @@ import type { RunSpec } from '../types';
 import {
   approvedRunStatusMessage,
   isActiveRunStatus,
-  makeRunContinuingAfterApproval,
   publicRunTimelineToStudioRunSpec,
 } from '../utils/runs';
 
@@ -56,49 +55,41 @@ export function useRunApprovalActions({
     if (!runId) throw new Error('请选择待审批 Run');
     const selectedAfterAction = nextSelectedRunId || runId;
     const currentRun = runById.get(runId) || null;
-    const selectedAfterRun = selectedAfterAction !== runId ? runById.get(selectedAfterAction) || null : null;
-    const optimisticRuns = [
-      currentRun ? makeRunContinuingAfterApproval(currentRun, '已批准，Run 正在继续执行。') : null,
-      selectedAfterRun && isActiveRunStatus(selectedAfterRun.status)
-        ? makeRunContinuingAfterApproval(selectedAfterRun, '已批准子 Agent，Workflow 正在继续执行。')
-        : null,
-    ].filter((run): run is RunSpec => Boolean(run));
-    upsertRunDetailCache(optimisticRuns);
-    rememberApprovedRun(currentRun);
-    rememberApprovedRun(selectedAfterRun);
-    setSelectedRunId(selectedAfterAction);
-    const approvalRequest = approveYachiyoRunApproval(runId).then(publicRunTimelineToStudioRunSpec);
-    void pollApprovedRunProgress(runId, selectedAfterAction).catch((err: unknown) => {
-      setError(err instanceof Error ? err.message : '刷新审批后的 Run 进度失败');
-    });
-    void approvalRequest
-      .then(async (run) => {
-        const updatedRuns = [run];
-        if (nextSelectedRunId && nextSelectedRunId !== run.run_id) {
-          try {
-            updatedRuns.push(publicRunTimelineToStudioRunSpec(await getYachiyoRunTimeline(nextSelectedRunId)));
-          } catch {
-            // The background polling path will retry; approval already succeeded.
-          }
+    const approvalId = String(currentRun?.pending_approval?.approval_id || '').trim();
+    if (!approvalId) throw new Error('审批信息已过期，请刷新后重试。');
+    try {
+      const run = publicRunTimelineToStudioRunSpec(
+        await approveYachiyoRunApproval(runId, approvalId),
+      );
+      rememberApprovedRun(currentRun);
+      const selectedAfterRun = selectedAfterAction !== runId ? runById.get(selectedAfterAction) || null : null;
+      rememberApprovedRun(selectedAfterRun);
+      const updatedRuns = [run];
+      if (nextSelectedRunId && nextSelectedRunId !== run.run_id) {
+        try {
+          updatedRuns.push(publicRunTimelineToStudioRunSpec(await getYachiyoRunTimeline(nextSelectedRunId)));
+        } catch {
+          // The follow-up polling path will retry; approval already succeeded.
         }
-        upsertRunDetailCache(updatedRuns);
-        await refreshRunGroupsForRuns(updatedRuns);
-        if (isApprovalFollowupCurrent(selectedAfterAction)) {
-          setSelectedRunId(selectedAfterAction);
-          setStatus(approvedRunStatusMessage(run));
-        }
-      })
-      .catch((err: unknown) => {
-        if (isApprovalFollowupCurrent(selectedAfterAction)) {
-          setError(err instanceof Error ? err.message : '批准 Run 审批失败');
-        }
-        void refresh(approvalFollowupRefreshOptions(selectedAfterAction)).catch(() => undefined);
+      }
+      upsertRunDetailCache(updatedRuns);
+      await refreshRunGroupsForRuns(updatedRuns);
+      if (isApprovalFollowupCurrent(selectedAfterAction)) {
+        setSelectedRunId(selectedAfterAction);
+        setStatus(approvedRunStatusMessage(run));
+      }
+      void pollApprovedRunProgress(runId, selectedAfterAction).catch((err: unknown) => {
+        setError(err instanceof Error ? err.message : '刷新审批后的 Run 进度失败');
       });
-    return {
-      selectedRunId: selectedAfterAction,
-      statusMessage: '已批准，Run 正在继续执行。',
-      skipRefresh: true,
-    };
+      return {
+        selectedRunId: selectedAfterAction,
+        statusMessage: approvedRunStatusMessage(run),
+        skipRefresh: true,
+      };
+    } catch (error) {
+      await refresh(approvalFollowupRefreshOptions(selectedAfterAction)).catch(() => undefined);
+      throw error;
+    }
   }, [
     approvalFollowupRefreshOptions,
     isApprovalFollowupCurrent,
@@ -118,20 +109,38 @@ export function useRunApprovalActions({
     nextSelectedRunId?: string,
   ): Promise<RunApprovalActionRefreshOptions> => {
     if (!runId) throw new Error('请选择待审批 Run');
-    const run = publicRunTimelineToStudioRunSpec(await rejectYachiyoRunApproval(runId));
-    const selectedAfterAction = nextSelectedRunId || run.run_id;
-    const updatedRuns = [run];
-    if (nextSelectedRunId && nextSelectedRunId !== run.run_id) {
-      try {
-        updatedRuns.push(publicRunTimelineToStudioRunSpec(await getYachiyoRunTimeline(nextSelectedRunId)));
-      } catch {
-        // The normal refresh/polling path will retry; rejection already succeeded.
+    const currentRun = runById.get(runId) || null;
+    const approvalId = String(currentRun?.pending_approval?.approval_id || '').trim();
+    if (!approvalId) throw new Error('审批信息已过期，请刷新后重试。');
+    const selectedAfterAction = nextSelectedRunId || runId;
+    try {
+      const run = publicRunTimelineToStudioRunSpec(
+        await rejectYachiyoRunApproval(runId, approvalId),
+      );
+      const updatedRuns = [run];
+      if (nextSelectedRunId && nextSelectedRunId !== run.run_id) {
+        try {
+          updatedRuns.push(publicRunTimelineToStudioRunSpec(await getYachiyoRunTimeline(nextSelectedRunId)));
+        } catch {
+          // The normal refresh/polling path will retry; rejection already succeeded.
+        }
       }
+      upsertRunDetailCache(updatedRuns);
+      await refreshRunGroupsForRuns(updatedRuns);
+      setSelectedRunId(selectedAfterAction);
+      return { selectedRunId: selectedAfterAction, statusMessage: '已拒绝，Run 已终止。' };
+    } catch (error) {
+      await refresh(approvalFollowupRefreshOptions(selectedAfterAction)).catch(() => undefined);
+      throw error;
     }
-    upsertRunDetailCache(updatedRuns);
-    setSelectedRunId(selectedAfterAction);
-    return { selectedRunId: selectedAfterAction, statusMessage: '已拒绝，Run 已终止。' };
-  }, [setSelectedRunId, upsertRunDetailCache]);
+  }, [
+    approvalFollowupRefreshOptions,
+    refresh,
+    refreshRunGroupsForRuns,
+    runById,
+    setSelectedRunId,
+    upsertRunDetailCache,
+  ]);
 
   const cancelRunById = useCallback(async (
     runId: string,

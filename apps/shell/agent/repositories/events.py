@@ -6,6 +6,7 @@ from copy import deepcopy
 from typing import Any, Callable
 from uuid import uuid4
 
+from apps.shell.agent.repositories.sqlite import repository_transaction
 from apps.shell.agent.runtime.events import redact_run_event_payload
 
 
@@ -23,6 +24,7 @@ class RunEventRepository:
         error_type: type[Exception] = RuntimeError,
         ensure_run_exists: Callable[[str], Any] | None = None,
         sync_event_cursor: Callable[..., Any] | None = None,
+        assert_write_active: Callable[[str], Any] | None = None,
     ) -> None:
         self._conn = conn
         self._db_lock = db_lock
@@ -32,6 +34,7 @@ class RunEventRepository:
         self._error_type = error_type
         self._ensure_run_exists = ensure_run_exists
         self._sync_event_cursor = sync_event_cursor
+        self._assert_write_active = assert_write_active
 
     def append(
         self,
@@ -42,7 +45,9 @@ class RunEventRepository:
         actor: str = "native_runtime",
         visibility: str = "user",
         sensitivity: str = "public",
-    ) -> dict[str, Any]:
+        expected_status: str | None = None,
+        expected_updated_at: str | None = None,
+    ) -> dict[str, Any] | None:
         clean_run_id = str(run_id or "").strip()
         clean_event_type = str(event_type or "").strip()
         if not clean_run_id or not clean_event_type:
@@ -57,8 +62,28 @@ class RunEventRepository:
         normalized_sensitivity = "secret" if sensitivity_text == "secret" else "public"
 
         with self._db_lock:
-            try:
-                self._conn.execute("BEGIN IMMEDIATE")
+            with repository_transaction(self._conn):
+                if callable(self._assert_write_active):
+                    self._assert_write_active(clean_run_id)
+                clean_expected_status = str(expected_status or "").strip()
+                clean_expected_updated_at = (
+                    None if expected_updated_at is None else str(expected_updated_at)
+                )
+                if clean_expected_status or clean_expected_updated_at is not None:
+                    where_clause = "run_id=?"
+                    expected_params: list[Any] = [clean_run_id]
+                    if clean_expected_status:
+                        where_clause += " AND status=?"
+                        expected_params.append(clean_expected_status)
+                    if clean_expected_updated_at is not None:
+                        where_clause += " AND updated_at=?"
+                        expected_params.append(clean_expected_updated_at)
+                    active = self._conn.execute(
+                        f"SELECT 1 AS active FROM runs WHERE {where_clause}",
+                        tuple(expected_params),
+                    ).fetchone()
+                    if active is None:
+                        return None
                 row = self._conn.execute(
                     "SELECT COALESCE(MAX(sequence), 0) + 1 AS next_sequence "
                     "FROM run_events WHERE run_id=?",
@@ -84,12 +109,8 @@ class RunEventRepository:
                         created_at,
                     ),
                 )
-                self._conn.commit()
-            except Exception:
-                self._conn.rollback()
-                raise
-            if callable(self._sync_event_cursor):
-                self._sync_event_cursor(clean_run_id, sequence=sequence)
+                if callable(self._sync_event_cursor):
+                    self._sync_event_cursor(clean_run_id, sequence=sequence)
 
         event = {
             "event_id": event_id,

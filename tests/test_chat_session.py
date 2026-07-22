@@ -5,6 +5,8 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
+import pytest
+
 from apps.core.chat_session import ChatSession, MessageRole, MessageStatus
 from apps.core.chat_store import ChatStore, StoredMessage
 
@@ -185,6 +187,36 @@ def test_chat_session_can_preserve_active_messages_during_live_switch(tmp_path):
         store.close()
 
 
+def test_get_chat_session_preserves_active_messages_until_startup_reconciliation(
+    tmp_path,
+    monkeypatch,
+):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    try:
+        store.create_session("s1")
+        store.save_message(StoredMessage(
+            message_id="m1",
+            session_id="s1",
+            role="assistant",
+            content="Native Agent 正在恢复",
+            status="processing",
+            task_id="t1",
+            error=None,
+            created_at="2026-01-01T00:00:00+00:00",
+        ))
+        monkeypatch.setattr(_store_mod, "get_chat_store", lambda: store)
+        monkeypatch.setattr(_cs_mod, "_global_session", None)
+
+        restored = _cs_mod.get_chat_session()
+
+        assert restored.messages[0].status == MessageStatus.PROCESSING
+        assert restored.messages[0].error is None
+        assert store.load_messages("s1")[0].status == "processing"
+    finally:
+        _cs_mod._global_session = None
+        store.close()
+
+
 def test_upsert_assistant_message_idempotent(tmp_path):
     """多次 upsert 同一 task_id 不产生重复消息"""
     store = ChatStore(db_path=str(tmp_path / "chat.db"))
@@ -210,6 +242,59 @@ def test_upsert_assistant_message_idempotent(tmp_path):
         assert len(assistant_msgs) == 1
         assert assistant_msgs[0].content == "最终结果"
         assert assistant_msgs[0].status == "completed"
+    finally:
+        store.close()
+
+
+def test_upsert_user_message_by_client_id_does_not_leave_memory_ghost_on_store_failure(
+    tmp_path,
+    monkeypatch,
+):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    try:
+        session = ChatSession(session_id="s1")
+        session.attach_store(store, load_existing=False)
+        monkeypatch.setattr(
+            store,
+            "save_message",
+            lambda _message: (_ for _ in ()).throw(RuntimeError("store failed")),
+        )
+
+        with pytest.raises(RuntimeError, match="store failed"):
+            session.upsert_user_message_by_client_id(
+                "canonical",
+                client_message_id="client-1",
+                task_id="task-1",
+            )
+
+        assert session.get_messages(0) == []
+        assert store.load_messages("s1", limit=0) == []
+    finally:
+        store.close()
+
+
+def test_upsert_user_message_by_client_id_does_not_regress_terminal_status(tmp_path):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    try:
+        session = ChatSession(session_id="s1")
+        session.attach_store(store, load_existing=False)
+
+        completed_id = session.upsert_user_message_by_client_id(
+            "canonical",
+            client_message_id="client-1",
+            task_id="task-1",
+            status=MessageStatus.COMPLETED,
+        )
+        stale_id = session.upsert_user_message_by_client_id(
+            "canonical",
+            client_message_id="client-1",
+            task_id="task-1",
+            status=MessageStatus.PROCESSING,
+        )
+
+        assert stale_id == completed_id
+        assert session.get_messages(0)[0].status == MessageStatus.COMPLETED
+        assert store.load_messages("s1", limit=0)[0].status == "completed"
     finally:
         store.close()
 
@@ -245,6 +330,182 @@ def test_upsert_reuses_persisted_assistant_across_session_instances(tmp_path):
         assert assistant_msgs[0].content == "最终结果"
         assert assistant_msgs[0].status == "completed"
         assert foreground.is_processing() is False
+    finally:
+        store.close()
+
+
+def test_projection_upsert_converges_across_instances_and_isolates_sessions(tmp_path):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    try:
+        first = ChatSession(session_id="s1")
+        first.attach_store(store, load_existing=False)
+        second = ChatSession(session_id="s1")
+        second.attach_store(store, load_existing=False)
+        projection_key = '["workflow_child","workflow_1","child_1","assistant"]'
+        start = threading.Barrier(2)
+
+        def project(session, content, status):
+            start.wait(timeout=5)
+            return session.upsert_assistant_projection_message(
+                projection_key,
+                content,
+                status,
+                metadata={"workflow_parent_run_id": "workflow_1", "run_id": "child_1"},
+            )
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = [
+                executor.submit(project, first, "", MessageStatus.PROCESSING),
+                executor.submit(project, second, "final result", MessageStatus.COMPLETED),
+            ]
+            message_ids = [future.result(timeout=5) for future in futures]
+
+        different_child_id = first.upsert_assistant_projection_message(
+            '["workflow_child","workflow_1","child_2","assistant"]',
+            "different child",
+            metadata={"workflow_parent_run_id": "workflow_1", "run_id": "child_2"},
+        )
+        other_session = ChatSession(session_id="s2")
+        other_session.attach_store(store, load_existing=False)
+        other_session_id = other_session.upsert_assistant_projection_message(
+            projection_key,
+            "same source identity in another session",
+            metadata={"workflow_parent_run_id": "workflow_1", "run_id": "child_1"},
+        )
+
+        restored = ChatSession(session_id="s1")
+        restored.attach_store(store, load_existing=True, fail_active_messages=False)
+        restored_projection_messages = [
+            message
+            for message in restored.messages
+            if message.role == MessageRole.ASSISTANT
+        ]
+
+        assert message_ids[0] == message_ids[1]
+        assert different_child_id != message_ids[0]
+        assert other_session_id != message_ids[0]
+        assert len(restored_projection_messages) == 2
+        restored_first_child = next(
+            message
+            for message in restored_projection_messages
+            if message.metadata.get("run_id") == "child_1"
+        )
+        assert restored_first_child.status == MessageStatus.COMPLETED
+        assert restored_first_child.content == "final result"
+        assert len(
+            [message for message in store.load_messages("s2") if message.role == "assistant"]
+        ) == 1
+    finally:
+        store.close()
+
+
+def test_projection_upsert_does_not_regress_terminal_message(tmp_path):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    try:
+        session = ChatSession(session_id="s1")
+        session.attach_store(store, load_existing=False)
+        projection_key = '["workflow_child","workflow_1","child_1","assistant"]'
+
+        completed_id = session.upsert_assistant_projection_message(
+            projection_key,
+            "final result",
+            MessageStatus.COMPLETED,
+        )
+        stale_id = session.upsert_assistant_projection_message(
+            projection_key,
+            "",
+            MessageStatus.PROCESSING,
+        )
+
+        messages = session.get_all_messages()
+        assert stale_id == completed_id
+        assert len(messages) == 1
+        assert messages[0].status == MessageStatus.COMPLETED
+        assert messages[0].content == "final result"
+    finally:
+        store.close()
+
+
+def test_projection_upsert_does_not_regress_terminal_across_session_instances(tmp_path):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    try:
+        stale_poll = ChatSession(session_id="s1")
+        stale_poll.attach_store(store, load_existing=False)
+        completion_callback = ChatSession(session_id="s1")
+        completion_callback.attach_store(store, load_existing=False)
+        projection_key = '["workflow_child","workflow_1","child_1","assistant"]'
+
+        stale_poll.upsert_assistant_projection_message(
+            projection_key,
+            "",
+            MessageStatus.PROCESSING,
+        )
+        completion_callback.upsert_assistant_projection_message(
+            projection_key,
+            "final result",
+            MessageStatus.COMPLETED,
+        )
+        stale_poll.upsert_assistant_projection_message(
+            projection_key,
+            "",
+            MessageStatus.PROCESSING,
+        )
+
+        persisted = [
+            message for message in store.load_messages("s1")
+            if message.role == "assistant"
+        ]
+        assert len(persisted) == 1
+        assert persisted[0].status == "completed"
+        assert persisted[0].content == "final result"
+    finally:
+        store.close()
+
+
+def test_projection_upsert_adopts_legacy_message_id_without_duplication(tmp_path):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    try:
+        stale_poll = ChatSession(session_id="s1")
+        stale_poll.attach_store(store, load_existing=False)
+        legacy_message_id = stale_poll.add_assistant_message(
+            "",
+            metadata={"workflow_parent_run_id": "workflow_1", "run_id": "child_1"},
+        )
+        stale_poll.update_assistant_message(
+            legacy_message_id,
+            "",
+            status=MessageStatus.PROCESSING,
+        )
+        completion_callback = ChatSession(session_id="s1")
+        completion_callback.attach_store(
+            store,
+            load_existing=True,
+            fail_active_messages=False,
+        )
+        projection_key = '["workflow_child","workflow_1","child_1","assistant"]'
+
+        completed_id = completion_callback.upsert_assistant_projection_message(
+            projection_key,
+            "final result",
+            MessageStatus.COMPLETED,
+            message_id=legacy_message_id,
+        )
+        stale_id = stale_poll.upsert_assistant_projection_message(
+            projection_key,
+            "",
+            MessageStatus.PROCESSING,
+            message_id=legacy_message_id,
+        )
+
+        persisted = [
+            message for message in store.load_messages("s1")
+            if message.role == "assistant"
+        ]
+        assert completed_id == stale_id == legacy_message_id
+        assert len(persisted) == 1
+        assert persisted[0].status == "completed"
+        assert persisted[0].content == "final result"
+        assert json.loads(persisted[0].metadata_json)["assistant_projection_key"] == projection_key
     finally:
         store.close()
 

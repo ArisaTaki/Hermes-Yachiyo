@@ -8,12 +8,15 @@ import os
 from pathlib import Path
 import plistlib
 import re
+import struct
 import subprocess
 import sys
+from types import SimpleNamespace
 
 import pytest
 
 from scripts import run_electron_ui_smokes as smoke_runner
+from scripts import release_integrity as integrity
 from scripts import verify_release_artifacts as verifier
 
 RELEASE_ELECTRON_SMOKE_SCRIPTS: tuple[str, ...] = (
@@ -70,8 +73,317 @@ def _explicit_smoke_data_attributes() -> set[str]:
     return attributes
 
 
+def _add_app_zip_contract(
+    release_dir: Path,
+    metadata: dict[str, object],
+    *,
+    branch: str,
+    architecture: str = "arm64",
+    repository: str = "kuguya-AI-app-develop/Hermes-Yachiyo",
+) -> None:
+    latest_tag = f"{branch}-latest"
+    zip_name = f"Oha-Yachiyo-{branch}-latest-{architecture}.zip"
+    zip_path = release_dir / zip_name
+    zip_path.write_bytes(b"fake packaged app zip")
+    zip_digest = hashlib.sha256(zip_path.read_bytes()).hexdigest()
+    (release_dir / f"{zip_name}.sha256").write_text(
+        f"{zip_digest}  {zip_name}\n",
+        encoding="utf-8",
+    )
+    signing = str(metadata.get("signing") or "unsigned")
+    metadata.update(
+        {
+            "signature_kind": {
+                "unsigned": "adhoc",
+                "self-signed-app-unsigned-dmg": "self-signed",
+                "developer-id-app-notarized-dmg": "developer-id",
+            }[signing],
+            "architecture": architecture,
+            "zip_name": zip_name,
+            "zip_sha256": zip_digest,
+            "zip_download_url": (
+                f"https://github.com/{repository}/releases/download/"
+                f"{latest_tag}/{zip_name}"
+            ),
+        }
+    )
+
+
+def _write_bound_release_candidate_fixture(
+    tmp_path: Path,
+) -> tuple[Path, Path, dict[str, object], Path, integrity.SourceTreeProvenance]:
+    release_dir = tmp_path / "release"
+    release_dir.mkdir()
+    dmg = release_dir / "Oha-Yachiyo-main-latest.dmg"
+    dmg.write_bytes(b"bound release candidate dmg")
+    dmg_digest = hashlib.sha256(dmg.read_bytes()).hexdigest()
+    (release_dir / f"{dmg.name}.sha256").write_text(
+        f"{dmg_digest}  {dmg.name}\n",
+        encoding="utf-8",
+    )
+
+    commit = "abc1234567890abc1234567890abc1234567890a"
+    fingerprint = "sha256:" + "a" * 64
+    metadata: dict[str, object] = {
+        "name": "Oha-Yachiyo",
+        "channel": "stable",
+        "branch": "main",
+        "source_branch": "main",
+        "version": "0.4.0",
+        "base_version": "0.4.0",
+        "commit": commit,
+        "short_commit": "abc1234",
+        "build_number": 1,
+        "run_number": 1,
+        "run_id": "1",
+        "tag": "stable-v0.4.0-build.1-abc1234",
+        "signing": "unsigned",
+        "dmg_name": dmg.name,
+        "sha256": dmg_digest,
+        "download_url": (
+            "https://github.com/kuguya-AI-app-develop/Hermes-Yachiyo/"
+            f"releases/download/main-latest/{dmg.name}"
+        ),
+        "latest_json_url": (
+            "https://github.com/kuguya-AI-app-develop/Hermes-Yachiyo/releases/"
+            "download/main-latest/Oha-Yachiyo-main-latest.json"
+        ),
+        "published_at": "2026-06-12T00:00:00Z",
+        "changelog": {},
+        "dirty": False,
+        "source_tree_fingerprint": fingerprint,
+        "release_publishable": True,
+    }
+    _add_app_zip_contract(release_dir, metadata, branch="main")
+
+    app_dir = tmp_path / "dist" / "electron" / "mac-arm64" / "Oha-Yachiyo.app"
+    executable = app_dir / "Contents" / "MacOS" / "Oha-Yachiyo"
+    executable.parent.mkdir(parents=True)
+    executable.write_bytes(b"packaged app executable")
+    executable.chmod(0o755)
+    info_path = app_dir / "Contents" / "Info.plist"
+    with info_path.open("wb") as handle:
+        plistlib.dump(
+            {
+                "CFBundleIdentifier": "io.github.arisataki.oha-yachiyo",
+                "CFBundleVersion": "400",
+                "CFBundleShortVersionString": "0.4.0",
+                "CFBundleExecutable": "Oha-Yachiyo",
+            },
+            handle,
+        )
+
+    manifest = integrity.bind_release_candidate_id(
+        {
+            "schema": integrity.RELEASE_CANDIDATE_SCHEMA,
+            "source": {
+                "commit": commit,
+                "dirty": False,
+                "fingerprint": fingerprint,
+                "release_publishable": True,
+            },
+            "artifacts": {
+                "dmg": {"name": dmg.name, "sha256": dmg_digest},
+                "zip": {
+                    "name": metadata["zip_name"],
+                    "sha256": metadata["zip_sha256"],
+                },
+            },
+            "app": {
+                "bundle_id": "io.github.arisataki.oha-yachiyo",
+                "version": "400",
+                "short_version": "0.4.0",
+                "executable": "Oha-Yachiyo",
+                "signature_kind": "adhoc",
+                "team_identifier": "",
+            },
+        }
+    )
+    metadata["candidate_id"] = manifest["candidate_id"]
+    metadata["release_candidate_manifest"] = manifest
+    metadata_path = release_dir / "Oha-Yachiyo-main-latest.json"
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+    provenance = integrity.SourceTreeProvenance(
+        commit=commit,
+        dirty=False,
+        source_tree_fingerprint=fingerprint,
+    )
+    return release_dir, metadata_path, metadata, app_dir, provenance
+
+
+def _verify_bound_release_fixture(
+    tmp_path: Path,
+    release_dir: Path,
+    app_dir: Path,
+    *,
+    require_bound: bool,
+) -> list[verifier.Finding]:
+    return verifier.verify_release_artifacts(
+        root=tmp_path,
+        paths=[release_dir, app_dir],
+        check_required_files=False,
+        check_release_security_guards=False,
+        allow_binary_targets=True,
+        require_bound_release_candidate=require_bound,
+    )
+
+
+def test_final_verifier_accepts_content_bound_release_candidate(
+    tmp_path,
+    monkeypatch,
+):
+    release_dir, _metadata_path, _metadata, app_dir, provenance = (
+        _write_bound_release_candidate_fixture(tmp_path)
+    )
+    monkeypatch.setattr(verifier, "capture_source_tree_provenance", lambda _root: provenance)
+
+    assert _verify_bound_release_fixture(
+        tmp_path,
+        release_dir,
+        app_dir,
+        require_bound=True,
+    ) == []
+
+
+def test_final_verifier_rejects_legacy_unbound_but_nonfinal_keeps_compatibility(
+    tmp_path,
+    monkeypatch,
+):
+    release_dir, metadata_path, metadata, app_dir, provenance = (
+        _write_bound_release_candidate_fixture(tmp_path)
+    )
+    metadata.pop("candidate_id")
+    metadata.pop("release_candidate_manifest")
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+    monkeypatch.setattr(verifier, "capture_source_tree_provenance", lambda _root: provenance)
+
+    assert _verify_bound_release_fixture(
+        tmp_path,
+        release_dir,
+        app_dir,
+        require_bound=False,
+    ) == []
+    final_findings = _verify_bound_release_fixture(
+        tmp_path,
+        release_dir,
+        app_dir,
+        require_bound=True,
+    )
+    assert verifier.Finding(
+        metadata_path,
+        "final signoff rejects legacy_unbound release metadata; rebuild with "
+        "oha-yachiyo.release-candidate.v1",
+    ) in final_findings
+
+
+def test_final_verifier_rejects_rebound_artifact_hash_and_current_source_mismatch(
+    tmp_path,
+    monkeypatch,
+):
+    release_dir, metadata_path, metadata, app_dir, provenance = (
+        _write_bound_release_candidate_fixture(tmp_path)
+    )
+    manifest = dict(metadata["release_candidate_manifest"])
+    artifacts = dict(manifest["artifacts"])
+    artifacts["dmg"] = {
+        "name": metadata["dmg_name"],
+        "sha256": "f" * 64,
+    }
+    manifest["artifacts"] = artifacts
+    rebound = integrity.bind_release_candidate_id(manifest)
+    metadata["candidate_id"] = rebound["candidate_id"]
+    metadata["release_candidate_manifest"] = rebound
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+    stale_source = integrity.SourceTreeProvenance(
+        commit=provenance.commit,
+        dirty=False,
+        source_tree_fingerprint="sha256:" + "b" * 64,
+    )
+    monkeypatch.setattr(
+        verifier,
+        "capture_source_tree_provenance",
+        lambda _root: stale_source,
+    )
+
+    messages = {
+        finding.message
+        for finding in _verify_bound_release_fixture(
+            tmp_path,
+            release_dir,
+            app_dir,
+            require_bound=True,
+        )
+    }
+    assert (
+        "release candidate artifacts.dmg.sha256 does not match latest JSON sha256"
+        in messages
+    )
+    assert "release candidate DMG content does not match its manifest sha256" in messages
+    assert (
+        "release candidate source.fingerprint does not match current source provenance"
+        in messages
+    )
+
+
+def test_final_verifier_rejects_selected_packaged_app_identity_mismatch(
+    tmp_path,
+    monkeypatch,
+):
+    release_dir, _metadata_path, _metadata, app_dir, provenance = (
+        _write_bound_release_candidate_fixture(tmp_path)
+    )
+    info_path = app_dir / "Contents" / "Info.plist"
+    with info_path.open("rb") as handle:
+        info = plistlib.load(handle)
+    info["CFBundleIdentifier"] = "invalid.bundle"
+    with info_path.open("wb") as handle:
+        plistlib.dump(info, handle)
+    monkeypatch.setattr(verifier, "capture_source_tree_provenance", lambda _root: provenance)
+
+    assert verifier.Finding(
+        app_dir,
+        "release candidate App bundle_id does not match selected packaged App identity",
+    ) in _verify_bound_release_fixture(
+        tmp_path,
+        release_dir,
+        app_dir,
+        require_bound=True,
+    )
+
+
 def test_verifier_accepts_current_release_files():
     assert verifier.verify_release_artifacts() == []
+
+
+def test_verifier_allows_exact_official_repository_identity_but_not_legacy_copy(
+    tmp_path,
+):
+    official = tmp_path / "official.txt"
+    official.write_text(
+        "https://github.com/kuguya-AI-app-develop/Hermes-Yachiyo/releases\n",
+        encoding="utf-8",
+    )
+    legacy = tmp_path / "legacy.txt"
+    legacy.write_text("Launch Hermes-Yachiyo\n", encoding="utf-8")
+
+    official_findings = verifier.verify_release_artifacts(
+        root=tmp_path,
+        paths=[official],
+        check_required_files=False,
+        check_release_security_guards=False,
+    )
+    legacy_findings = verifier.verify_release_artifacts(
+        root=tmp_path,
+        paths=[legacy],
+        check_required_files=False,
+        check_release_security_guards=False,
+    )
+
+    assert official_findings == []
+    assert any(
+        finding.message == "contains legacy product token 'Hermes-Yachiyo'"
+        for finding in legacy_findings
+    )
 
 
 def test_verifier_checks_release_security_guards():
@@ -109,6 +421,12 @@ def test_verifier_requires_streaming_provider_smoke_contract_guards(tmp_path):
     ui_runner.write_text("def main():\n    return 0\n", encoding="utf-8")
     packaged_ui_smoke = tmp_path / "scripts" / "smoke_packaged_ui_sampling.mjs"
     packaged_ui_smoke.write_text("console.log('placeholder');\n", encoding="utf-8")
+    packaged_chat_smoke = (
+        tmp_path / "scripts" / "smoke_packaged_chat_native_file_upload.mjs"
+    )
+    packaged_chat_smoke.write_text("console.log('placeholder');\n", encoding="utf-8")
+    release_smoke_summary = tmp_path / "scripts" / "summarize_release_smoke.py"
+    release_smoke_summary.write_text("def main():\n    return 0\n", encoding="utf-8")
 
     findings = verifier._verify_streaming_provider_smoke_contract_guards(tmp_path)
     messages = [finding.message for finding in findings]
@@ -438,6 +756,59 @@ def test_verifier_requires_streaming_provider_smoke_contract_guards(tmp_path):
     assert "packaged UI sampling smoke must cover Workflow Studio" in messages
     assert "packaged UI sampling smoke must cover Chat composer selectors" in messages
     assert "packaged UI sampling smoke must cover Live2D settings selectors" in messages
+    assert (
+        "packaged Chat native file smoke must provide stable UI settings to prevent packaged-window reloads"
+        in messages
+    )
+    assert (
+        "packaged Chat native file smoke must isolate Electron user data and single-instance state"
+        in messages
+    )
+    assert (
+        "packaged Chat native file smoke must prove the technical run action stays hidden in Chat"
+        in messages
+    )
+    assert (
+        "packaged Chat native file smoke must record direct Agent Studio replay navigation"
+        in messages
+    )
+    assert "packaged Chat native file smoke must use one global execution deadline" in messages
+    assert "packaged Chat native file smoke must apply the global deadline to app startup" in messages
+    assert "packaged Chat native file smoke must apply the global deadline to the full UI flow" in messages
+    assert "packaged Chat native file smoke must expose a strict process cleanup ledger" in messages
+    assert "packaged Chat native file smoke must record detached process cleanup state" in messages
+    assert (
+        "packaged Chat native file smoke must attest internal activity, tool, and recovery hiding"
+        in messages
+    )
+    assert "packaged Chat native file smoke must inject internal recovery evidence" in messages
+    assert (
+        "packaged Chat native file smoke must await packaged Electron process-tree cleanup"
+        in messages
+    )
+    assert (
+        "packaged Chat native file smoke must escalate cleanup when graceful termination times out"
+        in messages
+    )
+    assert (
+        "packaged Chat native file smoke must remove isolated state after process cleanup"
+        in messages
+    )
+    assert "release-smoke summary must retain the packaged Chat desktop-task item" in messages
+    assert "release-smoke summary must require passed packaged Chat native file evidence" in messages
+    assert "release-smoke summary must direct missing packaged Chat evidence to its RC smoke" in messages
+    assert (
+        "release candidate verifier must clean detached packaged Chat processes from a strict ledger"
+        in messages
+    )
+    assert (
+        "release candidate verifier must leave parent timeout budget for Chat smoke cleanup"
+        in messages
+    )
+    assert (
+        "release candidate verifier must reject missing internal-execution hiding evidence"
+        in messages
+    )
     assert "Electron UI smoke runner report must include per-script results" in messages
     assert "Electron UI smoke runner CLI must accept a report JSON output path" in messages
 
@@ -526,11 +897,21 @@ def test_verifier_validates_release_latest_json_checksum_contract(
         "signing": signing_mode,
         "dmg_name": dmg.name,
         "sha256": digest,
-        "download_url": f"https://github.example/releases/download/main-latest/{dmg.name}",
-        "latest_json_url": "https://github.example/releases/download/main-latest/Oha-Yachiyo-main-latest.json",
+        "download_url": (
+            "https://github.com/kuguya-AI-app-develop/Hermes-Yachiyo/"
+            f"releases/download/main-latest/{dmg.name}"
+        ),
+        "latest_json_url": (
+            "https://github.com/kuguya-AI-app-develop/Hermes-Yachiyo/releases/"
+            "download/main-latest/Oha-Yachiyo-main-latest.json"
+        ),
         "published_at": "2026-06-12T00:00:00Z",
         "changelog": {"sections": []},
+        "dirty": False,
+        "source_tree_fingerprint": "sha256:" + "a" * 64,
+        "release_publishable": True,
     }
+    _add_app_zip_contract(release_dir, metadata, branch="main")
     if signing_mode == "developer-id-app-notarized-dmg":
         submission_id = "12345678-1234-1234-1234-123456789abc"
         (release_dir / "notarization.json").write_text(
@@ -569,6 +950,229 @@ def test_verifier_validates_release_latest_json_checksum_contract(
     )
 
     assert findings == []
+
+
+def test_verifier_allows_dirty_rc_only_in_explicit_local_inspection_mode(tmp_path):
+    release_dir = tmp_path / "release"
+    release_dir.mkdir()
+    dmg = release_dir / "Oha-Yachiyo-oha-develop-latest.dmg"
+    dmg.write_bytes(b"dirty local dmg")
+    digest = hashlib.sha256(dmg.read_bytes()).hexdigest()
+    (release_dir / f"{dmg.name}.sha256").write_text(
+        f"{digest}  {dmg.name}\n",
+        encoding="utf-8",
+    )
+    metadata_path = release_dir / "Oha-Yachiyo-oha-develop-latest.json"
+    metadata = {
+        "name": "Oha-Yachiyo",
+        "channel": "experimental",
+        "branch": "oha-develop",
+        "source_branch": "feature/local-rc",
+        "version": "0.4.0",
+        "base_version": "0.4.0",
+        "commit": "abc1234567890abc1234567890abc1234567890a",
+        "short_commit": "abc1234",
+        "build_number": 1,
+        "run_number": 1,
+        "run_id": "1",
+        "tag": "experimental-v0.4.0-build.1-abc1234",
+        "signing": "unsigned",
+        "dmg_name": dmg.name,
+        "sha256": digest,
+        "download_url": f"https://github.com/local/oha-yachiyo/releases/download/oha-develop-latest/{dmg.name}",
+        "latest_json_url": f"https://github.com/local/oha-yachiyo/releases/download/oha-develop-latest/{metadata_path.name}",
+        "published_at": "2026-06-12T00:00:00Z",
+        "changelog": {"sections": []},
+        "dirty": True,
+        "source_tree_fingerprint": "sha256:" + "b" * 64,
+        "release_publishable": False,
+    }
+    _add_app_zip_contract(
+        release_dir,
+        metadata,
+        branch="oha-develop",
+        repository="local/oha-yachiyo",
+    )
+    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+
+    strict_findings = verifier.verify_release_artifacts(
+        root=tmp_path,
+        paths=[release_dir],
+        check_required_files=False,
+        check_release_security_guards=False,
+        allow_binary_targets=True,
+    )
+    assert any(
+        finding.message
+        == "public/latest/final release verification requires clean, publishable source provenance"
+        for finding in strict_findings
+    )
+
+    local_findings = verifier.verify_release_artifacts(
+        root=tmp_path,
+        paths=[release_dir],
+        check_required_files=False,
+        check_release_security_guards=False,
+        allow_binary_targets=True,
+        allow_nonpublishable_local_rc=True,
+    )
+    assert local_findings == []
+
+
+def test_verifier_rejects_app_zip_content_not_bound_to_latest_metadata(tmp_path):
+    release_dir = tmp_path / "release"
+    release_dir.mkdir()
+    dmg = release_dir / "Oha-Yachiyo-main-latest.dmg"
+    dmg.write_bytes(b"final dmg")
+    dmg_digest = hashlib.sha256(dmg.read_bytes()).hexdigest()
+    (release_dir / f"{dmg.name}.sha256").write_text(
+        f"{dmg_digest}  {dmg.name}\n",
+        encoding="utf-8",
+    )
+    metadata = {
+        "name": "Oha-Yachiyo",
+        "channel": "stable",
+        "branch": "main",
+        "source_branch": "main",
+        "version": "0.4.0",
+        "base_version": "0.4.0",
+        "commit": "abc1234567890abc1234567890abc1234567890a",
+        "short_commit": "abc1234",
+        "build_number": 1,
+        "run_number": 1,
+        "run_id": "1",
+        "tag": "stable-v0.4.0-build.1-abc1234",
+        "signing": "unsigned",
+        "dmg_name": dmg.name,
+        "sha256": dmg_digest,
+        "download_url": (
+            "https://github.com/kuguya-AI-app-develop/Hermes-Yachiyo/"
+            f"releases/download/main-latest/{dmg.name}"
+        ),
+        "latest_json_url": (
+            "https://github.com/kuguya-AI-app-develop/Hermes-Yachiyo/releases/"
+            "download/main-latest/Oha-Yachiyo-main-latest.json"
+        ),
+        "published_at": "2026-06-12T00:00:00Z",
+        "changelog": {},
+        "dirty": False,
+        "source_tree_fingerprint": "sha256:" + "a" * 64,
+        "release_publishable": True,
+    }
+    _add_app_zip_contract(release_dir, metadata, branch="main")
+    zip_path = release_dir / str(metadata["zip_name"])
+    zip_path.write_bytes(b"tampered app zip")
+    (release_dir / "Oha-Yachiyo-main-latest.json").write_text(
+        json.dumps(metadata),
+        encoding="utf-8",
+    )
+
+    findings = verifier.verify_release_artifacts(
+        root=tmp_path,
+        paths=[release_dir],
+        check_required_files=False,
+        check_release_security_guards=False,
+        allow_binary_targets=True,
+    )
+
+    assert any(
+        finding.path == zip_path
+        and finding.message == "release latest ZIP content does not match latest JSON zip_sha256"
+        for finding in findings
+    )
+
+
+def test_verifier_rejects_publishable_latest_metadata_with_nonofficial_urls(tmp_path):
+    metadata_path = tmp_path / "Oha-Yachiyo-main-latest.json"
+    metadata = {
+        "name": "Oha-Yachiyo",
+        "channel": "stable",
+        "branch": "main",
+        "source_branch": "main",
+        "version": "0.4.0",
+        "base_version": "0.4.0",
+        "commit": "abc1234567890abc1234567890abc1234567890a",
+        "short_commit": "abc1234",
+        "build_number": 1,
+        "run_number": 1,
+        "run_id": "1",
+        "tag": "stable-v0.4.0-build.1-abc1234",
+        "signing": "unsigned",
+        "dmg_name": "Oha-Yachiyo-main-latest.dmg",
+        "sha256": "a" * 64,
+        "download_url": "http://127.0.0.1/releases/download/main-latest/Oha-Yachiyo-main-latest.dmg",
+        "latest_json_url": "http://127.0.0.1/releases/download/main-latest/Oha-Yachiyo-main-latest.json",
+        "published_at": "2026-06-12T00:00:00Z",
+        "changelog": {},
+        "dirty": False,
+        "source_tree_fingerprint": "sha256:" + "c" * 64,
+        "release_publishable": True,
+    }
+    metadata.update(
+        {
+            "signature_kind": "adhoc",
+            "architecture": "arm64",
+            "zip_name": "Oha-Yachiyo-main-latest-arm64.zip",
+            "zip_sha256": "b" * 64,
+            "zip_download_url": (
+                "http://127.0.0.1/releases/download/main-latest/"
+                "Oha-Yachiyo-main-latest-arm64.zip"
+            ),
+        }
+    )
+
+    messages = [
+        finding.message
+        for finding in verifier._verify_release_latest_json_metadata(
+            metadata_path,
+            metadata,
+        )
+    ]
+    assert "publishable release latest JSON download_url must use the exact official HTTPS release URL" in messages
+    assert "publishable release latest JSON latest_json_url must use the exact official HTTPS release URL" in messages
+    assert "publishable release latest JSON zip_download_url must use the exact official HTTPS release URL" in messages
+
+
+def test_verifier_rejects_signing_claim_mismatched_with_dmg_app(
+    tmp_path,
+    monkeypatch,
+):
+    release_dir = tmp_path / "release"
+    release_dir.mkdir()
+    dmg = release_dir / "Oha-Yachiyo-main-latest.dmg"
+    dmg.write_bytes(b"fake dmg")
+    digest = hashlib.sha256(dmg.read_bytes()).hexdigest()
+    (release_dir / f"{dmg.name}.sha256").write_text(
+        f"{digest}  {dmg.name}\n",
+        encoding="utf-8",
+    )
+    (release_dir / "Oha-Yachiyo-main-latest.json").write_text(
+        json.dumps(
+            {
+                "signing": "self-signed-app-unsigned-dmg",
+                "dmg_name": dmg.name,
+                "sha256": digest,
+                "download_url": f"https://example.invalid/{dmg.name}",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        verifier,
+        "inspect_macos_dmg_signing",
+        lambda _path: SimpleNamespace(mode="unsigned"),
+    )
+
+    findings = verifier._verify_release_directory_artifacts(
+        tmp_path,
+        [release_dir],
+        allow_nonpublishable_local_rc=True,
+        inspect_macos_signing=True,
+    )
+    assert any(
+        "signing does not match the packaged App inside its DMG" in finding.message
+        for finding in findings
+    )
 
 
 def test_verifier_requires_complete_notarization_evidence_for_developer_id_release(tmp_path):
@@ -796,6 +1400,39 @@ def test_verifier_checks_every_release_dmg_checksum_file(tmp_path):
     assert messages_by_path[release_dir / f"{orphan_dmg.name}.sha256"] == "release DMG checksum file is missing"
 
 
+def test_verifier_checksum_manifests_bind_exact_dmg_and_zip_filenames(tmp_path):
+    release_dir = tmp_path / "release"
+    release_dir.mkdir()
+    dmg = release_dir / "Oha-Yachiyo-stable-v0.4.0-build.1-abc1234-arm64.dmg"
+    app_zip = release_dir / "Oha-Yachiyo-stable-v0.4.0-build.1-abc1234-arm64.zip"
+    dmg.write_bytes(b"dmg")
+    app_zip.write_bytes(b"zip")
+    (release_dir / f"{dmg.name}.sha256").write_text(
+        f"{hashlib.sha256(b'dmg').hexdigest()}  wrong.dmg\n",
+        encoding="utf-8",
+    )
+    (release_dir / f"{app_zip.name}.sha256").write_text(
+        f"{hashlib.sha256(b'zip').hexdigest()}  wrong.zip\n",
+        encoding="utf-8",
+    )
+
+    dmg_findings = verifier._verify_release_dmg_checksum_files(release_dir)
+    zip_findings = verifier._verify_release_zip_checksum_files(release_dir)
+
+    assert dmg_findings == [
+        verifier.Finding(
+            release_dir / f"{dmg.name}.sha256",
+            "release DMG checksum file must reference its exact filename",
+        )
+    ]
+    assert zip_findings == [
+        verifier.Finding(
+            release_dir / f"{app_zip.name}.sha256",
+            "release ZIP checksum file must reference its exact filename",
+        )
+    ]
+
+
 def test_verifier_binary_mode_scans_legacy_kernel_entrypoints(tmp_path):
     artifact = tmp_path / "Oha-Yachiyo-kernel-legacy.dmg"
     artifact.write_bytes(
@@ -946,6 +1583,35 @@ def test_verifier_requires_packaging_to_exclude_rebuilt_node_pty(tmp_path):
     assert "macOS release packaging must exclude Vite cache artifacts" in messages
 
 
+def test_verifier_requires_packaging_backend_runtime_extra_resource(tmp_path):
+    config = tmp_path / verifier.PACKAGING_CONFIG_FILE
+    config.parent.mkdir(parents=True)
+    current_config = (verifier.ROOT / verifier.PACKAGING_CONFIG_FILE).read_text(
+        encoding="utf-8"
+    )
+    required_block = (
+        "  - from: ../../dist/backend/runtime\n"
+        "    to: backend/runtime"
+    )
+    assert required_block in current_config
+    config.write_text(
+        current_config.replace(
+            required_block,
+            "  - from: ../../dist/backend/runtime\n"
+            "    to: backend/runtime-missing",
+            1,
+        ),
+        encoding="utf-8",
+    )
+
+    findings = verifier._verify_release_packaging_guards(tmp_path)
+
+    assert verifier.Finding(
+        config,
+        "macOS release packaging must include the packaged backend runtime",
+    ) in findings
+
+
 def test_verifier_requires_packaging_macos_entitlements_and_usage_descriptions(tmp_path):
     config = tmp_path / verifier.PACKAGING_CONFIG_FILE
     config.parent.mkdir(parents=True)
@@ -964,11 +1630,36 @@ def test_verifier_requires_packaging_macos_entitlements_and_usage_descriptions(t
     assert "macOS release packaging must enable hardened runtime for the app bundle" in messages
     assert "macOS release packaging must use the checked-in app entitlements" in messages
     assert "macOS release packaging must use the checked-in inherited entitlements" in messages
+    assert "macOS release packaging must define a separate Cua Driver signing policy" in messages
+    assert (
+        "macOS release packaging signIgnore must contain only the exact Cua Driver path"
+        in messages
+    )
     assert "macOS release packaging must include Apple Events permission copy" in messages
     assert "macOS release packaging must include Documents folder permission copy" in messages
     assert "macOS release packaging must include Downloads folder permission copy" in messages
     assert "macOS release packaging must include microphone permission copy" in messages
     assert "macOS release packaging must include Screen Recording permission copy" in messages
+
+
+def test_verifier_rejects_additional_electron_sign_ignore_paths(tmp_path):
+    config = tmp_path / verifier.PACKAGING_CONFIG_FILE
+    config.parent.mkdir(parents=True)
+    config.write_text(
+        "mac:\n"
+        "  signIgnore:\n"
+        "    - '/Contents/Resources/computer-use/macos/"
+        "OhaCuaDriver\\.app/Contents/MacOS/cua-driver$'\n"
+        "    - '/Contents/Resources/.*'\n",
+        encoding="utf-8",
+    )
+
+    findings = verifier._verify_release_packaging_guards(tmp_path)
+
+    assert verifier.Finding(
+        config,
+        "macOS release packaging signIgnore must contain only the exact Cua Driver path",
+    ) in findings
 
 
 def test_packaged_onefile_cli_smokes_allow_cold_start_time(monkeypatch, tmp_path):
@@ -1027,6 +1718,19 @@ def test_verifier_requires_macos_signing_script_and_entitlements(tmp_path):
     assert "macOS signing script must sign the app with hardened runtime options" in messages
     assert "macOS signing script must request a secure timestamp for Developer ID releases" in messages
     assert "macOS signing script must apply the checked-in entitlements" in messages
+    assert "macOS signing script must apply the dedicated Cua Driver entitlements" in messages
+    assert "macOS signing script must sign backend binaries with the stable backend identifier" in messages
+    assert "macOS signing script must apply the dedicated backend entitlements" in messages
+    assert "macOS signing script must explicitly sign the standalone backend binary" in messages
+    assert "macOS signing script must explicitly sign the embedded backend binary" in messages
+    assert "macOS signing script must verify backend binaries after signing" in messages
+    assert "macOS signing script must inspect backend signature metadata after signing" in messages
+    assert "macOS signing script must inspect backend designated requirements after signing" in messages
+    assert "macOS signing script must reject backend signatures with unstable identifiers" in messages
+    assert "macOS signing script must reject cdhash-only backend designated requirements" in messages
+    assert "macOS signing script must require the stable backend identifier in designated requirements" in messages
+    assert "macOS signing script must verify the nested Cua Driver signature" in messages
+    assert "macOS signing script must verify the final Cua Driver entitlements" in messages
     assert "macOS signing script must verify the signed app bundle" in messages
     assert "macOS signing script must create the unsigned DMG from the signed app bundle" in messages
     assert "macOS notarization script must submit the DMG with notarytool" in messages
@@ -1038,6 +1742,147 @@ def test_verifier_requires_macos_signing_script_and_entitlements(tmp_path):
     assert "macOS entitlements must allow JIT for the Electron runtime" in messages
     assert "macOS entitlements must allow unsigned executable memory for Electron" in messages
     assert "macOS entitlements must disable library validation for packaged native modules" in messages
+    assert any("could not read Cua Driver entitlements" in message for message in messages)
+
+
+def test_verifier_rejects_broad_cua_driver_entitlements(tmp_path):
+    script = tmp_path / verifier.MACOS_SIGNING_SCRIPT_FILE
+    script.parent.mkdir(parents=True)
+    script.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    notarization_script = tmp_path / verifier.MACOS_NOTARIZATION_SCRIPT_FILE
+    notarization_script.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    app_entitlements = tmp_path / verifier.MACOS_ENTITLEMENTS_FILE
+    app_entitlements.parent.mkdir(parents=True, exist_ok=True)
+    app_entitlements.write_bytes(plistlib.dumps({}))
+    cua_entitlements = tmp_path / verifier.CUA_DRIVER_ENTITLEMENTS_FILE
+    cua_entitlements.write_bytes(
+        plistlib.dumps(
+            {
+                **verifier.PACKAGED_CUA_DRIVER_EXPECTED_ENTITLEMENTS,
+                "com.apple.security.cs.allow-jit": True,
+            }
+        )
+    )
+
+    findings = verifier._verify_macos_signing_guards(tmp_path)
+
+    assert verifier.Finding(
+        cua_entitlements,
+        "Cua Driver entitlements must contain exactly Apple Events and Screen Capture",
+    ) in findings
+
+
+def test_verifier_rejects_missing_backend_entitlements_file(tmp_path):
+    script = tmp_path / verifier.MACOS_SIGNING_SCRIPT_FILE
+    script.parent.mkdir(parents=True)
+    script.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    notarization_script = tmp_path / verifier.MACOS_NOTARIZATION_SCRIPT_FILE
+    notarization_script.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    app_entitlements = tmp_path / verifier.MACOS_ENTITLEMENTS_FILE
+    app_entitlements.parent.mkdir(parents=True, exist_ok=True)
+    app_entitlements.write_bytes(plistlib.dumps({}))
+    cua_entitlements = tmp_path / verifier.CUA_DRIVER_ENTITLEMENTS_FILE
+    cua_entitlements.write_bytes(plistlib.dumps(verifier.PACKAGED_CUA_DRIVER_EXPECTED_ENTITLEMENTS))
+
+    findings = verifier._verify_macos_signing_guards(tmp_path)
+
+    assert verifier.Finding(
+        tmp_path / verifier.BACKEND_ENTITLEMENTS_FILE,
+        "could not read backend entitlements: FileNotFoundError",
+    ) in findings
+
+
+def test_verifier_rejects_broad_backend_entitlements(tmp_path):
+    script = tmp_path / verifier.MACOS_SIGNING_SCRIPT_FILE
+    script.parent.mkdir(parents=True)
+    script.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    notarization_script = tmp_path / verifier.MACOS_NOTARIZATION_SCRIPT_FILE
+    notarization_script.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    app_entitlements = tmp_path / verifier.MACOS_ENTITLEMENTS_FILE
+    app_entitlements.parent.mkdir(parents=True, exist_ok=True)
+    app_entitlements.write_bytes(plistlib.dumps({}))
+    backend_entitlements = tmp_path / verifier.BACKEND_ENTITLEMENTS_FILE
+    backend_entitlements.write_bytes(
+        plistlib.dumps(
+            {
+                **verifier.PACKAGED_BACKEND_EXPECTED_ENTITLEMENTS,
+                "com.apple.security.cs.allow-jit": True,
+            }
+        )
+    )
+    cua_entitlements = tmp_path / verifier.CUA_DRIVER_ENTITLEMENTS_FILE
+    cua_entitlements.write_bytes(plistlib.dumps(verifier.PACKAGED_CUA_DRIVER_EXPECTED_ENTITLEMENTS))
+
+    findings = verifier._verify_macos_signing_guards(tmp_path)
+
+    assert verifier.Finding(
+        backend_entitlements,
+        "backend entitlements must contain exactly disable-library-validation=true",
+    ) in findings
+
+
+def test_verifier_rejects_macos_signing_order_regressions(tmp_path):
+    script_path = tmp_path / verifier.MACOS_SIGNING_SCRIPT_FILE
+    script_path.parent.mkdir(parents=True, exist_ok=True)
+    current_script = (verifier.ROOT / verifier.MACOS_SIGNING_SCRIPT_FILE).read_text(
+        encoding="utf-8"
+    )
+    cua_sign = 'codesign "${cua_codesign_args[@]}" "${CUA_HELPER_PATH}"'
+    backend_sign = 'codesign "${backend_codesign_args[@]}" "${PACKAGED_BACKEND_PATH}"'
+    outer_sign = 'codesign "${codesign_args[@]}" "${APP_PATH}"'
+    assert cua_sign in current_script
+    assert backend_sign in current_script
+    assert outer_sign in current_script
+    mutated = current_script.replace(cua_sign + "\n", "", 1)
+    mutated = mutated.replace(backend_sign + "\n", "", 1)
+    mutated = mutated.replace(
+        outer_sign + "\n",
+        outer_sign + "\n" + cua_sign + "\n" + backend_sign + "\n",
+        1,
+    )
+    script_path.write_text(mutated, encoding="utf-8")
+
+    notarization_script = tmp_path / verifier.MACOS_NOTARIZATION_SCRIPT_FILE
+    notarization_script.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+    app_entitlements = tmp_path / verifier.MACOS_ENTITLEMENTS_FILE
+    app_entitlements.parent.mkdir(parents=True, exist_ok=True)
+    app_entitlements.write_text(
+        "<plist><dict>"
+        "<key>com.apple.security.cs.allow-jit</key><true/>"
+        "<key>com.apple.security.cs.allow-unsigned-executable-memory</key><true/>"
+        "<key>com.apple.security.cs.disable-library-validation</key><true/>"
+        "</dict></plist>\n",
+        encoding="utf-8",
+    )
+    backend_entitlements = tmp_path / verifier.BACKEND_ENTITLEMENTS_FILE
+    backend_entitlements.write_bytes(
+        plistlib.dumps(verifier.PACKAGED_BACKEND_EXPECTED_ENTITLEMENTS)
+    )
+    cua_entitlements = tmp_path / verifier.CUA_DRIVER_ENTITLEMENTS_FILE
+    cua_entitlements.write_bytes(
+        plistlib.dumps(verifier.PACKAGED_CUA_DRIVER_EXPECTED_ENTITLEMENTS)
+    )
+    helper_info = tmp_path / verifier.CUA_DRIVER_HELPER_INFO_FILE
+    helper_info.parent.mkdir(parents=True, exist_ok=True)
+    helper_info.write_bytes(
+        plistlib.dumps(
+            {
+                "CFBundleExecutable": verifier.PACKAGED_CUA_DRIVER_BINARY_NAME,
+                "CFBundleIdentifier": verifier.PACKAGED_CUA_DRIVER_HELPER_BUNDLE_ID,
+                "CFBundlePackageType": "APPL",
+                "LSBackgroundOnly": True,
+            }
+        )
+    )
+
+    findings = verifier._verify_macos_signing_guards(tmp_path)
+    messages = [finding.message for finding in findings]
+
+    assert "macOS signing script must sign the Cua helper before signing the outer app bundle" in messages
+    assert (
+        "macOS signing script must sign standalone and embedded backend binaries before signing the outer app bundle"
+        in messages
+    )
 
 
 def test_verifier_requires_release_packaging_docs_for_release_gates(tmp_path):
@@ -1048,6 +1893,8 @@ def test_verifier_requires_release_packaging_docs_for_release_gates(tmp_path):
     findings = verifier._verify_release_packaging_documentation(tmp_path)
     messages = [finding.message for finding in findings]
 
+    assert "release packaging docs must document the dedicated Cua Driver entitlement policy" in messages
+    assert "release packaging docs must require signing verification for certificate-free builds" in messages
     assert "release packaging docs must document that legacy develop is not an Oha release branch" in messages
     assert "release packaging docs must document the Oha experimental latest DMG name" in messages
     assert "release packaging docs must document the pre-dependency release guard" in messages
@@ -1055,8 +1902,11 @@ def test_verifier_requires_release_packaging_docs_for_release_gates(tmp_path):
     assert "release packaging docs must document release CredentialStore fallback guard coverage" in messages
     assert "release packaging docs must document final packaged app signature verification" in messages
     assert "release packaging docs must document final release artifact binary scanning" in messages
-    assert "release packaging docs must document latest JSON checksum consistency checks" in messages
+    assert "release packaging docs must document latest JSON DMG/ZIP checksum consistency checks" in messages
     assert "release packaging docs must document latest JSON metadata format validation" in messages
+    assert "release packaging docs must document source provenance and publishability metadata" in messages
+    assert "release packaging docs must document the explicit dirty local RC build mode" in messages
+    assert "release packaging docs must document explicit non-publishable local inspection" in messages
     assert "release packaging docs must document reusable app build metadata preparation" in messages
     assert "release packaging docs must document local RC artifact build helper" in messages
     assert "release packaging docs must document local RC signoff refresh helper" in messages
@@ -1074,7 +1924,7 @@ def test_verifier_requires_release_packaging_docs_for_release_gates(tmp_path):
     assert "release packaging docs must document local RC signoff status shortcut" in messages
     assert "release packaging docs must document print-status public demo blocker output" in messages
     assert "release packaging docs must document local RC OS evidence shortcut" in messages
-    assert "release packaging docs must document per-DMG checksum file validation" in messages
+    assert "release packaging docs must document per-DMG/ZIP checksum file validation" in messages
     assert "release packaging docs must document the local RC verification entrypoint" in messages
     assert "release packaging docs must document the local RC DMG mount gate" in messages
     assert "release packaging docs must document the opt-in real desktop app open smoke" in messages
@@ -1192,6 +2042,468 @@ def test_verifier_requires_user_facing_release_docs_for_first_launch(tmp_path):
     assert "contribution guide must document granular real desktop demo flags" in messages
 
 
+_TEST_CUA_CONTENT_HASH_ALGORITHM = "mach-o-without-code-signature-v1"
+_TEST_CUA_CONTENT_SHA256 = "c" * 64
+
+
+def _packaged_fixture_executable(
+    command,
+    relative_path: Path,
+) -> Path | None:
+    if not isinstance(command, (list, tuple)) or not command:
+        return None
+    candidate = Path(command[0])
+    relative_parts = relative_path.parts
+    if (
+        verifier.PACKAGED_APP_NAME not in candidate.parts
+        or len(candidate.parts) < len(relative_parts)
+        or candidate.parts[-len(relative_parts) :] != relative_parts
+    ):
+        return None
+    return candidate
+
+
+def _fixture_json_heredoc(script: str) -> str | None:
+    match = re.search(r"cat <<'JSON'\n(?P<payload>\{.*?\})\nJSON(?:\n|$)", script, re.DOTALL)
+    return match.group("payload") if match is not None else None
+
+
+def _packaged_shell_fixture_text(path: Path) -> str | None:
+    try:
+        payload = path.read_bytes()
+    except OSError:
+        return None
+    if not payload.startswith(b"#!/bin/sh\n"):
+        return None
+    try:
+        return payload.decode("utf-8")
+    except UnicodeDecodeError:
+        return None
+
+
+@pytest.fixture(autouse=True)
+def _run_packaged_shell_fixtures_deterministically(monkeypatch):
+    """Keep verifier subprocess parsing real without executing temp shell fixtures.
+
+    macOS may SIGKILL newly-created executable scripts in pytest's temporary tree.
+    These fixtures model only the three shell scripts written below; real packaged
+    binaries remain subject to the production subprocess and signature checks.
+    """
+
+    original_run = subprocess.run
+
+    def run(command, *args, **kwargs):
+        cua_driver = _packaged_fixture_executable(
+            command,
+            verifier.PACKAGED_CUA_DRIVER_RELATIVE_DIR
+            / verifier.PACKAGED_CUA_DRIVER_BINARY_RELATIVE_PATH,
+        )
+        if cua_driver is not None:
+            script = _packaged_shell_fixture_text(cua_driver)
+            if script is not None:
+                arguments = [str(item) for item in command[1:]]
+                if arguments == ["--version"]:
+                    match = re.search(
+                        r"cua-driver (?P<version>[0-9][A-Za-z0-9.+-]*)",
+                        script,
+                    )
+                    if match is not None:
+                        return subprocess.CompletedProcess(
+                            command,
+                            0,
+                            stdout=f"cua-driver {match.group('version')}\n",
+                            stderr="",
+                        )
+                elif arguments == ["manifest"]:
+                    payload = _fixture_json_heredoc(script)
+                    if payload is not None:
+                        return subprocess.CompletedProcess(
+                            command,
+                            0,
+                            stdout=f"{payload}\n",
+                            stderr="",
+                        )
+                return subprocess.CompletedProcess(command, 2, stdout="", stderr="")
+
+        desktop_provider = _packaged_fixture_executable(
+            command,
+            verifier.PACKAGED_DESKTOP_PROVIDER_RELATIVE_PATH,
+        )
+        if desktop_provider is not None:
+            script = _packaged_shell_fixture_text(desktop_provider)
+            if script is not None:
+                payload = _fixture_json_heredoc(script)
+                if payload is not None:
+                    return subprocess.CompletedProcess(
+                        command,
+                        0,
+                        stdout=f"{payload}\n",
+                        stderr="",
+                    )
+                if "echo not-json" in script:
+                    return subprocess.CompletedProcess(
+                        command,
+                        0,
+                        stdout="not-json\n",
+                        stderr="",
+                    )
+                return subprocess.CompletedProcess(command, 2, stdout="", stderr="")
+
+        desktop_bridge = _packaged_fixture_executable(
+            command,
+            verifier.PACKAGED_DESKTOP_BRIDGE_RELATIVE_PATH,
+        )
+        if desktop_bridge is not None:
+            script = _packaged_shell_fixture_text(desktop_bridge)
+            if script is not None:
+                help_match = re.search(r"echo '([^']*)'", script)
+                if help_match is not None:
+                    return subprocess.CompletedProcess(
+                        command,
+                        0,
+                        stdout=f"{help_match.group(1)}\n",
+                        stderr="",
+                    )
+                return subprocess.CompletedProcess(command, 2, stdout="", stderr="")
+
+        return original_run(command, *args, **kwargs)
+
+    monkeypatch.setattr(verifier.subprocess, "run", run)
+
+
+def _stub_packaged_cua_content_digest(monkeypatch, *, digest=_TEST_CUA_CONTENT_SHA256):
+    monkeypatch.setattr(
+        verifier,
+        "_sha256_macho_without_code_signature",
+        lambda _path: digest,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        verifier,
+        "_run_codesign_verify",
+        lambda _path, *, deep=False: None,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        verifier,
+        "_read_codesign_entitlements",
+        lambda path: (
+            dict(verifier.PACKAGED_CUA_DRIVER_EXPECTED_ENTITLEMENTS)
+            if Path(path).name == verifier.PACKAGED_CUA_DRIVER_BINARY_NAME
+            else dict(verifier.PACKAGED_BACKEND_EXPECTED_ENTITLEMENTS)
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        verifier,
+        "_read_codesign_display",
+        lambda _path: (
+            "Identifier="
+            f"{verifier.PACKAGED_BACKEND_IDENTIFIER}\n"
+            "Signature=Authority-signed\n"
+        ),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        verifier,
+        "_read_codesign_designated_requirement",
+        lambda _path: (
+            "designated => "
+            f'identifier "{verifier.PACKAGED_BACKEND_IDENTIFIER}" and anchor trusted'
+        ),
+        raising=False,
+    )
+
+
+def test_packaged_cua_signing_policy_rejects_electron_jit_entitlements(
+    monkeypatch,
+    tmp_path,
+):
+    binary_path = tmp_path / "cua-driver"
+    binary_path.write_bytes(b"fixture")
+    monkeypatch.setattr(
+        verifier,
+        "_run_codesign_verify",
+        lambda _path, *, deep=False: None,
+    )
+    monkeypatch.setattr(
+        verifier,
+        "_read_codesign_entitlements",
+        lambda _path: {
+            **verifier.PACKAGED_CUA_DRIVER_EXPECTED_ENTITLEMENTS,
+            "com.apple.security.cs.allow-jit": True,
+        },
+    )
+
+    findings = verifier._verify_packaged_cua_code_signature(binary_path)
+
+    assert findings == [
+        verifier.Finding(
+            binary_path,
+            "packaged Cua Driver entitlements must contain exactly Apple Events and Screen Capture",
+        )
+    ]
+
+
+def test_packaged_cua_signing_policy_fails_closed_on_invalid_signature(
+    monkeypatch,
+    tmp_path,
+):
+    binary_path = tmp_path / "cua-driver"
+    binary_path.write_bytes(b"fixture")
+
+    def reject_signature(_path, *, deep=False):
+        raise RuntimeError("invalid signature")
+
+    monkeypatch.setattr(verifier, "_run_codesign_verify", reject_signature)
+    monkeypatch.setattr(
+        verifier,
+        "_read_codesign_entitlements",
+        lambda _path: dict(verifier.PACKAGED_CUA_DRIVER_EXPECTED_ENTITLEMENTS),
+    )
+
+    findings = verifier._verify_packaged_cua_code_signature(binary_path)
+
+    assert findings == [
+        verifier.Finding(
+            binary_path,
+            "packaged Cua Driver code signature verification failed: RuntimeError",
+        )
+    ]
+
+
+def test_packaged_app_signing_policy_requires_deep_strict_verification(
+    monkeypatch,
+    tmp_path,
+):
+    app_dir = tmp_path / verifier.PACKAGED_APP_NAME
+    app_dir.mkdir()
+    captured = []
+
+    def capture(path, *, deep=False):
+        captured.append((path, deep))
+
+    monkeypatch.setattr(verifier, "_run_codesign_verify", capture)
+
+    assert verifier._verify_packaged_app_code_signature(app_dir) == []
+    assert captured == [(app_dir, True)]
+
+
+def test_codesign_helpers_use_fixed_argv_and_parse_xml_entitlements(
+    monkeypatch,
+    tmp_path,
+):
+    binary_path = tmp_path / "cua-driver; touch injected"
+    binary_path.write_bytes(b"fixture")
+    commands = []
+
+    def fake_run(command, **kwargs):
+        commands.append((command, kwargs))
+        if command[:3] == ["/usr/bin/codesign", "-d", "--verbose=4"]:
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                stdout="",
+                stderr=(
+                    f"Identifier={verifier.PACKAGED_BACKEND_IDENTIFIER}\n"
+                    "Signature=Authority-signed\n"
+                ),
+            )
+        if command[:3] == ["/usr/bin/codesign", "-dr", "-"]:
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                stdout="",
+                stderr=(
+                    "designated => "
+                    f'identifier "{verifier.PACKAGED_BACKEND_IDENTIFIER}" and anchor trusted\n'
+                ),
+            )
+        if "--entitlements" in command:
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                stdout=plistlib.dumps(
+                    verifier.PACKAGED_CUA_DRIVER_EXPECTED_ENTITLEMENTS
+                ),
+                stderr=b"",
+            )
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(verifier.subprocess, "run", fake_run)
+
+    verifier._run_codesign_verify(binary_path, deep=True)
+    display = verifier._read_codesign_display(binary_path)
+    requirement = verifier._read_codesign_designated_requirement(binary_path)
+    entitlements = verifier._read_codesign_entitlements(binary_path)
+
+    assert commands[0][0] == [
+        "/usr/bin/codesign",
+        "--verify",
+        "--deep",
+        "--strict",
+        "--verbose=2",
+        str(binary_path),
+    ]
+    assert commands[1][0] == [
+        "/usr/bin/codesign",
+        "-d",
+        "--verbose=4",
+        str(binary_path),
+    ]
+    assert commands[2][0] == [
+        "/usr/bin/codesign",
+        "-dr",
+        "-",
+        str(binary_path),
+    ]
+    assert commands[3][0] == [
+        "/usr/bin/codesign",
+        "-d",
+        "--entitlements",
+        "-",
+        "--xml",
+        str(binary_path),
+    ]
+    assert "Identifier=" in display
+    assert "designated => " in requirement
+    assert entitlements == verifier.PACKAGED_CUA_DRIVER_EXPECTED_ENTITLEMENTS
+
+
+def _write_packaged_cua_sidecar(root, app_dir, *, binary_mode=0o755):
+    version = "0.7.1"
+    tag = f"cua-driver-rs-v{version}"
+    archive_sha = "a" * 64
+    archive_url = (
+        f"https://github.com/trycua/cua/releases/download/{tag}/"
+        f"cua-driver-rs-{version}-darwin-universal-binary.tar.gz"
+    )
+    license_payload = b"MIT License\n"
+    license_sha = hashlib.sha256(license_payload).hexdigest()
+    license_url = f"https://raw.githubusercontent.com/trycua/cua/{tag}/LICENSE.md"
+    lock_payload = {
+        "schema_version": 1,
+        "name": "cua-driver",
+        "version": version,
+        "tag": tag,
+        "platform": "darwin-universal",
+        "architectures": ["arm64", "x86_64"],
+        "archive": {
+            "name": f"cua-driver-rs-{version}-darwin-universal-binary.tar.gz",
+            "url": archive_url,
+            "sha256": archive_sha,
+            "binary_member": "cua-driver",
+            "binary_content_hash_algorithm": _TEST_CUA_CONTENT_HASH_ALGORITHM,
+            "binary_content_sha256": _TEST_CUA_CONTENT_SHA256,
+        },
+        "license": {
+            "name": "LICENSE.md",
+            "url": license_url,
+            "sha256": license_sha,
+            "spdx": "MIT",
+        },
+    }
+    lock_path = root / verifier.CUA_DRIVER_LOCK_FILE
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path.write_text(json.dumps(lock_payload), encoding="utf-8")
+
+    sidecar_dir = app_dir / verifier.PACKAGED_CUA_DRIVER_RELATIVE_DIR
+    sidecar_dir.mkdir(parents=True, exist_ok=True)
+    binary_path = (
+        sidecar_dir / verifier.PACKAGED_CUA_DRIVER_BINARY_RELATIVE_PATH
+    )
+    binary_path.parent.mkdir(parents=True, exist_ok=True)
+    helper_info_path = (
+        sidecar_dir / verifier.PACKAGED_CUA_DRIVER_INFO_RELATIVE_PATH
+    )
+    helper_info_path.write_bytes(
+        plistlib.dumps(
+            {
+                "CFBundleExecutable": verifier.PACKAGED_CUA_DRIVER_BINARY_NAME,
+                "CFBundleIdentifier": (
+                    verifier.PACKAGED_CUA_DRIVER_HELPER_BUNDLE_ID
+                ),
+                "CFBundleName": "Oha Cua Driver",
+                "CFBundlePackageType": "APPL",
+                "CFBundleVersion": "1",
+                "LSBackgroundOnly": True,
+            }
+        )
+    )
+    runtime_manifest = {
+        "schema_version": "1",
+        "binary_version": version,
+        "mcp_invocation": {"command": str(binary_path), "args": ["mcp"]},
+        "subcommands": [
+            {
+                "name": "mcp",
+                "args": [
+                    {"name": "--embedded", "type": "flag"},
+                    {"name": "--host-bundle-id", "type": "string"},
+                ],
+            }
+        ],
+    }
+    binary_path.write_text(
+        "#!/bin/sh\n"
+        "case \"${1:-}\" in\n"
+        f"  --version) printf '%s\\n' 'cua-driver {version}' ;;\n"
+        "  manifest) cat <<'JSON'\n"
+        f"{json.dumps(runtime_manifest)}\n"
+        "JSON\n"
+        "    ;;\n"
+        "  *) exit 2 ;;\n"
+        "esac\n",
+        encoding="utf-8",
+    )
+    binary_path.chmod(binary_mode)
+    (sidecar_dir / verifier.PACKAGED_CUA_DRIVER_LICENSE_NAME).write_bytes(
+        license_payload
+    )
+    packaged_manifest = {
+        "schema_version": 1,
+        "component": "cua-driver",
+        "version": version,
+        "tag": tag,
+        "platform": "darwin-universal",
+        "architectures": ["arm64", "x86_64"],
+        "lock": {
+            "path": "packaging/cua-driver.lock.json",
+            "sha256": hashlib.sha256(lock_path.read_bytes()).hexdigest(),
+        },
+        "source": {
+            "archive_name": lock_payload["archive"]["name"],
+            "archive_url": archive_url,
+            "archive_sha256": archive_sha,
+        },
+        # Deliberately represents the pre-signing input, not this executable stub.
+        "binary": {
+            "file": "cua-driver",
+            "sha256": "b" * 64,
+            "content_hash_algorithm": _TEST_CUA_CONTENT_HASH_ALGORITHM,
+            "content_sha256": _TEST_CUA_CONTENT_SHA256,
+            "mode": "0755",
+        },
+        "license": {
+            "file": "LICENSE.md",
+            "spdx": "MIT",
+            "source_url": license_url,
+            "sha256": license_sha,
+        },
+        "validation": {
+            "binary_version": version,
+            "manifest_schema_version": "1",
+            "embedded_mcp": True,
+            "architectures": ["arm64", "x86_64"],
+        },
+    }
+    (sidecar_dir / verifier.PACKAGED_CUA_DRIVER_MANIFEST_NAME).write_text(
+        json.dumps(packaged_manifest),
+        encoding="utf-8",
+    )
+    return sidecar_dir
+
+
 def _write_packaged_app_bundle(
     root,
     *,
@@ -1206,6 +2518,8 @@ def _write_packaged_app_bundle(
     include_asar=True,
     include_permission_copy=True,
     include_backend_metadata=True,
+    include_cua_driver=True,
+    cua_driver_mode=0o755,
 ):
     if app_dir is None:
         app_dir = root / verifier.PACKAGED_APP_OUTPUT_DIR / "mac-arm64" / verifier.PACKAGED_APP_NAME
@@ -1235,6 +2549,12 @@ def _write_packaged_app_bundle(
     executable = macos_dir / "Oha-Yachiyo"
     executable.write_bytes(b"#!/bin/sh\nexit 0\n")
     executable.chmod(executable_mode)
+    if include_cua_driver:
+        _write_packaged_cua_sidecar(
+            root,
+            app_dir,
+            binary_mode=cua_driver_mode,
+        )
     backend = app_dir / verifier.PACKAGED_BACKEND_RELATIVE_PATH
     backend.parent.mkdir(parents=True, exist_ok=True)
     backend_bytes = b"#!/bin/sh\nexit 0\n"
@@ -1286,8 +2606,9 @@ def _write_packaged_app_bundle(
     return app_dir
 
 
-def test_verifier_accepts_packaged_app_bundle_structure(tmp_path):
-    _write_packaged_app_bundle(tmp_path)
+def test_verifier_accepts_packaged_app_bundle_structure(monkeypatch, tmp_path):
+    _stub_packaged_cua_content_digest(monkeypatch)
+    app_dir = _write_packaged_app_bundle(tmp_path)
 
     findings = verifier.verify_release_artifacts(
         root=tmp_path,
@@ -1299,9 +2620,274 @@ def test_verifier_accepts_packaged_app_bundle_structure(tmp_path):
     )
 
     assert findings == []
+    sidecar_dir = app_dir / verifier.PACKAGED_CUA_DRIVER_RELATIVE_DIR
+    packaged_binary_sha = hashlib.sha256(
+        (
+            sidecar_dir / verifier.PACKAGED_CUA_DRIVER_BINARY_RELATIVE_PATH
+        ).read_bytes()
+    ).hexdigest()
+    recorded_unsigned_sha = json.loads(
+        (sidecar_dir / verifier.PACKAGED_CUA_DRIVER_MANIFEST_NAME).read_text("utf-8")
+    )["binary"]["sha256"]
+    assert packaged_binary_sha != recorded_unsigned_sha
 
 
-def test_verifier_accepts_packaged_app_bundle_from_explicit_resources_path(tmp_path):
+def test_verifier_discovers_packaged_app_when_paths_are_omitted(monkeypatch, tmp_path):
+    _stub_packaged_cua_content_digest(monkeypatch)
+    monkeypatch.setattr(verifier, "DEFAULT_SCAN_PATHS", ())
+    _write_packaged_app_bundle(tmp_path)
+
+    findings = verifier.verify_release_artifacts(
+        root=tmp_path,
+        paths=None,
+        check_required_files=False,
+        check_release_security_guards=False,
+        check_packaged_app_bundle=True,
+        allow_binary_targets=True,
+    )
+
+    assert findings == []
+
+
+def test_verifier_requires_complete_packaged_cua_driver_resources(tmp_path):
+    app_dir = _write_packaged_app_bundle(tmp_path)
+    sidecar_dir = app_dir / verifier.PACKAGED_CUA_DRIVER_RELATIVE_DIR
+    for name in (
+        verifier.PACKAGED_CUA_DRIVER_BINARY_RELATIVE_PATH,
+        verifier.PACKAGED_CUA_DRIVER_LICENSE_NAME,
+        verifier.PACKAGED_CUA_DRIVER_MANIFEST_NAME,
+        verifier.PACKAGED_CUA_DRIVER_INFO_RELATIVE_PATH,
+    ):
+        (sidecar_dir / name).unlink()
+
+    findings = verifier.verify_release_artifacts(
+        root=tmp_path,
+        paths=[],
+        check_required_files=False,
+        check_release_security_guards=False,
+        check_packaged_app_bundle=True,
+        allow_binary_targets=True,
+    )
+    messages = [finding.message for finding in findings]
+
+    assert "packaged Cua Driver binary is missing from app resources" in messages
+    assert "packaged Cua Driver license is missing from app resources" in messages
+    assert "packaged Cua Driver manifest is missing from app resources" in messages
+    assert (
+        "packaged Cua Driver helper Info.plist is missing from app resources"
+        in messages
+    )
+
+
+def test_verifier_rejects_cua_helper_that_can_become_foreground(tmp_path):
+    info_path = tmp_path / "Info.plist"
+    info_path.write_bytes(
+        plistlib.dumps(
+            {
+                "CFBundleExecutable": verifier.PACKAGED_CUA_DRIVER_BINARY_NAME,
+                "CFBundleIdentifier": (
+                    verifier.PACKAGED_CUA_DRIVER_HELPER_BUNDLE_ID
+                ),
+                "CFBundlePackageType": "APPL",
+                "LSBackgroundOnly": False,
+            }
+        )
+    )
+
+    assert verifier._verify_packaged_cua_helper_info(info_path) == [
+        verifier.Finding(
+            info_path,
+            "packaged Cua Driver helper must be an LSBackgroundOnly app bundle",
+        )
+    ]
+
+
+@pytest.mark.parametrize(
+    ("resource_name", "expected_message"),
+    [
+        (
+            verifier.PACKAGED_CUA_DRIVER_BINARY_RELATIVE_PATH,
+            "packaged Cua Driver binary must not be a symlink",
+        ),
+        (
+            verifier.PACKAGED_CUA_DRIVER_LICENSE_NAME,
+            "packaged Cua Driver license must not be a symlink",
+        ),
+        (
+            verifier.PACKAGED_CUA_DRIVER_MANIFEST_NAME,
+            "packaged Cua Driver manifest must not be a symlink",
+        ),
+    ],
+)
+def test_verifier_rejects_packaged_cua_driver_resource_symlinks(
+    tmp_path,
+    resource_name,
+    expected_message,
+):
+    app_dir = _write_packaged_app_bundle(tmp_path)
+    sidecar_dir = app_dir / verifier.PACKAGED_CUA_DRIVER_RELATIVE_DIR
+    resource_path = sidecar_dir / resource_name
+    external_path = tmp_path / f"external-{Path(resource_name).name}"
+    external_path.write_bytes(resource_path.read_bytes())
+    if resource_name == verifier.PACKAGED_CUA_DRIVER_BINARY_RELATIVE_PATH:
+        external_path.chmod(0o755)
+    resource_path.unlink()
+    resource_path.symlink_to(external_path)
+
+    findings = verifier.verify_release_artifacts(
+        root=tmp_path,
+        paths=[],
+        check_required_files=False,
+        check_release_security_guards=False,
+        check_packaged_app_bundle=True,
+        allow_binary_targets=True,
+    )
+
+    assert verifier.Finding(resource_path, expected_message) in findings
+
+
+@pytest.mark.parametrize(
+    ("relative_directory", "expected_message"),
+    [
+        (
+            Path("Contents/Resources/computer-use"),
+            "packaged Cua Driver parent resource directory must be a real directory, not a symlink",
+        ),
+        (
+            verifier.PACKAGED_CUA_DRIVER_RELATIVE_DIR,
+            "packaged Cua Driver resource directory must be a real directory, not a symlink",
+        ),
+        (
+            verifier.PACKAGED_CUA_DRIVER_RELATIVE_DIR
+            / verifier.PACKAGED_CUA_DRIVER_HELPER_NAME,
+            "packaged Cua Driver helper app must be a real directory, not a symlink",
+        ),
+    ],
+)
+def test_verifier_rejects_packaged_cua_driver_ancestor_symlinks(
+    tmp_path,
+    relative_directory,
+    expected_message,
+):
+    app_dir = _write_packaged_app_bundle(tmp_path)
+    directory_path = app_dir / relative_directory
+    external_path = tmp_path / f"external-{'-'.join(relative_directory.parts)}"
+    directory_path.rename(external_path)
+    directory_path.symlink_to(external_path, target_is_directory=True)
+
+    findings = verifier.verify_release_artifacts(
+        root=tmp_path,
+        paths=[],
+        check_required_files=False,
+        check_release_security_guards=False,
+        check_packaged_app_bundle=True,
+        allow_binary_targets=True,
+    )
+
+    assert verifier.Finding(directory_path, expected_message) in findings
+
+
+def test_verifier_rejects_packaged_cua_driver_lock_and_runtime_mismatches(tmp_path):
+    app_dir = _write_packaged_app_bundle(tmp_path)
+    sidecar_dir = app_dir / verifier.PACKAGED_CUA_DRIVER_RELATIVE_DIR
+    manifest_path = sidecar_dir / verifier.PACKAGED_CUA_DRIVER_MANIFEST_NAME
+    manifest = json.loads(manifest_path.read_text("utf-8"))
+    manifest["tag"] = "cua-driver-rs-v9.9.9"
+    manifest["architectures"] = ["arm64"]
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    binary_path = sidecar_dir / verifier.PACKAGED_CUA_DRIVER_BINARY_RELATIVE_PATH
+    binary_path.write_text(
+        "#!/bin/sh\n"
+        "if [ \"${1:-}\" = --version ]; then echo 'cua-driver 9.9.9'; exit 0; fi\n"
+        "exit 2\n",
+        encoding="utf-8",
+    )
+    binary_path.chmod(0o755)
+
+    findings = verifier.verify_release_artifacts(
+        root=tmp_path,
+        paths=[],
+        check_required_files=False,
+        check_release_security_guards=False,
+        check_packaged_app_bundle=True,
+        allow_binary_targets=True,
+    )
+    messages = [finding.message for finding in findings]
+
+    assert "packaged Cua Driver manifest does not match the dependency lock" in messages
+    assert "packaged Cua Driver version does not match the lock" in messages
+
+
+def test_verifier_rejects_tampered_packaged_cua_license(tmp_path):
+    app_dir = _write_packaged_app_bundle(tmp_path)
+    license_path = (
+        app_dir
+        / verifier.PACKAGED_CUA_DRIVER_RELATIVE_DIR
+        / verifier.PACKAGED_CUA_DRIVER_LICENSE_NAME
+    )
+    license_path.write_text("tampered license\n", encoding="utf-8")
+
+    findings = verifier.verify_release_artifacts(
+        root=tmp_path,
+        paths=[],
+        check_required_files=False,
+        check_release_security_guards=False,
+        check_packaged_app_bundle=True,
+        allow_binary_targets=True,
+    )
+
+    assert verifier.Finding(
+        license_path,
+        "packaged Cua Driver license SHA256 does not match the lock",
+    ) in findings
+
+
+def test_verifier_rejects_packaged_cua_driver_without_embedded_manifest_contract(tmp_path):
+    app_dir = _write_packaged_app_bundle(tmp_path)
+    binary_path = (
+        app_dir
+        / verifier.PACKAGED_CUA_DRIVER_RELATIVE_DIR
+        / verifier.PACKAGED_CUA_DRIVER_BINARY_RELATIVE_PATH
+    )
+    runtime_manifest = {
+        "schema_version": "1",
+        "binary_version": "0.7.1",
+        "mcp_invocation": {"args": ["mcp"]},
+        "subcommands": [{"name": "mcp", "args": []}],
+    }
+    binary_path.write_text(
+        "#!/bin/sh\n"
+        "if [ \"${1:-}\" = --version ]; then echo 'cua-driver 0.7.1'; exit 0; fi\n"
+        "if [ \"${1:-}\" = manifest ]; then cat <<'JSON'\n"
+        f"{json.dumps(runtime_manifest)}\n"
+        "JSON\n"
+        "exit 0\n"
+        "fi\n"
+        "exit 2\n",
+        encoding="utf-8",
+    )
+    binary_path.chmod(0o755)
+
+    findings = verifier.verify_release_artifacts(
+        root=tmp_path,
+        paths=[],
+        check_required_files=False,
+        check_release_security_guards=False,
+        check_packaged_app_bundle=True,
+        allow_binary_targets=True,
+    )
+
+    assert verifier.Finding(
+        binary_path,
+        "packaged Cua Driver runtime manifest lacks the embedded host contract",
+    ) in findings
+
+
+def test_verifier_accepts_packaged_app_bundle_from_explicit_resources_path(
+    monkeypatch,
+    tmp_path,
+):
+    _stub_packaged_cua_content_digest(monkeypatch)
     app_dir = _write_packaged_app_bundle(
         tmp_path,
         app_dir=tmp_path / "mounted" / verifier.PACKAGED_APP_NAME,
@@ -1319,6 +2905,367 @@ def test_verifier_accepts_packaged_app_bundle_from_explicit_resources_path(tmp_p
     assert findings == []
 
 
+def test_packaged_app_verifier_does_not_fallback_outside_explicit_release_scope(
+    monkeypatch,
+    tmp_path,
+):
+    _stub_packaged_cua_content_digest(monkeypatch)
+    _write_packaged_app_bundle(tmp_path)
+    release_dir = tmp_path / "release"
+    release_dir.mkdir()
+
+    findings = verifier._verify_packaged_app_bundle(
+        tmp_path,
+        [release_dir],
+    )
+
+    assert findings == [
+        verifier.Finding(
+            release_dir,
+            "explicit release verification paths must contain Oha-Yachiyo.app; "
+            "refusing to verify an unrelated dist/electron app bundle",
+        )
+    ]
+
+
+def _synthetic_signed_macho64(*, body: bytes, signature: bytes) -> bytes:
+    header_size = 32
+    command_size = 16
+    signature_offset = header_size + command_size + len(body)
+    header = struct.pack(
+        "<IiiIIIII",
+        0xFEEDFACF,
+        0x0100000C,
+        0,
+        2,
+        1,
+        command_size,
+        0,
+        0,
+    )
+    signature_command = struct.pack(
+        "<IIII",
+        verifier._LC_CODE_SIGNATURE,
+        command_size,
+        signature_offset,
+        len(signature),
+    )
+    return header + signature_command + body + signature
+
+
+def test_verifier_ignores_legacy_identity_only_inside_macho_code_signature(
+    tmp_path,
+):
+    binary_path = tmp_path / "Oha-Yachiyo"
+    binary_path.write_bytes(
+        _synthetic_signed_macho64(
+            body=b"\0current product content\0",
+            signature=b"\0Hermes-Yachiyo Self Signed\0",
+        )
+    )
+
+    findings = verifier.verify_release_artifacts(
+        root=tmp_path,
+        paths=[binary_path],
+        check_required_files=False,
+        check_release_security_guards=False,
+        allow_binary_targets=True,
+    )
+
+    assert findings == []
+
+
+def test_verifier_still_rejects_legacy_identity_in_signed_macho_content(
+    tmp_path,
+):
+    binary_path = tmp_path / "Oha-Yachiyo"
+    binary_path.write_bytes(
+        _synthetic_signed_macho64(
+            body=b"\0Hermes-Yachiyo product content\0",
+            signature=b"\0Oha-Yachiyo Self Signed\0",
+        )
+    )
+
+    findings = verifier.verify_release_artifacts(
+        root=tmp_path,
+        paths=[binary_path],
+        check_required_files=False,
+        check_release_security_guards=False,
+        allow_binary_targets=True,
+    )
+
+    assert verifier.Finding(
+        binary_path,
+        "contains legacy product token 'Hermes-Yachiyo'",
+    ) in findings
+
+
+def test_verifier_allows_locked_packaged_cua_legacy_content_only_at_exact_path(
+    monkeypatch,
+    tmp_path,
+):
+    _stub_packaged_cua_content_digest(monkeypatch)
+    app_dir = _write_packaged_app_bundle(tmp_path)
+    binary_path = (
+        app_dir
+        / verifier.PACKAGED_CUA_DRIVER_RELATIVE_DIR
+        / verifier.PACKAGED_CUA_DRIVER_BINARY_RELATIVE_PATH
+    )
+    binary_path.write_text(
+        binary_path.read_text("utf-8") + "\n# Hermes Agent hermes/config hermes-agent\n",
+        encoding="utf-8",
+    )
+    binary_path.chmod(0o755)
+
+    findings = verifier.verify_release_artifacts(
+        root=tmp_path,
+        paths=[app_dir / "Contents" / "Resources"],
+        check_required_files=False,
+        check_release_security_guards=False,
+        check_packaged_app_bundle=True,
+        allow_binary_targets=True,
+    )
+
+    assert findings == []
+
+
+@pytest.mark.parametrize(
+    "relative_path",
+    (
+        Path("Contents/Resources/computer-use/macos/cua-driver-sibling"),
+        Path("Contents/Resources/other/cua-driver"),
+    ),
+)
+def test_verifier_still_rejects_legacy_content_outside_exact_packaged_cua_path(
+    monkeypatch,
+    tmp_path,
+    relative_path,
+):
+    _stub_packaged_cua_content_digest(monkeypatch)
+    app_dir = _write_packaged_app_bundle(tmp_path)
+    other_binary = app_dir / relative_path
+    other_binary.parent.mkdir(parents=True, exist_ok=True)
+    other_binary.write_bytes(b"\x00Hermes Agent\x00hermes/config\x00hermes-agent\x00")
+
+    findings = verifier.verify_release_artifacts(
+        root=tmp_path,
+        paths=[app_dir / "Contents" / "Resources"],
+        check_required_files=False,
+        check_release_security_guards=False,
+        check_packaged_app_bundle=True,
+        allow_binary_targets=True,
+    )
+
+    assert any(
+        finding.path == other_binary and "contains legacy product token" in finding.message
+        for finding in findings
+    )
+
+
+def test_verifier_does_not_exempt_packaged_cua_content_without_packaged_check(
+    tmp_path,
+):
+    app_dir = _write_packaged_app_bundle(tmp_path)
+    binary_path = (
+        app_dir
+        / verifier.PACKAGED_CUA_DRIVER_RELATIVE_DIR
+        / verifier.PACKAGED_CUA_DRIVER_BINARY_RELATIVE_PATH
+    )
+    binary_path.write_bytes(b"\x00Hermes Agent\x00")
+
+    findings = verifier.verify_release_artifacts(
+        root=tmp_path,
+        paths=[binary_path],
+        check_required_files=False,
+        check_release_security_guards=False,
+        check_packaged_app_bundle=False,
+        allow_binary_targets=True,
+    )
+
+    assert verifier.Finding(
+        binary_path,
+        "contains legacy product token 'Hermes Agent'",
+    ) in findings
+
+
+def test_verifier_does_not_exempt_cua_shaped_path_in_another_app(tmp_path):
+    binary_path = (
+        tmp_path
+        / "Other.app"
+        / verifier.PACKAGED_CUA_DRIVER_RELATIVE_DIR
+        / verifier.PACKAGED_CUA_DRIVER_BINARY_RELATIVE_PATH
+    )
+    binary_path.parent.mkdir(parents=True)
+    binary_path.write_bytes(b"\x00Hermes Agent\x00")
+
+    findings = verifier.verify_release_artifacts(
+        root=tmp_path,
+        paths=[binary_path],
+        check_required_files=False,
+        check_release_security_guards=False,
+        check_packaged_app_bundle=True,
+        allow_binary_targets=True,
+    )
+
+    assert verifier.Finding(
+        binary_path,
+        "contains legacy product token 'Hermes Agent'",
+    ) in findings
+
+
+def test_verifier_keeps_path_token_scan_for_exact_packaged_cua_path(tmp_path):
+    binary_path = (
+        tmp_path
+        / "Hermes Agent.app"
+        / verifier.PACKAGED_CUA_DRIVER_RELATIVE_DIR
+        / verifier.PACKAGED_CUA_DRIVER_BINARY_RELATIVE_PATH
+    )
+    binary_path.parent.mkdir(parents=True)
+    binary_path.write_bytes(b"\x00Hermes Agent\x00")
+
+    findings = verifier.verify_release_artifacts(
+        root=tmp_path,
+        paths=[binary_path],
+        check_required_files=False,
+        check_release_security_guards=False,
+        check_packaged_app_bundle=True,
+        allow_binary_targets=True,
+    )
+
+    assert verifier.Finding(
+        binary_path,
+        "path contains legacy product token 'Hermes Agent'",
+    ) in findings
+
+
+def test_verifier_rejects_packaged_cua_content_digest_mismatch(monkeypatch, tmp_path):
+    _stub_packaged_cua_content_digest(monkeypatch, digest="d" * 64)
+    app_dir = _write_packaged_app_bundle(tmp_path)
+    binary_path = (
+        app_dir
+        / verifier.PACKAGED_CUA_DRIVER_RELATIVE_DIR
+        / verifier.PACKAGED_CUA_DRIVER_BINARY_RELATIVE_PATH
+    )
+
+    findings = verifier.verify_release_artifacts(
+        root=tmp_path,
+        paths=[],
+        check_required_files=False,
+        check_release_security_guards=False,
+        check_packaged_app_bundle=True,
+        allow_binary_targets=True,
+    )
+
+    assert verifier.Finding(
+        binary_path,
+        "packaged Cua Driver canonical content SHA256 does not match the lock",
+    ) in findings
+
+
+def test_verifier_rejects_packaged_cua_manifest_content_digest_mismatch(
+    monkeypatch,
+    tmp_path,
+):
+    _stub_packaged_cua_content_digest(monkeypatch)
+    app_dir = _write_packaged_app_bundle(tmp_path)
+    manifest_path = (
+        app_dir
+        / verifier.PACKAGED_CUA_DRIVER_RELATIVE_DIR
+        / verifier.PACKAGED_CUA_DRIVER_MANIFEST_NAME
+    )
+    manifest = json.loads(manifest_path.read_text("utf-8"))
+    manifest["binary"]["content_sha256"] = "d" * 64
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+
+    findings = verifier.verify_release_artifacts(
+        root=tmp_path,
+        paths=[],
+        check_required_files=False,
+        check_release_security_guards=False,
+        check_packaged_app_bundle=True,
+        allow_binary_targets=True,
+    )
+
+    assert verifier.Finding(
+        manifest_path,
+        "packaged Cua Driver manifest does not match the dependency lock",
+    ) in findings
+
+
+@pytest.mark.parametrize(
+    ("error", "error_name"),
+    (
+        (FileNotFoundError("codesign missing"), "FileNotFoundError"),
+        (RuntimeError("codesign failed"), "RuntimeError"),
+    ),
+)
+def test_verifier_fails_closed_when_packaged_cua_canonicalization_fails(
+    monkeypatch,
+    tmp_path,
+    error,
+    error_name,
+):
+    def fail_digest(_path):
+        raise error
+
+    monkeypatch.setattr(
+        verifier,
+        "_sha256_macho_without_code_signature",
+        fail_digest,
+    )
+    app_dir = _write_packaged_app_bundle(tmp_path)
+    binary_path = (
+        app_dir
+        / verifier.PACKAGED_CUA_DRIVER_RELATIVE_DIR
+        / verifier.PACKAGED_CUA_DRIVER_BINARY_RELATIVE_PATH
+    )
+
+    findings = verifier.verify_release_artifacts(
+        root=tmp_path,
+        paths=[],
+        check_required_files=False,
+        check_release_security_guards=False,
+        check_packaged_app_bundle=True,
+        allow_binary_targets=True,
+    )
+
+    assert verifier.Finding(
+        binary_path,
+        f"packaged Cua Driver canonical content hash check failed: {error_name}",
+    ) in findings
+
+
+def test_packaged_cua_canonicalization_uses_disposable_copy_and_safe_codesign_argv(
+    monkeypatch,
+    tmp_path,
+):
+    binary_path = tmp_path / verifier.PACKAGED_CUA_DRIVER_BINARY_NAME
+    original_bytes = b"not-a-real-mach-o"
+    binary_path.write_bytes(original_bytes)
+    captured = {}
+
+    def fake_run(argv, **kwargs):
+        captured["argv"] = argv
+        captured["kwargs"] = kwargs
+        copied_path = Path(argv[-1])
+        assert copied_path != binary_path
+        assert copied_path.read_bytes() == original_bytes
+        return SimpleNamespace(returncode=1, stdout="", stderr="invalid Mach-O")
+
+    monkeypatch.setattr(verifier.subprocess, "run", fake_run)
+
+    with pytest.raises(RuntimeError, match="codesign --remove-signature failed"):
+        verifier._sha256_macho_without_code_signature(binary_path)
+
+    assert captured["argv"][:2] == ["/usr/bin/codesign", "--remove-signature"]
+    assert (
+        captured["kwargs"]["timeout"]
+        == verifier.PACKAGED_EXECUTABLE_SMOKE_TIMEOUT_SECONDS
+    )
+    assert "shell" not in captured["kwargs"]
+    assert binary_path.read_bytes() == original_bytes
+
+
 def test_verifier_reports_incomplete_packaged_app_bundle(tmp_path):
     app_dir = _write_packaged_app_bundle(
         tmp_path,
@@ -1327,6 +3274,7 @@ def test_verifier_reports_incomplete_packaged_app_bundle(tmp_path):
         backend_mode=0o644,
         desktop_provider_mode=0o644,
         desktop_bridge_mode=0o644,
+        cua_driver_mode=0o644,
         include_asar=False,
     )
 
@@ -1343,6 +3291,7 @@ def test_verifier_reports_incomplete_packaged_app_bundle(tmp_path):
     assert f"packaged app bundle identifier must be {verifier.PACKAGED_APP_IDENTIFIER}" in messages
     assert "packaged app main executable is not executable" in messages
     assert "packaged backend executable is not executable" in messages
+    assert "packaged Cua Driver binary is not executable" in messages
     assert "packaged virtual desktop guest provider is not executable" in messages
     assert "packaged virtual desktop host bridge is not executable" in messages
     assert verifier.Finding(
@@ -1386,6 +3335,273 @@ def test_verifier_reports_packaged_backend_missing_build_metadata(tmp_path):
     assert verifier.Finding(
         app_dir / verifier.PACKAGED_BACKEND_RELATIVE_PATH,
         "packaged backend executable must include the app build metadata resource",
+    ) in findings
+
+
+def test_verifier_accepts_packaged_onedir_backend_build_metadata(monkeypatch, tmp_path):
+    _stub_packaged_cua_content_digest(monkeypatch)
+    app_dir = _write_packaged_app_bundle(tmp_path, include_backend_metadata=False)
+    metadata_path = app_dir / verifier.PACKAGED_BACKEND_BUILD_METADATA_RELATIVE_PATH
+    metadata_path.parent.mkdir(parents=True, exist_ok=True)
+    metadata_path.write_text(json.dumps({"channel": "stable"}), encoding="utf-8")
+
+    findings = verifier.verify_release_artifacts(
+        root=tmp_path,
+        paths=[],
+        check_required_files=False,
+        check_release_security_guards=False,
+        check_packaged_app_bundle=True,
+        allow_binary_targets=True,
+    )
+
+    assert findings == []
+
+
+@pytest.mark.parametrize(
+    ("backend_display", "requirement", "expected_message"),
+    (
+        (
+            "Identifier=io.github.arisataki.oha-yachiyo.backend\nSignature=adhoc\n",
+            'designated => identifier "io.github.arisataki.oha-yachiyo.backend" and anchor trusted\n',
+            "packaged backend executable must not use an ad-hoc signature",
+        ),
+        (
+            "Identifier=io.github.arisataki.oha-yachiyo.backend-dev\nSignature=Authority-signed\n",
+            'designated => identifier "io.github.arisataki.oha-yachiyo.backend-dev" and anchor trusted\n',
+            f"packaged backend executable must use the stable identifier {verifier.PACKAGED_BACKEND_IDENTIFIER}",
+        ),
+        (
+            "Identifier=io.github.arisataki.oha-yachiyo.backend\nSignature=Authority-signed\n",
+            'designated => cdhash H"1234567890ABCDEF"\n',
+            "packaged backend executable designated requirement must not be cdhash-only",
+        ),
+    ),
+)
+def test_verifier_rejects_packaged_backend_signing_regressions(
+    monkeypatch,
+    tmp_path,
+    backend_display,
+    requirement,
+    expected_message,
+):
+    _stub_packaged_cua_content_digest(monkeypatch)
+    _write_packaged_app_bundle(tmp_path, include_backend_metadata=False)
+    def fake_display(path):
+        if Path(path).name == verifier.PACKAGED_APP_NAME:
+            return "Authority=Oha-Yachiyo Self Signed\n"
+        return backend_display
+
+    monkeypatch.setattr(verifier, "_read_codesign_display", fake_display)
+    monkeypatch.setattr(
+        verifier,
+        "_read_codesign_designated_requirement",
+        lambda _path: requirement,
+    )
+
+    findings = verifier.verify_release_artifacts(
+        root=tmp_path,
+        paths=[],
+        check_required_files=False,
+        check_release_security_guards=False,
+        check_packaged_app_bundle=True,
+        allow_binary_targets=True,
+    )
+
+    assert any(finding.message == expected_message for finding in findings)
+
+
+def test_verifier_checks_standalone_backend_signature(monkeypatch, tmp_path):
+    standalone_backend = tmp_path / "dist" / "backend" / "oha-yachiyo-backend"
+    standalone_backend.parent.mkdir(parents=True, exist_ok=True)
+    standalone_backend.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    standalone_backend.chmod(0o755)
+    monkeypatch.setattr(verifier, "_run_codesign_verify", lambda _path, *, deep=False: None)
+    monkeypatch.setattr(
+        verifier,
+        "_read_codesign_display",
+        lambda _path: (
+            f"Identifier={verifier.PACKAGED_BACKEND_IDENTIFIER}\n"
+            "Signature=Authority-signed\n"
+        ),
+    )
+    monkeypatch.setattr(
+        verifier,
+        "_read_codesign_designated_requirement",
+        lambda _path: (
+            "designated => "
+            f'identifier "{verifier.PACKAGED_BACKEND_IDENTIFIER}" and anchor trusted\n'
+        ),
+    )
+    monkeypatch.setattr(
+        verifier,
+        "_read_codesign_entitlements",
+        lambda _path: dict(verifier.PACKAGED_BACKEND_EXPECTED_ENTITLEMENTS),
+    )
+
+    findings = verifier.verify_release_artifacts(
+        root=tmp_path,
+        paths=[standalone_backend],
+        check_required_files=False,
+        check_release_security_guards=False,
+        allow_binary_targets=True,
+    )
+
+    assert findings == []
+
+
+def test_verifier_accepts_self_signed_backend_display_without_signature_field(
+    monkeypatch,
+    tmp_path,
+):
+    _stub_packaged_cua_content_digest(monkeypatch)
+    _write_packaged_app_bundle(tmp_path)
+
+    def fake_display(path):
+        if Path(path).name == verifier.PACKAGED_APP_NAME:
+            return "Authority=Oha-Yachiyo Self Signed\n"
+        return (
+            f"Identifier={verifier.PACKAGED_BACKEND_IDENTIFIER}\n"
+            "Authority=Oha-Yachiyo Self Signed\n"
+            "TeamIdentifier=LOCALTEAM\n"
+        )
+
+    monkeypatch.setattr(verifier, "_read_codesign_display", fake_display)
+    monkeypatch.setattr(
+        verifier,
+        "_read_codesign_designated_requirement",
+        lambda _path: (
+            "designated => "
+            f'identifier "{verifier.PACKAGED_BACKEND_IDENTIFIER}" and anchor trusted\n'
+        ),
+    )
+
+    findings = verifier.verify_release_artifacts(
+        root=tmp_path,
+        paths=[],
+        check_required_files=False,
+        check_release_security_guards=False,
+        check_packaged_app_bundle=True,
+        allow_binary_targets=True,
+    )
+
+    assert findings == []
+
+
+def test_verifier_allows_outer_adhoc_backend_cdhash_requirement(monkeypatch, tmp_path):
+    _stub_packaged_cua_content_digest(monkeypatch)
+    _write_packaged_app_bundle(tmp_path)
+
+    def fake_display(path):
+        if Path(path).name == verifier.PACKAGED_APP_NAME:
+            return "Signature=adhoc\n"
+        return (
+            f"Identifier={verifier.PACKAGED_BACKEND_IDENTIFIER}\n"
+            "Signature=adhoc\n"
+        )
+
+    monkeypatch.setattr(verifier, "_read_codesign_display", fake_display)
+    monkeypatch.setattr(
+        verifier,
+        "_read_codesign_designated_requirement",
+        lambda _path: 'designated => cdhash H"1234567890ABCDEF"\n',
+    )
+
+    findings = verifier.verify_release_artifacts(
+        root=tmp_path,
+        paths=[],
+        check_required_files=False,
+        check_release_security_guards=False,
+        check_packaged_app_bundle=True,
+        allow_binary_targets=True,
+    )
+
+    assert findings == []
+
+
+@pytest.mark.parametrize(
+    ("metadata_text", "expected_message"),
+    (
+        ("{", "packaged backend app build metadata is not valid JSON: JSONDecodeError"),
+        ("[]", "packaged backend app build metadata must contain one JSON object"),
+    ),
+)
+def test_verifier_rejects_invalid_packaged_onedir_backend_build_metadata(
+    monkeypatch,
+    tmp_path,
+    metadata_text,
+    expected_message,
+):
+    _stub_packaged_cua_content_digest(monkeypatch)
+    app_dir = _write_packaged_app_bundle(tmp_path, include_backend_metadata=False)
+    metadata_path = app_dir / verifier.PACKAGED_BACKEND_BUILD_METADATA_RELATIVE_PATH
+    metadata_path.parent.mkdir(parents=True, exist_ok=True)
+    metadata_path.write_text(metadata_text, encoding="utf-8")
+
+    findings = verifier.verify_release_artifacts(
+        root=tmp_path,
+        paths=[],
+        check_required_files=False,
+        check_release_security_guards=False,
+        check_packaged_app_bundle=True,
+        allow_binary_targets=True,
+    )
+
+    assert verifier.Finding(metadata_path, expected_message) in findings
+
+
+def test_verifier_rejects_symlinked_packaged_onedir_backend_build_metadata(
+    monkeypatch,
+    tmp_path,
+):
+    _stub_packaged_cua_content_digest(monkeypatch)
+    app_dir = _write_packaged_app_bundle(tmp_path, include_backend_metadata=False)
+    metadata_path = app_dir / verifier.PACKAGED_BACKEND_BUILD_METADATA_RELATIVE_PATH
+    metadata_path.parent.mkdir(parents=True, exist_ok=True)
+    external_metadata = tmp_path / "external-build-metadata.json"
+    external_metadata.write_text(json.dumps({"channel": "stable"}), encoding="utf-8")
+    metadata_path.symlink_to(external_metadata)
+
+    findings = verifier.verify_release_artifacts(
+        root=tmp_path,
+        paths=[],
+        check_required_files=False,
+        check_release_security_guards=False,
+        check_packaged_app_bundle=True,
+        allow_binary_targets=True,
+    )
+
+    assert verifier.Finding(
+        metadata_path,
+        "packaged backend app build metadata must not be a symlink",
+    ) in findings
+
+
+def test_verifier_rejects_unreadable_packaged_onedir_backend_build_metadata(
+    monkeypatch,
+    tmp_path,
+):
+    _stub_packaged_cua_content_digest(monkeypatch)
+    app_dir = _write_packaged_app_bundle(tmp_path, include_backend_metadata=False)
+    metadata_path = app_dir / verifier.PACKAGED_BACKEND_BUILD_METADATA_RELATIVE_PATH
+    metadata_path.parent.mkdir(parents=True, exist_ok=True)
+    metadata_path.write_text(json.dumps({"channel": "stable"}), encoding="utf-8")
+    metadata_path.chmod(0)
+
+    try:
+        findings = verifier.verify_release_artifacts(
+            root=tmp_path,
+            paths=[],
+            check_required_files=False,
+            check_release_security_guards=False,
+            check_packaged_app_bundle=True,
+            allow_binary_targets=True,
+        )
+    finally:
+        metadata_path.chmod(0o644)
+
+    assert verifier.Finding(
+        metadata_path,
+        "packaged backend app build metadata is not readable",
     ) in findings
 
 
@@ -1475,20 +3691,50 @@ def test_verifier_rejects_packaged_desktop_bridge_with_invalid_cli(tmp_path):
 
 def test_dynamic_packaged_selector_gate_covers_release_electron_smoke_selectors():
     missing = sorted(
-        _explicit_smoke_selectors()
+        (
+            _explicit_smoke_selectors()
+            - set(verifier.PACKAGED_UI_E2E_FORBIDDEN_SELECTORS)
+        )
         - set(verifier._packaged_ui_e2e_required_selectors(verifier.ROOT))
     )
 
     assert missing == []
+    assert set(verifier.PACKAGED_UI_E2E_FORBIDDEN_SELECTORS).isdisjoint(
+        verifier._packaged_ui_e2e_required_selectors(verifier.ROOT)
+    )
+
+
+def test_packaged_selector_gate_forbids_consumer_hidden_launcher_internals():
+    consumer_hidden = {
+        f"{surface}-launcher-agent-task-{suffix}"
+        for surface in ("bubble", "live2d")
+        for suffix in (
+            "open-studio",
+            "planner-summary",
+            "progress",
+            "runtime-debug",
+        )
+    }
+
+    assert consumer_hidden <= set(verifier.PACKAGED_UI_E2E_FORBIDDEN_SELECTORS)
+    assert consumer_hidden.isdisjoint(
+        verifier._packaged_ui_e2e_required_selectors(verifier.ROOT)
+    )
 
 
 def test_dynamic_packaged_attribute_gate_covers_release_electron_smoke_attributes():
     missing = sorted(
-        _explicit_smoke_data_attributes()
+        (
+            _explicit_smoke_data_attributes()
+            - set(verifier.PACKAGED_UI_E2E_FORBIDDEN_DATA_ATTRIBUTES)
+        )
         - set(verifier._packaged_ui_e2e_required_data_attributes(verifier.ROOT))
     )
 
     assert missing == []
+    assert set(verifier.PACKAGED_UI_E2E_FORBIDDEN_DATA_ATTRIBUTES).isdisjoint(
+        verifier._packaged_ui_e2e_required_data_attributes(verifier.ROOT)
+    )
 
 
 def test_release_electron_smoke_runner_discovers_expected_scripts():
@@ -1807,10 +4053,6 @@ def test_verifier_reports_packaged_app_missing_ui_e2e_selector(tmp_path):
     ) in findings
     assert verifier.Finding(
         asar_path,
-        "packaged Electron app.asar must include UI E2E selector 'chat-message-activity-open-run-detail'",
-    ) in findings
-    assert verifier.Finding(
-        asar_path,
         "packaged Electron app.asar must include UI E2E selector 'chat-image-viewer-backdrop'",
     ) in findings
     assert verifier.Finding(
@@ -1847,10 +4089,6 @@ def test_verifier_reports_packaged_app_missing_ui_e2e_selector(tmp_path):
     ) in findings
     assert verifier.Finding(
         asar_path,
-        "packaged Electron app.asar must include UI E2E selector 'chat-message-open-run-detail'",
-    ) in findings
-    assert verifier.Finding(
-        asar_path,
         "packaged Electron app.asar must include UI E2E selector 'chat-message-copy'",
     ) in findings
     assert verifier.Finding(
@@ -1875,7 +4113,15 @@ def test_verifier_reports_packaged_app_missing_ui_e2e_selector(tmp_path):
     ) in findings
     assert verifier.Finding(
         asar_path,
-        "packaged Electron app.asar must include UI E2E selector 'chat-composer-approval-reject'",
+        "packaged Electron app.asar must include UI E2E selector 'chat-composer-approval-canonical-hint'",
+    ) in findings
+    assert verifier.Finding(
+        asar_path,
+        "packaged Electron app.asar must include UI E2E selector 'yachiyo-task-approval-approve'",
+    ) in findings
+    assert verifier.Finding(
+        asar_path,
+        "packaged Electron app.asar must include UI E2E selector 'yachiyo-task-approval-reject'",
     ) in findings
     assert verifier.Finding(
         asar_path,
@@ -2048,7 +4294,11 @@ def test_verifier_reports_packaged_app_missing_required_run_handoff_data_attribu
     ) in findings
 
 
-def test_verifier_reports_packaged_app_development_only_ui_e2e_hook(tmp_path):
+def test_verifier_reports_packaged_app_development_only_ui_e2e_hook(
+    monkeypatch,
+    tmp_path,
+):
+    _stub_packaged_cua_content_digest(monkeypatch)
     app_dir = _write_packaged_app_bundle(tmp_path)
     asar_path = app_dir / verifier.PACKAGED_ASAR_RELATIVE_PATH
     asar_path.write_bytes(
@@ -2074,6 +4324,62 @@ def test_verifier_reports_packaged_app_development_only_ui_e2e_hook(tmp_path):
         verifier.Finding(
             asar_path,
             "packaged Electron app.asar must not include development-only UI E2E hook 'oha-chat-e2e-add-image'",
+        )
+    ]
+
+
+def test_verifier_reports_packaged_app_deprecated_ui_e2e_selector(
+    monkeypatch,
+    tmp_path,
+):
+    _stub_packaged_cua_content_digest(monkeypatch)
+    app_dir = _write_packaged_app_bundle(tmp_path)
+    asar_path = app_dir / verifier.PACKAGED_ASAR_RELATIVE_PATH
+    deprecated_selector = verifier.PACKAGED_UI_E2E_FORBIDDEN_SELECTORS[0]
+    with asar_path.open("ab") as asar:
+        asar.write(b"\n" + deprecated_selector.encode("utf-8"))
+
+    findings = verifier.verify_release_artifacts(
+        root=tmp_path,
+        paths=[],
+        check_required_files=False,
+        check_release_security_guards=False,
+        check_packaged_app_bundle=True,
+        allow_binary_targets=True,
+    )
+
+    assert findings == [
+        verifier.Finding(
+            asar_path,
+            f"packaged Electron app.asar must not include deprecated UI E2E selector {deprecated_selector!r}",
+        )
+    ]
+
+
+def test_verifier_reports_packaged_app_deprecated_ui_e2e_data_attribute(
+    monkeypatch,
+    tmp_path,
+):
+    _stub_packaged_cua_content_digest(monkeypatch)
+    app_dir = _write_packaged_app_bundle(tmp_path)
+    asar_path = app_dir / verifier.PACKAGED_ASAR_RELATIVE_PATH
+    deprecated_attribute = verifier.PACKAGED_UI_E2E_FORBIDDEN_DATA_ATTRIBUTES[0]
+    with asar_path.open("ab") as asar:
+        asar.write(b"\n" + deprecated_attribute.encode("utf-8"))
+
+    findings = verifier.verify_release_artifacts(
+        root=tmp_path,
+        paths=[],
+        check_required_files=False,
+        check_release_security_guards=False,
+        check_packaged_app_bundle=True,
+        allow_binary_targets=True,
+    )
+
+    assert findings == [
+        verifier.Finding(
+            asar_path,
+            f"packaged Electron app.asar must not include deprecated UI E2E data attribute {deprecated_attribute!r}",
         )
     ]
 
@@ -2471,6 +4777,25 @@ def test_verifier_requires_release_workflow_dmg_app_startup_smoke(tmp_path):
         "macOS release workflow must launch the app inside DMG artifacts during RC verification"
         in messages
     )
+
+
+def test_verifier_requires_release_workflow_electron_native_focus_smoke(tmp_path):
+    workflow = tmp_path / verifier.RELEASE_WORKFLOW_FILE
+    workflow.parent.mkdir(parents=True)
+    current_workflow = (verifier.ROOT / verifier.RELEASE_WORKFLOW_FILE).read_text(
+        encoding="utf-8"
+    )
+    workflow.write_text(
+        current_workflow.replace(" --run-electron-native-bridge-smoke", ""),
+        encoding="utf-8",
+    )
+
+    findings = verifier._verify_release_workflow_guards(tmp_path)
+
+    assert verifier.Finding(
+        workflow,
+        "macOS release workflow must verify a real foreground focus through the Electron native bridge",
+    ) in findings
 
 
 def test_verifier_requires_release_workflow_release_scan_after_metadata(tmp_path):
@@ -3050,14 +5375,17 @@ def test_verifier_requires_release_workflow_to_stage_and_upload_dmg_artifacts(tm
     messages = [finding.message for finding in findings]
 
     assert "macOS release workflow must stage the versioned DMG for final artifact scanning" in messages
-    assert "macOS release workflow must stage the latest DMG for final artifact scanning" in messages
+    assert (
+        "macOS release workflow must stage latest assets through the canonical release candidate builder"
+        in messages
+    )
     assert "macOS release workflow must compute a SHA256 checksum for the versioned DMG" in messages
     assert "macOS release workflow must upload release DMG artifacts" in messages
     assert "macOS release workflow must fail instead of choosing implicitly when multiple DMGs exist" in messages
     assert "macOS release workflow must upload release checksum artifacts" in messages
 
 
-def test_verifier_requires_release_workflow_latest_json_update_metadata_fields(tmp_path):
+def test_verifier_requires_release_workflow_to_delegate_latest_metadata(tmp_path):
     workflow = tmp_path / verifier.RELEASE_WORKFLOW_FILE
     workflow.parent.mkdir(parents=True)
     workflow.write_text(
@@ -3103,13 +5431,38 @@ def test_verifier_requires_release_workflow_latest_json_update_metadata_fields(t
     findings = verifier._verify_release_workflow_guards(tmp_path)
     messages = [finding.message for finding in findings]
 
-    assert "macOS release workflow must compute a SHA256 checksum for the latest DMG" in messages
-    assert "macOS release workflow latest JSON must include the release version" in messages
-    assert "macOS release workflow latest JSON must include the source commit" in messages
-    assert "macOS release workflow latest JSON must include the build number" in messages
-    assert "macOS release workflow latest JSON must include the DMG filename" in messages
-    assert "macOS release workflow latest JSON must include the latest DMG SHA256" in messages
-    assert "macOS release workflow latest JSON must include the DMG download URL" in messages
+    assert (
+        "macOS release workflow must delegate latest artifacts to the canonical release candidate builder"
+        in messages
+    )
+    assert (
+        "macOS release workflow must use the builder's explicit existing-artifact staging mode"
+        in messages
+    )
+    assert (
+        "macOS release workflow must bind content-bound signing evidence to the release candidate"
+        in messages
+    )
+    assert (
+        "macOS release workflow must not hand-write latest JSON outside the canonical release candidate builder"
+        in messages
+    )
+
+
+def test_release_workflow_uses_canonical_existing_artifact_staging_command():
+    workflow = (
+        Path(__file__).resolve().parents[1] / ".github/workflows/release-macos.yml"
+    ).read_text(encoding="utf-8")
+    metadata_step = verifier._release_workflow_step_block(
+        workflow,
+        "Prepare release metadata",
+    )
+
+    for required_text, _message in verifier.RELEASE_WORKFLOW_METADATA_REQUIRED_TEXT:
+        assert required_text in metadata_step
+    assert 'cat > "release/${LATEST_JSON}"' not in metadata_step
+    assert 'cp "release/${LATEST_ZIP}" "release/${VERSIONED_ZIP}"' in metadata_step
+    assert 'cp "${dmg_files[0]}" "release/${VERSIONED_DMG}"' in metadata_step
 
 
 def test_verifier_requires_release_workflow_signing_path_before_dmg_build(tmp_path):
@@ -3142,7 +5495,32 @@ def test_verifier_requires_release_workflow_signing_path_before_dmg_build(tmp_pa
     messages = [finding.message for finding in findings]
 
     assert "macOS release workflow must pass signing state into the Electron DMG build" in messages
+    assert "macOS release workflow must serialize publication per source ref" in messages
+    assert "macOS release workflow dispatch must make GitHub Release publication explicit" in messages
+    assert "macOS release workflow must validate publication channel against source branch" in messages
+    assert (
+        "macOS release workflow must gate publication validation behind push or explicit dispatch publication"
+        in messages
+    )
+    assert (
+        "macOS release workflow must success-gate both GitHub Release mutations after readiness enforcement"
+        in messages
+    )
+    assert "macOS release workflow must keep a no-certificate unsigned release path" in messages
+    assert "macOS release workflow must label the no-certificate path as unsigned" in messages
     assert "macOS release workflow must use the signed app build path when signing is configured" in messages
+    assert "macOS release workflow must inspect actual final DMG signing evidence" in messages
+    assert "macOS release workflow must derive signing metadata from the final DMG" in messages
+    assert (
+        "macOS release workflow must create a macOS-safe app ZIP through the canonical release candidate builder"
+        in messages
+    )
+    assert "macOS release workflow must verify the packaged app architecture" in messages
+    assert (
+        "macOS release workflow must normalize lipo x86_64 to Electron x64 architecture"
+        in messages
+    )
+    assert "macOS release workflow must upload the app ZIP" in messages
     assert "macOS release workflow must import signing material before building the DMG" in messages
     assert (
         "macOS release workflow must run the optional real virtual desktop smoke after guest build before signing"
@@ -3164,6 +5542,142 @@ def test_verifier_requires_release_workflow_signing_path_before_dmg_build(tmp_pa
     )
     assert (
         "macOS release workflow must merge real virtual desktop evidence into release smoke summary"
+        in messages
+    )
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "expected_message"),
+    [
+        (
+            "        id: release_smoke\n",
+            "",
+            "macOS release workflow must assign the release_smoke id to the final RC verification step",
+        ),
+        (
+            "      - name: Upload DMG artifact\n        if: always()\n",
+            "      - name: Upload DMG artifact\n",
+            "macOS release workflow must upload release evidence even when RC verification is incomplete",
+        ),
+        (
+            "        if: always() && (github.event_name == 'push' || inputs.publish_release == true)\n",
+            "        if: always()\n",
+            "macOS release workflow must enforce release-smoke readiness only for publication runs",
+        ),
+        (
+            "        if: success() && (github.event_name == 'push' || inputs.publish_release == true)\n",
+            "        if: github.event_name == 'push' || inputs.publish_release == true\n",
+            "macOS release workflow must success-gate both GitHub Release mutations after readiness enforcement",
+        ),
+    ],
+)
+def test_release_workflow_hard_gate_guards(
+    tmp_path,
+    old: str,
+    new: str,
+    expected_message: str,
+) -> None:
+    workflow = tmp_path / verifier.RELEASE_WORKFLOW_FILE
+    workflow.parent.mkdir(parents=True)
+    current = (verifier.ROOT / verifier.RELEASE_WORKFLOW_FILE).read_text(encoding="utf-8")
+    assert old in current
+    workflow.write_text(current.replace(old, new), encoding="utf-8")
+
+    messages = [
+        finding.message for finding in verifier._verify_release_workflow_guards(tmp_path)
+    ]
+
+    assert expected_message in messages
+
+
+@pytest.mark.parametrize(
+    ("old", "new", "expected_message"),
+    [
+        (
+            "          release_smoke_status=0\n",
+            "          echo release-smoke-status-initialized\n",
+            "macOS release workflow RC step must initialize release_smoke_status to zero",
+        ),
+        (
+            "            --output-markdown release/release-smoke.md || release_smoke_status=$?\n",
+            "            --output-markdown release/release-smoke.md || echo summary-failed\n",
+            "macOS release workflow RC step must capture release-smoke summary failures",
+        ),
+        (
+            "            release_smoke_status=1\n",
+            "            echo release-smoke-json-missing\n",
+            "macOS release workflow RC step must mark missing release-smoke JSON as failed",
+        ),
+        (
+            "            exit 1\n",
+            "            echo publication-would-have-failed\n",
+            "macOS release workflow readiness gate must exit 1 for missing or invalid status",
+        ),
+        (
+            "            release/electron-ui-smoke.json \\\n",
+            "",
+            "macOS release workflow final summary must consume Electron UI evidence before writing release-smoke outputs",
+        ),
+    ],
+)
+def test_release_workflow_status_and_electron_evidence_guards_reject_noops(
+    tmp_path,
+    old: str,
+    new: str,
+    expected_message: str,
+) -> None:
+    workflow = tmp_path / verifier.RELEASE_WORKFLOW_FILE
+    workflow.parent.mkdir(parents=True)
+    current = (verifier.ROOT / verifier.RELEASE_WORKFLOW_FILE).read_text(encoding="utf-8")
+    assert old in current
+    workflow.write_text(current.replace(old, new), encoding="utf-8")
+
+    messages = [
+        finding.message for finding in verifier._verify_release_workflow_guards(tmp_path)
+    ]
+
+    assert expected_message in messages
+
+
+def test_release_workflow_requires_packaged_chat_native_file_smoke_in_final_rc(
+    tmp_path,
+) -> None:
+    workflow = tmp_path / verifier.RELEASE_WORKFLOW_FILE
+    workflow.parent.mkdir(parents=True)
+    current = (verifier.ROOT / verifier.RELEASE_WORKFLOW_FILE).read_text(encoding="utf-8")
+    required_flag = " --run-dmg-chat-native-file-smoke"
+    assert required_flag in current
+    workflow.write_text(current.replace(required_flag, "", 1), encoding="utf-8")
+
+    messages = [
+        finding.message for finding in verifier._verify_release_workflow_guards(tmp_path)
+    ]
+
+    assert (
+        "macOS release workflow final RC must run the packaged Chat native file smoke"
+        in messages
+    )
+
+
+def test_release_workflow_requires_electron_ui_source_before_final_summary(tmp_path) -> None:
+    workflow = tmp_path / verifier.RELEASE_WORKFLOW_FILE
+    workflow.parent.mkdir(parents=True)
+    current = (verifier.ROOT / verifier.RELEASE_WORKFLOW_FILE).read_text(encoding="utf-8")
+    source = (
+        "python scripts/run_electron_ui_smokes.py "
+        "--report-json release/electron-ui-smoke.json"
+    )
+    assert source in current
+    mutated = current.replace(source, "echo electron-ui-smoke-deferred", 1)
+    mutated = f"{mutated}\n# late source\n{source}\n"
+    workflow.write_text(mutated, encoding="utf-8")
+
+    messages = [
+        finding.message for finding in verifier._verify_release_workflow_guards(tmp_path)
+    ]
+
+    assert (
+        "macOS release workflow must generate Electron UI evidence before final release-smoke summary"
         in messages
     )
 
@@ -3202,6 +5716,148 @@ def test_verifier_requires_release_workflow_first_launch_permission_guidance(tmp
     assert "macOS release workflow must document Gatekeeper first-launch handling" in messages
     assert "macOS release workflow must document the notarized Developer ID path" in messages
     assert "macOS release workflow must document screen recording permission setup" in messages
+
+
+@pytest.mark.parametrize(
+    ("required_text", "expected_message"),
+    [
+        (
+            "python scripts/prepare_cua_driver.py --clean",
+            "macOS release workflow must prepare the pinned Cua Driver after dependency installation",
+        ),
+        (
+            "tests/test_cua_embedded_distribution.py",
+            "macOS release workflow focused tests must cover embedded Cua distribution",
+        ),
+        (
+            "tests/test_prepare_cua_driver.py",
+            "macOS release workflow focused tests must cover Cua Driver preparation",
+        ),
+        (
+            "npm --prefix apps/frontend run test:cua-mcp-bridge",
+            "macOS release workflow must exercise the Electron-owned Cua bridge",
+        ),
+        (
+            "tests/test_cua_socket_transport.py",
+            "macOS release workflow focused tests must cover the backend Cua socket transport",
+        ),
+        (
+            "tests/test_agent_runtime_desktop_execution_providers.py",
+            "macOS release workflow focused tests must cover Cua bridge adapter reuse",
+        ),
+        (
+            'test ! -L "${packaged_cua_file}"',
+            "macOS release workflow must reject symlinked packaged Cua resources",
+        ),
+        (
+            'test ! -L "${packaged_cua_dir}"',
+            "macOS release workflow must reject symlinked packaged Cua resource directories",
+        ),
+        (
+            'test -d "${packaged_cua_dir}"',
+            "macOS release workflow must require real packaged Cua resource directories",
+        ),
+        (
+            'test -f "${packaged_cua_file}"',
+            "macOS release workflow must require packaged Cua resource files",
+        ),
+        (
+            'test -x "${cua_driver}"',
+            "macOS release workflow must require an executable packaged Cua Driver",
+        ),
+        (
+            '"${cua_driver}" --version',
+            "macOS release workflow must verify the packaged Cua Driver version",
+        ),
+        (
+            '"${cua_driver}" manifest',
+            "macOS release workflow must inspect the packaged Cua Driver manifest",
+        ),
+        (
+            '{"--embedded", "--host-bundle-id"}',
+            "macOS release workflow must require the embedded host manifest contract",
+        ),
+        (
+            'lipo -archs "${cua_driver}"',
+            "macOS release workflow must verify both packaged Cua Driver architectures",
+        ),
+        (
+            'codesign --verify --strict --verbose=2 "${cua_driver}"',
+            "macOS release workflow must verify the nested Cua Driver signature",
+        ),
+        (
+            'codesign -d --entitlements - --xml "${cua_driver}"',
+            "macOS release workflow must inspect the final Cua Driver entitlements",
+        ),
+        (
+            '"com.apple.security.automation.apple-events": True',
+            "macOS release workflow must require Apple Events for the Cua Driver",
+        ),
+        (
+            '"com.apple.security.device.screen-capture": True',
+            "macOS release workflow must require Screen Capture for the Cua Driver",
+        ),
+        (
+            "MACOS_SIGNING_MODE=self-signed-app-unsigned-dmg",
+            "macOS release workflow must ad-hoc sign no-certificate builds before verification",
+        ),
+        (
+            "tests/test_cua_background_provider.py",
+            "macOS release workflow must run the Cua background provider contract tests",
+        ),
+        (
+            "tests/test_background_desktop_safety.py",
+            "macOS release workflow must run background desktop safety tests",
+        ),
+    ],
+)
+def test_verifier_requires_embedded_cua_release_workflow_commands(
+    tmp_path,
+    required_text,
+    expected_message,
+):
+    workflow = tmp_path / verifier.RELEASE_WORKFLOW_FILE
+    workflow.parent.mkdir(parents=True)
+    current_workflow = (verifier.ROOT / verifier.RELEASE_WORKFLOW_FILE).read_text(
+        encoding="utf-8"
+    )
+    assert required_text in current_workflow
+    workflow.write_text(
+        current_workflow.replace(required_text, "removed-cua-release-guard", 1),
+        encoding="utf-8",
+    )
+
+    messages = [
+        finding.message
+        for finding in verifier._verify_release_workflow_guards(tmp_path)
+    ]
+
+    assert expected_message in messages
+
+
+def test_verifier_requires_cua_prepare_after_dependencies_before_tests(tmp_path):
+    workflow = tmp_path / verifier.RELEASE_WORKFLOW_FILE
+    workflow.parent.mkdir(parents=True)
+    current_workflow = (verifier.ROOT / verifier.RELEASE_WORKFLOW_FILE).read_text(
+        encoding="utf-8"
+    )
+    prepare_step = (
+        "      - name: Prepare embedded Cua Driver\n"
+        "        run: python scripts/prepare_cua_driver.py --clean\n\n"
+    )
+    assert prepare_step in current_workflow
+    late_workflow = current_workflow.replace(prepare_step, "", 1) + "\n" + prepare_step
+    workflow.write_text(late_workflow, encoding="utf-8")
+
+    messages = [
+        finding.message
+        for finding in verifier._verify_release_workflow_guards(tmp_path)
+    ]
+
+    assert (
+        "macOS release workflow must prepare the embedded Cua Driver after dependencies before focused tests"
+        in messages
+    )
 
 
 def _release_workflow_step_script(step_name: str) -> str:

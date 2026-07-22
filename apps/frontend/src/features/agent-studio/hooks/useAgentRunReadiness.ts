@@ -83,9 +83,12 @@ export function useAgentRunReadiness({
       agentToolCapabilitySummaries(draft, toolCatalog),
     );
     permissionNotices.forEach((message) => {
+      // Browser/CDP fallback is already explained above and on the Browser
+      // capability card. Do not duplicate it as a global desktop warning.
+      if (message === 'Browser: chrome_cdp') return;
       notices.push({
         tone: 'warn',
-        text: `桌面工具权限未就绪：${message}。可在 Tools 页查看诊断入口和 fallback。`,
+        text: `工具运行条件未就绪：${message}。可在 Tools 页查看诊断入口和 fallback。`,
       });
     });
     const hasTools = draft.allow_workspace_read

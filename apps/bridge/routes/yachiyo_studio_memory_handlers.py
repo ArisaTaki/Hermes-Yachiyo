@@ -14,9 +14,11 @@ from apps.bridge.routes.yachiyo_models import (
 )
 from apps.bridge.routes.yachiyo_services import (
     bad_request,
+    runtime_from_request,
     snapshot,
     studio_service,
 )
+from apps.shell.agent.runtime.memory_services import issue_user_memory_consent_capability
 from apps.shell.agent_runtime import AgentRuntimeError
 
 
@@ -61,6 +63,21 @@ async def update_memory(
             payload,
         )
         return snapshot(memory_snapshot)
+    except AgentRuntimeError as exc:
+        raise bad_request(exc) from exc
+
+
+async def issue_memory_consent_capability(
+    memory_id: str,
+    http_request: Request | None = None,
+) -> dict[str, Any]:
+    try:
+        runtime = runtime_from_request(http_request)
+        return await asyncio.to_thread(
+            issue_user_memory_consent_capability,
+            runtime.memory_services,
+            memory_id,
+        )
     except AgentRuntimeError as exc:
         raise bad_request(exc) from exc
 

@@ -16,12 +16,12 @@ from apps.shell.yachiyo_agent import (
     YachiyoAgentService,
 )
 from apps.shell.yachiyo_agent.legacy_tasks import LegacyRuntimePort
+from apps.shell.yachiyo_agent.replan_recovery_snapshots import (
+    replan_recovery_snapshots_from_runtime_execution_envelope,
+)
 from apps.shell.yachiyo_agent.runtime_execution import (
     runtime_execution_envelope_from_decision,
     runtime_execution_requests_from_envelope_payload,
-)
-from apps.shell.yachiyo_agent.replan_recovery_snapshots import (
-    replan_recovery_snapshots_from_runtime_execution_envelope,
 )
 from apps.shell.yachiyo_agent.task_cards import agent_task_snapshot_from_payload
 
@@ -408,6 +408,42 @@ class _ReplanRecoveryStudioPort(_FakeStudioExecutionPort):
         )
 
 
+class _IdempotentReplanRecoveryStudioPort(_ReplanRecoveryStudioPort):
+    def __init__(self) -> None:
+        super().__init__()
+        self.created_runs: list[dict[str, Any]] = []
+        self._runs_by_client_id: dict[str, dict[str, Any]] = {}
+
+    def get_run_timeline(self, run_id: str) -> dict[str, Any]:
+        self.calls.append(("get_run_timeline", run_id))
+        payload = _replan_recovery_task_payload(task_id=f"task-for-{run_id}")
+        payload["run_id"] = run_id
+        replan_payload = payload["events"][1]["payload"]
+        replan_payload["run_id"] = run_id
+        if run_id != "run-1":
+            replan_payload["request_id"] = "replan-2"
+            action = replan_payload["metadata"]["recovery_actions"][0]
+            action["action_id"] = "replan-2:action:1:desktop.list_apps"
+        return payload
+
+    def start_agent_run(self, request: dict[str, Any]) -> dict[str, Any]:
+        self.calls.append(("start_agent_run", request))
+        client_run_id = str(request.get("client_run_id") or "").strip()
+        if client_run_id and client_run_id in self._runs_by_client_id:
+            return dict(self._runs_by_client_id[client_run_id])
+        index = len(self.created_runs) + 1
+        run = _task_payload(
+            task_id=f"studio-recovery-task-{index}",
+            run_id=f"studio-recovery-run-{index}",
+            title=request.get("title") or "Recovery",
+            status="running",
+        )
+        self.created_runs.append(dict(run))
+        if client_run_id:
+            self._runs_by_client_id[client_run_id] = dict(run)
+        return run
+
+
 class _BlockedReplanRecoveryStudioPort(_ReplanRecoveryStudioPort):
     def get_run_timeline(self, run_id: str) -> dict[str, Any]:
         self.calls.append(("get_run_timeline", run_id))
@@ -513,6 +549,68 @@ class _PagedRuntimePort(_FakeRuntimePort):
                     "sequence": 7,
                     "payload": {"step": "read workspace"},
                 }
+            ],
+        }
+
+
+class _HiddenFirstPageToolNoiseRuntimePort(_FakeRuntimePort):
+    def get_task_event_page(
+        self,
+        task_id: str,
+        *,
+        after_sequence: int = 0,
+        limit: int = 200,
+    ) -> dict[str, Any]:
+        self.calls.append((
+            "get_task_event_page",
+            {
+                "task_id": task_id,
+                "after_sequence": after_sequence,
+                "limit": limit,
+            },
+        ))
+        return {
+            "run_id": "run-hidden-first-page",
+            "after_sequence": after_sequence,
+            "limit": limit,
+            "next_after_sequence": 1,
+            "has_more": True,
+            "events": [
+                {
+                    "event_type": "agent.tool.started",
+                    "sequence": 1,
+                    "payload": {"tool": "app.open"},
+                }
+            ],
+        }
+
+    def get_task_event_stream(self, task_id: str) -> dict[str, Any]:
+        self.calls.append(("get_task_event_stream", task_id))
+        return {
+            "run_id": "run-hidden-first-page",
+            "events": [
+                {
+                    "event_type": "agent.tool.started",
+                    "sequence": 1,
+                    "payload": {"tool": "app.open"},
+                },
+                {
+                    "event_type": "agent.desktop.permission_preflight",
+                    "sequence": 2,
+                    "payload": {
+                        "tool": "app.open",
+                        "permission_targets": ["accessibility"],
+                    },
+                },
+                {
+                    "event_type": "agent.tool.approval_required",
+                    "sequence": 3,
+                    "payload": {
+                        "tool": "app.open",
+                        "status": "approval_required",
+                    },
+                },
+                {"event_type": "task.completed", "sequence": 4},
             ],
         }
 
@@ -832,9 +930,121 @@ class _SensitiveTaskRuntimePort(_FakeRuntimePort):
                         "input_preview": {"path": "internal.md"},
                     },
                 },
-                {"event_type": "task.completed", "sequence": 5, "payload": {"step": "done"}},
+                {
+                    "event_type": "agent.model.followup_context",
+                    "sequence": 5,
+                    "visibility": "user",
+                    "sensitivity": "public",
+                    "payload": {"text": "INTERNAL MODEL INSTRUCTION"},
+                },
+                {
+                    "event_type": "agent.tool.call",
+                    "sequence": 6,
+                    "visibility": "user",
+                    "sensitivity": "public",
+                    "payload": {
+                        "tool": "desktop.read_ui",
+                        "source": "runtime_replan_recovery",
+                        "output_preview": "PRIVATE RECOVERY OBSERVATION",
+                    },
+                },
+                {"event_type": "task.completed", "sequence": 7, "payload": {"step": "done"}},
             ],
         }
+
+
+class _RawToolNoiseTaskRuntimePort(_FakeRuntimePort):
+    def __init__(self) -> None:
+        super().__init__()
+        self.raw_events = [
+            {"event_type": "task.started", "sequence": 1},
+            {
+                "event_type": "agent.desktop.intent_planned",
+                "sequence": 2,
+                "payload": {"tool": "app.open", "status": "planned"},
+            },
+            {
+                "event_type": "agent.tool.call",
+                "sequence": 3,
+                "payload": {
+                    "tool": "app.open",
+                    "input_preview": {"app_name": "Notes"},
+                    "result": {"ok": True},
+                },
+            },
+            {
+                "event_type": "agent.tool.started",
+                "sequence": 4,
+                "payload": {"tool": "app.open"},
+            },
+            {
+                "event_type": "agent.tool.skipped",
+                "sequence": 5,
+                "payload": {"tool": "desktop.verify", "status": "skipped"},
+            },
+            {
+                "event_type": "agent.tool.completed",
+                "sequence": 6,
+                "payload": {"tool": "app.open", "status": "completed"},
+            },
+            {
+                "event_type": "agent.tool.failed",
+                "sequence": 7,
+                "payload": {"tool": "desktop.verify", "status": "failed"},
+            },
+            {
+                "event_type": "tool.requested",
+                "sequence": 8,
+                "payload": {"tool": "app.open"},
+            },
+            {
+                "event_type": "tool.completed",
+                "sequence": 9,
+                "payload": {"tool": "app.open"},
+            },
+            {
+                "event_type": "agent.desktop.permission_preflight",
+                "sequence": 10,
+                "payload": {
+                    "tool": "app.open",
+                    "permission_targets": ["accessibility"],
+                },
+            },
+            {
+                "event_type": "agent.desktop.permission_recovery",
+                "sequence": 11,
+                "payload": {
+                    "tool": "app.open",
+                    "permission_targets": ["accessibility"],
+                },
+            },
+            {
+                "event_type": "agent.replan.requested",
+                "sequence": 12,
+                "payload": {
+                    "request_id": "replan-1",
+                    "trigger": "verification_failed",
+                },
+            },
+            {
+                "event_type": "agent.desktop.intent_unverified",
+                "sequence": 13,
+                "payload": {"tool": "app.open", "status": "unverified"},
+            },
+            {"event_type": "task.completed", "sequence": 14},
+        ]
+
+    def get_task_snapshot(self, task_id: str) -> dict[str, Any]:
+        self.calls.append(("get_task_snapshot", task_id))
+        return _task_payload(task_id=task_id, events=list(self.raw_events))
+
+    def get_task_timeline(self, task_id: str) -> dict[str, Any]:
+        self.calls.append(("get_task_timeline", task_id))
+        return _task_payload(task_id=task_id, timeline=list(self.raw_events))
+
+    def get_task_event_stream(self, task_id: str) -> dict[str, Any]:
+        self.calls.append(("get_task_event_stream", task_id))
+        return {"run_id": "run-raw-noise", "events": list(self.raw_events)}
 
 
 class _DesktopIntentTaskRuntimePort(_FakeRuntimePort):
@@ -918,6 +1128,48 @@ class _ReplanRecoveryTaskRuntimePort(_FakeRuntimePort):
             title=request.get("title") or "Recovery",
             status="running",
         )
+
+
+class _IdempotentReplanRecoveryTaskRuntimePort(_ReplanRecoveryTaskRuntimePort):
+    def __init__(self) -> None:
+        super().__init__()
+        self.created_tasks: list[dict[str, Any]] = []
+        self._tasks_by_client_id: dict[str, dict[str, Any]] = {}
+
+    def get_task_timeline(self, task_id: str) -> dict[str, Any]:
+        self.calls.append(("get_task_timeline", task_id))
+        payload = _replan_recovery_task_payload(task_id=task_id)
+        if task_id != "task-1":
+            replan_payload = payload["events"][1]["payload"]
+            replan_payload["request_id"] = "replan-2"
+            action = replan_payload["metadata"]["recovery_actions"][0]
+            action["action_id"] = "replan-2:action:1:desktop.list_apps"
+        return payload
+
+    def start_chat_task(self, request: dict[str, Any]) -> dict[str, Any]:
+        self.calls.append(("start_chat_task", request))
+        metadata = request.get("metadata") if isinstance(request.get("metadata"), dict) else {}
+        client_id = str(
+            request.get("client_run_id")
+            or request.get("client_message_id")
+            or request.get("client_task_id")
+            or metadata.get("client_message_id")
+            or ""
+        ).strip()
+        if client_id and client_id in self._tasks_by_client_id:
+            return dict(self._tasks_by_client_id[client_id])
+        index = len(self.created_tasks) + 1
+        task = _task_payload(
+            task_id=f"recovery-task-{index}",
+            run_id=f"recovery-run-{index}",
+            session_id=request.get("conversation_id") or "chat-1",
+            title=request.get("title") or "Recovery",
+            status="running",
+        )
+        self.created_tasks.append(dict(task))
+        if client_id:
+            self._tasks_by_client_id[client_id] = dict(task)
+        return task
 
 
 class _RuntimeBlockedDirectReplanTaskRuntimePort(_FakeRuntimePort):
@@ -1151,7 +1403,7 @@ def test_yachiyo_agent_service_maps_fake_runtime_to_task_snapshots() -> None:
     assert port.calls[1][1]["prompt"] == "Patch README"
 
 
-def test_legacy_runtime_readiness_exposes_local_desktop_provider(monkeypatch) -> None:
+def test_legacy_runtime_readiness_exposes_background_desktop_provider(monkeypatch) -> None:
     monkeypatch.delenv("OHA_YACHIYO_DESKTOP_PROVIDER_URL", raising=False)
     monkeypatch.delenv("OHA_YACHIYO_SANDBOX_DESKTOP_PROVIDER_URL", raising=False)
     monkeypatch.delenv("OHA_YACHIYO_DESKTOP_PROVIDER_EXECUTE_URL", raising=False)
@@ -1165,15 +1417,17 @@ def test_legacy_runtime_readiness_exposes_local_desktop_provider(monkeypatch) ->
         lambda: {},
     )
     monkeypatch.setattr(
-        "apps.shell.yachiyo_agent.legacy_tasks.local_desktop_execution_runtime_probe",
-        lambda: {
-            "checked": True,
-            "ok": True,
-            "broker_dispatch_verified": True,
-            "permission_probe_checked": True,
-            "discovery_verified": True,
-            "host_ready": True,
-            "blocking_conditions": [],
+        "apps.shell.yachiyo_agent.legacy_tasks.sandbox_desktop_provider_status",
+        lambda *_args, **_kwargs: {
+            "available": True,
+            "adapter_ready": True,
+            "provider_kind": "background_desktop",
+            "provider_id": "cua-driver",
+            "status": "available",
+            "supported_tools": ["app.open", "desktop.inspect_app"],
+            "keyboard_mouse_capture_supported": True,
+            "requires_real_sandbox_for": [],
+            "health": {"checked": True, "ok": True, "status": "healthy"},
         },
     )
 
@@ -1186,8 +1440,8 @@ def test_legacy_runtime_readiness_exposes_local_desktop_provider(monkeypatch) ->
 
     assert readiness["ok"] is True
     assert readiness["capabilities"]["desktop_provider_ready"] is True
-    assert provider["provider_kind"] == LOCAL_DESKTOP_PROVIDER_KIND
-    assert provider["provider_id"] == LOCAL_DESKTOP_PROVIDER_ID
+    assert provider["provider_kind"] == "background_desktop"
+    assert provider["provider_id"] == "cua-driver"
     assert provider["status"] == "available"
     assert provider["keyboard_mouse_capture_supported"] is True
     assert provider["requires_real_sandbox_for"] == []
@@ -1214,16 +1468,15 @@ def test_legacy_runtime_readiness_does_not_report_direct_desktop_ready_without_p
         lambda: {},
     )
     monkeypatch.setattr(
-        "apps.shell.yachiyo_agent.legacy_tasks.local_desktop_execution_runtime_probe",
-        lambda: {
-            "checked": True,
-            "ok": True,
-            "broker_dispatch_verified": True,
-            "permission_probe_checked": True,
-            "discovery_verified": True,
-            "host_ready": False,
-            "missing_permissions": ["accessibility"],
-            "blocking_conditions": ["local_desktop_permissions_required"],
+        "apps.shell.yachiyo_agent.legacy_tasks.sandbox_desktop_provider_status",
+        lambda *_args, **_kwargs: {
+            "available": False,
+            "adapter_ready": False,
+            "provider_kind": "background_desktop",
+            "provider_id": "cua-driver",
+            "status": "provider_required",
+            "supported_tools": [],
+            "health": {"checked": False, "ok": False, "status": "not_checked"},
         },
     )
 
@@ -1235,8 +1488,9 @@ def test_legacy_runtime_readiness_does_not_report_direct_desktop_ready_without_p
     provider = readiness["capabilities"]["sandbox_provider"]
 
     assert readiness["capabilities"]["desktop_provider_ready"] is False
-    assert provider["status"] == "available"
-    assert provider["health"]["status"] == "permission_required"
+    assert provider["provider_kind"] == "background_desktop"
+    assert provider["status"] == "provider_required"
+    assert provider["health"]["status"] == "not_checked"
     assert provider["health"]["ok"] is False
 
 
@@ -1540,7 +1794,10 @@ def test_yachiyo_agent_service_auto_starts_next_safe_replan_continuation() -> No
 
     task = service.start_next_replan_continuation(
         "task-1",
-        {"conversation_id": "chat-1"},
+        {
+            "conversation_id": "chat-1",
+            "client_run_id": "client-chat-auto-1",
+        },
     )
 
     assert task is not None
@@ -1550,6 +1807,10 @@ def test_yachiyo_agent_service_auto_starts_next_safe_replan_continuation() -> No
         "start_chat_task",
     ]
     request = port.calls[1][1]
+    assert request["client_run_id"].startswith("yachiyo-replan-chat:")
+    assert request["client_message_id"] == request["client_run_id"]
+    assert request["client_task_id"] == request["client_run_id"]
+    assert request["metadata"]["client_message_id"] == request["client_run_id"]
     assert request["metadata"]["source"] == "yachiyo_chat_replan_auto_continuation"
     assert request["metadata"]["replan_auto_start_eligible"] is True
     assert request["metadata"]["replan_auto_start_reason"] == (
@@ -1557,6 +1818,51 @@ def test_yachiyo_agent_service_auto_starts_next_safe_replan_continuation() -> No
     )
     assert request["direct_tool_requests"][0]["tool"] == "desktop.list_apps"
     assert request["direct_tool_requests"][0]["approval_required"] is False
+
+
+def test_yachiyo_agent_service_replan_recovery_start_is_persistently_idempotent() -> None:
+    port = _IdempotentReplanRecoveryTaskRuntimePort()
+    service = YachiyoAgentService(port)
+
+    first = service.start_next_replan_continuation(
+        "task-1",
+        {"conversation_id": "chat-1"},
+    )
+    retried = YachiyoAgentService(port).start_next_replan_continuation(
+        "task-1",
+        {"conversation_id": "chat-1"},
+    )
+    manual_retry = YachiyoAgentService(port).start_replan_recovery_action(
+        "task-1",
+        {
+            "request_id": "replan-1",
+            "action_id": "replan-1:action:1:desktop.list_apps",
+            "conversation_id": "chat-1",
+        },
+    )
+    different = service.start_next_replan_continuation(
+        "task-2",
+        {"conversation_id": "chat-1"},
+    )
+
+    assert first is not None
+    assert retried is not None
+    assert different is not None
+    assert retried.task_id == first.task_id
+    assert manual_retry.task_id == first.task_id
+    assert different.task_id != first.task_id
+    assert len(port.created_tasks) == 2
+    start_requests = [
+        payload for name, payload in port.calls if name == "start_chat_task"
+    ]
+    first_client_id = start_requests[0]["client_run_id"]
+    assert first_client_id
+    assert start_requests[0]["client_message_id"] == first_client_id
+    assert start_requests[0]["client_task_id"] == first_client_id
+    assert start_requests[0]["metadata"]["client_message_id"] == first_client_id
+    assert start_requests[1]["client_run_id"] == first_client_id
+    assert start_requests[2]["client_run_id"] == first_client_id
+    assert start_requests[3]["client_run_id"] != first_client_id
 
 
 def test_yachiyo_agent_service_returns_started_replan_continuation_result() -> None:
@@ -1782,7 +2088,7 @@ def test_agent_studio_service_plans_and_starts_replan_continuation() -> None:
     request = port.calls[-1][1]
     assert request["agent_id"] == "agent-1"
     assert request["objective"] == "执行恢复动作：Find Apple Music"
-    assert request["client_run_id"] == "client-recovery-2"
+    assert request["client_run_id"].startswith("yachiyo-replan-agent:")
     assert request["metadata"]["replan_continuation_id"] == (
         "replan-continuation:replan-1:replan-1:action:1:desktop.list_apps"
     )
@@ -1834,12 +2140,87 @@ def test_agent_studio_service_auto_starts_next_safe_replan_continuation() -> Non
         "start_agent_run",
     ]
     request = port.calls[-1][1]
+    assert request["client_run_id"].startswith("yachiyo-replan-agent:")
     assert request["metadata"]["source"] == "agent_studio_replan_auto_continuation"
     assert request["metadata"]["replan_auto_start_eligible"] is True
     assert request["metadata"]["replan_auto_start_reason"] == (
         "safe_low_risk_replan_continuation"
     )
     assert request["direct_tool_requests"][0]["tool"] == "desktop.list_apps"
+
+
+def test_agent_studio_service_replan_recovery_start_is_persistently_idempotent() -> None:
+    port = _IdempotentReplanRecoveryStudioPort()
+    service = AgentStudioService(port)
+
+    first = service.start_next_replan_continuation(
+        "run-1",
+        {"agent_id": "agent-1"},
+    )
+    retried = AgentStudioService(port).start_next_replan_continuation(
+        "run-1",
+        {"agent_id": "agent-1"},
+    )
+    manual_retry = AgentStudioService(port).start_replan_recovery_action(
+        "run-1",
+        {
+            "request_id": "replan-1",
+            "action_id": "replan-1:action:1:desktop.list_apps",
+            "agent_id": "agent-1",
+        },
+    )
+    different = service.start_next_replan_continuation(
+        "run-2",
+        {"agent_id": "agent-1"},
+    )
+
+    assert first is not None
+    assert retried is not None
+    assert different is not None
+    assert retried.run_id == first.run_id
+    assert manual_retry.run_id == first.run_id
+    assert different.run_id != first.run_id
+    assert len(port.created_runs) == 2
+    start_requests = [
+        payload for name, payload in port.calls if name == "start_agent_run"
+    ]
+    first_client_id = start_requests[0]["client_run_id"]
+    assert first_client_id
+    assert start_requests[1]["client_run_id"] == first_client_id
+    assert start_requests[2]["client_run_id"] == first_client_id
+    assert start_requests[3]["client_run_id"] != first_client_id
+
+
+def test_explicit_replan_client_id_is_scoped_to_surface_and_continuation() -> None:
+    chat_port = _ReplanRecoveryTaskRuntimePort()
+    studio_port = _ReplanRecoveryStudioPort()
+
+    chat = YachiyoAgentService(chat_port).start_next_replan_continuation(
+        "task-1",
+        {
+            "conversation_id": "chat-1",
+            "client_run_id": "shared-explicit-replan-id",
+        },
+    )
+    studio = AgentStudioService(studio_port).start_next_replan_continuation(
+        "run-1",
+        {
+            "agent_id": "agent-1",
+            "client_run_id": "shared-explicit-replan-id",
+        },
+    )
+
+    assert chat is not None
+    assert studio is not None
+    chat_request = next(
+        payload for name, payload in chat_port.calls if name == "start_chat_task"
+    )
+    studio_request = next(
+        payload for name, payload in studio_port.calls if name == "start_agent_run"
+    )
+    assert chat_request["client_run_id"].startswith("yachiyo-replan-chat:")
+    assert studio_request["client_run_id"].startswith("yachiyo-replan-agent:")
+    assert chat_request["client_run_id"] != studio_request["client_run_id"]
 
 
 def test_agent_studio_service_returns_started_replan_continuation_result() -> None:
@@ -1972,8 +2353,10 @@ def test_yachiyo_agent_service_attaches_runtime_planner_metadata_to_chat_task(
     ]
     assert metadata["yachiyo_route_to_studio"] is True
     assert metadata["yachiyo_plan_tools"] == [
+        "desktop.list_apps",
+        "app.open",
         "desktop.inspect_app",
-        "app.open_and_click_ui_element",
+        "app.focus_and_click_ui_element",
         "desktop.ui_elements",
     ]
     assert metadata["yachiyo_plan_capabilities"] == [
@@ -1986,6 +2369,7 @@ def test_yachiyo_agent_service_attaches_runtime_planner_metadata_to_chat_task(
     assert metadata["yachiyo_plan_open_questions"] == []
     assert metadata["yachiyo_required_capabilities"] == [
         "desktop.app_discovery",
+        "desktop.app_control",
         "desktop.ui_operation",
     ]
     assert metadata["yachiyo_missing_capabilities"] == []
@@ -2003,6 +2387,7 @@ def test_yachiyo_agent_service_surfaces_desktop_execution_request_previews(
         {
             "prompt": "打开 PixelForge",
             "conversation_id": "chat-1",
+            "metadata": {"allow_user_foreground_takeover": True},
             "allowed_tools": ["desktop.list_apps", "app.open", "desktop.active_window"],
         }
     )
@@ -2083,6 +2468,7 @@ def test_yachiyo_agent_service_plans_media_query_with_generic_desktop_tools(
         {
             "prompt": "用 Apple Music 播放超时空辉夜姬",
             "conversation_id": "chat-1",
+            "metadata": {"allow_user_foreground_takeover": True},
             "allowed_tools": [
                 "desktop.list_apps",
                 "app.open",
@@ -2139,8 +2525,10 @@ def test_yachiyo_agent_service_returns_runtime_planner_metadata_on_chat_task() -
     assert task.metadata["yachiyo_runtime_planner"] is True
     assert task.metadata["yachiyo_intent_kind"] == "desktop_operation"
     assert task.metadata["yachiyo_plan_tools"] == [
+        "desktop.list_apps",
+        "app.open",
         "desktop.inspect_app",
-        "app.open_and_click_ui_element",
+        "app.focus_and_click_ui_element",
         "desktop.ui_elements",
     ]
     assert task.metadata["yachiyo_plan_approvals_required"] == ["operate-foreground-ui"]
@@ -2219,7 +2607,6 @@ def test_yachiyo_agent_service_attaches_planner_outputs_to_chat_task() -> None:
     assert metadata["yachiyo_intent_kind"] == "data_analysis"
     assert metadata["yachiyo_candidate_intents"] == [
         {"kind": "data_analysis", "title": "Data Analysis", "confidence": 0.56},
-        {"kind": "report_generation", "title": "Report Generation", "confidence": 0.42},
     ]
     assert metadata["yachiyo_plan_tools"] == ["workspace.read", "data.analyze"]
     assert metadata["yachiyo_plan_capabilities"] == ["file.workspace_read", "data.analysis"]
@@ -2472,6 +2859,7 @@ def test_yachiyo_chat_execution_uses_local_provider_for_app_open(
     envelope = service.plan_chat_execution(
         "打开 PixelForge",
         allowed_tools=["desktop.list_apps", "app.open", "desktop.active_window"],
+        metadata={"allow_user_foreground_takeover": True},
     )
     requests = {request.tool_name: request for request in envelope.requests}
 
@@ -2607,11 +2995,13 @@ def test_yachiyo_chat_execution_uses_local_provider_for_music_playback(
             "media.apple_music_play",
             "desktop.active_window",
         ],
+        metadata={"allow_user_foreground_takeover": True},
     )
     requests = {request.tool_name: request for request in envelope.requests}
     playback_request = requests["media.music_app_open_and_play"]
 
     assert envelope.intent_kind == "media_playback"
+    assert list(requests) == ["media.music_app_open_and_play"]
     assert playback_request.input == {"app_name": "Music"}
     assert playback_request.sandbox_provider is not None
     assert playback_request.sandbox_provider.provider_kind == (
@@ -2629,10 +3019,6 @@ def test_yachiyo_chat_execution_uses_local_provider_for_music_playback(
     assert playback_request.desktop_execution_route.isolated_desktop_preferred is False
     assert playback_request.desktop_execution_route.foreground_takeover_allowed is True
     assert playback_request.desktop_execution_route.blocking_conditions == []
-    assert requests["desktop.active_window"].desktop_execution_route is not None
-    assert requests["desktop.active_window"].desktop_execution_route.status == (
-        "provider_ready"
-    )
 
 
 def test_yachiyo_agent_service_can_project_full_chat_execution_plan() -> None:
@@ -2649,11 +3035,17 @@ def test_yachiyo_agent_service_can_project_full_chat_execution_plan() -> None:
         "workspace.read",
         "terminal.run",
         "artifact.write",
+        "workspace.read",
     ]
+    verifier = envelope.requests[-1]
+    assert verifier.runtime_stage == "verify"
+    assert verifier.runtime_role == "verify_result"
+    assert verifier.depends_on == ["run-analysis", "write-analysis-artifact"]
     assert [request.step_id for request in envelope.requests] == [
         "inspect-data-source",
         "run-analysis",
         "write-analysis-artifact",
+        "verify-analysis-artifact",
     ]
     assert envelope.requests[1].approval_required is True
     assert envelope.requests[1].depends_on == ["inspect-data-source"]
@@ -2737,9 +3129,10 @@ def test_agent_studio_service_plans_discovered_desktop_app_execution() -> None:
     assert envelope.requests[2].runtime_stage == "discover"
     assert envelope.requests[2].depends_on == ["open-or-focus-app"]
     assert envelope.requests[2].input == {
-        "target": "Export",
         "limit": 80,
         "app_name": "PixelForge",
+        "selection_source": "desktop.list_apps",
+        "query": "PixelForge",
     }
     assert envelope.requests[3].input == {
         "app_name": "PixelForge",
@@ -2933,6 +3326,7 @@ def test_agent_studio_service_probes_desktop_provider_health_for_execution(
         ],
         metadata={
             "surface": "studio",
+            "desktop_provider_health_probe": True,
             "desktop_execution_policy": {
                 "mode": "sandbox_preferred",
                 "prefer_isolated_desktop": True,
@@ -3045,6 +3439,7 @@ def test_agent_studio_service_routes_readonly_desktop_discovery_through_provider
         ],
         metadata={
             "surface": "studio",
+            "desktop_provider_health_probe": True,
             "desktop_execution_policy": {
                 "mode": "sandbox_preferred",
                 "prefer_isolated_desktop": True,
@@ -3094,18 +3489,19 @@ def test_yachiyo_chat_entrypoint_routes_provider_supported_desktop_actions(
     monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_ID", "local-headless-desktop")
     monkeypatch.setenv(
         "OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS",
-        "desktop.list_apps,app.focus_and_click_ui_element",
+        "desktop.list_apps,app.focus_and_click_ui_element,desktop.ui_elements",
     )
     start_calls = _install_fake_isolated_provider_session(monkeypatch, calls)
     port = _FakeRuntimePort()
     service = YachiyoAgentService(port)
 
     task = service.start_chat_task(
-        StartChatTaskRequest(
-            prompt="在 PixelForge 点击 Export",
-            conversation_id="chat-1",
-            metadata={
+        {
+            "prompt": "在 PixelForge 点击 Export",
+            "conversation_id": "chat-1",
+            "metadata": {
                 "launcher_mode": "bubble",
+                "desktop_provider_health_probe": True,
                 "desktop_execution_policy": {
                     "mode": "sandbox_preferred",
                     "prefer_isolated_desktop": True,
@@ -3113,12 +3509,12 @@ def test_yachiyo_chat_entrypoint_routes_provider_supported_desktop_actions(
                     "require_sandbox_for_keyboard_mouse": True,
                 },
             },
-            allowed_tools=[
+            "allowed_tools": [
                 "desktop.list_apps",
                 "app.focus_and_click_ui_element",
                 "desktop.ui_elements",
             ],
-        )
+        }
     )
 
     request_payload = port.calls[0][1]
@@ -3179,10 +3575,10 @@ def test_yachiyo_chat_entrypoint_auto_starts_isolated_provider_for_input(
     service = YachiyoAgentService(port)
 
     task = service.start_chat_task(
-        StartChatTaskRequest(
-            prompt="在 PixelForge 点击 Export",
-            conversation_id="chat-1",
-            metadata={
+        {
+            "prompt": "在 PixelForge 点击 Export",
+            "conversation_id": "chat-1",
+            "metadata": {
                 "launcher_mode": "bubble",
                 "desktop_execution_policy": {
                     "mode": "sandbox_preferred",
@@ -3191,12 +3587,12 @@ def test_yachiyo_chat_entrypoint_auto_starts_isolated_provider_for_input(
                     "require_sandbox_for_keyboard_mouse": True,
                 },
             },
-            allowed_tools=[
+            "allowed_tools": [
                 "desktop.list_apps",
                 "app.focus_and_click_ui_element",
                 "desktop.ui_elements",
             ],
-        )
+        }
     )
 
     request_payload = port.calls[0][1]
@@ -3305,6 +3701,79 @@ def test_yachiyo_chat_entrypoint_auto_starts_isolated_provider_for_input(
     assert "desktop_provider" in task.runtime_debug.debug_surfaces
 
 
+def test_yachiyo_public_request_cannot_grant_user_foreground_takeover(
+    monkeypatch,
+) -> None:
+    for key in (
+        "OHA_YACHIYO_DESKTOP_PROVIDER_URL",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_ID",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_TOOLS",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_KEYBOARD_MOUSE_CAPTURE_SUPPORTED",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_KIND",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_SESSION_ISOLATED",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_FOREGROUND_TAKEOVER_REQUIRED",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_EXECUTE_URL",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_STATUS_URL",
+        "OHA_YACHIYO_DESKTOP_PROVIDER_KIND",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    start_calls = _install_fake_isolated_provider_session(monkeypatch)
+    port = _FakeRuntimePort()
+    service = YachiyoAgentService(port)
+
+    task = service.start_chat_task(
+        StartChatTaskRequest.model_validate(
+            {
+                "prompt": "打开 PixelForge",
+                "conversation_id": "chat-1",
+                "allow_live_foreground": True,
+                "allow_nonisolated_desktop_provider": True,
+                "allow_user_foreground_takeover": True,
+                "desktop_allow_user_foreground_takeover": True,
+                "metadata": {
+                    "launcher_mode": "bubble",
+                    "allow_live_foreground": True,
+                    "allow_nonisolated_desktop_provider": True,
+                    "allow_user_foreground_takeover": True,
+                    "desktop_allow_user_foreground_takeover": True,
+                    "client_context": {
+                        "allow_live_foreground": True,
+                        "allow_nonisolated_desktop_provider": True,
+                        "allow_user_foreground_takeover": True,
+                        "desktop_allow_user_foreground_takeover": True,
+                        "note": "keep this user metadata",
+                    },
+                },
+            }
+        )
+    )
+
+    request_payload = port.calls[0][1]
+    metadata = request_payload["metadata"]
+    open_request = next(
+        request
+        for request in request_payload["blocked_direct_tool_requests"]
+        if request["tool"] == "app.open"
+    )
+
+    assert "allow_live_foreground" not in request_payload
+    assert "allow_nonisolated_desktop_provider" not in request_payload
+    assert "allow_user_foreground_takeover" not in request_payload
+    assert "desktop_allow_user_foreground_takeover" not in request_payload
+    assert "allow_live_foreground" not in metadata
+    assert "allow_nonisolated_desktop_provider" not in metadata
+    assert "allow_user_foreground_takeover" not in metadata
+    assert "desktop_allow_user_foreground_takeover" not in metadata
+    assert metadata["client_context"] == {"note": "keep this user metadata"}
+    assert start_calls == []
+    assert open_request["desktop_execution_route"]["foreground_takeover_allowed"] is False
+    assert open_request["desktop_execution_route"]["selected_provider_kind"] != (
+        LOCAL_DESKTOP_PROVIDER_KIND
+    )
+    assert task.runtime_debug is not None
+    assert task.runtime_debug.desktop_execution_session_mode != "user_foreground"
+
+
 def test_yachiyo_chat_entrypoint_uses_local_provider_for_app_open(
     monkeypatch,
 ) -> None:
@@ -3326,19 +3795,23 @@ def test_yachiyo_chat_entrypoint_uses_local_provider_for_app_open(
     service = YachiyoAgentService(port)
 
     task = service.start_chat_task(
-        StartChatTaskRequest(
-            prompt="打开 PixelForge",
-            conversation_id="chat-1",
-            metadata={"launcher_mode": "bubble"},
-            allowed_tools=[
+        {
+            "prompt": "打开 PixelForge",
+            "conversation_id": "chat-1",
+            "metadata": {
+                "launcher_mode": "bubble",
+                "allow_live_foreground": True,
+            },
+            "allowed_tools": [
                 "desktop.list_apps",
                 "app.open",
                 "desktop.active_window",
             ],
-        )
+        }
     )
 
     request_payload = port.calls[0][1]
+    assert request_payload["metadata"]["allow_live_foreground"] is True
     envelope = request_payload["runtime_execution_envelope"]
     session = envelope["desktop_provider_session"]
     open_request = next(
@@ -3400,19 +3873,19 @@ def test_yachiyo_chat_entrypoint_allows_explicit_user_foreground_app_open(
     service = YachiyoAgentService(port)
 
     task = service.start_chat_task(
-        StartChatTaskRequest(
-            prompt="打开 PixelForge",
-            conversation_id="chat-1",
-            metadata={
+        {
+            "prompt": "打开 PixelForge",
+            "conversation_id": "chat-1",
+            "metadata": {
                 "launcher_mode": "bubble",
                 "allow_user_foreground_takeover": True,
             },
-            allowed_tools=[
+            "allowed_tools": [
                 "desktop.list_apps",
                 "app.open",
                 "desktop.active_window",
             ],
-        )
+        }
     )
 
     request_payload = port.calls[0][1]
@@ -3459,15 +3932,18 @@ def test_yachiyo_chat_entrypoint_uses_local_provider_for_music_playback(
     service = YachiyoAgentService(port)
 
     task = service.start_chat_task(
-        StartChatTaskRequest(
-            prompt="播放 Apple Music",
-            conversation_id="chat-1",
-            metadata={"launcher_mode": "bubble"},
-            allowed_tools=[
+        {
+            "prompt": "播放 Apple Music",
+            "conversation_id": "chat-1",
+            "metadata": {
+                "launcher_mode": "bubble",
+                "allow_user_foreground_takeover": True,
+            },
+            "allowed_tools": [
                 "media.music_app_open_and_play",
                 "desktop.ui_elements",
             ],
-        )
+        }
     )
 
     request_payload = port.calls[0][1]
@@ -3545,19 +4021,14 @@ def test_yachiyo_chat_entrypoint_prefers_direct_desktop_over_optional_loopback_v
     direct_requests = request_payload["direct_tool_requests"]
 
     assert direct_tools == [
-        "desktop.list_apps",
-        "app.open_and_safe_shortcut",
-        "desktop.safe_type_text",
-        "desktop.search_submit",
-        "media.music_app_open_and_play",
-        "desktop.ui_elements",
+        "media.apple_music_play",
     ]
     assert "blocked_direct_tool_requests" not in request_payload
     assert request_payload["metadata"].get("yachiyo_runtime_blocked") is not True
     assert all(
-        request["desktop_execution_route"]["status"] == "provider_ready"
+        request["desktop_execution_route"]["status"] == "ready"
         and request["desktop_execution_route"]["selected_provider_kind"]
-        == LOCAL_DESKTOP_PROVIDER_KIND
+        == "process"
         for request in direct_requests
     )
     session = request_payload["runtime_execution_envelope"]["desktop_provider_session"]
@@ -3568,8 +4039,8 @@ def test_yachiyo_chat_entrypoint_prefers_direct_desktop_over_optional_loopback_v
     assert task.runtime_debug.blocked_runtime_request_count == 0
     assert task.runtime_debug.blocked_direct_request_count == 0
     assert task.runtime_debug.desktop_provider_session_needed is False
-    assert task.runtime_debug.desktop_execution_session_mode == "user_foreground"
-    assert task.runtime_debug.desktop_execution_session_label == "real desktop foreground"
+    assert task.runtime_debug.desktop_execution_session_mode == "provider_routed"
+    assert task.runtime_debug.desktop_execution_session_label == "desktop provider routed"
     assert task.runtime_debug.needs_replan is False
 
 
@@ -3632,10 +4103,10 @@ def test_yachiyo_chat_entrypoint_does_not_direct_execute_blocked_provider_route(
     service = YachiyoAgentService(port)
 
     task = service.start_chat_task(
-        StartChatTaskRequest(
-            prompt="在 PixelForge 点击 Export",
-            conversation_id="chat-1",
-            metadata={
+        {
+            "prompt": "在 PixelForge 点击 Export",
+            "conversation_id": "chat-1",
+            "metadata": {
                 "launcher_mode": "bubble",
                 "desktop_execution_policy": {
                     "mode": "sandbox_preferred",
@@ -3644,11 +4115,11 @@ def test_yachiyo_chat_entrypoint_does_not_direct_execute_blocked_provider_route(
                     "require_sandbox_for_keyboard_mouse": True,
                 },
             },
-            allowed_tools=[
+            "allowed_tools": [
                 "app.focus_and_click_ui_element",
                 "desktop.ui_elements",
             ],
-        )
+        }
     )
 
     request_payload = port.calls[0][1]
@@ -3689,7 +4160,6 @@ def test_agent_studio_service_normalizes_known_app_submit_execution() -> None:
 
     assert envelope.intent_kind == "communication"
     assert [request.tool_name for request in envelope.requests] == [
-        "desktop.list_apps",
         "app.focus",
         "desktop.safe_shortcut",
         "desktop.safe_type_text",
@@ -3699,30 +4169,22 @@ def test_agent_studio_service_normalizes_known_app_submit_execution() -> None:
         "desktop.ui_elements",
     ]
     assert envelope.runtime_stage_counts == {
-        "discover": 1,
         "operate": 6,
         "verify": 1,
     }
-    assert envelope.requests[0].runtime_stage == "discover"
-    assert envelope.requests[0].runtime_role == "find_target_app"
-    assert envelope.requests[0].input == {"query": "Slack", "limit": 20}
-    assert envelope.requests[1].input == {
+    assert envelope.requests[0].runtime_stage == "operate"
+    assert envelope.requests[0].runtime_role == "prepare_target_app"
+    assert envelope.requests[0].input == {"app_name": "Slack"}
+    assert envelope.requests[5].approval_required is True
+    assert envelope.requests[5].runtime_stage == "operate"
+    assert envelope.requests[5].runtime_role == "send_message"
+    assert envelope.requests[6].source == "runtime_verification"
+    assert envelope.requests[6].runtime_stage == "verify"
+    assert envelope.requests[6].runtime_role == "verify_result"
+    assert envelope.requests[6].continue_to_model is True
+    assert envelope.requests[6].requires_observation is True
+    assert envelope.requests[6].input == {
         "app_name": "Slack",
-        "selection_source": "desktop.list_apps",
-        "query": "Slack",
-    }
-    assert envelope.requests[6].approval_required is True
-    assert envelope.requests[6].runtime_stage == "operate"
-    assert envelope.requests[6].runtime_role == "send_message"
-    assert envelope.requests[7].source == "runtime_verification"
-    assert envelope.requests[7].runtime_stage == "verify"
-    assert envelope.requests[7].runtime_role == "verify_result"
-    assert envelope.requests[7].continue_to_model is True
-    assert envelope.requests[7].requires_observation is True
-    assert envelope.requests[7].input == {
-        "app_name": "Slack",
-        "selection_source": "desktop.list_apps",
-        "query": "Slack",
         "role_filter": "text",
         "limit": 80,
     }
@@ -4339,11 +4801,14 @@ def test_yachiyo_agent_service_keeps_provider_session_event_with_existing_planne
     service = YachiyoAgentService(ProviderSessionRuntimePort(existing_planner_events=True))
 
     task = service.start_chat_task(
-        StartChatTaskRequest(
-            prompt="在 PixelForge 点击 Export",
-            conversation_id="chat-1",
-            allowed_tools=["app.focus_and_click_ui_element", "desktop.ui_elements"],
-        )
+        {
+            "prompt": "在 PixelForge 点击 Export",
+            "conversation_id": "chat-1",
+            "allowed_tools": [
+                "app.focus_and_click_ui_element",
+                "desktop.ui_elements",
+            ],
+        }
     )
 
     event_types = [event.event_type for event in task.recent_events]
@@ -4452,11 +4917,11 @@ def test_yachiyo_agent_service_preserves_provider_auto_start_override() -> None:
     service = YachiyoAgentService(port)
 
     service.start_chat_task(
-        StartChatTaskRequest(
-            prompt="打开 PixelForge 并点击导出",
-            conversation_id="chat-1",
-            metadata={"desktop_provider_session_auto_start": False},
-        )
+        {
+            "prompt": "打开 PixelForge 并点击导出",
+            "conversation_id": "chat-1",
+            "metadata": {"desktop_provider_session_auto_start": False},
+        }
     )
 
     metadata = port.calls[0][1]["metadata"]
@@ -4512,20 +4977,18 @@ def test_yachiyo_agent_service_surfaces_data_analysis_open_questions_to_chat_tas
     ]
     assert metadata["yachiyo_plan_tools"] == [
         "workspace.list",
-        "python.run",
-        "artifact.write",
+        "data.analyze",
     ]
     assert metadata["yachiyo_required_capabilities"] == [
-        "file.workspace_read",
         "data.analysis",
-        "artifact.write",
+        "file.workspace_read",
     ]
+    assert metadata["yachiyo_plan_artifacts_expected"] == ["analysis-report.md"]
     assert metadata["yachiyo_plan_open_questions"] == ["data_source"]
     assert task.metadata["yachiyo_plan_open_questions"] == ["data_source"]
     assert task.metadata["yachiyo_required_capabilities"] == [
-        "file.workspace_read",
         "data.analysis",
-        "artifact.write",
+        "file.workspace_read",
     ]
 
 
@@ -4601,6 +5064,93 @@ def test_yachiyo_agent_service_maps_task_timeline_snapshot() -> None:
     assert port.calls == [("get_task_timeline", "task-1")]
 
 
+def test_yachiyo_agent_service_hides_internal_recovery_observation_tool_calls() -> None:
+    timeline_events = [
+        {
+            "event": "agent.tool.call",
+            "detail": "media.apple_music_play",
+            "tool_call_id": "call-play",
+            "tool": "media.apple_music_play",
+            "source": "runtime_planner",
+            "input_preview": {"query": "超时空辉夜姬"},
+            "result": {
+                "ok": False,
+                "permission_error": True,
+                "permission_targets": ["music_app", "automation"],
+            },
+        },
+        {
+            "event": "agent.tool.call",
+            "detail": "desktop.active_window",
+            "tool_call_id": "call-observe-window",
+            "tool": "desktop.active_window",
+            "source": "runtime_replan_recovery",
+            "permission_target": "runtime_observation",
+            "result": {
+                "ok": True,
+                "data": {"app_name": "Music"},
+            },
+        },
+        {
+            "event": "agent.desktop.permission_recovery",
+            "detail": "media.apple_music_play",
+            "tool_call_id": "call-play",
+            "tool": "media.apple_music_play",
+            "permission_targets": ["music_app", "automation"],
+            "recovery_actions": [
+                {
+                    "label": "打开 Apple Music",
+                    "tool": "app.open",
+                    "input": {"app_name": "Music"},
+                    "permission_target": "music_app",
+                    "risk_level": "low",
+                }
+            ],
+        },
+    ]
+
+    class _PermissionRecoveryRuntimePort(_FakeRuntimePort):
+        def _payload(self, task_id: str) -> dict[str, Any]:
+            return _task_payload(
+                task_id=task_id,
+                run_id="run-music-permission",
+                status="failed",
+                timeline=timeline_events,
+            )
+
+        def get_task_snapshot(self, task_id: str) -> dict[str, Any]:
+            self.calls.append(("get_task_snapshot", task_id))
+            return self._payload(task_id)
+
+        def get_task_timeline(self, task_id: str) -> dict[str, Any]:
+            self.calls.append(("get_task_timeline", task_id))
+            return self._payload(task_id)
+
+    port = _PermissionRecoveryRuntimePort()
+    service = YachiyoAgentService(port)
+
+    task = service.get_task_snapshot("task-music-permission")
+    timeline = service.get_task_timeline("task-music-permission")
+
+    assert [call.tool_name for call in task.tool_calls] == ["media.apple_music_play"]
+    assert [call.tool_name for call in timeline.tool_calls] == ["media.apple_music_play"]
+    assert task.tool_calls[0].status == "failed"
+    assert timeline.tool_calls[0].status == "failed"
+    assert task.needs_user_action is True
+    assert any(
+        event.event_type == "agent.desktop.permission_recovery"
+        for event in task.recent_events
+    )
+    assert any(
+        event.event_type == "agent.desktop.permission_recovery"
+        for event in timeline.events
+    )
+    assert port.calls == [
+        ("get_task_snapshot", "task-music-permission"),
+        ("get_task_timeline", "task-music-permission"),
+    ]
+
+
 def test_yachiyo_agent_service_preserves_desktop_intent_planning_event() -> None:
     port = _DesktopIntentTaskRuntimePort()
     service = YachiyoAgentService(port)
@@ -4612,10 +5162,7 @@ def test_yachiyo_agent_service_preserves_desktop_intent_planning_event() -> None
     assert task.recent_events[0].detail == "media.apple_music_play"
     assert task.recent_events[0].payload == {
         "input_preview": {"query": "超时空辉夜姬"},
-        "planning_reason": "clear_daily_desktop_intent",
-        "source": "daily_desktop_intent",
         "status": "planned",
-        "task_id": "task-music",
         "tool": "media.apple_music_play",
     }
     assert task.current_step == "准备执行 · 播放 Apple Music"
@@ -4700,9 +5247,9 @@ def test_yachiyo_agent_service_pages_task_events() -> None:
     assert page.run_id == "run-1"
     assert page.after_sequence == 1
     assert page.limit == 1
-    assert page.next_after_sequence == 2
-    assert page.has_more is True
-    assert [event.event_type for event in page.events] == ["tool.requested"]
+    assert page.next_after_sequence == 3
+    assert page.has_more is False
+    assert [event.event_type for event in page.events] == ["task.completed"]
     assert page.events[0].task_id == "task-1"
     assert page.events[0].payload["task_id"] == "task-1"
     assert port.calls == [("get_task_event_stream", "task-1")]
@@ -4716,7 +5263,6 @@ def test_yachiyo_agent_service_stream_fallback_first_page_includes_key_status_wi
 
     assert [event.event_type for event in page.events] == [
         "task.started",
-        "tool.requested",
         "task.completed",
     ]
     assert page.next_after_sequence == 3
@@ -4751,6 +5297,31 @@ def test_yachiyo_agent_service_prefers_runtime_port_task_event_pages() -> None:
     ]
 
 
+def test_yachiyo_agent_service_skips_hidden_tool_only_first_page() -> None:
+    port = _HiddenFirstPageToolNoiseRuntimePort()
+    service = YachiyoAgentService(port)
+
+    page = service.get_task_event_page("task-1", after_sequence=0, limit=1)
+
+    assert [event.event_type for event in page.events] == [
+        "agent.desktop.permission_preflight",
+        "agent.tool.approval_required",
+    ]
+    assert page.next_after_sequence == 3
+    assert page.has_more is True
+    assert port.calls == [
+        (
+            "get_task_event_page",
+            {
+                "task_id": "task-1",
+                "after_sequence": 0,
+                "limit": 1,
+            },
+        ),
+        ("get_task_event_stream", "task-1"),
+    ]
+
+
 def test_yachiyo_agent_service_task_event_first_page_includes_key_status_window() -> None:
     port = _FirstPageKeyStatusRuntimePort()
     service = YachiyoAgentService(port)
@@ -4762,7 +5333,6 @@ def test_yachiyo_agent_service_task_event_first_page_includes_key_status_window(
         "task.started",
         "agent.plan.created",
         "desktop.provider_session.started",
-        "agent.tool.started",
         "agent.tool.approval_required",
     ]
     assert page.next_after_sequence == 5
@@ -4794,7 +5364,6 @@ def test_yachiyo_agent_service_task_event_first_page_prefers_replan_window() -> 
         "agent.task_core.created",
         "agent.task.todo.updated",
         "agent.task.checkpoint.updated",
-        "agent.tool.started",
         "agent.replan.requested",
     ]
     assert page.next_after_sequence == 7
@@ -4853,7 +5422,6 @@ def test_yachiyo_agent_service_task_event_first_page_includes_provider_session_w
     assert event_types == [
         "task.started",
         "agent.plan.created",
-        "agent.tool.started",
         "desktop.provider_session.started",
         "agent.deferred_continuation.enqueued",
     ]
@@ -4878,13 +5446,59 @@ def test_yachiyo_agent_service_filters_secret_and_internal_chat_events() -> None
     service = YachiyoAgentService(port)
 
     timeline = service.get_task_timeline("task-sensitive")
+    stream = list(service.get_task_event_stream("task-sensitive"))
     page = service.get_task_event_page("task-sensitive", after_sequence=0, limit=10)
 
     assert [event.event_type for event in timeline.events] == ["task.started"]
     assert timeline.tool_calls == []
+    assert [event.event_type for event in stream] == ["task.started", "task.completed"]
     assert [event.event_type for event in page.events] == ["task.started", "task.completed"]
     assert all(event.sensitivity == "public" for event in page.events)
     assert all(event.visibility == "user" for event in page.events)
+
+
+def test_yachiyo_agent_service_hides_raw_tool_noise_at_every_chat_boundary() -> None:
+    port = _RawToolNoiseTaskRuntimePort()
+    service = YachiyoAgentService(port)
+
+    task = service.get_task_snapshot("task-raw-noise")
+    timeline = service.get_task_timeline("task-raw-noise")
+    stream = list(service.get_task_event_stream("task-raw-noise"))
+    page = service.get_task_event_page(
+        "task-raw-noise",
+        after_sequence=0,
+        limit=50,
+    )
+
+    expected_event_types = [
+        "task.started",
+        "agent.desktop.intent_planned",
+        "agent.desktop.permission_preflight",
+        "agent.desktop.permission_recovery",
+        "agent.replan.requested",
+        "agent.desktop.intent_unverified",
+        "task.completed",
+    ]
+    assert [event.event_type for event in task.recent_events] == expected_event_types
+    assert [event.event_type for event in timeline.events] == expected_event_types
+    assert [event.event_type for event in stream] == expected_event_types
+    assert [event.event_type for event in page.events] == expected_event_types
+    assert [event["event_type"] for event in port.raw_events] == [
+        "task.started",
+        "agent.desktop.intent_planned",
+        "agent.tool.call",
+        "agent.tool.started",
+        "agent.tool.skipped",
+        "agent.tool.completed",
+        "agent.tool.failed",
+        "tool.requested",
+        "tool.completed",
+        "agent.desktop.permission_preflight",
+        "agent.desktop.permission_recovery",
+        "agent.replan.requested",
+        "agent.desktop.intent_unverified",
+        "task.completed",
+    ]
 
 
 def test_yachiyo_agent_service_reads_task_artifact_content() -> None:
@@ -4922,17 +5536,71 @@ def test_yachiyo_agent_service_prefers_chat_backed_starter_when_available() -> N
     assert port.calls == []
 
 
-def test_yachiyo_agent_service_falls_back_to_runtime_port_without_chat_backed_task() -> None:
+def test_yachiyo_agent_service_routes_tool_bearing_main_task_to_runtime_port() -> None:
     port = _FakeRuntimePort()
     starter = _FakeChatTaskStarter()
     service = YachiyoAgentService(port, chat_task_starter=starter)
 
-    task = service.start_chat_task(StartChatTaskRequest(prompt="Patch README"))
+    task = service.start_chat_task(
+        StartChatTaskRequest(
+            prompt="Patch README",
+            metadata={"source": "chat", "client_message_id": "client-tool-task"},
+        )
+    )
 
     assert task.task_id == "task-1"
     assert task.status == "waiting_approval"
-    assert starter.calls[0]["prompt"] == "Patch README"
+    assert starter.calls == []
     assert port.calls[0][0] == "start_chat_task"
+    assert port.calls[0][1]["prompt"] == "Patch README"
+    assert port.calls[0][1]["direct_tool_requests"]
+
+
+def test_yachiyo_agent_service_routes_all_consumer_main_tool_sources_async() -> None:
+    for source in ("launcher", "packaged_daily_provider_acceptance_v2"):
+        port = _FakeRuntimePort()
+        starter = _FakeChatTaskStarter()
+        service = YachiyoAgentService(port, chat_task_starter=starter)
+
+        task = service.start_chat_task(
+            {
+                "prompt": "Open Music",
+                "agent_id": "builtin:yachiyo-main",
+                "metadata": {"source": source},
+                "direct_tool_requests": [
+                    {"tool": "app.open", "input": {"app_name": "Music"}}
+                ],
+            }
+        )
+
+        assert task.task_id == "task-1"
+        assert starter.calls == []
+        assert port.calls[0][0] == "start_chat_task"
+
+
+def test_yachiyo_agent_service_routes_blocked_consumer_main_tool_request_async() -> None:
+    port = _FakeRuntimePort()
+    starter = _FakeChatTaskStarter()
+    service = YachiyoAgentService(port, chat_task_starter=starter)
+
+    service.start_chat_task(
+        {
+            "prompt": "Open Music",
+            "agent_id": "builtin:yachiyo-main",
+            "metadata": {"source": "chat"},
+            "blocked_direct_tool_requests": [
+                {
+                    "tool": "app.open",
+                    "input": {"app_name": "Music"},
+                    "blocked": True,
+                }
+            ],
+        }
+    )
+
+    assert starter.calls == []
+    assert port.calls[0][0] == "start_chat_task"
+    assert port.calls[0][1]["blocked_direct_tool_requests"]
 
 
 def test_yachiyo_agent_service_preserves_group_target_when_starting_chat_task() -> None:

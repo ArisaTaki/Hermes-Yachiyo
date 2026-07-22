@@ -2,27 +2,50 @@
 
 from __future__ import annotations
 
-import math
+import hashlib
 import json
+import locale
+import math
 import os
 import platform
 import plistlib
 import re
 import shutil
 import subprocess
+import time
+import unicodedata
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Mapping
 from urllib.error import HTTPError
-from urllib.parse import quote_plus, urlparse
+from urllib.parse import parse_qs, quote_plus, urlencode, urlparse
 from urllib.request import Request, urlopen
 
+from apps.core.tls import urlopen_with_bundled_ca
 from apps.shell.agent.runtime.app_aliases import APP_ALIASES, compact_app_alias
+from apps.shell.agent.runtime.callbacks import supports_keyword
 
 _ELECTRON_NATIVE_URL_ENV = "OHA_YACHIYO_ELECTRON_NATIVE_URL"
 _ELECTRON_NATIVE_TOKEN_ENV = "OHA_YACHIYO_ELECTRON_NATIVE_TOKEN"
+_APPLE_MUSIC_PLAY_DEADLINE_SECONDS = 30.0
+_APPLE_MUSIC_CATALOG_LIMIT = 20
+_APPLE_MUSIC_CATALOG_POLL_ATTEMPTS = 4
 
 _APP_ALIAS_EXPANSION_PRIMARY_SCORE = 95
+
+
+def _remaining_timeout(deadline: float, cap_seconds: float) -> float:
+    return max(0.0, min(float(cap_seconds), deadline - time.monotonic()))
+
+
+def _call_with_bounded_timeout(
+    callback: Any,
+    *args: Any,
+    timeout_seconds: float,
+) -> Any:
+    if supports_keyword(callback, "timeout_seconds"):
+        return callback(*args, timeout_seconds=timeout_seconds)
+    return callback(*args)
 
 _APP_CAPABILITY_QUERY_PROFILES = (
     {
@@ -370,6 +393,7 @@ _SAFE_SHORTCUTS: dict[str, tuple[str, tuple[str, ...], str]] = {
     "finder_network": ("k", ("command", "shift"), "Finder Network"),
     "finder_recents": ("f", ("command", "shift"), "Finder Recents"),
     "new_note": ("n", ("command",), "new note"),
+    "new_task": ("n", ("command",), "new task"),
     "new_reminder": ("n", ("command",), "new reminder"),
     "new_event": ("n", ("command",), "new calendar event"),
     "refresh": ("r", ("command",), "refresh"),
@@ -1009,7 +1033,7 @@ def screen_capture(target_path: Path) -> dict[str, Any]:
     return payload
 
 
-def active_window() -> dict[str, Any]:
+def active_window(*, timeout_seconds: float = 10.0) -> dict[str, Any]:
     if _desktop_platform() != "macos":
         return _unsupported("desktop.active_window")
     script = """
@@ -1018,14 +1042,27 @@ def active_window() -> dict[str, Any]:
         set appName to name of frontApp
         set appPID to unix id of frontApp
         try
-            set winTitle to name of front window of frontApp
+            set frontWindow to front window of frontApp
+            set winTitle to name of frontWindow
         on error
             set winTitle to ""
         end try
-        return appName & "|" & appPID & "|" & winTitle
+        set winID to ""
+        try
+            set winID to value of attribute "AXWindowNumber" of frontWindow as text
+        on error
+            try
+                set winID to id of frontWindow as text
+            end try
+        end try
+        return appName & "|" & appPID & "|" & winTitle & "|" & winID
     end tell
     """
-    result = _run_osascript(script)
+    result = _call_with_bounded_timeout(
+        _run_osascript,
+        script,
+        timeout_seconds=timeout_seconds,
+    )
     if not result["ok"]:
         appkit_frontmost = _appkit_frontmost_app_name()
         frontmost_app = str(appkit_frontmost.get("app_name") or "")
@@ -1042,10 +1079,11 @@ def active_window() -> dict[str, Any]:
             "desktop.active_window",
             {**result, "action": "desktop.active_window", "summary": "desktop.active_window failed"},
         )
-    parts = str(result.get("stdout") or "").strip().split("|", 2)
+    parts = str(result.get("stdout") or "").strip().split("|", 3)
     app_name = parts[0] if len(parts) > 0 else ""
     pid_text = parts[1] if len(parts) > 1 else ""
     title = parts[2] if len(parts) > 2 else ""
+    window_id_text = parts[3] if len(parts) > 3 else ""
     return {
         "ok": True,
         "action": "desktop.active_window",
@@ -1054,6 +1092,11 @@ def active_window() -> dict[str, Any]:
             "app_name": app_name,
             "pid": int(pid_text) if pid_text.isdigit() else None,
             "title": title,
+            **(
+                {"window_id": int(window_id_text)}
+                if window_id_text.isdigit()
+                else {}
+            ),
         },
         "permission_error": False,
         "fallback_used": False,
@@ -1173,7 +1216,7 @@ def ui_elements(
             else
                 set matchingApps to application processes whose name is appFilter
                 if (count of matchingApps) is 0 then
-                    return "META" & tab & appFilter & tab & "" & tab & ""
+                    return "META" & tab & appFilter & tab & "" & tab & "" & tab & ""
                 end if
                 set targetApp to item 1 of matchingApps
             end if
@@ -1182,12 +1225,21 @@ def ui_elements(
             try
                 set targetWindow to front window of targetApp
                 set windowTitle to my cleanText(name of targetWindow)
+                set windowID to ""
+                try
+                    set windowID to value of attribute "AXWindowNumber" of targetWindow as text
+                on error
+                    try
+                        set windowID to id of targetWindow as text
+                    end try
+                end try
                 set elementRows to my collectElements(targetWindow, 0, maxDepth, maxItems)
             on error
                 set windowTitle to ""
+                set windowID to ""
                 set elementRows to my collectElements(targetApp, 0, maxDepth, maxItems)
             end try
-            set header to "META" & tab & appName & tab & (appPID as text) & tab & windowTitle
+            set header to "META" & tab & appName & tab & (appPID as text) & tab & windowTitle & tab & windowID
             if (count of elementRows) is 0 then return header
             return header & linefeed & my joinRows(elementRows)
         end tell
@@ -1501,8 +1553,16 @@ def type_into_ui_element(
     return _with_permission_metadata("desktop.type_into_ui_element", payload)
 
 
-def permissions() -> dict[str, Any]:
-    """Return desktop execution permission readiness for observable diagnostics."""
+def permissions(*, active_verification: Any = False) -> dict[str, Any]:
+    """Return passive cached readiness unless interactive verification is explicit."""
+
+    if not _clean_bool(active_verification, default=False):
+        preflight = permission_preflight()
+        return {
+            **preflight,
+            "action": "desktop.permissions",
+            "active_verification": False,
+        }
 
     from apps.shell.yachiyo_agent.desktop_permissions import (
         desktop_permission_missing_by_capability,
@@ -1546,6 +1606,9 @@ def permissions() -> dict[str, Any]:
         "action": "desktop.permissions",
         "summary": summary,
         "data": {
+            "checked": True,
+            "diagnostic_status": "verified",
+            "active_verification": True,
             "ready": ready,
             "missing_permissions": clean_missing,
             "permission_targets": missing_targets,
@@ -1563,6 +1626,9 @@ def permissions() -> dict[str, Any]:
         "recovery_hints": recovery_hints,
         "recovery_actions": recovery_actions,
         "diagnostic_route": "/yachiyo/readiness",
+        "checked": True,
+        "diagnostic_status": "verified",
+        "active_verification": True,
         "runtime_blocked": bool(blocking_conditions),
         "permission_error": bool(missing_targets),
         "fallback_used": False,
@@ -1573,13 +1639,16 @@ def permission_preflight() -> dict[str, Any]:
     """Return cached desktop permission readiness without running fresh probes."""
 
     from apps.shell.yachiyo_agent.desktop_permissions import (
-        cached_desktop_permission_missing_by_capability,
+        cached_desktop_permission_diagnostics,
     )
 
+    cache_status = cached_desktop_permission_diagnostics()
     clean_missing = _clean_missing_permissions_by_capability(
-        cached_desktop_permission_missing_by_capability()
+        cache_status.get("missing_permissions") or {}
     )
-    runtime_blockers = _desktop_runtime_blocking_conditions(use_cache=True, cached_only=True)
+    runtime_blockers = _clean_missing_permissions_by_capability(
+        cache_status.get("blocking_conditions") or {}
+    )
     missing_targets = _ordered_unique(
         target for targets in clean_missing.values() for target in targets
     )
@@ -1592,11 +1661,19 @@ def permission_preflight() -> dict[str, Any]:
             *_affected_tools_for_missing_permissions(runtime_blockers),
         ]
     )
-    ready = not missing_targets and not blocking_conditions
-    summary = _desktop_permissions_summary(
-        missing_targets,
-        affected_tools,
-        blocking_conditions=blocking_conditions,
+    checked = cache_status.get("checked") is True
+    ready = checked and not missing_targets and not blocking_conditions
+    summary = (
+        _desktop_permissions_summary(
+            missing_targets,
+            affected_tools,
+            blocking_conditions=blocking_conditions,
+        )
+        if checked
+        else (
+            "Desktop permission status has not been interactively verified; "
+            "no app was activated and no Apple Event was sent."
+        )
     )
     recovery_hints = [
         *_permission_recovery_hints_for_targets(missing_targets),
@@ -1611,6 +1688,9 @@ def permission_preflight() -> dict[str, Any]:
         "action": "desktop.permission_preflight",
         "summary": summary,
         "data": {
+            "checked": checked,
+            "diagnostic_status": str(cache_status.get("status") or "not_checked"),
+            "active_verification": False,
             "ready": ready,
             "missing_permissions": clean_missing,
             "permission_targets": missing_targets,
@@ -1628,6 +1708,9 @@ def permission_preflight() -> dict[str, Any]:
         "recovery_hints": recovery_hints,
         "recovery_actions": recovery_actions,
         "diagnostic_route": "/yachiyo/readiness",
+        "checked": checked,
+        "diagnostic_status": str(cache_status.get("status") or "not_checked"),
+        "active_verification": False,
         "runtime_blocked": bool(blocking_conditions),
         "permission_error": bool(missing_targets),
         "fallback_used": False,
@@ -1852,19 +1935,66 @@ def app_status(app_name: str) -> dict[str, Any]:
     if _desktop_platform() != "macos":
         return _unsupported("app.status")
     clean_name = _clean_required(app_name, "app_name")
-    result = _run_osascript(
-        """
-        on run argv
-            set appName to item 1 of argv
-            if application appName is running then
-                return "running"
-            end if
-            return "not_running"
-        end run
-        """,
-        [clean_name],
+    resolved_app = _resolve_installed_app(clean_name)
+    resolved_metadata = resolved_app.get("metadata")
+    if not isinstance(resolved_metadata, Mapping):
+        resolved_metadata = {}
+    bundle_id = str(resolved_metadata.get("bundle_id") or "").strip()
+    candidate_names = _ordered_unique(
+        [
+            resolved_app.get("matched_name"),
+            resolved_app.get("name"),
+            clean_name,
+        ]
     )
-    if not result["ok"]:
+    criteria = json.dumps(
+        {"bundle_id": bundle_id, "names": candidate_names},
+        ensure_ascii=False,
+    )
+    result = _run_jxa(
+        """
+        function run(argv) {
+            ObjC.import("AppKit");
+            const criteria = JSON.parse(String(argv[0] || "{}"));
+            const requestedBundleId = String(criteria.bundle_id || "")
+                .trim()
+                .toLocaleLowerCase();
+            const requestedNames = Array.isArray(criteria.names)
+                ? criteria.names
+                    .map(function (name) {
+                        return String(name || "").trim().toLocaleLowerCase();
+                    })
+                    .filter(function (name) { return Boolean(name); })
+                : [];
+            const apps = $.NSWorkspace.sharedWorkspace.runningApplications;
+
+            if (requestedBundleId) {
+                for (let index = 0; index < apps.count; index += 1) {
+                    const app = apps.objectAtIndex(index);
+                    const bundleId = app.bundleIdentifier
+                        ? String(ObjC.unwrap(app.bundleIdentifier)).toLocaleLowerCase()
+                        : "";
+                    if (bundleId === requestedBundleId) {
+                        return JSON.stringify({running: true});
+                    }
+                }
+            }
+
+            for (let index = 0; index < apps.count; index += 1) {
+                const app = apps.objectAtIndex(index);
+                const localizedName = app.localizedName
+                    ? String(ObjC.unwrap(app.localizedName)).trim().toLocaleLowerCase()
+                    : "";
+                if (localizedName && requestedNames.indexOf(localizedName) !== -1) {
+                    return JSON.stringify({running: true});
+                }
+            }
+            return JSON.stringify({running: false});
+        }
+        """,
+        [criteria],
+    )
+    if not result.get("ok"):
         return _with_permission_metadata(
             "app.status",
             {
@@ -1874,8 +2004,20 @@ def app_status(app_name: str) -> dict[str, Any]:
                 "data": {"app_name": clean_name},
             },
         )
-    status = str(result.get("stdout") or "").strip()
-    running = status == "running"
+    try:
+        status_payload = json.loads(str(result.get("stdout") or ""))
+    except (TypeError, ValueError):
+        payload = _error("app.status", ValueError("invalid app status response"))
+        payload["data"] = {"app_name": clean_name}
+        return payload
+    if not isinstance(status_payload, Mapping) or not isinstance(
+        status_payload.get("running"), bool
+    ):
+        payload = _error("app.status", ValueError("invalid app status response"))
+        payload["data"] = {"app_name": clean_name}
+        return payload
+    running = status_payload["running"]
+    status = "running" if running else "not_running"
     return {
         "ok": True,
         "action": "app.status",
@@ -1939,16 +2081,16 @@ def app_open(app_name: str) -> dict[str, Any]:
 def inspect_app(
     app_name: str,
     *,
-    open_if_needed: Any = True,
-    focus: Any = True,
+    open_if_needed: Any = False,
+    focus: Any = False,
     role_filter: str = "",
     limit: Any = 80,
 ) -> dict[str, Any]:
     if _desktop_platform() != "macos":
         return _unsupported("desktop.inspect_app")
     clean_name = _clean_required(app_name, "app_name")
-    clean_open = _clean_bool(open_if_needed, default=True)
-    clean_focus = _clean_bool(focus, default=True)
+    clean_open = _clean_bool(open_if_needed, default=False)
+    clean_focus = _clean_bool(focus, default=False)
     clean_filter = str(role_filter or "").strip()
     try:
         clean_limit = max(1, min(200, int(limit or 80)))
@@ -2326,11 +2468,16 @@ def open_path_with_app(path: str, app_name: str) -> dict[str, Any]:
         "ok": True,
         "action": "desktop.open_path_with_app",
         "summary": f"Opened {target.name or str(target)} with {clean_app_name}",
+        # A zero LaunchServices exit status is the native receipt that macOS
+        # accepted this exact app/path dispatch.  Failed, missing, and unsafe
+        # paths return above and never receive this marker.
+        "postcondition_verified": True,
         "data": {
             **data_base,
             "app_name": clean_app_name,
             "open_target": "app_open",
             "exists": True,
+            "postcondition_verified": True,
             "is_dir": target.is_dir(),
             "suffix": target.suffix.lower(),
         },
@@ -3575,7 +3722,11 @@ def _electron_native_bridge_config() -> tuple[str, str] | None:
     return raw_url, token
 
 
-def _electron_native_focus_app(app_name: str) -> dict[str, Any]:
+def _electron_native_focus_app(
+    app_name: str,
+    *,
+    timeout_seconds: float = 8.0,
+) -> dict[str, Any]:
     config = _electron_native_bridge_config()
     if config is None:
         return {
@@ -3598,7 +3749,7 @@ def _electron_native_focus_app(app_name: str) -> dict[str, Any]:
         method="POST",
     )
     try:
-        with urlopen(request, timeout=6) as response:
+        with urlopen(request, timeout=timeout_seconds) as response:
             raw_body = response.read().decode("utf-8")
             payload = json.loads(raw_body) if raw_body.strip() else {}
             return _normalize_electron_native_focus_payload(payload, response.status)
@@ -4401,36 +4552,869 @@ def app_quit(app_name: str) -> dict[str, Any]:
     }
 
 
+def _apple_music_background_partial_result(
+    query: str,
+    *,
+    status: str = "not_found",
+    summary: str = "",
+    extra_data: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    return {
+        "ok": True,
+        "action": "media.apple_music_play",
+        "summary": summary
+        or (
+            f"Apple Music local library did not contain {query}; "
+            "no foreground search was opened."
+        ),
+        "data": {
+            "query": query,
+            "status": status,
+            "background_safe": True,
+            "library_search_completed": True,
+            "foreground_action_taken": False,
+            "target_app": "Music",
+            "search_opened": False,
+            "dispatch_verified": False,
+            "foreground_verified": False,
+            "search_query_verified": False,
+            "search_query_identity_verified": False,
+            "search_result_changed_from_nonmatching_baseline": False,
+            "playback_started": False,
+            "outcome": "partial",
+            "user_action_required": False,
+            **dict(extra_data or {}),
+        },
+        "permission_error": False,
+        "fallback_used": False,
+    }
+
+
+def _normalized_music_identity(value: Any) -> str:
+    normalized = unicodedata.normalize("NFKC", str(value or "")).casefold()
+    return re.sub(r"\s+", " ", normalized).strip()
+
+
+def _apple_music_identity_matches(query: Any, candidate: Any) -> bool:
+    query_identity = _normalized_music_identity(query)
+    candidate_identity = _normalized_music_identity(candidate)
+    if not query_identity or not candidate_identity:
+        return False
+    if candidate_identity == query_identity:
+        return True
+    # A user may omit one sentence-like mark at the end of a catalog title.
+    # This is intentionally asymmetric: an explicit `What?` must not match
+    # `What!`, and `Foo` must not match an emphatic `Foo!!` variant.
+    return bool(
+        query_identity[-1] not in "!?"
+        and candidate_identity[-1] in "!?"
+        and candidate_identity[:-1] == query_identity
+    )
+
+
+def _loose_normalized_music_identity(value: Any) -> str:
+    normalized = unicodedata.normalize("NFKC", str(value or "")).casefold()
+    return "".join(character for character in normalized if character.isalnum())
+
+
+def _apple_music_terminal_punctuation_variants(value: Any) -> list[str]:
+    raw = str(value or "").strip()
+    normalized = unicodedata.normalize("NFKC", raw).strip()
+    variants: list[str] = []
+    candidates = [raw, normalized]
+    if normalized and normalized[-1] not in "!?！？":
+        candidates.extend(
+            (
+                f"{normalized}!",
+                f"{normalized}！",
+                f"{normalized}?",
+                f"{normalized}？",
+            )
+        )
+    for candidate in candidates:
+        if candidate and candidate not in variants:
+            variants.append(candidate)
+    return variants
+
+
+def _apple_music_storefront_country() -> str:
+    try:
+        locale_name = str(locale.getlocale()[0] or "")
+    except Exception:
+        locale_name = ""
+    match = re.search(r"[_-]([A-Za-z]{2})(?:[.@_-]|$)", locale_name)
+    return match.group(1).upper() if match else "US"
+
+
+def _apple_music_catalog_url_is_valid(value: Any, track_id: Any) -> bool:
+    url = str(value or "").strip()
+    expected_track_id = str(track_id or "").strip()
+    if not url or not expected_track_id.isdigit():
+        return False
+    try:
+        parsed = urlparse(url)
+        port = parsed.port
+    except (TypeError, ValueError):
+        return False
+    if (
+        parsed.scheme.lower() != "https"
+        or (parsed.hostname or "").lower() != "music.apple.com"
+        or parsed.username is not None
+        or parsed.password is not None
+        or port is not None
+    ):
+        return False
+    return parse_qs(parsed.query, keep_blank_values=True).get("i") == [
+        expected_track_id
+    ]
+
+
+def _apple_music_catalog_result_is_weak_cover(
+    result: Mapping[str, Any],
+    *,
+    query: str,
+) -> bool:
+    query_identity = _loose_normalized_music_identity(query)
+    candidate_identity = _loose_normalized_music_identity(
+        " ".join(
+            str(result.get(key) or "")
+            for key in ("trackName", "collectionName", "artistName")
+        )
+    )
+    weak_markers = (
+        "pianocover",
+        "coverversion",
+        "instrumental",
+        "karaoke",
+        "钢琴",
+        "翻奏",
+        "伴奏",
+        "纯音乐",
+        "改编",
+    )
+    return any(
+        marker in candidate_identity and marker not in query_identity
+        for marker in weak_markers
+    )
+
+
+def _apple_music_catalog_match(
+    query: str,
+    results: Any,
+) -> dict[str, Any] | None:
+    query_identity = _normalized_music_identity(query)
+    if not query_identity or not isinstance(results, list):
+        return None
+    collection_candidates: dict[
+        tuple[str, ...],
+        list[tuple[tuple[int, int, int, int], dict[str, Any]]],
+    ] = {}
+    track_candidates: list[dict[str, Any]] = []
+    for raw in results:
+        if not isinstance(raw, Mapping) or str(raw.get("kind") or "") != "song":
+            continue
+        track_name = str(raw.get("trackName") or "").strip()
+        artist = str(raw.get("artistName") or "").strip()
+        collection = str(raw.get("collectionName") or "").strip()
+        track_exact = _apple_music_identity_matches(query, track_name)
+        collection_exact = _apple_music_identity_matches(query, collection)
+        if not track_exact and not collection_exact:
+            continue
+        if _apple_music_catalog_result_is_weak_cover(raw, query=query):
+            continue
+        track_id = raw.get("trackId")
+        if not _apple_music_catalog_url_is_valid(raw.get("trackViewUrl"), track_id):
+            continue
+        if not track_name or not artist:
+            continue
+        try:
+            track_number = int(raw.get("trackNumber") or 9999)
+        except (TypeError, ValueError):
+            track_number = 9999
+        try:
+            disc_number = int(raw.get("discNumber") or 1)
+        except (TypeError, ValueError):
+            disc_number = 1
+        try:
+            numeric_track_id = int(track_id)
+        except (TypeError, ValueError):
+            continue
+        collection_id = str(raw.get("collectionId") or "").strip()
+        collection_artist = str(raw.get("collectionArtistName") or "").strip()
+        candidate = {
+            "track_id": str(track_id),
+            "track": track_name,
+            "artist": artist,
+            "collection": collection,
+            "collection_id": collection_id,
+            "collection_artist": collection_artist,
+            "disc_number": disc_number,
+            "track_number": track_number,
+            "track_url": str(raw.get("trackViewUrl") or "").strip(),
+            "match_kind": "collection" if collection_exact else "track",
+        }
+        if collection_exact:
+            # The search API may return several unrelated releases with the
+            # same collectionName.  Only select an album when every exact-name
+            # result belongs to one collection identity.  collectionId is the
+            # authoritative identity; older/partial payloads fall back to the
+            # normalized collection and collection artist (or track artist),
+            # intentionally failing closed for multi-artist ambiguity.
+            collection_identity = (
+                ("collection_id", collection_id)
+                if collection_id
+                else (
+                    "collection_fallback",
+                    _normalized_music_identity(collection),
+                    _normalized_music_identity(collection_artist or artist),
+                )
+            )
+            collection_candidates.setdefault(collection_identity, []).append(
+                (
+                    (
+                        disc_number,
+                        0 if track_number > 0 else 1,
+                        track_number,
+                        numeric_track_id,
+                    ),
+                    candidate,
+                )
+            )
+        elif track_exact:
+            track_candidates.append(candidate)
+    if collection_candidates:
+        if len(collection_candidates) != 1:
+            return None
+        sole_collection = next(iter(collection_candidates.values()))
+        return min(sole_collection, key=lambda item: item[0])[1]
+    # A title alone does not identify a song when the catalog returns different
+    # artists or collections. Fail closed instead of selecting an arbitrary ID.
+    return track_candidates[0] if len(track_candidates) == 1 else None
+
+
+def _fetch_apple_music_catalog_match(
+    query: str,
+    *,
+    deadline: float,
+) -> tuple[dict[str, Any] | None, str]:
+    timeout = _remaining_timeout(deadline, 5.0)
+    if timeout <= 0:
+        return None, "catalog_deadline_exceeded"
+    params = urlencode(
+        {
+            "term": query,
+            "entity": "song",
+            "limit": _APPLE_MUSIC_CATALOG_LIMIT,
+            "country": _apple_music_storefront_country(),
+        }
+    )
+    request = Request(
+        f"https://itunes.apple.com/search?{params}",
+        headers={"Accept": "application/json", "User-Agent": "Oha-Yachiyo/1"},
+        method="GET",
+    )
+    try:
+        with urlopen_with_bundled_ca(request, timeout=timeout) as response:
+            raw = response.read(1_000_001)
+        if len(raw) > 1_000_000:
+            return None, "catalog_response_too_large"
+        payload = json.loads(raw.decode("utf-8"))
+    except Exception as exc:
+        return None, f"catalog_lookup_{exc.__class__.__name__}"
+    if not isinstance(payload, Mapping) or not isinstance(
+        payload.get("results"), list
+    ):
+        return None, "catalog_response_invalid"
+    return _apple_music_catalog_match(query, payload.get("results")), ""
+
+
+def _apple_music_playback_snapshot(*, timeout_seconds: float) -> dict[str, Any]:
+    result = _call_with_bounded_timeout(
+        _run_osascript,
+        """
+        if application "Music" is not running then
+            return "status|not_running||"
+        end if
+        tell application "Music"
+            try
+                set stateText to player state as text
+                set trackName to ""
+                set artistName to ""
+                try
+                    set trackName to name of current track
+                    set artistName to artist of current track
+                end try
+                return "status|" & stateText & "|" & trackName & "|" & artistName
+            on error errMsg number errNum
+                return "error|" & errNum & "|" & errMsg & "|"
+            end try
+        end tell
+        """,
+        timeout_seconds=timeout_seconds,
+    )
+    if result.get("ok") is not True:
+        detail = str(result.get("error") or result.get("stderr") or "").strip()
+        return {
+            "ok": False,
+            "error": detail or "Music status unavailable",
+            "permission_error": _looks_like_permission_error(detail),
+            "raw": result,
+        }
+    parts = str(result.get("stdout") or "").strip().split("|", 3)
+    if not parts or parts[0] != "status":
+        detail = "|".join(parts[1:]) if parts and parts[0] == "error" else str(
+            result.get("stdout") or ""
+        )
+        return {
+            "ok": False,
+            "error": detail or "Music status unavailable",
+            "permission_error": _looks_like_permission_error(detail),
+            "raw": result,
+        }
+    while len(parts) < 4:
+        parts.append("")
+    return {
+        "ok": True,
+        "player_state": parts[1].strip().lower(),
+        "track": parts[2].strip(),
+        "artist": parts[3].strip(),
+    }
+
+
+def _apple_music_track_identity_matches(
+    snapshot: Mapping[str, Any],
+    match: Mapping[str, Any],
+) -> bool:
+    return bool(
+        snapshot.get("ok") is True
+        and _normalized_music_identity(snapshot.get("track"))
+        == _normalized_music_identity(match.get("track"))
+        and _normalized_music_identity(snapshot.get("artist"))
+        == _normalized_music_identity(match.get("artist"))
+    )
+
+
+def _apple_music_automation_failure(
+    query: str,
+    result: Mapping[str, Any],
+    *,
+    summary: str,
+) -> dict[str, Any]:
+    raw = result.get("raw") if isinstance(result.get("raw"), Mapping) else result
+    return {
+        **_with_permission_metadata(
+            "media.apple_music_play",
+            {
+                **dict(raw),
+                "ok": False,
+                "action": "media.apple_music_play",
+                "summary": summary,
+                "error": str(result.get("error") or raw.get("error") or summary),
+                "permission_error": bool(result.get("permission_error"))
+                or _looks_like_permission_error(result.get("error")),
+                "data": {"query": query},
+            },
+        ),
+        "fallback_used": False,
+    }
+
+
+def _apple_music_play_catalog_match(
+    query: str,
+    match: Mapping[str, Any],
+    *,
+    deadline: float,
+) -> dict[str, Any]:
+    try:
+        frontmost_before_result = _appkit_frontmost_app_name()
+    except Exception:
+        frontmost_before_result = {}
+    frontmost_before = str(
+        (
+            frontmost_before_result.get("app_name")
+            if isinstance(frontmost_before_result, Mapping)
+            else ""
+        )
+        or ""
+    ).strip()
+    foreground_observation_verified = bool(
+        isinstance(frontmost_before_result, Mapping)
+        and frontmost_before_result.get("ok") is True
+        and frontmost_before
+    )
+    frontmost_after = frontmost_before
+    frontmost_observations = [frontmost_before] if frontmost_before else []
+    frontmost_observation_failures = 0 if foreground_observation_verified else 1
+    foreground_action_taken = False
+    before: dict[str, Any] = {}
+
+    def observe_frontmost() -> bool:
+        nonlocal foreground_action_taken, foreground_observation_verified
+        nonlocal frontmost_after, frontmost_observation_failures
+        try:
+            observation = _appkit_frontmost_app_name()
+        except Exception:
+            observation = {}
+        observed = str(
+            (
+                observation.get("app_name")
+                if isinstance(observation, Mapping)
+                else ""
+            )
+            or ""
+        ).strip()
+        if not (
+            isinstance(observation, Mapping)
+            and observation.get("ok") is True
+            and observed
+        ):
+            foreground_observation_verified = False
+            frontmost_observation_failures += 1
+            return False
+        frontmost_after = observed
+        frontmost_observations.append(observed)
+        if _compact_app_match_name(observed) != _compact_app_match_name(
+            frontmost_before
+        ):
+            foreground_action_taken = True
+            foreground_observation_verified = False
+        return foreground_observation_verified
+
+    def foreground_evidence() -> dict[str, Any]:
+        return {
+            "frontmost_before": frontmost_before,
+            "frontmost_after": frontmost_after,
+            "frontmost_observations": list(frontmost_observations),
+            "frontmost_observation_failures": frontmost_observation_failures,
+            "foreground_observation_verified": foreground_observation_verified,
+            "foreground_action_taken": foreground_action_taken,
+            "background_safe": bool(
+                foreground_observation_verified and not foreground_action_taken
+            ),
+        }
+
+    def catalog_partial(
+        summary: str,
+        *,
+        status: str = "catalog_playback_unverified",
+        extra_data: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return _apple_music_background_partial_result(
+            query,
+            status=status,
+            summary=summary,
+            extra_data={
+                **dict(match),
+                "catalog_match_verified": True,
+                "catalog_dispatch_verified": False,
+                "track_identity_verified": False,
+                "playback_state_unverified": True,
+                "old_track": str(before.get("track") or ""),
+                "old_artist": str(before.get("artist") or ""),
+                **foreground_evidence(),
+                **dict(extra_data or {}),
+            },
+        )
+
+    if not foreground_observation_verified:
+        return catalog_partial(
+            "Apple Music catalog playback was skipped because foreground state "
+            "could not be observed safely.",
+            status="foreground_observation_unverified",
+        )
+
+    before_timeout = _remaining_timeout(deadline, 3.0)
+    if before_timeout <= 0:
+        return catalog_partial(
+            "Apple Music found an exact catalog match, but its playback deadline "
+            "was reached before dispatch.",
+            extra_data={"catalog_deadline_exceeded": True},
+        )
+    before = _apple_music_playback_snapshot(timeout_seconds=before_timeout)
+    if before.get("ok") is not True and before.get("permission_error") is True:
+        return _apple_music_automation_failure(
+            query,
+            before,
+            summary="Apple Music automation permission is required.",
+        )
+    if before.get("ok") is not True:
+        return catalog_partial(
+            "Apple Music found an exact catalog match, but the initial playback "
+            "state could not be verified.",
+        )
+
+    dispatch_timeout = _remaining_timeout(deadline, 3.0)
+    dispatch = _call_with_bounded_timeout(
+        _run_osascript,
+        """
+        on run argv
+            set trackUrl to item 1 of argv
+            tell application "Music" to open location trackUrl
+            return "dispatched"
+        end run
+        """,
+        [str(match.get("track_url") or "")],
+        timeout_seconds=dispatch_timeout,
+    ) if dispatch_timeout > 0 else {"ok": False, "error": "catalog_deadline_exceeded"}
+    observe_frontmost()
+    if dispatch.get("ok") is not True:
+        if _looks_like_permission_error(dispatch.get("error") or dispatch.get("stderr")):
+            return _apple_music_automation_failure(
+                query,
+                dispatch,
+                summary="Apple Music could not open the matched catalog track.",
+            )
+        return catalog_partial(
+            summary="Apple Music found an exact catalog match but did not accept its URL.",
+        )
+    if not foreground_observation_verified:
+        return catalog_partial(
+            "Apple Music accepted the catalog URL, but foreground state changed "
+            "or became unavailable before playback.",
+            status="foreground_observation_unverified",
+            extra_data={"catalog_dispatch_verified": True},
+        )
+
+    opened_snapshot: dict[str, Any] = {}
+    for attempt in range(_APPLE_MUSIC_CATALOG_POLL_ATTEMPTS):
+        snapshot_timeout = _remaining_timeout(deadline, 2.0)
+        if snapshot_timeout <= 0:
+            break
+        opened_snapshot = _apple_music_playback_snapshot(
+            timeout_seconds=snapshot_timeout
+        )
+        observe_frontmost()
+        if opened_snapshot.get("ok") is not True and opened_snapshot.get(
+            "permission_error"
+        ) is True:
+            return _apple_music_automation_failure(
+                query,
+                opened_snapshot,
+                summary="Apple Music playback state requires Automation permission.",
+            )
+        if not foreground_observation_verified:
+            break
+        if _apple_music_track_identity_matches(opened_snapshot, match):
+            break
+        if attempt + 1 < _APPLE_MUSIC_CATALOG_POLL_ATTEMPTS:
+            time.sleep(0.15)
+    if not foreground_observation_verified:
+        return catalog_partial(
+            "Apple Music found the catalog track, but foreground state changed "
+            "or became unavailable before playback.",
+            status="foreground_observation_unverified",
+            extra_data={
+                "catalog_dispatch_verified": True,
+                "observed_track": str(opened_snapshot.get("track") or ""),
+                "observed_artist": str(opened_snapshot.get("artist") or ""),
+            },
+        )
+    if not _apple_music_track_identity_matches(opened_snapshot, match):
+        if foreground_observation_verified:
+            observe_frontmost()
+        return catalog_partial(
+            summary=(
+                "Apple Music found an exact catalog match, but the target track "
+                "was not verified."
+            ),
+            extra_data={
+                "catalog_dispatch_verified": True,
+                "observed_track": str(opened_snapshot.get("track") or ""),
+                "observed_artist": str(opened_snapshot.get("artist") or ""),
+            },
+        )
+
+    play_timeout = _remaining_timeout(deadline, 3.0)
+    play_result = _call_with_bounded_timeout(
+        _run_osascript,
+        """
+        on run argv
+            set expectedTrack to item 1 of argv
+            set expectedArtist to item 2 of argv
+            tell application "Music"
+                set currentTrackName to ""
+                set currentArtistName to ""
+                try
+                    set currentTrackName to name of current track
+                    set currentArtistName to artist of current track
+                end try
+                if currentTrackName is not expectedTrack then
+                    return "identity_changed|" & currentTrackName & "|" & currentArtistName
+                end if
+                if currentArtistName is not expectedArtist then
+                    return "identity_changed|" & currentTrackName & "|" & currentArtistName
+                end if
+                play current track
+                return "played|" & currentTrackName & "|" & currentArtistName
+            end tell
+        end run
+        """,
+        [str(match.get("track") or ""), str(match.get("artist") or "")],
+        timeout_seconds=play_timeout,
+    ) if play_timeout > 0 else {"ok": False, "error": "catalog_deadline_exceeded"}
+    observe_frontmost()
+    if play_result.get("ok") is not True and _looks_like_permission_error(
+        play_result.get("error") or play_result.get("stderr")
+    ):
+        return _apple_music_automation_failure(
+            query,
+            play_result,
+            summary="Apple Music playback requires Automation permission.",
+        )
+    play_status, observed_track, observed_artist = _split_status(
+        play_result.get("stdout")
+    )
+    if play_result.get("ok") is True and play_status == "identity_changed":
+        return catalog_partial(
+            summary=(
+                "Apple Music changed tracks before playback, so nothing was played."
+            ),
+            extra_data={
+                "catalog_dispatch_verified": True,
+                "identity_changed_before_play": True,
+                "observed_track": observed_track,
+                "observed_artist": observed_artist,
+            },
+        )
+    if not foreground_observation_verified:
+        return catalog_partial(
+            "Apple Music playback was requested, but foreground state changed or "
+            "became unavailable before it could be verified.",
+            status="foreground_observation_unverified",
+            extra_data={"catalog_dispatch_verified": True},
+        )
+
+    final_snapshot: dict[str, Any] = {}
+    for attempt in range(_APPLE_MUSIC_CATALOG_POLL_ATTEMPTS):
+        snapshot_timeout = _remaining_timeout(deadline, 2.0)
+        if snapshot_timeout <= 0:
+            break
+        final_snapshot = _apple_music_playback_snapshot(
+            timeout_seconds=snapshot_timeout
+        )
+        observe_frontmost()
+        if final_snapshot.get("ok") is not True and final_snapshot.get(
+            "permission_error"
+        ) is True:
+            return _apple_music_automation_failure(
+                query,
+                final_snapshot,
+                summary="Apple Music playback state requires Automation permission.",
+            )
+        if not foreground_observation_verified:
+            break
+        if (
+            _apple_music_track_identity_matches(final_snapshot, match)
+            and str(final_snapshot.get("player_state") or "").lower() == "playing"
+        ):
+            break
+        if attempt + 1 < _APPLE_MUSIC_CATALOG_POLL_ATTEMPTS:
+            time.sleep(0.15)
+    observe_frontmost()
+    identity_verified = _apple_music_track_identity_matches(final_snapshot, match)
+    player_state = str(final_snapshot.get("player_state") or "unknown").lower()
+    if (
+        play_result.get("ok") is not True
+        or play_status != "played"
+        or not identity_verified
+        or player_state != "playing"
+        or foreground_action_taken
+        or not foreground_observation_verified
+    ):
+        return catalog_partial(
+            summary=(
+                "Apple Music found the catalog track, but playback could not be "
+                "safely verified."
+            ),
+            extra_data={
+                "catalog_dispatch_verified": True,
+                "track_identity_verified": identity_verified,
+                "player_state": player_state,
+            },
+        )
+    return {
+        "ok": True,
+        "action": "media.apple_music_play",
+        "summary": f"Playing {match.get('track')} - {match.get('artist')}",
+        "data": {
+            "query": query,
+            "status": "played",
+            "track": str(match.get("track") or ""),
+            "artist": str(match.get("artist") or ""),
+            "collection": str(match.get("collection") or ""),
+            "catalog_match_verified": True,
+            "catalog_dispatch_verified": True,
+            "track_identity_verified": True,
+            "player_state": "playing",
+            "playback_started": True,
+            "background_safe": True,
+            "foreground_action_taken": False,
+            **foreground_evidence(),
+            "old_track": str(before.get("track") or ""),
+            "old_artist": str(before.get("artist") or ""),
+            "track_url": str(match.get("track_url") or ""),
+            "track_id": str(match.get("track_id") or ""),
+        },
+        "permission_error": False,
+        "fallback_used": False,
+    }
+
+
+def _apple_music_play_deadline_result(
+    query: str,
+    *,
+    fallback_result: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    fallback_payload = dict(fallback_result or {})
+    result = _apple_music_background_partial_result(
+        query,
+        status="playback_unverified",
+        summary=f"Apple Music search for {query} reached its execution deadline.",
+        extra_data={
+            "library_search_completed": isinstance(
+                fallback_payload.get("library_search"), Mapping
+            ),
+            "deadline_exceeded": True,
+            "playback_state_unverified": True,
+            "track_identity_verified": False,
+            "catalog_match_verified": False,
+            "catalog_dispatch_verified": False,
+        },
+    )
+    result["fallback_result"] = fallback_payload
+    return result
+
+
 def apple_music_play(query: str) -> dict[str, Any]:
     if _desktop_platform() != "macos":
         return _unsupported("media.apple_music_play")
     clean_query = _clean_required(query, "query")
-    result = _run_osascript(
+    deadline = time.monotonic() + _APPLE_MUSIC_PLAY_DEADLINE_SECONDS
+    initial_timeout = _remaining_timeout(deadline, 10.0)
+    if initial_timeout <= 0:
+        return _apple_music_play_deadline_result(clean_query)
+    result = _call_with_bounded_timeout(
+        _run_osascript,
         """
+        on safeText(theValue)
+            try
+                return theValue as text
+            on error
+                return ""
+            end try
+        end safeText
+
+        on sortableInteger(theValue)
+            try
+                set numericValue to theValue as integer
+                if numericValue is less than 1 then return 2147483647
+                return numericValue
+            on error
+                return 2147483647
+            end try
+        end sortableInteger
+
+        on textListContains(valuesList, expectedValue)
+            repeat with existingValue in valuesList
+                if (contents of existingValue) is expectedValue then return true
+            end repeat
+            return false
+        end textListContains
+
         on run argv
             set queryText to item 1 of argv
+            set exactNameVariants to items 2 thru -1 of argv
             tell application "Music"
-                activate
                 try
                     set matches to (search library playlist 1 for queryText)
                     if (count of matches) is 0 then
                         return "not_found|" & queryText & "|"
                     end if
-                    set trackRef to item 1 of matches
-                    play trackRef
-                    set trackName to name of trackRef
-                    set artistName to artist of trackRef
-                    return "played|" & trackName & "|" & artistName
+
+                    set exactAlbumTracks to {}
+                    set exactAlbumIdentities to {}
+                    set exactTrackMatches to {}
+                    repeat with candidateRef in matches
+                        set candidateTrack to contents of candidateRef
+                        set trackName to my safeText(name of candidateTrack)
+                        set artistName to my safeText(artist of candidateTrack)
+                        set albumName to my safeText(album of candidateTrack)
+                        set albumArtistName to my safeText(album artist of candidateTrack)
+                        if albumArtistName is "" then set albumArtistName to artistName
+
+                        if my textListContains(exactNameVariants, albumName) then
+                            set end of exactAlbumTracks to candidateTrack
+                            set albumIdentity to albumName & "\u001f" & albumArtistName
+                            if not my textListContains(exactAlbumIdentities, albumIdentity) then
+                                set end of exactAlbumIdentities to albumIdentity
+                            end if
+                        end if
+                        if my textListContains(exactNameVariants, trackName) then
+                            set end of exactTrackMatches to candidateTrack
+                        end if
+                    end repeat
+
+                    set exactAlbumIdentityCount to count of exactAlbumIdentities
+                    set exactTrackCount to count of exactTrackMatches
+                    set selectedTrack to missing value
+                    set matchKind to ""
+                    if (count of exactAlbumTracks) is greater than 0 then
+                        if exactAlbumIdentityCount is not 1 then
+                            return "ambiguous_exact_album|" & queryText & "|" & exactAlbumIdentityCount & "|"
+                        end if
+                        set selectedTrack to item 1 of exactAlbumTracks
+                        set bestDiscNumber to my sortableInteger(disc number of selectedTrack)
+                        set bestTrackNumber to my sortableInteger(track number of selectedTrack)
+                        set bestDatabaseID to my sortableInteger(database ID of selectedTrack)
+                        repeat with candidateRef in exactAlbumTracks
+                            set candidateTrack to contents of candidateRef
+                            set candidateDiscNumber to my sortableInteger(disc number of candidateTrack)
+                            set candidateTrackNumber to my sortableInteger(track number of candidateTrack)
+                            set candidateDatabaseID to my sortableInteger(database ID of candidateTrack)
+                            if candidateDiscNumber is less than bestDiscNumber or (candidateDiscNumber is bestDiscNumber and candidateTrackNumber is less than bestTrackNumber) or (candidateDiscNumber is bestDiscNumber and candidateTrackNumber is bestTrackNumber and candidateDatabaseID is less than bestDatabaseID) then
+                                set selectedTrack to candidateTrack
+                                set bestDiscNumber to candidateDiscNumber
+                                set bestTrackNumber to candidateTrackNumber
+                                set bestDatabaseID to candidateDatabaseID
+                            end if
+                        end repeat
+                        set matchKind to "album"
+                    else if exactTrackCount is 1 then
+                        set selectedTrack to item 1 of exactTrackMatches
+                        set matchKind to "track"
+                    else if exactTrackCount is greater than 1 then
+                        return "ambiguous_exact_track|" & queryText & "|" & exactTrackCount & "|"
+                    else
+                        return "no_exact_match|" & queryText & "||"
+                    end if
+
+                    set selectedTrackName to my safeText(name of selectedTrack)
+                    set selectedArtistName to my safeText(artist of selectedTrack)
+                    set selectedAlbumName to my safeText(album of selectedTrack)
+                    play selectedTrack
+                    set currentTrackName to my safeText(name of current track)
+                    set currentArtistName to my safeText(artist of current track)
+                    set currentAlbumName to my safeText(album of current track)
+                    set stateText to player state as text
+                    if currentTrackName is not selectedTrackName or currentArtistName is not selectedArtistName or currentAlbumName is not selectedAlbumName then
+                        return "playback_unverified|" & currentTrackName & "|" & currentArtistName & "|" & stateText & "|" & matchKind & "|" & currentAlbumName & "|identity_unverified"
+                    end if
+                    return "played|" & currentTrackName & "|" & currentArtistName & "|" & stateText & "|" & matchKind & "|" & currentAlbumName & "|identity_verified"
                 on error errMsg number errNum
                     return "error|" & errNum & "|" & errMsg
                 end try
             end tell
         end run
         """,
-        [clean_query],
+        [clean_query, *_apple_music_terminal_punctuation_variants(clean_query)],
+        timeout_seconds=initial_timeout,
     )
+    if time.monotonic() >= deadline:
+        return _apple_music_play_deadline_result(
+            clean_query,
+            fallback_result={"library_search": result},
+        )
     if not result["ok"]:
-        fallback = app_open("Music")
         return {
             **_with_permission_metadata(
                 "media.apple_music_play",
@@ -4441,42 +5425,153 @@ def apple_music_play(query: str) -> dict[str, Any]:
                 },
             ),
             "action": "media.apple_music_play",
-            "fallback_used": bool(fallback.get("ok")),
-            "fallback_result": fallback,
+            "fallback_used": False,
+            "fallback_result": {},
         }
     status, first, second = _split_status(result.get("stdout"))
-    if status == "played":
-        detail = f"{first}{f' - {second}' if second else ''}"
+    library_parts = str(result.get("stdout") or "").strip().split("|")
+    if status in {"played", "playback_unverified"}:
+        while len(library_parts) < 8:
+            library_parts.append("")
+        track = library_parts[1].strip()
+        artist = library_parts[2].strip()
+        player_state = library_parts[3].strip().lower()
+        match_kind = library_parts[4].strip().lower()
+        album = library_parts[5].strip()
+        identity_receipt = library_parts[6].strip().lower()
+        track_query_matches = bool(
+            match_kind == "track"
+            and _apple_music_identity_matches(clean_query, track)
+        )
+        album_query_matches = bool(
+            match_kind == "album"
+            and _apple_music_identity_matches(clean_query, album)
+        )
+        query_identity_matches = bool(
+            track_query_matches or album_query_matches
+        )
+        identity_verified = bool(
+            status == "played"
+            and identity_receipt == "identity_verified"
+            and query_identity_matches
+            and track
+            and artist
+            and album
+        )
+        detail = f"{track}{f' - {artist}' if artist else ''}"
+        if player_state != "playing" or not identity_verified:
+            return _apple_music_background_partial_result(
+                clean_query,
+                status="playback_unverified",
+                summary=f"Apple Music selected {detail}, but playback was not verified.",
+                extra_data={
+                    "track": track,
+                    "artist": artist,
+                    "album": album,
+                    "match_kind": match_kind or "unknown",
+                    "player_state": player_state or "unknown",
+                    "track_identity_verified": False,
+                    "playback_state_unverified": True,
+                    "library_match_status": status,
+                },
+            )
         return {
             "ok": True,
             "action": "media.apple_music_play",
             "summary": f"Playing {detail}",
-            "data": {"query": clean_query, "track": first, "artist": second},
+            "data": {
+                "query": clean_query,
+                "status": "played",
+                "track": track,
+                "artist": artist,
+                "album": album,
+                "match_kind": match_kind,
+                "track_identity_verified": True,
+                "player_state": "playing",
+                "playback_started": True,
+                "foreground_action_taken": False,
+                "background_safe": True,
+            },
             "permission_error": False,
             "fallback_used": False,
         }
-    fallback = _open_apple_music_search(clean_query)
-    payload = {
-        "ok": False,
-        "action": "media.apple_music_play",
-        "summary": (
-            f"Could not directly play {clean_query}; opened Apple Music search."
-            if fallback.get("ok")
-            else f"Could not directly play {clean_query}; Apple Music search fallback failed."
-        ),
-        "error": second or first or "Music did not return a playable track",
-        "data": {
-            "query": clean_query,
-            "status": status,
-            "search_url": str((fallback.get("data") or {}).get("url") or ""),
-            "search_opened": bool(fallback.get("ok")),
-        },
-        "permission_error": status == "error" and _looks_like_permission_error(f"{first}\n{second}"),
-        "fallback_used": bool(fallback.get("ok")),
-        "fallback": "apple_music_search",
-        "fallback_result": fallback,
+    library_miss_statuses = {
+        "not_found",
+        "no_exact_match",
+        "ambiguous_exact_track",
+        "ambiguous_exact_album",
     }
-    return _with_permission_metadata("media.apple_music_play", payload)
+    if status not in library_miss_statuses:
+        error_text = second or first or "Music did not return a playable track"
+        return _with_permission_metadata(
+            "media.apple_music_play",
+            {
+                "ok": False,
+                "action": "media.apple_music_play",
+                "summary": f"Could not directly play {clean_query}.",
+                "error": error_text,
+                "data": {
+                    "query": clean_query,
+                    "status": status or "unknown",
+                    "search_opened": False,
+                    "dispatch_verified": False,
+                    "foreground_verified": False,
+                    "search_query_verified": False,
+                    "search_query_identity_verified": False,
+                    "search_result_changed_from_nonmatching_baseline": False,
+                },
+                "permission_error": _looks_like_permission_error(
+                    f"{first}\n{second}"
+                ),
+                "fallback_used": False,
+            },
+        )
+    catalog_match, catalog_error = _fetch_apple_music_catalog_match(
+        clean_query,
+        deadline=deadline,
+    )
+    if catalog_match is not None:
+        catalog_result = _apple_music_play_catalog_match(
+            clean_query,
+            catalog_match,
+            deadline=deadline,
+        )
+        catalog_data = catalog_result.get("data")
+        if isinstance(catalog_data, dict):
+            catalog_data.setdefault("library_match_status", status)
+        return catalog_result
+    if status == "not_found":
+        summary = (
+            f"Apple Music local library did not contain {clean_query}; official catalog "
+            "lookup did not complete, and no foreground search was opened."
+            if catalog_error
+            else (
+                "Apple Music local library and official catalog did not contain an "
+                f"exact match for {clean_query}; no foreground search was opened."
+            )
+        )
+    else:
+        summary = (
+            "Apple Music local library did not provide an unambiguous exact match for "
+            f"{clean_query}; official catalog lookup did not complete, and no "
+            "foreground search was opened."
+            if catalog_error
+            else (
+                "Apple Music local library and official catalog did not provide one "
+                f"unambiguous exact match for {clean_query}; no foreground search "
+                "was opened."
+            )
+        )
+    return _apple_music_background_partial_result(
+        clean_query,
+        summary=summary,
+        extra_data={
+            "library_match_status": status,
+            "catalog_lookup_completed": not bool(catalog_error),
+            "catalog_match_verified": False,
+            **({"catalog_lookup_status": catalog_error} if catalog_error else {}),
+        },
+    )
 
 
 def apple_music_status() -> dict[str, Any]:
@@ -4544,16 +5639,129 @@ def apple_music_status() -> dict[str, Any]:
     return _with_permission_metadata("media.apple_music_status", payload)
 
 
+_APPLE_MUSIC_CONTROL_RECEIPT_SEPARATOR = "\x1f"
+
+
+def _clean_apple_music_database_id(value: Any) -> str:
+    text = str(value or "").strip()
+    try:
+        database_id = int(text)
+    except (TypeError, ValueError):
+        return ""
+    return str(database_id) if database_id > 0 else ""
+
+
+def _clean_apple_music_persistent_id(value: Any) -> str:
+    text = str(value or "").strip()
+    if text.casefold() in {"", "missing value", "none", "null"}:
+        return ""
+    if not text.strip("0"):
+        return ""
+    return text
+
+
+def _apple_music_track_change_receipt(
+    *,
+    before_database_id: Any,
+    after_database_id: Any,
+    before_persistent_id: Any,
+    after_persistent_id: Any,
+) -> dict[str, Any]:
+    before_database = _clean_apple_music_database_id(before_database_id)
+    after_database = _clean_apple_music_database_id(after_database_id)
+    before_persistent = _clean_apple_music_persistent_id(before_persistent_id)
+    after_persistent = _clean_apple_music_persistent_id(after_persistent_id)
+
+    identity_source = ""
+    before_identity = ""
+    after_identity = ""
+    identity_conflict = False
+    if before_database and after_database:
+        identity_source = "music_database_id"
+        before_identity = before_database
+        after_identity = after_database
+        if before_persistent and after_persistent:
+            identity_conflict = (
+                (before_database != after_database)
+                != (before_persistent.casefold() != after_persistent.casefold())
+            )
+    elif before_persistent and after_persistent:
+        identity_source = "music_persistent_id"
+        before_identity = before_persistent
+        after_identity = after_persistent
+
+    if identity_conflict:
+        return {
+            "track_changed": False,
+            "track_change_verified": False,
+            "track_identity_source": "",
+            "before_track_id": "",
+            "after_track_id": "",
+            "track_id": "",
+            "track_identity_conflict": True,
+        }
+
+    track_changed = bool(
+        before_identity
+        and after_identity
+        and before_identity.casefold() != after_identity.casefold()
+    )
+    return {
+        "track_changed": track_changed,
+        "track_change_verified": track_changed,
+        "track_identity_source": identity_source,
+        "before_track_id": before_identity,
+        "after_track_id": after_identity,
+        "track_id": after_identity,
+    }
+
+
 def apple_music_control(action: str) -> dict[str, Any]:
     if _desktop_platform() != "macos":
         return _unsupported("media.apple_music_control")
     clean_action = _clean_music_control_action(action)
     result = _run_osascript(
         """
+        on currentMusicTrackIdentity()
+            tell application "Music"
+                set databaseIDText to ""
+                set persistentIDText to ""
+                try
+                    set databaseIDText to (database ID of current track) as text
+                end try
+                try
+                    set persistentIDText to (persistent ID of current track) as text
+                end try
+                return {databaseIDText, persistentIDText}
+            end tell
+        end currentMusicTrackIdentity
+
+        on trackIdentityChanged(beforeIdentity, afterIdentity)
+            set beforeDatabaseID to (item 1 of beforeIdentity) as text
+            set afterDatabaseID to (item 1 of afterIdentity) as text
+            if beforeDatabaseID is not "" and afterDatabaseID is not "" then
+                return beforeDatabaseID is not afterDatabaseID
+            end if
+            set beforePersistentID to (item 2 of beforeIdentity) as text
+            set afterPersistentID to (item 2 of afterIdentity) as text
+            if beforePersistentID is not "" and afterPersistentID is not "" then
+                return beforePersistentID is not afterPersistentID
+            end if
+            return false
+        end trackIdentityChanged
+
         on run argv
             set controlAction to item 1 of argv
+            if application "Music" is not running then
+                return "not_running|0|Music is not running"
+            end if
             tell application "Music"
                 try
+                    set isTrackNavigation to controlAction is "next" or controlAction is "previous"
+                    set beforeIdentity to {"", ""}
+                    if isTrackNavigation then
+                        set beforeIdentity to my currentMusicTrackIdentity()
+                    end if
                     if controlAction is "toggle" then
                         playpause
                     else if controlAction is "play" then
@@ -4567,7 +5775,16 @@ def apple_music_control(action: str) -> dict[str, Any]:
                     else
                         return "error|-1|unsupported_control"
                     end if
-                    delay 0.1
+                    set afterIdentity to {"", ""}
+                    if isTrackNavigation then
+                        repeat with observationAttempt from 1 to 8
+                            delay 0.15
+                            set afterIdentity to my currentMusicTrackIdentity()
+                            if my trackIdentityChanged(beforeIdentity, afterIdentity) then exit repeat
+                        end repeat
+                    else
+                        delay 0.1
+                    end if
                     set stateText to player state as text
                     try
                         set trackName to name of current track
@@ -4576,6 +5793,10 @@ def apple_music_control(action: str) -> dict[str, Any]:
                         set trackName to ""
                         set artistName to ""
                     end try
+                    if isTrackNavigation then
+                        set outputSeparator to character id 31
+                        return "controlled-v2" & outputSeparator & controlAction & outputSeparator & stateText & outputSeparator & (item 1 of beforeIdentity) & outputSeparator & (item 1 of afterIdentity) & outputSeparator & (item 2 of beforeIdentity) & outputSeparator & (item 2 of afterIdentity) & outputSeparator & trackName & outputSeparator & artistName
+                    end if
                     return "controlled|" & controlAction & "|" & stateText & "|" & trackName & "|" & artistName
                 on error errMsg number errNum
                     return "error|" & errNum & "|" & errMsg
@@ -4586,24 +5807,56 @@ def apple_music_control(action: str) -> dict[str, Any]:
         [clean_action],
     )
     if not result["ok"]:
-        fallback = app_open("Music")
-        media_key_result = _apple_music_control_media_key_result(clean_action, result, fallback)
-        if media_key_result:
-            return media_key_result
-        return {
-            **_with_permission_metadata(
-                "media.apple_music_control",
-                {
-                    **result,
-                    "action": "media.apple_music_control",
-                    "summary": "media.apple_music_control failed",
-                },
-            ),
+        payload = {
+            **result,
             "action": "media.apple_music_control",
-            "fallback_used": bool(fallback.get("ok")),
-            "fallback_result": fallback,
+            "summary": "media.apple_music_control failed",
+            "fallback_used": False,
         }
-    parts = str(result.get("stdout") or "").strip().split("|", 4)
+        return _with_permission_metadata("media.apple_music_control", payload)
+    raw_stdout = str(result.get("stdout") or "").rstrip("\r\n")
+    receipt_prefix = f"controlled-v2{_APPLE_MUSIC_CONTROL_RECEIPT_SEPARATOR}"
+    if raw_stdout.startswith(receipt_prefix):
+        receipt_parts = raw_stdout.split(_APPLE_MUSIC_CONTROL_RECEIPT_SEPARATOR, 8)
+        while len(receipt_parts) < 9:
+            receipt_parts.append("")
+        (
+            _status,
+            receipt_action,
+            receipt_state,
+            before_database_id,
+            after_database_id,
+            before_persistent_id,
+            after_persistent_id,
+            receipt_track,
+            receipt_artist,
+        ) = receipt_parts
+        control = receipt_action or clean_action
+        data = {
+            "control": control,
+            "player_state": receipt_state,
+            "track": receipt_track,
+            "artist": receipt_artist,
+        }
+        if control in {"next", "previous"}:
+            data.update(
+                _apple_music_track_change_receipt(
+                    before_database_id=before_database_id,
+                    after_database_id=after_database_id,
+                    before_persistent_id=before_persistent_id,
+                    after_persistent_id=after_persistent_id,
+                )
+            )
+        return {
+            "ok": True,
+            "action": "media.apple_music_control",
+            "summary": f"Apple Music {control} executed",
+            "data": data,
+            "permission_error": False,
+            "fallback_used": False,
+        }
+
+    parts = raw_stdout.strip().split("|", 4)
     while len(parts) < 5:
         parts.append("")
     status, first, second, third, fourth = parts
@@ -4621,32 +5874,15 @@ def apple_music_control(action: str) -> dict[str, Any]:
             "permission_error": False,
             "fallback_used": False,
         }
-    fallback = app_open("Music")
     permission_error = status == "error" and _looks_like_permission_error(f"{first}\n{second}")
-    media_key_result = _apple_music_control_media_key_result(
-        clean_action,
-        {
-            "ok": False,
-            "action": "media.apple_music_control",
-            "summary": "media.apple_music_control failed",
-            "error": second or first or "Music did not accept the control action",
-            "data": {"control": clean_action, "status": status},
-            "permission_error": permission_error,
-            "fallback_used": False,
-        },
-        fallback,
-    )
-    if media_key_result:
-        return media_key_result
     payload = {
         "ok": False,
         "action": "media.apple_music_control",
-        "summary": f"Could not control Apple Music with action {clean_action}; opened Music.",
+        "summary": f"Could not control Apple Music with action {clean_action}.",
         "error": second or first or "Music did not accept the control action",
         "data": {"control": clean_action, "status": status},
         "permission_error": permission_error,
-        "fallback_used": bool(fallback.get("ok")),
-        "fallback_result": fallback,
+        "fallback_used": False,
     }
     return _with_permission_metadata("media.apple_music_control", payload)
 
@@ -5115,25 +6351,965 @@ def music_app_control(app_name: str, action: str) -> dict[str, Any]:
     return _with_permission_metadata("media.music_app_control", payload)
 
 
-def _open_apple_music_search(query: str) -> dict[str, Any]:
+def _apple_music_search_result_evidence(
+    query: str,
+    *,
+    timeout_seconds: float = 10.0,
+) -> dict[str, Any]:
+    """Read a bounded, Music-specific search-results subtree.
+
+    Music exposes the search page as the standard window's direct split group,
+    whose main scroll area contains one direct AXList.  Result sections are
+    direct AXList children and their result rows are direct AXCell children.
+    Keeping those levels and counts fixed avoids an expensive/brittle traversal
+    of the app's complete accessibility tree.
+    """
+
     clean_query = _clean_required(query, "query")
+    result = _call_with_bounded_timeout(
+        _run_osascript,
+        """
+        tell application "System Events"
+            if not (exists process "Music") then return "no_music_process"
+            tell process "Music"
+                set standardWindows to (every window whose subrole is "AXStandardWindow")
+                if (count of standardWindows) is 0 then return "no_standard_window"
+                set targetWindow to item 1 of standardWindows
+
+                -- A matching result row is only conclusive on its own when
+                -- Music's visible search control still contains this query.
+                -- Keep the lookup shallow and capped: window -> toolbar/group
+                -- -> direct field (or one direct group -> field).
+                set queryIdentityText to ""
+                set queryIdentitySource to ""
+                set queryIdentityRole to ""
+                set queryIdentityDescription to ""
+                set toolbarTotal to count of UI elements of targetWindow
+                if toolbarTotal is greater than 0 then
+                    repeat with toolbarIndex from 1 to toolbarTotal
+                        if toolbarIndex is greater than 12 then exit repeat
+                        set toolbarItem to UI element toolbarIndex of targetWindow
+                        set toolbarRole to ""
+                        try
+                            set toolbarRole to role of toolbarItem as text
+                        end try
+                        if toolbarRole is "AXToolbar" or toolbarRole is "AXGroup" then
+                            set toolbarChildTotal to count of UI elements of toolbarItem
+                            if toolbarChildTotal is greater than 0 then
+                                repeat with toolbarChildIndex from 1 to toolbarChildTotal
+                                    if toolbarChildIndex is greater than 24 then exit repeat
+                                    set toolbarChild to UI element toolbarChildIndex of toolbarItem
+                                    set toolbarChildRole to ""
+                                    try
+                                        set toolbarChildRole to role of toolbarChild as text
+                                    end try
+                                    if toolbarChildRole is "AXSearchField" or toolbarChildRole is "AXTextField" then
+                                        try
+                                            set queryIdentityText to value of toolbarChild as text
+                                        end try
+                                        if queryIdentityText is not "" then
+                                            set queryIdentitySource to "search_field"
+                                            set queryIdentityRole to toolbarChildRole
+                                            try
+                                                set queryIdentityDescription to description of toolbarChild as text
+                                            end try
+                                            exit repeat
+                                        end if
+                                    else if toolbarChildRole is "AXGroup" then
+                                        set searchContainerTotal to count of UI elements of toolbarChild
+                                        if searchContainerTotal is greater than 0 then
+                                            repeat with searchContainerChildIndex from 1 to searchContainerTotal
+                                                if searchContainerChildIndex is greater than 16 then exit repeat
+                                                set searchContainerChild to UI element searchContainerChildIndex of toolbarChild
+                                                set searchContainerChildRole to ""
+                                                try
+                                                    set searchContainerChildRole to role of searchContainerChild as text
+                                                end try
+                                                if searchContainerChildRole is "AXSearchField" or searchContainerChildRole is "AXTextField" then
+                                                    try
+                                                        set queryIdentityText to value of searchContainerChild as text
+                                                    end try
+                                                    if queryIdentityText is not "" then
+                                                        set queryIdentitySource to "search_field"
+                                                        set queryIdentityRole to searchContainerChildRole
+                                                        try
+                                                            set queryIdentityDescription to description of searchContainerChild as text
+                                                        end try
+                                                        exit repeat
+                                                    end if
+                                                end if
+                                            end repeat
+                                        end if
+                                    end if
+                                    if queryIdentityText is not "" then exit repeat
+                                end repeat
+                            end if
+                        end if
+                        if queryIdentityText is not "" then exit repeat
+                    end repeat
+                end if
+
+                set identityText to ""
+                if queryIdentityText is not "" then
+                    set identityText to "identity" & tab & queryIdentitySource & tab & queryIdentityText & linefeed
+                    set identityText to identityText & "identity_role" & tab & queryIdentityRole & linefeed
+                    if queryIdentityDescription is not "" then
+                        set identityText to identityText & "identity_description" & tab & queryIdentityDescription & linefeed
+                    end if
+                end if
+
+                set targetSplitGroup to missing value
+                set windowChildTotal to count of UI elements of targetWindow
+                if windowChildTotal is greater than 0 then
+                    repeat with windowChildIndex from 1 to windowChildTotal
+                        if windowChildIndex is greater than 12 then exit repeat
+                        set windowChild to UI element windowChildIndex of targetWindow
+                        try
+                            if (role of windowChild as text) is "AXSplitGroup" then
+                                set targetSplitGroup to windowChild
+                                exit repeat
+                            end if
+                        end try
+                    end repeat
+                end if
+                if targetSplitGroup is missing value then return "no_split_group"
+
+                set markerText to ""
+                set markerCount to 0
+                set scrollAreaTotal to count of UI elements of targetSplitGroup
+                if scrollAreaTotal is greater than 0 then
+                    repeat with scrollAreaIndex from 1 to scrollAreaTotal
+                        if scrollAreaIndex is greater than 8 then exit repeat
+                        set scrollArea to UI element scrollAreaIndex of targetSplitGroup
+                        try
+                            if (role of scrollArea as text) is "AXScrollArea" then
+                                set listTotal to count of UI elements of scrollArea
+                                if listTotal is greater than 0 then
+                                    repeat with listIndex from 1 to listTotal
+                                        if listIndex is greater than 12 then exit repeat
+                                        set resultList to UI element listIndex of scrollArea
+                                        try
+                                            if (role of resultList as text) is "AXList" then
+                                                set sectionTotal to count of UI elements of resultList
+                                                if sectionTotal is greater than 0 then
+                                                    repeat with sectionIndex from 1 to sectionTotal
+                                                        if sectionIndex is greater than 12 then exit repeat
+                                                        set sectionItem to UI element sectionIndex of resultList
+                                                        try
+                                                            if (role of sectionItem as text) is "AXList" then
+                                                                set sectionDescription to description of sectionItem as text
+                                                                if sectionDescription is not "" then
+                                                                    set markerText to markerText & "marker" & tab & sectionDescription & linefeed
+                                                                    set markerCount to markerCount + 1
+                                                                    if markerCount is greater than or equal to 64 then return "results" & linefeed & identityText & markerText
+                                                                end if
+                                                                set cellTotal to count of UI elements of sectionItem
+                                                                if cellTotal is greater than 0 then
+                                                                    repeat with cellIndex from 1 to cellTotal
+                                                                        if cellIndex is greater than 20 then exit repeat
+                                                                        set cellItem to UI element cellIndex of sectionItem
+                                                                        try
+                                                                            if (role of cellItem as text) is "AXCell" then
+                                                                                set cellDescription to description of cellItem as text
+                                                                                if cellDescription is not "" then
+                                                                                    set markerText to markerText & "marker" & tab & cellDescription & linefeed
+                                                                                    set markerCount to markerCount + 1
+                                                                                    if markerCount is greater than or equal to 64 then return "results" & linefeed & identityText & markerText
+                                                                                end if
+                                                                            end if
+                                                                        end try
+                                                                    end repeat
+                                                                end if
+                                                            end if
+                                                        end try
+                                                    end repeat
+                                                end if
+                                            end if
+                                        end try
+                                    end repeat
+                                end if
+                            end if
+                        end try
+                    end repeat
+                end if
+                if markerCount is 0 then return "no_result_marker"
+                return "results" & linefeed & identityText & markerText
+            end tell
+        end tell
+        """,
+        timeout_seconds=timeout_seconds,
+    )
+    if not result.get("ok"):
+        return _with_permission_metadata(
+            "desktop.ui_elements",
+            {
+                **result,
+                "action": "media.apple_music.search.result_evidence",
+                "summary": "Could not inspect Apple Music search results",
+                "data": {
+                    "query": clean_query,
+                    "result_marker": False,
+                    "query_match": False,
+                    "normalized_query_match": "",
+                    "fingerprint": "",
+                    "search_query_identity_verified": False,
+                    "search_query_identity_source": "",
+                    "search_query_identity_role": "",
+                    "search_query_identity_description": "",
+                },
+            },
+        )
+
+    lines = [line.strip() for line in str(result.get("stdout") or "").splitlines()]
+    identity_source = ""
+    identity_value = ""
+    identity_role = ""
+    identity_description = ""
+    marker_lines: list[str] = []
+    if lines[:1] == ["results"]:
+        for line in lines[1:]:
+            if not line:
+                continue
+            if line.startswith("identity\t"):
+                _, identity_source, identity_value = (line.split("\t", 2) + ["", ""])[
+                    :3
+                ]
+                continue
+            if line.startswith("identity_role\t"):
+                identity_role = line.split("\t", 1)[1]
+                continue
+            if line.startswith("identity_description\t"):
+                identity_description = line.split("\t", 1)[1]
+                continue
+            marker_lines.append(line.removeprefix("marker\t"))
+    normalized_query = re.sub(r"[\W_]+", "", clean_query.casefold())
+    normalized_identity = re.sub(r"[\W_]+", "", identity_value.casefold())
+    search_query_identity_verified = bool(
+        identity_source == "search_field"
+        and len(normalized_query) >= 2
+        and normalized_identity == normalized_query
+    )
+    normalized_markers = [
+        re.sub(r"[\W_]+", "", marker.casefold()) for marker in marker_lines
+    ]
+    query_match = bool(
+        len(normalized_query) >= 2
+        and any(normalized_query in marker for marker in normalized_markers)
+    )
+    fingerprint = (
+        hashlib.sha256("\n".join(normalized_markers).encode("utf-8")).hexdigest()
+        if marker_lines
+        else ""
+    )
+    return {
+        "ok": bool(marker_lines),
+        "action": "media.apple_music.search.result_evidence",
+        "summary": (
+            "Observed Apple Music search results"
+            if marker_lines
+            else "Apple Music search results were not observable"
+        ),
+        **({} if marker_lines else {"error": lines[0] if lines else "no_result_marker"}),
+        "data": {
+            "query": clean_query,
+            "result_marker": bool(marker_lines),
+            "query_match": query_match,
+            "normalized_query_match": normalized_query if query_match else "",
+            "search_query_identity_verified": search_query_identity_verified,
+            "search_query_identity_source": identity_source,
+            "search_query_identity_value": identity_value[:160],
+            "search_query_identity_role": identity_role,
+            "search_query_identity_description": identity_description[:160],
+            "fingerprint": fingerprint,
+            "marker_count": len(marker_lines),
+            "marker_samples": [marker[:160] for marker in marker_lines[:3]],
+        },
+        "permission_error": False,
+        "fallback_used": False,
+    }
+
+
+def _activate_apple_music_after_search_dispatch(
+    *,
+    timeout_seconds: float = 10.0,
+) -> dict[str, Any]:
+    """Request one explicit Music activation without sending keyboard input."""
+
+    result = _call_with_bounded_timeout(
+        _run_osascript,
+        """
+        tell application "Music" to activate
+        tell application "System Events"
+            if exists process "Music" then
+                set visible of process "Music" to true
+                set frontmost of process "Music" to true
+            end if
+        end tell
+        return "activated"
+        """,
+        timeout_seconds=timeout_seconds,
+    )
+    if not result.get("ok"):
+        return _with_permission_metadata(
+            "app.focus",
+            {
+                **result,
+                "action": "app.focus",
+                "summary": "Could not request Apple Music foreground activation",
+                "data": {
+                    "app_name": "Music",
+                    "focus_requested": False,
+                },
+            },
+        )
+    return {
+        "ok": True,
+        "action": "app.focus",
+        "summary": "Requested Apple Music foreground activation",
+        "data": {
+            "app_name": "Music",
+            "focus_requested": True,
+        },
+        "permission_error": False,
+        "fallback_used": False,
+    }
+
+
+def _focus_apple_music_after_search_dispatch(
+    *,
+    timeout_seconds: float = 8.0,
+) -> dict[str, Any]:
+    """Use the packaged native bridge when present, otherwise one AX activation."""
+
+    if _electron_native_bridge_config() is None:
+        result = _call_with_bounded_timeout(
+            _activate_apple_music_after_search_dispatch,
+            timeout_seconds=timeout_seconds,
+        )
+        data = result.get("data") if isinstance(result.get("data"), dict) else {}
+        return {
+            **result,
+            "data": {
+                **data,
+                "focus_strategy": "system_events_activate",
+            },
+        }
+
+    native_result = _call_with_bounded_timeout(
+        _electron_native_focus_app,
+        "Music",
+        timeout_seconds=timeout_seconds,
+    )
+    native_data = (
+        native_result.get("data")
+        if isinstance(native_result.get("data"), dict)
+        else {}
+    )
+    focus_verified = bool(
+        native_result.get("ok") is True
+        and native_data.get("focus_verified") is True
+    )
+    return {
+        **native_result,
+        "ok": focus_verified,
+        "action": "app.focus",
+        "summary": (
+            "Focused Apple Music via Electron native bridge"
+            if focus_verified
+            else "Could not focus Apple Music via Electron native bridge"
+        ),
+        **(
+            {}
+            if focus_verified
+            else {
+                "error": str(
+                    native_result.get("error")
+                    or "electron_native_focus_unverified"
+                ),
+                "blocking_condition": "foreground_focus_unverified",
+            }
+        ),
+        "data": {
+            **native_data,
+            "app_name": "Music",
+            "focus_strategy": "electron_native_bridge",
+        },
+    }
+
+
+def _open_apple_music_search(
+    query: str,
+    *,
+    deadline: float | None = None,
+) -> dict[str, Any]:
+    clean_query = _clean_required(query, "query")
+    deadline = (
+        float(deadline)
+        if deadline is not None
+        else time.monotonic() + _APPLE_MUSIC_PLAY_DEADLINE_SECONDS
+    )
     search_url = f"https://music.apple.com/search?term={quote_plus(clean_query)}"
+    command = ["open", "-a", "Music", search_url]
+    baseline_evidence: dict[str, Any] = {}
+    foreground_observations: list[dict[str, Any]] = []
+    evidence_observations: list[dict[str, Any]] = []
+    focus_result: dict[str, Any] = {}
+    dispatch_receipt: dict[str, Any] = {"command": command}
+    dispatch_verified = False
+    foreground_verified = False
+
+    def deadline_result() -> dict[str, Any]:
+        partial_evidence_available = bool(
+            baseline_evidence
+            or foreground_observations
+            or evidence_observations
+            or focus_result
+        )
+        return {
+            "ok": False,
+            "action": "media.apple_music.search",
+            "summary": (
+                "Apple Music search stopped after reaching its execution deadline"
+            ),
+            "error": "apple_music_search_deadline_exceeded",
+            "blocking_condition": "search_deadline_exceeded",
+            "data": {
+                "query": clean_query,
+                "url": search_url,
+                "target_app": "Music",
+                "open_target": "apple_music_search",
+                "search_opened": False,
+                "dispatch_verified": dispatch_verified,
+                "foreground_verified": foreground_verified,
+                "search_query_verified": False,
+                "search_query_identity_verified": False,
+                "search_result_changed_from_nonmatching_baseline": False,
+                "deadline_exceeded": True,
+                "partial_evidence_available": partial_evidence_available,
+                "poll_attempts": len(foreground_observations),
+            },
+            "permission_error": False,
+            "fallback_used": dispatch_verified,
+            "fallback_result": {
+                "dispatch": dispatch_receipt,
+                "focus": focus_result,
+                "foreground_observations": foreground_observations,
+                "baseline_evidence": baseline_evidence,
+                "result_evidence_observations": evidence_observations,
+            },
+        }
+
+    baseline_timeout = _remaining_timeout(deadline, 10.0)
+    if baseline_timeout <= 0:
+        return deadline_result()
+    baseline_evidence = _call_with_bounded_timeout(
+        _apple_music_search_result_evidence,
+        clean_query,
+        timeout_seconds=baseline_timeout,
+    )
+    if time.monotonic() >= deadline:
+        return deadline_result()
+    dispatch_timeout = _remaining_timeout(deadline, 10.0)
+    if dispatch_timeout <= 0:
+        return deadline_result()
     try:
-        result = subprocess.run(
-            ["open", "-a", "Music", search_url],
+        dispatch = subprocess.run(
+            command,
             capture_output=True,
             text=True,
-            timeout=10,
+            timeout=dispatch_timeout,
             check=False,
         )
     except Exception as exc:
+        if time.monotonic() >= deadline:
+            return deadline_result()
         payload = _error("media.apple_music.search", exc)
-        payload["data"] = {"query": clean_query, "url": search_url}
+        payload["data"] = {
+            "query": clean_query,
+            "url": search_url,
+            "target_app": "Music",
+            "open_target": "apple_music_search",
+            "search_opened": False,
+            "dispatch_verified": False,
+            "foreground_verified": False,
+            "search_query_verified": False,
+            "search_query_identity_verified": False,
+            "search_result_changed_from_nonmatching_baseline": False,
+        }
+        payload["fallback_result"] = {"baseline_evidence": baseline_evidence}
         return payload
-    if result.returncode != 0:
-        payload = _failed("media.apple_music.search", result)
-        payload["data"] = {"query": clean_query, "url": search_url}
+    dispatch_receipt = {
+        "command": command,
+        "returncode": dispatch.returncode,
+    }
+    dispatch_verified = dispatch.returncode == 0
+    if time.monotonic() >= deadline:
+        return deadline_result()
+    if dispatch.returncode != 0:
+        payload = _failed("media.apple_music.search", dispatch)
+        payload["data"] = {
+            "query": clean_query,
+            "url": search_url,
+            "target_app": "Music",
+            "open_target": "apple_music_search",
+            "search_opened": False,
+            "dispatch_verified": False,
+            "foreground_verified": False,
+            "search_query_verified": False,
+            "search_query_identity_verified": False,
+            "search_result_changed_from_nonmatching_baseline": False,
+        }
+        payload["fallback_result"] = {"baseline_evidence": baseline_evidence}
         return payload
+
+    # Universal-link dispatch is asynchronous.  Let LaunchServices hand the
+    # URL to Music, then explicitly restore Music once.  The host app may take
+    # foreground while it renders runtime updates, so the URL's process exit
+    # code alone is not useful evidence.  This does not send keyboard input.
+    launch_settle_seconds = _remaining_timeout(deadline, 1.0)
+    if launch_settle_seconds <= 0:
+        return deadline_result()
+    time.sleep(launch_settle_seconds)
+    if time.monotonic() >= deadline:
+        return deadline_result()
+    observation_timeout = _remaining_timeout(deadline, 10.0)
+    if observation_timeout <= 0:
+        return deadline_result()
+    initial_observation = _call_with_bounded_timeout(
+        active_window,
+        timeout_seconds=observation_timeout,
+    )
+    foreground_observations.append(initial_observation)
+    if time.monotonic() >= deadline:
+        return deadline_result()
+    initial_data = (
+        initial_observation.get("data")
+        if isinstance(initial_observation.get("data"), dict)
+        else {}
+    )
+    initial_app_name = str(initial_data.get("app_name") or "").strip()
+    foreground_verified = bool(
+        initial_observation.get("ok") is True
+        and (
+            _compact_app_match_name(initial_app_name) in {"music", "applemusic"}
+            or _app_name_matches_expected("Music", initial_app_name)
+        )
+    )
+    # In the packaged app, always cross the Electron bridge once so the
+    # backend receipt proves that the host-to-native focus path is alive.  A
+    # source/dev runtime has no bridge and can keep the already-frontmost fast
+    # path without a redundant System Events activation.
+    packaged_native_focus_available = _electron_native_bridge_config() is not None
+    if foreground_verified and not packaged_native_focus_available:
+        focus_result = {
+            "ok": True,
+            "action": "app.focus",
+            "summary": "Apple Music was already foreground",
+            "data": {
+                "app_name": "Music",
+                "focus_verified": True,
+                "focus_strategy": "already_frontmost",
+            },
+            "permission_error": False,
+            "fallback_used": False,
+        }
+    else:
+        focus_timeout = _remaining_timeout(deadline, 8.0)
+        if focus_timeout <= 0:
+            return deadline_result()
+        focus_result = _call_with_bounded_timeout(
+            _focus_apple_music_after_search_dispatch,
+            timeout_seconds=focus_timeout,
+        )
+        if time.monotonic() >= deadline:
+            return deadline_result()
+    focus_data = (
+        focus_result.get("data")
+        if isinstance(focus_result.get("data"), dict)
+        else {}
+    )
+    if focus_result.get("ok") is not True:
+        payload = {
+            "ok": False,
+            "action": "media.apple_music.search",
+            "summary": "Apple Music search was dispatched, but Music could not be focused",
+            "error": str(focus_result.get("error") or "apple_music_search_focus_unverified"),
+            "blocking_condition": "foreground_focus_unverified",
+            "data": {
+                "query": clean_query,
+                "url": search_url,
+                "target_app": "Music",
+                "open_target": "apple_music_search",
+                "search_opened": False,
+                "dispatch_verified": True,
+                "foreground_verified": False,
+                "search_query_verified": False,
+                "search_query_identity_verified": False,
+                "search_result_changed_from_nonmatching_baseline": False,
+                "observed_app": str(
+                    focus_data.get("frontmost_app")
+                    or initial_data.get("app_name")
+                    or ""
+                ),
+                "poll_attempts": len(foreground_observations),
+            },
+            "permission_error": bool(focus_result.get("permission_error")),
+            "recommended_tools": ["app.focus", "desktop.active_window"],
+            "fallback_used": True,
+            "fallback_result": {
+                "dispatch": {
+                    "command": command,
+                    "returncode": dispatch.returncode,
+                },
+                "focus": focus_result,
+                "foreground_observations": foreground_observations,
+                "baseline_evidence": baseline_evidence,
+            },
+        }
+        for key in (
+            "missing_permissions",
+            "permission_targets",
+            "recovery_hints",
+            "recovery_actions",
+        ):
+            if focus_result.get(key):
+                payload[key] = focus_result[key]
+        return _with_permission_metadata("app.focus", payload)
+
+    if not foreground_verified:
+        for attempt in range(7):
+            if attempt:
+                poll_sleep_seconds = _remaining_timeout(deadline, 0.2)
+                if poll_sleep_seconds <= 0:
+                    return deadline_result()
+                time.sleep(poll_sleep_seconds)
+                if time.monotonic() >= deadline:
+                    return deadline_result()
+            observation_timeout = _remaining_timeout(deadline, 10.0)
+            if observation_timeout <= 0:
+                return deadline_result()
+            observation = _call_with_bounded_timeout(
+                active_window,
+                timeout_seconds=observation_timeout,
+            )
+            foreground_observations.append(observation)
+            if time.monotonic() >= deadline:
+                return deadline_result()
+            data = (
+                observation.get("data")
+                if isinstance(observation.get("data"), dict)
+                else {}
+            )
+            app_name = str(data.get("app_name") or "").strip()
+            if observation.get("ok") is True and (
+                _compact_app_match_name(app_name) in {"music", "applemusic"}
+                or _app_name_matches_expected("Music", app_name)
+            ):
+                foreground_verified = True
+                break
+    if not foreground_verified:
+        last_observation = foreground_observations[-1] if foreground_observations else {}
+        last_data = (
+            last_observation.get("data")
+            if isinstance(last_observation.get("data"), dict)
+            else {}
+        )
+        return {
+            "ok": False,
+            "action": "media.apple_music.search",
+            "summary": (
+                "Apple Music search URL was dispatched, but Music did not "
+                "reach the foreground"
+            ),
+            "error": str(
+                last_observation.get("error")
+                or "apple_music_search_foreground_unverified"
+            ),
+            "blocking_condition": "foreground_focus_unverified",
+            "data": {
+                "query": clean_query,
+                "url": search_url,
+                "target_app": "Music",
+                "open_target": "apple_music_search",
+                "search_opened": False,
+                "dispatch_verified": True,
+                "foreground_verified": False,
+                "search_query_verified": False,
+                "search_query_identity_verified": False,
+                "search_result_changed_from_nonmatching_baseline": False,
+                "observed_app": str(last_data.get("app_name") or ""),
+                "poll_attempts": len(foreground_observations),
+            },
+            "permission_error": bool(last_observation.get("permission_error")),
+            "recommended_tools": ["app.focus", "desktop.active_window"],
+            "recovery_actions": [
+                {
+                    "label": "重新切到 Apple Music",
+                    "tool": "app.focus",
+                    "input": {"app_name": "Music"},
+                    "permission_target": "foreground_focus",
+                    "risk_level": "low",
+                }
+            ],
+            "fallback_used": True,
+            "fallback_result": {
+                "dispatch": {
+                    "command": command,
+                    "returncode": dispatch.returncode,
+                },
+                "focus": focus_result,
+                "foreground_observations": foreground_observations,
+                "baseline_evidence": baseline_evidence,
+            },
+        }
+
+    baseline_data = (
+        baseline_evidence.get("data")
+        if isinstance(baseline_evidence.get("data"), dict)
+        else {}
+    )
+    baseline_result_marker = bool(
+        baseline_evidence.get("ok") is True
+        and baseline_data.get("result_marker") is True
+    )
+    baseline_query_match = bool(
+        baseline_result_marker and baseline_data.get("query_match") is True
+    )
+    baseline_fingerprint = str(baseline_data.get("fingerprint") or "")
+
+    verified_evidence: dict[str, Any] | None = None
+    verified_by_identity = False
+    verified_by_nonmatching_baseline_change = False
+    last_identity_verified = False
+    last_changed_from_nonmatching_baseline = False
+    for attempt in range(8):
+        if attempt:
+            evidence_sleep_seconds = _remaining_timeout(deadline, 0.25)
+            if evidence_sleep_seconds <= 0:
+                return deadline_result()
+            time.sleep(evidence_sleep_seconds)
+            if time.monotonic() >= deadline:
+                return deadline_result()
+        evidence_timeout = _remaining_timeout(deadline, 10.0)
+        if evidence_timeout <= 0:
+            return deadline_result()
+        evidence = _call_with_bounded_timeout(
+            _apple_music_search_result_evidence,
+            clean_query,
+            timeout_seconds=evidence_timeout,
+        )
+        evidence_observations.append(evidence)
+        if time.monotonic() >= deadline:
+            return deadline_result()
+        evidence_data = (
+            evidence.get("data")
+            if isinstance(evidence.get("data"), dict)
+            else {}
+        )
+        result_marker = bool(
+            evidence.get("ok") is True
+            and evidence_data.get("result_marker") is True
+        )
+        current_fingerprint = str(evidence_data.get("fingerprint") or "")
+        last_identity_verified = bool(
+            evidence_data.get("search_query_identity_verified") is True
+        )
+        last_changed_from_nonmatching_baseline = bool(
+            baseline_result_marker
+            and not baseline_query_match
+            and baseline_fingerprint
+            and current_fingerprint
+            and current_fingerprint != baseline_fingerprint
+        )
+        if (
+            result_marker
+            and evidence_data.get("query_match") is True
+            and (
+                last_identity_verified
+                or last_changed_from_nonmatching_baseline
+            )
+        ):
+            verified_evidence = evidence
+            verified_by_identity = last_identity_verified
+            verified_by_nonmatching_baseline_change = (
+                last_changed_from_nonmatching_baseline
+            )
+            break
+
+    if verified_evidence is None:
+        last_evidence = evidence_observations[-1] if evidence_observations else {}
+        payload = {
+            "ok": False,
+            "action": "media.apple_music.search",
+            "summary": (
+                "Apple Music opened, but the requested search results were not verified"
+            ),
+            "error": str(
+                last_evidence.get("error") or "apple_music_search_results_unverified"
+            ),
+            "blocking_condition": "search_ui_evidence_unverified",
+            "data": {
+                "query": clean_query,
+                "url": search_url,
+                "target_app": "Music",
+                "open_target": "apple_music_search",
+                "search_opened": False,
+                "dispatch_verified": True,
+                "foreground_verified": True,
+                "search_query_verified": False,
+                "search_query_identity_verified": last_identity_verified,
+                "search_result_changed_from_nonmatching_baseline": (
+                    last_changed_from_nonmatching_baseline
+                ),
+                "poll_attempts": len(foreground_observations),
+            },
+            "permission_error": bool(last_evidence.get("permission_error")),
+            "fallback_used": True,
+            "fallback_result": {
+                "dispatch": {
+                    "command": command,
+                    "returncode": dispatch.returncode,
+                },
+                "focus": focus_result,
+                "foreground_observations": foreground_observations,
+                "baseline_evidence": baseline_evidence,
+                "result_evidence_observations": evidence_observations,
+            },
+        }
+        return _with_permission_metadata("desktop.ui_elements", payload)
+
+    verified_data = (
+        verified_evidence.get("data")
+        if isinstance(verified_evidence.get("data"), dict)
+        else {}
+    )
+    # Result evidence can become stale if the host regains focus while the
+    # agent is rendering progress.  Treat foreground as a final postcondition,
+    # not a one-time precondition before inspecting the Music UI.
+    final_observation_timeout = _remaining_timeout(deadline, 10.0)
+    if final_observation_timeout <= 0:
+        return deadline_result()
+    final_foreground_observation = _call_with_bounded_timeout(
+        active_window,
+        timeout_seconds=final_observation_timeout,
+    )
+    if time.monotonic() >= deadline:
+        return deadline_result()
+    final_foreground_data = (
+        final_foreground_observation.get("data")
+        if isinstance(final_foreground_observation.get("data"), dict)
+        else {}
+    )
+    final_app_name = str(final_foreground_data.get("app_name") or "").strip()
+    final_foreground_verified = bool(
+        final_foreground_observation.get("ok") is True
+        and (
+            _compact_app_match_name(final_app_name) in {"music", "applemusic"}
+            or _app_name_matches_expected("Music", final_app_name)
+        )
+    )
+    if (
+        not final_foreground_verified
+        and final_foreground_observation.get("ok") is True
+        and bool(final_app_name)
+    ):
+        # The search postcondition is already verified.  A later foreground
+        # change can be deliberate user input, so yield instead of fighting
+        # for focus or turning a completed search into a runtime failure.
+        return {
+            "ok": True,
+            "action": "media.apple_music.search",
+            "summary": (
+                f"Opened Apple Music search for {clean_query}; foreground focus moved"
+            ),
+            "data": {
+                "query": clean_query,
+                "url": search_url,
+                "target_app": "Music",
+                "open_target": "apple_music_search",
+                "search_opened": True,
+                "dispatch_verified": True,
+                "foreground_verified": False,
+                "focus_changed_after_search": True,
+                "search_query_verified": True,
+                "search_query_identity_verified": verified_by_identity,
+                "search_result_changed_from_nonmatching_baseline": (
+                    verified_by_nonmatching_baseline_change
+                ),
+                "result_fingerprint": str(verified_data.get("fingerprint") or ""),
+                "observed_app": final_app_name,
+                "poll_attempts": len(foreground_observations),
+            },
+            "permission_error": False,
+            "fallback_used": False,
+            "fallback_result": {
+                "dispatch": {
+                    "command": command,
+                    "returncode": dispatch.returncode,
+                },
+                "focus": focus_result,
+                "foreground_observations": foreground_observations,
+                "final_foreground_observation": final_foreground_observation,
+                "baseline_evidence": baseline_evidence,
+                "result_evidence_observations": evidence_observations,
+            },
+        }
+    if not final_foreground_verified:
+        payload = {
+            "ok": False,
+            "action": "media.apple_music.search",
+            "summary": (
+                "Apple Music search results matched, but the final foreground "
+                "state could not be observed"
+            ),
+            "error": str(
+                final_foreground_observation.get("error")
+                or "apple_music_search_final_foreground_unverified"
+            ),
+            "blocking_condition": "foreground_focus_unverified",
+            "data": {
+                "query": clean_query,
+                "url": search_url,
+                "target_app": "Music",
+                "open_target": "apple_music_search",
+                "search_opened": False,
+                "dispatch_verified": True,
+                "foreground_verified": False,
+                "search_query_verified": False,
+                "search_query_identity_verified": verified_by_identity,
+                "search_result_changed_from_nonmatching_baseline": (
+                    verified_by_nonmatching_baseline_change
+                ),
+                "observed_app": final_app_name,
+                "poll_attempts": len(foreground_observations),
+            },
+            "permission_error": bool(
+                final_foreground_observation.get("permission_error")
+            ),
+            "recommended_tools": ["desktop.permissions", "desktop.active_window"],
+            "fallback_used": True,
+            "fallback_result": {
+                "dispatch": {
+                    "command": command,
+                    "returncode": dispatch.returncode,
+                },
+                "focus": focus_result,
+                "foreground_observations": foreground_observations,
+                "final_foreground_observation": final_foreground_observation,
+                "baseline_evidence": baseline_evidence,
+                "result_evidence_observations": evidence_observations,
+            },
+        }
+        for key in (
+            "missing_permissions",
+            "permission_targets",
+            "recovery_hints",
+            "recovery_actions",
+        ):
+            if final_foreground_observation.get(key):
+                payload[key] = final_foreground_observation[key]
+        return _with_permission_metadata("app.focus", payload)
+
     return {
         "ok": True,
         "action": "media.apple_music.search",
@@ -5141,10 +7317,32 @@ def _open_apple_music_search(query: str) -> dict[str, Any]:
         "data": {
             "query": clean_query,
             "url": search_url,
+            "target_app": "Music",
             "open_target": "apple_music_search",
+            "search_opened": True,
+            "dispatch_verified": True,
+            "foreground_verified": True,
+            "search_query_verified": True,
+            "search_query_identity_verified": verified_by_identity,
+            "search_result_changed_from_nonmatching_baseline": (
+                verified_by_nonmatching_baseline_change
+            ),
+            "result_fingerprint": str(verified_data.get("fingerprint") or ""),
+            "poll_attempts": len(foreground_observations),
         },
         "permission_error": False,
         "fallback_used": False,
+        "fallback_result": {
+            "dispatch": {
+                "command": command,
+                "returncode": dispatch.returncode,
+            },
+            "focus": focus_result,
+            "foreground_observations": foreground_observations,
+            "final_foreground_observation": final_foreground_observation,
+            "baseline_evidence": baseline_evidence,
+            "result_evidence_observations": evidence_observations,
+        },
     }
 
 
@@ -5347,16 +7545,44 @@ def clipboard_write(text: str) -> dict[str, Any]:
         return _error("clipboard.write", exc)
     if result.returncode != 0:
         return _failed("clipboard.write", result)
-    return {
+    read_command = _clipboard_read_command()
+    readback = None
+    if read_command:
+        try:
+            readback = subprocess.run(
+                read_command,
+                capture_output=True,
+                text=True,
+                timeout=3,
+                check=False,
+            )
+        except Exception:
+            readback = None
+    postcondition_verified = bool(
+        readback is not None
+        and readback.returncode == 0
+        and str(readback.stdout or "") == clean_text
+    )
+    response = {
         "ok": True,
         "action": "clipboard.write",
         "summary": f"Copied {len(clean_text)} characters to clipboard",
         "data": {
             "text_length": len(clean_text),
             "platform": _desktop_platform(),
+            "postcondition_verified": postcondition_verified,
         },
         "permission_error": False,
         "fallback_used": False,
+    }
+    if postcondition_verified:
+        return {**response, "postcondition_verified": True}
+    return {
+        **response,
+        "ok": False,
+        "verification_failed": True,
+        "retryable": True,
+        "error": "clipboard_write_readback_unverified",
     }
 
 
@@ -5433,15 +7659,18 @@ def notes_create(body: str, *, title: str = "", folder_name: str = "") -> dict[s
             "notes.create",
             {**result, "action": "notes.create", "summary": "notes.create failed"},
         )
+    note_id = str(result.get("stdout") or "").strip()
     return {
         "ok": True,
         "action": "notes.create",
         "summary": f"Created note: {clean_title}",
+        "postcondition_verified": bool(note_id),
         "data": {
             "title": clean_title,
             "body_length": len(clean_body),
             "folder_name": clean_folder_name,
-            "note_id": str(result.get("stdout") or "").strip(),
+            "note_id": note_id,
+            "postcondition_verified": bool(note_id),
         },
         "permission_error": False,
         "fallback_used": False,
@@ -5493,6 +7722,7 @@ def reminders_create(title: str, *, due_at: Any = None, list_name: str = "") -> 
             "reminders.create",
             {**result, "action": "reminders.create", "summary": "reminders.create failed"},
         )
+    reminder_id = str(result.get("stdout") or "").strip()
     return {
         "ok": True,
         "action": "reminders.create",
@@ -5501,11 +7731,13 @@ def reminders_create(title: str, *, due_at: Any = None, list_name: str = "") -> 
             if due is None
             else f"Created reminder: {clean_title} at {_format_local_datetime(due)}"
         ),
+        "postcondition_verified": bool(reminder_id),
         "data": {
             "title": clean_title,
             "due_at": _format_local_datetime(due) if due is not None else "",
             "list_name": clean_list_name,
-            "reminder_id": str(result.get("stdout") or "").strip(),
+            "reminder_id": reminder_id,
+            "postcondition_verified": bool(reminder_id),
         },
         "permission_error": False,
         "fallback_used": False,
@@ -5576,6 +7808,7 @@ def calendar_create_event(
             "calendar.create_event",
             {**result, "action": "calendar.create_event", "summary": "calendar.create_event failed"},
         )
+    event_id = str(result.get("stdout") or "").strip()
     return {
         "ok": True,
         "action": "calendar.create_event",
@@ -5583,12 +7816,14 @@ def calendar_create_event(
             f"Created calendar event: {clean_title} from {_format_local_datetime(start)} "
             f"to {_format_local_datetime(end)}"
         ),
+        "postcondition_verified": bool(event_id),
         "data": {
             "title": clean_title,
             "start_at": _format_local_datetime(start),
             "end_at": _format_local_datetime(end),
             "calendar_name": clean_calendar_name,
-            "event_id": str(result.get("stdout") or "").strip(),
+            "event_id": event_id,
+            "postcondition_verified": bool(event_id),
         },
         "permission_error": False,
         "fallback_used": False,
@@ -6099,13 +8334,18 @@ def _send_desktop_keystroke(
     }
 
 
-def _run_osascript(script: str, args: list[str] | None = None) -> dict[str, Any]:
+def _run_osascript(
+    script: str,
+    args: list[str] | None = None,
+    *,
+    timeout_seconds: float = 10.0,
+) -> dict[str, Any]:
     try:
         result = subprocess.run(
             ["osascript", "-e", script, *(args or [])],
             capture_output=True,
             text=True,
-            timeout=10,
+            timeout=timeout_seconds,
             check=False,
         )
     except Exception as exc:
@@ -6258,7 +8498,7 @@ def _parse_app_focus_output(value: Any, fallback_app_name: str) -> dict[str, Any
     frontmost_app = parts[3] if len(parts) > 3 else ""
     visible_text = parts[4] if len(parts) > 4 else ""
     window_count_text = parts[5] if len(parts) > 5 else ""
-    focus_verified = frontmost_text.strip().lower() == "true" or (
+    focus_verified = (
         bool(app_name)
         and bool(frontmost_app)
         and _compact_app_match_name(app_name) == _compact_app_match_name(frontmost_app)
@@ -6269,6 +8509,9 @@ def _parse_app_focus_output(value: Any, fallback_app_name: str) -> dict[str, Any
         "focus_status": "frontmost" if focus_verified else "not_frontmost",
         "frontmost_app": frontmost_app,
     }
+    system_events_reported_frontmost = _parse_optional_bool(frontmost_text)
+    if system_events_reported_frontmost is not None:
+        data["system_events_reported_frontmost"] = system_events_reported_frontmost
     process_visible = _parse_optional_bool(visible_text)
     if process_visible is not None:
         data["process_visible"] = process_visible
@@ -6287,7 +8530,7 @@ def _parse_dock_focus_output(value: Any, fallback_app_name: str) -> dict[str, An
     visible_text = parts[5] if len(parts) > 5 else ""
     window_count_text = parts[6] if len(parts) > 6 else ""
     dock_item_name = parts[7] if len(parts) > 7 else ""
-    focus_verified = frontmost_text.strip().lower() == "true" or (
+    focus_verified = (
         bool(app_name)
         and bool(frontmost_app)
         and _compact_app_match_name(app_name) == _compact_app_match_name(frontmost_app)
@@ -6299,6 +8542,9 @@ def _parse_dock_focus_output(value: Any, fallback_app_name: str) -> dict[str, An
         "frontmost_app": frontmost_app,
         "dock_status": dock_status,
     }
+    dock_reported_frontmost = _parse_optional_bool(frontmost_text)
+    if dock_reported_frontmost is not None:
+        data["dock_reported_frontmost"] = dock_reported_frontmost
     if dock_item_name:
         data["dock_item_name"] = dock_item_name
     process_visible = _parse_optional_bool(visible_text)
@@ -6541,18 +8787,22 @@ def _parse_appkit_focus_output(value: Any, fallback_app_name: str) -> dict[str, 
     activate_result = parts[2] if len(parts) > 2 else ""
     active_text = parts[3] if len(parts) > 3 else ""
     frontmost_app = parts[4] if len(parts) > 4 else ""
-    focus_verified = active_text.strip().lower() == "true" or (
+    focus_verified = (
         bool(app_name)
         and bool(frontmost_app)
         and _compact_app_match_name(app_name) == _compact_app_match_name(frontmost_app)
     )
-    return {
+    data: dict[str, Any] = {
         "app_name": app_name,
         "focus_verified": focus_verified,
         "focus_status": "frontmost" if focus_verified else "not_frontmost",
         "frontmost_app": frontmost_app,
         "appkit_activate_result": activate_result,
     }
+    appkit_reported_active = _parse_optional_bool(active_text)
+    if appkit_reported_active is not None:
+        data["appkit_reported_active"] = appkit_reported_active
+    return data
 
 
 def _app_focus_attempt(
@@ -7261,6 +9511,7 @@ def _parse_ui_elements_output(
     app_name = ""
     pid: int | None = None
     title = ""
+    window_id: int | None = None
     elements: list[dict[str, Any]] = []
     normalized_filter = str(role_filter or "").strip().lower()
     for raw_line in str(value or "").splitlines():
@@ -7269,11 +9520,12 @@ def _parse_ui_elements_output(
             continue
         parts = line.split("\t")
         if parts[0] == "META":
-            while len(parts) < 4:
+            while len(parts) < 5:
                 parts.append("")
             app_name = parts[1].strip()
             pid = int(parts[2]) if parts[2].strip().isdigit() else None
             title = parts[3].strip()
+            window_id = int(parts[4]) if parts[4].strip().isdigit() else None
             continue
         while len(parts) < 11:
             parts.append("")
@@ -7304,6 +9556,7 @@ def _parse_ui_elements_output(
         "app_name": app_name,
         "pid": pid,
         "title": title,
+        **({"window_id": window_id} if window_id is not None else {}),
         "elements": elements,
         "count": len(elements),
         "truncated": len(elements) >= limit,
@@ -7798,14 +10051,24 @@ def _runtime_blocking_recovery_actions_for_conditions(
     conditions: list[str],
 ) -> list[dict[str, Any]]:
     actions: list[dict[str, Any]] = []
+    if "desktop_permission_diagnostics_not_checked" in conditions:
+        actions.append(
+            {
+                "label": "经你确认后验证桌面权限",
+                "tool": "desktop.permissions.verify",
+                "input": {},
+                "permission_target": "desktop_permission_diagnostics",
+                "risk_level": "medium",
+            }
+        )
     if "desktop_session_locked" in conditions:
         actions.append(
             {
                 "label": "解锁后重新检查桌面权限",
-                "tool": "desktop.permissions",
+                "tool": "desktop.permissions.verify",
                 "input": {},
                 "permission_target": "desktop_session_unlocked",
-                "risk_level": "low",
+                "risk_level": "medium",
             }
         )
     if "foreground_focus_unavailable" in conditions:
@@ -7851,9 +10114,14 @@ def _runtime_blocking_recovery_actions_for_conditions(
 
 def _runtime_blocking_recovery_hints_for_conditions(conditions: list[str]) -> list[str]:
     hints: list[str] = []
+    if "desktop_permission_diagnostics_not_checked" in conditions:
+        hints.append(
+            "Use desktop.permissions.verify only after explicit approval when you "
+            "want a fresh interactive macOS permission check."
+        )
     if "desktop_session_locked" in conditions:
         hints.append(
-            "Unlock the active macOS user session, then rerun desktop.permissions "
+            "Unlock the active macOS user session, then approve desktop.permissions.verify "
             "or retry the foreground desktop action."
         )
     if "foreground_focus_unavailable" in conditions:

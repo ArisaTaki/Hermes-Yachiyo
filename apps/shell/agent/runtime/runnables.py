@@ -5,6 +5,11 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
+from apps.shell.agent.runtime.run_group_attachments import (
+    RUN_GROUP_ATTACHMENT_PAYLOAD_KEY,
+    RunGroupChildAttachment,
+)
+
 
 class RuntimeRunnableCatalog:
     """Builds public runnable summaries without owning persistence."""
@@ -226,6 +231,8 @@ class RuntimeRunnableRunCoordinator:
         metadata: dict[str, Any] | None = None,
         direct_tool_requests: list[dict[str, Any]] | None = None,
         daily_desktop_planning_context: str | None = None,
+        project_root_group: bool | None = None,
+        run_group_attachment: RunGroupChildAttachment | None = None,
     ) -> dict[str, Any]:
         runnable = self._required_runnable(runnable_id=runnable_id, name=name, message="未找到指定 Agent 或 Workflow")
         request_id = client_run_id or client_request_id
@@ -252,6 +259,10 @@ class RuntimeRunnableRunCoordinator:
                 payload["direct_tool_requests"] = direct_tool_requests
             if daily_desktop_planning_context is not None:
                 payload["daily_desktop_planning_context"] = daily_desktop_planning_context
+            if project_root_group is not None:
+                payload["project_root_group"] = bool(project_root_group)
+            if run_group_attachment is not None:
+                payload[RUN_GROUP_ATTACHMENT_PAYLOAD_KEY] = run_group_attachment
             run = self._create_agent_run(payload)
             run["agent_run_id"] = run["run_id"]
             run["runnable"] = runnable
@@ -271,6 +282,8 @@ class RuntimeRunnableRunCoordinator:
             workflow_payload["metadata"] = metadata
         if daily_desktop_planning_context is not None:
             workflow_payload["daily_desktop_planning_context"] = daily_desktop_planning_context
+        if run_group_attachment is not None:
+            workflow_payload[RUN_GROUP_ATTACHMENT_PAYLOAD_KEY] = run_group_attachment
         run = self._create_workflow_run(workflow_payload)
         run["workflow_run_id"] = run["run_id"]
         run["runnable"] = runnable
@@ -284,6 +297,8 @@ class RuntimeRunnableRunCoordinator:
         user_goal: str = "",
         run_group_id: str = "",
         upstream: str = "",
+        client_run_id: str = "",
+        client_request_id: str = "",
         agent_override: dict[str, Any] | None = None,
         daily_desktop_policy_overlay: bool = False,
         runtime_planner_entrypoint: bool = False,
@@ -291,9 +306,14 @@ class RuntimeRunnableRunCoordinator:
         metadata: dict[str, Any] | None = None,
         direct_tool_requests: list[dict[str, Any]] | None = None,
         daily_desktop_planning_context: str | None = None,
+        project_root_group: bool | None = None,
+        run_group_attachment: RunGroupChildAttachment | None = None,
+        deferred_execution_start_sink: Callable[[Callable[[], None]], None]
+        | None = None,
         on_complete: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
         runnable = self._required_runnable(runnable_id=runnable_id, name=name, message="未找到指定 Agent 或 Workflow")
+        request_id = client_run_id or client_request_id
         if runnable["kind"] == "agent":
             payload = {
                 "agent_id": runnable["id"],
@@ -302,6 +322,8 @@ class RuntimeRunnableRunCoordinator:
                 "run_group_id": run_group_id,
                 "upstream": upstream,
             }
+            if request_id:
+                payload["client_run_id"] = request_id
             if agent_override is not None:
                 payload["agent_override"] = agent_override
             if daily_desktop_policy_overlay:
@@ -316,10 +338,16 @@ class RuntimeRunnableRunCoordinator:
                 payload["direct_tool_requests"] = direct_tool_requests
             if daily_desktop_planning_context is not None:
                 payload["daily_desktop_planning_context"] = daily_desktop_planning_context
-            run = self._create_agent_run_async(
-                payload,
-                on_complete=on_complete,
-            )
+            if project_root_group is not None:
+                payload["project_root_group"] = bool(project_root_group)
+            if run_group_attachment is not None:
+                payload[RUN_GROUP_ATTACHMENT_PAYLOAD_KEY] = run_group_attachment
+            async_kwargs: dict[str, Any] = {"on_complete": on_complete}
+            if deferred_execution_start_sink is not None:
+                async_kwargs["deferred_execution_start_sink"] = (
+                    deferred_execution_start_sink
+                )
+            run = self._create_agent_run_async(payload, **async_kwargs)
             run["agent_run_id"] = run["run_id"]
             run["runnable"] = runnable
             return run
@@ -338,7 +366,16 @@ class RuntimeRunnableRunCoordinator:
             workflow_payload["metadata"] = metadata
         if daily_desktop_planning_context is not None:
             workflow_payload["daily_desktop_planning_context"] = daily_desktop_planning_context
-        run = self._create_workflow_run_async(workflow_payload, on_complete=on_complete)
+        if run_group_attachment is not None:
+            if request_id:
+                workflow_payload["client_run_id"] = request_id
+            workflow_payload[RUN_GROUP_ATTACHMENT_PAYLOAD_KEY] = run_group_attachment
+        async_kwargs = {"on_complete": on_complete}
+        if deferred_execution_start_sink is not None:
+            async_kwargs["deferred_execution_start_sink"] = (
+                deferred_execution_start_sink
+            )
+        run = self._create_workflow_run_async(workflow_payload, **async_kwargs)
         run["workflow_run_id"] = run["run_id"]
         run["runnable"] = runnable
         return run

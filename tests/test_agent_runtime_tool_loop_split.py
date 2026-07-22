@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import json
+
 from apps.shell import agent_runtime
 from apps.shell.agent.runtime.tool_loop import (
     RuntimeToolLoopProjectionBuilder,
     append_tool_result_message,
     assistant_message_for_history,
     fatal_tool_failure_detail,
+    stage_tool_result_messages,
     tool_loop_limit_artifact_completion,
     tool_loop_limit_detail,
 )
@@ -146,6 +149,47 @@ def test_tool_loop_message_projection_helpers_preserve_protocol_shapes() -> None
     assert fallback_messages == [
         {"role": "user", "content": 'Tool result for workspace.read: {"ok": true}'}
     ]
+
+
+def test_tool_loop_stages_complete_native_batch_before_internal_recovery_messages() -> None:
+    messages = [
+        assistant_message_for_history(
+            {
+                "content": "",
+                "tool_calls": [
+                    {"id": "call-1", "function": {"name": "app_open", "arguments": "{}"}},
+                    {"id": "call-2", "function": {"name": "app_type", "arguments": "{}"}},
+                ],
+            }
+        )
+    ]
+
+    stage_tool_result_messages(messages)
+    append_tool_result_message(
+        messages,
+        {"protocol": "tool_calls", "tool_call_id": "call-1", "tool": "app.open"},
+        {"ok": False, "status": "blocked"},
+    )
+    append_tool_result_message(
+        messages,
+        {"protocol": "json_fallback", "tool": "desktop.permissions"},
+        {"ok": True},
+    )
+
+    assert [message["role"] for message in messages] == [
+        "assistant",
+        "tool",
+        "tool",
+        "user",
+    ]
+    assert [message["tool_call_id"] for message in messages[1:3]] == [
+        "call-1",
+        "call-2",
+    ]
+    assert json.loads(messages[1]["content"]) == {"ok": False, "status": "blocked"}
+    assert json.loads(messages[2]["content"])["error"] == (
+        "tool_batch_interrupted_before_execution"
+    )
 
 
 def test_native_runtime_uses_split_tool_loop_projection_builder(tmp_path) -> None:

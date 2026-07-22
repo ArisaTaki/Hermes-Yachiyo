@@ -87,6 +87,66 @@ def test_approval_entrypoint_preserves_requests_after_first_approval() -> None:
     assert selected == requests
 
 
+def test_approval_entrypoint_preserves_only_ordered_dependency_ancestors() -> None:
+    requests = [
+        {
+            "tool": "desktop.running_apps",
+            "input": {},
+            "step_id": "discover",
+        },
+        {
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "paste"},
+            "step_id": "paste",
+            "depends_on": ["discover"],
+        },
+        {
+            "tool": "desktop.read_ui",
+            "input": {},
+            "step_id": "unrelated-observation",
+        },
+        {
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "send"},
+            "step_id": "send",
+            "depends_on": ["paste"],
+            "approval_required": True,
+            "risk_level": "high",
+        },
+        {
+            "tool": "desktop.ui_elements",
+            "input": {},
+            "step_id": "verify",
+            "depends_on": ["send"],
+            "runtime_stage": "verify",
+            "continue_to_model": True,
+        },
+        {
+            "tool": "artifact.write",
+            "input": {"path": "research-summary.md"},
+            "continue_to_model": True,
+        },
+    ]
+
+    selected = daily_desktop_approval_or_submit_entrypoint_requests(
+        requests,
+        text="在当前输入框粘贴并发送",
+    )
+
+    assert [request["step_id"] for request in selected] == [
+        "discover",
+        "paste",
+        "send",
+        "verify",
+    ]
+    assert [request["tool"] for request in selected] == [
+        "desktop.running_apps",
+        "desktop.safe_shortcut",
+        "desktop.submit_foreground",
+        "desktop.ui_elements",
+    ]
+
+
 def test_submit_foreground_entrypoint_requires_approval() -> None:
     selected = daily_desktop_approval_or_submit_entrypoint_requests(
         [],

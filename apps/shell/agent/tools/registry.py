@@ -29,21 +29,23 @@ def _memory_add(broker: Any, payload: dict[str, Any], _approved: bool) -> dict[s
     )
 
 
-def _memory_replace(broker: Any, payload: dict[str, Any], _approved: bool) -> dict[str, Any]:
+def _memory_replace(broker: Any, payload: dict[str, Any], approved: bool) -> dict[str, Any]:
     return broker.memory_replace(
         str(payload.get("content") or ""),
         memory_id=str(payload.get("memory_id") or ""),
         old_content=str(payload.get("old_content") or ""),
         kind=str(payload.get("kind") or ""),
         scope=str(payload.get("scope") or ""),
+        approved=approved,
     )
 
 
-def _memory_remove(broker: Any, payload: dict[str, Any], _approved: bool) -> dict[str, Any]:
+def _memory_remove(broker: Any, payload: dict[str, Any], approved: bool) -> dict[str, Any]:
     return broker.memory_remove(
         memory_id=str(payload.get("memory_id") or ""),
         content=str(payload.get("content") or ""),
         reason=str(payload.get("reason") or ""),
+        approved=approved,
     )
 
 
@@ -215,6 +217,21 @@ def _desktop_permissions(
     return broker.desktop_permissions()
 
 
+def _desktop_permissions_verify(
+    broker: Any,
+    _payload: dict[str, Any],
+    _approved: bool,
+) -> dict[str, Any]:
+    if not _approved:
+        return {
+            "ok": False,
+            "approval_required": True,
+            "tool": "desktop.permissions.verify",
+            "policy_reason": "主动桌面权限验证可能触发 Apple Events 和系统授权提示，需要你确认后再执行。",
+        }
+    return broker.desktop_permissions_verify()
+
+
 def _desktop_running_apps(
     broker: Any,
     _payload: dict[str, Any],
@@ -244,6 +261,39 @@ def _desktop_focus_app(broker: Any, payload: dict[str, Any], _approved: bool) ->
 
 def _desktop_verify(broker: Any, payload: dict[str, Any], _approved: bool) -> dict[str, Any]:
     app_name = str(payload.get("app_name") or "").strip()
+    verification_goal = str(payload.get("verification_goal") or "").strip()
+    if app_name and verification_goal == "app_running":
+        result = broker.app_status(app_name)
+        data = result.get("data") if isinstance(result.get("data"), dict) else {}
+        raw_running = data.get("running")
+        status_contract_valid = result.get("ok") is True and isinstance(
+            raw_running,
+            bool,
+        )
+        running = raw_running if status_contract_valid else None
+        launch_verified = running
+        normalized_result = dict(result)
+        malformed_success = result.get("ok") is True and not isinstance(
+            raw_running,
+            bool,
+        )
+        if malformed_success:
+            normalized_result["ok"] = False
+            normalized_result["verification_failed"] = True
+            if not str(normalized_result.get("error") or "").strip():
+                normalized_result["error"] = "app_running_verification_missing"
+        return {
+            **normalized_result,
+            "action": "desktop.verify",
+            "summary": result.get("summary") or f"Verified app running state: {app_name}",
+            "running": running,
+            "launch_verified": launch_verified,
+            "data": {
+                **data,
+                "running": running,
+                "launch_verified": launch_verified,
+            },
+        }
     if app_name:
         result = broker.desktop_inspect_app(
             app_name,
@@ -292,8 +342,8 @@ def _desktop_read_ui(broker: Any, payload: dict[str, Any], _approved: bool) -> d
 def _desktop_inspect_app(broker: Any, payload: dict[str, Any], _approved: bool) -> dict[str, Any]:
     return broker.desktop_inspect_app(
         str(payload.get("app_name") or ""),
-        open_if_needed=payload.get("open_if_needed", True),
-        focus=payload.get("focus", True),
+        open_if_needed=payload.get("open_if_needed", False),
+        focus=payload.get("focus", False),
         role_filter=str(payload.get("role_filter") or ""),
         limit=payload.get("limit", 80),
     )
@@ -330,6 +380,21 @@ def _app_status(broker: Any, payload: dict[str, Any], _approved: bool) -> dict[s
 
 
 def _app_open(broker: Any, payload: dict[str, Any], _approved: bool) -> dict[str, Any]:
+    if payload.get("bring_to_front") is False:
+        return {
+            "ok": False,
+            "action": "app.open",
+            "status": "provider_required",
+            "error": "background_desktop_provider_required",
+            "summary": (
+                "Background-only app launch requires a background desktop provider."
+            ),
+            "blocked_by_desktop_execution_policy": True,
+            "blocking_conditions": ["sandbox_desktop_provider_required"],
+            "requires_user_handoff": True,
+            "user_handoff_required": True,
+            "fallback_used": False,
+        }
     return broker.app_open(str(payload.get("app_name") or ""))
 
 
@@ -880,7 +945,18 @@ def _browser_open_url(broker: Any, payload: dict[str, Any], _approved: bool) -> 
 
 def _browser_search(broker: Any, payload: dict[str, Any], _approved: bool) -> dict[str, Any]:
     query = str(payload.get("query") or "").strip()
-    return broker.browser_open_url(f"https://www.google.com/search?q={quote_plus(query)}")
+    search_url = f"https://www.google.com/search?q={quote_plus(query)}"
+    result = broker.browser_open_url_and_extract_text(search_url)
+    result_data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    return {
+        **result,
+        "action": "browser.search",
+        "data": {
+            **result_data,
+            "query": query,
+            "search_url": search_url,
+        },
+    }
 
 
 def _browser_open(broker: Any, payload: dict[str, Any], _approved: bool) -> dict[str, Any]:
@@ -920,8 +996,6 @@ def _browser_current_page(
 def _browser_click(broker: Any, payload: dict[str, Any], _approved: bool) -> dict[str, Any]:
     return broker.browser_click(
         str(payload.get("selector") or ""),
-        fallback_x=payload.get("fallback_x"),
-        fallback_y=payload.get("fallback_y"),
         click_count=payload.get("click_count", 1),
     )
 
@@ -934,8 +1008,6 @@ def _browser_type_text(
     return broker.browser_type_text(
         str(payload.get("selector") or ""),
         str(payload.get("text") or ""),
-        fallback_x=payload.get("fallback_x"),
-        fallback_y=payload.get("fallback_y"),
     )
 
 
@@ -982,6 +1054,7 @@ TOOL_DISPATCH_REGISTRY: dict[str, ToolDispatchHandler] = {
     "data.analyze": _data_analyze,
     "screen.capture": _screen_capture,
     "desktop.permissions": _desktop_permissions,
+    "desktop.permissions.verify": _desktop_permissions_verify,
     "desktop.active_window": _desktop_active_window,
     "desktop.running_apps": _desktop_running_apps,
     "desktop.list_apps": _desktop_list_apps,

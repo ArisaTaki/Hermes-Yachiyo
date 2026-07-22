@@ -42,8 +42,7 @@ function messagesPayload(extra = {}) {
         id: 'assistant-cancel-ui-smoke-cancelled',
         role: 'assistant',
         content: RUN_RESULT,
-        status: 'failed',
-        error: RUN_RESULT,
+        status: 'cancelled',
         created_at: now,
         metadata: {
           task_id: TASK_ID,
@@ -180,7 +179,7 @@ function sessionsPayload() {
         latest_message_preview: bridgeState.cancelled
           ? RUN_RESULT
           : 'Still running cancel smoke.',
-        latest_message_status: bridgeState.cancelled ? 'failed' : 'processing',
+        latest_message_status: bridgeState.cancelled ? 'cancelled' : 'processing',
         updated_at: now,
       },
     ],
@@ -391,13 +390,13 @@ async function waitForCancelled(win, label) {
     const header = document.querySelector('[data-testid="chat-header-stop-button"]');
     const composer = document.querySelector('[data-testid="chat-composer-stop-button"]');
     const cancelledMessage = document.querySelector('[data-message-id="assistant-cancel-ui-smoke-cancelled"]');
-    const openRun = cancelledMessage?.querySelector('[data-testid="chat-message-open-run-detail"]');
     const status = document.querySelector('.chat-status')?.textContent || '';
     return header
       && header.disabled
       && !composer
-      && cancelledMessage?.className.includes('error')
-      && openRun?.textContent.includes('Agent Studio')
+      && !cancelledMessage?.className.includes('error')
+      && cancelledMessage?.textContent.includes('· 已取消')
+      && !document.body.textContent.includes('处理失败：')
       && document.body.textContent.includes(${JSON.stringify(RUN_RESULT)})
       && !document.body.textContent.includes('Still running cancel smoke.')
       && status !== '取消失败';
@@ -457,9 +456,6 @@ async function main() {
   await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"chat-header-stop-button\\"]').click()", true);
   await waitForCancelled(win, 'header stop cancellation projection');
   console.log('[electron-smoke] header stop cancelled chat');
-  await win.webContents.executeJavaScript("document.querySelector('[data-message-id=\\"assistant-cancel-ui-smoke-cancelled\\"] [data-testid=\\"chat-message-open-run-detail\\"]').click()", true);
-  await waitForCancelledRunDetail(win, 'cancelled message Run Detail replay handoff');
-  console.log('[electron-smoke] cancelled message Run Detail replay verified');
 
   clearTimeout(watchdog);
   await win.close();

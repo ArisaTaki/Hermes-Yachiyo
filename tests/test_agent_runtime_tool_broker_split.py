@@ -32,6 +32,73 @@ def test_tool_broker_remains_exported_from_legacy_runtime_module() -> None:
     )
 
 
+def test_tool_broker_mints_exact_app_lifecycle_receipts(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    broker = ToolBroker({}, tmp_path / "artifacts")
+    monkeypatch.setattr(
+        broker_module.desktop,
+        "app_show",
+        lambda app_name: {
+            "ok": True,
+            "action": "app.show",
+            "data": {"app_name": app_name, "show_status": "shown"},
+        },
+    )
+    monkeypatch.setattr(
+        broker_module.desktop,
+        "app_hide",
+        lambda app_name: {
+            "ok": True,
+            "action": "app.hide",
+            "data": {"app_name": app_name, "hide_status": "hidden"},
+        },
+    )
+    monkeypatch.setattr(
+        broker_module.desktop,
+        "app_minimize",
+        lambda app_name: {
+            "ok": True,
+            "action": "app.minimize",
+            "data": {
+                "app_name": app_name,
+                "minimize_status": "minimized",
+                "window_count": 1,
+            },
+        },
+    )
+
+    for result in (
+        broker.app_show("Slack"),
+        broker.app_hide("Slack"),
+        broker.app_minimize("Slack"),
+    ):
+        assert result["postcondition_verified"] is True
+        assert result["data"]["postcondition_verified"] is True
+
+
+def test_tool_broker_rejects_mismatched_app_lifecycle_receipt(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    broker = ToolBroker({}, tmp_path / "artifacts")
+    monkeypatch.setattr(
+        broker_module.desktop,
+        "app_show",
+        lambda _app_name: {
+            "ok": True,
+            "action": "app.show",
+            "data": {"app_name": "Discord", "show_status": "shown"},
+        },
+    )
+
+    result = broker.app_show("Slack")
+
+    assert "postcondition_verified" not in result
+    assert "postcondition_verified" not in result["data"]
+
+
 def test_tool_broker_payload_approved_field_cannot_bypass_terminal_approval(
     tmp_path: Path,
 ) -> None:
@@ -134,6 +201,7 @@ def test_tool_broker_write_patch_keeps_workspace_scope_and_hash_reporting(
         "tool": "workspace.write_patch",
     }
     assert result["ok"] is True
+    assert result["postcondition_verified"] is True
     assert result["mode"] == "patch"
     assert result["sha256_before"] != result["sha256_after"]
     assert target.read_text(encoding="utf-8") == "hi\n"
@@ -163,6 +231,10 @@ def test_tool_broker_workspace_list_filters_files_by_pattern_and_type(tmp_path: 
     )
     invoices = broker.workspace_list(".", file_type="invoice")
     csv_files = broker.workspace_list(".", file_type="csv")
+    structured_data = broker.workspace_list(
+        ".",
+        pattern="*.{csv,tsv,xlsx,json,jsonl}",
+    )
 
     assert screenshots["ok"] is True
     assert screenshots["entries"] == [{"name": "Screen Shot 1.png", "type": "file"}]
@@ -177,6 +249,14 @@ def test_tool_broker_workspace_list_filters_files_by_pattern_and_type(tmp_path: 
     assert invoices["filter"]["file_type"] == "invoice"
     assert csv_files["entries"] == [{"name": "sales.csv", "type": "file"}]
     assert csv_files["filter"]["expanded_patterns"] == ["*.csv"]
+    assert structured_data["entries"] == [{"name": "sales.csv", "type": "file"}]
+    assert structured_data["filter"]["expanded_patterns"] == [
+        "*.csv",
+        "*.tsv",
+        "*.xlsx",
+        "*.json",
+        "*.jsonl",
+    ]
 
 
 def test_tool_broker_file_organize_requires_approval_and_moves_matching_files(
@@ -271,6 +351,7 @@ def test_tool_broker_artifact_write_redacts_secrets(tmp_path: Path) -> None:
     artifact_path = artifact_root / "reports" / "secret.md"
     content = artifact_path.read_text(encoding="utf-8")
     assert result["ok"] is True
+    assert result["postcondition_verified"] is True
     assert "sk-toolbrokersecret123456" not in content
     assert "api_key=[redacted]" in content
 

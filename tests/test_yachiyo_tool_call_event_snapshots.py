@@ -489,6 +489,20 @@ def test_tool_call_snapshots_project_scoped_desktop_intent_events() -> None:
                     "blocked_summary": "这个 Agent 当前没有开启 media.apple_music_play。",
                 },
             ),
+            PublicRunEvent(
+                run_id="workflow-run-desktop",
+                sequence=4,
+                event_type="workflow.run.desktop.intent_unverified",
+                detail="media.system_control",
+                created_at="2026-06-27T00:00:03Z",
+                payload={
+                    "tool": "media.system_control",
+                    "input_preview": {"action": "next"},
+                    "status": "failed",
+                    "reason": "desktop_verification_missing",
+                    "error": "已发送媒体控制请求，但无法确认播放状态。",
+                },
+            ),
         ]
     )
 
@@ -497,6 +511,7 @@ def test_tool_call_snapshots_project_scoped_desktop_intent_events() -> None:
         "app.focus",
         "desktop.ui_elements",
         "media.apple_music_play",
+        "media.system_control",
     ]
     assert calls[0].status == "waiting_approval"
     assert calls[0].approval_id == "approval-hotkey"
@@ -508,3 +523,125 @@ def test_tool_call_snapshots_project_scoped_desktop_intent_events() -> None:
     assert calls[2].output_preview["count"] == 4
     assert calls[3].status == "blocked"
     assert calls[3].output_preview["blocked_by"] == "agent_tool_policy"
+    assert calls[4].status == "failed"
+    assert calls[4].output_preview["reason"] == "desktop_verification_missing"
+
+
+def test_explicit_tool_call_id_keeps_post_terminal_call_in_one_snapshot() -> None:
+    events = [
+        PublicRunEvent(
+            run_id="run-explicit-call",
+            sequence=sequence,
+            event_type=event_type,
+            detail="workspace.read",
+            created_at=f"2026-07-11T00:00:0{sequence}Z",
+            payload={
+                "tool_call_id": "call-explicit-1",
+                "tool": "workspace.read",
+                "input_preview": {"path": "README.md"},
+                **(
+                    {"result": {"ok": True, "content": "done"}}
+                    if event_type in {"tool.completed", "agent.tool.call"}
+                    else {}
+                ),
+            },
+        )
+        for sequence, event_type in enumerate(
+            (
+                "tool.requested",
+                "agent.tool.started",
+                "tool.completed",
+                "agent.tool.call",
+            ),
+            start=1,
+        )
+    ]
+
+    calls = tool_call_snapshots_from_events(events)
+
+    assert len(calls) == 1
+    assert calls[0].tool_call_id == "call-explicit-1"
+    assert calls[0].status == "completed"
+    assert calls[0].output_preview["content"] == "done"
+
+
+def test_unverified_desktop_intent_overlays_original_tool_call_by_id() -> None:
+    calls = tool_call_snapshots_from_events(
+        [
+            PublicRunEvent(
+                run_id="run-media",
+                sequence=1,
+                event_type="agent.tool.call",
+                detail="media.music_app_open_and_play",
+                created_at="2026-07-11T00:00:01Z",
+                payload={
+                    "tool_call_id": "call-media",
+                    "tool": "media.music_app_open_and_play",
+                    "input_preview": {"app_name": "Spotify"},
+                    "result": {"ok": True, "playback_state_unverified": True},
+                },
+            ),
+            PublicRunEvent(
+                run_id="run-media",
+                sequence=2,
+                event_type="agent.desktop.intent_unverified",
+                detail="media.music_app_open_and_play",
+                created_at="2026-07-11T00:00:02Z",
+                payload={
+                    "tool_call_id": "call-media",
+                    "tool": "media.music_app_open_and_play",
+                    "input_preview": {"app_name": "Spotify"},
+                    "status": "failed",
+                    "reason": "desktop_verification_missing",
+                    "error": "无法确认播放状态",
+                },
+            ),
+        ]
+    )
+
+    assert len(calls) == 1
+    assert calls[0].tool_call_id == "call-media"
+    assert calls[0].status == "failed"
+    assert calls[0].output_preview["ok"] is True
+    assert calls[0].output_preview["reason"] == "desktop_verification_missing"
+
+
+def test_legacy_unverified_overlay_ignores_runtime_trace_in_correlation() -> None:
+    calls = tool_call_snapshots_from_events(
+        [
+            PublicRunEvent(
+                run_id="run-media-legacy",
+                sequence=1,
+                event_type="agent.tool.call",
+                detail="media.music_app_open_and_play",
+                created_at="2026-07-11T00:00:01Z",
+                core_id="core-1",
+                workspace_id="workspace-1",
+                task_id="task-1",
+                payload={
+                    "tool_call_id": "call-media-legacy",
+                    "tool": "media.music_app_open_and_play",
+                    "input_preview": {"app_name": "Spotify"},
+                    "result": {"ok": True, "playback_state_unverified": True},
+                },
+            ),
+            PublicRunEvent(
+                run_id="run-media-legacy",
+                sequence=2,
+                event_type="agent.desktop.intent_unverified",
+                detail="media.music_app_open_and_play",
+                created_at="2026-07-11T00:00:02Z",
+                payload={
+                    "tool": "media.music_app_open_and_play",
+                    "input_preview": {"app_name": "Spotify"},
+                    "status": "failed",
+                    "reason": "desktop_verification_missing",
+                },
+            ),
+        ]
+    )
+
+    assert len(calls) == 1
+    assert calls[0].tool_call_id == "call-media-legacy"
+    assert calls[0].status == "failed"
+    assert calls[0].output_preview["reason"] == "desktop_verification_missing"

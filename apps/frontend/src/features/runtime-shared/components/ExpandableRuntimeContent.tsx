@@ -1,13 +1,15 @@
 export function ExpandableRuntimeContent({
   content,
   defaultOpen = false,
+  forceCollapse = false,
   label,
 }: {
   content: string;
   defaultOpen?: boolean;
+  forceCollapse?: boolean;
   label: string;
 }) {
-  const shouldCollapse = runPayloadShouldCollapse(content);
+  const shouldCollapse = forceCollapse || runPayloadShouldCollapse(content);
   if (!shouldCollapse) return <pre>{content}</pre>;
   return (
     <details className="run-expandable-content" open={defaultOpen}>

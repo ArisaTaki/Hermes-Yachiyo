@@ -117,7 +117,7 @@ export function MemorySkillTraceInspector({
             ) : null}
           </article>
         ))}
-        {!traces.length ? <span>No memory or skill trace events</span> : null}
+        {!traces.length ? <span>暂无记忆或 Skill Trace 事件</span> : null}
       </div>
     </details>
   );

@@ -1,3 +1,5 @@
+import type { Ref } from 'react';
+
 import { UiIcon } from '../../../components/UiIcon';
 import type { ChatRunnableSummary as RunnableSummary } from '../runnables';
 import type {
@@ -16,7 +18,7 @@ type ChatHeaderProps = {
   hasSessions: boolean;
   imageAttachDisabled: boolean;
   isProcessing: boolean;
-  copiedSessionId: string;
+  conversationTransitionLocked: boolean;
   runnables: RunnableSummary[];
   sessionContext: ChatSessionContext;
   statusText: string;
@@ -24,8 +26,10 @@ type ChatHeaderProps = {
   onClearSession: () => void;
   onOpenGroupSettings: () => void;
   onOpenImageAttachmentPicker: () => void;
-  onOpenSessionIdDialog: () => void;
   onRequestDeleteSession: () => void;
+  onToggleSessions: () => void;
+  sessionsPanelOpen: boolean;
+  sessionsToggleRef: Ref<HTMLButtonElement>;
 };
 
 export function ChatHeader({
@@ -38,7 +42,7 @@ export function ChatHeader({
   hasSessions,
   imageAttachDisabled,
   isProcessing,
-  copiedSessionId,
+  conversationTransitionLocked,
   runnables,
   sessionContext,
   statusText,
@@ -46,13 +50,26 @@ export function ChatHeader({
   onClearSession,
   onOpenGroupSettings,
   onOpenImageAttachmentPicker,
-  onOpenSessionIdDialog,
   onRequestDeleteSession,
+  onToggleSessions,
+  sessionsPanelOpen,
+  sessionsToggleRef,
 }: ChatHeaderProps) {
-  const sessionIdCopied = copiedSessionId === currentSessionId;
   return (
     <header className="chat-header">
       <div className="chat-header-info">
+        <button
+          type="button"
+          className="chat-action-btn chat-session-toggle-btn"
+          aria-controls="chat-session-sidebar"
+          aria-expanded={sessionsPanelOpen}
+          aria-label={sessionsPanelOpen ? '收起会话列表' : '展开会话列表'}
+          title={sessionsPanelOpen ? '收起会话列表' : '展开会话列表'}
+          onClick={onToggleSessions}
+          ref={sessionsToggleRef}
+        >
+          <UiIcon name="sidebar" />
+        </button>
         <SessionAvatar
           assistantProfile={assistantProfile}
           context={sessionContext}
@@ -76,22 +93,12 @@ export function ChatHeader({
             data-testid="chat-group-settings"
             title="群组设置"
             aria-label="群组设置"
-            disabled={!currentSessionId}
+            disabled={!currentSessionId || conversationTransitionLocked}
             onClick={onOpenGroupSettings}
           >
             <UiIcon name="settings" />
           </button>
         ) : null}
-        <button
-          type="button"
-          className={`chat-action-btn ${sessionIdCopied ? 'copied' : ''}`}
-          title={currentSessionId ? `查看/复制会话 ID：${currentSessionId}` : '查看/复制会话 ID'}
-          aria-label="查看/复制会话 ID，不复制聊天记录"
-          disabled={!currentSessionId}
-          onClick={onOpenSessionIdDialog}
-        >
-          <UiIcon name={sessionIdCopied ? 'check' : 'copy'} />
-        </button>
         <button
           type="button"
           className="chat-action-btn"
@@ -114,7 +121,14 @@ export function ChatHeader({
         >
           <UiIcon name="stop" />
         </button>
-        <button type="button" className="chat-action-btn" title="新对话" aria-label="新对话" onClick={onClearSession}>
+        <button
+          type="button"
+          className="chat-action-btn"
+          title="新对话"
+          aria-label="新对话"
+          onClick={onClearSession}
+          disabled={conversationTransitionLocked}
+        >
           <UiIcon name="plus" />
         </button>
         <button
@@ -123,7 +137,7 @@ export function ChatHeader({
           title={`删除${deleteTarget}`}
           aria-label={`删除${deleteTarget}`}
           onClick={onRequestDeleteSession}
-          disabled={!hasSessions}
+          disabled={!hasSessions || conversationTransitionLocked}
         >
           <UiIcon name="trash" />
         </button>

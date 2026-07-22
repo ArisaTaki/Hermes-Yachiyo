@@ -185,7 +185,7 @@ export function WorkflowStepResults({
                 </p>
               ) : null}
               <RunExpandableContent
-                content={step.childRunId && !childRun ? 'Loading child run...' : summary}
+                content={step.childRunId && !childRun ? '正在加载子 Run...' : summary}
                 label="展开完整节点结果"
                 defaultOpen={childStatus === 'failed' || childStatus === 'cancelled' || childStatus === 'approval_required'}
               />
@@ -265,7 +265,7 @@ export function WorkflowStepResults({
             </article>
           );
         })}
-        {!selectedWorkflowSteps.length ? <span>No workflow steps</span> : null}
+        {!selectedWorkflowSteps.length ? <span>暂无 Workflow 步骤</span> : null}
       </div>
     </details>
   );

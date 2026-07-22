@@ -43,7 +43,7 @@ const LauncherView = lazy(() =>
 function RouteLoadingFallback() {
   return (
     <div className="hy-route-page hy-route-loading" aria-live="polite">
-      正在加载界面...
+      正在加载页面...
     </div>
   );
 }

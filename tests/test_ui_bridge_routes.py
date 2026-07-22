@@ -6,6 +6,7 @@ import asyncio
 import json
 import subprocess
 import threading
+import time
 import zipfile
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
@@ -27,6 +28,7 @@ from apps.core.chat_store import ChatStore
 from apps.core.special_sessions import PROACTIVE_CHAT_SESSION_ID
 from apps.core.state import AppState
 from apps.shell.config import AppConfig
+from packages.protocol.enums import TaskStatus, TaskType
 
 
 def _create_live2d_model_dir(root: Path, model_name: str = "demo") -> Path:
@@ -92,6 +94,7 @@ class _ChatRouteRuntime:
     def __init__(self, store: ChatStore) -> None:
         self.store = store
         self.state = AppState()
+        self.cancelled_runner_tasks: list[str] = []
         self.chat_session = ChatSession(session_id="route-chat")
         self.chat_session.attach_store(store, load_existing=False)
 
@@ -99,6 +102,19 @@ class _ChatRouteRuntime:
         self.chat_session = ChatSession()
         self.chat_session.attach_store(self.store, load_existing=False)
         return self.chat_session.session_id
+
+    def switch_session(self, session_id: str) -> None:
+        session = ChatSession(session_id=session_id)
+        session.attach_store(
+            self.store,
+            load_existing=True,
+            fail_active_messages=False,
+            create_if_missing=False,
+        )
+        self.chat_session = session
+
+    def cancel_task_runner_task(self, task_id: str) -> None:
+        self.cancelled_runner_tasks.append(task_id)
 
 
 @pytest.mark.asyncio
@@ -428,7 +444,7 @@ async def test_yachiyo_desktop_permission_settings_route_reports_unsupported_pla
 
 @pytest.mark.asyncio
 async def test_chat_routes_use_shared_chat_api(monkeypatch):
-    runtime = SimpleNamespace()
+    runtime = SimpleNamespace(chat_session=SimpleNamespace(session_id="session-route"))
     monkeypatch.setattr(ui, "get_runtime", lambda: runtime)
 
     class FakeChatAPI:
@@ -437,6 +453,10 @@ async def test_chat_routes_use_shared_chat_api(monkeypatch):
 
         def get_messages(self, limit, anchor_message_id=""):
             return {"messages": [], "limit": limit, "anchor_message_id": anchor_message_id}
+
+        def get_messages_in_session(self, session_id, limit, anchor_message_id=""):
+            assert session_id == runtime.chat_session.session_id
+            return self.get_messages(limit, anchor_message_id=anchor_message_id)
 
         def send_message(self, text, attachments=None, runnable_id="", client_message_id=""):
             return {
@@ -447,14 +467,35 @@ async def test_chat_routes_use_shared_chat_api(monkeypatch):
                 "client_message_id": client_message_id,
             }
 
-        def retry_message(self, message_id):
-            return {"ok": True, "message_id": message_id}
+        def send_message_in_session(
+            self,
+            session_id,
+            text,
+            attachments=None,
+            runnable_id="",
+            client_message_id="",
+        ):
+            assert session_id == runtime.chat_session.session_id
+            return self.send_message(
+                text,
+                attachments,
+                runnable_id=runnable_id,
+                client_message_id=client_message_id,
+            )
 
-        def summarize_delegated_run(self, run_id):
+        def retry_message(self, message_id, *, client_message_id=""):
+            return {
+                "ok": True,
+                "message_id": message_id,
+                "client_message_id": client_message_id,
+            }
+
+        def summarize_delegated_run(self, run_id, *, conversation_id=""):
             return {
                 "ok": True,
                 "summary_created": True,
                 "run_id": run_id,
+                "conversation_id": conversation_id,
                 "run_group_id": "run_group_delegate_1",
                 "run_status": "completed",
                 "source_task_id": "source-task-1",
@@ -482,8 +523,8 @@ async def test_chat_routes_use_shared_chat_api(monkeypatch):
         def cancel_current_tasks(self):
             return {"ok": True, "cancelled_tasks": 1}
 
-        def delete_current_session(self):
-            return {"ok": True, "deleted": True}
+        def delete_session(self, session_id=""):
+            return {"ok": True, "deleted": True, "deleted_session_id": session_id}
 
         def list_sessions(self, limit, query=""):
             return {"sessions": [], "limit": limit, "query": query}
@@ -515,6 +556,13 @@ async def test_chat_routes_use_shared_chat_api(monkeypatch):
         "runnable_id": "",
         "client_message_id": "client-1",
     }
+    assert await ui.send_chat_message(ui.SendChatMessageRequest(text="hello", message_id="legacy-1")) == {
+        "ok": True,
+        "text": "hello",
+        "attachments": [],
+        "runnable_id": "",
+        "client_message_id": "legacy-1",
+    }
     assert await ui.send_chat_message(
         ui.SendChatMessageRequest(text="hello"),
         SimpleNamespace(headers={"idempotency-key": "header-1"}),
@@ -540,14 +588,24 @@ async def test_chat_routes_use_shared_chat_api(monkeypatch):
         "runnable_id": "agent_design",
         "client_message_id": "",
     }
-    assert await ui.retry_chat_message(ui.RetryChatMessageRequest(message_id="m1")) == {
+    assert await ui.retry_chat_message(ui.RetryChatMessageRequest(
+        message_id="m1",
+        client_message_id="retry-client-1",
+    )) == {
         "ok": True,
         "message_id": "m1",
+        "client_message_id": "retry-client-1",
     }
-    assert await ui.summarize_delegated_run(ui.SummarizeDelegatedRunRequest(run_id="run_delegate_1")) == {
+    assert await ui.summarize_delegated_run(
+        ui.SummarizeDelegatedRunRequest(
+            run_id="run_delegate_1",
+            conversation_id="session-summary-a",
+        )
+    ) == {
         "ok": True,
         "summary_created": True,
         "run_id": "run_delegate_1",
+        "conversation_id": "session-summary-a",
         "run_group_id": "run_group_delegate_1",
         "run_status": "completed",
         "source_task_id": "source-task-1",
@@ -583,7 +641,13 @@ async def test_chat_routes_use_shared_chat_api(monkeypatch):
     assert await ui.get_chat_session() == {"session_id": "session-1"}
     assert await ui.clear_chat_session() == {"ok": True}
     assert await ui.cancel_chat_session_tasks() == {"ok": True, "cancelled_tasks": 1}
-    assert await ui.delete_chat_session() == {"ok": True, "deleted": True}
+    assert await ui.delete_chat_session(
+        ui.DeleteChatSessionRequest(session_id="session-delete-a")
+    ) == {
+        "ok": True,
+        "deleted": True,
+        "deleted_session_id": "session-delete-a",
+    }
     assert await ui.list_chat_sessions(limit=3, query="聊天") == {
         "sessions": [],
         "limit": 3,
@@ -597,6 +661,592 @@ async def test_chat_routes_use_shared_chat_api(monkeypatch):
         "executor": "NativeAgentExecutor",
         "available": True,
     }
+
+
+@pytest.mark.asyncio
+async def test_send_chat_message_keeps_bridge_event_loop_responsive(monkeypatch):
+    runtime = SimpleNamespace(chat_session=SimpleNamespace(session_id="session-slow-send"))
+    started = threading.Event()
+    release = threading.Event()
+    release_timer = threading.Timer(0.25, release.set)
+    monkeypatch.setattr(ui, "get_runtime", lambda: runtime)
+
+    class SlowChatAPI:
+        def __init__(self, received_runtime):
+            assert received_runtime is runtime
+
+        def send_message_in_session(
+            self,
+            session_id,
+            text,
+            attachments=None,
+            runnable_id="",
+            client_message_id="",
+        ):
+            assert session_id == runtime.chat_session.session_id
+            started.set()
+            assert release.wait(timeout=1)
+            return {"ok": True, "task_id": "task-slow-chat"}
+
+    monkeypatch.setattr(ui, "ChatAPI", SlowChatAPI)
+    release_timer.start()
+    started_at = time.monotonic()
+    try:
+        send_task = asyncio.create_task(
+            ui.send_chat_message(ui.SendChatMessageRequest(text="slow desktop task"))
+        )
+        assert await asyncio.to_thread(started.wait, 1)
+        await asyncio.sleep(0.02)
+        assert time.monotonic() - started_at < 0.15
+        assert await send_task == {"ok": True, "task_id": "task-slow-chat"}
+    finally:
+        release.set()
+        release_timer.cancel()
+
+
+@pytest.mark.asyncio
+async def test_get_chat_messages_keeps_bridge_event_loop_responsive(monkeypatch):
+    runtime = SimpleNamespace(chat_session=SimpleNamespace(session_id="session-slow-get"))
+    started = threading.Event()
+    release = threading.Event()
+    release_timer = threading.Timer(0.25, release.set)
+    monkeypatch.setattr(ui, "get_runtime", lambda: runtime)
+
+    class SlowChatAPI:
+        def __init__(self, received_runtime):
+            assert received_runtime is runtime
+
+        def get_messages_in_session(self, session_id, limit, anchor_message_id=""):
+            assert session_id == runtime.chat_session.session_id
+            started.set()
+            assert release.wait(timeout=1)
+            return {"ok": True, "messages": [], "limit": limit}
+
+    monkeypatch.setattr(ui, "ChatAPI", SlowChatAPI)
+    release_timer.start()
+    started_at = time.monotonic()
+    try:
+        messages_task = asyncio.create_task(ui.get_chat_messages(limit=12))
+        assert await asyncio.to_thread(started.wait, 1)
+        await asyncio.sleep(0.02)
+        assert time.monotonic() - started_at < 0.15
+        assert await messages_task == {"ok": True, "messages": [], "limit": 12}
+    finally:
+        release.set()
+        release_timer.cancel()
+
+
+@pytest.mark.asyncio
+async def test_send_chat_message_stays_bound_to_session_selected_before_worker_starts(
+    tmp_path,
+    monkeypatch,
+):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _ChatRouteRuntime(store)
+    session_a_id = runtime.chat_session.session_id
+    session_b = ChatSession(session_id="route-chat-b")
+    session_b.attach_store(store, load_existing=False)
+    started = threading.Event()
+    release = threading.Event()
+    monkeypatch.setattr(ui, "get_runtime", lambda: runtime)
+
+    class BlockingChatAPI(chat_api_mod.ChatAPI):
+        def send_message(
+            self,
+            text,
+            attachments=None,
+            *,
+            runnable_id="",
+            client_message_id="",
+            metadata=None,
+        ):
+            started.set()
+            assert release.wait(timeout=3)
+            return super().send_message(
+                text,
+                attachments,
+                runnable_id=runnable_id,
+                client_message_id=client_message_id,
+                metadata=metadata,
+            )
+
+    monkeypatch.setattr(ui, "ChatAPI", BlockingChatAPI)
+
+    try:
+        send_task = asyncio.create_task(
+            ui.send_chat_message(
+                ui.SendChatMessageRequest(
+                    text="message for session A",
+                    client_message_id="session-race-send-a",
+                )
+            )
+        )
+        assert await asyncio.to_thread(started.wait, 3)
+
+        loaded = await ui.load_chat_session(
+            ui.LoadChatSessionRequest(session_id=session_b.session_id)
+        )
+        assert loaded["ok"] is True
+        assert runtime.chat_session.session_id == session_b.session_id
+
+        release.set()
+        result = await send_task
+
+        assert result["ok"] is True
+        assert runtime.chat_session.session_id == session_b.session_id
+        assert [
+            message.content
+            for message in store.load_messages(session_a_id, limit=0)
+            if message.role == "user"
+        ] == ["message for session A"]
+        assert [
+            message.content
+            for message in store.load_messages(session_b.session_id, limit=0)
+            if message.role == "user"
+        ] == []
+    finally:
+        release.set()
+        store.close()
+
+
+@pytest.mark.asyncio
+async def test_get_chat_messages_stays_bound_to_session_selected_before_worker_starts(
+    tmp_path,
+    monkeypatch,
+):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _ChatRouteRuntime(store)
+    session_a_id = runtime.chat_session.session_id
+    runtime.chat_session.add_user_message("message already in session A")
+    session_b = ChatSession(session_id="route-chat-get-b")
+    session_b.attach_store(store, load_existing=False)
+    session_b.add_user_message("message already in session B")
+    started = threading.Event()
+    release = threading.Event()
+    monkeypatch.setattr(ui, "get_runtime", lambda: runtime)
+
+    class BlockingChatAPI(chat_api_mod.ChatAPI):
+        def get_messages(self, limit=0, anchor_message_id=""):
+            started.set()
+            assert release.wait(timeout=3)
+            return super().get_messages(limit, anchor_message_id=anchor_message_id)
+
+    monkeypatch.setattr(ui, "ChatAPI", BlockingChatAPI)
+
+    try:
+        messages_task = asyncio.create_task(ui.get_chat_messages(limit=20))
+        assert await asyncio.to_thread(started.wait, 3)
+
+        loaded = await ui.load_chat_session(
+            ui.LoadChatSessionRequest(session_id=session_b.session_id)
+        )
+        assert loaded["ok"] is True
+        assert runtime.chat_session.session_id == session_b.session_id
+
+        release.set()
+        result = await messages_task
+
+        assert result["ok"] is True
+        assert result["session_id"] == session_a_id
+        assert [message["content"] for message in result["messages"]] == [
+            "message already in session A"
+        ]
+        assert runtime.chat_session.session_id == session_b.session_id
+    finally:
+        release.set()
+        store.close()
+
+
+@pytest.mark.asyncio
+async def test_send_chat_message_does_not_recreate_a_deleted_captured_session(
+    tmp_path,
+    monkeypatch,
+):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _ChatRouteRuntime(store)
+    session_a_id = runtime.chat_session.session_id
+    session_b = ChatSession(session_id="route-chat-delete-b")
+    session_b.attach_store(store, load_existing=False)
+    started = threading.Event()
+    release = threading.Event()
+    monkeypatch.setattr(ui, "get_runtime", lambda: runtime)
+
+    class BlockingChatAPI(chat_api_mod.ChatAPI):
+        def send_message(
+            self,
+            text,
+            attachments=None,
+            *,
+            runnable_id="",
+            client_message_id="",
+            metadata=None,
+        ):
+            started.set()
+            assert release.wait(timeout=3)
+            return super().send_message(
+                text,
+                attachments,
+                runnable_id=runnable_id,
+                client_message_id=client_message_id,
+                metadata=metadata,
+            )
+
+    monkeypatch.setattr(ui, "ChatAPI", BlockingChatAPI)
+
+    try:
+        send_task = asyncio.create_task(
+            ui.send_chat_message(
+                ui.SendChatMessageRequest(
+                    text="must not survive deleted session",
+                    client_message_id="session-deleted-before-send",
+                )
+            )
+        )
+        assert await asyncio.to_thread(started.wait, 3)
+
+        runtime.switch_session(session_b.session_id)
+        store.delete_session(session_a_id)
+        release.set()
+        result = await send_task
+
+        assert result["ok"] is False
+        assert result["committed"] is False
+        assert result["delivery_state"] == "not_committed"
+        assert result["reason"] == "chat_session_deleted"
+        assert runtime.chat_session.session_id == session_b.session_id
+        assert store.get_session(session_a_id) is None
+        assert store.load_messages(session_a_id, limit=0) == []
+        assert store.load_messages(session_b.session_id, limit=0) == []
+    finally:
+        release.set()
+        store.close()
+
+
+@pytest.mark.asyncio
+async def test_delete_waits_for_committed_send_then_cancels_it_without_touching_loaded_session(
+    tmp_path,
+    monkeypatch,
+):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _ChatRouteRuntime(store)
+    session_a_id = runtime.chat_session.session_id
+    session_b = ChatSession(session_id="route-chat-delete-loaded-b")
+    session_b.attach_store(store, load_existing=False)
+    session_b.add_user_message("keep session B")
+    send_committed = threading.Event()
+    release_send = threading.Event()
+    delete_entered = threading.Event()
+    committed_task_id = ""
+    monkeypatch.setattr(ui, "get_runtime", lambda: runtime)
+
+    class BlockingAfterCommitChatAPI(chat_api_mod.ChatAPI):
+        def send_message(
+            self,
+            text,
+            attachments=None,
+            *,
+            runnable_id="",
+            client_message_id="",
+            metadata=None,
+        ):
+            nonlocal committed_task_id
+            result = super().send_message(
+                text,
+                attachments,
+                runnable_id=runnable_id,
+                client_message_id=client_message_id,
+                metadata=metadata,
+            )
+            committed_task_id = str(result.get("task_id") or "")
+            assert committed_task_id
+            send_committed.set()
+            assert release_send.wait(timeout=3)
+            return result
+
+        def delete_session(self, session_id=""):
+            delete_entered.set()
+            return super().delete_session(session_id)
+
+    monkeypatch.setattr(ui, "ChatAPI", BlockingAfterCommitChatAPI)
+
+    try:
+        send_task = asyncio.create_task(
+            ui.send_chat_message(
+                ui.SendChatMessageRequest(
+                    text="committed in A before delete",
+                    client_message_id="session-delete-after-commit",
+                )
+            )
+        )
+        assert await asyncio.to_thread(send_committed.wait, 3)
+        assert runtime.state.get_task(committed_task_id) is not None
+
+        loaded = await ui.load_chat_session(
+            ui.LoadChatSessionRequest(session_id=session_b.session_id)
+        )
+        assert loaded["ok"] is True
+        assert runtime.chat_session.session_id == session_b.session_id
+
+        heartbeat_started_at = time.monotonic()
+        delete_task = asyncio.create_task(
+            ui.delete_chat_session(
+                ui.DeleteChatSessionRequest(session_id=session_a_id)
+            )
+        )
+        assert await asyncio.to_thread(delete_entered.wait, 3)
+        await asyncio.sleep(0.02)
+
+        assert time.monotonic() - heartbeat_started_at < 0.15
+        assert delete_task.done() is False
+
+        release_send.set()
+        send_result, delete_result = await asyncio.gather(send_task, delete_task)
+
+        assert send_result["ok"] is True
+        assert send_result["committed"] is True
+        assert delete_result["ok"] is True
+        assert delete_result["deleted_session_id"] == session_a_id
+        assert delete_result["session_id"] == session_b.session_id
+        assert delete_result["cancelled_tasks"] == 1
+        task = runtime.state.get_task(committed_task_id)
+        assert task is not None
+        assert task.status == TaskStatus.CANCELLED
+        assert runtime.cancelled_runner_tasks == [committed_task_id]
+        assert store.get_session(session_a_id) is None
+        assert store.load_messages(session_a_id, limit=0) == []
+        assert store.get_session(session_b.session_id) is not None
+        assert [
+            message.content
+            for message in store.load_messages(session_b.session_id, limit=0)
+        ] == ["keep session B"]
+        assert runtime.chat_session.session_id == session_b.session_id
+        assert all(
+            item.status not in (TaskStatus.PENDING, TaskStatus.RUNNING)
+            for item in runtime.state.list_tasks()
+            if item.chat_session_id == session_a_id
+        )
+    finally:
+        release_send.set()
+        store.close()
+
+
+@pytest.mark.asyncio
+async def test_delete_remains_bound_to_captured_session_when_another_window_loads_b(
+    tmp_path,
+    monkeypatch,
+):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _ChatRouteRuntime(store)
+    session_a_id = runtime.chat_session.session_id
+    monkeypatch.setattr(ui, "get_runtime", lambda: runtime)
+
+    sent_a = await ui.send_chat_message(
+        ui.SendChatMessageRequest(
+            text="active task in A",
+            client_message_id="delete-cas-session-a",
+        )
+    )
+    task_a_id = sent_a["task_id"]
+
+    session_b = ChatSession(session_id="route-chat-delete-cas-b")
+    session_b.attach_store(store, load_existing=False)
+    message_b_id = session_b.add_user_message("keep active task in B")
+    task_b = runtime.state.create_task(
+        task_type=TaskType.GENERAL,
+        description="task in B must survive",
+        chat_session_id=session_b.session_id,
+    )
+    session_b.link_message_to_task(message_b_id, task_b.task_id)
+    cancel_entered = threading.Event()
+    release_cancel = threading.Event()
+
+    class BlockingDeleteChatAPI(chat_api_mod.ChatAPI):
+        def _cancel_active_session_tasks(self, reason):
+            cancel_entered.set()
+            assert release_cancel.wait(timeout=3)
+            return super()._cancel_active_session_tasks(reason)
+
+    monkeypatch.setattr(ui, "ChatAPI", BlockingDeleteChatAPI)
+
+    try:
+        delete_task = asyncio.create_task(
+            ui.delete_chat_session()
+        )
+        assert await asyncio.to_thread(cancel_entered.wait, 3)
+
+        load_started_at = time.monotonic()
+        loaded = await ui.load_chat_session(
+            ui.LoadChatSessionRequest(session_id=session_b.session_id)
+        )
+        assert time.monotonic() - load_started_at < 0.15
+        assert loaded["ok"] is True
+        assert runtime.chat_session.session_id == session_b.session_id
+        assert delete_task.done() is False
+
+        release_cancel.set()
+        deleted = await delete_task
+
+        assert deleted["ok"] is True
+        assert deleted["deleted_session_id"] == session_a_id
+        assert deleted["session_id"] == session_b.session_id
+        assert runtime.chat_session.session_id == session_b.session_id
+        assert store.get_session(session_a_id) is None
+        assert store.load_messages(session_a_id, limit=0) == []
+        assert runtime.state.get_task(task_a_id).status == TaskStatus.CANCELLED
+        assert runtime.state.get_task(task_b.task_id).status == TaskStatus.PENDING
+        assert runtime.cancelled_runner_tasks == [task_a_id]
+        assert [
+            (message.content, message.task_id)
+            for message in store.load_messages(session_b.session_id, limit=0)
+        ] == [("keep active task in B", task_b.task_id)]
+    finally:
+        release_cancel.set()
+        store.close()
+
+
+@pytest.mark.asyncio
+async def test_discard_waits_for_committed_send_and_keeps_nonempty_captured_session(
+    tmp_path,
+    monkeypatch,
+):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _ChatRouteRuntime(store)
+    session_a_id = runtime.chat_session.session_id
+    session_b = ChatSession(session_id="route-chat-discard-send-wins-b")
+    session_b.attach_store(store, load_existing=False)
+    session_b.add_user_message("keep B while discarding A")
+    send_committed = threading.Event()
+    release_send = threading.Event()
+    discard_entered = threading.Event()
+    monkeypatch.setattr(ui, "get_runtime", lambda: runtime)
+
+    class BlockingSendChatAPI(chat_api_mod.ChatAPI):
+        def send_message(
+            self,
+            text,
+            attachments=None,
+            *,
+            runnable_id="",
+            client_message_id="",
+            metadata=None,
+        ):
+            result = super().send_message(
+                text,
+                attachments,
+                runnable_id=runnable_id,
+                client_message_id=client_message_id,
+                metadata=metadata,
+            )
+            assert result.get("task_id")
+            send_committed.set()
+            assert release_send.wait(timeout=3)
+            return result
+
+        def discard_empty_current_session(self, session_id=""):
+            discard_entered.set()
+            if session_id:
+                return super().discard_empty_current_session(session_id)
+            return super().discard_empty_current_session()
+
+    monkeypatch.setattr(ui, "ChatAPI", BlockingSendChatAPI)
+
+    try:
+        send_task = asyncio.create_task(
+            ui.send_chat_message(
+                ui.SendChatMessageRequest(
+                    text="send wins discard race in A",
+                    client_message_id="discard-send-wins-a",
+                )
+            )
+        )
+        assert await asyncio.to_thread(send_committed.wait, 3)
+
+        heartbeat_started_at = time.monotonic()
+        discard_task = asyncio.create_task(ui.discard_empty_chat_session())
+        assert await asyncio.to_thread(discard_entered.wait, 3)
+        await asyncio.sleep(0.02)
+        assert time.monotonic() - heartbeat_started_at < 0.15
+        assert discard_task.done() is False
+
+        loaded = await ui.load_chat_session(
+            ui.LoadChatSessionRequest(session_id=session_b.session_id)
+        )
+        assert loaded["ok"] is True
+        assert runtime.chat_session.session_id == session_b.session_id
+
+        release_send.set()
+        send_result, discard_result = await asyncio.gather(send_task, discard_task)
+
+        assert send_result["ok"] is True
+        assert send_result["committed"] is True
+        assert discard_result == {
+            "ok": True,
+            "discarded": False,
+            "session_id": session_a_id,
+        }
+        assert store.get_session(session_a_id) is not None
+        assert [
+            message.content
+            for message in store.load_messages(session_a_id, limit=0)
+            if message.role == "user"
+        ] == ["send wins discard race in A"]
+        assert [
+            message.content
+            for message in store.load_messages(session_b.session_id, limit=0)
+        ] == ["keep B while discarding A"]
+        assert runtime.chat_session.session_id == session_b.session_id
+    finally:
+        release_send.set()
+        store.close()
+
+
+@pytest.mark.asyncio
+async def test_chat_message_route_retry_after_lost_response_reuses_committed_task(
+    tmp_path,
+    monkeypatch,
+):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _ChatRouteRuntime(store)
+    monkeypatch.setattr(ui, "get_runtime", lambda: runtime)
+
+    try:
+        request = ui.SendChatMessageRequest(
+            text="send exactly once",
+            client_message_id="route-response-lost-1",
+        )
+        first = await ui.send_chat_message(request)
+        retry = await ui.send_chat_message(request)
+
+        assert first["ok"] is True
+        assert first["committed"] is True
+        assert first["delivery_state"] == "accepted"
+        assert retry["ok"] is True
+        assert retry["committed"] is True
+        assert retry["delivery_state"] == "accepted"
+        assert retry["idempotent"] is True
+        assert retry["client_message_id"] == request.client_message_id
+        assert retry["message_id"] == first["message_id"]
+        assert retry["task_id"] == first["task_id"]
+        assert len(runtime.state.list_tasks()) == 1
+        assert len(
+            [
+                message
+                for message in runtime.chat_session.get_messages(0)
+                if message.role.value == "user"
+            ]
+        ) == 1
+
+        rejected = await ui.send_chat_message(
+            ui.SendChatMessageRequest(
+                text="",
+                client_message_id="route-invalid-empty-1",
+            )
+        )
+        assert rejected["ok"] is False
+        assert rejected["committed"] is False
+        assert rejected["delivery_state"] == "not_committed"
+    finally:
+        store.close()
 
 
 @pytest.mark.asyncio

@@ -128,6 +128,7 @@ from apps.shell.yachiyo_agent import (
     desktop_tool_execution_mode_for_input,
     desktop_execution_capability_snapshots,
     desktop_execution_route_decision,
+    runtime_execution_envelope_with_desktop_execution_policy,
     desktop_tool_risk_level,
     sandbox_desktop_provider_status,
     with_agent_studio_desktop_execution_policy,
@@ -268,11 +269,13 @@ def test_tool_plan_step_snapshot_exposes_runtime_action() -> None:
         "execution_mode",
         "approval_required",
         "depends_on",
+        "input_bindings",
         "reason",
         "fallback_tools",
         "status",
     ]
     assert payload["action"] == "list_apps"
+    assert payload["input_bindings"] == []
 
 
 def test_planner_public_snapshots_explain_intent_capabilities_and_tool_plan() -> None:
@@ -1125,12 +1128,14 @@ def test_task_core_public_snapshot_exposes_workspace_todo_checkpoint_and_replan(
         "todos",
         "checkpoints",
         "replan_signals",
+        "goal_contract",
         "source",
     ]
     assert payload["workspace"]["items"][0]["kind"] == "input"
     assert payload["todos"][0]["approval_required"] is True
     assert payload["checkpoints"][0]["replan_on_failure"] is True
     assert payload["replan_signals"][0]["fallback_tools"] == ["terminal.run"]
+    assert payload["goal_contract"] is None
 
 
 def test_task_progress_summary_public_snapshot_exposes_replay_state() -> None:
@@ -3525,7 +3530,7 @@ def test_group_and_workflow_snapshots_scope_desktop_recovery_events() -> None:
         "agent.desktop.permission_recovery"
     )
     assert group_snapshot.tool_calls[0].tool_name == "desktop.safe_type_text"
-    assert group_snapshot.tool_calls[0].status == "blocked"
+    assert group_snapshot.tool_calls[0].status == "failed"
     assert group_snapshot.tool_calls[0].output_preview["permission_targets"] == [
         "accessibility"
     ]
@@ -4619,11 +4624,22 @@ def test_agent_task_snapshot_keeps_verify_events_but_shows_primary_desktop_tool(
         }
     )
 
-    assert [event.event_type for event in snapshot.recent_events].count("agent.tool.call") == 3
+    assert [event.event_type for event in snapshot.recent_events] == [
+        "agent.desktop.intent_completed"
+    ]
+    assert snapshot.recent_events[0].payload == {
+        "tool": "app.open",
+        "status": "completed",
+        "summary": "已打开 Microsoft Word。",
+        "input_preview": {"app_name": "Microsoft Word"},
+    }
+    assert all(
+        event.event_type != "agent.tool.call" for event in snapshot.recent_events
+    )
     assert [tool_call.tool_name for tool_call in snapshot.tool_calls] == ["app.open"]
     assert snapshot.tool_calls[0].input_preview == {"app_name": "Microsoft Word"}
     assert snapshot.runtime_debug is not None
-    assert snapshot.runtime_debug.event_count == 4
+    assert snapshot.runtime_debug.event_count == 1
     assert snapshot.runtime_debug.tool_call_count == 1
     assert snapshot.runtime_debug.latest_tool_name == "app.open"
     assert snapshot.runtime_debug.debug_surfaces == ["timeline", "tools"]
@@ -5186,9 +5202,19 @@ def test_agent_task_snapshot_clears_recovered_foreground_readiness_action() -> N
     assert snapshot.needs_user_action is False
     assert snapshot.current_step == "桌面就绪已恢复 · 发现已安装应用"
     assert [event.event_type for event in snapshot.recent_events] == [
-        "agent.tool.call",
         "agent.desktop.readiness_recovered",
     ]
+    assert snapshot.recent_events[0].payload == {
+        "tool": "desktop.list_apps",
+        "status": "recovered",
+    }
+    assert all(
+        event.event_type != "agent.tool.call" for event in snapshot.recent_events
+    )
+    assert [tool_call.tool_name for tool_call in snapshot.tool_calls] == [
+        "desktop.inspect_app"
+    ]
+    assert snapshot.tool_calls[0].status == "failed"
 
 
 def test_agent_task_snapshot_handles_scoped_desktop_recovery_events() -> None:
@@ -5694,12 +5720,12 @@ def test_public_pending_approval_projects_runtime_planner_trace_fields() -> None
         }
     )
 
-    assert snapshot["step_id"] == "save-discovered-app-creative-result"
-    assert snapshot["capability_id"] == "desktop.ui_operation"
-    assert snapshot["decision_id"] == "decision-1"
-    assert snapshot["plan_id"] == "runtime-plan-1"
-    assert snapshot["tool_plan_id"] == "tool-plan-1"
-    assert snapshot["intent_kind"] == "desktop_operation"
+    assert snapshot["approval_id"] == "approval-1"
+    assert snapshot["tool"] == "desktop.click_ui_element"
+    # ``label`` is planner vocabulary, not a broker-declared executable
+    # argument for this tool.  Public approval cards fail closed and omit it.
+    assert snapshot["input_preview"] == {}
+    assert snapshot["risk_level"] == "medium"
     assert snapshot["core_id"] == "core-1"
     assert snapshot["workspace_id"] == "workspace-1"
     assert snapshot["task_id"] == "task-1"
@@ -5709,41 +5735,30 @@ def test_public_pending_approval_projects_runtime_planner_trace_fields() -> None
     assert snapshot["workflow_run_id"] == "workflow-run-1"
     assert snapshot["workflow_node_id"] == "review"
     assert snapshot["workflow_node_label"] == "Review Save"
-    assert snapshot["runtime_stage"] == "operate"
-    assert snapshot["runtime_role"] == "click_ui"
-    assert snapshot["requires_post_action_verification"] is True
-    assert snapshot["runtime_execution_envelope"]["envelope_id"] == "approval-envelope-1"
-    assert snapshot["runtime_execution_envelope"]["requests"][0]["request_id"] == (
-        "approval-request-1"
-    )
-    assert snapshot["runtime_execution_metadata"] == {"yachiyo_runtime_planner": True}
-    assert snapshot["replan_triggers"] == ["ui_not_found"]
-    assert snapshot["replan_request_id"] == "replan-1"
-    assert snapshot["replan_trigger"] == "ui_not_found"
-    assert snapshot["action_target"] == {"action": "click", "label": "Save"}
-    assert snapshot["observation_evidence"] == {
-        "source_tool": "desktop.ui_elements",
-        "strategy": "button",
-    }
-    assert snapshot["observation_retry"] == {
-        "from_tool": "desktop.ui_elements",
-        "reason": "target_not_found",
-    }
-    assert snapshot["task_workspace_items"] == [
-        {"item_id": "workspace-save", "title": "Saved draft", "path": "draft.md"}
-    ]
-    assert snapshot["verification_targets"] == [
-        {"step_id": "verify-save", "todo_id": "todo-save"}
-    ]
-    assert snapshot["task_verification_targets"] == [
+    assert set(snapshot).isdisjoint(
         {
-            "todo_id": "todo-save",
-            "todo_title": "Verify save",
-            "workspace_items": [
-                {"item_id": "workspace-save", "path": "draft.md"}
-            ],
+            "step_id",
+            "capability_id",
+            "decision_id",
+            "plan_id",
+            "tool_plan_id",
+            "intent_kind",
+            "runtime_stage",
+            "runtime_role",
+            "requires_post_action_verification",
+            "runtime_execution_envelope",
+            "runtime_execution_metadata",
+            "replan_triggers",
+            "replan_request_id",
+            "replan_trigger",
+            "action_target",
+            "observation_evidence",
+            "observation_retry",
+            "task_workspace_items",
+            "verification_targets",
+            "task_verification_targets",
         }
-    ]
+    )
 
 
 def test_approval_card_from_payload_maps_runtime_planner_trace_fields() -> None:
@@ -5993,6 +6008,7 @@ def test_desktop_execution_policy_snapshot_json_shape_is_stable() -> None:
     assert list(payload) == [
         "mode",
         "allow_live_foreground",
+        "prefer_background_desktop",
         "prefer_isolated_desktop",
         "avoid_user_foreground_takeover",
         "require_sandbox_for_keyboard_mouse",
@@ -6190,6 +6206,45 @@ def test_sandbox_desktop_provider_snapshot_json_shape_is_stable() -> None:
         DesktopProviderHealthSnapshot(unknown=True)
 
 
+def test_sandbox_desktop_provider_snapshot_preserves_cua_health_diagnostics() -> None:
+    health_report = {
+        "schema_version": "1",
+        "overall": "ok",
+        "checks": [
+            {
+                "name": "tcc_accessibility",
+                "status": "pass",
+                "message": "Accessibility is available.",
+            }
+        ],
+    }
+
+    snapshot = SandboxDesktopProviderSnapshot.model_validate(
+        {
+            "available": True,
+            "provider_id": "cua-background",
+            "provider_kind": "background_desktop",
+            "health": {
+                "ok": True,
+                "checked": True,
+                "status": "healthy",
+                "health_report": health_report,
+                "cached": True,
+            },
+        }
+    )
+
+    assert snapshot.health is not None
+    assert snapshot.health.health_report == health_report
+    assert snapshot.health.cached is True
+    assert _json(snapshot)["health"]["health_report"] == health_report
+
+    with pytest.raises(ValidationError, match="unknown_health_field"):
+        SandboxDesktopProviderSnapshot.model_validate(
+            {"health": {"unknown_health_field": True}}
+        )
+
+
 def test_desktop_execution_route_decision_reports_provider_boundaries() -> None:
     preview_route = desktop_execution_route_decision(
         "desktop.safe_type_text",
@@ -6224,7 +6279,7 @@ def test_desktop_execution_route_decision_reports_provider_boundaries() -> None:
         policy={"mode": "preview_input"},
         execution_mode=DesktopExecutionModeSnapshot(
             mode="tool_native",
-            isolation="browser_profile",
+            isolation="browser_target",
         ),
     )
     readonly_provider_route = desktop_execution_route_decision(
@@ -6269,11 +6324,13 @@ def test_desktop_execution_route_decision_reports_provider_boundaries() -> None:
         "requested_mode",
         "selected_provider_kind",
         "selected_provider_id",
+        "provider_readiness_status",
         "status",
         "can_execute",
         "can_auto_start",
         "provider_execution_required",
         "sandbox_required",
+        "background_desktop_preferred",
         "isolated_desktop_preferred",
         "foreground_takeover_allowed",
         "desktop_execution_session_policy",
@@ -6295,6 +6352,7 @@ def test_desktop_execution_route_decision_reports_provider_boundaries() -> None:
         "blocking_conditions",
         "source",
     ]
+    assert payload["provider_readiness_status"] == "provider_required"
     assert payload["status"] == "provider_required"
     assert payload["can_execute"] is False
     assert payload["provider_execution_required"] is False
@@ -6316,7 +6374,7 @@ def test_desktop_execution_route_decision_reports_provider_boundaries() -> None:
     assert foreground_provider_route["requires_user_foreground_session"] is False
     assert foreground_provider_route["user_foreground_takeover_risk"] is False
     assert browser_route["status"] == "ready"
-    assert browser_route["selected_provider_kind"] == "browser_profile"
+    assert browser_route["selected_provider_kind"] == "browser_target"
     assert browser_route["can_execute"] is True
     with pytest.raises(ValidationError):
         DesktopExecutionRouteSnapshot(unknown=True)
@@ -6343,9 +6401,14 @@ def test_readonly_desktop_route_can_auto_start_provider_when_configured(
         metadata={"desktop_provider_route_readonly": True},
     )
 
-    assert local_route["status"] == "ready"
-    assert local_route["can_execute"] is True
-    assert local_route["selected_provider_kind"] == "none"
+    assert local_route["status"] == "provider_required"
+    assert local_route["can_execute"] is False
+    assert local_route["selected_provider_kind"] == "sandbox_desktop"
+    assert local_route["sandbox_required"] is True
+    assert local_route["requires_user_foreground_session"] is False
+    assert local_route["blocking_conditions"] == [
+        "sandbox_desktop_provider_required"
+    ]
 
     monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_AUTO_START", "true")
 
@@ -6738,36 +6801,43 @@ def test_isolated_provider_session_annotation_readies_readonly_discovery_loop(
         assert request["desktop_execution_route"]["can_execute"] is True
 
 
-def test_agent_studio_route_uses_local_provider_for_keyboard_mouse_by_default(
+def test_agent_studio_route_requires_isolated_provider_for_keyboard_mouse_by_default(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("OHA_YACHIYO_DESKTOP_PROVIDER_URL", raising=False)
     monkeypatch.delenv("OHA_YACHIYO_SANDBOX_DESKTOP_PROVIDER_URL", raising=False)
     monkeypatch.delenv("OHA_YACHIYO_DESKTOP_PROVIDER_EXECUTE_URL", raising=False)
     monkeypatch.delenv("OHA_YACHIYO_SANDBOX_DESKTOP_PROVIDER_EXECUTE_URL", raising=False)
+    metadata = with_agent_studio_desktop_execution_policy({"source": "studio"})
     route = desktop_execution_route_decision(
         "desktop.safe_type_text",
-        policy={"mode": "supervised_live"},
+        policy=metadata["desktop_execution_policy"],
         execution_mode=DesktopExecutionModeSnapshot(
             mode="supervised_live",
             foreground_control=True,
             keyboard_mouse_capture=True,
         ),
-        metadata=with_agent_studio_desktop_execution_policy({"source": "studio"}),
+        metadata=metadata,
     )
 
-    assert route["status"] == "provider_ready"
-    assert route["can_execute"] is True
+    assert route["status"] == "sandbox_desktop_session_required"
+    assert route["can_execute"] is False
     assert route["selected_provider_kind"] == LOCAL_DESKTOP_PROVIDER_KIND
-    assert route["sandbox_required"] is False
+    assert route["sandbox_required"] is True
     assert route["requires_user_foreground_session"] is True
-    assert route["blocking_conditions"] == []
+    assert route["foreground_takeover_allowed"] is False
+    assert route["blocking_conditions"] == ["sandbox_desktop_session_required"]
 
 
 def test_agent_studio_route_blocks_keyboard_mouse_without_isolated_session() -> None:
     route = desktop_execution_route_decision(
         "desktop.safe_type_text",
-        policy={"mode": "supervised_live"},
+        policy={
+            "mode": "supervised_live",
+            "prefer_isolated_desktop": True,
+            "avoid_user_foreground_takeover": True,
+            "require_sandbox_for_keyboard_mouse": True,
+        },
         execution_mode=DesktopExecutionModeSnapshot(
             mode="supervised_live",
             foreground_control=True,
@@ -6830,7 +6900,7 @@ def test_desktop_policy_prefer_isolated_routes_keyboard_mouse_without_extra_meta
     assert route["blocking_conditions"] == ["sandbox_desktop_session_required"]
 
 
-def test_daily_policy_allows_app_launch_through_user_foreground_provider() -> None:
+def test_daily_policy_requires_explicit_permission_for_user_foreground_provider() -> None:
     provider = {
         "available": True,
         "adapter_ready": True,
@@ -6866,11 +6936,11 @@ def test_daily_policy_allows_app_launch_through_user_foreground_provider() -> No
         },
     )
 
-    assert route["status"] == "provider_ready"
-    assert route["can_execute"] is True
+    assert route["status"] == "sandbox_desktop_session_required"
+    assert route["can_execute"] is False
     assert route["selected_provider_id"] == "foreground-control"
     assert route["user_foreground_takeover_risk"] is True
-    assert route["blocking_conditions"] == []
+    assert route["blocking_conditions"] == ["sandbox_desktop_session_required"]
     assert explicit_route["status"] == "provider_ready"
     assert explicit_route["can_execute"] is True
     assert explicit_route["foreground_takeover_allowed"] is True
@@ -6908,7 +6978,7 @@ def test_daily_policy_routes_app_launch_through_isolated_provider_without_foregr
     assert route["foreground_takeover_required"] is False
 
 
-def test_daily_policy_can_auto_start_provider_for_keyboard_mouse(
+def test_daily_policy_auto_start_never_enables_direct_foreground(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("OHA_YACHIYO_DESKTOP_PROVIDER_AUTO_START", "true")
@@ -6925,13 +6995,15 @@ def test_daily_policy_can_auto_start_provider_for_keyboard_mouse(
 
     assert route["status"] == "provider_required"
     assert route["can_execute"] is False
-    assert route["can_auto_start"] is True
-    assert route["sandbox_required"] is True
-    assert route["blocking_conditions"] == ["sandbox_desktop_provider_required"]
-    assert "auto-start the isolated desktop provider" in route["reason"]
+    assert route["can_auto_start"] is False
+    assert route["sandbox_required"] is False
+    assert route["selected_provider_kind"] == "background_desktop"
+    assert route["foreground_takeover_allowed"] is False
+    assert route["fallback_mode"] == "user_handoff"
+    assert route["blocking_conditions"] == ["cua_driver_not_installed"]
 
 
-def test_daily_entrypoint_desktop_execution_policy_defaults_to_direct_desktop() -> None:
+def test_daily_entrypoint_desktop_execution_policy_defaults_to_background() -> None:
     policy = daily_entrypoint_desktop_execution_policy(surface="bubble")
     metadata = with_daily_entrypoint_desktop_execution_policy(
         {"source": "launcher"},
@@ -6951,24 +7023,27 @@ def test_daily_entrypoint_desktop_execution_policy_defaults_to_direct_desktop() 
         "input": {"text": "hello"},
     }
 
-    assert policy["mode"] == "supervised_live"
-    assert policy["allow_live_foreground"] is True
+    assert policy["mode"] == "preview_input"
+    assert policy["allow_live_foreground"] is False
+    assert policy["prefer_background_desktop"] is True
     assert policy["prefer_isolated_desktop"] is False
-    assert policy["avoid_user_foreground_takeover"] is False
+    assert policy["avoid_user_foreground_takeover"] is True
     assert policy["require_sandbox_for_keyboard_mouse"] is False
     assert (
         desktop_provider_session_auto_start_recommended_for_requests([request])
         is False
     )
     assert policy["allow_media_control"] is True
-    assert metadata["desktop_execution_policy"]["mode"] == "supervised_live"
+    assert metadata["desktop_execution_policy"]["mode"] == "preview_input"
     assert metadata["desktop_execution_policy"]["source"] == "daily_bubble"
+    assert metadata["desktop_execution_policy"]["prefer_background_desktop"] is True
     assert metadata["desktop_execution_policy"]["prefer_isolated_desktop"] is False
-    assert metadata["desktop_execution_policy"]["avoid_user_foreground_takeover"] is False
+    assert metadata["desktop_execution_policy"]["avoid_user_foreground_takeover"] is True
     assert metadata["desktop_execution_policy"]["require_sandbox_for_keyboard_mouse"] is False
     assert explicit["desktop_execution_policy"] == {"mode": "supervised_live"}
     assert live_foreground["desktop_execution_policy"]["mode"] == "allow"
     assert live_foreground["desktop_execution_policy"]["allow_live_foreground"] is True
+    assert live_foreground["desktop_execution_policy"]["prefer_background_desktop"] is False
     assert live_foreground["desktop_execution_policy"]["prefer_isolated_desktop"] is False
     assert (
         live_foreground["desktop_execution_policy"]["avoid_user_foreground_takeover"]
@@ -7310,13 +7385,71 @@ def test_daily_desktop_runtime_execution_envelope_uses_daily_policy_for_strategy
     )
 
     request_policy = envelope["requests"][0]["desktop_execution_policy"]
-    assert request_policy["mode"] == "supervised_live"
+    assert request_policy["mode"] == "preview_input"
+    assert request_policy["prefer_background_desktop"] is True
     assert request_policy["prefer_isolated_desktop"] is False
-    assert envelope["execution_strategy"]["preferred_environment"] == "user_foreground"
+    assert envelope["execution_strategy"]["preferred_environment"] == (
+        "background_desktop"
+    )
+    assert envelope["execution_strategy"]["interaction_mode"] == "background"
     assert envelope["execution_strategy"]["keyboard_mouse_step_count"] >= 1
-    assert envelope["execution_strategy"]["foreground_takeover_allowed"] is True
+    assert envelope["execution_strategy"]["foreground_takeover_allowed"] is False
     assert envelope["execution_strategy"]["sandbox_required"] is False
     assert envelope["execution_strategy"]["provider_auto_start_recommended"] is False
+
+
+def test_runtime_execution_envelope_inherits_policy_without_overriding_explicit_request() -> None:
+    stale_route = {
+        "status": "provider_required",
+        "can_execute": False,
+        "selected_provider_kind": "none",
+        "blocking_conditions": ["sandbox_desktop_provider_required"],
+    }
+    explicit_route = {
+        "status": "supervised_live",
+        "can_execute": True,
+        "selected_provider_kind": "local_desktop",
+        "blocking_conditions": [],
+    }
+    envelope = {
+        "envelope_id": "envelope-policy-inheritance",
+        "desktop_execution_route": dict(stale_route),
+        "requests": [
+            {
+                "tool_name": "app.open",
+                "input": {"app_name": "TextEdit"},
+                "desktop_execution_route": dict(stale_route),
+            },
+            {
+                "tool_name": "app.focus",
+                "input": {"app_name": "Music"},
+                "desktop_execution_policy": {
+                    "mode": "supervised_live",
+                    "allow_live_foreground": True,
+                },
+                "desktop_execution_route": dict(explicit_route),
+            },
+        ],
+    }
+    background_policy = daily_entrypoint_desktop_execution_policy(surface="chat")
+
+    effective = runtime_execution_envelope_with_desktop_execution_policy(
+        envelope,
+        background_policy,
+    )
+
+    assert "desktop_execution_policy" not in envelope
+    assert envelope["desktop_execution_route"] == stale_route
+    assert effective["desktop_execution_policy"] == background_policy
+    assert "desktop_execution_route" not in effective
+    inherited_request, explicit_request = effective["requests"]
+    assert inherited_request["desktop_execution_policy"] == background_policy
+    assert "desktop_execution_route" not in inherited_request
+    assert explicit_request["desktop_execution_policy"] == {
+        "mode": "supervised_live",
+        "allow_live_foreground": True,
+    }
+    assert explicit_request["desktop_execution_route"] == explicit_route
 
 
 def test_daily_desktop_direct_metadata_request_carries_daily_policy() -> None:
@@ -7334,10 +7467,11 @@ def test_daily_desktop_direct_metadata_request_carries_daily_policy() -> None:
     assert request is not None
     policy = request["desktop_execution_policy"]
     assert request["tool"] == "app.focus_and_safe_shortcut"
-    assert policy["mode"] == "supervised_live"
+    assert policy["mode"] == "preview_input"
     assert policy["source"] == "daily_live2d"
+    assert policy["prefer_background_desktop"] is True
     assert policy["prefer_isolated_desktop"] is False
-    assert policy["avoid_user_foreground_takeover"] is False
+    assert policy["avoid_user_foreground_takeover"] is True
     assert policy["require_sandbox_for_keyboard_mouse"] is False
 
 
@@ -7374,9 +7508,10 @@ def test_agent_studio_desktop_execution_policy_requests_provider_health_probe() 
     )
 
     assert metadata["desktop_execution_policy"]["mode"] == "supervised_live"
-    assert metadata["desktop_execution_policy"]["prefer_isolated_desktop"] is False
-    assert metadata["desktop_execution_policy"]["avoid_user_foreground_takeover"] is False
-    assert metadata["desktop_execution_policy"]["require_sandbox_for_keyboard_mouse"] is False
+    assert metadata["desktop_execution_policy"]["allow_live_foreground"] is False
+    assert metadata["desktop_execution_policy"]["prefer_isolated_desktop"] is True
+    assert metadata["desktop_execution_policy"]["avoid_user_foreground_takeover"] is True
+    assert metadata["desktop_execution_policy"]["require_sandbox_for_keyboard_mouse"] is True
     assert metadata["desktop_provider_health_probe"] is True
     assert metadata["desktop_provider_route_readonly"] is True
     assert metadata["desktop_provider_route_foreground"] is True
@@ -8236,16 +8371,18 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
         "desktop.inspect_app",
         {"app_name": "PixelForge"},
     )
-    assert inspect_default.mode == "supervised_live"
-    assert inspect_default.foreground_control is True
+    assert inspect_default.mode == "read_only_observation"
+    assert inspect_default.foreground_control is False
     assert inspect_default.keyboard_mouse_capture is False
-    assert inspect_default.sandbox_recommended is True
-    inspect_read_only = desktop_tool_execution_mode_for_input(
+    assert inspect_default.sandbox_recommended is False
+    inspect_foreground = desktop_tool_execution_mode_for_input(
         "desktop.inspect_app",
-        {"app_name": "PixelForge", "open_if_needed": False, "focus": False},
+        {"app_name": "PixelForge", "open_if_needed": True, "focus": True},
     )
-    assert inspect_read_only.mode == "read_only_observation"
-    assert inspect_read_only.foreground_control is False
+    assert inspect_foreground.mode == "supervised_live"
+    assert inspect_foreground.foreground_control is True
+    assert inspect_foreground.keyboard_mouse_capture is False
+    assert inspect_foreground.sandbox_recommended is True
     assert desktop_tool_execution_mode("app.open").foreground_control is True
     assert desktop_tool_execution_mode("app.open").keyboard_mouse_capture is False
     assert desktop_tool_execution_mode("desktop.safe_type_text").mode == (
@@ -8264,7 +8401,7 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
     assert desktop_tool_execution_mode("media.apple_music_status").mode == (
         "read_only_observation"
     )
-    assert desktop_tool_execution_mode("browser.open_url").isolation == "browser_profile"
+    assert desktop_tool_execution_mode("browser.open_url").isolation == "browser_target"
     assert desktop_tool_execution_mode("terminal.run").approval_recommended is True
     assert desktop_action_risk_level("read_screen") == "low"
     assert desktop_action_risk_level("diagnose_permissions") == "low"
@@ -9411,7 +9548,7 @@ def test_runtime_tool_catalog_does_not_root_block_app_launch_or_discovery() -> N
     assert tools["desktop.ui_elements"].blocking_conditions == ["screen_capture_blank"]
 
 
-def test_desktop_execution_envelope_keeps_blocked_verification_non_executable() -> None:
+def test_desktop_execution_envelopes_keep_executable_verification_fallback() -> None:
     tools = runtime_execution_tool_names(
         intent_kind="desktop_operation",
         prefer_low_level=True,
@@ -9427,28 +9564,48 @@ def test_desktop_execution_envelope_keeps_blocked_verification_non_executable() 
             }
         },
     )
-    envelope = runtime_execution_envelope_from_decision(
+    full_plan_envelope = runtime_execution_envelope_from_decision(
+        decision,
+        allowed_tools=tools,
+        full_plan=True,
+    )
+    subset_envelope = runtime_execution_envelope_from_decision(
         decision,
         allowed_tools=tools,
     )
-    assert envelope is not None
-    requests = envelope.requests
+    assert full_plan_envelope is not None
+    assert subset_envelope is not None
+    full_plan_requests = full_plan_envelope.requests
 
-    assert [(request.tool_name, request.status) for request in requests] == [
+    assert [
+        (request.tool_name, request.status) for request in full_plan_requests
+    ] == [
         ("desktop.list_apps", "planned"),
         ("app.open", "planned"),
-        ("desktop.verify", "unavailable"),
+        ("screen.capture", "planned"),
     ]
-    assert requests[2].step_id == "verify-desktop-result"
-    assert requests[2].policy_reason == "screen_capture_blank"
-    assert requests[2].observation_evidence["blocking_condition"] == (
-        "screen_capture_blank"
+    assert full_plan_requests[2].step_id == "verify-desktop-result"
+    assert full_plan_requests[2].policy_reason == ""
+    assert full_plan_requests[2].observation_evidence["source_tool"] == (
+        "screen.capture"
     )
-    assert requests[2].observation_evidence["app_name"] == "PixelForge"
-    assert requests[2].observation_retry["reason"] == "screen_capture_blank"
+    assert full_plan_requests[2].observation_evidence["app_name"] == "PixelForge"
+    assert full_plan_requests[2].observation_retry["reason"] == "verification_failed"
+
+    assert [
+        (request.tool_name, request.status) for request in subset_envelope.requests
+    ] == [
+        ("desktop.list_apps", "planned"),
+        ("app.open", "planned"),
+    ]
+    assert all(
+        request.tool_name != "desktop.verify"
+        and request.status not in {"blocked", "unavailable"}
+        for request in subset_envelope.requests
+    )
 
     executable = runtime_execution_requests_from_envelope_payload(
-        envelope.model_dump(mode="json"),
+        subset_envelope.model_dump(mode="json"),
         allowed_tools=tools,
     )
     assert [request["tool"] for request in executable] == [
@@ -9456,23 +9613,8 @@ def test_desktop_execution_envelope_keeps_blocked_verification_non_executable() 
         "app.open",
     ]
 
-    recoveries = replan_recovery_snapshots_from_runtime_execution_envelope(
-        envelope,
-        run_id="run-1",
-        task_id="task-1",
-    )
-    verify_recovery = next(
-        recovery
-        for recovery in recoveries
-        if recovery.source_step_id == "verify-desktop-result"
-    )
-    assert verify_recovery.permission_target == "desktop_screen_visible"
-    assert verify_recovery.recovery_actions[0].observation_retry["reason"] == (
-        "screen_capture_blank"
-    )
 
-
-def test_runtime_planner_execution_strategy_prefers_direct_desktop_for_daily_keyboard_mouse() -> None:
+def test_runtime_planner_execution_strategy_prefers_background_desktop_for_daily_keyboard_mouse() -> None:
     tools = runtime_execution_tool_names(
         intent_kind="desktop_operation",
         prefer_low_level=True,
@@ -9490,17 +9632,20 @@ def test_runtime_planner_execution_strategy_prefers_direct_desktop_for_daily_key
     strategy = decision.plan.execution_strategy
 
     assert strategy is not None
-    assert strategy.preferred_environment == "user_foreground"
-    assert strategy.interaction_mode == "foreground"
-    assert strategy.policy_mode == "allow"
+    assert strategy.preferred_environment == "background_desktop"
+    assert strategy.interaction_mode == "background"
+    assert strategy.policy_mode == "preview"
+    assert strategy.background_desktop_preferred is True
     assert strategy.isolated_desktop_preferred is False
-    assert strategy.foreground_takeover_allowed is True
-    assert strategy.user_foreground_takeover_risk is True
+    assert strategy.foreground_takeover_allowed is False
+    assert strategy.user_foreground_takeover_risk is False
     assert strategy.sandbox_required is False
     assert strategy.provider_auto_start_recommended is False
     assert strategy.local_foreground_fallback_allowed is False
     assert strategy.keyboard_mouse_step_count >= 1
     assert "keyboard_mouse_capture_planned" in strategy.reasons
+    assert "policy_prefers_background_desktop" in strategy.reasons
+    assert "run_in_background_desktop_provider" in strategy.mitigations
     assert "apply_risk_policy_before_keyboard_mouse" in strategy.mitigations
 
     envelope = runtime_execution_envelope_from_decision(
@@ -9512,7 +9657,7 @@ def test_runtime_planner_execution_strategy_prefers_direct_desktop_for_daily_key
     assert envelope is not None
     assert envelope.execution_strategy is not None
     assert envelope.execution_strategy.strategy_id == strategy.strategy_id
-    assert envelope.execution_strategy.preferred_environment == "user_foreground"
+    assert envelope.execution_strategy.preferred_environment == "background_desktop"
     assert envelope.execution_strategy.sandbox_required is False
     assert envelope.execution_strategy.provider_auto_start_recommended is False
 
@@ -9540,7 +9685,7 @@ def test_runtime_execution_strategy_marks_explicit_live_foreground_risk() -> Non
     assert "user_foreground_takeover_allowed" in strategy.reasons
 
 
-def test_runtime_execution_strategy_allows_low_risk_app_activation_fallback() -> None:
+def test_runtime_execution_strategy_keeps_low_risk_app_activation_in_background() -> None:
     metadata = with_daily_entrypoint_desktop_execution_policy(
         {"source": "chat"},
         surface="chat",
@@ -9554,17 +9699,17 @@ def test_runtime_execution_strategy_allows_low_risk_app_activation_fallback() ->
     strategy = decision.plan.execution_strategy
 
     assert strategy is not None
-    assert strategy.preferred_environment == "user_foreground"
-    assert strategy.interaction_mode == "foreground"
+    assert strategy.preferred_environment == "background_desktop"
+    assert strategy.interaction_mode == "background"
     assert strategy.keyboard_mouse_step_count == 0
-    assert strategy.user_foreground_takeover_risk is True
+    assert strategy.user_foreground_takeover_risk is False
     assert strategy.sandbox_required is False
     assert strategy.provider_auto_start_recommended is False
-    assert strategy.local_foreground_fallback_allowed is True
-    assert "local_low_risk_foreground_fallback_allowed" in strategy.reasons
+    assert strategy.local_foreground_fallback_allowed is False
+    assert "policy_prefers_background_desktop" in strategy.reasons
 
 
-def test_runtime_execution_envelope_routes_keyboard_mouse_to_local_provider(
+def test_runtime_execution_envelope_blocks_keyboard_mouse_without_isolated_provider(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.delenv("OHA_YACHIYO_DESKTOP_PROVIDER_URL", raising=False)
@@ -9597,14 +9742,17 @@ def test_runtime_execution_envelope_routes_keyboard_mouse_to_local_provider(
     assert input_request.sandbox_provider.provider_id == LOCAL_DESKTOP_PROVIDER_ID
     assert input_request.sandbox_provider.keyboard_mouse_capture_supported is True
     assert input_request.desktop_execution_route is not None
-    assert (
-        input_request.desktop_execution_route.status
-        == "provider_ready"
+    assert input_request.desktop_execution_route.status == (
+        "sandbox_desktop_session_required"
     )
-    assert input_request.desktop_execution_route.can_execute is True
+    assert input_request.desktop_execution_route.can_execute is False
+    assert input_request.desktop_execution_route.sandbox_required is True
     assert input_request.desktop_execution_route.selected_provider_kind == (
         LOCAL_DESKTOP_PROVIDER_KIND
     )
+    assert input_request.desktop_execution_route.blocking_conditions == [
+        "sandbox_desktop_session_required"
+    ]
 
 
 def test_runtime_tool_catalog_surfaces_restricted_plugin_metadata_and_uninstall() -> None:
@@ -11410,6 +11558,8 @@ def test_memory_snapshot_keeps_runtime_memory_fields() -> None:
         "scope",
         "kind",
         "content",
+        "content_hash",
+        "project_id",
         "source_session_id",
         "source_message_id",
         "source_task_id",
@@ -11417,10 +11567,16 @@ def test_memory_snapshot_keeps_runtime_memory_fields() -> None:
         "confidence",
         "pinned",
         "user_confirmed",
+        "enabled",
+        "actor",
         "created_at",
         "updated_at",
         "deleted_at",
     ]
+    assert payload["content_hash"] is None
+    assert payload["project_id"] is None
+    assert payload["enabled"] is True
+    assert payload["actor"] == "agent_tool"
     assert payload["source_run_id"] == "run-1"
     assert payload["pinned"] is True
 

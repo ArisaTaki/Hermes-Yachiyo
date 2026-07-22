@@ -92,6 +92,7 @@ LOW_RISK_DESKTOP_TOOLS = frozenset(
 )
 MEDIUM_RISK_DESKTOP_TOOLS = frozenset(
     {
+        "desktop.permissions.verify",
         "app.quit",
         "desktop.quit_app",
         "app.open_and_click_ui_element",
@@ -150,6 +151,7 @@ READ_ONLY_OBSERVATION_TOOLS = frozenset(
 )
 LIVE_DESKTOP_FOCUS_TOOLS = frozenset(
     {
+        "desktop.permissions.verify",
         "desktop.open_app",
         "desktop.focus_app",
         "app.open",
@@ -200,6 +202,7 @@ LIVE_DESKTOP_INPUT_TOOLS = frozenset(
         "desktop.hotkey",
         "desktop.type_text",
         "desktop.click",
+        "desktop.quit_app",
         "desktop.submit_foreground",
     }
 )
@@ -537,6 +540,7 @@ DESKTOP_CAPABILITY_TOOLS: dict[str, tuple[str, ...]] = {
     "desktop_execution": (
         "screen.capture",
         "desktop.permissions",
+        "desktop.permissions.verify",
         "desktop.active_window",
         "desktop.running_apps",
         "desktop.list_apps",
@@ -913,9 +917,15 @@ def desktop_tool_execution_mode(tool_name: str) -> DesktopExecutionModeSnapshot:
     if clean.startswith("browser."):
         return DesktopExecutionModeSnapshot(
             mode="tool_native",
-            isolation="browser_profile",
-            reason="Uses browser automation instead of global desktop mouse/keyboard control.",
-            mitigations=["Keep browser state in an isolated profile when possible."],
+            isolation="browser_target",
+            reason=(
+                "Uses one run-owned CDP page target instead of global desktop input; "
+                "the surrounding browser profile may still be shared."
+            ),
+            mitigations=[
+                "Bind every follow-up action to the target created by this run.",
+                "Use a managed dedicated browser profile when account-state isolation is required.",
+            ],
         )
     if clean.startswith("media.apple_music"):
         return DesktopExecutionModeSnapshot(
@@ -956,8 +966,8 @@ def desktop_tool_execution_mode_for_input(
         return desktop_tool_execution_mode(clean)
 
     payload = input_preview if isinstance(input_preview, Mapping) else {}
-    open_if_needed = _bool_payload_value(payload.get("open_if_needed"), default=True)
-    focus = _bool_payload_value(payload.get("focus"), default=True)
+    open_if_needed = _bool_payload_value(payload.get("open_if_needed"), default=False)
+    focus = _bool_payload_value(payload.get("focus"), default=False)
     if not open_if_needed and not focus:
         return desktop_tool_execution_mode(clean)
 

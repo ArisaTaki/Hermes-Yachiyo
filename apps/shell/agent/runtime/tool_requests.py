@@ -5,16 +5,47 @@ from __future__ import annotations
 import json
 import re
 from typing import Any
+from uuid import uuid4
 
 from apps.shell.agent.runtime.errors import AgentRuntimeError
 from apps.shell.agent.tools.policy import TOOL_NAME_ALIASES
 
 MAX_AGENT_TOOL_ITERATIONS = 50
+_BROWSER_TYPE_TEXT_INPUT_KEYS = ("selector", "text")
 
 
 def normalize_tool_name(value: Any) -> str:
     name = str(value or "").strip()
     return TOOL_NAME_ALIASES.get(name, name)
+
+
+def normalize_tool_request_input(tool_request: dict[str, Any]) -> dict[str, Any]:
+    """Remove retired browser input fields before validation or persistence."""
+
+    if normalize_tool_name(tool_request.get("tool")) != "browser.type_text":
+        return tool_request
+    raw_input = tool_request.get("input")
+    if not isinstance(raw_input, dict):
+        return tool_request
+    tool_request["input"] = {
+        key: raw_input[key]
+        for key in _BROWSER_TYPE_TEXT_INPUT_KEYS
+        if key in raw_input
+    }
+    return tool_request
+
+
+def ensure_tool_call_id(tool_request: dict[str, Any]) -> str:
+    """Keep an upstream call identity or assign one for this logical invocation."""
+
+    for key in ("tool_call_id", "call_id", "id"):
+        tool_call_id = str(tool_request.get(key) or "").strip()
+        if tool_call_id:
+            tool_request["tool_call_id"] = tool_call_id
+            return tool_call_id
+    tool_call_id = f"call_{uuid4().hex}"
+    tool_request["tool_call_id"] = tool_call_id
+    return tool_call_id
 
 
 def normalize_tool_iteration(
@@ -43,7 +74,7 @@ class ToolRequestParser:
         if not isinstance(tool_calls, list):
             return []
         requests = []
-        for index, call in enumerate(tool_calls):
+        for call in tool_calls:
             if not isinstance(call, dict):
                 continue
             function = call.get("function") if isinstance(call.get("function"), dict) else {}
@@ -62,15 +93,19 @@ class ToolRequestParser:
                 raise AgentRuntimeError(f"工具参数格式无效：{function_name}")
             if not isinstance(arguments, dict):
                 raise AgentRuntimeError(f"工具参数必须是对象：{function_name}")
-            requests.append(
-                {
-                    "protocol": "tool_calls",
-                    "tool": normalize_tool_name(function_name),
-                    "input": arguments,
-                    "tool_call_id": str(call.get("id") or f"call_{index}"),
-                    "function_name": function_name,
-                }
-            )
+            request = {
+                "protocol": "tool_calls",
+                "tool": normalize_tool_name(function_name),
+                "input": arguments,
+                "function_name": function_name,
+            }
+            for key in ("tool_call_id", "call_id", "id"):
+                value = str(call.get(key) or "").strip()
+                if value:
+                    request["tool_call_id"] = value
+                    break
+            ensure_tool_call_id(request)
+            requests.append(request)
         return requests
 
     def parse_json_fallback(self, content: str) -> dict[str, Any] | None:
@@ -84,9 +119,18 @@ class ToolRequestParser:
         if not isinstance(payload, dict):
             return None
         if payload.get("action") == "tool" and payload.get("tool"):
-            payload["protocol"] = "json_fallback"
-            payload["tool"] = normalize_tool_name(payload.get("tool"))
-            if not isinstance(payload.get("input"), dict):
-                payload["input"] = {}
-            return payload
+            # JSON fallback is model-authored input.  Keep the same strict
+            # boundary as native tool_calls: route, policy, provider, approval,
+            # and runtime identity fields are assigned only by the runtime.
+            request = {
+                "protocol": "json_fallback",
+                "tool": normalize_tool_name(payload.get("tool")),
+                "input": (
+                    dict(payload.get("input"))
+                    if isinstance(payload.get("input"), dict)
+                    else {}
+                ),
+            }
+            ensure_tool_call_id(request)
+            return request
         return None

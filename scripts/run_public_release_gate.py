@@ -36,6 +36,7 @@ def public_release_gate_checks(
     include_public_demo: bool = True,
     include_isolated_provider_smoke: bool = False,
     provider_manifest: Path | None = None,
+    daily_provider_acceptance_json: Path | None = None,
     include_real_desktop: bool = False,
     include_real_desktop_open: bool = False,
     include_real_desktop_ui_inspection: bool = False,
@@ -50,6 +51,7 @@ def public_release_gate_checks(
         "scripts/smoke_oha_desktop_agent_release.py",
         "--report-json",
         str(tmp_dir / "oha-desktop-agent-release-smoke.json"),
+        "--public-release",
     ]
     source_capabilities_json = tmp_dir / "rc-verification-source-capabilities.json"
     if include_isolated_provider_smoke or provider_manifest is not None:
@@ -62,6 +64,13 @@ def public_release_gate_checks(
                 "--use-configured-virtual-desktop-provider",
                 "--provider-manifest",
                 str(provider_manifest),
+            ]
+        )
+    if daily_provider_acceptance_json is not None:
+        oha_release_smoke_command.extend(
+            [
+                "--daily-provider-acceptance-json",
+                str(daily_provider_acceptance_json),
             ]
         )
     checks = [
@@ -115,6 +124,7 @@ def public_release_gate_checks(
                 "tests/test_public_release_gate.py",
                 "tests/test_release_smoke_summary.py",
                 "tests/test_oha_desktop_agent_release_smoke.py",
+                "tests/test_generic_agent_release_smoke.py",
                 "tests/test_virtual_desktop_guest_provider.py",
                 "tests/test_virtual_desktop_ssh_bridge.py",
                 "tests/test_build_virtual_desktop_guest.py",
@@ -179,6 +189,7 @@ def run_public_release_gate(
     include_diagnostics_bundle: bool = True,
     include_isolated_provider_smoke: bool = False,
     provider_manifest: Path | str | None = None,
+    daily_provider_acceptance_json: Path | str | None = None,
     include_real_desktop: bool = False,
     include_real_desktop_open: bool = False,
     include_real_desktop_ui_inspection: bool = False,
@@ -197,6 +208,11 @@ def run_public_release_gate(
         if provider_manifest is not None
         else None
     )
+    resolved_daily_provider_acceptance_json = (
+        _resolve_path(Path(daily_provider_acceptance_json))
+        if daily_provider_acceptance_json is not None
+        else None
+    )
     effective_include_isolated_provider_smoke = (
         include_isolated_provider_smoke
         or resolved_provider_manifest is not None
@@ -206,6 +222,7 @@ def run_public_release_gate(
         include_public_demo=include_public_demo,
         include_isolated_provider_smoke=effective_include_isolated_provider_smoke,
         provider_manifest=resolved_provider_manifest,
+        daily_provider_acceptance_json=resolved_daily_provider_acceptance_json,
         include_real_desktop=include_real_desktop,
         include_real_desktop_open=include_real_desktop_open,
         include_real_desktop_ui_inspection=include_real_desktop_ui_inspection,
@@ -321,6 +338,9 @@ def run_public_release_gate(
         "require_release_ready": require_release_ready,
         "include_isolated_provider_smoke": effective_include_isolated_provider_smoke,
         "provider_manifest": _display_path(resolved_provider_manifest),
+        "daily_provider_acceptance_json": _display_path(
+            resolved_daily_provider_acceptance_json
+        ),
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "tmp_dir": _display_path(resolved_tmp_dir),
         "check_count": len(check_results),
@@ -1152,6 +1172,20 @@ def _external_requirements(actions: Sequence[Mapping[str, Any]]) -> list[dict[st
             "oha_desktop_agent_release_smoke",
         } and _action_has_blocking_condition(
             action,
+            "default_daily_provider_release_evidence_required",
+        ):
+            _merge_external_requirement(
+                requirements,
+                requirement_id="default_daily_provider_acceptance",
+                label="Packaged daily-provider TCC acceptance",
+                kind="local_tcc_acceptance",
+                action=action,
+            )
+        elif action_id in {
+            "oha_desktop_agent_product",
+            "oha_desktop_agent_release_smoke",
+        } and _action_has_blocking_condition(
+            action,
             "real_virtual_desktop_backend_required",
         ):
             _merge_external_requirement(
@@ -1165,7 +1199,8 @@ def _external_requirements(actions: Sequence[Mapping[str, Any]]) -> list[dict[st
         "real_desktop_smoke_opt_in": 0,
         "provider_smoke_credentials": 1,
         "local_loopback_permission": 2,
-        "real_virtual_desktop_backend": 3,
+        "default_daily_provider_acceptance": 3,
+        "real_virtual_desktop_backend": 4,
     }
     return sorted(
         requirements.values(),
@@ -1278,6 +1313,9 @@ def _oha_desktop_agent_release_gate_blockers(
     report_json: Path | None,
 ) -> list[dict[str, Any]]:
     report = _load_json(report_json)
+    daily_provider_blockers = _oha_default_daily_provider_release_blockers(report)
+    if daily_provider_blockers:
+        return daily_provider_blockers
     provider_blockers = _oha_desktop_agent_provider_release_blockers(report)
     if provider_blockers:
         return provider_blockers
@@ -1305,6 +1343,44 @@ def _oha_desktop_agent_release_gate_blockers(
             }
         ]
     return []
+
+
+def _oha_default_daily_provider_release_blockers(
+    report: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    if report.get("public_release_required") is not True:
+        return []
+    if report.get("default_daily_provider_release_ready") is True:
+        return []
+    blockers = _string_list(
+        report.get("default_daily_provider_release_blockers")
+    )
+    if not blockers:
+        blockers = ["default_daily_provider_release_evidence_required"]
+    acceptance = _dict(report.get("daily_provider_acceptance"))
+    return [
+        {
+            "id": "oha_default_daily_provider_release_ready",
+            "status": "missing",
+            "reason": blockers[0],
+            "evidence_summary": {
+                "blocking_condition": blockers[0],
+                "blocking_conditions": blockers,
+                "acceptance_source": str(
+                    acceptance.get("evidence_source") or ""
+                ),
+                "acceptance_source_path": str(
+                    acceptance.get("source_path") or ""
+                ),
+                "recovery_hints": [
+                    "authorize the final packaged app for Accessibility and Screen Recording",
+                    "run a packaged background launch/observe/input/verify acceptance without foreground takeover",
+                    "rerun the gate with --daily-provider-acceptance-json",
+                    "or attach a release-ready configured virtual desktop provider",
+                ],
+            },
+        }
+    ]
 
 
 def _oha_desktop_agent_provider_release_blockers(
@@ -1412,6 +1488,12 @@ def _oha_desktop_agent_failure_category(
         ]
         if "real_virtual_desktop_backend_required" in conditions:
             return "real_virtual_desktop_backend"
+        if any(
+            condition.startswith("default_daily_provider_release_evidence")
+            or condition.startswith("daily_provider_acceptance_")
+            for condition in conditions
+        ):
+            return "default_daily_provider_evidence"
         if "local_loopback_permission_required" in conditions:
             return "local_loopback_permission"
     return "external_requirement"
@@ -1854,6 +1936,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             "Passing this also enables --include-isolated-provider-smoke."
         ),
     )
+    parser.add_argument(
+        "--daily-provider-acceptance-json",
+        type=Path,
+        help=(
+            "Packaged background-provider acceptance evidence collected after "
+            "local macOS TCC authorization."
+        ),
+    )
     parser.add_argument("--include-real-desktop", action="store_true")
     parser.add_argument("--include-real-desktop-open", action="store_true")
     parser.add_argument("--include-real-desktop-ui-inspection", action="store_true")
@@ -1878,6 +1968,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         include_diagnostics_bundle=not args.skip_diagnostics_bundle,
         include_isolated_provider_smoke=bool(args.include_isolated_provider_smoke),
         provider_manifest=args.provider_manifest,
+        daily_provider_acceptance_json=args.daily_provider_acceptance_json,
         include_real_desktop=bool(args.include_real_desktop),
         include_real_desktop_open=bool(args.include_real_desktop_open),
         include_real_desktop_ui_inspection=bool(args.include_real_desktop_ui_inspection),

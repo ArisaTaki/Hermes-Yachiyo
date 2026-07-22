@@ -33,6 +33,7 @@ class FakeApprovals:
 
 def _tool_pending() -> dict[str, Any]:
     return {
+        "approval_id": "approval-tool",
         "tool": "terminal.run",
         "tool_request": {"tool": "terminal.run", "input": {"command": "printf ok"}},
     }
@@ -40,6 +41,7 @@ def _tool_pending() -> dict[str, Any]:
 
 def _workflow_pending() -> dict[str, Any]:
     return {
+        "approval_id": "approval-workflow",
         "tool": "workflow.approval",
         "workflow_node_id": "approval-1",
         "workflow_node_label": "Review",
@@ -51,6 +53,7 @@ def _workflow_pending() -> dict[str, Any]:
 def test_approval_transition_service_rejects_tool_approval() -> None:
     approvals = FakeApprovals()
     projected: list[dict[str, Any]] = []
+    closed_browser_targets: list[dict[str, Any]] = []
     run = {
         "run_id": "run-tool",
         "kind": "agent_run",
@@ -60,11 +63,14 @@ def test_approval_transition_service_rejects_tool_approval() -> None:
     service = RuntimeApprovalTransitionService(
         get_run=lambda _run_id: run,
         pending_approval_private=lambda _run_id: _tool_pending(),
+        claim_pending_rejection=lambda *_args, **_kwargs: True,
+        claim_pending_timeout=lambda *_args, **_kwargs: True,
         approvals=approvals,
         project_child_run_transition=lambda result: projected.append(result)
         or {"projected_child": result},
         project_cancelled_workflow_group_if_root=lambda _run, result: {"projected_workflow": result},
         cancel_run=lambda run_id: {"run_id": run_id, "status": "cancelled"},
+        close_run_owned_browser_target=lambda result: closed_browser_targets.append(result),
     )
 
     result = service.reject("run-tool", "not now")
@@ -78,17 +84,22 @@ def test_approval_transition_service_rejects_tool_approval() -> None:
             {
                 "run_id": "run-tool",
                 "timeline": [{"event": "agent.tool.approval_required"}],
-                "reason": "not now",
-                "tool_name": "terminal.run",
-                "input_preview": {"command": "printf ok"},
+                    "reason": "not now",
+                    "tool_name": "terminal.run",
+                    "input_preview": {"command": "printf ok"},
+                    "expected_approval_id": "approval-tool",
             },
         )
     ]
     assert projected == [{"run_id": "run-tool", "kind": "agent_run", "status": "cancelled"}]
+    assert closed_browser_targets == [
+        {"run_id": "run-tool", "kind": "agent_run", "status": "cancelled"}
+    ]
 
 
 def test_approval_transition_service_times_out_workflow_approval() -> None:
     approvals = FakeApprovals()
+    closed_browser_targets: list[dict[str, Any]] = []
     run = {
         "run_id": "run-workflow",
         "kind": "workflow_run",
@@ -98,6 +109,8 @@ def test_approval_transition_service_times_out_workflow_approval() -> None:
     service = RuntimeApprovalTransitionService(
         get_run=lambda _run_id: run,
         pending_approval_private=lambda _run_id: _workflow_pending(),
+        claim_pending_rejection=lambda *_args, **_kwargs: True,
+        claim_pending_timeout=lambda *_args, **_kwargs: True,
         approvals=approvals,
         project_child_run_transition=lambda result: {"projected_child": result},
         project_cancelled_workflow_group_if_root=lambda run_arg, result: {
@@ -105,6 +118,7 @@ def test_approval_transition_service_times_out_workflow_approval() -> None:
             "projected_workflow": result,
         },
         cancel_run=lambda run_id: {"run_id": run_id, "status": "cancelled"},
+        close_run_owned_browser_target=lambda result: closed_browser_targets.append(result),
     )
 
     result = service.timeout("run-workflow")
@@ -124,8 +138,12 @@ def test_approval_transition_service_times_out_workflow_approval() -> None:
                 "label": "Review",
                 "criteria": "Check output",
                 "input_preview": {"checkpoint": "Review"},
+                "expected_approval_id": "approval-workflow",
             },
         )
+    ]
+    assert closed_browser_targets == [
+        {"run_id": "run-workflow", "kind": "workflow_run", "status": "cancelled"}
     ]
 
 
@@ -134,6 +152,8 @@ def test_approval_transition_service_returns_non_waiting_run() -> None:
     service = RuntimeApprovalTransitionService(
         get_run=lambda _run_id: run,
         pending_approval_private=lambda _run_id: None,
+        claim_pending_rejection=lambda *_args, **_kwargs: True,
+        claim_pending_timeout=lambda *_args, **_kwargs: True,
         approvals=FakeApprovals(),
         project_child_run_transition=lambda result: result,
         project_cancelled_workflow_group_if_root=lambda _run, result: result,
@@ -142,6 +162,41 @@ def test_approval_transition_service_returns_non_waiting_run() -> None:
 
     assert service.reject("run-done") is run
     assert service.timeout("run-done") is run
+
+
+def test_stale_timeout_generation_does_not_cancel_current_approval() -> None:
+    run = {
+        "run_id": "run-1",
+        "kind": "agent_run",
+        "status": "approval_required",
+        "pending_approval": {"approval_id": "approval-B"},
+        "timeline": [],
+    }
+    timeout_claims: list[tuple[Any, ...]] = []
+    service = RuntimeApprovalTransitionService(
+        get_run=lambda _run_id: run,
+        pending_approval_private=lambda _run_id: {
+            "approval_id": "approval-B",
+            "tool": "terminal.run",
+            "tool_request": {"tool": "terminal.run", "input": {}},
+        },
+        claim_pending_rejection=lambda *_args, **_kwargs: True,
+        claim_pending_timeout=lambda *args, **_kwargs: timeout_claims.append(
+            (*args, kwargs)
+        ) or True,
+        approvals=FakeApprovals(),
+        project_child_run_transition=lambda result: result,
+        project_cancelled_workflow_group_if_root=lambda _run, result: result,
+        cancel_run=lambda run_id: {"run_id": run_id, "status": "cancelled"},
+    )
+
+    assert service.timeout(
+        "run-1",
+        expected_approval_id="approval-A",
+    ) is run
+    assert timeout_claims == []
+    assert run["status"] == "approval_required"
+    assert run["pending_approval"]["approval_id"] == "approval-B"
 
 
 def test_native_runtime_installs_approval_transition_service(tmp_path) -> None:

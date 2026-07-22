@@ -1,4 +1,10 @@
-import { apiDelete, apiGet, apiPatch, apiPost } from './bridge';
+import {
+  apiDelete,
+  apiGet,
+  apiPatch,
+  apiPost,
+  shouldFallbackToLegacyRoute,
+} from './bridge';
 import type {
   YachiyoGroupRunSnapshot,
   YachiyoRunTimelineSnapshot,
@@ -611,17 +617,32 @@ export async function cancelRun(runId: string): Promise<RunSpec> {
     .catch(() => apiPost(`/ui/runs/${encodeURIComponent(runId)}/cancel`, {}));
 }
 
-export async function approveRunApproval(runId: string): Promise<RunSpec> {
-  return apiPost<YachiyoRunTimelineSnapshot>(`/yachiyo/studio/runs/${encodeURIComponent(runId)}/approval/approve`, {})
-    .then(runSpecFromPublicTimelineSnapshot)
-    .catch(() => apiPost(`/ui/runs/${encodeURIComponent(runId)}/approval/approve`, {}));
-}
-
-export async function rejectRunApproval(runId: string, reason = ''): Promise<RunSpec> {
+export async function approveRunApproval(runId: string, approvalId: string): Promise<RunSpec> {
+  const body = { approval_id: approvalId };
   return apiPost<YachiyoRunTimelineSnapshot>(
-    `/yachiyo/studio/runs/${encodeURIComponent(runId)}/approval/reject`,
-    reason ? { reason } : {},
+    `/yachiyo/studio/runs/${encodeURIComponent(runId)}/approval/approve`,
+    body,
   )
     .then(runSpecFromPublicTimelineSnapshot)
-    .catch(() => apiPost(`/ui/runs/${encodeURIComponent(runId)}/approval/reject`, reason ? { reason } : {}));
+    .catch((error: unknown) => {
+      if (!shouldFallbackToLegacyRoute(error)) throw error;
+      return apiPost(`/ui/runs/${encodeURIComponent(runId)}/approval/approve`, body);
+    });
+}
+
+export async function rejectRunApproval(
+  runId: string,
+  approvalId: string,
+  reason = '',
+): Promise<RunSpec> {
+  const body = { approval_id: approvalId, reason: reason || undefined };
+  return apiPost<YachiyoRunTimelineSnapshot>(
+    `/yachiyo/studio/runs/${encodeURIComponent(runId)}/approval/reject`,
+    body,
+  )
+    .then(runSpecFromPublicTimelineSnapshot)
+    .catch((error: unknown) => {
+      if (!shouldFallbackToLegacyRoute(error)) throw error;
+      return apiPost(`/ui/runs/${encodeURIComponent(runId)}/approval/reject`, body);
+    });
 }

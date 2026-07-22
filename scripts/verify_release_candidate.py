@@ -123,6 +123,10 @@ DMG_UI_SAMPLING_PARENT_TIMEOUT_FACTOR = 3.0
 DMG_UI_SAMPLING_SMOKE_SCRIPT = Path("scripts/smoke_packaged_ui_sampling.mjs")
 DMG_CHAT_NATIVE_FILE_SMOKE_TIMEOUT_SECONDS = 60.0
 DMG_CHAT_NATIVE_FILE_SMOKE_SCRIPT = Path("scripts/smoke_packaged_chat_native_file_upload.mjs")
+DMG_CHAT_NATIVE_FILE_SMOKE_CLEANUP_GRACE_SECONDS = 15.0
+DMG_CHAT_NATIVE_FILE_PROCESS_CLEANUP_TIMEOUT_SECONDS = 3.0
+DMG_ELECTRON_SMOKE_MODE_ENV = "OHA_YACHIYO_DESKTOP_SMOKE_MODE"
+DMG_ELECTRON_SMOKE_ROOT_ENV = "OHA_YACHIYO_ELECTRON_SMOKE_ROOT"
 GATEKEEPER_READINESS_COMMAND_TIMEOUT_SECONDS = 15.0
 DMG_BRIDGE_STATUS_REPORT_SECTIONS: tuple[str, ...] = (
     "packaged_backend_bridge_smoke",
@@ -214,9 +218,9 @@ MANUAL_RELEASE_CANDIDATE_CHECK_DETAILS: tuple[dict[str, str], ...] = (
         "id": "chat_native_file_upload",
         "status": "manual_required",
         "required_before": "public_release_signoff",
-        "description": "Use the packaged app's Chat image attach button with the native file picker and verify preview, send, message attachment, image viewer, and Run Detail handoff.",
-        "evidence": "Record the image filename, native picker path used, sent message attachment metadata, image viewer open/close result, and linked Run Detail id.",
-        "next_action": "Prefer rerunning the RC gate with --run-dmg-chat-native-file-smoke; otherwise manually use the packaged Chat image attach button and native file picker, then verify preview, send, image viewer, and Run Detail handoff.",
+        "description": "Use the packaged app's Chat image attach button with the native file picker, verify preview/send/viewer behavior, confirm Chat hides internal activity, tool, recovery, warning, and technical-action details, and replay the linked run in Agent Studio.",
+        "evidence": "Record the image filename, native picker path used, sent attachment metadata, image viewer result, hidden internal-execution result, and Agent Studio replay run id.",
+        "next_action": "Prefer rerunning the RC gate with --run-dmg-chat-native-file-smoke; otherwise manually verify the packaged native image flow, confirm no internal execution or technical run action appears in Chat, then open the run directly in Agent Studio and verify replay.",
     },
     {
         "id": "packaged_ui_sampling",
@@ -2046,7 +2050,7 @@ def _auto_apply_release_candidate_check_evidence(
                     selected_file_name = str(upload.get("selected_file_name") or "").strip()
                     run_id = str(upload.get("run_id") or "").strip()
                     if selected_file_name and run_id:
-                        upload_labels.append(f"{selected_file_name} -> Run Detail {run_id}")
+                        upload_labels.append(f"{selected_file_name} -> Agent Studio replay {run_id}")
                     elif selected_file_name:
                         upload_labels.append(selected_file_name)
         upload_summary = ", ".join(upload_labels) if upload_labels else "packaged native file upload flow"
@@ -2057,7 +2061,9 @@ def _auto_apply_release_candidate_check_evidence(
                 f"Automated --run-dmg-chat-native-file-smoke passed for {artifact_label}: "
                 "the packaged Chat attach button invoked the desktop chooseChatImages IPC "
                 "against a smoke-selected local image, rendered the preview, sent the "
-                "message, opened the image viewer, and verified Run Detail handoff "
+                "message, opened the image viewer, confirmed Chat hid the internal activity, "
+                "tool, recovery, warning, and technical run-action details, and verified the "
+                "run replay directly in Agent Studio "
                 f"({upload_summary})."
             ),
         )
@@ -2669,7 +2675,7 @@ def verify_real_desktop_interaction_smoke(
 
 def verify_electron_native_bridge_smoke(root: Path) -> tuple[list[Finding], dict[str, Any]]:
     try:
-        raw_evidence = run_electron_native_bridge_smoke()
+        raw_evidence = run_electron_native_bridge_smoke(focus_app="Music")
     except Exception as exc:
         return [
             Finding(
@@ -2693,9 +2699,21 @@ def verify_electron_native_bridge_smoke(root: Path) -> tuple[list[Finding], dict
             "mode": "electron_native_bridge_smoke",
             "error": "non-object evidence",
         }
-    if evidence.get("ok") is True:
+    checks = evidence.get("checks") if isinstance(evidence.get("checks"), dict) else {}
+    focus_verified = bool(
+        checks.get("focus_attempted") is True
+        and checks.get("focus_verified") is True
+    )
+    if evidence.get("ok") is True and focus_verified:
         return [], evidence
-    message = str(evidence.get("error") or "Electron native bridge smoke did not pass")
+    message = str(
+        evidence.get("error")
+        or (
+            "electron_native_focus_unverified"
+            if evidence.get("ok") is True
+            else "Electron native bridge smoke did not pass"
+        )
+    )
     return [
         Finding(
             root / "scripts/smoke_electron_native_bridge.py",
@@ -2990,8 +3008,19 @@ def _source_revision_final_signoff_findings(
     if (
         not isinstance(source_revision, dict)
         or source_revision.get("available") is not True
-        or source_revision.get("dirty") is not True
+        or not str(source_revision.get("commit") or "").strip()
     ):
+        return [
+            Finding(
+                root,
+                (
+                    "final signoff requires an available clean source revision; "
+                    "restore Git revision metadata and rebuild release artifacts "
+                    "before final signoff"
+                ),
+            )
+        ]
+    if source_revision.get("dirty") is False:
         return []
     short_commit = str(source_revision.get("short_commit") or "").strip()
     suffix = f" at {short_commit}" if short_commit else ""
@@ -3589,6 +3618,36 @@ def _allocate_loopback_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
         server.bind(("127.0.0.1", 0))
         return int(server.getsockname()[1])
+
+
+def _isolated_dmg_electron_environment(
+    home_dir: str | Path,
+    *,
+    bridge_url: str,
+) -> dict[str, str]:
+    """Isolate Electron userData/single-instance state for a packaged app smoke."""
+
+    home_path = Path(home_dir).resolve()
+    temp_root = Path(tempfile.gettempdir()).resolve()
+    try:
+        relative_home = home_path.relative_to(temp_root)
+    except ValueError as exc:
+        raise ValueError("DMG Electron smoke home must stay inside the system temporary directory") from exc
+    if not relative_home.parts:
+        raise ValueError("DMG Electron smoke home must be a child of the system temporary directory")
+    electron_smoke_root = home_path / "electron-smoke-root"
+    electron_smoke_root.mkdir(mode=0o700)
+    env = {
+        **os.environ,
+        "HOME": str(home_path),
+        "OHA_YACHIYO_HOME": str(home_path / ".oha-yachiyo"),
+        "OHA_YACHIYO_BRIDGE_URL": bridge_url,
+        DMG_ELECTRON_SMOKE_MODE_ENV: "1",
+        DMG_ELECTRON_SMOKE_ROOT_ENV: str(electron_smoke_root),
+    }
+    # These smokes must exercise the backend embedded in the packaged app.
+    env.pop("OHA_YACHIYO_SKIP_BACKEND", None)
+    return env
 
 
 def _terminate_process(process: subprocess.Popen[str], timeout_seconds: float = 5.0) -> None:
@@ -4467,38 +4526,41 @@ def verify_dmg_app_startup(
                 continue
             bridge_url = f"http://127.0.0.1:{_allocate_loopback_port()}"
             with tempfile.TemporaryDirectory(prefix="oha-yachiyo-rc-home-") as home_dir:
-                env = {
-                    **os.environ,
-                    "HOME": home_dir,
-                    "OHA_YACHIYO_HOME": str(Path(home_dir) / ".oha-yachiyo"),
-                    "OHA_YACHIYO_BRIDGE_URL": bridge_url,
-                }
-                process = _MANAGED_SUBPROCESS_POPEN(
-                    [str(executable_path)],
-                    cwd=str(app_path),
-                    env=env,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    start_new_session=True,
-                )
-                status_finding, status_payload = _wait_for_dmg_app_status(
-                    process,
+                env = _isolated_dmg_electron_environment(
+                    home_dir,
                     bridge_url=bridge_url,
-                    dmg_path=dmg_path,
-                    timeout_seconds=timeout_seconds,
                 )
-                if status_finding is not None:
-                    findings.append(status_finding)
-                    continue
-                if status_payload is not None:
-                    bridge_statuses.append(
-                        _bridge_status_report(
-                            dmg_path,
-                            status_payload,
-                            bridge_url=bridge_url,
-                        )
+                try:
+                    process = _MANAGED_SUBPROCESS_POPEN(
+                        [str(executable_path)],
+                        cwd=str(app_path),
+                        env=env,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                        start_new_session=True,
                     )
+                    status_finding, status_payload = _wait_for_dmg_app_status(
+                        process,
+                        bridge_url=bridge_url,
+                        dmg_path=dmg_path,
+                        timeout_seconds=timeout_seconds,
+                    )
+                    if status_finding is not None:
+                        findings.append(status_finding)
+                        continue
+                    if status_payload is not None:
+                        bridge_statuses.append(
+                            _bridge_status_report(
+                                dmg_path,
+                                status_payload,
+                                bridge_url=bridge_url,
+                            )
+                        )
+                finally:
+                    if process is not None:
+                        _terminate_process(process)
+                        process = None
         finally:
             if process is not None:
                 _terminate_process(process)
@@ -4610,56 +4672,59 @@ def verify_dmg_screen_recording_probe(
             )
             bridge_url = f"http://127.0.0.1:{_allocate_loopback_port()}"
             with tempfile.TemporaryDirectory(prefix="oha-yachiyo-rc-home-") as home_dir:
-                env = {
-                    **os.environ,
-                    "HOME": home_dir,
-                    "OHA_YACHIYO_HOME": str(Path(home_dir) / ".oha-yachiyo"),
-                    "OHA_YACHIYO_BRIDGE_URL": bridge_url,
-                }
-                process = _MANAGED_SUBPROCESS_POPEN(
-                    [str(launch_executable_path)],
-                    cwd=str(launch_app_path),
-                    env=env,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    start_new_session=True,
-                )
-                status_finding, status_payload = _wait_for_dmg_app_status(
-                    process,
+                env = _isolated_dmg_electron_environment(
+                    home_dir,
                     bridge_url=bridge_url,
-                    dmg_path=dmg_path,
-                    timeout_seconds=timeout_seconds,
                 )
-                if status_finding is not None:
-                    findings.append(status_finding)
-                    continue
-                bridge_ready_dmg_paths.append(str(dmg_path))
-                if status_payload is not None:
-                    bridge_statuses.append(
-                        _bridge_status_report(
-                            dmg_path,
-                            status_payload,
-                            bridge_url=bridge_url,
-                        )
-                    )
                 try:
-                    metadata = _read_screen_probe_metadata(bridge_url)
-                except (
-                    OSError,
-                    ValueError,
-                    urllib.error.URLError,
-                    json.JSONDecodeError,
-                ) as exc:
-                    findings.append(
-                        Finding(
-                            dmg_path,
-                            "release candidate packaged /screen/current probe failed: "
-                            + _redacted_url_error_detail(exc),
-                        )
+                    process = _MANAGED_SUBPROCESS_POPEN(
+                        [str(launch_executable_path)],
+                        cwd=str(launch_app_path),
+                        env=env,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                        start_new_session=True,
                     )
-                    continue
-                screens.append({"dmg_path": str(dmg_path), **metadata})
+                    status_finding, status_payload = _wait_for_dmg_app_status(
+                        process,
+                        bridge_url=bridge_url,
+                        dmg_path=dmg_path,
+                        timeout_seconds=timeout_seconds,
+                    )
+                    if status_finding is not None:
+                        findings.append(status_finding)
+                        continue
+                    bridge_ready_dmg_paths.append(str(dmg_path))
+                    if status_payload is not None:
+                        bridge_statuses.append(
+                            _bridge_status_report(
+                                dmg_path,
+                                status_payload,
+                                bridge_url=bridge_url,
+                            )
+                        )
+                    try:
+                        metadata = _read_screen_probe_metadata(bridge_url)
+                    except (
+                        OSError,
+                        ValueError,
+                        urllib.error.URLError,
+                        json.JSONDecodeError,
+                    ) as exc:
+                        findings.append(
+                            Finding(
+                                dmg_path,
+                                "release candidate packaged /screen/current probe failed: "
+                                + _redacted_url_error_detail(exc),
+                            )
+                        )
+                        continue
+                    screens.append({"dmg_path": str(dmg_path), **metadata})
+                finally:
+                    if process is not None:
+                        _terminate_process(process)
+                        process = None
         finally:
             if process is not None:
                 _terminate_process(process)
@@ -4753,109 +4818,112 @@ def verify_dmg_ui_sampling_smoke(
             bridge_url = f"http://127.0.0.1:{_allocate_loopback_port()}"
             debug_port = _allocate_loopback_port()
             with tempfile.TemporaryDirectory(prefix="oha-yachiyo-rc-home-") as home_dir:
-                env = {
-                    **os.environ,
-                    "HOME": home_dir,
-                    "OHA_YACHIYO_HOME": str(Path(home_dir) / ".oha-yachiyo"),
-                    "OHA_YACHIYO_BRIDGE_URL": bridge_url,
-                }
-                process = _MANAGED_SUBPROCESS_POPEN(
-                    [
-                        str(executable_path),
-                        f"--remote-debugging-port={debug_port}",
-                        "--remote-allow-origins=*",
-                    ],
-                    cwd=str(app_path),
-                    env=env,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    start_new_session=True,
-                )
-                status_finding, status_payload = _wait_for_dmg_app_status(
-                    process,
+                env = _isolated_dmg_electron_environment(
+                    home_dir,
                     bridge_url=bridge_url,
-                    dmg_path=dmg_path,
-                    timeout_seconds=timeout_seconds,
                 )
-                if status_finding is not None:
-                    findings.append(status_finding)
-                    continue
-                bridge_ready_dmg_paths.append(str(dmg_path))
-                if status_payload is not None:
-                    bridge_statuses.append(
-                        _bridge_status_report(
-                            dmg_path,
-                            status_payload,
-                            bridge_url=bridge_url,
-                        )
-                    )
-
-                sample_report_path = Path(home_dir) / "packaged-ui-sampling.json"
-                command = [
-                    "node",
-                    str(DMG_UI_SAMPLING_SMOKE_SCRIPT),
-                    "--debug-port",
-                    str(debug_port),
-                    "--expect-bridge-url",
-                    bridge_url,
-                    "--timeout-ms",
-                    str(int(timeout_seconds * 1000)),
-                    "--report-json",
-                    str(sample_report_path),
-                ]
                 try:
-                    result = subprocess.run(
-                        command,
-                        cwd=root,
-                        check=False,
+                    process = _MANAGED_SUBPROCESS_POPEN(
+                        [
+                            str(executable_path),
+                            f"--remote-debugging-port={debug_port}",
+                            "--remote-allow-origins=*",
+                        ],
+                        cwd=str(app_path),
+                        env=env,
                         stdout=subprocess.PIPE,
                         stderr=subprocess.PIPE,
                         text=True,
-                        timeout=_dmg_ui_sampling_parent_timeout(timeout_seconds),
+                        start_new_session=True,
                     )
-                except subprocess.TimeoutExpired as exc:
-                    detail = _redacted_process_detail(
-                        _process_output_text(exc.stdout),
-                        _process_output_text(exc.stderr),
+                    status_finding, status_payload = _wait_for_dmg_app_status(
+                        process,
+                        bridge_url=bridge_url,
+                        dmg_path=dmg_path,
+                        timeout_seconds=timeout_seconds,
                     )
-                    message = f"release candidate packaged UI sampling smoke timed out after {timeout_seconds:.0f}s"
-                    if detail:
-                        message = f"{message}: {detail}"
-                    findings.append(Finding(dmg_path, message))
-                    continue
-                except OSError as exc:
-                    detail = redact_api_error_text(str(exc))
-                    findings.append(Finding(dmg_path, f"release candidate packaged UI sampling smoke could not start: {detail}"))
-                    continue
-                if result.returncode != 0:
-                    detail = _redacted_process_detail(result.stdout, result.stderr)
-                    message = f"release candidate packaged UI sampling smoke failed with exit code {result.returncode}"
-                    if detail:
-                        message = f"{message}: {detail}"
-                    findings.append(Finding(dmg_path, message))
-                    continue
-                try:
-                    sample_report = _read_packaged_ui_sampling_report(sample_report_path)
-                except (OSError, json.JSONDecodeError) as exc:
-                    findings.append(Finding(dmg_path, f"release candidate packaged UI sampling report could not be read: {exc}"))
-                    continue
-                if sample_report.get("ok") is not True:
-                    findings.append(Finding(dmg_path, "release candidate packaged UI sampling report did not pass"))
-                    continue
-                raw_samples = sample_report.get("samples")
-                route_labels: list[str] = []
-                if isinstance(raw_samples, list):
-                    for sample in raw_samples:
-                        if isinstance(sample, dict) and sample.get("route"):
-                            route_labels.append(str(sample["route"]))
-                samples.append(
-                    {
-                        "dmg_path": str(dmg_path),
-                        "sample_count": sample_report.get("sample_count", len(route_labels)),
-                        "routes": route_labels,
-                    }
-                )
+                    if status_finding is not None:
+                        findings.append(status_finding)
+                        continue
+                    bridge_ready_dmg_paths.append(str(dmg_path))
+                    if status_payload is not None:
+                        bridge_statuses.append(
+                            _bridge_status_report(
+                                dmg_path,
+                                status_payload,
+                                bridge_url=bridge_url,
+                            )
+                        )
+
+                    sample_report_path = Path(home_dir) / "packaged-ui-sampling.json"
+                    command = [
+                        "node",
+                        str(DMG_UI_SAMPLING_SMOKE_SCRIPT),
+                        "--debug-port",
+                        str(debug_port),
+                        "--expect-bridge-url",
+                        bridge_url,
+                        "--timeout-ms",
+                        str(int(timeout_seconds * 1000)),
+                        "--report-json",
+                        str(sample_report_path),
+                    ]
+                    try:
+                        result = subprocess.run(
+                            command,
+                            cwd=root,
+                            check=False,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE,
+                            text=True,
+                            timeout=_dmg_ui_sampling_parent_timeout(timeout_seconds),
+                        )
+                    except subprocess.TimeoutExpired as exc:
+                        detail = _redacted_process_detail(
+                            _process_output_text(exc.stdout),
+                            _process_output_text(exc.stderr),
+                        )
+                        message = f"release candidate packaged UI sampling smoke timed out after {timeout_seconds:.0f}s"
+                        if detail:
+                            message = f"{message}: {detail}"
+                        findings.append(Finding(dmg_path, message))
+                        continue
+                    except OSError as exc:
+                        detail = redact_api_error_text(str(exc))
+                        findings.append(Finding(dmg_path, f"release candidate packaged UI sampling smoke could not start: {detail}"))
+                        continue
+                    if result.returncode != 0:
+                        detail = _redacted_process_detail(result.stdout, result.stderr)
+                        message = f"release candidate packaged UI sampling smoke failed with exit code {result.returncode}"
+                        if detail:
+                            message = f"{message}: {detail}"
+                        findings.append(Finding(dmg_path, message))
+                        continue
+                    try:
+                        sample_report = _read_packaged_ui_sampling_report(sample_report_path)
+                    except (OSError, json.JSONDecodeError) as exc:
+                        findings.append(Finding(dmg_path, f"release candidate packaged UI sampling report could not be read: {exc}"))
+                        continue
+                    if sample_report.get("ok") is not True:
+                        findings.append(Finding(dmg_path, "release candidate packaged UI sampling report did not pass"))
+                        continue
+                    raw_samples = sample_report.get("samples")
+                    route_labels: list[str] = []
+                    if isinstance(raw_samples, list):
+                        for sample in raw_samples:
+                            if isinstance(sample, dict) and sample.get("route"):
+                                route_labels.append(str(sample["route"]))
+                    samples.append(
+                        {
+                            "dmg_path": str(dmg_path),
+                            "sample_count": sample_report.get("sample_count", len(route_labels)),
+                            "routes": route_labels,
+                        }
+                    )
+                finally:
+                    if process is not None:
+                        _terminate_process(process)
+                        process = None
         finally:
             if process is not None:
                 _terminate_process(process)
@@ -4875,6 +4943,111 @@ def verify_dmg_ui_sampling_smoke(
                     findings.append(Finding(dmg_path, message))
             shutil.rmtree(mount_dir, ignore_errors=True)
     return findings, samples, bridge_ready_dmg_paths, bridge_statuses
+
+
+def _validated_packaged_chat_process_ledger(
+    ledger_path: Path,
+    *,
+    expected_executable: Path,
+    expected_smoke_root: Path,
+) -> tuple[dict[str, object] | None, str]:
+    try:
+        payload = json.loads(ledger_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return None, f"process ledger could not be read: {exc}"
+    required_keys = {"pid", "pgid", "executable", "smoke_root", "cleaned"}
+    if not isinstance(payload, dict) or set(payload) != required_keys:
+        return None, "process ledger must contain exactly pid, pgid, executable, smoke_root, and cleaned"
+    pid = payload.get("pid")
+    pgid = payload.get("pgid")
+    cleaned = payload.get("cleaned")
+    if type(pid) is not int or pid <= 1 or type(pgid) is not int or pgid <= 1:
+        return None, "process ledger pid and pgid must be positive integers"
+    if pid != pgid:
+        return None, "process ledger must identify a dedicated process group with pid equal to pgid"
+    if type(cleaned) is not bool:
+        return None, "process ledger cleaned must be a boolean"
+    executable = payload.get("executable")
+    smoke_root = payload.get("smoke_root")
+    if not isinstance(executable, str) or not Path(executable).is_absolute():
+        return None, "process ledger executable must be an absolute path"
+    if not isinstance(smoke_root, str) or not Path(smoke_root).is_absolute():
+        return None, "process ledger smoke_root must be an absolute path"
+    if Path(executable).resolve() != expected_executable.resolve():
+        return None, "process ledger executable does not match this packaged Chat smoke"
+    if Path(smoke_root).resolve() != expected_smoke_root.resolve():
+        return None, "process ledger smoke_root does not match this packaged Chat smoke"
+    return payload, ""
+
+
+def _wait_for_process_group_exit(pgid: int, *, timeout_seconds: float) -> bool:
+    deadline = time.monotonic() + timeout_seconds
+    while time.monotonic() < deadline:
+        try:
+            os.killpg(pgid, 0)
+        except ProcessLookupError:
+            return True
+        except PermissionError:
+            return False
+        time.sleep(0.05)
+    try:
+        os.killpg(pgid, 0)
+    except ProcessLookupError:
+        return True
+    except PermissionError:
+        return False
+    return False
+
+
+def _mark_packaged_chat_process_ledger_cleaned(
+    ledger_path: Path,
+    payload: dict[str, object],
+) -> None:
+    cleaned_payload = {**payload, "cleaned": True}
+    ledger_path.write_text(
+        f"{json.dumps(cleaned_payload, indent=2, sort_keys=True)}\n",
+        encoding="utf-8",
+    )
+
+
+def _cleanup_packaged_chat_process_from_ledger(
+    ledger_path: Path,
+    *,
+    expected_executable: Path,
+    expected_smoke_root: Path,
+    timeout_seconds: float = DMG_CHAT_NATIVE_FILE_PROCESS_CLEANUP_TIMEOUT_SECONDS,
+) -> tuple[bool, str]:
+    payload, error = _validated_packaged_chat_process_ledger(
+        ledger_path,
+        expected_executable=expected_executable,
+        expected_smoke_root=expected_smoke_root,
+    )
+    if payload is None:
+        return False, error
+    if payload["cleaned"] is True:
+        return True, "process ledger already recorded cleanup"
+    pgid = int(payload["pgid"])
+    try:
+        os.killpg(pgid, signal.SIGTERM)
+    except ProcessLookupError:
+        _mark_packaged_chat_process_ledger_cleaned(ledger_path, payload)
+        return True, "process group had already exited"
+    except OSError as exc:
+        return False, f"could not terminate recorded process group {pgid}: {exc}"
+    if _wait_for_process_group_exit(pgid, timeout_seconds=timeout_seconds):
+        _mark_packaged_chat_process_ledger_cleaned(ledger_path, payload)
+        return True, "recorded process group exited after SIGTERM"
+    try:
+        os.killpg(pgid, signal.SIGKILL)
+    except ProcessLookupError:
+        _mark_packaged_chat_process_ledger_cleaned(ledger_path, payload)
+        return True, "process group exited before SIGKILL"
+    except OSError as exc:
+        return False, f"could not kill recorded process group {pgid}: {exc}"
+    if not _wait_for_process_group_exit(pgid, timeout_seconds=timeout_seconds):
+        return False, f"recorded process group {pgid} remained alive after SIGKILL"
+    _mark_packaged_chat_process_ledger_cleaned(ledger_path, payload)
+    return True, "recorded process group exited after SIGKILL"
 
 
 def verify_dmg_chat_native_file_upload_smoke(
@@ -4937,6 +5110,8 @@ def verify_dmg_chat_native_file_upload_smoke(
 
             with tempfile.TemporaryDirectory(prefix="oha-yachiyo-rc-chat-file-") as home_dir:
                 report_path = Path(home_dir) / "packaged-chat-native-file-upload.json"
+                process_ledger_path = Path(home_dir) / "packaged-chat-process-ledger.json"
+                smoke_root = Path(home_dir) / "packaged-chat-smoke-root"
                 command = [
                     "node",
                     str(DMG_CHAT_NATIVE_FILE_SMOKE_SCRIPT),
@@ -4948,6 +5123,10 @@ def verify_dmg_chat_native_file_upload_smoke(
                     str(int(timeout_seconds * 1000)),
                     "--report-json",
                     str(report_path),
+                    "--process-ledger-json",
+                    str(process_ledger_path),
+                    "--smoke-root",
+                    str(smoke_root),
                 ]
                 try:
                     result = subprocess.run(
@@ -4957,9 +5136,19 @@ def verify_dmg_chat_native_file_upload_smoke(
                         stdout=subprocess.PIPE,
                         stderr=subprocess.PIPE,
                         text=True,
-                        timeout=timeout_seconds + 10.0,
+                        timeout=(
+                            timeout_seconds
+                            + DMG_CHAT_NATIVE_FILE_SMOKE_CLEANUP_GRACE_SECONDS
+                        ),
                     )
                 except subprocess.TimeoutExpired as exc:
+                    cleanup_ok, cleanup_detail = (
+                        _cleanup_packaged_chat_process_from_ledger(
+                            process_ledger_path,
+                            expected_executable=executable_path,
+                            expected_smoke_root=smoke_root,
+                        )
+                    )
                     detail = _redacted_process_detail(
                         _process_output_text(exc.stdout),
                         _process_output_text(exc.stderr),
@@ -4967,17 +5156,51 @@ def verify_dmg_chat_native_file_upload_smoke(
                     message = f"release candidate packaged Chat native file smoke timed out after {timeout_seconds:.0f}s"
                     if detail:
                         message = f"{message}: {detail}"
+                    if not cleanup_ok:
+                        message = (
+                            f"{message}; detached packaged app cleanup failed safely: "
+                            f"{redact_api_error_text(cleanup_detail)}"
+                        )
                     findings.append(Finding(dmg_path, message))
                     continue
                 except OSError as exc:
                     detail = redact_api_error_text(str(exc))
                     findings.append(Finding(dmg_path, f"release candidate packaged Chat native file smoke could not start: {detail}"))
                     continue
+                process_ledger, ledger_error = _validated_packaged_chat_process_ledger(
+                    process_ledger_path,
+                    expected_executable=executable_path,
+                    expected_smoke_root=smoke_root,
+                )
+                cleanup_ok = process_ledger is not None
+                cleanup_detail = ledger_error
+                if process_ledger is not None and process_ledger.get("cleaned") is not True:
+                    cleanup_ok, cleanup_detail = (
+                        _cleanup_packaged_chat_process_from_ledger(
+                            process_ledger_path,
+                            expected_executable=executable_path,
+                            expected_smoke_root=smoke_root,
+                        )
+                    )
                 if result.returncode != 0:
                     detail = _redacted_process_detail(result.stdout, result.stderr)
                     message = f"release candidate packaged Chat native file smoke failed with exit code {result.returncode}"
                     if detail:
                         message = f"{message}: {detail}"
+                    if not cleanup_ok:
+                        message = (
+                            f"{message}; detached packaged app cleanup failed safely: "
+                            f"{redact_api_error_text(cleanup_detail)}"
+                        )
+                    findings.append(Finding(dmg_path, message))
+                    continue
+                if not cleanup_ok:
+                    message = (
+                        "release candidate packaged Chat native file smoke did not "
+                        "prove detached Electron process cleanup"
+                    )
+                    if cleanup_detail:
+                        message = f"{message}: {redact_api_error_text(cleanup_detail)}"
                     findings.append(Finding(dmg_path, message))
                     continue
                 try:
@@ -4987,6 +5210,36 @@ def verify_dmg_chat_native_file_upload_smoke(
                     continue
                 if upload_report.get("ok") is not True:
                     findings.append(Finding(dmg_path, "release candidate packaged Chat native file smoke report did not pass"))
+                    continue
+                if upload_report.get("chat_technical_action_hidden") is not True:
+                    findings.append(
+                        Finding(
+                            dmg_path,
+                            "release candidate packaged Chat native file smoke did not prove the technical run action stays hidden in Chat",
+                        )
+                    )
+                    continue
+                if upload_report.get("internal_execution_hidden") is not True:
+                    findings.append(
+                        Finding(
+                            dmg_path,
+                            "release candidate packaged Chat native file smoke did not "
+                            "prove internal activity, tool, and recovery details stay "
+                            "hidden in Chat",
+                        )
+                    )
+                    continue
+                if (
+                    upload_report.get("run_detail_verified") is not True
+                    or upload_report.get("run_detail_navigation_source")
+                    != "direct_agent_studio_route"
+                ):
+                    findings.append(
+                        Finding(
+                            dmg_path,
+                            "release candidate packaged Chat native file smoke did not prove direct Agent Studio replay",
+                        )
+                    )
                     continue
                 app_build_metadata = upload_report.get("app_build_metadata")
                 uploads.append(
@@ -4999,6 +5252,15 @@ def verify_dmg_chat_native_file_upload_smoke(
                         "task_id": upload_report.get("task_id"),
                         "image_viewer_verified": upload_report.get("image_viewer_verified"),
                         "run_detail_verified": upload_report.get("run_detail_verified"),
+                        "chat_technical_action_hidden": upload_report.get(
+                            "chat_technical_action_hidden"
+                        ),
+                        "internal_execution_hidden": upload_report.get(
+                            "internal_execution_hidden"
+                        ),
+                        "run_detail_navigation_source": upload_report.get(
+                            "run_detail_navigation_source"
+                        ),
                         "desktop_picker_ipc_verified": upload_report.get("desktop_picker_ipc_verified"),
                         "app_build_metadata": app_build_metadata
                         if isinstance(app_build_metadata, dict)
@@ -5306,6 +5568,8 @@ def verify_release_candidate(
 
     source_only_conflicts: list[str] = []
     if source_only:
+        if require_manual_checks_complete:
+            source_only_conflicts.append("--require-manual-checks-complete")
         if artifact_paths:
             source_only_conflicts.append("artifact paths")
         if require_artifacts:
@@ -5941,12 +6205,16 @@ def verify_release_candidate(
                 "run_requested": run_dmg_chat_native_file_smoke,
             }
         elif selected_artifacts:
-            artifact_findings = verify_release_artifacts(
-                root=root,
-                paths=selected_artifacts,
-                allow_binary_targets=True,
-                check_packaged_app_bundle=True,
-            )
+            artifact_guard_options: dict[str, Any] = {
+                "root": root,
+                "paths": selected_artifacts,
+                "allow_binary_targets": True,
+                "check_packaged_app_bundle": True,
+                "allow_nonpublishable_local_rc": not require_manual_checks_complete,
+            }
+            if require_manual_checks_complete:
+                artifact_guard_options["require_bound_release_candidate"] = True
+            artifact_findings = verify_release_artifacts(**artifact_guard_options)
             _print_findings("built artifact guards", artifact_findings)
             failed = failed or bool(artifact_findings)
             report["built_artifact_guards"] = {
@@ -5954,7 +6222,7 @@ def verify_release_candidate(
                 "artifact_paths": [str(path) for path in selected_artifacts],
                 "findings": _finding_report(artifact_findings),
             }
-        elif require_artifacts:
+        elif require_artifacts or require_manual_checks_complete:
             print(
                 "built artifact guards: failed\n"
                 "- release candidate artifacts not found under dist/backend, dist/electron, or release"

@@ -59,6 +59,128 @@ const blockingConditionRecoveryHints: Record<string, string> = {
   screen_capture_blank: '当前截图为空黑画面；请唤醒或解锁桌面会话，并确认远程显示没有黑屏。',
 };
 
+export type BackgroundControlReadinessStatus =
+  | 'ready'
+  | 'installed_unchecked'
+  | 'setup_required'
+  | 'attention'
+  | 'unknown';
+
+export type BackgroundControlReadiness = {
+  status: BackgroundControlReadinessStatus;
+  statusLabel: string;
+  summary: string;
+  safetyPromise: string;
+  configured: boolean | null;
+  available: boolean | null;
+  adapterReady: boolean | null;
+  healthChecked: boolean | null;
+  healthOk: boolean | null;
+  providerId: string;
+  kind: string;
+  supportedTools: string[];
+  desktopSessionIsolated: boolean | null;
+  foregroundTakeoverRequired: boolean | null;
+  blockers: string[];
+};
+
+/**
+ * Projects the passive readiness snapshot into consumer-facing background
+ * control states. Missing booleans stay unknown: installation, health and
+ * permission readiness must never be inferred from a provider name or status.
+ */
+export function backgroundControlReadiness(
+  readiness: YachiyoReadinessSnapshot | null | undefined,
+): BackgroundControlReadiness {
+  const capabilities = recordValue(readiness?.capabilities);
+  const provider = recordValue(capabilities?.sandbox_provider);
+  const health = recordValue(provider?.health);
+  const providerId = stringValue(provider?.provider_id || health?.provider_id);
+  const kind = stringValue(provider?.provider_kind || health?.provider_kind);
+  const configured = strictBooleanValue(provider?.configured);
+  const available = strictBooleanValue(provider?.available);
+  const adapterReady = strictBooleanValue(provider?.adapter_ready);
+  const healthChecked = strictBooleanValue(health?.checked);
+  const healthOk = strictBooleanValue(health?.ok);
+  const supportedTools = uniqueStrings([
+    ...stringList(provider?.supported_tools),
+    ...stringList(health?.supported_tools),
+    ...stringList(capabilities?.desktop_provider_supported_tools),
+  ]);
+  const desktopSessionIsolated = firstKnownBoolean(
+    provider?.desktop_session_isolated,
+    health?.desktop_session_isolated,
+  );
+  const foregroundTakeoverRequired = firstKnownBoolean(
+    provider?.foreground_takeover_required,
+    health?.foreground_takeover_required,
+  );
+  const blockers = uniqueStrings([
+    ...stringList(provider?.blocking_conditions),
+    ...stringList(health?.blocking_conditions),
+  ]);
+
+  let status: BackgroundControlReadinessStatus = 'unknown';
+  if (kind === 'background_desktop') {
+    if (configured === false) {
+      status = 'setup_required';
+    } else if (configured === true && healthChecked === false) {
+      status = 'installed_unchecked';
+    } else if (configured === true && healthChecked === true) {
+      status = healthOk === true
+        && available === true
+        && adapterReady === true
+        && foregroundTakeoverRequired === false
+        && blockers.length === 0
+        ? 'ready'
+        : 'attention';
+    }
+  }
+
+  const consumerCopy: Record<
+    BackgroundControlReadinessStatus,
+    { statusLabel: string; summary: string }
+  > = {
+    ready: {
+      statusLabel: '可以使用',
+      summary: '已就绪，可以在后台操作支持的应用。',
+    },
+    installed_unchecked: {
+      statusLabel: '首次使用时确认',
+      summary: '后台操作组件已安装；首次实际使用时会确认运行条件。',
+    },
+    setup_required: {
+      statusLabel: '需要设置',
+      summary: '尚未完成后台操控设置，相关任务会安全暂停。',
+    },
+    attention: {
+      statusLabel: '需要处理',
+      summary: '后台操控暂不可用，相关任务会安全暂停。',
+    },
+    unknown: {
+      statusLabel: '状态待确认',
+      summary: '暂时无法确认后台操控状态，相关任务不会接管前台。',
+    },
+  };
+
+  return {
+    status,
+    ...consumerCopy[status],
+    safetyPromise: '默认不移动你的鼠标、不切换当前窗口；无法保持后台时会暂停，不会自动接管前台。',
+    configured,
+    available,
+    adapterReady,
+    healthChecked,
+    healthOk,
+    providerId,
+    kind,
+    supportedTools,
+    desktopSessionIsolated,
+    foregroundTakeoverRequired,
+    blockers,
+  };
+}
+
 export function chatDesktopPermissionNotice(
   readiness: YachiyoReadinessSnapshot | null | undefined,
 ): Pick<
@@ -69,27 +191,51 @@ export function chatDesktopPermissionNotice(
   const blocking = desktopRuntimeBlockingIssues(readiness);
   const toolReadiness = desktopToolReadinessSummary(readiness);
   const providerReadiness = desktopProviderReadinessSummary(readiness);
-  const providerNeedsAttention = Boolean(
-    providerReadiness.provider_id && !providerReadiness.ready,
+  const backgroundProviderInstalledUnchecked = Boolean(
+    providerReadiness.provider_kind === 'background_desktop'
+    && providerReadiness.status === 'installed_not_checked',
   );
+  const visibleToolReadiness = backgroundProviderInstalledUnchecked
+    ? { degraded: [], unavailable: [], tools: [] }
+    : toolReadiness;
+  const visibleBlocking = backgroundProviderInstalledUnchecked
+    ? blocking.filter((issue) => issue.token !== 'desktop_permission_diagnostics_not_checked')
+    : blocking;
+  const providerNeedsAttention = Boolean(
+    providerReadiness.provider_id
+    && !providerReadiness.ready
+    && !backgroundProviderInstalledUnchecked,
+  );
+  const browserEnhancementOnly = Boolean(
+    providerReadiness.provider_kind === 'local_desktop'
+    && providerReadiness.ready
+    && missing.length
+    && missing.every((issue) => issue.token === 'chrome_cdp')
+    && !visibleBlocking.length
+    && toolReadiness.tools.every((tool) => tool.startsWith('browser.'))
+  );
+  // Chrome CDP is an optional browser enhancement. When Direct Desktop is
+  // healthy, keep the limitation in Tools/Diagnostics and surface it only if
+  // a browser action needs CDP instead of covering every Chat/Launcher view.
+  if (browserEnhancementOnly) return null;
   if (
     !missing.length
-    && !blocking.length
-    && !toolReadiness.degraded.length
-    && !toolReadiness.unavailable.length
+    && !visibleBlocking.length
+    && !visibleToolReadiness.degraded.length
+    && !visibleToolReadiness.unavailable.length
     && !providerNeedsAttention
   ) return null;
   const labels = missing.map((issue) => issue.label);
-  const blockerLabels = blocking.map((issue) => issue.label);
+  const blockerLabels = visibleBlocking.map((issue) => issue.label);
   const hints = [
     ...missing.map((issue) => issue.recovery_hint),
-    ...blocking.map((issue) => issue.recovery_hint),
+    ...visibleBlocking.map((issue) => issue.recovery_hint),
   ].filter(Boolean);
   const details = [
     labels.length ? `${labels.join('、')} 未就绪。` : '',
     blockerLabels.length ? `${blockerLabels.join('、')} 正在阻塞桌面执行。` : '',
-    toolReadiness.degraded.length ? `降级可用：${formatDesktopToolList(toolReadiness.degraded)}。` : '',
-    toolReadiness.unavailable.length ? `暂不可用：${formatDesktopToolList(toolReadiness.unavailable)}。` : '',
+    visibleToolReadiness.degraded.length ? `降级可用：${formatDesktopToolList(visibleToolReadiness.degraded)}。` : '',
+    visibleToolReadiness.unavailable.length ? `暂不可用：${formatDesktopToolList(visibleToolReadiness.unavailable)}。` : '',
     providerReadiness.detail,
     hints.join(' ') || '打开「诊断」中的桌面能力检查，按提示处理后再试。',
   ].filter(Boolean);
@@ -98,8 +244,10 @@ export function chatDesktopPermissionNotice(
     return_to: 'chat',
   };
   if (missing.length) actionParams.permission_targets = missing.map((issue) => issue.token).join(',');
-  if (blocking.length) actionParams.blocking_conditions = blocking.map((issue) => issue.token).join(',');
-  if (toolReadiness.tools.length) actionParams.desktop_tools = toolReadiness.tools.join(',');
+  if (visibleBlocking.length) {
+    actionParams.blocking_conditions = visibleBlocking.map((issue) => issue.token).join(',');
+  }
+  if (visibleToolReadiness.tools.length) actionParams.desktop_tools = visibleToolReadiness.tools.join(',');
   if (providerReadiness.provider_id) actionParams.desktop_provider_id = providerReadiness.provider_id;
   if (providerReadiness.status) actionParams.desktop_provider_status = providerReadiness.status;
   if (providerReadiness.supported_tools.length) {
@@ -115,7 +263,7 @@ export function chatDesktopPermissionNotice(
     kind: 'warn',
     title: missing.length
       ? '桌面执行权限未就绪'
-      : blocking.length
+      : visibleBlocking.length
         ? '桌面运行条件需处理'
         : '桌面执行能力需检查',
     detail: details.join(''),
@@ -179,16 +327,28 @@ export function desktopProviderReadinessSummary(
   const healthStatus = stringValue(health?.status);
   const backendReleaseReady = booleanValue(provider?.desktop_backend_ready_for_public_release);
   const localProvider = providerKind === 'local_desktop';
+  const backgroundProvider = providerKind === 'background_desktop';
+  const backgroundProviderInstalledUnchecked = backgroundProvider
+    && status === 'installed_not_checked'
+    && !healthChecked;
   const ready = localProvider
     ? available && adapterReady && healthChecked && healthOk && backendReleaseReady
-    : booleanValue(capabilities.desktop_provider_ready) || (available && adapterReady);
-  const providerLabel = localProvider ? 'Direct Desktop' : '可选隔离桌面 Provider';
+    : backgroundProvider
+      ? available && adapterReady && healthChecked && healthOk
+      : booleanValue(capabilities.desktop_provider_ready) || (available && adapterReady);
+  const providerLabel = localProvider
+    ? '当前桌面'
+    : backgroundProvider
+      ? '后台操作组件'
+      : '隔离桌面';
   const inputSandboxLimited = ready
     && keyboardMouseCaptureKnown
     && !keyboardMouseCaptureSupported
     && requiresRealSandboxFor.length > 0;
   const detail = ready
-    ? inputSandboxLimited
+    ? backgroundProvider && !healthChecked
+      ? `${providerLabel}已安装；首次执行会检查权限。默认不移动真实鼠标，应用无法保持后台时会暂停，不会自动改用前台控制。`
+      : inputSandboxLimited
       ? `${providerLabel} 已就绪${supportedTools.length ? `，支持 ${formatDesktopToolList(toolDisplayLabels(supportedTools))}` : ''}；点击、输入和快捷键仍需要真实沙盒或受监管控制通道${controlledCommand.length ? `，可在 Agent Studio 启动 ${controlledProviderId || 'controlled provider'}。` : '。'}`
       : `${providerLabel} 已就绪${supportedTools.length ? `，支持 ${formatDesktopToolList(toolDisplayLabels(supportedTools))}` : ''}。`
     : providerId || status
@@ -196,7 +356,11 @@ export function desktopProviderReadinessSummary(
         ? healthStatus === 'permission_required'
           ? `${providerLabel} 运行时已安装，但当前主机权限或桌面会话未就绪。`
           : `${providerLabel} 运行时已安装，但尚未通过生产 Broker 与权限检查。`
-        : `${providerLabel} 未就绪；前台点击、输入或快捷键会保持预览、审批或转入 Agent Studio。`
+        : backgroundProvider
+          ? backgroundProviderInstalledUnchecked
+            ? `${providerLabel}已安装；首次执行会检查权限。默认不移动真实鼠标，应用无法保持后台时会暂停，不会自动改用前台控制。`
+            : `${providerLabel} 未就绪；需要操作软件时会暂停等待设置，不会自动改用前台控制。`
+          : `${providerLabel} 未就绪；前台点击、输入或快捷键会保持预览、审批或转入 Agent Studio。`
       : '';
   return {
     ready,
@@ -316,6 +480,18 @@ function stringValue(value: unknown): string {
 
 function booleanValue(value: unknown): boolean {
   return value === true || value === 'true' || value === '1';
+}
+
+function strictBooleanValue(value: unknown): boolean | null {
+  return typeof value === 'boolean' ? value : null;
+}
+
+function firstKnownBoolean(...values: unknown[]): boolean | null {
+  for (const value of values) {
+    const known = strictBooleanValue(value);
+    if (known !== null) return known;
+  }
+  return null;
 }
 
 function stringList(value: unknown): string[] {

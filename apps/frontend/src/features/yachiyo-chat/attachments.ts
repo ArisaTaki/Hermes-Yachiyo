@@ -45,6 +45,32 @@ export function clipboardImageFiles(data: DataTransfer | null) {
   return Array.from(data.files || []).filter((file) => file.type.startsWith('image/'));
 }
 
+function fileFromImageDataUrl(dataUrl: string, name: string, fallbackMimeType: string): File | null {
+  const commaIndex = dataUrl.indexOf(',');
+  if (!dataUrl.startsWith('data:image/') || commaIndex < 0) return null;
+  try {
+    const metadata = dataUrl.slice(5, commaIndex);
+    const declaredMimeType = String(metadata.split(';')[0] || '').trim().toLowerCase();
+    const mimeType = declaredMimeType || fallbackMimeType;
+    if (!mimeType.startsWith('image/')) return null;
+    let payload = dataUrl.slice(commaIndex + 1);
+    let buffer: ArrayBuffer;
+    if (metadata.split(';').some((part) => part.trim().toLowerCase() === 'base64')) {
+      payload = decodeURIComponent(payload.replace(/\s/g, ''));
+      const binary = atob(payload);
+      buffer = new ArrayBuffer(binary.length);
+      const bytes = new Uint8Array(buffer);
+      for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+    } else {
+      const bytes = new TextEncoder().encode(decodeURIComponent(payload));
+      buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+    }
+    return new File([buffer], name, { type: mimeType });
+  } catch {
+    return null;
+  }
+}
+
 export async function fileFromE2EImageDetail(detail: ChatE2EImageDetail | undefined): Promise<File | null> {
   if (!detail) return null;
   const mimeType = String(detail.mime_type || detail.mimeType || 'image/png').trim() || 'image/png';
@@ -52,14 +78,7 @@ export async function fileFromE2EImageDetail(detail: ChatE2EImageDetail | undefi
   const dataUrl = String(detail.data_url || detail.dataUrl || '').trim()
     || (detail.base64 ? `data:${mimeType};base64,${String(detail.base64).trim()}` : '');
   if (!dataUrl.startsWith('data:image/')) return null;
-  try {
-    const response = await fetch(dataUrl);
-    const blob = await response.blob();
-    if (!blob.type.startsWith('image/')) return null;
-    return new File([blob], name, { type: blob.type || mimeType });
-  } catch {
-    return null;
-  }
+  return fileFromImageDataUrl(dataUrl, name, mimeType);
 }
 
 export async function fileFromDesktopImageSelection(selection: DesktopImageSelection | undefined): Promise<File | null> {
@@ -71,14 +90,7 @@ export async function fileFromDesktopImageSelection(selection: DesktopImageSelec
   if (Number(selection.size || 0) > MAX_ATTACHMENT_BYTES) {
     throw new Error(`图片 ${name} 超过 8 MB`);
   }
-  try {
-    const response = await fetch(dataUrl);
-    const blob = await response.blob();
-    if (!blob.type.startsWith('image/')) return null;
-    return new File([blob], name, { type: blob.type || mimeType });
-  } catch {
-    return null;
-  }
+  return fileFromImageDataUrl(dataUrl, name, mimeType);
 }
 
 export function readPendingAttachment(file: File): Promise<PendingAttachment> {

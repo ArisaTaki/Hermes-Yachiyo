@@ -56,13 +56,13 @@ PLANNER_TOOL_PARITY_CASES: tuple[dict[str, Any], ...] = (
         "prompt": "打开 Linear，把这个 bug 记录成 issue",
         "expected_intent": "desktop_operation",
         "expected_plan_tools": [
-            "desktop.inspect_app",
+            "desktop.list_apps",
             "app.open_and_safe_shortcut",
             "desktop.safe_type_text",
             "desktop.ui_elements",
         ],
         "expected_request_tools": [
-            "desktop.inspect_app",
+            "desktop.list_apps",
             "app.open_and_safe_shortcut",
             "desktop.safe_type_text",
             "desktop.ui_elements",

@@ -118,7 +118,7 @@ Live2D アセットは任意で、メインリポジトリには含めません�
 
 リソース release:
 
-<https://github.com/kuguya-AI-app-develop/oha-yachiyo/releases>
+<https://github.com/kuguya-AI-app-develop/Hermes-Yachiyo/releases>
 
 推奨パス:
 
@@ -132,7 +132,7 @@ Live2D アセットは任意で、メインリポジトリには含めません�
 
 八千代 GPT-SoVITS 音色パッケージはアプリ DMG とは別に公開します。
 
-<https://github.com/kuguya-AI-app-develop/oha-yachiyo/releases/tag/tts-assets-yachiyo-gpt-sovits-v4>
+<https://github.com/kuguya-AI-app-develop/Hermes-Yachiyo/releases/tag/tts-assets-yachiyo-gpt-sovits-v4>
 
 プロアクティブケア / デスクトップ観察ページから `Oha-Yachiyo-yachiyo-gpt-sovits-v4.zip` を取り込みます。このパッケージには音色重みと参考音声のみが含まれ、GPT-SoVITS API サービス本体はユーザーがローカルで起動します。詳細は [docs/tts-voice-assets.md](docs/tts-voice-assets.md) を参照してください。
 

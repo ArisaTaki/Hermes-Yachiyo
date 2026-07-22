@@ -53,10 +53,15 @@ def test_build_runtime_agent_services_wires_skill_context_preparation_and_outcom
         runtime_agent_timeline=runtime_agent_timeline,
         runtime_agent_run_events=runtime_agent_run_events,
         runtime_trace_events=runtime_trace_events,
-        append_run_event=lambda _run_id, _event_type, _payload: None,
+        append_run_event=lambda _run_id, _event_type, _payload, **_kwargs: None,
         timeline_factory=lambda event, detail="", **extra: {"event": event, "detail": detail, **extra},
         memory_context_limit=12,
         runtime_task_model_events=runtime_task_model_events,
+        get_run=lambda run_id: {
+            "run_id": run_id,
+            "status": "running",
+            "updated_at": "version-1",
+        },
         update_run=lambda run_id, **kwargs: {"run_id": run_id, **kwargs},
         model_output_metadata=lambda _value: {},
         redact_secrets=lambda value: str(value),
@@ -81,6 +86,7 @@ def test_build_runtime_agent_services_wires_skill_context_preparation_and_outcom
     assert bundle.agent_run_outcomes._runtime_task_model_events is runtime_task_model_events
     assert bundle.agent_run_outcomes._runtime_agent_timeline is runtime_agent_timeline
     assert bundle.agent_run_outcomes._runtime_agent_run_events is runtime_agent_run_events
+    assert callable(bundle.agent_run_outcomes._get_run)
 
 
 def test_native_runtime_installs_agent_services_under_legacy_attribute_names(tmp_path) -> None:

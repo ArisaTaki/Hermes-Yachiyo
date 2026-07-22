@@ -1997,6 +1997,41 @@ def test_chat_task_snapshot_ignores_resolved_approval_cards_for_user_action() ->
     assert task.pending_approvals == []
 
 
+def test_chat_task_snapshot_drops_stale_pending_approval_after_terminal_failure() -> None:
+    task = agent_task_snapshot_from_payload(
+        {
+            "task_id": "task-approval-dependency-failed",
+            "run_id": "run-approval-dependency-failed",
+            "title": "Click the search field",
+            "status": "failed",
+            "recent_events": [
+                {
+                    "event_type": "agent.tool.approval_required",
+                    "payload": {
+                        "approval_id": "approval-never-requested",
+                        "tool": "desktop.click_ui_element",
+                        "input_preview": {
+                            "target": "search",
+                            "role_filter": "text",
+                        },
+                    },
+                },
+                {
+                    "event_type": "agent.desktop.intent_unverified",
+                    "payload": {
+                        "tool": "desktop.click_ui_element",
+                        "reason": "approval_dependency_unverified",
+                    },
+                },
+            ],
+        }
+    )
+
+    assert task.status == "failed"
+    assert task.needs_user_action is False
+    assert task.pending_approvals == []
+
+
 def test_run_snapshots_merge_stale_pending_approval_payload_with_resolved_events() -> None:
     payload = {
         "task_id": "task-stale-pending",

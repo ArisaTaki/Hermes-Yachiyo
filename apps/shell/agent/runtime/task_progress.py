@@ -13,6 +13,7 @@ from apps.shell.agent.runtime.event_scopes import (
     runtime_progress_event_payload as _runtime_progress_event_payload,
     runtime_progress_event_type as _runtime_progress_event_type,
 )
+from apps.shell.agent.runtime.recovery_identity import recovery_action_identity
 
 
 def append_task_progress_events_for_tool_result(
@@ -75,6 +76,10 @@ def append_task_progress_events_for_tool_result(
     source_event = {
         "event": str(tool_event.get("event") or ""),
         "detail": str(tool_event.get("detail") or tool_name),
+        "request_id": str(
+            tool_event.get("request_id") or tool_request.get("request_id") or ""
+        ).strip(),
+        "tool_call_id": str(tool_event.get("tool_call_id") or "").strip(),
     }
     base_payload = {
         "source": str(tool_request.get("source") or "runtime_planner"),
@@ -84,9 +89,15 @@ def append_task_progress_events_for_tool_result(
         "plan_id": str(tool_request.get("plan_id") or ""),
         "step_id": step_id,
         "tool": tool_name,
+        "request_id": str(tool_request.get("request_id") or "").strip(),
+        "tool_call_id": str(tool_request.get("tool_call_id") or "").strip(),
         "source_event": source_event,
         "result_preview": _task_progress_result_preview(result),
+        "actor": "native_runtime",
+        "visibility": "internal",
     }
+    if run_id:
+        base_payload["run_id"] = str(run_id).strip()
     base_payload.update(
         _task_progress_verification_context(
             tool_request,
@@ -239,7 +250,12 @@ def append_task_progress_events_for_tool_start(
         statuses={"in_progress", "completed", "blocked", "skipped"},
     ):
         return
-    source_event = {"event": "agent.tool.started", "detail": tool_name}
+    source_event = {
+        "event": "agent.tool.started",
+        "detail": tool_name,
+        "request_id": str(tool_request.get("request_id") or "").strip(),
+        "tool_call_id": str(tool_request.get("tool_call_id") or "").strip(),
+    }
     base_payload = {
         "source": str(tool_request.get("source") or "runtime_planner"),
         "core_id": str(tool_request.get("core_id") or ""),
@@ -248,9 +264,15 @@ def append_task_progress_events_for_tool_start(
         "plan_id": str(tool_request.get("plan_id") or ""),
         "step_id": step_id,
         "tool": tool_name,
+        "request_id": str(tool_request.get("request_id") or "").strip(),
+        "tool_call_id": str(tool_request.get("tool_call_id") or "").strip(),
         "source_event": source_event,
         "runtime_status": "running",
+        "actor": "native_runtime",
+        "visibility": "internal",
     }
+    if run_id:
+        base_payload["run_id"] = str(run_id).strip()
     for key in (
         "task_id",
         "run_group_id",
@@ -750,6 +772,12 @@ def _append_replan_recovery_update_event(
     }
     if action_id:
         payload["replan_recovery_action_id"] = action_id
+    recovery_identity = recovery_action_identity(
+        tool_request,
+        replan_request_id=request_id,
+    )
+    if recovery_identity:
+        payload["replan_recovery_identity"] = recovery_identity
     if replan_triggers:
         payload["replan_triggers"] = replan_triggers
     if replan_signal_ids:
@@ -828,6 +856,7 @@ def _replan_recovery_update_action_record(
         "runtime_stage",
         "target_capability_id",
         "replan_recovery_action_id",
+        "replan_recovery_identity",
     ):
         value = payload.get(key) or tool_request.get(key)
         if value not in (None, "", [], {}):
@@ -900,6 +929,8 @@ def _append_replan_progress_event(
         return
     scoped_event_type = _runtime_progress_event_type(event_type, payload)
     event_payload = _runtime_progress_event_payload(payload, event_type, scoped_event_type)
+    if run_id:
+        event_payload["run_id"] = str(run_id).strip()
     timeline.append(timeline_factory(scoped_event_type, detail, **event_payload))
     if run_id and append_run_event is not None:
         append_run_event(run_id, scoped_event_type, event_payload)
@@ -1041,6 +1072,11 @@ def _task_progress_result_preview(result: Mapping[str, Any]) -> dict[str, Any]:
         "blocked_by_user_goal",
         "approval_required",
         "verification_failed",
+        "content_verified",
+        "launch_verified",
+        "postcondition_verified",
+        "verification_passed",
+        "verified",
     ):
         if key in result:
             preview[key] = result.get(key)

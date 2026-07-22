@@ -284,6 +284,51 @@ def test_post_runs_http_route_maps_idempotency_key(monkeypatch):
         _restore_module_prefixes(("fastapi",), saved_modules)
 
 
+def test_post_runs_http_route_rejects_run_group_attachment(monkeypatch):
+    saved_modules = _unload_module_prefixes(("fastapi",))
+    try:
+        try:
+            from fastapi import FastAPI
+            from fastapi.testclient import TestClient
+        except ModuleNotFoundError as exc:
+            pytest.skip(f"FastAPI/TestClient dependency is not installed: {exc.name}")
+
+        route_path = Path(__file__).resolve().parents[1] / "apps" / "bridge" / "routes" / "runs.py"
+        spec = importlib.util.spec_from_file_location(
+            "_oha_runs_group_authority_route_http_under_test",
+            route_path,
+        )
+        assert spec is not None
+        assert spec.loader is not None
+        run_route_module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = run_route_module
+        spec.loader.exec_module(run_route_module)
+
+        class FakeRunEngine:
+            def create_run_for_runnable(self, **_kwargs):
+                raise AssertionError("public Group attachment must fail before runtime")
+
+        route_app = FastAPI()
+        route_app.state.runtime = SimpleNamespace(agent_runtime_service=FakeRunEngine())
+        route_app.include_router(run_route_module.router)
+
+        with TestClient(route_app) as client:
+            response = client.post(
+                "/runs",
+                json={
+                    "runnable_id": "agent-coding",
+                    "user_goal": "join unrelated group",
+                    "run_group_id": "run-group-unrelated",
+                },
+            )
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == "public_run_group_attachment_forbidden"
+    finally:
+        sys.modules.pop("_oha_runs_group_authority_route_http_under_test", None)
+        _restore_module_prefixes(("fastapi",), saved_modules)
+
+
 def test_post_runs_http_route_rejects_sensitive_idempotency_key_before_persistence(tmp_path, monkeypatch):
     saved_modules = _unload_module_prefixes(("fastapi",))
     try:
@@ -507,7 +552,16 @@ def test_chat_message_http_route_maps_idempotency_key_header(monkeypatch):
             def __init__(self, runtime):
                 assert runtime is fake_runtime
 
-            def send_message(self, text, attachments=None, runnable_id="", client_message_id=""):
+            def send_message_in_session(
+                self,
+                session_id,
+                text,
+                attachments=None,
+                *,
+                runnable_id="",
+                client_message_id="",
+            ):
+                assert session_id == fake_runtime.chat_session.session_id
                 return {
                     "ok": True,
                     "text": text,
@@ -516,7 +570,9 @@ def test_chat_message_http_route_maps_idempotency_key_header(monkeypatch):
                     "client_message_id": client_message_id,
                 }
 
-        fake_runtime = SimpleNamespace()
+        fake_runtime = SimpleNamespace(
+            chat_session=SimpleNamespace(session_id="session-current")
+        )
         monkeypatch.setattr(ui_route_module, "get_runtime", lambda: fake_runtime)
         monkeypatch.setattr(ui_route_module, "ChatAPI", FakeChatAPI)
         route_app = FastAPI()
@@ -557,7 +613,7 @@ def test_chat_message_http_route_rejects_sensitive_idempotency_key_header(tmp_pa
 
         session = ChatSession(session_id="http-sensitive-client-message-id-session")
         session.attach_store(store, load_existing=False)
-        runtime = SimpleNamespace(state=AppState(), chat_session=session)
+        runtime = SimpleNamespace(state=AppState(), chat_session=session, store=store)
         monkeypatch.setattr(ui_route_module, "get_runtime", lambda: runtime)
         route_app = FastAPI()
         route_app.include_router(ui_route_module.router)
@@ -606,11 +662,12 @@ def test_chat_retry_http_route_returns_retry_projection(monkeypatch):
             def __init__(self, runtime):
                 assert runtime is fake_runtime
 
-            def retry_message(self, message_id):
-                calls.append(("retry_message", message_id))
+            def retry_message(self, message_id, *, client_message_id=""):
+                calls.append(("retry_message", message_id, client_message_id))
                 return {
                     "ok": True,
                     "message_id": message_id,
+                    "client_message_id": client_message_id,
                     "task_id": "retry-task-1",
                     "status": "processing",
                 }
@@ -624,17 +681,23 @@ def test_chat_retry_http_route_returns_retry_projection(monkeypatch):
         with TestClient(route_app) as client:
             response = client.post(
                 "/ui/chat/messages/retry",
-                json={"message_id": "failed-message-1"},
+                json={
+                    "message_id": "failed-message-1",
+                    "client_message_id": "retry-client-1",
+                },
             )
 
         assert response.status_code == 200
         assert response.json() == {
             "ok": True,
             "message_id": "failed-message-1",
+            "client_message_id": "retry-client-1",
             "task_id": "retry-task-1",
             "status": "processing",
         }
-        assert calls == [("retry_message", "failed-message-1")]
+        assert calls == [
+            ("retry_message", "failed-message-1", "retry-client-1"),
+        ]
     finally:
         sys.modules.pop("_oha_ui_retry_route_http_under_test", None)
         _restore_module_prefixes(("fastapi",), saved_modules)
@@ -721,7 +784,8 @@ def test_chat_session_http_routes_preserve_lifecycle_payloads(monkeypatch):
             def __init__(self, runtime):
                 assert runtime is fake_runtime
 
-            def get_messages(self, limit, anchor_message_id=""):
+            def get_messages_in_session(self, session_id, limit, anchor_message_id=""):
+                assert session_id == fake_runtime.chat_session.session_id
                 payload = {"limit": limit, "anchor_message_id": anchor_message_id}
                 calls.append(("get_messages", payload))
                 return {"ok": True, "messages": [], **payload}
@@ -751,14 +815,17 @@ def test_chat_session_http_routes_preserve_lifecycle_payloads(monkeypatch):
 
             def clear_session(self):
                 calls.append(("clear_session", {}))
+                fake_runtime.chat_session.session_id = "session-new"
                 return {
                     "ok": True,
                     "session_id": "session-new",
                     "previous_session_id": "session-current",
                 }
 
-            def discard_empty_current_session(self):
+            def discard_empty_current_session(self, session_id):
+                assert session_id == "session-new"
                 calls.append(("discard_empty_current_session", {}))
+                fake_runtime.chat_session.session_id = "session-current"
                 return {
                     "ok": True,
                     "discarded": True,
@@ -766,8 +833,10 @@ def test_chat_session_http_routes_preserve_lifecycle_payloads(monkeypatch):
                     "session_id": "session-current",
                 }
 
-            def delete_current_session(self):
+            def delete_session(self, session_id):
+                assert session_id == "session-current"
                 calls.append(("delete_current_session", {}))
+                fake_runtime.chat_session.session_id = "session-after-delete"
                 return {
                     "ok": True,
                     "deleted_session_id": "session-current",
@@ -775,7 +844,9 @@ def test_chat_session_http_routes_preserve_lifecycle_payloads(monkeypatch):
                     "remaining_sessions": 0,
                 }
 
-        fake_runtime = SimpleNamespace()
+        fake_runtime = SimpleNamespace(
+            chat_session=SimpleNamespace(session_id="session-current")
+        )
         monkeypatch.setattr(ui_route_module, "get_runtime", lambda: fake_runtime)
         monkeypatch.setattr(ui_route_module, "ChatAPI", FakeChatAPI)
         route_app = FastAPI()
@@ -1010,7 +1081,16 @@ def test_chat_message_image_attachment_http_roundtrip_maps_idempotency_and_file_
             def __init__(self, runtime):
                 assert runtime is fake_runtime
 
-            def send_message(self, text, attachments=None, runnable_id="", client_message_id=""):
+            def send_message_in_session(
+                self,
+                session_id,
+                text,
+                attachments=None,
+                *,
+                runnable_id="",
+                client_message_id="",
+            ):
+                assert session_id == fake_runtime.chat_session.session_id
                 calls.append(
                     (
                         "send",
@@ -1033,7 +1113,9 @@ def test_chat_message_image_attachment_http_roundtrip_maps_idempotency_and_file_
                     "name": "screen.png",
                 }
 
-        fake_runtime = SimpleNamespace()
+        fake_runtime = SimpleNamespace(
+            chat_session=SimpleNamespace(session_id="session-current")
+        )
         monkeypatch.setattr(ui_route_module, "get_runtime", lambda: fake_runtime)
         monkeypatch.setattr(ui_route_module, "ChatAPI", FakeChatAPI)
         route_app = FastAPI()
@@ -1108,8 +1190,9 @@ def test_chat_delegated_summary_http_route_returns_followup_projection(monkeypat
             def __init__(self, runtime):
                 assert runtime is fake_runtime
 
-            def summarize_delegated_run(self, run_id):
+            def summarize_delegated_run(self, run_id, *, conversation_id=""):
                 assert run_id == "run_delegate_http"
+                assert conversation_id == ""
                 return {
                     "ok": True,
                     "summary_created": True,
@@ -1692,6 +1775,7 @@ def test_chat_approval_bridge_route_resumes_native_run(tmp_path, monkeypatch):
         runner_task = asyncio.create_task(runner._execute_with_state(task.task_id))
         try:
             run = None
+            candidate = None
             for _ in range(150):
                 try:
                     candidate = service.get_run(service.get_task_run_link(task.task_id)["run_id"])
@@ -1702,7 +1786,11 @@ def test_chat_approval_bridge_route_resumes_native_run(tmp_path, monkeypatch):
                     run = candidate
                     break
                 await asyncio.sleep(0.02)
-            assert run is not None
+            assert run is not None, (
+                candidate.get("status"),
+                candidate.get("result"),
+                candidate.get("pending_approval"),
+            )
 
             waiting_messages = await ui_routes.get_chat_messages()
             assistant = next(message for message in waiting_messages["messages"] if message["role"] == "assistant")
@@ -1712,7 +1800,12 @@ def test_chat_approval_bridge_route_resumes_native_run(tmp_path, monkeypatch):
             assert assistant["metadata"]["run_status"] == "approval_required"
             assert assistant["metadata"]["pending_approval"]["tool"] == "workspace.write_patch"
 
-            approved = await agent_routes.approve_run_approval(run["run_id"])
+            approved = await agent_routes.approve_run_approval(
+                run["run_id"],
+                agent_routes.ApprovalRejectRequest(
+                    approval_id=run["pending_approval"]["approval_id"]
+                ),
+            )
             assert approved["status"] == "running"
             await runner_task
 
@@ -1842,6 +1935,7 @@ def test_chat_approval_bridge_route_projects_failed_approved_tool(tmp_path, monk
         runner_task = asyncio.create_task(runner._execute_with_state(task.task_id))
         try:
             run = None
+            candidate = None
             for _ in range(150):
                 try:
                     candidate = service.get_run(service.get_task_run_link(task.task_id)["run_id"])
@@ -1852,7 +1946,11 @@ def test_chat_approval_bridge_route_projects_failed_approved_tool(tmp_path, monk
                     run = candidate
                     break
                 await asyncio.sleep(0.02)
-            assert run is not None
+            assert run is not None, (
+                candidate.get("status"),
+                candidate.get("result"),
+                candidate.get("pending_approval"),
+            )
 
             waiting_messages = await ui_routes.get_chat_messages()
             assistant = next(message for message in waiting_messages["messages"] if message["role"] == "assistant")
@@ -1862,7 +1960,12 @@ def test_chat_approval_bridge_route_projects_failed_approved_tool(tmp_path, monk
             assert assistant["metadata"]["run_status"] == "approval_required"
             assert assistant["metadata"]["pending_approval"]["tool"] == "terminal.run"
 
-            approved = await agent_routes.approve_run_approval(run["run_id"])
+            approved = await agent_routes.approve_run_approval(
+                run["run_id"],
+                agent_routes.ApprovalRejectRequest(
+                    approval_id=run["pending_approval"]["approval_id"]
+                ),
+            )
             assert approved["status"] == "failed"
             assert approved["pending_approval"] == {}
             assert "terminal.run 执行失败" in approved["result"]
@@ -2020,11 +2123,18 @@ def test_chat_delegated_summary_bridge_route_runs_native_followup(tmp_path, monk
             assert sent["ok"] is True
             source_task = state.get_task(sent["task_id"])
             assert source_task is not None
-            state.update_task_status(
-                source_task.task_id,
+            if source_task.status not in {
                 TaskStatus.COMPLETED,
-                result="我会交给 Bridge Summary Agent 处理。",
-            )
+                TaskStatus.CANCELLED,
+                TaskStatus.FAILED,
+            }:
+                state.update_task_status(
+                    source_task.task_id,
+                    TaskStatus.COMPLETED,
+                    result="我会交给 Bridge Summary Agent 处理。",
+                )
+            else:
+                assert source_task.status == TaskStatus.COMPLETED
             session.upsert_assistant_message(
                 task_id=source_task.task_id,
                 content=(
@@ -2480,13 +2590,29 @@ def test_chat_direct_group_agent_bridge_route_runs_native_summary(tmp_path, monk
         assert sent["ok"] is True
         assert sent["agent_run_id"]
 
-        agent_run = await wait_for(
-            lambda: (
-                service.get_run(sent["agent_run_id"])
-                if service.get_run(sent["agent_run_id"])["status"] in {"completed", "failed", "cancelled", "approval_required"}
-                else None
+        agent_run = service.get_run(sent["agent_run_id"])
+        for _ in range(150):
+            if agent_run["status"] in {
+                "completed",
+                "failed",
+                "cancelled",
+                "approval_required",
+            }:
+                break
+            await asyncio.sleep(0.02)
+            agent_run = service.get_run(sent["agent_run_id"])
+        else:
+            event_facts = [
+                (
+                    event["event_type"],
+                    (event.get("payload") or {}).get("tool"),
+                )
+                for event in service.list_run_events(agent_run["run_id"])["events"]
+            ]
+            raise AssertionError(
+                "direct agent run did not become terminal: "
+                f"{agent_run['status']} events={event_facts!r}"
             )
-        )
         assert agent_run["kind"] == "agent_run"
         assert agent_run["status"] == "completed"
         assert agent_run["result"] == "Design bridge direct result"
@@ -2732,7 +2858,10 @@ def test_chat_direct_group_agent_bridge_route_runs_rejected_summary(tmp_path, mo
 
         rejected = await agent_routes.reject_run_approval(
             waiting["run_id"],
-            agent_routes.ApprovalRejectRequest(reason="Rejected from Bridge direct group"),
+            agent_routes.ApprovalRejectRequest(
+                approval_id=waiting["pending_approval"]["approval_id"],
+                reason="Rejected from Bridge direct group",
+            ),
         )
         assert rejected["status"] == "cancelled"
         assert rejected["result"] == "工具审批已拒绝：Rejected from Bridge direct group"
@@ -2988,7 +3117,12 @@ def test_chat_direct_group_agent_bridge_route_runs_approved_summary(tmp_path, mo
         assert waiting["pending_approval"]["tool"] == "terminal.run"
         assert waiting["pending_approval"]["input_preview"]["command"] == "printf bridge-approved"
 
-        approved = await agent_routes.approve_run_approval(waiting["run_id"])
+        approved = await agent_routes.approve_run_approval(
+            waiting["run_id"],
+            agent_routes.ApprovalRejectRequest(
+                approval_id=waiting["pending_approval"]["approval_id"]
+            ),
+        )
         assert approved["status"] == "completed"
         assert approved["result"] == "Design bridge approved result"
         approved_replay = await run_routes.list_run_events(waiting["run_id"], after_sequence=0, limit=200)
@@ -3172,7 +3306,20 @@ def test_chat_cancel_bridge_route_cancels_native_run_and_ignores_late_output(tmp
         runner._in_progress[task.task_id] = runner_task
         runner_task.add_done_callback(lambda _future: runner._in_progress.pop(task.task_id, None))
         try:
-            assert await asyncio.to_thread(model_started.wait, 3)
+            if not await asyncio.to_thread(model_started.wait, 3):
+                link = service.get_task_run_link(task.task_id)
+                stalled_run = service.get_run(link["run_id"])
+                event_facts = [
+                    (
+                        event["event_type"],
+                        (event.get("payload") or {}).get("tool"),
+                    )
+                    for event in service.list_run_events(stalled_run["run_id"])["events"]
+                ]
+                raise AssertionError(
+                    "slow model call did not start: "
+                    f"status={stalled_run['status']} events={event_facts!r}"
+                )
             run = service.get_run(service.get_task_run_link(task.task_id)["run_id"])
             assert run["status"] == "running"
 
@@ -3289,12 +3436,26 @@ def test_agent_and_workflow_run_http_routes_map_idempotency_key_header(monkeypat
                 self.calls.append(("get_run", {"run_id": run_id}))
                 return {"run_id": run_id, "status": "approval_required"}
 
-            def approve_run_approval(self, run_id):
-                self.calls.append(("approve_run_approval", {"run_id": run_id}))
+            def approve_run_approval(self, run_id, approval_id):
+                self.calls.append(
+                    (
+                        "approve_run_approval",
+                        {"run_id": run_id, "approval_id": approval_id},
+                    )
+                )
                 return {"run_id": run_id, "status": "running"}
 
-            def reject_run_approval(self, run_id, reason):
-                self.calls.append(("reject_run_approval", {"run_id": run_id, "reason": reason}))
+            def reject_run_approval(self, run_id, reason, approval_id):
+                self.calls.append(
+                    (
+                        "reject_run_approval",
+                        {
+                            "run_id": run_id,
+                            "reason": reason,
+                            "approval_id": approval_id,
+                        },
+                    )
+                )
                 return {"run_id": run_id, "status": "cancelled", "result": reason}
 
             def cancel_run(self, run_id):
@@ -3324,10 +3485,16 @@ def test_agent_and_workflow_run_http_routes_map_idempotency_key_header(monkeypat
             )
             runs_response = client.get("/ui/runs?limit=7")
             detail_response = client.get("/ui/runs/run-1")
-            approve_response = client.post("/ui/runs/run-1/approval/approve")
+            approve_response = client.post(
+                "/ui/runs/run-1/approval/approve",
+                json={"approval_id": "approval-1"},
+            )
             reject_response = client.post(
                 "/ui/runs/run-1/approval/reject",
-                json={"reason": "Rejected from HTTP"},
+                json={
+                    "approval_id": "approval-1",
+                    "reason": "Rejected from HTTP",
+                },
             )
             cancel_response = client.post("/ui/runs/run-1/cancel")
 
@@ -3364,12 +3531,87 @@ def test_agent_and_workflow_run_http_routes_map_idempotency_key_header(monkeypat
             ),
             ("list_runs", {"limit": 7}),
             ("get_run", {"run_id": "run-1"}),
-            ("approve_run_approval", {"run_id": "run-1"}),
-            ("reject_run_approval", {"run_id": "run-1", "reason": "Rejected from HTTP"}),
+            (
+                "approve_run_approval",
+                {"run_id": "run-1", "approval_id": "approval-1"},
+            ),
+            (
+                "reject_run_approval",
+                {
+                    "run_id": "run-1",
+                    "reason": "Rejected from HTTP",
+                    "approval_id": "approval-1",
+                },
+            ),
             ("cancel_run", {"run_id": "run-1"}),
         ]
     finally:
         sys.modules.pop("_oha_agent_route_http_under_test", None)
+        _restore_module_prefixes(("fastapi",), saved_modules)
+
+
+def test_public_run_routes_reject_run_group_attachment(monkeypatch):
+    saved_modules = _unload_module_prefixes(("fastapi",))
+    try:
+        try:
+            from fastapi import FastAPI
+            from fastapi.testclient import TestClient
+        except ModuleNotFoundError as exc:
+            pytest.skip(f"FastAPI/TestClient dependency is not installed: {exc.name}")
+
+        route_path = Path(__file__).resolve().parents[1] / "apps" / "bridge" / "routes" / "agents.py"
+        spec = importlib.util.spec_from_file_location(
+            "_oha_run_group_authority_route_under_test",
+            route_path,
+        )
+        assert spec is not None
+        assert spec.loader is not None
+        agent_route_module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = agent_route_module
+        spec.loader.exec_module(agent_route_module)
+
+        class FakeRuntimeService:
+            def __init__(self) -> None:
+                self.calls: list[tuple[str, dict]] = []
+
+            def create_agent_run(self, payload: dict) -> dict:
+                self.calls.append(("create_agent_run", dict(payload)))
+                return {"ok": True}
+
+            def create_workflow_run(self, payload: dict) -> dict:
+                self.calls.append(("create_workflow_run", dict(payload)))
+                return {"ok": True}
+
+        service = FakeRuntimeService()
+        route_app = FastAPI()
+        route_app.state.runtime = SimpleNamespace(agent_runtime_service=service)
+        route_app.include_router(agent_route_module.router)
+
+        with TestClient(route_app) as client:
+            agent_response = client.post(
+                "/ui/agent-runs",
+                json={
+                    "agent_id": "agent-1",
+                    "user_goal": "join unrelated group",
+                    "run_group_id": "run-group-unrelated",
+                },
+            )
+            workflow_response = client.post(
+                "/ui/workflow-runs",
+                json={
+                    "workflow_id": "workflow-1",
+                    "user_goal": "join unrelated group",
+                    "run_group_id": "run-group-unrelated",
+                },
+            )
+
+        assert agent_response.status_code == 400
+        assert workflow_response.status_code == 400
+        assert agent_response.json()["detail"] == "public_run_group_attachment_forbidden"
+        assert workflow_response.json()["detail"] == "public_run_group_attachment_forbidden"
+        assert service.calls == []
+    finally:
+        sys.modules.pop("_oha_run_group_authority_route_under_test", None)
         _restore_module_prefixes(("fastapi",), saved_modules)
 
 
@@ -4390,7 +4632,12 @@ def test_agent_run_http_routes_roundtrip_approval_detail_and_replay(tmp_path, mo
 
                 detail_before = client.get(f"/ui/runs/{run_id}")
                 replay_before = client.get(f"/runs/{run_id}/events?after_sequence=0&limit=200")
-                approve_response = client.post(f"/ui/runs/{run_id}/approval/approve")
+                approve_response = client.post(
+                    f"/ui/runs/{run_id}/approval/approve",
+                    json={
+                        "approval_id": waiting["pending_approval"]["approval_id"]
+                    },
+                )
                 detail_after = client.get(f"/ui/runs/{run_id}")
                 replay_after = client.get(f"/runs/{run_id}/events?after_sequence=0&limit=200")
 
@@ -4549,7 +4796,10 @@ def test_agent_run_http_routes_roundtrip_reject_detail_and_replay(tmp_path, monk
                 replay_before = client.get(f"/runs/{run_id}/events?after_sequence=0&limit=200")
                 reject_response = client.post(
                     f"/ui/runs/{run_id}/approval/reject",
-                    json={"reason": "Rejected from HTTP"},
+                    json={
+                        "approval_id": waiting["pending_approval"]["approval_id"],
+                        "reason": "Rejected from HTTP",
+                    },
                 )
                 detail_after = client.get(f"/ui/runs/{run_id}")
                 replay_after = client.get(f"/runs/{run_id}/events?after_sequence=0&limit=200")
@@ -4907,7 +5157,14 @@ def test_workflow_run_http_routes_roundtrip_child_approval_detail_and_replay(tmp
                 child_detail_before = client.get(f"/ui/runs/{child_run_id}")
                 parent_replay_before = client.get(f"/runs/{parent_run_id}/events?after_sequence=0&limit=200")
                 child_replay_before = client.get(f"/runs/{child_run_id}/events?after_sequence=0&limit=200")
-                approve_response = client.post(f"/ui/runs/{child_run_id}/approval/approve")
+                approve_response = client.post(
+                    f"/ui/runs/{child_run_id}/approval/approve",
+                    json={
+                        "approval_id": child_detail_before.json()["pending_approval"][
+                            "approval_id"
+                        ]
+                    },
+                )
                 parent_detail_after = client.get(f"/ui/workflow-runs/{parent_run_id}")
                 child_detail_after = client.get(f"/ui/runs/{child_run_id}")
                 group_after = client.get(f"/ui/run-groups/{waiting_parent['run_group_id']}")
@@ -5118,7 +5375,12 @@ def test_workflow_run_http_routes_roundtrip_child_reject_detail_and_replay(tmp_p
                 child_replay_before = client.get(f"/runs/{child_run_id}/events?after_sequence=0&limit=200")
                 reject_response = client.post(
                     f"/ui/runs/{child_run_id}/approval/reject",
-                    json={"reason": "Rejected child from HTTP"},
+                    json={
+                        "approval_id": child_detail_before.json()["pending_approval"][
+                            "approval_id"
+                        ],
+                        "reason": "Rejected child from HTTP",
+                    },
                 )
                 parent_detail_after = client.get(f"/ui/workflow-runs/{parent_run_id}")
                 child_detail_after = client.get(f"/ui/runs/{child_run_id}")
@@ -5543,7 +5805,12 @@ def test_workflow_approval_node_http_roundtrip_approve_detail_and_replay(tmp_pat
 
                 detail_before = client.get(f"/ui/workflow-runs/{run_id}")
                 replay_before = client.get(f"/runs/{run_id}/events?after_sequence=0&limit=200")
-                approve_response = client.post(f"/ui/runs/{run_id}/approval/approve")
+                approve_response = client.post(
+                    f"/ui/runs/{run_id}/approval/approve",
+                    json={
+                        "approval_id": waiting["pending_approval"]["approval_id"]
+                    },
+                )
                 detail_after = client.get(f"/ui/workflow-runs/{run_id}")
                 replay_after = client.get(f"/runs/{run_id}/events?after_sequence=0&limit=200")
                 artifact_response = client.get(f"/ui/runs/{run_id}/artifacts/summary.md")
@@ -5713,7 +5980,10 @@ def test_workflow_approval_node_http_roundtrip_reject_detail_and_replay(tmp_path
                 replay_before = client.get(f"/runs/{run_id}/events?after_sequence=0&limit=200")
                 reject_response = client.post(
                     f"/ui/runs/{run_id}/approval/reject",
-                    json={"reason": "Rejected workflow gate from HTTP"},
+                    json={
+                        "approval_id": waiting["pending_approval"]["approval_id"],
+                        "reason": "Rejected workflow gate from HTTP",
+                    },
                 )
                 detail_after = client.get(f"/ui/workflow-runs/{run_id}")
                 group_after = client.get(f"/ui/run-groups/{waiting['run_group_id']}")

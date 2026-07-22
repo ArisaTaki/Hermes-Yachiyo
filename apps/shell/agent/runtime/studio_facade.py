@@ -322,7 +322,9 @@ class RuntimeStudioFacadeMixin:
         actor: str = "native_runtime",
         visibility: str = "user",
         sensitivity: str = "public",
-    ) -> dict[str, Any]:
+        expected_status: str | None = None,
+        expected_updated_at: str | None = None,
+    ) -> dict[str, Any] | None:
         return self.run_timeline.append_event(
             run_id,
             event_type,
@@ -330,6 +332,8 @@ class RuntimeStudioFacadeMixin:
             actor=actor,
             visibility=visibility,
             sensitivity=sensitivity,
+            expected_status=expected_status,
+            expected_updated_at=expected_updated_at,
         )
 
     def list_run_events(

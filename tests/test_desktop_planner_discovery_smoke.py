@@ -76,7 +76,6 @@ def test_desktop_planner_discovery_smoke_covers_discover_operate_verify():
         "desktop.list_apps",
         "app.focus",
         "desktop.hotkey",
-        "desktop.ui_elements",
     ]
     assert [request["tool"] for request in cases["app_scoped_safe_shortcut"]["requests"]] == [
         "desktop.list_apps",
@@ -91,14 +90,13 @@ def test_desktop_planner_discovery_smoke_covers_discover_operate_verify():
         request["tool"]
         for request in cases["app_scoped_safe_shortcut_with_inspect"]["requests"]
     ] == [
-        "desktop.inspect_app",
+        "desktop.list_apps",
         "app.focus_and_safe_shortcut",
         "desktop.ui_elements",
     ]
     assert cases["app_scoped_safe_shortcut_with_inspect"]["requests"][0]["input"] == {
-        "app_name": "PixelForge",
-        "open_if_needed": True,
-        "focus": True,
+        "query": "PixelForge",
+        "limit": 20,
     }
     assert cases["app_scoped_safe_shortcut_with_inspect"]["requests"][1]["input"] == {
         "app_name": "PixelForge",

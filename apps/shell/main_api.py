@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import re
+import shlex
 import shutil
 import socket
 import struct
@@ -371,14 +372,14 @@ _NATIVE_TOOL_CONFIG_CATALOG: tuple[dict[str, Any], ...] = (
     },
     {
         "id": "browser-cdp",
-        "title": "浏览器 CDP 高级控制",
-        "summary": "连接已经开启远程调试端口的 Chrome，用于 CDP 级别的高级浏览器操作。",
+        "title": "Yachiyo 独立浏览器",
+        "summary": "启动专属 Chrome 会话，不读取或操作你正在使用的浏览器标签页。",
         "action": "launch_browser_cdp",
         "fields": (
             {
                 "key": "browser.cdp_url",
                 "config_key": "browser.cdp_url",
-                "label": "CDP Endpoint",
+                "label": "独立浏览器连接地址（高级）",
                 "kind": "text",
                 "placeholder": "http://127.0.0.1:9222",
             },
@@ -690,6 +691,90 @@ def _store_native_tool_config_projection(projection: dict[str, Any]) -> None:
     except OSError as exc:
         logger.warning("写入 Native 工具配置投影失败: %s", exc)
         raise
+
+
+def _browser_cdp_port_reachable(host: str, port: int) -> bool:
+    try:
+        with socket.create_connection((host, int(port)), timeout=0.3):
+            return True
+    except OSError:
+        return False
+
+
+def _reserve_browser_cdp_port(host: str = "127.0.0.1") -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as candidate:
+        candidate.bind((host, 0))
+        return int(candidate.getsockname()[1])
+
+
+def _browser_cdp_profile_dir() -> Path:
+    return (Path.home() / ".oha-yachiyo" / "chrome-debug").resolve(strict=False)
+
+
+def _find_owned_browser_cdp_process(
+    profile_dir: Path,
+    *,
+    port: int | None = None,
+) -> dict[str, Any]:
+    """Find Chrome only when both its dedicated profile and CDP port match."""
+
+    try:
+        result = subprocess.run(
+            ["ps", "-axo", "pid=,command="],
+            capture_output=True,
+            text=True,
+            timeout=2.0,
+            check=False,
+        )
+    except Exception:
+        return {}
+    if result.returncode != 0:
+        return {}
+    expected_profile = profile_dir.expanduser().resolve(strict=False)
+    for line in result.stdout.splitlines():
+        match = re.match(r"\s*(\d+)\s+(.+)", line)
+        if match is None:
+            continue
+        try:
+            tokens = shlex.split(match.group(2))
+        except ValueError:
+            continue
+        profile_value = next(
+            (
+                token.split("=", 1)[1]
+                for token in tokens
+                if token.startswith("--user-data-dir=")
+            ),
+            "",
+        )
+        port_value = next(
+            (
+                token.split("=", 1)[1]
+                for token in tokens
+                if token.startswith("--remote-debugging-port=")
+            ),
+            "",
+        )
+        try:
+            candidate_profile = Path(profile_value).expanduser().resolve(strict=False)
+            candidate_port = int(port_value)
+        except (OSError, TypeError, ValueError):
+            continue
+        if candidate_profile != expected_profile:
+            continue
+        if port is not None and candidate_port != int(port):
+            continue
+        candidate_pid = int(match.group(1))
+        from apps.shell.agent.tools.browser import _browser_cdp_process_matches
+
+        if not _browser_cdp_process_matches(
+            f"http://127.0.0.1:{candidate_port}",
+            pid=candidate_pid,
+            profile_dir=str(expected_profile),
+        ):
+            continue
+        return {"pid": candidate_pid, "port": candidate_port}
+    return {}
 
 
 def _tool_projection_values(projection: dict[str, Any]) -> tuple[dict[tuple[str, ...], str], dict[str, str]]:
@@ -2999,34 +3084,45 @@ class MainWindowAPI:
         }
 
     def launch_browser_cdp(self) -> Dict[str, Any]:
-        """Best-effort 启动/连接本机 Chrome CDP，并写入 browser.cdp_url。"""
+        """启动 Oha 专属 Chrome CDP；绝不认领来源不明的本机端口。"""
         host = "127.0.0.1"
-        port = 9222
+        profile_dir = _browser_cdp_profile_dir()
+        existing = _find_owned_browser_cdp_process(profile_dir)
+        reuse_existing = bool(
+            existing
+            and _browser_cdp_port_reachable(host, int(existing["port"]))
+        )
+        if reuse_existing:
+            port = int(existing["port"])
+            pid = int(existing["pid"])
+            launched = False
+        else:
+            port = _reserve_browser_cdp_port(host)
+            pid = 0
+            launched = False
         url = f"http://{host}:{port}"
         manual_command = (
-            'open -a "Google Chrome" --args --remote-debugging-port=9222 '
-            '--user-data-dir="$HOME/.oha-yachiyo/chrome-debug" --no-first-run '
-            "--no-default-browser-check"
+            'open -n -g -a "Google Chrome" --args '
+            f"--remote-debugging-port={port} "
+            "--remote-debugging-address=127.0.0.1 "
+            f"--user-data-dir={shlex.quote(str(profile_dir))} "
+            "--no-first-run --no-default-browser-check"
         )
 
-        def reachable() -> bool:
+        if not reuse_existing and sys.platform == "darwin" and shutil.which("open"):
             try:
-                with socket.create_connection((host, port), timeout=0.3):
-                    return True
-            except OSError:
-                return False
-
-        launched = False
-        if not reachable() and sys.platform == "darwin" and shutil.which("open"):
-            try:
-                subprocess.run(
+                profile_dir.mkdir(parents=True, exist_ok=True)
+                launch_result = subprocess.run(
                     [
                         "open",
+                        "-n",
+                        "-g",
                         "-a",
                         "Google Chrome",
                         "--args",
-                        "--remote-debugging-port=9222",
-                        f"--user-data-dir={Path.home() / '.oha-yachiyo' / 'chrome-debug'}",
+                        f"--remote-debugging-port={port}",
+                        "--remote-debugging-address=127.0.0.1",
+                        f"--user-data-dir={profile_dir}",
                         "--no-first-run",
                         "--no-default-browser-check",
                     ],
@@ -3035,19 +3131,21 @@ class MainWindowAPI:
                     timeout=8.0,
                     check=False,
                 )
-                launched = True
+                launched = launch_result.returncode == 0
             except Exception as exc:
-                logger.info("启动 Chrome 调试端口失败: %s", exc)
+                logger.info("启动 Oha 专属 Chrome 调试端口失败: %s", exc)
             for _ in range(12):
-                if reachable():
+                owned = _find_owned_browser_cdp_process(profile_dir, port=port)
+                if owned and _browser_cdp_port_reachable(host, port):
+                    pid = int(owned["pid"])
                     break
                 time.sleep(0.5)
 
-        if not reachable():
+        if pid <= 0 or not _browser_cdp_port_reachable(host, port):
             return {
                 "ok": False,
                 "success": False,
-                "error": "未能自动启动或连接 Chrome 调试端口",
+                "error": "未能启动或验证 Yachiyo 的独立 Chrome",
                 "url": url,
                 "manual_command": manual_command,
                 "needs_env_refresh": False,
@@ -3056,6 +3154,11 @@ class MainWindowAPI:
         projection = _load_native_tool_config_projection()
         config_projection = projection.get("config") if isinstance(projection.get("config"), dict) else {}
         config_projection["browser.cdp_url"] = url
+        config_projection["browser.cdp_owner"] = "oha-yachiyo"
+        config_projection["browser.cdp_pid"] = pid
+        config_projection["browser.cdp_port"] = port
+        config_projection["browser.cdp_profile_dir"] = str(profile_dir)
+        config_projection["browser.cdp_external_explicit"] = False
         projection["config"] = config_projection
         try:
             _store_native_tool_config_projection(projection)
@@ -3063,7 +3166,7 @@ class MainWindowAPI:
             return {
                 "ok": False,
                 "success": False,
-                "error": redact_api_error_text(f"保存 browser.cdp_url 失败：{exc}"),
+                "error": redact_api_error_text(f"保存独立浏览器配置失败：{exc}"),
                 "url": url,
                 "manual_command": manual_command,
                 "needs_env_refresh": False,
@@ -3072,8 +3175,11 @@ class MainWindowAPI:
         return {
             "ok": True,
             "success": True,
-            "message": "已连接 Chrome 调试端口并写入 browser.cdp_url",
+            "message": "Yachiyo 的独立 Chrome 已就绪，不会使用你当前的浏览器窗口",
             "url": url,
+            "pid": pid,
+            "profile_dir": str(profile_dir),
+            "owned_by_yachiyo": True,
             "launched": launched,
             "manual_command": manual_command,
             "needs_env_refresh": False,

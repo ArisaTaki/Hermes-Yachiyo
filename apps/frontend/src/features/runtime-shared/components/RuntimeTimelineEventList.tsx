@@ -6,6 +6,7 @@ import {
 } from '../desktopProviderSessionEvents';
 import { runtimeAnchorId } from '../runtimeAnchors';
 import {
+  runtimeEventIsDesktopIntent,
   runtimeEventIsDesktopProviderExecutionRouted,
   runtimeEventIsDesktopProviderSessionEvent,
 } from '../desktopEvents';
@@ -232,7 +233,10 @@ export function RuntimeTimelineEventList({
                   <ExpandableRuntimeContent
                     content={payload}
                     label="展开完整事件内容"
-                    defaultOpen={eventTone === 'danger' || eventTone === 'approval'}
+                    defaultOpen={(
+                      eventTone === 'danger' || eventTone === 'approval'
+                    ) && !runtimeEventIsDesktopIntent(eventName, 'unverified')}
+                    forceCollapse={runtimeEventIsDesktopIntent(eventName, 'unverified')}
                   />
                 ) : null}
                 {childRunId && onOpenChildRun ? (

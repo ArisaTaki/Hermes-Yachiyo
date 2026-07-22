@@ -3,80 +3,210 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import posixpath
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
+from copy import deepcopy
+from dataclasses import replace
 from typing import Any, Callable
 
+from apps.shell.agent.runtime.app_aliases import APP_ALIASES, compact_app_alias
+from apps.shell.agent.runtime.abstract_capability_planning import (
+    abstract_capability_action_catalog,
+)
 from apps.shell.agent.runtime.approval_tool_sets import (
     APPROVAL_PLAN_TOOLS as _DAILY_DESKTOP_APPROVAL_PLAN_TOOLS,
 )
 from apps.shell.agent.runtime.desktop_recovery_metadata import (
     daily_desktop_metadata_tool_request,
 )
+from apps.shell.agent.runtime.dispatch_semantics import is_semantic_safe_shortcut
 from apps.shell.agent.runtime.desktop_tool_labels import (
     DAILY_DESKTOP_TOOL_LABELS as _DAILY_DESKTOP_TOOL_LABELS,
 )
-from apps.shell.agent.runtime.errors import AgentApprovalRequired
+from apps.shell.agent.runtime.errors import (
+    AgentApprovalRequired,
+    AgentDirectOutcomeUnverified,
+)
 from apps.shell.agent.runtime.event_scopes import (
     runtime_event_payload as _runtime_task_progress_event_payload,
-    runtime_planner_base_event_type as _runtime_planner_base_event_type,
-    runtime_planner_event_payload as _runtime_planner_event_payload,
-    runtime_planner_event_type as _runtime_planner_event_type,
-    runtime_planner_timeline_event as _runtime_planner_timeline_event,
-    runtime_progress_base_event_type as _runtime_progress_base_event_type,
-    runtime_progress_event_payload as _runtime_progress_event_payload,
-    runtime_progress_event_type as _runtime_progress_event_type,
-    runtime_replan_base_event_type as _runtime_replan_event_type,
-    runtime_replan_request_event_payload as _runtime_replan_request_event_payload,
-    runtime_replan_request_event_type as _runtime_replan_request_event_type,
-    runtime_scope_context as _runtime_planner_scope_context,
 )
-from apps.shell.agent.runtime.replan_deferred import (
-    materialized_deferred_items,
-    safe_deferred_continuation_request,
+from apps.shell.agent.runtime.event_scopes import (
+    runtime_planner_base_event_type as _runtime_planner_base_event_type,
+)
+from apps.shell.agent.runtime.event_scopes import (
+    runtime_planner_event_payload as _runtime_planner_event_payload,
+)
+from apps.shell.agent.runtime.event_scopes import (
+    runtime_planner_event_type as _runtime_planner_event_type,
+)
+from apps.shell.agent.runtime.event_scopes import (
+    runtime_planner_timeline_event as _runtime_planner_timeline_event,
+)
+from apps.shell.agent.runtime.event_scopes import (
+    runtime_progress_base_event_type as _runtime_progress_base_event_type,
+)
+from apps.shell.agent.runtime.event_scopes import (
+    runtime_progress_event_payload as _runtime_progress_event_payload,
+)
+from apps.shell.agent.runtime.event_scopes import (
+    runtime_progress_event_type as _runtime_progress_event_type,
+)
+from apps.shell.agent.runtime.event_scopes import (
+    runtime_replan_base_event_type as _runtime_replan_event_type,
+)
+from apps.shell.agent.runtime.event_scopes import (
+    runtime_replan_request_event_payload as _runtime_replan_request_event_payload,
+)
+from apps.shell.agent.runtime.event_scopes import (
+    runtime_replan_request_event_type as _runtime_replan_request_event_type,
+)
+from apps.shell.agent.runtime.event_scopes import (
+    runtime_scope_context as _runtime_planner_scope_context,
 )
 from apps.shell.agent.runtime.followup_content_snapshot import (
     followup_content_snapshot_for_tool_call,
     followup_content_snapshots,
     latest_followup_content_snapshot,
 )
+from apps.shell.agent.runtime.goal_contract import GoalContract, GoalCoordinator
+from apps.shell.agent.runtime.goal_runtime import (
+    _runtime_execution_provider_identity,
+    _runtime_owned_terminal_event,
+    complete_response_only_goal,
+    goal_assessment_event_payload,
+    goal_contract_context_message,
+    goal_contract_event_payload,
+    goal_replan_context_message,
+    pending_semantic_artifact_assessment_candidates,
+    planned_goal_contract_payload,
+    runtime_goal_assessment,
+    runtime_goal_contract,
+)
+from apps.shell.agent.runtime.semantic_artifact_verification import (
+    SemanticArtifactVerificationResult,
+    verify_semantic_artifact,
+)
 from apps.shell.agent.runtime.model_messages import messages_require_model_first
+from apps.shell.agent.runtime.model_intent_planning import (
+    ModelIntentClarificationResolution,
+    ModelIntentPlanningError,
+    direct_tool_selection_from_user_clarification,
+    model_intent_planning_tool_schema,
+    model_intent_proposal_from_tool_requests,
+    model_intent_resolution_from_proposal,
+    planner_selection_needs_model_assistance,
+)
+from apps.shell.agent.runtime.outcome_evaluator import (
+    evaluate_goal_contract_outcome,
+    evaluate_main_chat_outcome,
+)
+from apps.shell.agent.runtime.outcome_loop import (
+    OutcomeLoopCoordinator,
+    OutcomeLoopDisposition,
+    OutcomeLoopResult,
+)
+from apps.shell.yachiyo_agent.runtime_planner import clarification_authority_for_goal
+from apps.shell.agent.runtime.recovery_actions import (
+    RecoveryActionContext,
+    RecoveryActionDisposition,
+    RecoveryActionExecutionMode,
+    RecoveryActionRegistry,
+    RecoveryActionResult,
+    RecoveryActionScope,
+    RecoveryModelTurn,
+    RecoveryToolBatch,
+    RecoveryToolResult,
+)
+from apps.shell.agent.runtime.recovery_adapters.background_window import (
+    BackgroundWindowRecoveryAdapter,
+)
+from apps.shell.agent.runtime.recovery_lineage import (
+    RUNTIME_PRIVATE_REPLAN_CONTEXT_KEY,
+    RUNTIME_PRIVATE_RECOVERY_AUTHORITY,
+    RUNTIME_PRIVATE_RECOVERY_CONTEXT_KEY,
+    RUNTIME_PRIVATE_RECOVERY_CONTEXT_VERSION,
+    RuntimeAuthorizedReplanPayload,
+    canonical_replan_action_signature,
+    copy_live_replan_payload,
+    mint_private_replan_context,
+    trusted_private_replan_action_signatures,
+)
+from apps.shell.agent.runtime.recovery_identity import (
+    ensure_recovery_action_identity,
+    recovery_action_identities_from_timeline,
+    recovery_request_repeats_stalled_discovery,
+)
+from apps.shell.agent.runtime.recovery_ownership import (
+    RecoveryOwnershipStatus,
+    resolve_legacy_replan_ownership,
+)
+from apps.shell.agent.runtime.recovery_policies import (
+    RecoveryAssessment,
+    assess_latest_tool_recovery,
+    background_window_runtime_recovery_tools,
+    recovery_attempt_lineage_from_timeline,
+)
+from apps.shell.agent.runtime.replan_deferred import (
+    materialized_deferred_items,
+    safe_deferred_continuation_request,
+)
 from apps.shell.agent.runtime.tool_execution import (
+    _approval_dependency_block_result,
+    _broker_tool_precondition_failure,
     _discovered_app_name_for_query,
     _discovered_app_resolution_evidence,
+    _post_action_verification_request,
+)
+from apps.shell.agent.runtime.tool_capabilities import capability_ids_for_tool
+from apps.shell.agent.runtime.tool_loop import stage_tool_result_messages
+from apps.shell.agent.runtime.tool_requests import ensure_tool_call_id
+from apps.shell.agent.runtime.tool_outcomes import OutcomeStatus, from_tool_result
+from apps.shell.agent.runtime.verification_receipts import (
+    EXACT_FILE_CONTENT_PRESENT_PREDICATE,
+    RUNTIME_SEMANTIC_ARTIFACT_VERIFIER_AUTHORITY,
+    SEMANTIC_ARTIFACT_ADEQUACY_PREDICATE,
+    SEMANTIC_ARTIFACT_ASSESSED_EVENT,
+    declared_workspace_output_path,
+    normalized_workspace_relative_path,
 )
 from apps.shell.agent.tools.policy import (
     DAILY_BROWSER_TOOL_NAMES,
     DAILY_DESKTOP_TOOL_NAMES,
 )
 from apps.shell.yachiyo_agent.app_name_hints import compact_app_name_hint
+from apps.shell.yachiyo_agent.capability_registry import capability_snapshots
 from apps.shell.yachiyo_agent.desktop_plan_hints import (
     click_target_hint,
     type_into_ui_hint,
+)
+from apps.shell.yachiyo_agent.desktop_execution_policy import (
+    runtime_execution_envelope_with_desktop_execution_policy,
 )
 from apps.shell.yachiyo_agent.entrypoint_tool_selection import (
     DirectToolSelection,
     planner_first_direct_tool_selection,
 )
-from apps.shell.yachiyo_agent.capability_registry import capability_snapshots
 from apps.shell.yachiyo_agent.planner_execution import (
     planner_execution_tool_requests,
     planner_tool_requests,
     runtime_execution_verified_tool_requests,
 )
+from apps.shell.yachiyo_agent.policy import READ_ONLY_OBSERVATION_TOOLS
 from apps.shell.yachiyo_agent.planner_projection import (
     planner_selection_payload,
     runtime_planner_decision,
 )
 from apps.shell.yachiyo_agent.policy import desktop_tool_execution_mode_for_input
+from apps.shell.yachiyo_agent.runtime_doctrine import YACHIYO_RUNTIME_OPERATING_MANUAL
 from apps.shell.yachiyo_agent.runtime_execution import (
     runtime_execution_blocked_requests_from_envelope_payload,
     runtime_execution_envelope_payload,
     runtime_execution_requests_from_envelope_payload,
     runtime_execution_requests_from_metadata,
 )
-from apps.shell.yachiyo_agent.runtime_doctrine import YACHIYO_RUNTIME_OPERATING_MANUAL
+from packages.security import redact_sensitive_text
 
 _DIRECT_DAILY_DESKTOP_TOOLS = {
     *DAILY_DESKTOP_TOOL_NAMES,
@@ -87,7 +217,10 @@ _DIRECT_DAILY_DESKTOP_TOOLS = {
 
 _DIRECT_DAILY_SEQUENCE_CONTEXT_TOOLS = {
     "file.read",
+    "file.search",
+    "fs.find_files",
     "fs.read_file",
+    "workspace.list",
     "workspace.read",
 }
 
@@ -101,6 +234,7 @@ _RUNTIME_REPLAN_ACTION_AUTO_SAFE_TOOLS = {
     "desktop.focus_app",
     "desktop.list_apps",
     "desktop.open_app",
+    "desktop.open_path",
     "desktop.read_ui",
     "desktop.running_apps",
     "desktop.ui_elements",
@@ -111,9 +245,328 @@ _RUNTIME_REPLAN_ACTION_AUTO_SAFE_TOOLS = {
     "workspace.read",
 }
 
+_RUNTIME_GOAL_BOUNDED_BACKGROUND_WINDOW_TOOLS = (
+    "desktop.safe_shortcut",
+    "desktop.read_ui",
+)
+
+_RUNTIME_REPLAN_INTERNAL_PERMISSION_TARGETS = {
+    "app_launch",
+    "runtime_observation",
+}
+
+_RUNTIME_REPLAN_AUTO_SAFE_CAPABILITY_TARGETS = {
+    "app_control",
+    "app_discovery",
+    "app_inspection",
+    "browser_capture",
+    "browser_read",
+    "ui_inspection",
+    "window_inspection",
+    "workspace_read",
+}
+
+_RUNTIME_RECOVERY_CONTINUATION_REPLAN_SOURCE = (
+    "runtime_recovery_coordinator"
+)
+
+_RUNTIME_REPLAN_INGESTION_SOURCES = frozenset(
+    {
+        "runtime_tool_request_runner",
+        _RUNTIME_RECOVERY_CONTINUATION_REPLAN_SOURCE,
+    }
+)
+
+_RUNTIME_PLANNER_AUTHORITY_CONFLICT_CODES = frozenset(
+    {
+        "goal_contract_conflict",
+        "goal_contract_conflict: original_goal",
+        "runtime_execution_action_target_conflict",
+        "runtime_execution_action_target_step_conflict",
+        "runtime_execution_goal_action_target_conflict",
+        "runtime_execution_input_bindings_conflict",
+    }
+)
+
+
+class _RuntimePlannerFailure(RuntimeError):
+    """Private fail-closed signal; never expose the originating exception."""
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = str(reason or "planner_internal_failure").strip()
+
+
+def _model_intent_plan_may_replace_execution_envelope(
+    envelope: Mapping[str, Any] | None,
+    deterministic_selection: DirectToolSelection,
+) -> bool:
+    """Only supersede the exact first-pass planner envelope for this goal."""
+
+    if not isinstance(envelope, Mapping):
+        return True
+    requests = envelope.get("requests")
+    if not isinstance(requests, list) or not requests:
+        return True
+    expected_decision_id = str(
+        getattr(deterministic_selection.decision, "decision_id", "") or ""
+    ).strip()
+    envelope_decision_id = str(envelope.get("decision_id") or "").strip()
+    return bool(
+        expected_decision_id
+        and envelope_decision_id
+        and envelope_decision_id == expected_decision_id
+    )
+
+
+def _initial_model_intent_planning_messages(
+    original_goal: str,
+    deterministic_selection: DirectToolSelection,
+    allowed_tools: Iterable[str],
+    *,
+    clarification_authority: tuple[str, str] | None = None,
+) -> list[dict[str, str]]:
+    decision = deterministic_selection.decision
+    raw_candidates = getattr(decision, "candidate_intents", ()) or ()
+    candidates = [
+        {
+            "kind": str(getattr(candidate, "kind", "") or "").strip(),
+            "confidence": round(float(getattr(candidate, "confidence", 0) or 0), 3),
+            "missing_inputs": list(getattr(candidate, "missing_inputs", ()) or ()),
+        }
+        for candidate in raw_candidates
+        if str(getattr(candidate, "kind", "") or "").strip()
+        and float(getattr(candidate, "confidence", 0) or 0) > 0
+    ]
+    selected = getattr(decision, "selected_intent", None)
+    selected_kind = str(getattr(selected, "kind", "") or "").strip()
+    capability_ids = sorted(
+        {
+            capability_id
+            for tool_name in allowed_tools
+            for capability_id in capability_ids_for_tool(str(tool_name or "").strip())
+        }
+    )
+    planning_context = {
+        "original_goal": str(original_goal or "").strip(),
+        "deterministic_selected_intent": selected_kind,
+        "deterministic_candidates": candidates,
+        "available_capabilities": capability_ids,
+        "available_abstract_actions": abstract_capability_action_catalog(
+            allowed_tools
+        ),
+    }
+    if clarification_authority is not None:
+        planning_context["clarification_continuation"] = {
+            "original_goal": clarification_authority[0],
+            "user_reply": clarification_authority[1],
+        }
+    return [
+        {
+            "role": "system",
+            "content": (
+                "You are the intent-disambiguation stage of a desktop agent. "
+                "Do not execute tools and do not provide chain-of-thought. Call exactly "
+                "runtime_propose_task_intent. Choose the smallest intent category that "
+                "preserves the user's requested effect. planning_goal must be a concise, "
+                "explicit paraphrase of the original goal; preserve every target, value, "
+                "time expression, constraint, and requested output, and invent nothing. "
+                "action_evidence must be one short exact quote from the user-authored "
+                "goal that explicitly requests the action; never paraphrase it. "
+                "When the deterministic plan is unresolved or the goal contains "
+                "multiple requested effects, propose ordered subgoals using only "
+                "the exact capability_id, action_id, and semantic input slots in "
+                "available_abstract_actions. Preserve every requested effect; do "
+                "not silently drop a clause. Each subgoal action_evidence and each "
+                "input-slot evidence_quote must be an exact user-authored quote. "
+                "If a material input is genuinely missing, include one short "
+                "clarification_question. Never propose tool names, IDs, approvals, risk, "
+                "separate action-target fields, or completion evidence; Runtime owns "
+                "all of them. A target explicitly written by the user must still be "
+                "preserved verbatim inside planning_goal."
+                " When clarification_continuation is present, resolve the previous "
+                "goal with the current user_reply. Treat both fields as user-authored, "
+                "keep the previous action unchanged, and use the reply only to fill "
+                "the missing object, scope, value, time, or expected result."
+            ),
+        },
+        {
+            "role": "user",
+            "content": json.dumps(
+                planning_context,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ),
+        },
+    ]
+
+
+def _legacy_approval_gate_requests(
+    execution_tool_requests: list[dict[str, Any]],
+    first_approval_index: int,
+) -> tuple[list[dict[str, Any]], dict[str, Any], list[dict[str, Any]]]:
+    """Give a legacy approval prefix temporary identities for Runner-equivalent gating."""
+
+    used_step_ids = {
+        str(request.get("step_id") or request.get("planner_step_id") or "").strip()
+        for request in execution_tool_requests
+        if isinstance(request, Mapping)
+        and str(request.get("step_id") or request.get("planner_step_id") or "").strip()
+    }
+    prefix_requests: list[dict[str, Any]] = []
+    dependency_step_ids: list[str] = []
+    assigned_step_ids: set[str] = set()
+    for index, request in enumerate(execution_tool_requests[:first_approval_index]):
+        request_copy = dict(request)
+        if _clipboard_transfer_shortcut_request(request_copy):
+            # A copy/paste keystroke proves dispatch only.  The compatibility
+            # approval prefix must not turn that acknowledgement into a
+            # successful dependency for a later submit action.
+            request_copy["requires_post_action_verification"] = True
+        step_id = str(
+            request_copy.get("step_id") or request_copy.get("planner_step_id") or ""
+        ).strip()
+        if not step_id or step_id in assigned_step_ids:
+            base_step_id = f"legacy-approval-prefix-{index + 1}"
+            step_id = base_step_id
+            suffix = 2
+            while step_id in used_step_ids or step_id in assigned_step_ids:
+                step_id = f"{base_step_id}-{suffix}"
+                suffix += 1
+            request_copy["step_id"] = step_id
+        assigned_step_ids.add(step_id)
+        used_step_ids.add(step_id)
+        dependency_step_ids.append(step_id)
+        prefix_requests.append(request_copy)
+
+    approval_request = dict(execution_tool_requests[first_approval_index])
+    gate_approval_request = {
+        **approval_request,
+        "depends_on": dependency_step_ids,
+    }
+    return (
+        prefix_requests,
+        approval_request,
+        [*prefix_requests, gate_approval_request],
+    )
+
+
+def _clipboard_transfer_shortcut_request(request: Mapping[str, Any]) -> bool:
+    tool_name = str(request.get("tool") or request.get("tool_name") or "").strip()
+    if tool_name not in {
+        "desktop.safe_shortcut",
+        "desktop.shortcut",
+        "app.open_and_safe_shortcut",
+        "app.focus_and_safe_shortcut",
+    }:
+        return False
+    payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+    return str(payload.get("action") or "").strip().lower() in {
+        "copy",
+        "paste",
+    }
+
+
+def _legacy_approval_gate_timeline(
+    timeline: list[dict[str, Any]],
+    prefix_requests: list[dict[str, Any]],
+    *,
+    tool_timeline_start: int,
+) -> list[dict[str, Any]]:
+    """Correlate trace-poor legacy adapter events without treating absence as success."""
+
+    gate_timeline = [dict(event) for event in timeline]
+    cursor = max(0, tool_timeline_start)
+    for request in prefix_requests:
+        step_id = str(request.get("step_id") or request.get("planner_step_id") or "").strip()
+        if not step_id:
+            continue
+        request_decision_id = str(request.get("decision_id") or "").strip()
+        correlated_index = -1
+        for index in range(cursor, len(gate_timeline)):
+            event = gate_timeline[index]
+            payload = event.get("payload") if isinstance(event.get("payload"), Mapping) else {}
+            event_type = str(event.get("event") or event.get("event_type") or "").strip()
+            if not event_type.endswith(
+                ("agent.tool.call", "agent.tool.skipped", "agent.tool.failed")
+            ):
+                continue
+            event_step_id = str(
+                event.get("step_id")
+                or payload.get("step_id")
+                or event.get("planner_step_id")
+                or payload.get("planner_step_id")
+                or ""
+            ).strip()
+            if event_step_id == step_id:
+                correlated_index = index
+                break
+        if correlated_index >= 0:
+            correlated_event = gate_timeline[correlated_index]
+            correlated_payload = (
+                correlated_event.get("payload")
+                if isinstance(correlated_event.get("payload"), Mapping)
+                else {}
+            )
+            correlated_decision_id = str(
+                correlated_event.get("decision_id")
+                or correlated_payload.get("decision_id")
+                or ""
+            ).strip()
+            if request_decision_id and not correlated_decision_id:
+                gate_timeline[correlated_index] = {
+                    **correlated_event,
+                    "decision_id": request_decision_id,
+                }
+            cursor = correlated_index + 1
+            continue
+
+        expected_tool = str(request.get("tool") or request.get("tool_name") or "").strip()
+        for index in range(cursor, len(gate_timeline)):
+            event = gate_timeline[index]
+            payload = event.get("payload") if isinstance(event.get("payload"), Mapping) else {}
+            event_type = str(event.get("event") or event.get("event_type") or "").strip()
+            if not event_type.endswith(
+                ("agent.tool.call", "agent.tool.skipped", "agent.tool.failed")
+            ):
+                continue
+            event_tool = str(
+                event.get("tool")
+                or payload.get("tool")
+                or event.get("detail")
+                or ""
+            ).strip()
+            if expected_tool and event_tool != expected_tool:
+                continue
+            correlated_scope = (
+                {"decision_id": request_decision_id}
+                if request_decision_id
+                else {}
+            )
+            gate_timeline[index] = {
+                **event,
+                "step_id": step_id,
+                **correlated_scope,
+            }
+            cursor = index + 1
+            break
+    return gate_timeline
+
+
 _RUNTIME_REPLAN_NO_REPEAT_AFTER_SUCCESS_TOOLS = {
     "app.open",
     "desktop.open_app",
+}
+
+_STRICT_CANONICAL_APP_IDENTITIES = {
+    **{
+        compact_app_alias(alias): compact_app_alias(app_name)
+        for alias, app_name in APP_ALIASES.items()
+    },
+    **{
+        compact_app_alias(app_name): compact_app_alias(app_name)
+        for app_name in APP_ALIASES.values()
+    },
 }
 
 _DAILY_DESKTOP_DISCOVERY_TOOLS = {
@@ -143,6 +596,7 @@ _DAILY_DESKTOP_VERIFY_TOOLS = {
     "desktop.active_window",
     "desktop.verify",
     "desktop.list_windows",
+    "desktop.running_apps",
     "desktop.read_ui",
     "screen.capture",
     "desktop.windows",
@@ -242,9 +696,7 @@ def _tool_requests_with_desktop_execution_policy(
     if not policy:
         return requests
     return [
-        request
-        if isinstance(request.get("desktop_execution_policy"), Mapping)
-        else {**request, "desktop_execution_policy": dict(policy)}
+        {**request, "desktop_execution_policy": dict(policy)}
         for request in requests
     ]
 
@@ -255,7 +707,7 @@ def _tool_request_with_desktop_execution_policy(
 ) -> dict[str, Any] | None:
     if not isinstance(tool_request, dict):
         return None
-    if not policy or isinstance(tool_request.get("desktop_execution_policy"), Mapping):
+    if not policy:
         return dict(tool_request)
     return {**tool_request, "desktop_execution_policy": dict(policy)}
 
@@ -274,6 +726,493 @@ _DISCOVERED_APP_DIRECT_VERIFICATION_TOOLS = {
     *_DAILY_DESKTOP_VERIFY_TOOLS,
     "screen.capture",
 }
+
+
+def _completed_legacy_recovery_batch(
+    timeline: Sequence[Mapping[str, Any]],
+    *,
+    request_id: str,
+    action_id: str,
+) -> RecoveryToolBatch | None:
+    """Recover one already-executed, source-correlated legacy action result."""
+
+    expected_request_id = str(request_id or "").strip()
+    expected_action_id = str(action_id or "").strip()
+    if not expected_request_id:
+        return None
+    candidates: list[tuple[dict[str, Any], RecoveryToolResult]] = []
+    for event in timeline:
+        if not isinstance(event, Mapping):
+            continue
+        event_type = str(event.get("event") or event.get("event_type") or "").strip()
+        base_event_type = _runtime_progress_base_event_type(event_type)
+        if base_event_type not in {
+            "agent.tool.call",
+            "agent.tool.failed",
+            "agent.tool.skipped",
+        }:
+            continue
+        payload = event.get("payload") if isinstance(event.get("payload"), Mapping) else {}
+        event_request_id = str(
+            event.get("replan_request_id") or payload.get("replan_request_id") or ""
+        ).strip()
+        if event_request_id != expected_request_id:
+            continue
+        event_action_id = str(
+            event.get("replan_recovery_action_id")
+            or payload.get("replan_recovery_action_id")
+            or ""
+        ).strip()
+        if expected_action_id and event_action_id != expected_action_id:
+            continue
+        tool_name = str(
+            event.get("detail")
+            or event.get("tool")
+            or payload.get("tool")
+            or ""
+        ).strip()
+        tool_call_id = str(
+            event.get("tool_call_id") or payload.get("tool_call_id") or ""
+        ).strip()
+        if not tool_name or not tool_call_id:
+            continue
+        raw_input = event.get("input_preview")
+        if not isinstance(raw_input, Mapping):
+            raw_input = payload.get("input_preview")
+        result = event.get("result")
+        if result is None:
+            result = payload.get("result")
+        request = {
+            "tool": tool_name,
+            "tool_call_id": tool_call_id,
+            "input": dict(raw_input) if isinstance(raw_input, Mapping) else {},
+        }
+        candidates.append(
+            (
+                request,
+                RecoveryToolResult(
+                    tool_call_id=tool_call_id,
+                    result=result,
+                    event_type=base_event_type,
+                ),
+            )
+        )
+    if len(candidates) != 1:
+        return None
+    request, result = candidates[0]
+    return RecoveryToolBatch(requests=(request,), results=(result,))
+
+
+def _is_exact_background_window_batch(
+    requests: Sequence[Mapping[str, Any]],
+) -> bool:
+    """Admit no arbitrary tool selection through the private execution grant."""
+
+    if tuple(
+        str(request.get("tool") or "").strip() for request in requests
+    ) != _RUNTIME_GOAL_BOUNDED_BACKGROUND_WINDOW_TOOLS:
+        return False
+    shortcut_input = requests[0].get("input")
+    observation_input = requests[1].get("input")
+    return bool(
+        isinstance(shortcut_input, Mapping)
+        and dict(shortcut_input) == {"action": "new_document"}
+        and isinstance(observation_input, Mapping)
+        and not observation_input
+    )
+
+
+class _CustomApiRecoveryRuntimePort:
+    """Keep private loop state behind five high-depth recovery operations."""
+
+    def __init__(
+        self,
+        *,
+        owner: RuntimeCustomApiAgentLoop,
+        model_config: Mapping[str, Any] | Callable[[], Mapping[str, Any]],
+        allowed_tools: list[str],
+        broker: Any,
+        messages: list[dict[str, Any]],
+        timeline: list[dict[str, Any]],
+        artifacts: list[dict[str, Any]],
+        budget: Any,
+        run_id: str,
+        source_tool_call_id: str = "",
+        source_tool_name: str = "",
+        recovery_action: str = "",
+        recovery_scope_id: str = "",
+        recovery_goal_identity: Mapping[str, Any] | None = None,
+        observation_only: bool = False,
+        goal_bounded_effectful_tools: Iterable[str] = (),
+    ) -> None:
+        self._owner = owner
+        self._model_config = model_config
+        self._resolved_model_config: Mapping[str, Any] | None = None
+        self._root_allowed_tools = frozenset(
+            str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()
+        )
+        self._broker = broker
+        self._messages = messages
+        self._timeline = timeline
+        self._artifacts = artifacts
+        self._budget = budget
+        self._run_id = run_id
+        self._source_tool_call_id = str(source_tool_call_id or "").strip()
+        self._source_tool_name = str(source_tool_name or "").strip()
+        self._recovery_action = str(recovery_action or "").strip()
+        self._recovery_scope_id = str(recovery_scope_id or "").strip()
+        self._observation_only = bool(observation_only)
+        private_tools = tuple(
+            dict.fromkeys(
+                tool
+                for value in goal_bounded_effectful_tools
+                if (tool := str(value or "").strip())
+            )
+        )
+        if private_tools and private_tools != (
+            _RUNTIME_GOAL_BOUNDED_BACKGROUND_WINDOW_TOOLS
+        ):
+            raise ValueError(
+                "Goal-bounded recovery requires the exact background-window tool pair"
+            )
+        if private_tools and self._observation_only:
+            raise ValueError(
+                "Goal-bounded effectful recovery cannot use observation-only authority"
+            )
+        self._goal_bounded_effectful_tools = private_tools
+        raw_goal_identity = (
+            recovery_goal_identity
+            if isinstance(recovery_goal_identity, Mapping)
+            else {}
+        )
+        goal_identity = {
+            key: str(raw_goal_identity.get(key) or "").strip()
+            for key in (
+                "goal_contract_id",
+                "goal_criterion_id",
+                "goal_subgoal_id",
+            )
+        }
+        self._recovery_goal_identity = (
+            {**goal_identity, "root_goal_unchanged": True}
+            if all(goal_identity.values())
+            and raw_goal_identity.get("root_goal_unchanged") is True
+            else {}
+        )
+        root_identity = {
+            key: str(raw_goal_identity.get(key) or "").strip()
+            for key in ("root_plan_id", "root_source_step_id")
+        }
+        self._recovery_root_identity = (
+            root_identity
+            if self._recovery_goal_identity and all(root_identity.values())
+            else {}
+        )
+        self._resources_released = False
+
+    def _narrowed_allowlist(self, allowed_tools: Iterable[str]) -> list[str]:
+        narrowed = list(
+            dict.fromkeys(
+                tool
+                for value in allowed_tools
+                if (tool := str(value or "").strip())
+            )
+        )
+        if not set(narrowed).issubset(self._root_allowed_tools):
+            raise ValueError("Recovery action attempted to expand the runtime allowlist")
+        return narrowed
+
+    def _narrowed_execution_allowlist(
+        self,
+        allowed_tools: Iterable[str],
+    ) -> tuple[list[str], bool]:
+        narrowed = list(
+            dict.fromkeys(
+                tool
+                for value in allowed_tools
+                if (tool := str(value or "").strip())
+            )
+        )
+        if set(narrowed).issubset(self._root_allowed_tools):
+            return narrowed, False
+        if tuple(narrowed) != self._goal_bounded_effectful_tools:
+            raise ValueError("Recovery action attempted to expand the runtime allowlist")
+        return narrowed, True
+
+    def execute_tools(
+        self,
+        tool_requests: Iterable[Mapping[str, Any]],
+        *,
+        allowed_tools: Iterable[str],
+        next_iteration: int,
+    ) -> RecoveryToolBatch:
+        narrowed, uses_goal_bounded_effectful_grant = (
+            self._narrowed_execution_allowlist(allowed_tools)
+        )
+        requests = tuple(
+            self._request_with_recovery_identity(request)
+            for request in tool_requests
+        )
+        if uses_goal_bounded_effectful_grant and not _is_exact_background_window_batch(
+            requests
+        ):
+            raise ValueError(
+                "Goal-bounded recovery may execute only the exact background-window batch"
+            )
+        request_tools_by_call_id: dict[str, str] = {}
+        for request in requests:
+            tool_name = str(request.get("tool") or "").strip()
+            tool_call_id = str(request.get("tool_call_id") or "").strip()
+            if not tool_name or tool_name not in narrowed:
+                raise ValueError(
+                    "Recovery action requested a tool outside its narrowed allowlist"
+                )
+            if not tool_call_id:
+                raise ValueError("Recovery action tool_call_id is required")
+            if (
+                self._observation_only
+                and tool_name not in _RUNTIME_REPLAN_GROUNDING_OBSERVATION_TOOLS
+            ):
+                raise ValueError(
+                    "Goal-loop recovery may execute only trusted observation tools"
+                )
+            if tool_call_id in request_tools_by_call_id:
+                raise ValueError("Recovery action tool_call_id values must be unique")
+            request_tools_by_call_id[tool_call_id] = tool_name
+        timeline_start = len(self._timeline)
+        self._owner._run_tool_requests(
+            list(requests),
+            narrowed,
+            self._broker,
+            self._messages,
+            self._timeline,
+            self._artifacts,
+            next_iteration=int(next_iteration),
+            run_id=self._run_id,
+            budget=self._budget,
+        )
+        results: list[RecoveryToolResult] = []
+        for request in requests:
+            tool_call_id = str(request.get("tool_call_id") or "").strip()
+            expected_tool = request_tools_by_call_id[tool_call_id]
+            raw_result: Any = None
+            terminal_event_type = ""
+            for event in reversed(self._timeline[timeline_start:]):
+                event_type = str(
+                    event.get("event") or event.get("event_type") or ""
+                ).strip()
+                if event_type not in {
+                    "agent.tool.call",
+                    "agent.tool.failed",
+                    "agent.tool.skipped",
+                }:
+                    continue
+                event_payload = (
+                    event.get("payload")
+                    if isinstance(event.get("payload"), Mapping)
+                    else event
+                )
+                if (
+                    str(event_payload.get("tool_call_id") or "").strip()
+                    != tool_call_id
+                ):
+                    continue
+                event_tool = str(
+                    event_payload.get("tool")
+                    or event_payload.get("detail")
+                    or event.get("detail")
+                    or ""
+                ).strip()
+                if event_tool != expected_tool:
+                    continue
+                raw_result = event_payload.get("result")
+                terminal_event_type = event_type
+                break
+            results.append(
+                RecoveryToolResult(
+                    tool_call_id=tool_call_id,
+                    result=raw_result,
+                    event_type=terminal_event_type,
+                )
+            )
+        return RecoveryToolBatch(
+            requests=requests,
+            results=tuple(results),
+            completion_token=timeline_start,
+        )
+
+    def _request_with_recovery_identity(
+        self,
+        request: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        item = dict(request)
+        item["source"] = "runtime_internal_recovery"
+        if not self._source_tool_call_id:
+            return item
+        item["source_tool_call_id"] = self._source_tool_call_id
+        item["recovery_link_kind"] = "coordinator_action"
+        if self._source_tool_name:
+            item["recovery_source_tool"] = self._source_tool_name
+        if self._recovery_action:
+            item["recovery_action"] = self._recovery_action
+        if self._recovery_scope_id:
+            item["recovery_scope_id"] = self._recovery_scope_id
+            item["replan_recovery_identity"] = self._recovery_scope_id
+        item.update(self._recovery_goal_identity)
+        request_tool = str(item.get("tool") or "").strip()
+        tool_call_id = str(item.get("tool_call_id") or "").strip()
+        if request_tool and tool_call_id:
+            # Recovery adapters and recovery-model output are suggestions, not
+            # Runtime identity authority.  Mint the request generation here so
+            # the executor-owned terminal fact can be admitted by GoalRuntime
+            # without trusting a caller-supplied request_id.
+            digest = hashlib.sha256(
+                (
+                    f"{self._run_id}\0{self._recovery_scope_id}\0"
+                    f"{tool_call_id}\0{request_tool}"
+                ).encode("utf-8")
+            ).hexdigest()[:24]
+            item["request_id"] = f"runtime-recovery-request-{digest}"
+            if self._observation_only:
+                item["step_id"] = f"runtime-recovery-observation-step-{digest}"
+                item["planner_step_id"] = item["step_id"]
+                item["observation_only"] = True
+                item["goal_completion_authority"] = False
+                for key in (
+                    "action_target",
+                    "postcondition_verified",
+                    "verification_passed",
+                    "verified",
+                    "state",
+                    "target",
+                ):
+                    item.pop(key, None)
+        if self._recovery_root_identity:
+            item["plan_id"] = self._recovery_root_identity["root_plan_id"]
+            item["source_step_id"] = self._recovery_root_identity[
+                "root_source_step_id"
+            ]
+            # The retry is a Runtime-owned attempt of the immutable root
+            # criterion.  Give its terminal fact an executor step identity as
+            # well as a source link; otherwise GoalRuntime must correctly
+            # quarantine it as an unscoped effectful event.
+            if not self._observation_only:
+                item["step_id"] = self._recovery_root_identity[
+                    "root_source_step_id"
+                ]
+                item["planner_step_id"] = self._recovery_root_identity[
+                    "root_source_step_id"
+                ]
+        if (
+            self._recovery_goal_identity
+            and request_tool
+            and request_tool == self._source_tool_name
+            and tool_call_id
+            and self._recovery_scope_id
+            and self._recovery_root_identity
+        ):
+            item["recovery_suggested_tool"] = request_tool
+            item[RUNTIME_PRIVATE_RECOVERY_CONTEXT_KEY] = {
+                "version": RUNTIME_PRIVATE_RECOVERY_CONTEXT_VERSION,
+                "_authority": RUNTIME_PRIVATE_RECOVERY_AUTHORITY,
+                "run_id": self._run_id,
+                "return_to_root": True,
+                "source_tool_call_id": self._source_tool_call_id,
+                "recovery_source_tool": self._source_tool_name,
+                "recovery_action": self._recovery_action,
+                "recovery_scope_id": self._recovery_scope_id,
+                "tool_call_id": tool_call_id,
+                **self._recovery_goal_identity,
+                "plan_id": self._recovery_root_identity["root_plan_id"],
+                "source_step_id": self._recovery_root_identity[
+                    "root_source_step_id"
+                ],
+                "recovery_suggested_tool": request_tool,
+            }
+        return item
+
+    def select_tool(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        allowed_tools: Iterable[str],
+    ) -> RecoveryModelTurn:
+        narrowed = self._narrowed_allowlist(allowed_tools)
+        if self._resolved_model_config is None:
+            resolved_config = (
+                self._model_config()
+                if callable(self._model_config)
+                else self._model_config
+            )
+            if not isinstance(resolved_config, Mapping):
+                raise TypeError("Recovery model configuration must be a mapping")
+            self._resolved_model_config = resolved_config
+        model_config = self._resolved_model_config
+        recovery_messages = [
+            {"role": "system", "content": str(system_prompt)},
+            {"role": "user", "content": str(user_prompt)},
+        ]
+        self._owner._check_context_budget(self._budget, recovery_messages)
+        self._budget.claim_model_call()
+        message = self._owner._coalesce_model_message(
+            self._owner._call_model(
+                str(model_config.get("base_url") or "").rstrip("/"),
+                str(model_config.get("model") or "").strip(),
+                str(model_config.get("api_key") or "").strip(),
+                recovery_messages,
+                tools=self._owner._tool_schemas(narrowed),
+                stream=True,
+            )
+        )
+        visible_content = self._owner._message_visible_content_text(message)
+        requests = self._owner._tool_requests_from_message(message, visible_content)
+        return RecoveryModelTurn(
+            message=message,
+            visible_content=visible_content,
+            tool_requests=tuple(dict(request) for request in requests),
+        )
+
+    def commit_model_turn(
+        self,
+        *,
+        user_prompt: str,
+        turn: RecoveryModelTurn,
+    ) -> None:
+        self._messages.append({"role": "user", "content": str(user_prompt)})
+        if turn.tool_requests and turn.tool_requests[0].get("protocol") == "tool_calls":
+            self._messages.append(
+                self._owner._tool_loop_projection.assistant_message_for_history(
+                    dict(turn.message)
+                )
+            )
+            stage_tool_result_messages(self._messages)
+            return
+        self._messages.append(
+            {"role": "assistant", "content": turn.visible_content}
+        )
+
+    def project_completion(self, batch: RecoveryToolBatch) -> str:
+        if not isinstance(batch.completion_token, int):
+            return ""
+        return self._owner._direct_daily_desktop_sequence_result(
+            [dict(request) for request in batch.requests],
+            self._timeline,
+            tool_timeline_start=batch.completion_token,
+            run_id=self._run_id,
+        )
+
+    def release_owned_resources(self) -> None:
+        if self._resources_released:
+            return
+        self._resources_released = True
+        close_target = getattr(self._broker, "close_owned_browser_target", None)
+        if not callable(close_target):
+            return
+        try:
+            close_target()
+        except Exception:
+            return
 
 
 class RuntimeCustomApiAgentLoop:
@@ -304,6 +1243,7 @@ class RuntimeCustomApiAgentLoop:
         run_tool_requests: Callable[..., None],
         error_type: type[Exception],
         append_run_event: Callable[[str, str, dict[str, Any]], Any] | None = None,
+        recovery_action_registry: RecoveryActionRegistry | None = None,
     ) -> None:
         self._agent_model_config_private = agent_model_config_private
         self._compile_agent_runtime = compile_agent_runtime
@@ -327,6 +1267,219 @@ class RuntimeCustomApiAgentLoop:
         self._run_tool_requests = run_tool_requests
         self._error_type = error_type
         self._append_run_event = append_run_event
+        self._recovery_action_registry = (
+            recovery_action_registry
+            if recovery_action_registry is not None
+            else RecoveryActionRegistry()
+        )
+
+    def resolve_initial_model_plan(
+        self,
+        *,
+        agent: dict[str, Any],
+        original_goal: str,
+        allowed_tools: list[str],
+        runtime_execution_metadata: Mapping[str, Any] | None = None,
+        runtime_execution_envelope: Mapping[str, Any] | None = None,
+        run_id: str = "",
+        timeline: list[dict[str, Any]],
+        budget: Any,
+    ) -> DirectToolSelection | ModelIntentClarificationResolution | None:
+        """Resolve only ambiguous first-turn intent; execution stays Runtime-owned.
+
+        The model may normalize the user's intent category, but it cannot name
+        an executable adapter, author approval/risk metadata, mint plan IDs, or
+        define completion evidence.  The deterministic RuntimePlanner validates
+        the proposal and creates every authoritative snapshot afterwards.
+        """
+
+        immutable_goal = str(original_goal or "").strip()
+        if not immutable_goal or not allowed_tools:
+            return None
+        planner_metadata = _runtime_planner_execution_metadata(
+            runtime_execution_metadata,
+        )
+        deterministic_selection = planner_first_direct_tool_selection(
+            immutable_goal,
+            allowed_tools,
+            metadata=planner_metadata,
+        )
+        clarification_authority = clarification_authority_for_goal(
+            planner_metadata,
+            immutable_goal,
+        )
+        needs_model_assistance = planner_selection_needs_model_assistance(
+            deterministic_selection,
+            immutable_goal,
+        )
+        if clarification_authority is None and not needs_model_assistance:
+            return None
+        if not _model_intent_plan_may_replace_execution_envelope(
+            runtime_execution_envelope,
+            deterministic_selection,
+        ):
+            raise ValueError("model_intent_plan_envelope_conflict")
+
+        if clarification_authority is not None:
+            clarification_selection = (
+                direct_tool_selection_from_user_clarification(
+                    immutable_goal,
+                    allowed_tools,
+                    metadata=planner_metadata,
+                )
+            )
+            if clarification_selection is not None:
+                timeline.append(
+                    self._timeline(
+                        "agent.plan.clarification_resumed",
+                        str(
+                            getattr(
+                                clarification_selection.decision.selected_intent,
+                                "kind",
+                                "",
+                            )
+                            or ""
+                        ),
+                        decision_id=str(
+                            getattr(
+                                clarification_selection.decision,
+                                "decision_id",
+                                "",
+                            )
+                            or ""
+                        ),
+                        visibility="internal",
+                        source="runtime_validated_user_clarification",
+                    )
+                )
+                return clarification_selection
+
+        model_config = self._agent_model_config_private(agent)
+        base_url = str(model_config.get("base_url") or "").rstrip("/")
+        model = str(model_config.get("model") or "").strip()
+        api_key = str(model_config.get("api_key") or "").strip()
+        if not base_url or not model or not api_key:
+            if clarification_authority is not None:
+                timeline.append(
+                    self._timeline(
+                        "agent.plan.clarification_resume_unresolved",
+                        "complete_goal_required",
+                        visibility="internal",
+                        source="runtime_validated_user_clarification",
+                    )
+                )
+                return ModelIntentClarificationResolution(
+                    original_goal=immutable_goal,
+                    question="请在一条消息里完整说明动作和对象，我会按新目标继续。",
+                )
+            raise self._error_type(
+                "native_agent_not_ready:chat_model_profile_required"
+            )
+
+        planning_messages = _initial_model_intent_planning_messages(
+            immutable_goal,
+            deterministic_selection,
+            allowed_tools,
+            clarification_authority=clarification_authority,
+        )
+        self._check_context_budget(budget, planning_messages)
+        budget.claim_model_call()
+        timeline.append(
+            self._timeline(
+                "agent.plan.model_assistance_requested",
+                "intent_disambiguation",
+                visibility="internal",
+                source="runtime_model_intent_planner",
+            )
+        )
+        message = self._coalesce_model_message(
+            self._call_model(
+                base_url,
+                model,
+                api_key,
+                planning_messages,
+                tools=[model_intent_planning_tool_schema()],
+                stream=True,
+            )
+        )
+        content = self._message_visible_content_text(message)
+        proposals = self._tool_requests_from_message(message, content)
+        proposal = None
+        validation_error: ModelIntentPlanningError | None = None
+        try:
+            proposal = model_intent_proposal_from_tool_requests(proposals)
+        except ModelIntentPlanningError as exc:
+            validation_error = exc
+        if validation_error is None:
+            if proposal is None:
+                raise self._error_type(
+                    "Agent 无法形成安全的候选计划，请补充目标、对象或期望结果。"
+                )
+            try:
+                resolution = model_intent_resolution_from_proposal(
+                    proposal,
+                    original_goal=immutable_goal,
+                    allowed_tools=allowed_tools,
+                    metadata=planner_metadata,
+                )
+            except ModelIntentPlanningError as exc:
+                validation_error = exc
+        validation_reason = ""
+        if validation_error is not None:
+            candidate_reason = str(validation_error).partition(":")[0].strip()
+            validation_reason = (
+                candidate_reason
+                if re.fullmatch(r"[a-z][a-z0-9_]{0,127}", candidate_reason)
+                else "model_intent_proposal_rejected"
+            )
+            # Any model proposal that Runtime cannot safely promote is a
+            # request for user authority, not an execution failure.  Keep the
+            # question generic so rejected model content never leaks back as
+            # trusted task detail.
+            resolution = ModelIntentClarificationResolution(
+                original_goal=immutable_goal,
+                question="请补充要操作的具体对象、范围、时间或期望结果。",
+            )
+        if isinstance(resolution, ModelIntentClarificationResolution):
+            event_payload = {
+                "intent_kind": proposal.intent_kind if proposal is not None else "",
+                "resolution": "awaiting_user",
+                "visibility": "internal",
+                "source": "runtime_model_intent_planner",
+            }
+            if validation_reason:
+                event_payload["validation_reason"] = validation_reason
+            timeline.append(
+                self._timeline(
+                    "agent.plan.model_assistance_resolved",
+                    "clarification_required",
+                    **event_payload,
+                )
+            )
+            return resolution
+
+        selection = resolution
+        event_payload = {
+            **dict(selection.event_payload),
+            "selected_reason": "runtime_model_assisted_intent",
+            "model_assisted_from_decision_id": str(
+                getattr(deterministic_selection.decision, "decision_id", "") or ""
+            ).strip(),
+            "visibility": "internal",
+        }
+        selection = replace(selection, event_payload=event_payload)
+        timeline.append(
+            self._timeline(
+                "agent.plan.model_assistance_resolved",
+                str(getattr(selection.decision.selected_intent, "kind", "") or ""),
+                decision_id=str(
+                    getattr(selection.decision, "decision_id", "") or ""
+                ),
+                visibility="internal",
+                source="runtime_model_intent_planner",
+            )
+        )
+        return selection
 
     def run(
         self,
@@ -342,9 +1495,11 @@ class RuntimeCustomApiAgentLoop:
         runtime_execution_envelope: dict[str, Any] | None = None,
         runtime_execution_metadata: Mapping[str, Any] | None = None,
         daily_desktop_planning_context: str | None = None,
+        original_goal: str | None = None,
         start_iteration: int = 0,
         run_id: str = "",
         budget: Any | None = None,
+        resume_after_approved_tool: bool = False,
     ) -> str:
         runtime = self._compile_agent_runtime(agent)
         allowed_tools = runtime["tool_policy"].get("allowed_tools") or []
@@ -352,13 +1507,28 @@ class RuntimeCustomApiAgentLoop:
             agent,
             runtime_execution_metadata,
         )
-        direct_tool_request = _tool_request_with_desktop_execution_policy(
-            direct_tool_request,
-            desktop_execution_policy,
-        )
+        if (
+            isinstance(runtime_execution_envelope, Mapping)
+            and desktop_execution_policy
+        ):
+            runtime_execution_envelope = (
+                runtime_execution_envelope_with_desktop_execution_policy(
+                    runtime_execution_envelope,
+                    desktop_execution_policy,
+                )
+            )
         runtime_execution_envelope_owned = _runtime_execution_envelope_has_requests(
             runtime_execution_envelope
         )
+        if runtime_execution_envelope_owned:
+            # A caller-supplied envelope owns both execution and blocking.
+            # Conflicting legacy direct fields must never outrank it.
+            direct_tool_request = None
+        else:
+            direct_tool_request = _tool_request_with_desktop_execution_policy(
+                direct_tool_request,
+                desktop_execution_policy,
+            )
         blocked_runtime_execution_requests = (
             runtime_execution_blocked_requests_from_envelope_payload(
                 runtime_execution_envelope,
@@ -367,7 +1537,13 @@ class RuntimeCustomApiAgentLoop:
             if runtime_execution_envelope_owned
             else []
         )
-        if direct_tool_requests is None:
+        if runtime_execution_envelope_owned:
+            direct_tool_requests = _runtime_execution_context_tool_requests(
+                runtime_execution_envelope,
+                runtime_execution_metadata,
+                allowed_tools,
+            )
+        elif direct_tool_requests is None:
             direct_tool_requests = _runtime_execution_context_tool_requests(
                 runtime_execution_envelope,
                 runtime_execution_metadata,
@@ -384,13 +1560,155 @@ class RuntimeCustomApiAgentLoop:
             or ([direct_tool_request] if isinstance(direct_tool_request, dict) else None),
         )
         default_messages = messages is None
+        normalized_start_iteration = self._normalize_tool_iteration(start_iteration)
+        goal_contract = None
+        if original_goal is None:
+            # Restore before any planner or prompt construction. Continuations
+            # must not invoke a new planner merely to rebuild system guidance.
+            goal_contract = runtime_goal_contract(
+                run_id=run_id,
+                original_goal=None,
+                runtime_execution_envelope=(
+                    runtime_execution_envelope
+                    if isinstance(runtime_execution_envelope, Mapping)
+                    else None
+                ),
+                runtime_execution_metadata=runtime_execution_metadata,
+                messages=(messages if messages is not None else []),
+                timeline=timeline,
+            )
+        immutable_original_goal = (
+            goal_contract.original_goal
+            if goal_contract is not None
+            else (
+                str(original_goal).strip()
+                if original_goal is not None
+                else (
+                    self._original_user_intent_text(messages or [])
+                    or str(context or "").strip()
+                )
+            )
+        )
+        fresh_runtime_planner_selection: DirectToolSelection | None = None
+        fresh_goal_contract_template: dict[str, Any] | None = None
+        if (
+            goal_contract is None
+            and immutable_original_goal
+            and not runtime_execution_envelope_owned
+            and not resume_after_approved_tool
+            and normalized_start_iteration == 0
+            and allowed_tools
+        ):
+            planner_metadata = _runtime_planner_execution_metadata(
+                runtime_execution_metadata,
+            )
+            try:
+                fresh_runtime_planner_selection = planner_first_direct_tool_selection(
+                    immutable_original_goal,
+                    allowed_tools,
+                    metadata=planner_metadata,
+                )
+            except Exception as exc:
+                reason = (
+                    "planner_authority_conflict"
+                    if str(exc or "").strip()
+                    in _RUNTIME_PLANNER_AUTHORITY_CONFLICT_CODES
+                    else "planner_internal_failure"
+                )
+                self._record_runtime_planner_failure(
+                    reason,
+                    timeline=timeline,
+                    run_id=run_id,
+                )
+                raise self._error_type(
+                    "Agent 规划暂时无法安全执行，任务已停止。请重试或重新描述目标。"
+                ) from exc
+            fresh_goal_contract_template = _fresh_planner_goal_contract_template(
+                fresh_runtime_planner_selection,
+                immutable_original_goal,
+            )
+        planner_guidance_decision = (
+            fresh_runtime_planner_selection.decision
+            if fresh_runtime_planner_selection is not None
+            else None
+        )
         if messages is None:
-            messages = self._initial_messages(context, allowed_tools)
+            messages = self._initial_messages(
+                context,
+                allowed_tools,
+                planner_decision=planner_guidance_decision,
+                plan_guidance_if_missing=False,
+            )
         else:
-            self._ensure_runtime_system_message(messages, allowed_tools)
+            self._ensure_runtime_system_message(
+                messages,
+                allowed_tools,
+                planner_decision=planner_guidance_decision,
+                plan_guidance_if_missing=False,
+            )
+        goal_contract_base_kwargs = {
+            "run_id": run_id,
+            "runtime_execution_envelope": (
+                runtime_execution_envelope
+                if isinstance(runtime_execution_envelope, Mapping)
+                else None
+            ),
+            "runtime_execution_metadata": runtime_execution_metadata,
+            "messages": messages,
+            "timeline": timeline,
+        }
+        if goal_contract is None:
+            goal_contract_kwargs = {
+                **goal_contract_base_kwargs,
+                "original_goal": immutable_original_goal or None,
+            }
+            try:
+                goal_contract = runtime_goal_contract(
+                    **goal_contract_kwargs,
+                    goal_contract_template=fresh_goal_contract_template,
+                )
+            except ValueError as exc:
+                if str(exc) != "goal_contract_missing" or not immutable_original_goal:
+                    raise
+                goal_contract = runtime_goal_contract(
+                    **goal_contract_kwargs,
+                    goal_contract_template=planned_goal_contract_payload(
+                        immutable_original_goal,
+                        allowed_tools=allowed_tools,
+                    ),
+                )
+        if goal_contract is not None:
+            self._ensure_goal_contract_context(
+                goal_contract,
+                messages=messages,
+                timeline=timeline,
+                run_id=run_id,
+            )
+            direct_tool_requests = _runtime_bind_unscoped_tools_to_goal_contract(
+                list(direct_tool_requests or []),
+                contract=goal_contract,
+                timeline=timeline,
+                run_id=run_id,
+                iteration=normalized_start_iteration,
+                # Direct requests at this layer are projections from the
+                # deterministic planner / execution envelope. Public or model
+                # requests must enter through ToolRequestParser or the
+                # safe-default binder boundary below.
+                trusted_runtime_metadata=True,
+            )
+            if isinstance(direct_tool_request, dict):
+                bound_direct = _runtime_bind_unscoped_tools_to_goal_contract(
+                    [direct_tool_request],
+                    contract=goal_contract,
+                    timeline=timeline,
+                    run_id=run_id,
+                    iteration=normalized_start_iteration,
+                    trusted_runtime_metadata=True,
+                )
+                direct_tool_request = bound_direct[0] if bound_direct else None
         budget = budget or self._run_budget(run_id, timeline)
         self._check_context_budget(budget, messages)
-        start_iteration = self._normalize_tool_iteration(start_iteration)
+        start_iteration = normalized_start_iteration
         runtime_planner_decision = None
         planned_tool_requests: list[dict[str, Any]] = []
         direct_tool_selection_payload: dict[str, Any] = {}
@@ -402,7 +1720,41 @@ class RuntimeCustomApiAgentLoop:
             )
             if resumed_result:
                 return resumed_result
-            if start_iteration > 0:
+            if resume_after_approved_tool:
+                approved_verification_request = (
+                    _approved_tool_post_action_verification_request(
+                        timeline,
+                        allowed_tools=allowed_tools,
+                    )
+                )
+                if approved_verification_request:
+                    self._record_auto_model_followup_app_write_plan(
+                        [approved_verification_request],
+                        timeline=timeline,
+                        run_id=run_id,
+                    )
+                    self._run_tool_requests(
+                        [approved_verification_request],
+                        allowed_tools,
+                        broker,
+                        messages,
+                        timeline,
+                        artifacts,
+                        next_iteration=start_iteration,
+                        run_id=run_id,
+                        budget=budget,
+                    )
+                    resumed_result = self._direct_existing_daily_desktop_result(
+                        agent,
+                        timeline,
+                        run_id=run_id,
+                    )
+                    if resumed_result:
+                        return resumed_result
+            # An approval resume already carries the model-selected recovery
+            # action and its fresh tool result. Let the model consume that
+            # result before considering any older pending replan request.
+            if start_iteration > 0 and not resume_after_approved_tool:
                 replan_recovery_result = self._run_pending_runtime_replan_recovery(
                     allowed_tools,
                     broker,
@@ -413,10 +1765,11 @@ class RuntimeCustomApiAgentLoop:
                     run_id=run_id,
                     budget=budget,
                     next_iteration=start_iteration,
+                    goal_contract=goal_contract,
                 )
                 if replan_recovery_result:
                     return replan_recovery_result
-        if default_messages or start_iteration == 0:
+        if default_messages or (start_iteration == 0 and not resume_after_approved_tool):
             planning_context = (
                 str(daily_desktop_planning_context or "").strip()
                 if daily_desktop_planning_context is not None
@@ -445,10 +1798,13 @@ class RuntimeCustomApiAgentLoop:
                         runtime_planner_decision,
                         planner_execution_requests,
                         direct_tool_selection_payload,
-                    ) = self._runtime_planner_tool_requests(
+                    ) = self._runtime_planner_tool_requests_for_run(
                         planning_context,
                         allowed_tools,
                         runtime_execution_metadata=runtime_execution_metadata,
+                        preplanned_selection=fresh_runtime_planner_selection,
+                        timeline=timeline,
+                        run_id=run_id,
                     )
                     if planner_execution_requests:
                         planned_tool_requests = planner_execution_requests
@@ -482,10 +1838,13 @@ class RuntimeCustomApiAgentLoop:
                     runtime_planner_decision,
                     planned_tool_requests,
                     direct_tool_selection_payload,
-                ) = self._runtime_planner_tool_requests(
+                ) = self._runtime_planner_tool_requests_for_run(
                     planning_context,
                     allowed_tools,
                     runtime_execution_metadata=runtime_execution_metadata,
+                    preplanned_selection=fresh_runtime_planner_selection,
+                    timeline=timeline,
+                    run_id=run_id,
                 )
                 if not planned_tool_requests:
                     planner_unavailable_payloads = (
@@ -531,8 +1890,25 @@ class RuntimeCustomApiAgentLoop:
                                 timeline=timeline,
                                 run_id=run_id,
                             )
+                        if _goal_contract_requires_effectful_execution(goal_contract):
+                            return self._record_runtime_planner_unavailable_goal(
+                                runtime_planner_decision,
+                                planner_unavailable_payloads,
+                                replan_payloads,
+                                goal_contract=goal_contract,
+                                timeline=timeline,
+                                run_id=run_id,
+                            )
                         planner_replan_only = True
             if planned_tool_requests:
+                planned_tool_requests = _runtime_bind_unscoped_tools_to_goal_contract(
+                    list(planned_tool_requests),
+                    contract=goal_contract,
+                    timeline=timeline,
+                    run_id=run_id,
+                    iteration=normalized_start_iteration,
+                    trusted_runtime_metadata=True,
+                )
                 planned_tool_requests = _tool_requests_with_desktop_execution_policy(
                     planned_tool_requests,
                     desktop_execution_policy,
@@ -611,11 +1987,22 @@ class RuntimeCustomApiAgentLoop:
                         )
                 execution_tool_requests = planned_tool_requests
                 if self._has_approval_plan_tool(planned_tool_requests):
-                    execution_tool_requests = _visible_daily_desktop_completed_steps(
-                        planned_tool_requests
+                    approval_has_dependencies = any(
+                        bool(request.get("approval_required"))
+                        and any(
+                            str(step_id or "").strip()
+                            for step_id in request.get("depends_on", [])
+                        )
+                        for request in planned_tool_requests
+                        if isinstance(request, Mapping)
+                        and isinstance(request.get("depends_on"), list)
                     )
-                    if not execution_tool_requests:
-                        execution_tool_requests = planned_tool_requests
+                    if not approval_has_dependencies:
+                        execution_tool_requests = _visible_daily_desktop_completed_steps(
+                            planned_tool_requests
+                        )
+                        if not execution_tool_requests:
+                            execution_tool_requests = planned_tool_requests
                 execution_tool_requests = _split_model_materialization_tool_requests(
                     execution_tool_requests
                 )[0]
@@ -632,6 +2019,25 @@ class RuntimeCustomApiAgentLoop:
                     ),
                     -1,
                 )
+                if first_approval_index >= 0:
+                    approval_candidate = execution_tool_requests[first_approval_index]
+                    approval_dependencies = approval_candidate.get("depends_on")
+                    if isinstance(approval_dependencies, list) and any(
+                        str(step_id or "").strip()
+                        for step_id in approval_dependencies
+                    ):
+                        # Dependency-aware planner approvals must stay in the
+                        # authoritative Runner sequence.  Splitting the prefix
+                        # here would let this compatibility projection bypass
+                        # the Runner's prerequisite-success gate.
+                        first_approval_index = -1
+                if first_approval_index == 0:
+                    approval_candidate = execution_tool_requests[0]
+                    approval_tool = str(approval_candidate.get("tool") or "").strip()
+                    if _broker_tool_precondition_failure(broker, approval_tool) is not None:
+                        # Project the precondition failure through the Runner
+                        # instead of requesting approval for an impossible action.
+                        first_approval_index = -1
                 if first_approval_index == 0:
                     approval_request = execution_tool_requests[0]
                     approval_tool = str(approval_request.get("tool") or "").strip()
@@ -684,8 +2090,14 @@ class RuntimeCustomApiAgentLoop:
                     )
                     raise AgentApprovalRequired(pending_approval)
                 if first_approval_index > 0:
-                    preapproval_requests = execution_tool_requests[:first_approval_index]
-                    approval_request = execution_tool_requests[first_approval_index]
+                    (
+                        preapproval_requests,
+                        approval_request,
+                        approval_gate_requests,
+                    ) = _legacy_approval_gate_requests(
+                        execution_tool_requests,
+                        first_approval_index,
+                    )
                     self._record_desktop_permission_preflight(
                         preapproval_requests,
                         broker,
@@ -722,6 +2134,48 @@ class RuntimeCustomApiAgentLoop:
                         if isinstance(approval_request.get("input"), dict)
                         else {}
                     )
+                    approval_dependency_block = _approval_dependency_block_result(
+                        approval_gate_requests[-1],
+                        approval_gate_requests,
+                        _legacy_approval_gate_timeline(
+                            timeline,
+                            preapproval_requests,
+                            tool_timeline_start=preapproval_timeline_start,
+                        ),
+                    )
+                    if approval_dependency_block:
+                        blocked_payload = {
+                            "tool": approval_tool,
+                            "input_preview": dict(approval_input),
+                            "result": approval_dependency_block,
+                            "status": "blocked",
+                            **_request_observability_metadata(approval_request),
+                        }
+                        timeline.append(
+                            self._timeline(
+                                "agent.tool.skipped",
+                                approval_tool,
+                                **blocked_payload,
+                            )
+                        )
+                        if run_id and self._append_run_event is not None:
+                            self._append_run_event(
+                                run_id,
+                                "agent.tool.skipped",
+                                blocked_payload,
+                            )
+                        raise AgentDirectOutcomeUnverified(
+                            str(
+                                approval_dependency_block.get("summary")
+                                or "approval dependency unverified"
+                            ),
+                            reason="approval_dependency_unverified",
+                            tool_name=approval_tool,
+                            input_preview=dict(approval_input),
+                            tool_call_id=str(
+                                approval_request.get("tool_call_id") or ""
+                            ),
+                        )
                     approval_id_source = (
                         f"{run_id}:{approval_tool}:{repr(sorted(approval_input.items()))}"
                     )
@@ -787,6 +2241,11 @@ class RuntimeCustomApiAgentLoop:
                     for request in planned_tool_requests
                     if isinstance(request, dict)
                 )
+                immutable_execution_tool_requests = [
+                    deepcopy(request)
+                    for request in execution_tool_requests
+                    if isinstance(request, Mapping)
+                ]
                 tool_timeline_start = len(timeline)
                 try:
                     if execution_tool_requests:
@@ -845,9 +2304,373 @@ class RuntimeCustomApiAgentLoop:
                     tool_timeline_start=tool_timeline_start,
                     run_id=run_id,
                 )
+                direct_outcome_results = OutcomeLoopCoordinator().decide_terminal_batch(
+                    timeline=timeline,
+                    start_index=tool_timeline_start,
+                    run_id=run_id,
+                    allowed_tools=allowed_tools,
+                    planned_tool_call_ids=[
+                        str(request.get("tool_call_id") or "")
+                        for request in execution_tool_requests
+                    ],
+                    recovery_action=lambda assessment: (
+                        self._execute_runtime_recovery_plan(
+                            assessment,
+                            model_config=lambda: self._agent_model_config_private(agent),
+                            allowed_tools=allowed_tools,
+                            broker=broker,
+                            messages=messages,
+                            timeline=timeline,
+                            artifacts=artifacts,
+                            budget=budget,
+                            iteration=start_iteration,
+                            run_id=run_id,
+                        )
+                    ),
+                )
+                (
+                    recovered_source_tool_call_id,
+                    recovered_downstream_requests,
+                ) = _runtime_background_window_resume_contract(
+                    direct_outcome_results,
+                    immutable_execution_tool_requests,
+                    timeline=timeline,
+                    run_id=run_id,
+                )
+                if recovered_downstream_requests:
+                    recovered_timeline_start = len(timeline)
+                    try:
+                        self._run_tool_requests(
+                            recovered_downstream_requests,
+                            allowed_tools,
+                            broker,
+                            messages,
+                            timeline,
+                            artifacts,
+                            next_iteration=start_iteration,
+                            run_id=run_id,
+                            budget=budget,
+                        )
+                    except AgentApprovalRequired as exc:
+                        self._record_runtime_planner_task_progress_events(
+                            runtime_planner_decision,
+                            timeline=timeline,
+                            tool_timeline_start=recovered_timeline_start,
+                            run_id=run_id,
+                        )
+                        self._record_tool_request_task_progress_events(
+                            recovered_downstream_requests,
+                            timeline=timeline,
+                            tool_timeline_start=recovered_timeline_start,
+                            run_id=run_id,
+                        )
+                        pending_approval = (
+                            exc.pending_approval
+                            if isinstance(exc.pending_approval, dict)
+                            else {}
+                        )
+                        planned_tool = str(
+                            pending_approval.get("tool")
+                            or recovered_downstream_requests[0].get("tool")
+                            or ""
+                        )
+                        approval_request = self._planned_request_for_tool(
+                            recovered_downstream_requests,
+                            planned_tool,
+                        )
+                        planned_input = self._pending_approval_input_preview(
+                            pending_approval,
+                            approval_request,
+                            recovered_downstream_requests[0],
+                        )
+                        self._record_desktop_intent_approval_required(
+                            planned_tool,
+                            planned_input,
+                            pending_approval=exc.pending_approval,
+                            timeline=timeline,
+                            run_id=run_id,
+                            planned_request=approval_request,
+                            source=self._approval_event_source(
+                                approval_request,
+                                planned_tool,
+                            ),
+                            planning_reason=self._approval_event_planning_reason(
+                                approval_request,
+                                planned_tool,
+                            ),
+                        )
+                        raise
+                    recovered_outcomes = OutcomeLoopCoordinator().decide_terminal_batch(
+                        timeline=timeline,
+                        start_index=recovered_timeline_start,
+                        run_id=run_id,
+                        allowed_tools=allowed_tools,
+                        planned_tool_call_ids=[
+                            str(request.get("tool_call_id") or "")
+                            for request in recovered_downstream_requests
+                        ],
+                        recovery_action=lambda assessment: (
+                            self._execute_runtime_recovery_plan(
+                                assessment,
+                                model_config=lambda: self._agent_model_config_private(
+                                    agent
+                                ),
+                                allowed_tools=allowed_tools,
+                                broker=broker,
+                                messages=messages,
+                                timeline=timeline,
+                                artifacts=artifacts,
+                                budget=budget,
+                                iteration=start_iteration,
+                                run_id=run_id,
+                            )
+                        ),
+                    )
+                    direct_outcome_results = [
+                        result
+                        for result in direct_outcome_results
+                        if result.source_tool_call_id
+                        != recovered_source_tool_call_id
+                    ]
+                    direct_outcome_results.extend(recovered_outcomes)
+                clipboard_transfer_failure = (
+                    _runtime_clipboard_transfer_verification_failure(
+                        timeline,
+                        tool_timeline_start=tool_timeline_start,
+                    )
+                )
+                if clipboard_transfer_failure is not None:
+                    raise AgentDirectOutcomeUnverified(
+                        str(clipboard_transfer_failure["summary"]),
+                        reason="desktop_verification_failed",
+                        tool_name=str(clipboard_transfer_failure["tool"]),
+                        input_preview=dict(
+                            clipboard_transfer_failure["input_preview"]
+                        ),
+                        tool_call_id=str(
+                            clipboard_transfer_failure["tool_call_id"]
+                        ),
+                    )
+                await_user_result = next(
+                    (
+                        result
+                        for result in direct_outcome_results
+                        if result.disposition is OutcomeLoopDisposition.AWAIT_USER
+                    ),
+                    None,
+                )
+                if await_user_result is not None:
+                    if _timeline_has_permission_recovery_signal(
+                        timeline,
+                        tool_timeline_start,
+                    ):
+                        self._record_timeline_desktop_permission_recovery_events(
+                            timeline,
+                            tool_timeline_start=tool_timeline_start,
+                            run_id=run_id,
+                        )
+                    source_request = next(
+                        (
+                            request
+                            for request in execution_tool_requests
+                            if str(request.get("tool_call_id") or "").strip()
+                            == await_user_result.source_tool_call_id
+                        ),
+                        {},
+                    )
+                    message = self._consumer_tool_outcome_message(
+                        await_user_result,
+                        source_request,
+                        default="此操作需要用户授权后才能继续。",
+                    )
+                    raise AgentDirectOutcomeUnverified(
+                        message,
+                        reason=await_user_result.reason or "action_required",
+                        tool_name=await_user_result.outcome.tool_name,
+                        input_preview=(
+                            dict(source_request.get("input"))
+                            if isinstance(source_request.get("input"), Mapping)
+                            else {}
+                        ),
+                        tool_call_id=await_user_result.source_tool_call_id,
+                    )
+                failed_outcome_result = next(
+                    (
+                        result
+                        for result in direct_outcome_results
+                        if result.disposition is OutcomeLoopDisposition.FAILED
+                    ),
+                    None,
+                )
+                if failed_outcome_result is not None and not replan_payloads:
+                    source_request = next(
+                        (
+                            request
+                            for request in execution_tool_requests
+                            if str(request.get("tool_call_id") or "").strip()
+                            == failed_outcome_result.source_tool_call_id
+                        ),
+                        {},
+                    )
+                    message = self._consumer_tool_outcome_message(
+                        failed_outcome_result,
+                        source_request,
+                        default="工具执行未完成。",
+                    )
+                    raise AgentDirectOutcomeUnverified(
+                        message,
+                        reason=failed_outcome_result.reason or "tool_error",
+                        tool_name=failed_outcome_result.outcome.tool_name,
+                        input_preview=(
+                            dict(source_request.get("input"))
+                            if isinstance(source_request.get("input"), Mapping)
+                            else {}
+                        ),
+                        tool_call_id=failed_outcome_result.source_tool_call_id,
+                    )
+                continuation_replan_payloads = (
+                    self._record_recovery_continuation_replan_events(
+                        direct_outcome_results,
+                        timeline=timeline,
+                        run_id=run_id,
+                    )
+                )
+                if continuation_replan_payloads:
+                    replan_payloads = [
+                        *replan_payloads,
+                        *(
+                            payload
+                            for payload in continuation_replan_payloads
+                            if _runtime_replan_payload_identity(payload)
+                            not in {
+                                _runtime_replan_payload_identity(existing)
+                                for existing in replan_payloads
+                            }
+                        ),
+                    ]
+                terminal_recovery_output = self._terminal_recovery_output(
+                    direct_outcome_results,
+                    goal_contract=goal_contract,
+                    timeline=timeline,
+                )
+                blocking_outcome_dispositions = {
+                    OutcomeLoopDisposition.AWAIT_USER,
+                    OutcomeLoopDisposition.REPLAN_MODEL,
+                    OutcomeLoopDisposition.PARTIAL,
+                    OutcomeLoopDisposition.FAILED,
+                }
+                if terminal_recovery_output and not any(
+                    result.disposition in blocking_outcome_dispositions
+                    for result in direct_outcome_results
+                ):
+                    return terminal_recovery_output
+                if any(
+                    result.disposition
+                    in {
+                        OutcomeLoopDisposition.REPLAN_MODEL,
+                        OutcomeLoopDisposition.PARTIAL,
+                    }
+                    for result in direct_outcome_results
+                ) and not replan_payloads:
+                    # One intermediate action can be intentionally partial
+                    # (for example, opening an app's find UI) while a later,
+                    # provenance-bound verifier already satisfies the root
+                    # Goal.  Do not discard that completed plan and fall into
+                    # an unnecessary model turn.  The Goal evaluator remains
+                    # the authority here; provider summaries and aggregate
+                    # success flags cannot enter this branch on their own.
+                    goal_completed = bool(
+                        goal_contract is not None
+                        and runtime_goal_assessment(
+                            goal_contract,
+                            timeline,
+                        ).completed
+                    )
+                    if goal_completed:
+                        direct_result = self._direct_daily_desktop_sequence_result(
+                            execution_tool_requests,
+                            timeline,
+                            tool_timeline_start=tool_timeline_start,
+                            run_id=run_id,
+                        )
+                        if direct_result:
+                            self._record_goal_contract_assessment(
+                                goal_contract,
+                                timeline=timeline,
+                                run_id=run_id,
+                            )
+                            return direct_result
+                    if _tool_requests_require_media_playback(
+                        execution_tool_requests
+                    ) and not _tool_requests_include_media_tool(
+                        execution_tool_requests
+                    ):
+                        # A preparatory UI action may be honestly partial even
+                        # when the later search/read steps succeeded.  With no
+                        # recovery plan and no playback receipt, handing that
+                        # state to the model only invites an unsupported
+                        # "played" claim.  Close the capability-level goal
+                        # through the same verified aggregate used by every
+                        # direct desktop sequence.
+                        direct_result = self._direct_daily_desktop_sequence_result(
+                            execution_tool_requests,
+                            timeline,
+                            tool_timeline_start=tool_timeline_start,
+                            run_id=run_id,
+                        )
+                        if direct_result:
+                            return direct_result
+                    execution_tool_requests = []
+                    planned_tool_requests = []
+                    replan_payloads = []
+                deferred_verification_requests = [
+                    request
+                    for request in execution_tool_requests
+                    if isinstance(request, Mapping)
+                    and str(request.get("tool") or "").strip()
+                    in _DAILY_DESKTOP_VERIFY_TOOLS
+                ]
+                completed_primary = (
+                    _runtime_planner_verified_app_open_before_unavailable_deferred_verification(
+                        deferred_verification_requests,
+                        replan_payloads,
+                        timeline,
+                        tool_timeline_start=len(timeline),
+                    )
+                )
+                if completed_primary is not None:
+                    completed_requests, completed_timeline_start = completed_primary
+                    direct_result = self._direct_daily_desktop_sequence_result(
+                        completed_requests,
+                        timeline,
+                        tool_timeline_start=completed_timeline_start,
+                        run_id=run_id,
+                    )
+                    if direct_result:
+                        return direct_result
                 permission_recovery_detected = _timeline_has_permission_recovery_signal(
                     timeline,
                     tool_timeline_start,
+                )
+                permission_recovery_requests: list[dict[str, Any]] = []
+                if permission_recovery_detected:
+                    self._record_timeline_desktop_permission_recovery_events(
+                        timeline,
+                        tool_timeline_start=tool_timeline_start,
+                        run_id=run_id,
+                    )
+                    permission_recovery_requests = (
+                        _permission_recovery_executed_requests(
+                            execution_tool_requests,
+                            timeline,
+                            tool_timeline_start=tool_timeline_start,
+                        )
+                    )
+                terminal_media_failure_detected = (
+                    _timeline_has_terminal_media_failure_without_permission_recovery(
+                        timeline,
+                        tool_timeline_start,
+                    )
                 )
                 if replan_payloads and permission_recovery_detected:
                     replan_payloads = []
@@ -863,14 +2686,44 @@ class RuntimeCustomApiAgentLoop:
                     tool_timeline_start=tool_timeline_start,
                     run_id=run_id,
                 )
-                explicit_model_followup = explicit_model_followup_requested
-                auto_permission_recovery_requests = _auto_direct_permission_recovery_requests(
-                    execution_tool_requests,
-                    allowed_tools,
-                    timeline,
-                    tool_timeline_start=tool_timeline_start,
+                verification_failure = (
+                    _runtime_planner_trailing_verification_failure_outcome(
+                        execution_tool_requests,
+                        replan_payloads,
+                        timeline,
+                        tool_timeline_start=tool_timeline_start,
+                    )
+                    if replan_payloads and not permission_recovery_detected
+                    else None
                 )
-                if permission_recovery_detected and not auto_permission_recovery_requests:
+                if verification_failure is not None:
+                    # The primary action is not proven complete, but the
+                    # Runtime already minted a trusted replan request for the
+                    # failed verifier.  Keep that failure as observation
+                    # evidence and let the bounded recovery loop select
+                    # another verifier or model-planned recovery action. Tool
+                    # policy and approval gates still prevent an unverified
+                    # side effect from being replayed directly.
+                    timeline.append(
+                        self._timeline(
+                            "agent.goal.verification_replan_continued",
+                            str(verification_failure["tool"]),
+                            run_id=run_id,
+                            status="replanning",
+                            source_tool_call_id=str(
+                                verification_failure["tool_call_id"]
+                            ),
+                            visibility="internal",
+                        )
+                    )
+                if terminal_media_failure_detected and not replan_payloads:
+                    # A retryable media miss is a failed attempt, not a failed
+                    # root goal.  When Runtime has already minted a replan
+                    # request, preserve the failure as model-visible evidence
+                    # and let the generic loop choose another capability (for
+                    # example research/observation) before retrying playback.
+                    # Only project the terminal consumer failure when no safe
+                    # replan path exists.
                     direct_result = self._direct_daily_desktop_sequence_result(
                         execution_tool_requests,
                         timeline,
@@ -879,6 +2732,35 @@ class RuntimeCustomApiAgentLoop:
                     )
                     if direct_result:
                         return direct_result
+                if _direct_runtime_verification_only_followups(
+                    execution_tool_requests
+                ):
+                    direct_result = self._direct_daily_desktop_sequence_result(
+                        execution_tool_requests,
+                        timeline,
+                        tool_timeline_start=tool_timeline_start,
+                        run_id=run_id,
+                    )
+                    if direct_result:
+                        return direct_result
+                explicit_model_followup = explicit_model_followup_requested
+                if permission_recovery_detected:
+                    direct_result = self._direct_daily_desktop_sequence_result(
+                        permission_recovery_requests or execution_tool_requests,
+                        timeline,
+                        tool_timeline_start=tool_timeline_start,
+                        run_id=run_id,
+                    )
+                    if direct_result:
+                        return direct_result
+                    auto_permission_recovery_requests = []
+                else:
+                    auto_permission_recovery_requests = _auto_direct_permission_recovery_requests(
+                        execution_tool_requests,
+                        allowed_tools,
+                        timeline,
+                        tool_timeline_start=tool_timeline_start,
+                    )
                 if auto_permission_recovery_requests:
                     recovery_timeline_start = self._run_auto_runtime_planner_requests(
                         auto_permission_recovery_requests,
@@ -914,6 +2796,23 @@ class RuntimeCustomApiAgentLoop:
                             budget=budget,
                             next_iteration=start_iteration,
                         )
+                    permission_retry_completed = bool(
+                        auto_permission_retry_requests
+                        and _auto_direct_permission_retry_completed(
+                            auto_permission_retry_requests,
+                            timeline,
+                            tool_timeline_start=retry_timeline_start,
+                        )
+                    )
+                    if permission_recovery_detected and not permission_retry_completed:
+                        direct_result = self._direct_daily_desktop_sequence_result(
+                            execution_tool_requests,
+                            timeline,
+                            tool_timeline_start=tool_timeline_start,
+                            run_id=run_id,
+                        )
+                        if direct_result:
+                            return direct_result
                     planned_tool_requests = [
                         *planned_tool_requests,
                         *auto_permission_recovery_requests,
@@ -921,17 +2820,16 @@ class RuntimeCustomApiAgentLoop:
                     ]
                     explicit_model_followup = (
                         explicit_model_followup_requested
-                        if auto_permission_retry_requests
-                        and _auto_direct_permission_retry_completed(
-                            auto_permission_retry_requests,
-                            timeline,
-                            tool_timeline_start=retry_timeline_start,
-                        )
+                        if permission_retry_completed
                         else True
                     )
                 if (
                     runtime_execution_envelope_owned
                     and blocked_runtime_execution_requests
+                    and not _runtime_execution_envelope_has_only_materialization_blockers(
+                        runtime_execution_envelope,
+                        blocked_runtime_execution_requests,
+                    )
                 ):
                     return self._record_blocked_runtime_execution_envelope(
                         runtime_execution_envelope,
@@ -1053,6 +2951,15 @@ class RuntimeCustomApiAgentLoop:
                             tool_timeline_start=tool_timeline_start,
                         )
                     )
+                    auto_replan_recovery_requests = (
+                        _bind_trusted_runtime_replan_goal_requests(
+                            auto_replan_recovery_requests,
+                            replan_payloads,
+                            contract=goal_contract,
+                            timeline=timeline,
+                            run_id=run_id,
+                        )
+                    )
                     if auto_replan_recovery_requests:
                         self._record_auto_model_followup_app_write_plan(
                             auto_replan_recovery_requests,
@@ -1091,7 +2998,7 @@ class RuntimeCustomApiAgentLoop:
                                 tool_timeline_start=auto_tool_timeline_start,
                                 run_id=run_id,
                             )
-                            auto_replan_deferred_continuation_requests = (
+                            generated_replan_deferred_continuation_requests = (
                                 _auto_replan_recovery_deferred_continuation_requests(
                                     auto_replan_recovery_requests,
                                     allowed_tools,
@@ -1099,6 +3006,48 @@ class RuntimeCustomApiAgentLoop:
                                     tool_timeline_start=auto_tool_timeline_start,
                                 )
                             )
+                            auto_replan_deferred_continuation_requests = (
+                                _drop_replayed_approved_replan_operate_requests(
+                                    generated_replan_deferred_continuation_requests,
+                                    timeline,
+                                )
+                            )
+                            if (
+                                generated_replan_deferred_continuation_requests
+                                and not auto_replan_deferred_continuation_requests
+                                and _replayed_approved_replan_operate_requests_verified(
+                                    generated_replan_deferred_continuation_requests,
+                                    timeline,
+                                )
+                            ):
+                                verified_operate_request = next(
+                                    request
+                                    for request in generated_replan_deferred_continuation_requests
+                                    if _replan_observed_action_operate_request(request)
+                                )
+                                direct_result = self._direct_daily_desktop_result(
+                                    agent,
+                                    str(verified_operate_request.get("tool") or ""),
+                                    (
+                                        dict(verified_operate_request.get("input"))
+                                        if isinstance(
+                                            verified_operate_request.get("input"),
+                                            Mapping,
+                                        )
+                                        else {}
+                                    ),
+                                    timeline,
+                                    run_id=run_id,
+                                    source=str(
+                                        verified_operate_request.get("source")
+                                        or "runtime_planner"
+                                    ),
+                                    planning_reason=(
+                                        "planner_verified_approved_replan_action"
+                                    ),
+                                )
+                                if direct_result:
+                                    return direct_result
                             if auto_replan_deferred_continuation_requests:
                                 auto_replan_approval_requests = [
                                     *auto_replan_approval_requests,
@@ -1605,7 +3554,13 @@ class RuntimeCustomApiAgentLoop:
                                 run_id=run_id,
                             )
                             if direct_result:
-                                return direct_result
+                                assessment = self._record_goal_contract_assessment(
+                                    goal_contract,
+                                    timeline=timeline,
+                                    run_id=run_id,
+                                )
+                                if assessment is None or assessment.completed:
+                                    return direct_result
                     if replan_payloads and not _auto_deferred_observed_ui_can_complete_without_model(
                         planned_tool_requests,
                         allowed_tools,
@@ -1700,8 +3655,22 @@ class RuntimeCustomApiAgentLoop:
                                 tool_timeline_start=auto_tool_timeline_start,
                                 run_id=run_id,
                             )
-                        if _selection_payload_has_model_followup_target(
-                            followup_selection_payload
+                        followup_target = (
+                            followup_selection_payload.get("followup_target")
+                            if isinstance(
+                                followup_selection_payload.get("followup_target"),
+                                Mapping,
+                            )
+                            else {}
+                        )
+                        if (
+                            _selection_payload_has_model_followup_target(
+                                followup_selection_payload
+                            )
+                            and not _model_followup_artifact_target_completed(
+                                followup_target,
+                                timeline,
+                            )
                         ):
                             auto_followup_request = {
                                 **auto_followup_request,
@@ -1730,18 +3699,61 @@ class RuntimeCustomApiAgentLoop:
                             )
                             if direct_result:
                                 return direct_result
-                    auto_deferred_observed_ui_requests = (
+                    generated_deferred_observed_ui_requests = (
                         _auto_deferred_observed_ui_followup_requests(
                             planned_tool_requests,
                             allowed_tools,
                             timeline,
                         )
                     )
-                    auto_deferred_observed_ui_requests = _drop_completed_auto_followup_prefix(
-                        auto_deferred_observed_ui_requests,
+                    generated_deferred_observed_ui_requests = _drop_completed_auto_followup_prefix(
+                        generated_deferred_observed_ui_requests,
                         timeline,
                         tool_timeline_start=tool_timeline_start,
                     )
+                    auto_deferred_observed_ui_requests = (
+                        _drop_replayed_approved_replan_operate_requests(
+                            generated_deferred_observed_ui_requests,
+                            timeline,
+                        )
+                    )
+                    if (
+                        generated_deferred_observed_ui_requests
+                        and _replayed_approved_replan_operate_requests_verified(
+                            generated_deferred_observed_ui_requests,
+                            timeline,
+                        )
+                        and all(
+                            _replan_observed_action_verification_request(request)
+                            for request in auto_deferred_observed_ui_requests
+                        )
+                    ):
+                        verified_operate_request = next(
+                            request
+                            for request in generated_deferred_observed_ui_requests
+                            if _replan_observed_action_operate_request(request)
+                        )
+                        direct_result = self._direct_daily_desktop_result(
+                            agent,
+                            str(verified_operate_request.get("tool") or ""),
+                            (
+                                dict(verified_operate_request.get("input"))
+                                if isinstance(
+                                    verified_operate_request.get("input"),
+                                    Mapping,
+                                )
+                                else {}
+                            ),
+                            timeline,
+                            run_id=run_id,
+                            source=str(
+                                verified_operate_request.get("source")
+                                or "runtime_planner"
+                            ),
+                            planning_reason="planner_verified_approved_replan_action",
+                        )
+                        if direct_result:
+                            return direct_result
                     auto_deferred_observed_ui_requests = (
                         _tool_requests_with_desktop_execution_policy(
                             auto_deferred_observed_ui_requests,
@@ -1862,6 +3874,12 @@ class RuntimeCustomApiAgentLoop:
                             timeline,
                             tool_timeline_start=auto_tool_timeline_start,
                         )
+                        nested_deferred_observed_ui_requests = (
+                            _drop_replayed_approved_replan_operate_requests(
+                                nested_deferred_observed_ui_requests,
+                                timeline,
+                            )
+                        )
                         if nested_deferred_observed_ui_requests:
                             self._record_auto_model_followup_app_write_plan(
                                 nested_deferred_observed_ui_requests,
@@ -1972,24 +3990,36 @@ class RuntimeCustomApiAgentLoop:
                             )
                             if direct_result:
                                 return direct_result
-                        direct_result = self._direct_daily_desktop_sequence_result(
-                            auto_deferred_observed_ui_requests,
-                            timeline,
-                            tool_timeline_start=auto_tool_timeline_start,
-                            run_id=run_id,
-                        )
-                        if direct_result:
-                            return direct_result
-                    auto_discovered_app_requests = _auto_discovered_followup_requests(
+                        if not _runtime_planner_scoped_observation_deferral(
+                            planned_tool_requests
+                        ):
+                            direct_result = self._direct_daily_desktop_sequence_result(
+                                auto_deferred_observed_ui_requests,
+                                timeline,
+                                tool_timeline_start=auto_tool_timeline_start,
+                                run_id=run_id,
+                            )
+                            if direct_result:
+                                return direct_result
+                    auto_discovered_app_candidates = _auto_discovered_followup_requests(
                         followup_selection_payload,
                         allowed_tools,
                         timeline,
                     )
                     auto_discovered_app_requests = _drop_completed_auto_followup_prefix(
-                        auto_discovered_app_requests,
+                        auto_discovered_app_candidates,
                         timeline,
                         tool_timeline_start=tool_timeline_start,
                     )
+                    if auto_discovered_app_candidates and not auto_discovered_app_requests:
+                        direct_result = self._direct_daily_desktop_sequence_result(
+                            auto_discovered_app_candidates,
+                            timeline,
+                            tool_timeline_start=tool_timeline_start,
+                            run_id=run_id,
+                        )
+                        if direct_result:
+                            return direct_result
                     if auto_discovered_app_requests:
                         self._record_auto_model_followup_app_write_plan(
                             auto_discovered_app_requests,
@@ -2011,6 +4041,58 @@ class RuntimeCustomApiAgentLoop:
                         auto_tool_timeline_start = len(timeline)
                         auto_discovered_app_approval_requests = auto_discovered_app_requests
                         try:
+                            first_auto_approval_index = next(
+                                (
+                                    index
+                                    for index, request in enumerate(
+                                        auto_discovered_app_requests
+                                    )
+                                    if isinstance(request, Mapping)
+                                    and bool(request.get("approval_required"))
+                                ),
+                                -1,
+                            )
+                            if first_auto_approval_index == 0:
+                                approval_request = auto_discovered_app_requests[0]
+                                approval_tool = str(
+                                    approval_request.get("tool") or ""
+                                ).strip()
+                                approval_input = (
+                                    dict(approval_request.get("input"))
+                                    if isinstance(approval_request.get("input"), Mapping)
+                                    else {}
+                                )
+                                approval_preview = dict(approval_input)
+                                if approval_preview.get("app_name"):
+                                    approval_preview.pop("query", None)
+                                    approval_preview.pop("selection_source", None)
+                                approval_id_source = (
+                                    f"{run_id}:{approval_tool}:"
+                                    f"{repr(sorted(approval_input.items()))}"
+                                )
+                                raise AgentApprovalRequired(
+                                    {
+                                        "approval_id": (
+                                            "approval-"
+                                            + hashlib.sha1(
+                                                approval_id_source.encode("utf-8")
+                                            ).hexdigest()[:12]
+                                        ),
+                                        "tool": approval_tool,
+                                        "input": approval_input,
+                                        "input_preview": approval_preview,
+                                        "messages": list(messages),
+                                        "tool_request": dict(approval_request),
+                                        "remaining_tool_requests": [
+                                            dict(item)
+                                            for item in auto_discovered_app_requests[1:]
+                                            if isinstance(item, Mapping)
+                                        ],
+                                        "next_iteration": self._normalize_tool_iteration(
+                                            start_iteration + 1
+                                        ),
+                                    }
+                                )
                             self._run_tool_requests(
                                 auto_discovered_app_requests,
                                 allowed_tools,
@@ -2180,6 +4262,19 @@ class RuntimeCustomApiAgentLoop:
                             *auto_code_context_requests,
                         ]
                     if not replan_payloads:
+                        if _runtime_planner_completed_exact_verified_discovery_action_chain(
+                            execution_tool_requests,
+                            timeline,
+                            tool_timeline_start=tool_timeline_start,
+                        ):
+                            direct_result = self._direct_daily_desktop_sequence_result(
+                                execution_tool_requests,
+                                timeline,
+                                tool_timeline_start=tool_timeline_start,
+                                run_id=run_id,
+                            )
+                            if direct_result:
+                                return direct_result
                         self._append_model_followup_context(
                             planned_tool_requests,
                             followup_selection_payload,
@@ -2219,6 +4314,20 @@ class RuntimeCustomApiAgentLoop:
                     )
                     direct_result = self._direct_daily_desktop_sequence_result(
                         completed_execution_tool_requests,
+                        timeline,
+                        tool_timeline_start=tool_timeline_start,
+                        run_id=run_id,
+                    )
+                if (
+                    not direct_result
+                    and _runtime_planner_completed_exact_verified_discovery_action_chain(
+                        execution_tool_requests,
+                        timeline,
+                        tool_timeline_start=tool_timeline_start,
+                    )
+                ):
+                    direct_result = self._direct_daily_desktop_sequence_result(
+                        execution_tool_requests,
                         timeline,
                         tool_timeline_start=tool_timeline_start,
                         run_id=run_id,
@@ -2293,10 +4402,15 @@ class RuntimeCustomApiAgentLoop:
                 self._call_model(base_url, model, api_key, messages, tools=tools, stream=True)
             )
             content = self._message_visible_content_text(message)
-            tool_requests = self._tool_requests_from_message(message, content)
+            tool_requests = [
+                _runtime_model_tool_selection_request(request)
+                for request in self._tool_requests_from_message(message, content)
+                if isinstance(request, Mapping)
+            ]
             tool_requests = _tool_requests_with_pending_plan_metadata(
                 tool_requests,
                 timeline,
+                run_id=run_id,
             )
             tool_requests = runtime_execution_verified_tool_requests(
                 tool_requests,
@@ -2307,6 +4421,27 @@ class RuntimeCustomApiAgentLoop:
                     )
                 ),
             )
+            tool_requests = _runtime_bind_unscoped_tools_to_goal_contract(
+                tool_requests,
+                contract=goal_contract,
+                timeline=timeline,
+                run_id=run_id,
+                iteration=iteration,
+                # The immediately preceding helper reconstructs requests from
+                # the model protocol whitelist before attaching Runtime trace
+                # metadata; model-authored authority fields are already gone.
+                trusted_runtime_metadata=True,
+            )
+            tool_requests = self._bind_runtime_goal_recovery_lineage(
+                tool_requests,
+                followup_context=_latest_model_followup_context(
+                    timeline,
+                    include_pending_execution_only=True,
+                ),
+                contract=goal_contract,
+                timeline=timeline,
+                run_id=run_id,
+            )
             tool_requests = _tool_requests_with_desktop_execution_policy(
                 tool_requests,
                 desktop_execution_policy,
@@ -2314,7 +4449,31 @@ class RuntimeCustomApiAgentLoop:
             detail = content[:500] if content else ", ".join(
                 request["tool"] for request in tool_requests
             )[:500]
-            timeline.append(self._timeline("agent.model.response", detail))
+            timeline.append(
+                self._timeline(
+                    "agent.model.response",
+                    detail,
+                    run_id=run_id,
+                )
+            )
+            if (
+                runtime_execution_envelope_owned
+                and blocked_runtime_execution_requests
+                and not _runtime_execution_envelope_has_only_materialization_blockers(
+                    runtime_execution_envelope,
+                    blocked_runtime_execution_requests,
+                )
+            ):
+                # Approval continuation may legitimately ask the model to
+                # consume the approved result, but that model turn cannot
+                # replace a still-blocked authoritative execution request
+                # with a different tool or target.
+                return self._record_blocked_runtime_execution_envelope(
+                    runtime_execution_envelope,
+                    blocked_runtime_execution_requests,
+                    timeline=timeline,
+                    run_id=run_id,
+                )
             if not tool_requests:
                 if not content.strip():
                     raise self._error_type("Native Agent 模型返回了空回复")
@@ -2323,37 +4482,71 @@ class RuntimeCustomApiAgentLoop:
                     include_pending_execution_only=True,
                 )
                 followup_target = _model_followup_context_target(followup_context)
-                if _model_followup_artifact_target_completed(
+                semantic_artifact_retry = _trusted_semantic_artifact_retry_context(
+                    goal_contract,
+                    followup_context,
+                    timeline,
+                )
+                if not semantic_artifact_retry and _model_followup_artifact_target_completed(
                     followup_target,
                     timeline,
                 ):
-                    result_text, truncated = self._limit_model_output(content)
-                    return self._model_output_text_factory(
-                        result_text,
-                        metadata=self._model_message_metadata(message),
-                        truncated=truncated,
+                    gated_output = self._goal_gated_model_output(
+                        content,
+                        message,
+                        contract=goal_contract,
+                        messages=messages,
+                        timeline=timeline,
+                        run_id=run_id,
+                        base_url=base_url,
+                        model=model,
+                        api_key=api_key,
+                        budget=budget,
                     )
+                    if gated_output is not None:
+                        return gated_output
+                    continue
                 auto_app_write_requests = _model_followup_app_write_requests(
                     content,
                     followup_target,
                     allowed_tools,
                     followup_context=followup_context,
                 )
-                auto_app_write_requests = (
-                    _model_followup_requests_with_pending_plan_metadata(
-                        auto_app_write_requests,
-                        followup_context,
+                canonical_materialized_requests = _model_followup_pending_plan_requests(
+                    followup_context,
+                    allowed_tools,
+                    generated_content=content,
+                    timeline=timeline,
+                    allow_materialization_rebind=True,
+                    semantic_artifact_retry=semantic_artifact_retry,
+                )
+                fresh_materialized_requests = _fresh_materialized_execution_bindings(
+                    canonical_materialized_requests,
+                    followup_context,
+                    generated_content=content,
+                    goal_contract=goal_contract,
+                    run_id=run_id,
+                )
+                if fresh_materialized_requests:
+                    auto_app_write_requests = fresh_materialized_requests
+                else:
+                    auto_app_write_requests = (
+                        _model_followup_requests_with_pending_plan_metadata(
+                            auto_app_write_requests,
+                            followup_context,
+                            trusted_request_metadata=True,
+                        )
                     )
-                )
-                auto_app_write_requests = _drop_completed_auto_followup_prefix(
-                    auto_app_write_requests,
-                    timeline,
-                    tool_timeline_start=0,
-                )
-                auto_app_write_requests = _drop_completed_artifact_write_requests(
-                    auto_app_write_requests,
-                    artifacts,
-                )
+                if not semantic_artifact_retry:
+                    auto_app_write_requests = _drop_completed_auto_followup_prefix(
+                        auto_app_write_requests,
+                        timeline,
+                        tool_timeline_start=0,
+                    )
+                    auto_app_write_requests = _drop_completed_artifact_write_requests(
+                        auto_app_write_requests,
+                        artifacts,
+                    )
                 auto_app_write_requests = _tool_requests_with_desktop_execution_policy(
                     auto_app_write_requests,
                     desktop_execution_policy,
@@ -2402,6 +4595,7 @@ class RuntimeCustomApiAgentLoop:
                             _model_followup_requests_with_pending_plan_metadata(
                                 discovered_app_write_requests,
                                 followup_context,
+                                trusted_request_metadata=True,
                             )
                         )
                         if discovered_app_write_requests:
@@ -2475,6 +4669,61 @@ class RuntimeCustomApiAgentLoop:
                             ),
                         )
                         raise
+                    auto_app_write_outcomes = self._tool_batch_outcome_results(
+                        auto_app_write_requests,
+                        timeline=timeline,
+                        tool_timeline_start=tool_timeline_start,
+                        model_config=model_config,
+                        allowed_tools=allowed_tools,
+                        broker=broker,
+                        messages=messages,
+                        artifacts=artifacts,
+                        budget=budget,
+                        iteration=iteration,
+                        run_id=run_id,
+                    )
+                    self._raise_terminal_outcome_blocker(
+                        auto_app_write_outcomes,
+                        auto_app_write_requests,
+                        include_failed=False,
+                    )
+                    terminal_recovery_output = self._terminal_recovery_output(
+                        auto_app_write_outcomes,
+                        goal_contract=goal_contract,
+                        timeline=timeline,
+                    )
+                    if terminal_recovery_output and not (
+                        fresh_materialized_requests
+                        and _goal_contract_requires_semantic_artifact_assessment(
+                            goal_contract
+                        )
+                    ):
+                        return terminal_recovery_output
+                    if self._outcome_results_require_model_turn(
+                        auto_app_write_outcomes
+                    ):
+                        continue
+                    if (
+                        fresh_materialized_requests
+                        and _goal_contract_requires_semantic_artifact_assessment(
+                            goal_contract
+                        )
+                    ):
+                        gated_output = self._goal_gated_model_output(
+                            content,
+                            message,
+                            contract=goal_contract,
+                            messages=messages,
+                            timeline=timeline,
+                            run_id=run_id,
+                            base_url=base_url,
+                            model=model,
+                            api_key=api_key,
+                            budget=budget,
+                        )
+                        if gated_output is not None:
+                            return gated_output
+                        continue
                     direct_result = self._direct_daily_desktop_sequence_result(
                         auto_app_write_requests,
                         timeline,
@@ -2482,23 +4731,74 @@ class RuntimeCustomApiAgentLoop:
                         run_id=run_id,
                     )
                     if direct_result:
-                        return direct_result
+                        if _only_persists_model_generated_artifacts(
+                            auto_app_write_requests
+                        ):
+                            gated_output = self._goal_gated_model_output(
+                                content,
+                                message,
+                                contract=goal_contract,
+                                messages=messages,
+                                timeline=timeline,
+                                run_id=run_id,
+                                base_url=base_url,
+                                model=model,
+                                api_key=api_key,
+                                budget=budget,
+                            )
+                        else:
+                            gated_output = self._goal_gated_model_output(
+                                str(direct_result),
+                                message,
+                                contract=goal_contract,
+                                messages=messages,
+                                timeline=timeline,
+                                run_id=run_id,
+                                base_url=base_url,
+                                model=model,
+                                api_key=api_key,
+                                budget=budget,
+                            )
+                        if gated_output is not None:
+                            return gated_output
+                        continue
                 else:
                     auto_pending_plan_requests = _model_followup_pending_plan_requests(
                         followup_context,
                         allowed_tools,
                         generated_content=content,
                         timeline=timeline,
+                        allow_materialization_rebind=True,
+                        semantic_artifact_retry=semantic_artifact_retry,
                     )
-                    auto_pending_plan_requests = _drop_completed_auto_followup_prefix(
-                        auto_pending_plan_requests,
-                        timeline,
-                        tool_timeline_start=0,
+                    auto_pending_plan_requests = (
+                        _fresh_materialized_execution_bindings(
+                            auto_pending_plan_requests,
+                            followup_context,
+                            generated_content=content,
+                            goal_contract=goal_contract,
+                            run_id=run_id,
+                        )
                     )
-                    auto_pending_plan_requests = _drop_completed_artifact_write_requests(
-                        auto_pending_plan_requests,
-                        artifacts,
+                    auto_pending_plan_requests = (
+                        self._bind_runtime_goal_recovery_lineage(
+                            auto_pending_plan_requests,
+                            followup_context=followup_context,
+                            contract=goal_contract,
+                            timeline=timeline,
+                            run_id=run_id,
+                        )
                     )
+                    if not semantic_artifact_retry:
+                        auto_pending_plan_requests = _drop_completed_auto_followup_prefix(
+                            auto_pending_plan_requests,
+                            timeline,
+                            tool_timeline_start=0,
+                        )
+                        auto_pending_plan_requests = _drop_completed_artifact_write_requests(
+                            auto_pending_plan_requests,
+                            artifacts,
+                        )
                     auto_pending_plan_requests = _tool_requests_with_desktop_execution_policy(
                         auto_pending_plan_requests,
                         desktop_execution_policy,
@@ -2580,6 +4880,26 @@ class RuntimeCustomApiAgentLoop:
                                 ),
                             )
                             raise
+                        auto_pending_plan_outcomes = self._tool_batch_outcome_results(
+                            auto_pending_plan_requests,
+                            timeline=timeline,
+                            tool_timeline_start=tool_timeline_start,
+                            model_config=model_config,
+                            allowed_tools=allowed_tools,
+                            broker=broker,
+                            messages=messages,
+                            artifacts=artifacts,
+                            budget=budget,
+                            iteration=iteration,
+                            run_id=run_id,
+                        )
+                        terminal_recovery_output = self._terminal_recovery_output(
+                            auto_pending_plan_outcomes,
+                            goal_contract=goal_contract,
+                            timeline=timeline,
+                        )
+                        if terminal_recovery_output:
+                            return terminal_recovery_output
                         self._record_runtime_planner_task_progress_events(
                             runtime_planner_decision,
                             timeline=timeline,
@@ -2612,6 +4932,15 @@ class RuntimeCustomApiAgentLoop:
                                     run_id=run_id,
                                 )
                                 continue
+                        self._raise_terminal_outcome_blocker(
+                            auto_pending_plan_outcomes,
+                            auto_pending_plan_requests,
+                            include_failed=False,
+                        )
+                        if self._outcome_results_require_model_turn(
+                            auto_pending_plan_outcomes
+                        ):
+                            continue
                         direct_result = self._direct_daily_desktop_sequence_result(
                             auto_pending_plan_requests,
                             timeline,
@@ -2619,16 +4948,56 @@ class RuntimeCustomApiAgentLoop:
                             run_id=run_id,
                         )
                         if direct_result:
-                            return direct_result
-                result_text, truncated = self._limit_model_output(content)
-                return self._model_output_text_factory(
-                    result_text,
-                    metadata=self._model_message_metadata(message),
-                    truncated=truncated,
+                            if _only_persists_model_generated_artifacts(
+                                auto_pending_plan_requests
+                            ):
+                                gated_output = self._goal_gated_model_output(
+                                    content,
+                                    message,
+                                    contract=goal_contract,
+                                    messages=messages,
+                                    timeline=timeline,
+                                    run_id=run_id,
+                                    base_url=base_url,
+                                    model=model,
+                                    api_key=api_key,
+                                    budget=budget,
+                                )
+                            else:
+                                gated_output = self._goal_gated_model_output(
+                                    str(direct_result),
+                                    message,
+                                    contract=goal_contract,
+                                    messages=messages,
+                                    timeline=timeline,
+                                    run_id=run_id,
+                                    base_url=base_url,
+                                    model=model,
+                                    api_key=api_key,
+                                    budget=budget,
+                                )
+                            if gated_output is not None:
+                                return gated_output
+                            continue
+                gated_output = self._goal_gated_model_output(
+                    content,
+                    message,
+                    contract=goal_contract,
+                    messages=messages,
+                    timeline=timeline,
+                    run_id=run_id,
+                    base_url=base_url,
+                    model=model,
+                    api_key=api_key,
+                    budget=budget,
                 )
+                if gated_output is not None:
+                    return gated_output
+                continue
 
             if tool_requests[0].get("protocol") == "tool_calls":
                 messages.append(self._tool_loop_projection.assistant_message_for_history(message))
+                stage_tool_result_messages(messages)
             else:
                 messages.append({"role": "assistant", "content": content})
             followup_context = _latest_model_followup_context(timeline)
@@ -2644,6 +5013,117 @@ class RuntimeCustomApiAgentLoop:
                 run_id=run_id,
                 budget=budget,
             )
+            latest_recovery_assessment = assess_latest_tool_recovery(
+                timeline,
+                start_index=tool_timeline_start,
+                allowed_tools=allowed_tools,
+                attempt_lineage=recovery_attempt_lineage_from_timeline(timeline),
+            )
+            direct_partial_result = (
+                self._direct_daily_desktop_sequence_result(
+                    tool_requests,
+                    timeline,
+                    tool_timeline_start=tool_timeline_start,
+                    run_id=run_id,
+                    allow_honest_partial=True,
+                )
+                if latest_recovery_assessment is not None
+                and latest_recovery_assessment.preserves_partial_result
+                else ""
+            )
+            model_tool_outcomes = self._tool_batch_outcome_results(
+                tool_requests,
+                timeline=timeline,
+                tool_timeline_start=tool_timeline_start,
+                model_config=model_config,
+                allowed_tools=allowed_tools,
+                broker=broker,
+                messages=messages,
+                artifacts=artifacts,
+                budget=budget,
+                iteration=iteration,
+                run_id=run_id,
+            )
+            terminal_recovery_output = self._terminal_recovery_output(
+                model_tool_outcomes,
+                goal_contract=goal_contract,
+                timeline=timeline,
+            )
+            if terminal_recovery_output:
+                return terminal_recovery_output
+            continuation_replan_payloads = (
+                self._record_recovery_continuation_replan_events(
+                    model_tool_outcomes,
+                    timeline=timeline,
+                    run_id=run_id,
+                )
+            )
+            if continuation_replan_payloads and not any(
+                result.disposition
+                in {
+                    OutcomeLoopDisposition.AWAIT_USER,
+                    OutcomeLoopDisposition.FAILED,
+                }
+                for result in model_tool_outcomes
+            ):
+                if not _timeline_has_replan_followup_context(
+                    timeline,
+                    continuation_replan_payloads,
+                ):
+                    self._append_replan_followup_context(
+                        continuation_replan_payloads,
+                        allowed_tools=allowed_tools,
+                        messages=messages,
+                        timeline=timeline,
+                        run_id=run_id,
+                    )
+                if not any(
+                    result.disposition
+                    in {
+                        OutcomeLoopDisposition.REPLAN_MODEL,
+                        OutcomeLoopDisposition.PARTIAL,
+                    }
+                    for result in model_tool_outcomes
+                ):
+                    continue
+            partial_completion_candidates = [
+                result
+                for result in model_tool_outcomes
+                if result.outcome.status is OutcomeStatus.PARTIAL
+                and not (
+                    result.recovery_action_result is not None
+                    and result.recovery_action_result.reason
+                    == "effectful_recovery_deferred_to_goal_loop"
+                )
+                and (
+                    result.disposition is OutcomeLoopDisposition.PARTIAL
+                    or (
+                        result.disposition is OutcomeLoopDisposition.REPLAN_MODEL
+                        and result.recovery_plan is not None
+                        and result.recovery_plan.action == "resolve_entity_alias"
+                    )
+                )
+            ]
+            other_unresolved_outcomes = [
+                result
+                for result in model_tool_outcomes
+                if (
+                    self._outcome_results_require_model_turn((result,))
+                    or result.disposition
+                    in {
+                        OutcomeLoopDisposition.AWAIT_USER,
+                        OutcomeLoopDisposition.FAILED,
+                    }
+                )
+                and result not in partial_completion_candidates
+            ]
+            if partial_completion_candidates and not other_unresolved_outcomes:
+                if direct_partial_result:
+                    # Entity-alias recovery is an optional enrichment of an
+                    # already honest partial result only for legacy/unstructured
+                    # calls. Structured Goal runs defer effectful recovery to
+                    # the canonical model loop and are excluded above.
+                    return direct_partial_result
             if followup_context:
                 self._record_model_followup_pending_plan_progress_events(
                     followup_context,
@@ -2668,6 +5148,11 @@ class RuntimeCustomApiAgentLoop:
                         run_id=run_id,
                     )
                     continue
+                self._raise_terminal_outcome_blocker(
+                    model_tool_outcomes,
+                    tool_requests,
+                    include_failed=False,
+                )
                 auto_pending_continuation_requests = (
                     _model_followup_pending_plan_continuation_requests(
                         followup_context,
@@ -2675,6 +5160,15 @@ class RuntimeCustomApiAgentLoop:
                         allowed_tools,
                         timeline,
                         tool_timeline_start=tool_timeline_start,
+                    )
+                )
+                auto_pending_continuation_requests = (
+                    self._bind_runtime_goal_recovery_lineage(
+                        auto_pending_continuation_requests,
+                        followup_context=followup_context,
+                        contract=goal_contract,
+                        timeline=timeline,
+                        run_id=run_id,
                     )
                 )
                 auto_pending_continuation_requests = (
@@ -2760,6 +5254,26 @@ class RuntimeCustomApiAgentLoop:
                             ),
                         )
                         raise
+                    continuation_outcomes = self._tool_batch_outcome_results(
+                        auto_pending_continuation_requests,
+                        timeline=timeline,
+                        tool_timeline_start=continuation_timeline_start,
+                        model_config=model_config,
+                        allowed_tools=allowed_tools,
+                        broker=broker,
+                        messages=messages,
+                        artifacts=artifacts,
+                        budget=budget,
+                        iteration=iteration,
+                        run_id=run_id,
+                    )
+                    terminal_recovery_output = self._terminal_recovery_output(
+                        continuation_outcomes,
+                        goal_contract=goal_contract,
+                        timeline=timeline,
+                    )
+                    if terminal_recovery_output:
+                        return terminal_recovery_output
                     self._record_model_followup_pending_plan_progress_events(
                         followup_context,
                         auto_pending_continuation_requests,
@@ -2785,6 +5299,15 @@ class RuntimeCustomApiAgentLoop:
                             run_id=run_id,
                         )
                         continue
+                    self._raise_terminal_outcome_blocker(
+                        continuation_outcomes,
+                        auto_pending_continuation_requests,
+                        include_failed=False,
+                    )
+                    if self._outcome_results_require_model_turn(
+                        continuation_outcomes
+                    ):
+                        continue
                     direct_result = self._direct_daily_desktop_sequence_result(
                         auto_pending_continuation_requests,
                         timeline,
@@ -2793,8 +5316,26 @@ class RuntimeCustomApiAgentLoop:
                     )
                     if direct_result:
                         return direct_result
+            else:
+                self._raise_terminal_outcome_blocker(
+                    model_tool_outcomes,
+                    tool_requests,
+                    include_failed=False,
+                )
         artifact_completion = self._tool_loop_projection.artifact_completion(timeline, artifacts)
         if artifact_completion:
+            goal_assessment = self._record_goal_contract_assessment(
+                goal_contract,
+                timeline=timeline,
+                run_id=run_id,
+            )
+            if goal_contract is not None and not (
+                goal_assessment is not None and goal_assessment.completed
+            ):
+                raise self._error_type(
+                    "custom_api Agent 工具循环超过上限；"
+                    f"{self._tool_loop_projection.loop_limit_detail(timeline)}"
+                )
             timeline.append(
                 self._timeline(
                     "agent.tool.loop_limit_completed",
@@ -2812,6 +5353,596 @@ class RuntimeCustomApiAgentLoop:
             "custom_api Agent 工具循环超过上限；"
             f"{self._tool_loop_projection.loop_limit_detail(timeline)}"
         )
+
+    def _tool_batch_outcome_results(
+        self,
+        tool_requests: Sequence[Mapping[str, Any]],
+        *,
+        timeline: list[dict[str, Any]],
+        tool_timeline_start: int,
+        model_config: Mapping[str, Any],
+        allowed_tools: list[str],
+        broker: Any,
+        messages: list[dict[str, Any]],
+        artifacts: list[dict[str, Any]],
+        budget: Any,
+        iteration: int,
+        run_id: str,
+    ) -> tuple[OutcomeLoopResult, ...]:
+        """Route every terminal result in a model-owned batch through one loop."""
+
+        return OutcomeLoopCoordinator().decide_terminal_batch(
+            timeline=timeline,
+            start_index=tool_timeline_start,
+            run_id=run_id,
+            allowed_tools=allowed_tools,
+            planned_tool_call_ids=[
+                str(request.get("tool_call_id") or "")
+                for request in tool_requests
+                if isinstance(request, Mapping)
+            ],
+            recovery_action=lambda assessment: self._execute_runtime_recovery_plan(
+                assessment,
+                model_config=model_config,
+                allowed_tools=allowed_tools,
+                broker=broker,
+                messages=messages,
+                timeline=timeline,
+                artifacts=artifacts,
+                budget=budget,
+                iteration=iteration,
+                run_id=run_id,
+            ),
+        )
+
+    def _record_recovery_continuation_replan_events(
+        self,
+        results: Sequence[OutcomeLoopResult],
+        *,
+        timeline: list[dict[str, Any]],
+        run_id: str,
+    ) -> list[dict[str, Any]]:
+        """Promote one grounded recovery observation into a canonical replan.
+
+        Recovery adapters can deliberately return ``CONTINUE_PLAN`` after a
+        bounded discovery/inspection call.  That disposition is not success
+        for the immutable root goal: the observation must be handed back to
+        the planner/model loop.  Only an executor-owned observation that can
+        be replayed against the adapter's attempt is admitted here.
+        """
+
+        existing_by_id = {
+            str(payload.get("request_id") or "").strip(): copy_live_replan_payload(
+                payload
+            )
+            for payload in _timeline_replan_request_payloads(timeline)
+            if str(payload.get("request_id") or "").strip()
+        }
+        recorded: list[dict[str, Any]] = []
+        seen_request_ids: set[str] = set()
+        for result in results:
+            payload = _runtime_recovery_continuation_replan_payload(
+                result,
+                timeline=timeline,
+                run_id=run_id,
+            )
+            request_id = str(payload.get("request_id") or "").strip()
+            if not request_id or request_id in seen_request_ids:
+                continue
+            seen_request_ids.add(request_id)
+            existing = existing_by_id.get(request_id)
+            if existing is not None:
+                recorded.append(existing)
+                continue
+            event_payload = {**payload, "visibility": "internal"}
+            timeline.append(
+                self._timeline(
+                    "agent.replan.requested",
+                    str(payload.get("reason") or "recovery_observation_ready"),
+                    payload=event_payload,
+                    visibility="internal",
+                )
+            )
+            self._append_internal_run_event(
+                run_id,
+                "agent.replan.requested",
+                event_payload,
+            )
+            existing_by_id[request_id] = event_payload
+            recorded.append(event_payload)
+        return recorded
+
+    @staticmethod
+    def _terminal_recovery_output(
+        results: Sequence[OutcomeLoopResult],
+        *,
+        goal_contract: GoalContract | None = None,
+        timeline: Sequence[Mapping[str, Any]] = (),
+    ) -> str:
+        blocking_dispositions = {
+            OutcomeLoopDisposition.AWAIT_USER,
+            OutcomeLoopDisposition.REPLAN_MODEL,
+            OutcomeLoopDisposition.PARTIAL,
+            OutcomeLoopDisposition.FAILED,
+        }
+        if any(result.disposition in blocking_dispositions for result in results):
+            return ""
+        if any(
+            result.disposition is OutcomeLoopDisposition.CONTINUE_PLAN
+            and result.outcome.status is not OutcomeStatus.SUCCESS
+            for result in results
+        ):
+            return ""
+        terminal_output = next(
+            (
+                result.terminal_output
+                for result in results
+                if result.disposition is OutcomeLoopDisposition.COMPLETED
+                and result.terminal_output
+            ),
+            "",
+        )
+        if (
+            terminal_output
+            and goal_contract is not None
+            and not runtime_goal_assessment(goal_contract, timeline).completed
+        ):
+            return ""
+        return terminal_output
+
+    def _consumer_tool_outcome_message(
+        self,
+        result: OutcomeLoopResult,
+        source_request: Mapping[str, Any],
+        *,
+        default: str,
+    ) -> str:
+        """Project structured tool failure facts instead of raw provider copy."""
+
+        raw_outcome = result.outcome.raw
+        raw_payload = dict(raw_outcome) if isinstance(raw_outcome, Mapping) else {}
+        input_preview = (
+            dict(source_request.get("input"))
+            if isinstance(source_request.get("input"), Mapping)
+            else {}
+        )
+        consumer_summary = self._daily_desktop_summary(
+            result.outcome.tool_name,
+            input_preview,
+            raw_payload,
+        )
+        if consumer_summary:
+            return consumer_summary
+        raw_data = (
+            raw_payload.get("data")
+            if isinstance(raw_payload.get("data"), Mapping)
+            else {}
+        )
+        return str(
+            raw_data.get("error")
+            or raw_payload.get("error")
+            or default
+        ).strip()
+
+    @staticmethod
+    def _outcome_results_require_model_turn(
+        results: Sequence[OutcomeLoopResult],
+    ) -> bool:
+        return any(
+            result.disposition
+            in {
+                OutcomeLoopDisposition.REPLAN_MODEL,
+                OutcomeLoopDisposition.PARTIAL,
+                OutcomeLoopDisposition.FAILED,
+            }
+            or (
+                result.disposition is OutcomeLoopDisposition.CONTINUE_PLAN
+                and result.outcome.status is not OutcomeStatus.SUCCESS
+            )
+            for result in results
+        )
+
+    @staticmethod
+    def _raise_terminal_outcome_blocker(
+        results: Sequence[OutcomeLoopResult],
+        tool_requests: Sequence[Mapping[str, Any]],
+        *,
+        include_failed: bool = True,
+    ) -> None:
+        dispositions = [OutcomeLoopDisposition.AWAIT_USER]
+        if include_failed:
+            dispositions.append(OutcomeLoopDisposition.FAILED)
+        blocker = next(
+            (
+                result
+                for disposition in dispositions
+                for result in results
+                if result.disposition is disposition
+            ),
+            None,
+        )
+        if blocker is None:
+            return
+        source_request = next(
+            (
+                request
+                for request in tool_requests
+                if str(request.get("tool_call_id") or "").strip()
+                == blocker.source_tool_call_id
+            ),
+            {},
+        )
+        if blocker.disposition is OutcomeLoopDisposition.AWAIT_USER:
+            message = "此操作需要用户授权或补充操作后才能继续。"
+        else:
+            message = "工具执行未完成，请检查输入或稍后重试。"
+        raise AgentDirectOutcomeUnverified(
+            message,
+            reason=blocker.reason or "tool_error",
+            tool_name=blocker.outcome.tool_name,
+            input_preview=(
+                dict(source_request.get("input"))
+                if isinstance(source_request.get("input"), Mapping)
+                else {}
+            ),
+            tool_call_id=blocker.source_tool_call_id,
+        )
+
+    def _execute_runtime_recovery_plan(
+        self,
+        assessment: RecoveryAssessment,
+        *,
+        model_config: Mapping[str, Any] | Callable[[], Mapping[str, Any]],
+        allowed_tools: list[str],
+        broker: Any,
+        messages: list[dict[str, Any]],
+        timeline: list[dict[str, Any]],
+        artifacts: list[dict[str, Any]],
+        budget: Any,
+        iteration: int,
+        run_id: str,
+    ) -> RecoveryActionResult:
+        """Resolve and execute one bounded plan through the adapter registry."""
+
+        plan = assessment.plan
+        if plan is None:
+            return RecoveryActionResult.not_handled(reason="recovery_plan_unavailable")
+        goal_contract = runtime_goal_contract(
+            run_id=run_id,
+            runtime_execution_envelope=None,
+            runtime_execution_metadata=None,
+            messages=messages,
+            timeline=timeline,
+        )
+        goal_subgoal = None
+        goal_root_identity: dict[str, str] = {}
+        goal_bounded_effectful_tools: tuple[str, ...] = ()
+        structured_goal = bool(
+            goal_contract is not None
+            and any(
+                criterion.required and not criterion.response_satisfiable
+                for criterion in goal_contract.criteria
+            )
+        )
+        if structured_goal and goal_contract is not None:
+            goal_assessment = runtime_goal_assessment(goal_contract, timeline)
+            outcome_capabilities = set(assessment.outcome.capabilities)
+            unsatisfied_criterion_ids = set(
+                goal_assessment.unsatisfied_criterion_ids
+            )
+            bound_criterion = next(
+                (
+                    criterion
+                    for criterion in goal_contract.criteria
+                    if criterion.criterion_id
+                    in unsatisfied_criterion_ids
+                    and bool(criterion.required_capabilities)
+                    and set(criterion.required_capabilities).issubset(
+                        outcome_capabilities
+                    )
+                    and any(
+                        evidence.kind == "tool_outcome"
+                        and evidence.criterion_id == criterion.criterion_id
+                        and evidence.source_tool_call_id == assessment.tool_call_id
+                        and evidence.status == assessment.outcome.status.value
+                        for evidence in goal_assessment.evidence
+                    )
+                ),
+                None,
+            )
+            goal_root_identity = (
+                _runtime_direct_recovery_root_identity(
+                    timeline,
+                    run_id=run_id,
+                    source_tool_call_id=assessment.tool_call_id,
+                    source_tool_name=assessment.outcome.tool_name,
+                    source_result=assessment.outcome.raw,
+                    source_step_ids=bound_criterion.source_step_ids,
+                )
+                if bound_criterion is not None
+                else {}
+            )
+            exact_background_tools = background_window_runtime_recovery_tools(
+                assessment.outcome
+            )
+            if not goal_root_identity and tuple(exact_background_tools) == (
+                _RUNTIME_GOAL_BOUNDED_BACKGROUND_WINDOW_TOOLS
+            ):
+                dependency_bindings: list[
+                    tuple[Any, dict[str, str]]
+                ] = []
+                recovery_capabilities = set(plan.required_capabilities)
+                for criterion in goal_contract.criteria:
+                    if (
+                        criterion.criterion_id not in unsatisfied_criterion_ids
+                        or not criterion.required_capabilities
+                        or not set(criterion.required_capabilities).issubset(
+                            recovery_capabilities
+                        )
+                    ):
+                        continue
+                    root_identity = _runtime_direct_recovery_root_identity(
+                        timeline,
+                        run_id=run_id,
+                        source_tool_call_id=assessment.tool_call_id,
+                        source_tool_name=assessment.outcome.tool_name,
+                        source_result=assessment.outcome.raw,
+                        source_step_ids=criterion.source_step_ids,
+                        allow_planner_dependency_ancestor=True,
+                        required_target_capabilities=criterion.required_capabilities,
+                    )
+                    if root_identity:
+                        dependency_bindings.append((criterion, root_identity))
+                if len(dependency_bindings) == 1:
+                    bound_criterion, goal_root_identity = dependency_bindings[0]
+            if bound_criterion is None:
+                return RecoveryActionResult.not_handled(
+                    reason="goal_criterion_unmatched"
+                )
+            if not goal_root_identity:
+                return RecoveryActionResult.not_handled(
+                    reason="goal_root_lineage_unavailable"
+                )
+            goal_assessment, goal_subgoal = GoalCoordinator().open_subgoal(
+                goal_contract,
+                goal_assessment,
+                criterion_id=bound_criterion.criterion_id,
+                action=plan.action,
+                description=(
+                    f"{plan.action}: {plan.recovery_hint}; then return to the root criterion"
+                ),
+                source_tool_call_id=assessment.tool_call_id,
+            )
+            if goal_subgoal is None:
+                return RecoveryActionResult.not_handled(
+                    reason="goal_subgoal_budget_exhausted"
+                )
+            plan = replace(
+                plan,
+                metadata={
+                    **dict(plan.metadata),
+                    "goal_contract_id": goal_contract.contract_id,
+                    "goal_criterion_id": bound_criterion.criterion_id,
+                    "goal_subgoal_id": goal_subgoal.subgoal_id,
+                    "root_goal_unchanged": True,
+                    **goal_root_identity,
+                },
+            )
+            assessment = replace(assessment, plan=plan)
+            if (
+                plan.action == "materialize_background_window"
+                and plan.strategy_id == "materialize-background-window"
+                and plan.recovery_hint == "materialize_background_window"
+                and tuple(exact_background_tools)
+                == _RUNTIME_GOAL_BOUNDED_BACKGROUND_WINDOW_TOOLS
+                and goal_subgoal.action == plan.action
+                and str(plan.metadata.get("goal_contract_id") or "").strip()
+                == goal_contract.contract_id
+                and str(plan.metadata.get("goal_criterion_id") or "").strip()
+                == bound_criterion.criterion_id
+                and str(plan.metadata.get("goal_subgoal_id") or "").strip()
+                == goal_subgoal.subgoal_id
+                and plan.metadata.get("root_goal_unchanged") is True
+                and all(goal_root_identity.values())
+            ):
+                goal_bounded_effectful_tools = tuple(exact_background_tools)
+        recovery_scope_tools = frozenset(
+            (*allowed_tools, *goal_bounded_effectful_tools)
+        )
+        context = RecoveryActionContext(
+            plan=plan,
+            source_outcome=assessment.outcome,
+            source_tool_call_id=assessment.tool_call_id,
+            scope=RecoveryActionScope(
+                allowed_tools=recovery_scope_tools,
+                iteration=iteration,
+            ),
+            runtime=_CustomApiRecoveryRuntimePort(
+                owner=self,
+                model_config=model_config,
+                allowed_tools=allowed_tools,
+                broker=broker,
+                messages=messages,
+                timeline=timeline,
+                artifacts=artifacts,
+                budget=budget,
+                run_id=run_id,
+                source_tool_call_id=assessment.tool_call_id,
+                source_tool_name=assessment.outcome.tool_name,
+                recovery_action=plan.action,
+                recovery_scope_id=plan.scope_id,
+                recovery_goal_identity={
+                    key: plan.metadata.get(key)
+                    for key in (
+                        "goal_contract_id",
+                        "goal_criterion_id",
+                        "goal_subgoal_id",
+                        "root_goal_unchanged",
+                        "root_plan_id",
+                        "root_source_step_id",
+                    )
+                },
+                observation_only=(
+                    structured_goal and not goal_bounded_effectful_tools
+                ),
+                goal_bounded_effectful_tools=goal_bounded_effectful_tools,
+            ),
+        )
+        resolved = self._recovery_action_registry.resolve(context)
+        if resolved is None:
+            return RecoveryActionResult.not_handled(reason="no_unique_adapter")
+        goal_bounded_effectful_adapter = bool(
+            goal_bounded_effectful_tools
+            and resolved.execution_mode
+            is RecoveryActionExecutionMode.GOAL_BOUNDED_EFFECTFUL
+            and resolved.adapter_type is BackgroundWindowRecoveryAdapter
+        )
+        if structured_goal and not (
+            resolved.execution_mode is RecoveryActionExecutionMode.OBSERVATION_ONLY
+            or goal_bounded_effectful_adapter
+        ):
+            # Recovery may gather bounded evidence for the canonical loop, but
+            # it may not run a second effectful executor or model-selected
+            # retry beneath an immutable GoalContract.  The ordinary outcome
+            # path maps NOT_HANDLED to REPLAN_MODEL and the main loop owns the
+            # next tool choice, target binding, execution, and verification.
+            return RecoveryActionResult.not_handled(
+                reason="effectful_recovery_deferred_to_goal_loop"
+            )
+        ownership = resolve_legacy_replan_ownership(
+            timeline,
+            source_tool_call_id=assessment.tool_call_id,
+            source_tool_name=assessment.outcome.tool_name,
+            plan=plan,
+        )
+        if ownership.status is RecoveryOwnershipStatus.ALREADY_HANDLED:
+            completed_batch = _completed_legacy_recovery_batch(
+                timeline,
+                request_id=ownership.request_id,
+                action_id=ownership.action_id,
+            )
+            if completed_batch is not None:
+                reconciled = resolved.reconcile_completed_attempt(completed_batch)
+                if reconciled.disposition is not RecoveryActionDisposition.NOT_HANDLED:
+                    return reconciled
+        if not ownership.coordinator_may_execute:
+            return RecoveryActionResult.not_handled(reason="legacy_replan_owns_source")
+        if goal_subgoal is not None and goal_contract is not None:
+            serialized_subgoal = goal_subgoal.to_payload()
+            subgoal_payload = {
+                "subgoal": serialized_subgoal,
+                "subgoal_json": json.dumps(
+                    serialized_subgoal,
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ),
+                "contract_id": goal_contract.contract_id,
+                "criterion_id": goal_subgoal.criterion_id,
+                "source_tool_call_id": assessment.tool_call_id,
+                **goal_root_identity,
+                "run_id": run_id,
+                "status": "opened",
+                "source": "runtime_goal_coordinator",
+                "actor": "native_runtime",
+                "execution_authority": "runtime_goal_coordinator",
+                "visibility": "internal",
+            }
+            timeline.append(
+                self._timeline(
+                    "agent.goal.subgoal.opened",
+                    goal_subgoal.action,
+                    **subgoal_payload,
+                )
+            )
+            self._append_internal_run_event(
+                run_id,
+                "agent.goal.subgoal.opened",
+                subgoal_payload,
+            )
+        payload = {
+            "strategy_id": plan.strategy_id,
+            "action": plan.action,
+            "recovery_hint": plan.recovery_hint,
+            "required_capabilities": list(plan.required_capabilities),
+            "source_status": plan.source_status.value,
+            "source_reason": plan.source_reason,
+            "source_tool_name": assessment.outcome.tool_name,
+            "source_tool_call_id": assessment.tool_call_id,
+            "scope_id": plan.scope_id,
+            "recovery_owner": "coordinator",
+            "visibility": "internal",
+            **(
+                {
+                    "goal_contract_id": goal_contract.contract_id,
+                    "goal_criterion_id": goal_subgoal.criterion_id,
+                    "goal_subgoal_id": goal_subgoal.subgoal_id,
+                    "root_goal_unchanged": True,
+                }
+                if goal_subgoal is not None and goal_contract is not None
+                else {}
+            ),
+            **ownership.event_fields(),
+        }
+
+        def append_lifecycle_event(
+            event_type: str,
+            status: str,
+            **extra: Any,
+        ) -> None:
+            event_payload = {**payload, "status": status, **extra}
+            timeline.append(
+                self._timeline(
+                    event_type,
+                    plan.action,
+                    **event_payload,
+                )
+            )
+            if run_id:
+                self._append_internal_run_event(
+                    run_id,
+                    event_type,
+                    event_payload,
+                )
+
+        append_lifecycle_event("agent.recovery.planned", "claimed")
+        try:
+            result = resolved.execute()
+        except BaseException as exc:
+            try:
+                append_lifecycle_event(
+                    "agent.recovery.failed",
+                    "failed",
+                    error_type=type(exc).__name__,
+                )
+            except BaseException:
+                # Recovery journaling must never replace the original control/error signal.
+                pass
+            raise
+        result_fields = {
+            "result_disposition": result.disposition.value,
+            "result_reason": result.reason,
+            "attempt_count": len(result.attempts),
+        }
+        if result.disposition is RecoveryActionDisposition.EXECUTION_FAILED:
+            append_lifecycle_event(
+                "agent.recovery.failed",
+                "failed",
+                **result_fields,
+            )
+        elif result.disposition is RecoveryActionDisposition.NOT_HANDLED:
+            append_lifecycle_event(
+                "agent.recovery.skipped",
+                "not_handled",
+                **result_fields,
+            )
+        else:
+            append_lifecycle_event(
+                "agent.recovery.completed",
+                "completed",
+                **result_fields,
+            )
+        return result
 
     @staticmethod
     def _direct_daily_desktop_tool_request(
@@ -2960,6 +6091,7 @@ class RuntimeCustomApiAgentLoop:
         )
         if not payload:
             return
+        payload = {**payload, "visibility": "internal"}
         messages.append(
             {
                 "role": "user",
@@ -2974,7 +6106,11 @@ class RuntimeCustomApiAgentLoop:
             )
         )
         if run_id and self._append_run_event is not None:
-            self._append_run_event(run_id, "agent.model.followup_context", payload)
+            self._append_internal_run_event(
+                run_id,
+                "agent.model.followup_context",
+                payload,
+            )
 
     def _append_replan_followup_context(
         self,
@@ -2992,6 +6128,7 @@ class RuntimeCustomApiAgentLoop:
         )
         if not payload:
             return
+        payload = {**payload, "visibility": "internal"}
         messages.append(
             {
                 "role": "user",
@@ -3006,7 +6143,452 @@ class RuntimeCustomApiAgentLoop:
             )
         )
         if run_id and self._append_run_event is not None:
-            self._append_run_event(run_id, "agent.model.followup_context", payload)
+            self._append_internal_run_event(
+                run_id,
+                "agent.model.followup_context",
+                payload,
+            )
+
+    def _append_internal_run_event(
+        self,
+        run_id: str,
+        event_type: str,
+        payload: dict[str, Any],
+    ) -> None:
+        if not run_id or self._append_run_event is None:
+            return
+        internal_payload = {**payload, "visibility": "internal"}
+        try:
+            self._append_run_event(
+                run_id,
+                event_type,
+                internal_payload,
+                visibility="internal",
+            )
+        except TypeError as exc:
+            # Lightweight test/legacy adapters may still expose the old
+            # three-argument callback. Keep the payload fail-closed there too.
+            if "visibility" not in str(exc) or "keyword" not in str(exc):
+                raise
+            self._append_run_event(run_id, event_type, internal_payload)
+
+    def _bind_runtime_goal_recovery_lineage(
+        self,
+        requests: list[dict[str, Any]],
+        *,
+        followup_context: Mapping[str, Any],
+        contract: GoalContract | None,
+        timeline: list[dict[str, Any]],
+        run_id: str,
+    ) -> list[dict[str, Any]]:
+        """Bind a verification-repair tail back to one immutable criterion."""
+
+        if not requests or contract is None or contract.run_id != str(run_id or "").strip():
+            return requests
+        lineage = _runtime_goal_verification_recovery_lineage(
+            followup_context,
+            contract=contract,
+            timeline=timeline,
+            run_id=run_id,
+        )
+        if not lineage:
+            return requests
+        assessment = runtime_goal_assessment(contract, timeline)
+        coordinator = GoalCoordinator()
+        subgoal = next(
+            (
+                item
+                for item in assessment.subgoals
+                if item.criterion_id == lineage["criterion_id"]
+                and item.source_tool_call_id
+                == lineage["failed_verifier_tool_call_id"]
+                and item.action == lineage["recovery_action"]
+            ),
+            None,
+        )
+        if subgoal is None:
+            _next_assessment, subgoal = coordinator.open_subgoal(
+                contract,
+                assessment,
+                criterion_id=lineage["criterion_id"],
+                action=lineage["recovery_action"],
+                description="Repair the root action after its declared verifier failed.",
+                source_tool_call_id=lineage["failed_verifier_tool_call_id"],
+            )
+            if subgoal is None:
+                return requests
+            subgoal_payload = subgoal.to_payload()
+            opened_payload = {
+                "subgoal": subgoal_payload,
+                "subgoal_json": json.dumps(
+                    subgoal_payload,
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                    sort_keys=True,
+                ),
+                "contract_id": contract.contract_id,
+                "criterion_id": lineage["criterion_id"],
+                "source_tool_call_id": lineage["failed_verifier_tool_call_id"],
+                "recovery_origin_tool_call_id": lineage[
+                    "failed_verifier_tool_call_id"
+                ],
+                "root_source_tool_call_id": lineage["root_source_tool_call_id"],
+                "root_source_step_id": lineage["root_source_step_id"],
+                "root_verifier_step_id": lineage["root_verifier_step_id"],
+                "root_plan_id": lineage["root_plan_id"],
+                "root_provider_kind": lineage["root_provider_kind"],
+                "root_provider_id": lineage["root_provider_id"],
+                "run_id": run_id,
+                "status": "opened",
+                "source": "runtime_goal_coordinator",
+                "actor": "native_runtime",
+                "execution_authority": "runtime_goal_coordinator",
+                "visibility": "internal",
+            }
+            timeline.append(
+                self._timeline(
+                    "agent.goal.subgoal.opened",
+                    subgoal.subgoal_id,
+                    **opened_payload,
+                )
+            )
+            self._append_internal_run_event(
+                run_id,
+                "agent.goal.subgoal.opened",
+                opened_payload,
+            )
+        recovery_scope_id = "recovery-scope-" + hashlib.sha256(
+            (
+                f"{contract.contract_id}|{subgoal.subgoal_id}|"
+                f"{lineage['root_source_tool_call_id']}|"
+                f"{lineage['failed_verifier_tool_call_id']}"
+            ).encode("utf-8")
+        ).hexdigest()[:24]
+        common = {
+            "recovery_link_kind": "coordinator_action",
+            "root_goal_unchanged": True,
+            "goal_contract_id": contract.contract_id,
+            "goal_criterion_id": lineage["criterion_id"],
+            "goal_subgoal_id": subgoal.subgoal_id,
+            "recovery_action": subgoal.action,
+            "recovery_scope_id": recovery_scope_id,
+            "replan_recovery_identity": recovery_scope_id,
+            "recovery_source_tool": lineage["failed_verifier_tool"],
+            "recovery_origin_tool_call_id": lineage[
+                "failed_verifier_tool_call_id"
+            ],
+            "root_source_tool_call_id": lineage["root_source_tool_call_id"],
+            "root_source_step_id": lineage["root_source_step_id"],
+            "root_verifier_step_id": lineage["root_verifier_step_id"],
+            "root_plan_id": lineage["root_plan_id"],
+            "source": "runtime_internal_recovery",
+        }
+        prepared = [dict(request) for request in requests]
+        for item in prepared:
+            item.pop("recovery_context_trusted", None)
+            item.pop(RUNTIME_PRIVATE_RECOVERY_CONTEXT_KEY, None)
+            if _request_matches_runtime_goal_recovery_lineage(item, lineage):
+                ensure_tool_call_id(item)
+        call_id_by_step = {
+            str(item.get("step_id") or item.get("planner_step_id") or "").strip(): str(
+                item.get("tool_call_id") or ""
+            ).strip()
+            for item in prepared
+            if str(item.get("step_id") or item.get("planner_step_id") or "").strip()
+            and str(item.get("tool_call_id") or "").strip()
+        }
+        bound: list[dict[str, Any]] = []
+        for item in prepared:
+            if not _request_matches_runtime_goal_recovery_lineage(item, lineage):
+                bound.append(item)
+                continue
+            tool_name = str(item.get("tool") or item.get("tool_name") or "").strip()
+            item.update(common)
+            item["plan_id"] = lineage["root_plan_id"]
+            item["source_step_id"] = lineage["root_source_step_id"]
+            item["recovery_suggested_tool"] = tool_name
+            dependency_call_id = next(
+                (
+                    call_id_by_step.get(str(step_id or "").strip(), "")
+                    for step_id in item.get("depends_on", [])
+                    if call_id_by_step.get(str(step_id or "").strip(), "")
+                ),
+                "",
+            )
+            item["source_tool_call_id"] = (
+                dependency_call_id or lineage["failed_verifier_tool_call_id"]
+            )
+            if item.get("approval_required") is not True:
+                item[RUNTIME_PRIVATE_RECOVERY_CONTEXT_KEY] = {
+                    "version": RUNTIME_PRIVATE_RECOVERY_CONTEXT_VERSION,
+                    "_authority": RUNTIME_PRIVATE_RECOVERY_AUTHORITY,
+                    "run_id": run_id,
+                    "return_to_root": True,
+                    "tool_call_id": str(item.get("tool_call_id") or "").strip(),
+                    "source_tool_call_id": item["source_tool_call_id"],
+                    "recovery_source_tool": lineage["failed_verifier_tool"],
+                    "recovery_action": subgoal.action,
+                    "recovery_scope_id": recovery_scope_id,
+                    "goal_contract_id": contract.contract_id,
+                    "goal_criterion_id": lineage["criterion_id"],
+                    "goal_subgoal_id": subgoal.subgoal_id,
+                    "root_goal_unchanged": True,
+                    "plan_id": lineage["root_plan_id"],
+                    "source_step_id": lineage["root_source_step_id"],
+                    "recovery_suggested_tool": tool_name,
+                    "root_source_tool_call_id": lineage[
+                        "root_source_tool_call_id"
+                    ],
+                    "root_source_step_id": lineage["root_source_step_id"],
+                    "root_verifier_step_id": lineage["root_verifier_step_id"],
+                    "root_plan_id": lineage["root_plan_id"],
+                    "recovery_origin_tool_call_id": lineage[
+                        "failed_verifier_tool_call_id"
+                    ],
+                }
+            bound.append(item)
+        return bound
+
+    def _ensure_goal_contract_context(
+        self,
+        contract: GoalContract,
+        *,
+        messages: list[dict[str, Any]],
+        timeline: list[dict[str, Any]],
+        run_id: str,
+    ) -> None:
+        marker = f"Contract id: {contract.contract_id}"
+        if not any(marker in str(message.get("content") or "") for message in messages):
+            context_message = goal_contract_context_message(contract)
+            if messages and str(messages[0].get("role") or "").strip() == "system":
+                messages[0] = {
+                    **messages[0],
+                    "content": f"{str(messages[0].get('content') or '').rstrip()}\n\n{context_message}",
+                }
+            else:
+                messages.insert(0, {"role": "system", "content": context_message})
+        already_recorded = any(
+            str(event.get("event") or event.get("event_type") or "").strip()
+            == "agent.goal.contract"
+            and str(event.get("contract_id") or "").strip() == contract.contract_id
+            for event in timeline
+            if isinstance(event, Mapping)
+        )
+        if already_recorded:
+            return
+        payload = goal_contract_event_payload(contract)
+        timeline.append(
+            self._timeline(
+                "agent.goal.contract",
+                contract.contract_id,
+                **payload,
+            )
+        )
+        self._append_internal_run_event(run_id, "agent.goal.contract", payload)
+
+    def _record_goal_contract_assessment(
+        self,
+        contract: GoalContract | None,
+        *,
+        timeline: list[dict[str, Any]],
+        run_id: str,
+    ) -> Any | None:
+        if contract is None:
+            return None
+        assessment = runtime_goal_assessment(contract, timeline)
+        assessment_payload = goal_assessment_event_payload(assessment)
+        timeline.append(
+            self._timeline(
+                "agent.goal.assessed",
+                contract.contract_id,
+                **assessment_payload,
+            )
+        )
+        self._append_internal_run_event(
+            run_id,
+            "agent.goal.assessed",
+            assessment_payload,
+        )
+        return assessment
+
+    def _goal_gated_model_output(
+        self,
+        content: str,
+        message: Mapping[str, Any],
+        *,
+        contract: GoalContract | None,
+        messages: list[dict[str, Any]],
+        timeline: list[dict[str, Any]],
+        run_id: str,
+        base_url: str = "",
+        model: str = "",
+        api_key: str = "",
+        budget: Any = None,
+    ) -> Any | None:
+        result_text, truncated = self._limit_model_output(content)
+        if contract is None:
+            return self._model_output_text_factory(
+                result_text,
+                metadata=self._model_message_metadata(dict(message)),
+                truncated=truncated,
+            )
+        semantic_assessments = self._assess_pending_semantic_artifacts(
+            contract,
+            timeline=timeline,
+            run_id=run_id,
+            base_url=base_url,
+            model=model,
+            api_key=api_key,
+            budget=budget,
+        )
+        assessment = runtime_goal_assessment(contract, timeline)
+        assessment = complete_response_only_goal(
+            contract,
+            assessment,
+            str(result_text),
+        )
+        assessment_payload = goal_assessment_event_payload(assessment)
+        timeline.append(
+            self._timeline(
+                "agent.goal.assessed",
+                contract.contract_id,
+                **assessment_payload,
+            )
+        )
+        self._append_internal_run_event(
+            run_id,
+            "agent.goal.assessed",
+            assessment_payload,
+        )
+        if assessment.completed:
+            return self._model_output_text_factory(
+                result_text,
+                metadata=self._model_message_metadata(dict(message)),
+                truncated=truncated,
+            )
+        followup = goal_replan_context_message(contract, assessment)
+        semantic_hint = _semantic_artifact_replan_hint(semantic_assessments)
+        if semantic_hint:
+            followup = f"{followup}\n\n{semantic_hint}"
+        if not (
+            messages
+            and str(messages[-1].get("role") or "").strip() == "user"
+            and str(messages[-1].get("content") or "").strip() == followup
+        ):
+            messages.append({"role": "user", "content": followup})
+        replan_payload = {
+            **assessment_payload,
+            "planning_reason": "goal_contract_unsatisfied",
+            "original_goal_unchanged": True,
+        }
+        timeline.append(
+            self._timeline(
+                "agent.goal.replan_required",
+                contract.contract_id,
+                **replan_payload,
+            )
+        )
+        self._append_internal_run_event(
+            run_id,
+            "agent.goal.replan_required",
+            replan_payload,
+        )
+        return None
+
+    def _assess_pending_semantic_artifacts(
+        self,
+        contract: GoalContract,
+        *,
+        timeline: list[dict[str, Any]],
+        run_id: str,
+        base_url: str,
+        model: str,
+        api_key: str,
+        budget: Any,
+    ) -> tuple[dict[str, Any], ...]:
+        """Mint Runtime events around proposal-only semantic model verdicts."""
+
+        if (
+            contract.run_id != str(run_id or "").strip()
+            or not str(base_url or "").strip()
+            or not str(model or "").strip()
+            or not str(api_key or "").strip()
+            or budget is None
+        ):
+            return ()
+        candidates = pending_semantic_artifact_assessment_candidates(
+            contract,
+            timeline,
+        )
+        recorded: list[dict[str, Any]] = []
+        for candidate in candidates:
+            budget_errors: list[Exception] = []
+
+            def verifier_model_call(
+                *,
+                messages: list[dict[str, Any]],
+                tools: list[dict[str, Any]],
+                tool_choice: Mapping[str, Any],
+                config: Mapping[str, Any],
+            ) -> Any:
+                # The verifier owns no independent allowance. Its prompt and
+                # model call consume the same caller-owned run budget/deadline.
+                del config
+                try:
+                    self._check_context_budget(budget, messages)
+                    budget.claim_model_call()
+                except Exception as exc:
+                    budget_errors.append(exc)
+                    raise
+                return self._coalesce_model_message(
+                    self._call_model(
+                        base_url,
+                        model,
+                        api_key,
+                        messages,
+                        tools=tools,
+                        tool_choice=tool_choice,
+                        stream=True,
+                    )
+                )
+
+            proposal = verify_semantic_artifact(
+                original_user_goal=str(candidate.get("original_goal") or ""),
+                criterion_id=str(candidate.get("criterion_id") or ""),
+                criterion_description=str(
+                    candidate.get("criterion_description") or ""
+                ),
+                expected_target=candidate.get("criterion_expected"),
+                artifact_path=str(candidate.get("observed_path") or ""),
+                artifact_content=candidate.get("content"),
+                artifact_sha256=str(candidate.get("content_sha256") or ""),
+                artifact_byte_length=candidate.get("content_length"),
+                model_call=verifier_model_call,
+                model_config={"purpose": "semantic_artifact_verification"},
+            )
+            if budget_errors:
+                # verify_semantic_artifact deliberately converts callback
+                # exceptions to uncertain proposals. Budget/context failures
+                # are control-flow authority and must remain fatal to this run.
+                raise budget_errors[0]
+            payload = _runtime_semantic_artifact_assessment_payload(
+                candidate,
+                proposal,
+            )
+            timeline.append(
+                self._timeline(
+                    SEMANTIC_ARTIFACT_ASSESSED_EVENT,
+                    str(candidate.get("criterion_id") or ""),
+                    **payload,
+                )
+            )
+            self._append_internal_run_event(
+                run_id,
+                SEMANTIC_ARTIFACT_ASSESSED_EVENT,
+                payload,
+            )
+            recorded.append(payload)
+        return tuple(recorded)
 
     def _record_auto_model_followup_app_write_plan(
         self,
@@ -3019,6 +6601,7 @@ class RuntimeCustomApiAgentLoop:
             tool_name = str(request.get("tool") or "").strip()
             if not tool_name:
                 continue
+            step_id = str(request.get("step_id") or "").strip()
             payload = {
                 "tool": tool_name,
                 "status": "planned",
@@ -3030,6 +6613,9 @@ class RuntimeCustomApiAgentLoop:
                     request.get("input") if isinstance(request.get("input"), dict) else {}
                 ),
             }
+            presentation = str(request.get("presentation") or "").strip()
+            if presentation:
+                payload["presentation"] = presentation
             if request.get("continue_to_model"):
                 payload["continue_to_model"] = True
             for key in ("step_id", "capability_id", "replan_request_id", "replan_trigger"):
@@ -3037,15 +6623,39 @@ class RuntimeCustomApiAgentLoop:
                 if value:
                     payload[key] = value
             payload.update(_request_observability_metadata(request))
+            runtime_stage = str(request.get("runtime_stage") or "").strip()
+            is_replan_attempt = bool(
+                str(request.get("replan_request_id") or "").strip()
+            )
+            already_planned = bool(step_id) and not is_replan_attempt and any(
+                str(event.get("event") or "").strip()
+                == "agent.desktop.intent_planned"
+                and str(event.get("tool") or event.get("detail") or "").strip()
+                == tool_name
+                and str(event.get("step_id") or "").strip() == step_id
+                and str(event.get("runtime_stage") or "").strip()
+                == runtime_stage
+                for event in timeline
+                if isinstance(event, Mapping)
+            )
+            event_type = (
+                "agent.tool.input_resolved"
+                if already_planned
+                else "agent.desktop.intent_planned"
+            )
+            if already_planned:
+                payload.pop("status", None)
+                payload.pop("continue_to_model", None)
+                payload["resolution_source"] = "model_followup"
             timeline.append(
                 self._timeline(
-                    "agent.desktop.intent_planned",
+                    event_type,
                     tool_name,
                     **payload,
                 )
             )
             if run_id and self._append_run_event is not None:
-                self._append_run_event(run_id, "agent.desktop.intent_planned", payload)
+                self._append_run_event(run_id, event_type, payload)
 
     @staticmethod
     def _planned_request_for_tool(
@@ -3105,21 +6715,93 @@ class RuntimeCustomApiAgentLoop:
             return "planner_fallback_desktop_operation"
         return planning_reason
 
+    def _runtime_planner_tool_requests_for_run(
+        self,
+        planning_context: str,
+        allowed_tools: list[str],
+        *,
+        runtime_execution_metadata: Mapping[str, Any] | None,
+        preplanned_selection: DirectToolSelection | None = None,
+        timeline: list[dict[str, Any]],
+        run_id: str,
+    ) -> tuple[Any | None, list[dict[str, Any]], dict[str, Any]]:
+        try:
+            return self._runtime_planner_tool_requests(
+                planning_context,
+                allowed_tools,
+                runtime_execution_metadata=runtime_execution_metadata,
+                preplanned_selection=preplanned_selection,
+            )
+        except _RuntimePlannerFailure as exc:
+            self._record_runtime_planner_failure(
+                exc.reason,
+                timeline=timeline,
+                run_id=run_id,
+            )
+            raise self._error_type(
+                "Agent 规划暂时无法安全执行，任务已停止。请重试或重新描述目标。"
+            ) from exc
+
+    def _record_runtime_planner_failure(
+        self,
+        reason: str,
+        *,
+        timeline: list[dict[str, Any]],
+        run_id: str,
+    ) -> None:
+        diagnostic_reason = (
+            "planner_authority_conflict"
+            if str(reason or "").strip() == "planner_authority_conflict"
+            else "planner_internal_failure"
+        )
+        request_seed = f"{run_id}:{len(timeline)}:{diagnostic_reason}"
+        request_id = (
+            "runtime-planner-diagnostic:"
+            f"{hashlib.sha256(request_seed.encode('utf-8')).hexdigest()[:16]}"
+        )
+        payload = {
+            "request_id": request_id,
+            "trigger": diagnostic_reason,
+            "source": "runtime_planner_integrity_guard",
+            "failure_detail": "planner_execution_blocked",
+            "replan_allowed": False,
+            "requires_new_plan": True,
+            "visibility": "internal",
+        }
+        timeline.append(
+            self._timeline(
+                "agent.replan.requested",
+                "planner_execution_blocked",
+                payload=payload,
+                visibility="internal",
+            )
+        )
+        self._append_internal_run_event(
+            run_id,
+            "agent.replan.requested",
+            payload,
+        )
+
     def _runtime_planner_tool_requests(
         self,
         planning_context: str,
         allowed_tools: list[str],
         *,
         runtime_execution_metadata: Mapping[str, Any] | None = None,
+        preplanned_selection: DirectToolSelection | None = None,
     ) -> tuple[Any | None, list[dict[str, Any]], dict[str, Any]]:
         try:
             planner_metadata = _runtime_planner_execution_metadata(
                 runtime_execution_metadata,
             )
-            selection: DirectToolSelection = planner_first_direct_tool_selection(
-                planning_context,
-                allowed_tools,
-                metadata=planner_metadata,
+            selection: DirectToolSelection = (
+                preplanned_selection
+                if preplanned_selection is not None
+                else planner_first_direct_tool_selection(
+                    planning_context,
+                    allowed_tools,
+                    metadata=planner_metadata,
+                )
             )
             if selection.selected_source == "runtime_planner" and selection.decision is not None:
                 runtime_request_trace_metadata = _runtime_planner_request_trace_metadata(
@@ -3158,6 +6840,17 @@ class RuntimeCustomApiAgentLoop:
                 execution_requests = _runtime_planner_execution_requests_with_selection_inputs(
                     execution_requests,
                     selection.requests,
+                )
+                planner_goal_contract = _runtime_planner_goal_contract_payload(
+                    selection.decision
+                )
+                execution_requests = _bind_runtime_planner_declared_verifiers(
+                    execution_requests,
+                    planner_goal_contract,
+                )
+                execution_requests = _defer_runtime_planner_desktop_type_until_observed(
+                    execution_requests,
+                    goal_contract=planner_goal_contract,
                 )
                 has_approval_plan_tool = self._has_approval_plan_tool(execution_requests)
                 if execution_requests and (
@@ -3201,11 +6894,26 @@ class RuntimeCustomApiAgentLoop:
                 execution_requests,
                 selection.event_payload,
             )
+            planner_goal_contract = _runtime_planner_goal_contract_payload(
+                selection.decision
+            )
+            execution_requests = _bind_runtime_planner_declared_verifiers(
+                execution_requests,
+                planner_goal_contract,
+            )
+            execution_requests = _defer_runtime_planner_desktop_type_until_observed(
+                execution_requests,
+                goal_contract=planner_goal_contract,
+            )
             if not execution_requests and not selection.requests:
-                unavailable_decision = runtime_planner_decision(
-                    planning_context,
-                    allowed_tools=allowed_tools,
-                    metadata=planner_metadata,
+                unavailable_decision = (
+                    selection.decision
+                    if selection.decision is not None
+                    else runtime_planner_decision(
+                        planning_context,
+                        allowed_tools=allowed_tools,
+                        metadata=planner_metadata,
+                    )
                 )
                 if (
                     unavailable_decision is not None
@@ -3252,8 +6960,14 @@ class RuntimeCustomApiAgentLoop:
                     metadata=planner_metadata,
                 )
             return selection.decision, execution_requests, event_payload
-        except Exception:
-            return None, [], {}
+        except Exception as exc:
+            reason = (
+                "planner_authority_conflict"
+                if str(exc or "").strip()
+                in _RUNTIME_PLANNER_AUTHORITY_CONFLICT_CODES
+                else "planner_internal_failure"
+            )
+            raise _RuntimePlannerFailure(reason) from exc
 
     @staticmethod
     def _legacy_return_hotkey_projection(
@@ -3319,19 +7033,10 @@ class RuntimeCustomApiAgentLoop:
         scope_context: Mapping[str, Any] | None = None,
     ) -> None:
         decision_id = str(getattr(decision, "decision_id", "") or "").strip()
-        if decision_id and any(
-            str(event.get("decision_id") or "") == decision_id
-            or str(
-                (
-                    event.get("payload")
-                    if isinstance(event.get("payload"), dict)
-                    else {}
-                ).get("decision_id")
-                or ""
-            )
-            == decision_id
-            for event in timeline
-            if isinstance(event, dict)
+        if decision_id and _runtime_planner_decision_exists(
+            timeline,
+            decision_id=decision_id,
+            scope_context=scope_context,
         ):
             return
         try:
@@ -3342,23 +7047,49 @@ class RuntimeCustomApiAgentLoop:
         except Exception:
             return
         for event in planner_timeline_events(decision):
+            event_type = str(event.get("event") or "").strip()
+            payload = (
+                event.get("payload")
+                if isinstance(event.get("payload"), Mapping)
+                else {}
+            )
+            if _runtime_planner_is_progress_event(event_type):
+                _append_runtime_task_progress_event(
+                    event_type,
+                    str(event.get("detail") or ""),
+                    {**dict(payload), **dict(scope_context or {})},
+                    timeline=timeline,
+                    timeline_factory=self._timeline,
+                    append_run_event=None,
+                    run_id="",
+                )
+                continue
             timeline.append(_runtime_planner_timeline_event(event, scope_context))
         if run_id and self._append_run_event is not None:
             for event_type, payload in planner_run_event_payloads(decision):
-                scoped_event_type = _runtime_planner_event_type(event_type, scope_context)
-                event_payload = _runtime_planner_event_payload(
-                    payload,
-                    event_type,
-                    scoped_event_type,
-                    scope_context,
-                )
+                if _runtime_planner_is_progress_event(event_type):
+                    scoped_payload = {**dict(payload), **dict(scope_context or {})}
+                    scoped_event_type = _runtime_progress_event_type(
+                        event_type,
+                        scoped_payload,
+                    )
+                    event_payload = _runtime_progress_event_payload(
+                        scoped_payload,
+                        event_type,
+                        scoped_event_type,
+                    )
+                else:
+                    scoped_event_type = _runtime_planner_event_type(
+                        event_type,
+                        scope_context,
+                    )
+                    event_payload = _runtime_planner_event_payload(
+                        payload,
+                        event_type,
+                        scoped_event_type,
+                        scope_context,
+                    )
                 self._append_run_event(run_id, scoped_event_type, event_payload)
-        self._record_runtime_planner_initial_task_events(
-            decision,
-            timeline=timeline,
-            run_id=run_id,
-            scope_context=scope_context,
-        )
 
     def _record_runtime_planner_initial_task_events(
         self,
@@ -3393,6 +7124,10 @@ class RuntimeCustomApiAgentLoop:
         if not payload:
             return
         event_payload = {**dict(scope_context or {}), **dict(payload)}
+        if run_id:
+            # Run identity is Runtime authority.  Selection snapshots without
+            # it cannot later authorize dependency recovery or continuation.
+            event_payload["run_id"] = run_id
         detail = str(
             event_payload.get("selection_source")
             or event_payload.get("selection_reason")
@@ -3433,6 +7168,13 @@ class RuntimeCustomApiAgentLoop:
     ) -> int:
         if not requests:
             return len(timeline)
+        goal_contract_payload = _runtime_planner_goal_contract_payload(
+            runtime_planner_decision
+        )
+        requests[:] = _bind_runtime_planner_declared_verifiers(
+            requests,
+            goal_contract_payload,
+        )
         self._record_auto_model_followup_app_write_plan(
             requests,
             timeline=timeline,
@@ -3471,6 +7213,10 @@ class RuntimeCustomApiAgentLoop:
                 tool_timeline_start=tool_timeline_start,
             )
             if continuation_requests:
+                continuation_requests = _bind_runtime_planner_declared_verifiers(
+                    continuation_requests,
+                    goal_contract_payload,
+                )
                 completed_requests = [*completed_requests, *continuation_requests]
                 self._record_auto_model_followup_app_write_plan(
                     continuation_requests,
@@ -3565,6 +7311,7 @@ class RuntimeCustomApiAgentLoop:
         run_id: str,
         budget: Any,
         next_iteration: int,
+        goal_contract: GoalContract | None,
     ) -> str:
         replan_payloads = _pending_runtime_replan_payloads(timeline)
         if not replan_payloads:
@@ -3574,6 +7321,13 @@ class RuntimeCustomApiAgentLoop:
             replan_payloads,
             allowed_tool_list,
             timeline,
+        )
+        recovery_requests = _bind_trusted_runtime_replan_goal_requests(
+            recovery_requests,
+            replan_payloads,
+            contract=goal_contract,
+            timeline=timeline,
+            run_id=run_id,
         )
         if not recovery_requests:
             if not _timeline_has_replan_followup_context(timeline, replan_payloads):
@@ -3647,6 +7401,24 @@ class RuntimeCustomApiAgentLoop:
             replan_payloads = []
         if not replan_payloads:
             return ""
+        completed_primary = (
+            _runtime_planner_verified_app_open_before_unavailable_deferred_verification(
+                planned_tool_requests,
+                replan_payloads,
+                timeline,
+                tool_timeline_start=tool_timeline_start,
+            )
+        )
+        if completed_primary is not None:
+            completed_requests, completed_timeline_start = completed_primary
+            direct_result = self._direct_daily_desktop_sequence_result(
+                completed_requests,
+                timeline,
+                tool_timeline_start=completed_timeline_start,
+                run_id=run_id,
+            )
+            if direct_result:
+                return direct_result
 
         recovery_requests: list[dict[str, Any]] = []
         recovery_timeline_start = len(timeline)
@@ -3788,6 +7560,22 @@ class RuntimeCustomApiAgentLoop:
             timeline,
             start=tool_timeline_start,
         )
+        live_existing_payloads: list[dict[str, Any]] = []
+        for existing_payload in existing_payloads:
+            live_payload = _runtime_replan_payload_with_private_authority(
+                existing_payload,
+                timeline=timeline,
+                run_id=run_id,
+            )
+            live_existing_payloads.append(live_payload)
+            dedupe_key = _replan_payload_dedupe_key(live_payload)
+            if dedupe_key:
+                _replace_in_memory_runtime_replan_payload(
+                    timeline,
+                    dedupe_key=dedupe_key,
+                    payload=live_payload,
+                )
+        existing_payloads = live_existing_payloads
         if decision is None:
             return existing_payloads
         try:
@@ -3828,12 +7616,24 @@ class RuntimeCustomApiAgentLoop:
         step_payloads = _runtime_planner_tool_event_step_payloads(decision, tool_events)
         failure_payloads: list[dict[str, Any]] = []
         for event_index, event in enumerate(tool_events):
-            result = event.get("result") if isinstance(event.get("result"), dict) else {}
-            if event.get("verification_failed") is True:
+            event_payload = (
+                event.get("payload")
+                if isinstance(event.get("payload"), Mapping)
+                else {}
+            )
+            terminal_event = {**dict(event_payload), **dict(event)}
+            result = (
+                terminal_event.get("result")
+                if isinstance(terminal_event.get("result"), dict)
+                else {}
+            )
+            if terminal_event.get("verification_failed") is True:
                 result = {**result, "verification_failed": True}
             if not _tool_result_requests_replan(result):
                 continue
-            tool_name = str(event.get("detail") or "").strip()
+            tool_name = str(
+                terminal_event.get("tool") or terminal_event.get("detail") or ""
+            ).strip()
             step_payload = step_payloads.get(event_index, {})
             step_metadata = (
                 step_payload.get("metadata")
@@ -3841,12 +7641,16 @@ class RuntimeCustomApiAgentLoop:
                 else {}
             )
             input_preview = (
-                event.get("input_preview")
-                if isinstance(event.get("input_preview"), dict)
+                terminal_event.get("input_preview")
+                if isinstance(terminal_event.get("input_preview"), dict)
                 else {}
             )
             failure_payload = {
-                "event_type": str(event.get("event") or "agent.tool.call").strip(),
+                "event_type": str(
+                    terminal_event.get("event")
+                    or terminal_event.get("event_type")
+                    or "agent.tool.call"
+                ).strip(),
                 "tool_name": tool_name,
                 "input_preview": input_preview,
                 "result": result,
@@ -3856,16 +7660,61 @@ class RuntimeCustomApiAgentLoop:
                     if key != "metadata"
                 },
             }
+            for key in ("plan_id", "goal_contract_id", "goal_criterion_id"):
+                value = str(terminal_event.get(key) or "").strip()
+                if value:
+                    failure_payload[key] = value
             if result.get("verification_failed") is True:
                 failure_payload["trigger"] = "verification_failed"
                 failure_payload["status"] = "verification_failed"
-            event_trace_metadata = _runtime_trace_metadata_from_mapping(event)
+            event_trace_metadata = _runtime_trace_metadata_from_mapping(terminal_event)
             recovery_metadata = _runtime_replan_failure_metadata(result)
-            if step_metadata or input_preview or event_trace_metadata or recovery_metadata:
+            source_identity = {
+                key: value
+                for key, value in {
+                    "source_tool_call_id": str(
+                        terminal_event.get("tool_call_id") or ""
+                    ).strip(),
+                    "source_request_id": str(
+                        terminal_event.get("request_id") or ""
+                    ).strip(),
+                    "source_plan_id": str(
+                        terminal_event.get("plan_id") or ""
+                    ).strip(),
+                    "source_step_id": str(
+                        terminal_event.get("step_id")
+                        or terminal_event.get("planner_step_id")
+                        or step_payload.get("source_step_id")
+                        or step_payload.get("step_id")
+                        or ""
+                    ).strip(),
+                    "source_provider_kind": str(
+                        _runtime_execution_provider_identity(result).get(
+                            "provider_kind"
+                        )
+                        or ""
+                    ).strip(),
+                    "source_provider_id": str(
+                        _runtime_execution_provider_identity(result).get(
+                            "provider_id"
+                        )
+                        or ""
+                    ).strip(),
+                }.items()
+                if value
+            }
+            if (
+                step_metadata
+                or input_preview
+                or event_trace_metadata
+                or recovery_metadata
+                or source_identity
+            ):
                 metadata = {
                     **dict(step_metadata),
                     **event_trace_metadata,
                     **recovery_metadata,
+                    **source_identity,
                 }
                 if input_preview:
                     metadata.setdefault("input_preview", dict(input_preview))
@@ -3900,19 +7749,62 @@ class RuntimeCustomApiAgentLoop:
                 else {}
             )
             payload_dict = dict(payload)
+            goal_identity = {
+                key: str(failure_payload.get(key) or "").strip()
+                for key in ("goal_contract_id", "goal_criterion_id")
+            }
+            if all(
+                str(replan_metadata.get(key) or "").strip()
+                for key in (
+                    "source_tool_call_id",
+                    "source_request_id",
+                    "source_plan_id",
+                    "source_step_id",
+                    "source_provider_kind",
+                    "source_provider_id",
+                )
+            ) and all(goal_identity.values()):
+                # The planner describes the bounded fallback, but this replan
+                # exists only because Runtime correlated an executor-owned,
+                # provider-attested terminal failure above. Preserve that
+                # authority boundary for the later recovery binder.
+                payload_dict["source"] = "runtime_tool_request_runner"
+                payload_dict["plan_id"] = str(
+                    replan_metadata.get("source_plan_id") or ""
+                ).strip()
+                payload_dict.update(goal_identity)
             dedupe_key = _replan_payload_dedupe_key(payload_dict)
             if dedupe_key and dedupe_key in existing_payload_by_key:
-                payloads[existing_payload_by_key[dedupe_key]] = payload_dict
+                private_payload = _runtime_replan_payload_with_private_authority(
+                    payload_dict,
+                    timeline=timeline,
+                    run_id=run_id,
+                )
+                payloads[existing_payload_by_key[dedupe_key]] = private_payload
+                _replace_in_memory_runtime_replan_payload(
+                    timeline,
+                    dedupe_key=dedupe_key,
+                    payload=private_payload,
+                )
                 continue
             request_id = str(payload.get("request_id") or "").strip()
             if request_id and request_id in existing_request_ids:
                 continue
             if request_id:
                 existing_request_ids.add(request_id)
-            timeline.append(replan_event)
-            payloads.append(payload_dict)
+            # Persist only the public replay projection. The process-private
+            # execution capability is attached outside the live payload's
+            # mapping entries and therefore disappears across serialization.
             if run_id and self._append_run_event is not None:
                 self._append_run_event(run_id, "agent.replan.requested", payload_dict)
+            private_payload = _runtime_replan_payload_with_private_authority(
+                payload_dict,
+                timeline=timeline,
+                run_id=run_id,
+            )
+            replan_event["payload"] = private_payload
+            timeline.append(replan_event)
+            payloads.append(private_payload)
         return payloads
 
     def _record_model_followup_pending_plan_replan_events(
@@ -4126,6 +8018,18 @@ class RuntimeCustomApiAgentLoop:
                 result,
                 requires_post_action_verification=requires_post_action_verification,
             )
+            if (
+                todo_status == "in_progress"
+                and _runtime_planner_step_has_following_ui_verification(
+                    step_id,
+                    steps,
+                    tool_events[event_index:],
+                    todos_by_step=todo_by_step,
+                    checkpoints_by_step=checkpoints_by_step,
+                )
+            ):
+                todo_status = "completed"
+                checkpoint_status = "completed"
             skip_statuses = {todo_status}
             if todo_status != "completed":
                 skip_statuses.add("completed")
@@ -4139,6 +8043,8 @@ class RuntimeCustomApiAgentLoop:
             source_event = {
                 "event": str(tool_event.get("event") or ""),
                 "detail": str(tool_event.get("detail") or ""),
+                "request_id": str(tool_event.get("request_id") or "").strip(),
+                "tool_call_id": str(tool_event.get("tool_call_id") or "").strip(),
             }
             base_payload = {
                 "source": "runtime_planner",
@@ -4148,8 +8054,12 @@ class RuntimeCustomApiAgentLoop:
                 "plan_id": plan_id,
                 "step_id": step_id,
                 "tool": tool_name,
+                "request_id": str(tool_event.get("request_id") or "").strip(),
+                "tool_call_id": str(tool_event.get("tool_call_id") or "").strip(),
                 "source_event": source_event,
                 "result_preview": _task_progress_result_preview(result),
+                "actor": "native_runtime",
+                "visibility": "internal",
             }
             base_payload.update(
                 _runtime_task_progress_scope_context(
@@ -4382,6 +8292,8 @@ class RuntimeCustomApiAgentLoop:
             source_event = {
                 "event": str(tool_event.get("event") or ""),
                 "detail": str(tool_event.get("detail") or ""),
+                "request_id": str(tool_event.get("request_id") or "").strip(),
+                "tool_call_id": str(tool_event.get("tool_call_id") or "").strip(),
             }
             base_payload = {
                 "source": "runtime_planner",
@@ -4391,8 +8303,12 @@ class RuntimeCustomApiAgentLoop:
                 "plan_id": plan_id,
                 "step_id": step_id,
                 "tool": tool_name,
+                "request_id": str(tool_event.get("request_id") or "").strip(),
+                "tool_call_id": str(tool_event.get("tool_call_id") or "").strip(),
                 "source_event": source_event,
                 "result_preview": _task_progress_result_preview(result),
+                "actor": "native_runtime",
+                "visibility": "internal",
             }
             base_payload.update(
                 _runtime_task_progress_scope_context(
@@ -4539,6 +8455,44 @@ class RuntimeCustomApiAgentLoop:
         )
         return summary
 
+    def _record_runtime_planner_unavailable_goal(
+        self,
+        decision: Any,
+        unavailable_payloads: Iterable[Mapping[str, Any]],
+        replan_payloads: Iterable[Mapping[str, Any]],
+        *,
+        goal_contract: GoalContract | None,
+        timeline: list[dict[str, Any]],
+        run_id: str,
+    ) -> str:
+        payload = _runtime_planner_unavailable_goal_payload(
+            decision,
+            unavailable_payloads,
+            replan_payloads,
+            goal_contract=goal_contract,
+            run_id=run_id,
+        )
+        timeline.append(
+            self._timeline(
+                "agent.plan.blocked",
+                str(payload.get("plan_id") or "runtime_planner_unavailable"),
+                **payload,
+            )
+        )
+        self._append_internal_run_event(
+            run_id,
+            "agent.plan.blocked",
+            payload,
+        )
+        return self._model_output_text_factory(
+            _runtime_planner_unavailable_user_summary(payload),
+            metadata={
+                "runtime_status": "awaiting_user",
+                "blocked_reason": str(payload.get("blocked_reason") or ""),
+            },
+            truncated=False,
+        )
+
     def _record_blocked_runtime_execution_envelope(
         self,
         envelope: Mapping[str, Any] | None,
@@ -4591,6 +8545,23 @@ class RuntimeCustomApiAgentLoop:
             summary = (
                 "当前没有可用的真实隔离桌面 Provider，Runtime 已保留执行计划但没有执行。"
                 "请启动或配置真实隔离桌面 Provider 后重试。"
+            )
+        elif blocked_by == "provider_required" or "cua driver" in reason.casefold():
+            planned_input = (
+                candidate.get("input")
+                if isinstance(candidate.get("input"), Mapping)
+                else {}
+            )
+            app_name = str(
+                planned_input.get("app_name")
+                or planned_input.get("expected_app_name")
+                or ""
+            ).strip()
+            target = _display_target_name(app_name) or "目标应用"
+            summary = (
+                f"后台桌面控制尚未就绪，因此没有打开或操作{target}，"
+                "也没有接管你正在使用的鼠标和键盘。"
+                "请先安装或授权后台控制组件后重试。"
             )
         else:
             summary = f"Runtime 已保留执行计划，但当前执行条件未满足，因此没有执行：{reason}"
@@ -4816,39 +8787,59 @@ class RuntimeCustomApiAgentLoop:
             "result": result,
             "summary": summary,
         }
+        tool_call_id = str(
+            tool_event.get("tool_call_id") or tool_event.get("id") or ""
+        ).strip()
+        if tool_call_id:
+            event_payload["tool_call_id"] = tool_call_id
         clean_planning_reason = str(planning_reason or "").strip()
         if clean_planning_reason:
             event_payload["planning_reason"] = clean_planning_reason
         if clean_presentation:
             event_payload["presentation"] = clean_presentation
-        timeline.append(
-            self._timeline(
-                "agent.desktop.intent_completed",
-                planned_tool,
-                **event_payload,
-            )
+        completed_event = self._timeline(
+            "agent.desktop.intent_completed",
+            planned_tool,
+            **event_payload,
         )
+        goal_gate = evaluate_goal_contract_outcome(
+            {"run_id": run_id},
+            [*timeline, completed_event],
+        )
+        aggregate_outcome = evaluate_main_chat_outcome(
+            {},
+            [completed_event],
+        )
+        completion_outcome = goal_gate or aggregate_outcome
+        if not completion_outcome.allows_completion:
+            try:
+                self._raise_unverified_media_completion(
+                    (
+                        aggregate_outcome
+                        if planned_tool.startswith("media.")
+                        and not aggregate_outcome.allows_completion
+                        else completion_outcome
+                    ),
+                    [event_payload],
+                    summary,
+                    media_intent=planned_tool.startswith("media."),
+                )
+            except AgentDirectOutcomeUnverified:
+                self._record_desktop_permission_recovery_events(
+                    [event_payload],
+                    timeline,
+                    run_id=run_id,
+                )
+                raise
+            return ""
+        timeline.append(completed_event)
         if run_id and self._append_run_event is not None:
             self._append_run_event(run_id, "agent.desktop.intent_completed", event_payload)
-        recovery_payload = _desktop_permission_recovery_event_payload(
-            planned_tool,
-            executed_input,
-            result,
+        self._record_desktop_permission_recovery_events(
+            [event_payload],
+            timeline,
+            run_id=run_id,
         )
-        if recovery_payload:
-            timeline.append(
-                self._timeline(
-                    "agent.desktop.permission_recovery",
-                    planned_tool,
-                    **recovery_payload,
-                )
-            )
-            if run_id and self._append_run_event is not None:
-                self._append_run_event(
-                    run_id,
-                    "agent.desktop.permission_recovery",
-                    recovery_payload,
-                )
         return summary
 
     def _direct_daily_desktop_sequence_result(
@@ -4858,6 +8849,7 @@ class RuntimeCustomApiAgentLoop:
         *,
         tool_timeline_start: int,
         run_id: str = "",
+        allow_honest_partial: bool = False,
     ) -> str:
         tool_events = [
             event
@@ -4867,10 +8859,14 @@ class RuntimeCustomApiAgentLoop:
         planned_tool_requests = _direct_sequence_requests_with_safe_deferred_continuations(
             planned_tool_requests
         )
+        sequence_media_intent = _tool_requests_require_media_playback(
+            planned_tool_requests
+        )
         if any(
             bool(request.get("continue_to_model"))
             and str(request.get("tool") or "").strip()
             not in {*_DAILY_DESKTOP_DISCOVERY_TOOLS, *_DAILY_DESKTOP_VERIFY_TOOLS}
+            and not _direct_daily_runtime_verification_request(request)
             for request in planned_tool_requests
             if isinstance(request, dict)
         ):
@@ -4888,22 +8884,48 @@ class RuntimeCustomApiAgentLoop:
             planned_input = planned_tool_request.get("input")
             if not isinstance(planned_input, dict):
                 planned_input = {}
+            direct_runtime_verification = _direct_daily_runtime_verification_request(
+                planned_tool_request
+            )
             tool_event: dict[str, Any] | None = None
             while event_index < len(tool_events):
                 candidate = tool_events[event_index]
                 event_index += 1
                 candidate_tool = str(candidate.get("detail") or "")
-                if candidate_tool == planned_tool or _followup_plan_tools_match(
-                    candidate_tool,
-                    planned_tool,
+                if not (
+                    candidate_tool == planned_tool
+                    or _followup_plan_tools_match(candidate_tool, planned_tool)
                 ):
-                    candidate_result = (
-                        candidate.get("result") if isinstance(candidate.get("result"), dict) else {}
-                    )
-                    if candidate_result.get("approval_required"):
-                        continue
-                    tool_event = candidate
-                    break
+                    continue
+                planned_plan_id = str(planned_tool_request.get("plan_id") or "").strip()
+                candidate_plan_id = str(candidate.get("plan_id") or "").strip()
+                if (
+                    planned_plan_id
+                    and candidate_plan_id
+                    and candidate_plan_id != planned_plan_id
+                ):
+                    continue
+                planned_step_id = str(
+                    planned_tool_request.get("step_id")
+                    or planned_tool_request.get("planner_step_id")
+                    or ""
+                ).strip()
+                candidate_step_id = str(
+                    candidate.get("step_id") or candidate.get("planner_step_id") or ""
+                ).strip()
+                if (
+                    planned_step_id
+                    and candidate_step_id
+                    and candidate_step_id != planned_step_id
+                ):
+                    continue
+                candidate_result = (
+                    candidate.get("result") if isinstance(candidate.get("result"), dict) else {}
+                )
+                if candidate_result.get("approval_required"):
+                    continue
+                tool_event = candidate
+                break
             if tool_event is None:
                 remaining_requests = planned_tool_requests[request_index:]
                 if completed_steps and _all_noncritical_daily_desktop_observations(
@@ -4921,6 +8943,7 @@ class RuntimeCustomApiAgentLoop:
             if (
                 result.get("ok") is False
                 and planned_tool not in _DIRECT_DAILY_SEQUENCE_CONTEXT_TOOLS
+                and planned_tool not in _DIRECT_DAILY_DESKTOP_TERMINAL_ACTION_TOOLS
                 and not _has_permission_recovery_signal(result)
             ):
                 remaining_requests = planned_tool_requests[request_index:]
@@ -4947,16 +8970,22 @@ class RuntimeCustomApiAgentLoop:
                 "app.focus_and_safe_type_text",
             }:
                 executed_input = {**planned_input, **executed_input}
-            if _daily_desktop_step_has_placeholder_app(
-                planned_input,
-                executed_input,
-                result,
+            if (
+                not direct_runtime_verification
+                and _daily_desktop_step_has_placeholder_app(
+                    planned_input,
+                    executed_input,
+                    result,
+                )
             ):
                 return ""
             presentation = str(planned_tool_request.get("presentation") or "").strip()
             summary = (
                 ""
-                if planned_tool in _DIRECT_DAILY_SEQUENCE_CONTEXT_TOOLS
+                if (
+                    planned_tool in _DIRECT_DAILY_SEQUENCE_CONTEXT_TOOLS
+                    or direct_runtime_verification
+                )
                 else self._daily_desktop_summary(
                     planned_tool,
                     executed_input,
@@ -4967,6 +8996,7 @@ class RuntimeCustomApiAgentLoop:
             if (
                 not summary
                 and planned_tool not in _DIRECT_DAILY_SEQUENCE_CONTEXT_TOOLS
+                and not direct_runtime_verification
             ):
                 return ""
             completed_step = {
@@ -4975,6 +9005,32 @@ class RuntimeCustomApiAgentLoop:
                 "result": result,
                 "summary": summary,
             }
+            execution_source = str(
+                tool_event.get("source") or planned_tool_request.get("source") or ""
+            ).strip()
+            if execution_source:
+                # Keep the authoritative execution source on aggregate steps.
+                # Native-receipt verifiers are projected after the action and
+                # the terminal outcome evaluator deliberately requires this
+                # provenance before it trusts the receipt.
+                completed_step["source"] = execution_source
+            tool_call_id = str(
+                tool_event.get("tool_call_id") or tool_event.get("id") or ""
+            ).strip()
+            if tool_call_id:
+                completed_step["tool_call_id"] = tool_call_id
+            request_id = str(
+                tool_event.get("request_id")
+                or planned_tool_request.get("request_id")
+                or ""
+            ).strip()
+            if request_id:
+                # The aggregate step is a lifecycle projection of this exact
+                # execution, not a retry. Preserve the authoritative request
+                # identity so the terminal evaluator can distinguish it from
+                # a later same-step action without weakening fail-closed
+                # receipt correlation.
+                completed_step["request_id"] = request_id
             completed_step.update(_request_observability_metadata(planned_tool_request))
             if presentation:
                 completed_step["presentation"] = presentation
@@ -5035,25 +9091,88 @@ class RuntimeCustomApiAgentLoop:
         if len(planning_reasons) == 1:
             event_payload["planning_reason"] = next(iter(planning_reasons))
         event_payload.update(_step_observability_metadata(last_step))
+        # The aggregate completion is not a second execution of the visible
+        # action. Nested action facts keep their strict verification contract.
+        event_payload["requires_post_action_verification"] = False
         presentation = str(last_step.get("presentation") or "").strip()
         if presentation:
             event_payload["presentation"] = presentation
-        timeline.append(
-            self._timeline(
-                "agent.desktop.intent_completed",
-                str(last_step.get("tool") or ""),
-                **event_payload,
-            )
+        completed_event = self._timeline(
+            "agent.desktop.intent_completed",
+            str(last_step.get("tool") or ""),
+            **event_payload,
         )
+        goal_gate = evaluate_goal_contract_outcome(
+            {"run_id": run_id},
+            [*timeline, completed_event],
+        )
+        aggregate_outcome = evaluate_main_chat_outcome(
+            {},
+            [*timeline[tool_timeline_start:], completed_event],
+        )
+        completion_outcome = goal_gate or aggregate_outcome
+        if not completion_outcome.allows_completion:
+            if allow_honest_partial:
+                # Recovery enrichment may fail while the first tool attempt
+                # still produced a truthful, useful partial result (for
+                # example, a bounded media-library miss).  Preserve that text
+                # without projecting a completion event or weakening the Goal
+                # contract; the caller returns it only after the recovery loop
+                # has exhausted its bounded alternatives.
+                return summary
+            try:
+                self._raise_unverified_media_completion(
+                    (
+                        aggregate_outcome
+                        if sequence_media_intent
+                        and not aggregate_outcome.allows_completion
+                        else completion_outcome
+                    ),
+                    completed_steps,
+                    summary,
+                    media_intent=sequence_media_intent,
+                )
+            except AgentDirectOutcomeUnverified:
+                self._record_desktop_permission_recovery_events(
+                    summary_steps,
+                    timeline,
+                    run_id=run_id,
+                )
+                raise
+            return ""
+        timeline.append(completed_event)
         if run_id and self._append_run_event is not None:
             self._append_run_event(run_id, "agent.desktop.intent_completed", event_payload)
-        for step in summary_steps:
+        self._record_desktop_permission_recovery_events(
+            summary_steps,
+            timeline,
+            run_id=run_id,
+        )
+        return summary
+
+    def _record_desktop_permission_recovery_events(
+        self,
+        steps: Iterable[Mapping[str, Any]],
+        timeline: list[dict[str, Any]],
+        *,
+        run_id: str = "",
+    ) -> None:
+        for step in steps:
+            tool_call_id = str(step.get("tool_call_id") or "").strip()
+            if tool_call_id and any(
+                event.get("event") == "agent.desktop.permission_recovery"
+                and str(event.get("tool_call_id") or "").strip() == tool_call_id
+                for event in timeline
+            ):
+                continue
             recovery_payload = _desktop_permission_recovery_event_payload(
                 str(step.get("tool") or ""),
                 step.get("input_preview") if isinstance(step.get("input_preview"), dict) else {},
                 step.get("result") if isinstance(step.get("result"), dict) else {},
             )
             if recovery_payload:
+                if tool_call_id:
+                    recovery_payload["tool_call_id"] = tool_call_id
                 timeline.append(
                     self._timeline(
                         "agent.desktop.permission_recovery",
@@ -5067,7 +9186,135 @@ class RuntimeCustomApiAgentLoop:
                         "agent.desktop.permission_recovery",
                         recovery_payload,
                     )
-        return summary
+
+    def _record_timeline_desktop_permission_recovery_events(
+        self,
+        timeline: list[dict[str, Any]],
+        *,
+        tool_timeline_start: int,
+        run_id: str = "",
+    ) -> None:
+        steps: list[dict[str, Any]] = []
+        for event in timeline[tool_timeline_start:]:
+            if event.get("event") not in {"agent.tool.call", "agent.tool.skipped"}:
+                continue
+            result = event.get("result") if isinstance(event.get("result"), dict) else {}
+            if not _has_permission_recovery_signal(result):
+                continue
+            tool_name = str(event.get("detail") or "").strip()
+            input_preview = (
+                event.get("input_preview")
+                if isinstance(event.get("input_preview"), dict)
+                else {}
+            )
+            enriched_result = _with_retry_recovery_action(
+                tool_name,
+                input_preview,
+                result,
+            )
+            event["result"] = enriched_result
+            steps.append(
+                {
+                    "tool": tool_name,
+                    "input_preview": input_preview,
+                    "result": enriched_result,
+                    "tool_call_id": str(event.get("tool_call_id") or "").strip(),
+                }
+            )
+        self._record_desktop_permission_recovery_events(
+            steps,
+            timeline,
+            run_id=run_id,
+        )
+
+    def _raise_unverified_media_completion(
+        self,
+        completion_outcome: Any,
+        completed_steps: Iterable[Mapping[str, Any]],
+        summary: str,
+        *,
+        media_intent: bool = False,
+    ) -> None:
+        completion_reason = str(
+            getattr(completion_outcome, "reason", "") or ""
+        ).strip()
+        unverified_reasons = {
+            "desktop_permission_required",
+            "desktop_tool_failed",
+            "desktop_verification_missing",
+            "desktop_verification_failed",
+            "goal_contract_incomplete",
+        }
+        if completion_reason not in unverified_reasons:
+            return
+        completed_step_list = list(completed_steps)
+        if not media_intent and not any(
+            _direct_step_requires_honest_unverified_outcome(step)
+            for step in completed_step_list
+        ):
+            return
+        executed_direct_steps = [
+            step
+            for step in completed_step_list
+            if str(step.get("tool") or "").strip()
+            and isinstance(step.get("result"), Mapping)
+            and _direct_step_requires_honest_unverified_outcome(step)
+        ]
+        unverified_direct_steps = [
+            step
+            for step in executed_direct_steps
+            if (
+                completion_reason == "desktop_permission_required"
+                and isinstance(step.get("result"), Mapping)
+                and _has_permission_recovery_signal(dict(step["result"]))
+            )
+            or (
+                completion_reason == "goal_contract_incomplete"
+                and _direct_step_requires_honest_unverified_outcome(step)
+            )
+            or _direct_step_unverified_outcome_reason(step)
+            in unverified_reasons
+        ]
+        if not unverified_direct_steps:
+            return
+        unverified_step = unverified_direct_steps[-1]
+        unverified_result = (
+            unverified_step.get("result")
+            if isinstance(unverified_step.get("result"), Mapping)
+            else {}
+        )
+        preserve_failure_summary = completion_reason == "desktop_tool_failed" or (
+            completion_reason == "desktop_permission_required"
+            and unverified_result.get("ok") is False
+        )
+        if preserve_failure_summary:
+            failure_summary = summary
+        elif media_intent or str(unverified_step.get("tool") or "").strip().startswith(
+            "media."
+        ):
+            failure_summary = _unverified_media_action_failure_summary(
+                str(unverified_step.get("summary") or summary)
+            )
+        else:
+            failure_summary = _unverified_desktop_action_failure_summary(
+                str(unverified_step.get("summary") or summary)
+            )
+        reported_reason = (
+            "desktop_verification_missing"
+            if completion_reason == "goal_contract_incomplete"
+            else completion_reason
+        )
+        raise AgentDirectOutcomeUnverified(
+            failure_summary,
+            reason=reported_reason,
+            tool_name=str(unverified_step.get("tool") or "").strip(),
+            tool_call_id=str(unverified_step.get("tool_call_id") or "").strip(),
+            input_preview=(
+                dict(unverified_step.get("input_preview"))
+                if isinstance(unverified_step.get("input_preview"), Mapping)
+                else {}
+            ),
+        )
 
     @staticmethod
     def _latest_tool_call_event(
@@ -5213,6 +9460,62 @@ class RuntimeCustomApiAgentLoop:
                 track = str(data.get("track") or "").strip()
                 artist = str(data.get("artist") or "").strip()
                 query = _payload_text(result, planned_input, "query")
+                if (
+                    data.get("status") == "not_found"
+                    and data.get("outcome") == "partial"
+                    and data.get("background_safe") is True
+                    and data.get("library_search_completed") is True
+                    and data.get("foreground_action_taken") is False
+                    and data.get("playback_started") is False
+                    and data.get("search_opened") is False
+                    and data.get("user_action_required") is False
+                ):
+                    target = f"「{query}」" if query else "目标音乐"
+                    if data.get("catalog_lookup_completed") is True:
+                        return (
+                            f"已在后台检查 Apple Music 本地曲库和官方目录，"
+                            f"但没有找到{target}的精确匹配。"
+                            "为避免抢占你的桌面，没有打开前台搜索，也没有开始播放。"
+                        )
+                    if data.get("catalog_lookup_status"):
+                        return (
+                            f"Apple Music 本地曲库中没有找到{target}，"
+                            "官方目录查询也未能完成。"
+                            "为避免误报或抢占桌面，本次没有开始播放。"
+                        )
+                    return (
+                        f"已在后台检查 Apple Music 本地曲库，但没有找到{target}。"
+                        "为避免抢占你的桌面，没有打开前台搜索，也没有开始播放。"
+                    )
+                if (
+                    data.get("outcome") == "partial"
+                    and data.get("user_action_required") is False
+                    and data.get("playback_started") is False
+                    and data.get("status")
+                    in {"playback_unverified", "catalog_playback_unverified"}
+                ):
+                    target = f"「{track or query}」" if track or query else "目标音乐"
+                    if data.get("foreground_action_taken") is True:
+                        return (
+                            f"Apple Music 找到了{target}，但播放状态未能安全确认，"
+                            "且 Music 意外切到了前台，因此没有宣称任务成功。"
+                        )
+                    return (
+                        f"Apple Music 找到了{target}，但没有验证到它正在播放。"
+                        "为避免误报，本次按未播放处理。"
+                    )
+                if (
+                    data.get("status") == "not_found"
+                    and data.get("search_opened") is True
+                    and data.get("playback_started") is False
+                    and data.get("outcome") == "partial"
+                    and data.get("user_action_required") is True
+                ):
+                    target = f"「{query}」" if query else "这首音乐"
+                    return (
+                        f"已打开 Apple Music，但没有找到可直接播放的{target}。"
+                        "你可以换个关键词，或在 Music 中选择结果。"
+                    )
                 if track:
                     return f"已在 Apple Music 播放：{track}{f' - {artist}' if artist else ''}。"
                 return f"已尝试在 Apple Music 播放：{query}。" if query else (result_summary or "已尝试播放。")
@@ -5287,15 +9590,15 @@ class RuntimeCustomApiAgentLoop:
                     or "已用应用打开本地路径。"
                 )
             if tool_name == "desktop.hide_app":
-                return "已隐藏当前应用。"
+                return "已发送隐藏当前应用指令。"
             if tool_name == "desktop.show_all_apps":
                 return "已显示所有隐藏应用。"
             if tool_name == "desktop.minimize_window":
-                return "已最小化当前窗口。"
+                return "已发送最小化当前窗口指令。"
             if tool_name == "desktop.close_window":
-                return "已关闭当前窗口。"
+                return "已发送关闭当前窗口指令。"
             if tool_name == "desktop.quit_app":
-                return "已请求退出当前应用。"
+                return "已发送退出当前应用请求。"
             if tool_name == "data.analyze":
                 return _data_analyze_summary(result, planned_input) or result_summary or "已分析数据。"
             if tool_name == "terminal.run":
@@ -5367,10 +9670,10 @@ class RuntimeCustomApiAgentLoop:
                     "action",
                 )
                 return {
-                    "send": "已确认发送前台内容。",
-                    "submit": "已确认提交前台内容。",
-                    "confirm": "已确认前台操作。",
-                }.get(action, result_summary or "已确认前台提交动作。")
+                    "send": "已向前台发送“发送”指令。",
+                    "submit": "已向前台发送提交指令。",
+                    "confirm": "已向前台发送确认指令。",
+                }.get(action, result_summary or "已向前台发送提交按键。")
             if tool_name == "desktop.type_text":
                 text = _payload_text(result, planned_input, "text")
                 if text:
@@ -5476,11 +9779,11 @@ class RuntimeCustomApiAgentLoop:
         if sequence_result:
             return sequence_result
         sequence = self._latest_uncompleted_daily_desktop_sequence(timeline)
-        if sequence is not None and any(
-            bool(request.get("continue_to_model"))
-            for request in sequence.get("requests", [])
-            if isinstance(request, dict)
-        ):
+        if sequence is not None:
+            # A verifier/observation is not a substitute for the action whose
+            # postcondition it was meant to prove. If sequence aggregation
+            # cannot establish completion, do not summarize the last read-only
+            # tool as though it satisfied the user's original side effect.
             return ""
         tool_event = self._latest_tool_call_event_for_daily_desktop_intent(timeline)
         if not tool_event:
@@ -5547,6 +9850,9 @@ class RuntimeCustomApiAgentLoop:
             planning_reason = str(event.get("planning_reason") or "").strip()
             if planning_reason:
                 request["planning_reason"] = planning_reason
+            presentation = str(event.get("presentation") or "").strip()
+            if presentation:
+                request["presentation"] = presentation
             if bool(event.get("continue_to_model")):
                 request["continue_to_model"] = True
             for key in ("step_id", "capability_id", "replan_request_id", "replan_trigger"):
@@ -5611,19 +9917,50 @@ class RuntimeCustomApiAgentLoop:
                 return content
         return ""
 
+    def _original_user_intent_text(self, messages: list[dict[str, Any]]) -> str:
+        """Return the first authentic run goal, never a Runtime pseudo-user turn."""
+
+        runtime_prefixes = (
+            "Tool result for ",
+            "Desktop intent for ",
+            "Runtime follow-up context:",
+            "Runtime replan context:",
+            "Runtime goal verification:",
+            "Runtime root-goal contract ",
+        )
+        for message in messages:
+            if str(message.get("role") or "").strip() != "user":
+                continue
+            if message.get("runtime_generated") is True or str(
+                message.get("visibility") or ""
+            ).strip() == "internal":
+                continue
+            content = self._message_visible_content_text(message).strip()
+            if not content or content.startswith(runtime_prefixes):
+                continue
+            return content
+        return ""
+
     def _ensure_runtime_system_message(
         self,
         messages: list[dict[str, Any]],
         allowed_tools: list[str],
+        *,
+        planner_decision: Any | None = None,
+        plan_guidance_if_missing: bool = True,
     ) -> None:
-        runtime_message = self._system_message(
-            allowed_tools,
-            planner_context=self._latest_user_intent_text(messages),
-        )
         if messages and str(messages[0].get("role") or "") == "system":
             content = str(messages[0].get("content") or "")
             if "Oha-Yachiyo Agent Runtime" in content:
                 return
+        runtime_message = self._system_message(
+            allowed_tools,
+            planner_context=self._latest_user_intent_text(messages),
+            planner_decision=planner_decision,
+            plan_guidance_if_missing=plan_guidance_if_missing,
+        )
+        if messages and str(messages[0].get("role") or "") == "system":
+            content = str(messages[0].get("content") or "")
             messages[0] = {
                 **messages[0],
                 "content": f"{runtime_message['content']}\n\n{content}",
@@ -5631,9 +9968,21 @@ class RuntimeCustomApiAgentLoop:
             return
         messages.insert(0, runtime_message)
 
-    def _initial_messages(self, context: str, allowed_tools: list[str]) -> list[dict[str, Any]]:
+    def _initial_messages(
+        self,
+        context: str,
+        allowed_tools: list[str],
+        *,
+        planner_decision: Any | None = None,
+        plan_guidance_if_missing: bool = True,
+    ) -> list[dict[str, Any]]:
         return [
-            self._system_message(allowed_tools, planner_context=context),
+            self._system_message(
+                allowed_tools,
+                planner_context=context,
+                planner_decision=planner_decision,
+                plan_guidance_if_missing=plan_guidance_if_missing,
+            ),
             {"role": "user", "content": context},
         ]
 
@@ -5642,6 +9991,8 @@ class RuntimeCustomApiAgentLoop:
         allowed_tools: list[str],
         *,
         planner_context: str = "",
+        planner_decision: Any | None = None,
+        plan_guidance_if_missing: bool = True,
     ) -> dict[str, Any]:
         allowed_tool_text = ", ".join(allowed_tools) or "none"
         memory_tool_guidance = (
@@ -5719,8 +10070,8 @@ class RuntimeCustomApiAgentLoop:
             "browser.open_url, browser.open_url_and_extract_text, browser.open_url_and_screenshot, "
             "browser.current_page, browser.click, browser.type_text, browser.extract_text, "
             "and browser.screenshot when they are allowed. "
-            "When browser.click has no Chrome CDP, use screen observation and explicit "
-            "fallback_x/fallback_y coordinates instead of guessing selector positions. "
+            "When browser interaction has no Chrome CDP, pause and request the CDP setup; "
+            "never switch silently to global desktop coordinates, clicks, or typing. "
             "Do not replace these structured desktop or browser actions with terminal.run. "
             "If a desktop or browser permission is missing, explain the exact missing permission "
             "and continue with the safest fallback. "
@@ -5763,7 +10114,7 @@ class RuntimeCustomApiAgentLoop:
             "not request file-writing tools. If the user asks not to run or execute commands, do not request "
             "command-execution tools. "
             f"{workspace_guidance}"
-            f"{self._runtime_planner_guidance(planner_context, allowed_tools)}"
+            f"{self._runtime_planner_guidance(planner_context, allowed_tools, decision=planner_decision, plan_if_missing=plan_guidance_if_missing)}"
             f"Request at most one high-risk tool per turn.\n\nAllowed tools: {allowed_tool_text}"
         )
         return {"role": "system", "content": system_prompt}
@@ -5772,20 +10123,28 @@ class RuntimeCustomApiAgentLoop:
     def _runtime_planner_guidance(
         planner_context: str,
         allowed_tools: list[str],
+        *,
+        decision: Any | None = None,
+        plan_if_missing: bool = True,
     ) -> str:
         clean_context = str(planner_context or "").strip()
         if not clean_context:
             return ""
-        try:
-            from apps.shell.yachiyo_agent.runtime_planner import RuntimePlanner
-        except Exception:
-            return ""
-        try:
-            decision = RuntimePlanner().decision(
-                clean_context,
-                allowed_tools=allowed_tools,
-            )
-        except Exception:
+        if decision is None:
+            if not plan_if_missing:
+                return ""
+            try:
+                from apps.shell.yachiyo_agent.runtime_planner import RuntimePlanner
+            except Exception:
+                return ""
+            try:
+                decision = RuntimePlanner().decision(
+                    clean_context,
+                    allowed_tools=allowed_tools,
+                )
+            except Exception:
+                return ""
+        if str(getattr(decision, "prompt", "") or "").strip() != clean_context:
             return ""
         if decision.selected_intent.kind == "general":
             return ""
@@ -5851,6 +10210,91 @@ class RuntimeCustomApiAgentLoop:
             "or policy blocks execution. If a required step is unavailable, explain the missing capability "
             "instead of fabricating execution. Existing tool policy and approval gates still apply. "
         )
+
+
+def _runtime_semantic_artifact_assessment_payload(
+    candidate: Mapping[str, Any],
+    proposal: SemanticArtifactVerificationResult,
+) -> dict[str, Any]:
+    """Bind one untrusted verdict to Runtime-owned exact-readback lineage."""
+
+    verdict = str(getattr(proposal.verdict, "value", "uncertain") or "uncertain")
+    if verdict not in {"fulfilled", "insufficient", "uncertain"}:
+        verdict = "uncertain"
+    reason = redact_sensitive_text(proposal.reason, limit=500) or "semantic_verdict_unavailable"
+    missing_requirements = [
+        clean
+        for item in tuple(proposal.missing_requirements)[:8]
+        if (clean := redact_sensitive_text(item, limit=300))
+    ]
+    return {
+        "run_id": str(candidate.get("run_id") or "").strip(),
+        "contract_id": str(candidate.get("contract_id") or "").strip(),
+        "criterion_id": str(candidate.get("criterion_id") or "").strip(),
+        "plan_id": str(candidate.get("plan_id") or "").strip(),
+        "source_tool_call_id": str(
+            candidate.get("source_tool_call_id") or ""
+        ).strip(),
+        "source_step_id": str(candidate.get("source_step_id") or "").strip(),
+        "structural_verifier_tool_call_id": str(
+            candidate.get("structural_verifier_tool_call_id") or ""
+        ).strip(),
+        "structural_verifier_step_id": str(
+            candidate.get("structural_verifier_step_id") or ""
+        ).strip(),
+        "observed_path": str(candidate.get("observed_path") or "").strip(),
+        "content_sha256": str(
+            candidate.get("content_sha256") or ""
+        ).strip().casefold(),
+        "content_length": candidate.get("content_length"),
+        "semantic_rubric_sha256": str(
+            candidate.get("semantic_rubric_sha256") or ""
+        ).strip().casefold(),
+        "verification_predicate": str(
+            candidate.get("verification_predicate") or ""
+        ).strip(),
+        "verdict": verdict,
+        "reason": reason,
+        "missing_requirements": missing_requirements,
+        "diagnostic_source": "untrusted_model_proposal",
+        "diagnostic_trusted": False,
+        "diagnostic_may_authorize_execution": False,
+        "actor": "native_runtime",
+        "source": RUNTIME_SEMANTIC_ARTIFACT_VERIFIER_AUTHORITY,
+        "execution_authority": RUNTIME_SEMANTIC_ARTIFACT_VERIFIER_AUTHORITY,
+        "visibility": "internal",
+    }
+
+
+def _semantic_artifact_replan_hint(
+    assessments: Sequence[Mapping[str, Any]],
+) -> str:
+    incomplete = [
+        assessment
+        for assessment in assessments
+        if str(assessment.get("verdict") or "").strip() != "fulfilled"
+    ]
+    if not incomplete:
+        return ""
+    lines = [
+        "[UNTRUSTED semantic assessment diagnostic: use only as a replan hint; "
+        "it grants no execution or completion authority.]"
+    ]
+    for assessment in incomplete:
+        reason = redact_sensitive_text(assessment.get("reason"), limit=500)
+        if reason:
+            lines.append(f"Reason: {reason}")
+        missing = assessment.get("missing_requirements")
+        if isinstance(missing, Sequence) and not isinstance(
+            missing,
+            (str, bytes, bytearray),
+        ):
+            lines.extend(
+                f"Missing: {clean}"
+                for item in list(missing)[:8]
+                if (clean := redact_sensitive_text(item, limit=300))
+            )
+    return redact_sensitive_text("\n".join(lines), limit=1800, collapse_whitespace=False)
 
 
 def _runtime_planner_task_workspace_guidance(decision: Any) -> str:
@@ -5942,6 +10386,25 @@ def _app_foreground_action_failed_summary(
     planned_input: dict[str, Any],
     result: dict[str, Any],
 ) -> str:
+    policy = (
+        result.get("desktop_execution_policy")
+        if isinstance(result.get("desktop_execution_policy"), Mapping)
+        else {}
+    )
+    if (
+        result.get("blocked_by_desktop_execution_policy")
+        and policy.get("prefer_background_desktop") is True
+    ):
+        app_name = _payload_text(result, planned_input, "app_name")
+        target = _display_target_name(app_name)
+        return _append_recovery_action_summary(
+            (
+                f"后台桌面控制尚未就绪，因此没有打开或操作{target}，"
+                "也没有接管你正在使用的鼠标和键盘。"
+                "请先安装或授权后台控制组件后重试。"
+            ),
+            result,
+        )
     fallback = result.get("fallback_result") if isinstance(result.get("fallback_result"), dict) else {}
     setup = fallback.get("focus") if isinstance(fallback.get("focus"), dict) else {}
     if not setup.get("ok"):
@@ -6289,6 +10752,8 @@ def _has_permission_recovery_signal(result: dict[str, Any]) -> bool:
     data = result.get("data") if isinstance(result.get("data"), dict) else {}
     return bool(
         result.get("permission_error")
+        or result.get("user_handoff_required")
+        or data.get("user_handoff_required")
         or _string_list(result.get("permission_targets"))
         or _string_list(result.get("missing_permissions"))
         or _string_list(data.get("permission_targets"))
@@ -6314,10 +10779,120 @@ def _timeline_has_permission_recovery_signal(
     return False
 
 
+def _permission_recovery_executed_requests(
+    requests: Iterable[Mapping[str, Any]],
+    timeline: list[dict[str, Any]],
+    *,
+    tool_timeline_start: int,
+) -> list[dict[str, Any]]:
+    """Project only recovery-bearing requests that actually reached a tool call."""
+
+    request_list = [dict(request) for request in requests if isinstance(request, Mapping)]
+    selected: list[dict[str, Any]] = []
+    selected_indexes: set[int] = set()
+    for event in timeline[tool_timeline_start:]:
+        if event.get("event") not in {"agent.tool.call", "agent.tool.skipped"}:
+            continue
+        result = event.get("result") if isinstance(event.get("result"), dict) else {}
+        if not _has_permission_recovery_signal(result):
+            continue
+        event_tool = str(event.get("detail") or "").strip()
+        event_step_id = str(
+            event.get("step_id") or event.get("planner_step_id") or ""
+        ).strip()
+        for index, request in enumerate(request_list):
+            if index in selected_indexes:
+                continue
+            request_tool = str(request.get("tool") or request.get("tool_name") or "").strip()
+            request_step_id = str(
+                request.get("step_id") or request.get("planner_step_id") or ""
+            ).strip()
+            step_matches = bool(
+                event_step_id and request_step_id and event_step_id == request_step_id
+            )
+            tool_matches = bool(
+                event_tool
+                and request_tool
+                and (
+                    event_tool == request_tool
+                    or _followup_plan_tools_match(event_tool, request_tool)
+                )
+            )
+            if not step_matches and not tool_matches:
+                continue
+            selected_indexes.add(index)
+            selected.append(request)
+            break
+    return selected
+
+
+
+
+def _timeline_has_terminal_media_failure_without_permission_recovery(
+    timeline: list[dict[str, Any]],
+    start_index: int,
+) -> bool:
+    for event in timeline[start_index:]:
+        if event.get("event") not in {"agent.tool.call", "agent.tool.skipped"}:
+            continue
+        tool_name = str(event.get("detail") or event.get("tool") or "").strip()
+        if tool_name not in _DIRECT_DAILY_DESKTOP_TERMINAL_ACTION_TOOLS:
+            continue
+        result = event.get("result") if isinstance(event.get("result"), dict) else {}
+        data = result.get("data") if isinstance(result.get("data"), Mapping) else {}
+        if any(
+            source.get("playback_state_unverified") is True
+            for source in (result, data)
+        ):
+            # Provider dispatch success is still a terminal, honest partial
+            # outcome when playback cannot be observed.  Route it through the
+            # media completion evaluator now; falling into model/profile
+            # lookup cannot manufacture the missing postcondition evidence.
+            return True
+        if (
+            result.get("ok") is False
+            and not _has_permission_recovery_signal(result)
+        ):
+            return True
+    return False
+
+
+def _direct_daily_runtime_verification_request(
+    request: Mapping[str, Any],
+) -> bool:
+    runtime_stage = str(request.get("runtime_stage") or "").strip()
+    runtime_role = str(request.get("runtime_role") or "").strip()
+    if runtime_stage != "verify" and runtime_role != "verify_result":
+        return False
+    tool_name = str(request.get("tool") or "").strip()
+    payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+    if (
+        tool_name in _DAILY_DESKTOP_VERIFY_TOOLS
+        and not bool(request.get("approval_required"))
+        and request.get("requires_post_action_verification") is not True
+    ):
+        return True
+    return bool(
+        tool_name == "system.volume"
+        and str(payload.get("action") or "").strip() == "status"
+        and not bool(request.get("approval_required"))
+    )
+
+
+def _direct_runtime_verification_only_followups(
+    requests: Iterable[Mapping[str, Any]],
+) -> bool:
+    followups = [request for request in requests if bool(request.get("continue_to_model"))]
+    return bool(followups) and all(
+        _direct_daily_runtime_verification_request(request)
+        for request in followups
+    )
+
+
 def _daily_desktop_retry_prompt(tool_name: str, planned_input: dict[str, Any]) -> str:
     if tool_name == "media.apple_music_play":
         query = str(planned_input.get("query") or "").strip()
-        return f"播放{query}" if query else "播放音乐"
+        return f"用 Apple Music 播放{query}" if query else "用 Apple Music 播放音乐"
     if tool_name == "media.apple_music_open_and_play":
         return "打开Apple Music并播放"
     if tool_name == "media.music_app_open_and_play":
@@ -6896,6 +11471,81 @@ def _system_media_control_summary(result: dict[str, Any], planned_input: dict[st
     return f"已发送媒体键尝试{label}当前媒体。"
 
 
+def _unverified_media_action_failure_summary(summary: str) -> str:
+    first_sentence = str(summary or "").strip().split("。", 1)[0].strip()
+    if "尝试" not in first_sentence and "请求" not in first_sentence:
+        first_sentence = "已发送媒体控制请求"
+    return f"{first_sentence}，但无法确认播放状态；请在播放器中确认后重试。"
+
+
+def _unverified_desktop_action_failure_summary(summary: str) -> str:
+    first_sentence = str(summary or "").strip().split("。", 1)[0].strip()
+    if not first_sentence:
+        first_sentence = "已发送桌面操作指令"
+    return f"{first_sentence}，但未能确认界面已按预期变化；请确认后重试。"
+
+
+def _tool_requests_require_media_playback(
+    requests: Iterable[Mapping[str, Any]],
+) -> bool:
+    """Return whether the immutable plan requires a playback effect."""
+
+    return any(
+        str(request.get("tool") or "").strip().startswith("media.")
+        or str(request.get("intent_kind") or "").strip().casefold()
+        == "media_playback"
+        or "media_playback"
+        in str(request.get("planning_reason") or "").strip().casefold()
+        for request in requests
+        if isinstance(request, Mapping)
+    )
+
+
+def _tool_requests_include_media_tool(
+    requests: Iterable[Mapping[str, Any]],
+) -> bool:
+    """Return whether a plan already attempted a native media capability."""
+
+    return any(
+        str(request.get("tool") or "").strip().startswith("media.")
+        for request in requests
+        if isinstance(request, Mapping)
+    )
+
+
+def _direct_step_requires_honest_unverified_outcome(
+    step: Mapping[str, Any],
+) -> bool:
+    tool_name = str(step.get("tool") or "").strip()
+    result = step.get("result") if isinstance(step.get("result"), Mapping) else {}
+    return bool(
+        tool_name.startswith("media.")
+        or _has_permission_recovery_signal(dict(result))
+        or step.get("requires_post_action_verification") is True
+        or (
+            tool_name in DAILY_DESKTOP_TOOL_NAMES
+            and tool_name not in READ_ONLY_OBSERVATION_TOOLS
+            and tool_name not in _DAILY_DESKTOP_VERIFY_TOOLS
+            and tool_name not in _DIRECT_DAILY_SEQUENCE_CONTEXT_TOOLS
+        )
+    )
+
+
+def _direct_step_unverified_outcome_reason(step: Mapping[str, Any]) -> str:
+    return str(
+        evaluate_main_chat_outcome(
+            {},
+            [
+                {
+                    "event_type": "agent.tool.call",
+                    "payload": dict(step),
+                }
+            ],
+        ).reason
+        or ""
+    ).strip()
+
+
 def _music_app_control_label(action: str) -> str:
     return {
         "toggle": "切换播放/暂停",
@@ -6960,6 +11610,7 @@ def _safe_shortcut_summary(result: dict[str, Any], planned_input: dict[str, Any]
         "force_quit_dialog": "打开强制退出窗口",
         "new_window": "新建窗口",
         "new_document": "新建文档",
+        "new_task": "新建任务",
         "new_message": "新建消息",
         "new_folder": "新建文件夹",
         "rename_selected": "重命名 Finder 选中项",
@@ -6980,7 +11631,7 @@ def _safe_shortcut_summary(result: dict[str, Any], planned_input: dict[str, Any]
         "reopen_closed_tab": "重新打开关闭的标签页",
         "finder_quick_look": "快速查看选中项",
     }.get(action, "")
-    return f"已{label}。" if label else ""
+    return f"已发送“{label}”快捷键。" if label else ""
 
 
 def _safe_key_summary(result: dict[str, Any], planned_input: dict[str, Any]) -> str:
@@ -7273,10 +11924,15 @@ def _model_followup_context_payload(
         if str(tool or "").strip()
     }
     artifacts_expected = _string_list(selection_payload.get("artifacts_expected"))
+    planning_reason_requests = [
+        request
+        for request in content_requests
+        if str(request.get("replan_recovery_identity") or "").strip()
+    ] or content_requests
     planning_reasons = _ordered_text_list(
         [
             str(request.get("planning_reason") or "").strip()
-            for request in content_requests
+            for request in planning_reason_requests
             if str(request.get("planning_reason") or "").strip()
         ]
     )
@@ -7702,6 +12358,12 @@ def _auto_deferred_observed_ui_followup_requests(
             request,
             timeline,
         )
+        if not _runtime_planner_deferred_observation_scope_matches(
+            request,
+            target,
+            timeline,
+        ):
+            continue
         tool_name = str(request.get("deferred_tool") or "").strip()
         scoped_allowed = _deferred_observed_ui_scoped_allowed_tools(
             tool_name,
@@ -7966,6 +12628,9 @@ def _deferred_observed_ui_observation_retry_request(
     raw_context = request.get("deferred_context")
     if isinstance(raw_context, Mapping):
         retry["deferred_context"] = dict(raw_context)
+    raw_verifier_context = request.get("deferred_verifier_context")
+    if isinstance(raw_verifier_context, Mapping):
+        retry["deferred_verifier_context"] = dict(raw_verifier_context)
     raw_continuation = request.get("deferred_continuation")
     if isinstance(raw_continuation, list):
         retry["deferred_continuation"] = [
@@ -7973,6 +12638,18 @@ def _deferred_observed_ui_observation_retry_request(
         ]
     for key, value in _request_observability_metadata(request).items():
         retry.setdefault(key, value)
+    # This request only re-observes state after an already-approved action.
+    # Never inherit the action's approval/risk/stage contract onto the verifier.
+    retry.update(
+        {
+            "approval_required": False,
+            "risk_level": "low",
+            "requires_observation": True,
+            "requires_post_action_verification": False,
+            "runtime_stage": "verify",
+            "runtime_role": "verify_result",
+        }
+    )
     request_id = str(request.get("request_id") or "").strip()
     if request_id:
         retry["request_id"] = f"{request_id}:retry:desktop.read_ui"
@@ -8094,19 +12771,34 @@ def _annotate_deferred_observed_ui_followup_requests(
     tool_name: str,
     index: int,
 ) -> list[dict[str, Any]]:
-    request_id = _deferred_execution_request_id(
-        source_request,
-        tool_name=tool_name,
-        index=index,
-    )
     deferred_context = (
         source_request.get("deferred_context")
         if isinstance(source_request.get("deferred_context"), Mapping)
         else {}
     )
+    request_id = (
+        _runtime_planner_deferred_root_request_id(
+            source_request,
+            deferred_context,
+            tool_name=tool_name,
+        )
+        or _deferred_execution_request_id(
+            source_request,
+            tool_name=tool_name,
+            index=index,
+        )
+    )
+    deferred_verifier_context = (
+        source_request.get("deferred_verifier_context")
+        if isinstance(source_request.get("deferred_verifier_context"), Mapping)
+        else {}
+    )
     annotated: list[dict[str, Any]] = []
     for request_index, request in enumerate(requests):
         item = dict(request)
+        is_verification_request = _replan_observed_action_verification_request(
+            item
+        )
         if request_id:
             item["request_id"] = (
                 request_id if request_index == 0 else f"{request_id}:verify:{request_index}"
@@ -8136,6 +12828,15 @@ def _annotate_deferred_observed_ui_followup_requests(
             "task_todo",
             "task_checkpoints",
             "task_workspace_items",
+            "approval_required",
+            "approval_status",
+            "risk_level",
+            "depends_on",
+            "runtime_stage",
+            "runtime_role",
+            "requires_post_action_verification",
+            "action_target",
+            "verification_targets",
         ):
             value = deferred_context.get(key)
             if value in (None, "", [], {}) or key in item:
@@ -8143,10 +12844,113 @@ def _annotate_deferred_observed_ui_followup_requests(
             item[key] = value
         if item.get("step_id") and not item.get("planner_step_id"):
             item["planner_step_id"] = str(item.get("step_id") or "").strip()
-        item.setdefault("runtime_stage", "operate" if request_index == 0 else "verify")
-        item.setdefault("runtime_role", _deferred_ui_runtime_role(tool_name))
+        if is_verification_request and deferred_verifier_context:
+            for key in (
+                "step_id",
+                "planner_step_id",
+                "capability_id",
+                "depends_on",
+                "task_todo",
+                "task_checkpoints",
+                "task_workspace_items",
+                "verification_targets",
+                "task_verification_targets",
+                "verification_predicate_kind",
+            ):
+                value = deferred_verifier_context.get(key)
+                if value not in (None, "", [], {}):
+                    item[key] = value
+            if item.get("step_id"):
+                # The generated verifier initially inherits the deferred
+                # action's planner_step_id.  Replace it with the dedicated
+                # verifier identity; otherwise task progress opens a false
+                # replan even though GoalContract correlation succeeds.
+                item["planner_step_id"] = str(
+                    deferred_verifier_context.get("planner_step_id")
+                    or item.get("step_id")
+                    or ""
+                ).strip()
+            verifier_action_target = deferred_verifier_context.get("action_target")
+            if isinstance(verifier_action_target, Mapping):
+                item["action_target"] = dict(verifier_action_target)
+            item["source"] = str(
+                deferred_verifier_context.get("source") or "runtime_verification"
+            ).strip()
+            verifier_reason = str(
+                deferred_verifier_context.get("planning_reason") or ""
+            ).strip()
+            if verifier_reason:
+                item["planning_reason"] = verifier_reason
+            item["approval_required"] = False
+            item["risk_level"] = "low"
+            item["runtime_stage"] = "verify"
+            item["runtime_role"] = "verify_result"
+        else:
+            action_target = deferred_context.get("action_target")
+            if request_index == 0 and isinstance(action_target, Mapping):
+                # The follow-up helper uses an internal observed-action target
+                # while the immutable GoalContract is bound to the planner's
+                # canonical action target.  Preserve that exact target across
+                # the observation -> action transformation so verifier
+                # evidence remains contract-correlated.
+                item["action_target"] = dict(action_target)
+            item.setdefault("runtime_stage", "operate" if request_index == 0 else "verify")
+            item.setdefault("runtime_role", _deferred_ui_runtime_role(tool_name))
+        if is_verification_request:
+            verifier_tool = str(item.get("tool") or "").strip()
+            if verifier_tool not in READ_ONLY_OBSERVATION_TOOLS:
+                return []
+            action_step_id = str(
+                deferred_context.get("step_id")
+                or deferred_context.get("planner_step_id")
+                or ""
+            ).strip()
+            if not action_step_id:
+                return []
+            item["approval_required"] = False
+            item["risk_level"] = "low"
+            item["runtime_stage"] = "verify"
+            item["runtime_role"] = "verify_result"
+            item["requires_observation"] = True
+            item["requires_post_action_verification"] = False
+            item["depends_on"] = [action_step_id]
+            item["verification_target_step_ids"] = [action_step_id]
+            if request_id:
+                item["source_request_id"] = request_id
         annotated.append(item)
     return annotated
+
+
+def _runtime_planner_deferred_root_request_id(
+    source_request: Mapping[str, Any],
+    deferred_context: Mapping[str, Any],
+    *,
+    tool_name: str,
+) -> str:
+    scope = (
+        source_request.get("runtime_observation_scope")
+        if isinstance(source_request.get("runtime_observation_scope"), Mapping)
+        else {}
+    )
+    if not scope or str(source_request.get("deferred_tool") or "").strip() != str(
+        tool_name or ""
+    ).strip():
+        return ""
+    plan_id = str(deferred_context.get("plan_id") or "").strip()
+    step_id = str(
+        deferred_context.get("step_id")
+        or deferred_context.get("planner_step_id")
+        or ""
+    ).strip()
+    request_id = str(deferred_context.get("request_id") or "").strip()
+    if (
+        not plan_id
+        or not step_id
+        or str(scope.get("plan_id") or "").strip() != plan_id
+        or not request_id.startswith(f"{plan_id}:request:")
+    ):
+        return ""
+    return request_id
 
 
 def _deferred_execution_request_id(
@@ -8266,9 +13070,24 @@ def _model_followup_execution_request_payload(
     allowed: set[str],
 ) -> dict[str, Any]:
     status = str(request.get("status") or "planned").strip()
-    if status not in {"", "planned"}:
-        return {}
     tool_name = str(request.get("tool_name") or request.get("tool") or "").strip()
+    request_input = (
+        dict(request.get("input"))
+        if isinstance(request.get("input"), Mapping)
+        else {}
+    )
+    materialization_blocker = bool(
+        status in {"blocked", "waiting_approval"}
+        and _tool_request_requires_model_materialization(
+            {
+                "tool": tool_name,
+                "input": request_input,
+                "continue_to_model": True,
+            }
+        )
+    )
+    if status not in {"", "planned"} and not materialization_blocker:
+        return {}
     if not tool_name or (allowed and tool_name not in allowed):
         return {}
     payload: dict[str, Any] = {
@@ -8276,11 +13095,7 @@ def _model_followup_execution_request_payload(
         "step_id": str(request.get("step_id") or "").strip(),
         "tool_name": tool_name,
         "capability_id": str(request.get("capability_id") or "").strip(),
-        "input_preview": (
-            dict(request.get("input"))
-            if isinstance(request.get("input"), Mapping)
-            else {}
-        ),
+        "input_preview": request_input,
         "planning_reason": str(request.get("planning_reason") or "").strip(),
         "status": status or "planned",
     }
@@ -8311,6 +13126,21 @@ def _model_followup_execution_request_payload(
         values = _string_list(request.get(key))
         if values:
             payload[key] = values
+    raw_input_bindings = request.get("input_bindings")
+    input_bindings = (
+        [
+            dict(binding)
+            for binding in raw_input_bindings
+            if isinstance(binding, Mapping)
+        ]
+        if isinstance(raw_input_bindings, list)
+        else []
+    )
+    if input_bindings:
+        payload["input_bindings"] = input_bindings
+    action_target = request.get("action_target")
+    if isinstance(action_target, Mapping) and action_target:
+        payload["action_target"] = dict(action_target)
     task_todo = request.get("task_todo")
     if isinstance(task_todo, Mapping) and task_todo:
         payload["task_todo"] = dict(task_todo)
@@ -8385,6 +13215,21 @@ def _model_followup_plan_step_payload(step: Mapping[str, Any]) -> dict[str, Any]
     depends_on = _string_list(step.get("depends_on"))
     if depends_on:
         payload["depends_on"] = depends_on
+    raw_input_bindings = step.get("input_bindings")
+    input_bindings = (
+        [
+            dict(binding)
+            for binding in raw_input_bindings
+            if isinstance(binding, Mapping)
+        ]
+        if isinstance(raw_input_bindings, list)
+        else []
+    )
+    if input_bindings:
+        payload["input_bindings"] = input_bindings
+    action_target = step.get("action_target")
+    if isinstance(action_target, Mapping) and action_target:
+        payload["action_target"] = dict(action_target)
     for key in (
         "runtime_doctrine",
         "runtime_stage",
@@ -8444,8 +13289,18 @@ def _model_replan_followup_context_payload(
         request = {
             "request_id": str(payload.get("request_id") or "").strip(),
             "trigger": str(payload.get("trigger") or "").strip(),
+            "source": str(payload.get("source") or "").strip(),
+            "run_id": str(payload.get("run_id") or "").strip(),
+            "decision_id": str(payload.get("decision_id") or "").strip(),
+            "plan_id": str(payload.get("plan_id") or "").strip(),
             "source_step_id": str(payload.get("source_step_id") or "").strip(),
             "source_tool_name": str(payload.get("source_tool_name") or "").strip(),
+            "source_tool_call_id": str(
+                payload.get("source_tool_call_id") or ""
+            ).strip(),
+            "recovery_observation_tool_call_id": str(
+                payload.get("recovery_observation_tool_call_id") or ""
+            ).strip(),
             "target_capability_id": str(payload.get("target_capability_id") or "").strip(),
             "condition": str(payload.get("condition") or "").strip(),
             "reason": str(payload.get("reason") or "").strip(),
@@ -8456,6 +13311,15 @@ def _model_replan_followup_context_payload(
             "recommended_tools": _string_list(metadata.get("recommended_tools")),
             "replan_prompt": str(payload.get("replan_prompt") or "").strip(),
             "metadata": metadata,
+            "grounded_observation": (
+                dict(payload.get("grounded_observation"))
+                if isinstance(payload.get("grounded_observation"), Mapping)
+                else {}
+            ),
+            "grounded_observations": [
+                dict(item)
+                for item in _mapping_list(payload.get("grounded_observations"))
+            ],
             **_replan_recovery_target(payload),
         }
         requests.append(request)
@@ -8680,6 +13544,1188 @@ def _runtime_replan_pending_code_repair_steps(
     ]
 
 
+def _runtime_direct_recovery_root_identity(
+    timeline: Sequence[Mapping[str, Any]],
+    *,
+    run_id: str,
+    source_tool_call_id: str,
+    source_tool_name: str,
+    source_result: Mapping[str, Any],
+    source_step_ids: Iterable[str],
+    allow_planner_dependency_ancestor: bool = False,
+    required_target_capabilities: Iterable[str] = (),
+) -> dict[str, str]:
+    """Return one exact, provider-attested planner source for a direct retry."""
+
+    clean_run_id = str(run_id or "").strip()
+    clean_call_id = str(source_tool_call_id or "").strip()
+    clean_tool = str(source_tool_name or "").strip()
+    declared_steps = {
+        str(step_id or "").strip()
+        for step_id in source_step_ids
+        if str(step_id or "").strip()
+    }
+    if (
+        not clean_run_id
+        or not clean_call_id
+        or not clean_tool
+        or not declared_steps
+        or not _runtime_execution_provider_identity(source_result)
+    ):
+        return {}
+    winner: Mapping[str, Any] | None = None
+    winner_index = -1
+    for index, raw_event in enumerate(timeline):
+        if not isinstance(raw_event, Mapping):
+            continue
+        payload = raw_event.get("payload")
+        event = (
+            {**dict(payload), **dict(raw_event)}
+            if isinstance(payload, Mapping)
+            else dict(raw_event)
+        )
+        if str(event.get("event") or event.get("event_type") or "").strip() not in {
+            "agent.tool.call",
+            "agent.tool.failed",
+            "agent.tool.skipped",
+        }:
+            continue
+        if str(event.get("run_id") or "").strip() != clean_run_id:
+            continue
+        if str(event.get("tool_call_id") or "").strip() != clean_call_id:
+            continue
+        winner = event
+        winner_index = index
+        break
+    if winner is None:
+        return {}
+    result = winner.get("result")
+    plan_id = str(winner.get("plan_id") or "").strip()
+    step_id = str(
+        winner.get("step_id") or winner.get("planner_step_id") or ""
+    ).strip()
+    source_is_declared = step_id in declared_steps
+    if (
+        not source_is_declared
+        and allow_planner_dependency_ancestor
+        and winner_index >= 0
+    ):
+        source_is_declared = _runtime_planner_dependency_ancestor_matches(
+            timeline[:winner_index],
+            run_id=clean_run_id,
+            plan_id=plan_id,
+            source_step_id=step_id,
+            source_tool_name=clean_tool,
+            target_step_ids=declared_steps,
+            required_target_capabilities=required_target_capabilities,
+        )
+    if (
+        str(winner.get("tool") or winner.get("detail") or "").strip()
+        != clean_tool
+        or not isinstance(result, Mapping)
+        or result != source_result
+        or not source_is_declared
+        or not _runtime_owned_terminal_event(
+            winner,
+            result,
+            run_id=clean_run_id,
+            plan_id=plan_id,
+        )
+    ):
+        return {}
+    provider = _runtime_execution_provider_identity(result)
+    return {
+        "root_plan_id": plan_id,
+        "root_source_step_id": step_id,
+        "root_provider_kind": provider["provider_kind"],
+        "root_provider_id": provider["provider_id"],
+    }
+
+
+_RUNTIME_PLANNER_GRAPH_BOOL_FIELDS = (
+    "continue_to_model",
+    "requires_observation",
+    "requires_post_action_verification",
+)
+
+_RUNTIME_PLANNER_GRAPH_AUTHORITY_BOOL_FIELDS = (
+    "approved",
+    "approval_resume_result_canonical",
+    "approved_by_replan_recovery_action",
+    "goal_completion_authority",
+    "observation_only",
+)
+
+_RUNTIME_PLANNER_GRAPH_APPROVAL_TEXT_FIELDS = (
+    "approval_id",
+    "approval_generation_id",
+    "approval_claim_id",
+    "approval_request_fingerprint",
+    "approval_status",
+    "source_approval_id",
+    "expected_approval_id",
+    "parent_approval_id",
+    "approval_source",
+    "approval_authority",
+    "approval_reason",
+    "approval_policy",
+    "approval_mode",
+    "approval_scope",
+)
+
+_RUNTIME_PLANNER_GRAPH_APPROVAL_MAPPING_FIELDS = (
+    "approval",
+    "approval_context",
+    "approval_lineage",
+    "approval_metadata",
+)
+
+_RUNTIME_PLANNER_ROUTE_AUTHORITY_TEXT_FIELDS = (
+    "route_id",
+    "tool_name",
+    "requested_mode",
+    "desktop_execution_session_policy",
+    "desktop_session_kind",
+    "desktop_backend_kind",
+    "fallback_mode",
+    "source",
+    "delivery_mode",
+    "transport",
+    "transport_kind",
+    "selected_transport",
+    "selected_transport_kind",
+    "selected_transport_id",
+    "mcp_tool",
+    "endpoint_origin",
+    "endpoint_path",
+)
+
+_RUNTIME_PLANNER_ROUTE_AUTHORITY_BOOL_FIELDS = (
+    "can_execute",
+    "can_auto_start",
+    "provider_execution_required",
+    "sandbox_required",
+    "background_desktop_preferred",
+    "isolated_desktop_preferred",
+    "foreground_takeover_allowed",
+    "user_foreground_takeover_risk",
+    "requires_user_foreground_session",
+    "foreground_mutation_supported",
+    "keyboard_mouse_capture_supported",
+    "desktop_session_isolated",
+    "foreground_takeover_required",
+    "desktop_backend_is_loopback",
+    "desktop_backend_ready_for_public_release",
+    "requires_real_virtual_desktop_backend",
+    "simulated_desktop_provider",
+    "background_only",
+    "background_execution_required",
+    "foreground_execution_required",
+)
+
+_RUNTIME_PLANNER_ROUTE_AUTHORITY_MAPPING_FIELDS = (
+    "provider_contract",
+    "provider_transport",
+    "desktop_execution_provider_transport",
+    "transport_authority",
+)
+
+_RUNTIME_PLANNER_ROUTE_VOLATILE_TEXT_FIELDS = (
+    "status",
+    "provider_readiness_status",
+    "reason",
+)
+
+_RUNTIME_PLANNER_ROUTE_VOLATILE_TEXT_LIST_FIELDS = (
+    "blocking_conditions",
+    "provider_contract_blocking_conditions",
+)
+
+_RUNTIME_PLANNER_CANONICAL_INVALID = object()
+
+
+def _canonical_runtime_planner_json_value(value: Any) -> Any:
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    if isinstance(value, Mapping):
+        if any(not isinstance(key, str) for key in value):
+            return _RUNTIME_PLANNER_CANONICAL_INVALID
+        payload: dict[str, Any] = {}
+        for key in sorted(value):
+            normalized = _canonical_runtime_planner_json_value(value[key])
+            if normalized is _RUNTIME_PLANNER_CANONICAL_INVALID:
+                return _RUNTIME_PLANNER_CANONICAL_INVALID
+            payload[key] = normalized
+        return payload
+    if isinstance(value, (list, tuple)):
+        payload = []
+        for item in value:
+            normalized = _canonical_runtime_planner_json_value(item)
+            if normalized is _RUNTIME_PLANNER_CANONICAL_INVALID:
+                return _RUNTIME_PLANNER_CANONICAL_INVALID
+            payload.append(normalized)
+        return payload
+    return _RUNTIME_PLANNER_CANONICAL_INVALID
+
+
+def _canonical_runtime_planner_desktop_execution_route(
+    value: Any,
+) -> dict[str, Any] | None:
+    if value is None:
+        route: Mapping[str, Any] = {}
+    elif isinstance(value, Mapping):
+        route = value
+    else:
+        return None
+
+    known_fields = {
+        *_RUNTIME_PLANNER_ROUTE_AUTHORITY_TEXT_FIELDS,
+        *_RUNTIME_PLANNER_ROUTE_AUTHORITY_BOOL_FIELDS,
+        *_RUNTIME_PLANNER_ROUTE_AUTHORITY_MAPPING_FIELDS,
+        *_RUNTIME_PLANNER_ROUTE_VOLATILE_TEXT_FIELDS,
+        *_RUNTIME_PLANNER_ROUTE_VOLATILE_TEXT_LIST_FIELDS,
+        "selected_provider_kind",
+        "selected_provider_id",
+        "provider_kind",
+        "provider_id",
+    }
+    if any(not isinstance(key, str) or key not in known_fields for key in route):
+        # A new route field may carry provider or foreground authority. Do not
+        # silently dedupe it until its immutable/volatile semantics are known.
+        return None
+
+    for key in _RUNTIME_PLANNER_ROUTE_VOLATILE_TEXT_FIELDS:
+        if key in route and not isinstance(route.get(key), str):
+            return None
+    for key in _RUNTIME_PLANNER_ROUTE_VOLATILE_TEXT_LIST_FIELDS:
+        if key not in route:
+            continue
+        values = route.get(key)
+        if not isinstance(values, (list, tuple)) or any(
+            not isinstance(item, str) for item in values
+        ):
+            return None
+
+    canonical: dict[str, Any] = {}
+    for key in _RUNTIME_PLANNER_ROUTE_AUTHORITY_TEXT_FIELDS:
+        raw = route.get(key)
+        if key in route and not isinstance(raw, str):
+            return None
+        canonical[key] = raw.strip() if isinstance(raw, str) else ""
+    for key in _RUNTIME_PLANNER_ROUTE_AUTHORITY_BOOL_FIELDS:
+        raw = route.get(key)
+        if key in route and raw is not None and not isinstance(raw, bool):
+            return None
+        canonical[key] = raw if isinstance(raw, bool) else None
+    for key in _RUNTIME_PLANNER_ROUTE_AUTHORITY_MAPPING_FIELDS:
+        raw = route.get(key)
+        if key in route and not isinstance(raw, Mapping):
+            return None
+        normalized = _canonical_runtime_planner_json_value(raw or {})
+        if normalized is _RUNTIME_PLANNER_CANONICAL_INVALID:
+            return None
+        canonical[key] = normalized
+
+    for canonical_key, aliases in (
+        ("selected_provider_kind", ("selected_provider_kind", "provider_kind")),
+        ("selected_provider_id", ("selected_provider_id", "provider_id")),
+    ):
+        values: set[str] = set()
+        for key in aliases:
+            raw = route.get(key)
+            if key in route and not isinstance(raw, str):
+                return None
+            if isinstance(raw, str) and raw.strip():
+                values.add(raw.strip())
+        if len(values) > 1:
+            return None
+        canonical[canonical_key] = next(iter(values), "")
+    return canonical
+
+
+def _canonical_runtime_planner_request_graph(
+    requests: Sequence[Mapping[str, Any]],
+    *,
+    plan_id: str,
+    decision_id: str,
+) -> list[dict[str, Any]] | None:
+    """Canonicalize immutable execution semantics, excluding live overlays."""
+
+    clean_plan_id = str(plan_id or "").strip()
+    clean_decision_id = str(decision_id or "").strip()
+    if not clean_plan_id or not clean_decision_id or not requests:
+        return None
+    canonical: list[dict[str, Any]] = []
+    seen_step_ids: set[str] = set()
+    for request in requests:
+        if not isinstance(request, Mapping):
+            return None
+        step_values = {
+            str(request.get(key) or "").strip()
+            for key in ("step_id", "planner_step_id")
+            if str(request.get(key) or "").strip()
+        }
+        tool_values = {
+            str(request.get(key) or "").strip()
+            for key in ("tool_name", "tool")
+            if str(request.get(key) or "").strip()
+        }
+        step_id = next(iter(step_values), "")
+        tool_name = next(iter(tool_values), "")
+        request_id = str(request.get("request_id") or "").strip()
+        request_plan_id = str(request.get("plan_id") or "").strip()
+        request_decision_id = str(request.get("decision_id") or "").strip()
+        tool_plan_id = str(request.get("tool_plan_id") or "").strip()
+        capability_id = str(request.get("capability_id") or "").strip()
+        source = str(request.get("source") or "").strip()
+        request_input = request.get("input")
+        dependencies = request.get("depends_on") or []
+        desktop_execution_route = (
+            _canonical_runtime_planner_desktop_execution_route(
+                request.get("desktop_execution_route")
+            )
+        )
+        approval_required_values: set[bool] = set()
+        for key in ("approval_required", "requires_approval"):
+            raw = request.get(key)
+            if key in request and not isinstance(raw, bool):
+                return None
+            if isinstance(raw, bool):
+                approval_required_values.add(raw)
+        if len(approval_required_values) > 1:
+            return None
+        approval_required = next(iter(approval_required_values), False)
+        known_approval_fields = {
+            "approval_required",
+            "requires_approval",
+            "approval_ids",
+            *_RUNTIME_PLANNER_GRAPH_AUTHORITY_BOOL_FIELDS,
+            *_RUNTIME_PLANNER_GRAPH_APPROVAL_TEXT_FIELDS,
+            *_RUNTIME_PLANNER_GRAPH_APPROVAL_MAPPING_FIELDS,
+        }
+        if (
+            len(step_values) != 1
+            or len(tool_values) != 1
+            or not request_id
+            or not tool_plan_id
+            or not capability_id
+            or request_plan_id != clean_plan_id
+            or request_decision_id != clean_decision_id
+            or source not in {"runtime_planner", "runtime_verification"}
+            or not isinstance(request_input, Mapping)
+            or not isinstance(dependencies, (list, tuple))
+            or any(not str(value or "").strip() for value in dependencies)
+            or step_id in seen_step_ids
+            or any(
+                key in request and not isinstance(request.get(key), bool)
+                for key in _RUNTIME_PLANNER_GRAPH_BOOL_FIELDS
+            )
+            or desktop_execution_route is None
+            or any(
+                key in request
+                and request.get(key) is not None
+                and not isinstance(request.get(key), bool)
+                for key in _RUNTIME_PLANNER_GRAPH_AUTHORITY_BOOL_FIELDS
+            )
+            or any(
+                key in request
+                and request.get(key) is not None
+                and not isinstance(request.get(key), str)
+                for key in _RUNTIME_PLANNER_GRAPH_APPROVAL_TEXT_FIELDS
+            )
+            or any(
+                isinstance(key, str)
+                and "approval" in key
+                and key not in known_approval_fields
+                for key in request
+            )
+        ):
+            return None
+        approval_ids = request.get("approval_ids") or []
+        if not isinstance(approval_ids, (list, tuple)) or any(
+            not isinstance(value, str) or not value.strip()
+            for value in approval_ids
+        ):
+            return None
+        approval_mappings: dict[str, Any] = {}
+        for key in _RUNTIME_PLANNER_GRAPH_APPROVAL_MAPPING_FIELDS:
+            raw = request.get(key)
+            if key in request and raw is not None and not isinstance(raw, Mapping):
+                return None
+            normalized = _canonical_runtime_planner_json_value(raw or {})
+            if normalized is _RUNTIME_PLANNER_CANONICAL_INVALID:
+                return None
+            approval_mappings[key] = normalized
+        clean_dependencies = sorted(
+            {str(value or "").strip() for value in dependencies}
+        )
+        if step_id in clean_dependencies:
+            return None
+        seen_step_ids.add(step_id)
+        item: dict[str, Any] = {
+            "request_id": request_id,
+            "decision_id": request_decision_id,
+            "plan_id": request_plan_id,
+            "tool_plan_id": tool_plan_id,
+            "step_id": step_id,
+            "tool_name": tool_name,
+            "input": dict(request_input),
+            "depends_on": clean_dependencies,
+            "source": source,
+            "capability_id": capability_id,
+            "protocol": str(request.get("protocol") or "json_fallback").strip(),
+            "planning_reason": str(request.get("planning_reason") or "").strip(),
+            "intent_kind": str(request.get("intent_kind") or "").strip(),
+            "core_id": str(request.get("core_id") or "").strip(),
+            "workspace_id": str(request.get("workspace_id") or "").strip(),
+            "runtime_stage": str(request.get("runtime_stage") or "").strip(),
+            "runtime_role": str(request.get("runtime_role") or "").strip(),
+            "risk_level": str(request.get("risk_level") or "").strip(),
+            "policy_reason": str(request.get("policy_reason") or "").strip(),
+            "presentation": str(request.get("presentation") or "").strip(),
+            "approval_required": approval_required,
+            "approval_ids": [value.strip() for value in approval_ids],
+            "desktop_execution_route": desktop_execution_route,
+        }
+        for key in _RUNTIME_PLANNER_GRAPH_BOOL_FIELDS:
+            item[key] = request.get(key) is True
+        for key in _RUNTIME_PLANNER_GRAPH_AUTHORITY_BOOL_FIELDS:
+            value = request.get(key)
+            item[key] = value if isinstance(value, bool) else None
+        for key in _RUNTIME_PLANNER_GRAPH_APPROVAL_TEXT_FIELDS:
+            value = request.get(key)
+            item[key] = value.strip() if isinstance(value, str) else ""
+        item.update(approval_mappings)
+        for key in (
+            "fallback_tools",
+            "input_bindings",
+            "replan_triggers",
+            "task_verification_targets",
+            "verification_targets",
+        ):
+            value = request.get(key) or []
+            if not isinstance(value, (list, tuple)):
+                return None
+            item[key] = list(value)
+        for key in (
+            "action_target",
+            "desktop_execution_policy",
+            "desktop_loop",
+            "observation_evidence",
+            "observation_retry",
+        ):
+            value = request.get(key) or {}
+            if not isinstance(value, Mapping):
+                return None
+            item[key] = dict(value)
+        canonical.append(item)
+
+    if any(
+        dependency not in seen_step_ids
+        for request in canonical
+        for dependency in request["depends_on"]
+    ):
+        return None
+    by_step_id = {request["step_id"]: request for request in canonical}
+    visiting: set[str] = set()
+    visited: set[str] = set()
+
+    def visit(step_id: str) -> bool:
+        if step_id in visited:
+            return True
+        if step_id in visiting:
+            return False
+        visiting.add(step_id)
+        if not all(visit(dependency) for dependency in by_step_id[step_id]["depends_on"]):
+            return False
+        visiting.remove(step_id)
+        visited.add(step_id)
+        return True
+
+    if not all(visit(step_id) for step_id in by_step_id):
+        return None
+    return sorted(canonical, key=lambda request: request["step_id"])
+
+
+def _runtime_planner_selection_request_graphs(
+    timeline: Sequence[Mapping[str, Any]],
+    *,
+    run_id: str,
+    plan_id: str,
+) -> dict[str, list[dict[str, Any]]]:
+    clean_run_id = str(run_id or "").strip()
+    clean_plan_id = str(plan_id or "").strip()
+    if not clean_run_id or not clean_plan_id:
+        return {}
+    matching: dict[str, list[dict[str, Any]]] = {}
+    for raw_event in timeline:
+        if not isinstance(raw_event, Mapping):
+            continue
+        payload = (
+            raw_event.get("payload")
+            if isinstance(raw_event.get("payload"), Mapping)
+            else {}
+        )
+        event = {**dict(payload), **dict(raw_event)}
+        if _runtime_planner_base_event_type(
+            str(event.get("event") or event.get("event_type") or "").strip()
+        ) != "agent.plan.selection":
+            continue
+        run_ids = {
+            str(source.get("run_id") or "").strip()
+            for source in (payload, raw_event)
+            if str(source.get("run_id") or "").strip()
+        }
+        if run_ids != {clean_run_id}:
+            continue
+        selection_sources = {
+            str(source.get(key) or "").strip()
+            for source in (payload, raw_event)
+            for key in ("selected_source", "selection_source", "source")
+            if str(source.get(key) or "").strip()
+        }
+        if not selection_sources or not selection_sources.issubset(
+            {"runtime_planner", "runtime_execution_envelope"}
+        ):
+            continue
+        envelope_candidates = [
+            source.get(key)
+            for source in (payload, raw_event)
+            for key in (
+                "yachiyo_execution_envelope",
+                "execution_envelope",
+                "runtime_execution_envelope",
+            )
+            if isinstance(source.get(key), Mapping)
+        ]
+        if not envelope_candidates:
+            continue
+        envelope_keys = {
+            json.dumps(
+                dict(envelope),
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+            for envelope in envelope_candidates
+        }
+        if len(envelope_keys) != 1:
+            continue
+        envelope = envelope_candidates[0]
+        envelope_id = str(envelope.get("envelope_id") or "").strip()
+        envelope_decision_id = str(envelope.get("decision_id") or "").strip()
+        envelope_plan_id = str(envelope.get("plan_id") or "").strip()
+        envelope_source = str(envelope.get("source") or "").strip()
+        event_plan_id = str(event.get("plan_id") or "").strip()
+        event_decision_id = str(event.get("decision_id") or "").strip()
+        requests = envelope.get("requests")
+        if (
+            not envelope_id
+            or not envelope_decision_id
+            or envelope_plan_id != clean_plan_id
+            or envelope_source != "runtime_planner"
+            or (event_plan_id and event_plan_id != clean_plan_id)
+            or (event_decision_id and event_decision_id != envelope_decision_id)
+            or not isinstance(requests, list)
+            or not requests
+            or any(not isinstance(request, Mapping) for request in requests)
+        ):
+            continue
+        graph = _canonical_runtime_planner_request_graph(
+            requests,
+            plan_id=clean_plan_id,
+            decision_id=envelope_decision_id,
+        )
+        if graph is None:
+            # A matching trusted selection snapshot with malformed or unknown
+            # execution authority cannot be ignored in favour of an older
+            # valid snapshot. The graph proof is now ambiguous, so fail closed.
+            return {}
+        canonical = json.dumps(
+            {
+                "envelope_id": envelope_id,
+                "decision_id": envelope_decision_id,
+                "plan_id": envelope_plan_id,
+                "source": envelope_source,
+                "requests": graph,
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        matching[canonical] = graph
+    return matching
+
+
+def _runtime_planner_dependency_ancestor_matches(
+    timeline: Sequence[Mapping[str, Any]],
+    *,
+    run_id: str,
+    plan_id: str,
+    source_step_id: str,
+    source_tool_name: str,
+    target_step_ids: Iterable[str],
+    required_target_capabilities: Iterable[str],
+) -> bool:
+    """Prove that a failed step is an immutable planner dependency.
+
+    Goal criteria name the step that fulfils the user-visible effect, not
+    every prerequisite needed to reach it. An owned-window launch may recover
+    only when the Runtime's recorded plan proves that the launch step is an
+    ancestor of that exact criterion source step. Public/model text and tool
+    results cannot mint this dependency edge.
+    """
+
+    clean_run_id = str(run_id or "").strip()
+    clean_plan_id = str(plan_id or "").strip()
+    clean_source_step_id = str(source_step_id or "").strip()
+    clean_source_tool_name = str(source_tool_name or "").strip()
+    clean_targets = {
+        str(step_id or "").strip()
+        for step_id in target_step_ids
+        if str(step_id or "").strip()
+    }
+    target_capabilities = {
+        str(capability or "").strip()
+        for capability in required_target_capabilities
+        if str(capability or "").strip()
+    }
+    if not all(
+        (
+            clean_run_id,
+            clean_plan_id,
+            clean_source_step_id,
+            clean_source_tool_name,
+            clean_targets,
+            target_capabilities,
+        )
+    ):
+        return False
+
+    matching_request_sets = _runtime_planner_selection_request_graphs(
+        timeline,
+        run_id=clean_run_id,
+        plan_id=clean_plan_id,
+    )
+    if len(matching_request_sets) != 1:
+        return False
+
+    requests = next(iter(matching_request_sets.values()))
+    by_step_id: dict[str, Mapping[str, Any]] = {}
+    for request in requests:
+        step_id = str(
+            request.get("step_id") or request.get("planner_step_id") or ""
+        ).strip()
+        tool_name = str(
+            request.get("tool_name") or request.get("tool") or ""
+        ).strip()
+        request_plan_id = str(request.get("plan_id") or "").strip()
+        source = str(request.get("source") or "").strip()
+        dependencies = request.get("depends_on") or []
+        if (
+            not step_id
+            or not tool_name
+            or step_id in by_step_id
+            or (request_plan_id and request_plan_id != clean_plan_id)
+            or source not in {"runtime_planner", "runtime_verification"}
+            or not isinstance(dependencies, (list, tuple))
+            or any(not str(value or "").strip() for value in dependencies)
+        ):
+            return False
+        by_step_id[step_id] = request
+
+    source_request = by_step_id.get(clean_source_step_id)
+    if not isinstance(source_request, Mapping) or str(
+        source_request.get("tool_name") or source_request.get("tool") or ""
+    ).strip() != clean_source_tool_name:
+        return False
+
+    eligible_targets = {
+        target
+        for target in clean_targets
+        if target in by_step_id
+        and target_capabilities.issubset(
+            set(
+                capability_ids_for_tool(
+                    str(
+                        by_step_id[target].get("tool_name")
+                        or by_step_id[target].get("tool")
+                        or ""
+                    ).strip()
+                )
+            )
+        )
+    }
+    if not eligible_targets or clean_source_step_id in eligible_targets:
+        return False
+
+    def depends_on_source(step_id: str, visiting: frozenset[str]) -> bool:
+        if step_id == clean_source_step_id:
+            return True
+        if step_id in visiting:
+            return False
+        request = by_step_id.get(step_id)
+        if not isinstance(request, Mapping):
+            return False
+        dependencies = {
+            str(value or "").strip()
+            for value in request.get("depends_on") or []
+            if str(value or "").strip()
+        }
+        if any(dependency not in by_step_id for dependency in dependencies):
+            return False
+        next_visiting = frozenset((*visiting, step_id))
+        return any(
+            depends_on_source(dependency, next_visiting)
+            for dependency in dependencies
+        )
+
+    return any(
+        depends_on_source(target, frozenset()) for target in eligible_targets
+    )
+
+
+def _runtime_background_window_resume_contract(
+    results: Sequence[OutcomeLoopResult],
+    planned_requests: Sequence[Mapping[str, Any]],
+    *,
+    timeline: Sequence[Mapping[str, Any]],
+    run_id: str,
+) -> tuple[str, list[dict[str, Any]]]:
+    """Return the exact recovered source and its transitive plan descendants."""
+
+    candidates = []
+    for result in results:
+        recovery = result.recovery_action_result
+        plan = result.recovery_plan
+        if (
+            result.disposition is OutcomeLoopDisposition.CONTINUE_PLAN
+            and result.outcome.status is OutcomeStatus.FAILED
+            and result.outcome.tool_name == "app.open"
+            and plan is not None
+            and plan.action == "materialize_background_window"
+            and plan.strategy_id == "materialize-background-window"
+            and plan.recovery_hint == "materialize_background_window"
+            and recovery is not None
+            and recovery.disposition is RecoveryActionDisposition.CONTINUE_PLAN
+            and recovery.reason == "background_window_materialized"
+            and recovery.attempts
+        ):
+            candidates.append(result)
+    if len(candidates) != 1:
+        return "", []
+    result = candidates[0]
+    plan = result.recovery_plan
+    assert plan is not None
+    source_tool_call_id = str(result.source_tool_call_id or "").strip()
+    subgoal_candidates: list[Mapping[str, Any]] = []
+    for raw_event in timeline:
+        if not isinstance(raw_event, Mapping):
+            continue
+        payload = (
+            raw_event.get("payload")
+            if isinstance(raw_event.get("payload"), Mapping)
+            else {}
+        )
+        event = {**dict(payload), **dict(raw_event)}
+        subgoal = event.get("subgoal")
+        if (
+            str(event.get("event") or event.get("event_type") or "").strip()
+            == "agent.goal.subgoal.opened"
+            and str(event.get("detail") or "").strip()
+            == "materialize_background_window"
+            and str(event.get("run_id") or "").strip()
+            == str(run_id or "").strip()
+            and str(event.get("source_tool_call_id") or "").strip()
+            == source_tool_call_id
+            and str(event.get("source") or "").strip()
+            == "runtime_goal_coordinator"
+            and str(event.get("actor") or "").strip() == "native_runtime"
+            and str(event.get("execution_authority") or "").strip()
+            == "runtime_goal_coordinator"
+            and str(event.get("visibility") or "").strip() == "internal"
+            and str(event.get("status") or "").strip() == "opened"
+            and isinstance(subgoal, Mapping)
+            and str(subgoal.get("action") or "").strip()
+            == "materialize_background_window"
+            and str(subgoal.get("source_tool_call_id") or "").strip()
+            == source_tool_call_id
+            and str(subgoal.get("contract_id") or "").strip()
+            == str(event.get("contract_id") or "").strip()
+            and str(subgoal.get("criterion_id") or "").strip()
+            == str(event.get("criterion_id") or "").strip()
+            and str(subgoal.get("subgoal_id") or "").strip()
+        ):
+            subgoal_candidates.append(event)
+    if len(subgoal_candidates) != 1:
+        return "", []
+    goal_identity = subgoal_candidates[0]
+    subgoal = goal_identity["subgoal"]
+    plan_id = str(goal_identity.get("root_plan_id") or "").strip()
+    source_step_id = str(
+        goal_identity.get("root_source_step_id") or ""
+    ).strip()
+    if not all(
+        (
+            plan_id,
+            source_step_id,
+            str(goal_identity.get("root_provider_kind") or "").strip(),
+            str(goal_identity.get("root_provider_id") or "").strip(),
+        )
+    ):
+        return "", []
+    completed_recovery_events = [
+        event
+        for raw_event in timeline
+        if isinstance(raw_event, Mapping)
+        for event in (
+            {
+                **(
+                    dict(raw_event.get("payload"))
+                    if isinstance(raw_event.get("payload"), Mapping)
+                    else {}
+                ),
+                **dict(raw_event),
+            },
+        )
+        if str(event.get("event") or event.get("event_type") or "").strip()
+        == "agent.recovery.completed"
+        and str(event.get("source_tool_call_id") or "").strip()
+        == source_tool_call_id
+        and str(event.get("scope_id") or "").strip() == plan.scope_id
+        and str(event.get("strategy_id") or "").strip() == plan.strategy_id
+        and str(event.get("action") or "").strip() == plan.action
+        and str(event.get("goal_contract_id") or "").strip()
+        == str(subgoal.get("contract_id") or "").strip()
+        and str(event.get("goal_criterion_id") or "").strip()
+        == str(subgoal.get("criterion_id") or "").strip()
+        and str(event.get("goal_subgoal_id") or "").strip()
+        == str(subgoal.get("subgoal_id") or "").strip()
+        and event.get("root_goal_unchanged") is True
+        and str(event.get("recovery_owner") or "").strip() == "coordinator"
+        and str(event.get("visibility") or "").strip() == "internal"
+        and str(event.get("status") or "").strip() == "completed"
+        and str(event.get("result_disposition") or "").strip()
+        == RecoveryActionDisposition.CONTINUE_PLAN.value
+        and str(event.get("result_reason") or "").strip()
+        == "background_window_materialized"
+        and int(event.get("attempt_count") or 0) == len(recovery.attempts)
+    ]
+    if len(completed_recovery_events) != 1:
+        return "", []
+    source_match = _runtime_recovery_executor_terminal_event(
+        timeline,
+        run_id=str(run_id or "").strip(),
+        tool_call_id=source_tool_call_id,
+        tool_name="app.open",
+    )
+    if source_match is None:
+        return "", []
+    _source_index, source_event = source_match
+    source_result = source_event.get("result")
+    if (
+        not isinstance(source_result, Mapping)
+        or source_result != result.outcome.raw
+        or str(source_event.get("plan_id") or "").strip() != plan_id
+        or str(source_event.get("step_id") or "").strip() != source_step_id
+        or str(source_event.get("source") or "").strip() != "runtime_planner"
+    ):
+        return "", []
+
+    source_request_id = str(source_event.get("request_id") or "").strip()
+    source_candidates = [
+        (index, request)
+        for index, request in enumerate(planned_requests)
+        if isinstance(request, Mapping)
+        and str(request.get("request_id") or "").strip() == source_request_id
+        and str(request.get("step_id") or request.get("planner_step_id") or "").strip()
+        == source_step_id
+        and str(request.get("tool") or request.get("tool_name") or "").strip()
+        == "app.open"
+        and str(request.get("plan_id") or "").strip() == plan_id
+        and str(request.get("source") or "").strip() == "runtime_planner"
+    ]
+    if len(source_candidates) != 1:
+        return "", []
+    source_request_index, source_request = source_candidates[0]
+    decision_id = str(source_request.get("decision_id") or "").strip()
+    planned_graph = _canonical_runtime_planner_request_graph(
+        planned_requests,
+        plan_id=plan_id,
+        decision_id=decision_id,
+    )
+    selection_graphs = _runtime_planner_selection_request_graphs(
+        timeline,
+        run_id=str(run_id or "").strip(),
+        plan_id=plan_id,
+    )
+    if planned_graph is None or len(selection_graphs) != 1:
+        return "", []
+    selection_graph = next(iter(selection_graphs.values()))
+    if json.dumps(
+        planned_graph,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ) != json.dumps(
+        selection_graph,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ):
+        return "", []
+
+    by_step_id = {request["step_id"]: request for request in selection_graph}
+    descendant_step_ids = {source_step_id}
+    changed = True
+    while changed:
+        changed = False
+        for step_id, request in by_step_id.items():
+            if step_id in descendant_step_ids:
+                continue
+            if descendant_step_ids.intersection(request["depends_on"]):
+                descendant_step_ids.add(step_id)
+                changed = True
+    descendant_step_ids.discard(source_step_id)
+    if not descendant_step_ids:
+        return "", []
+    request_indexes = {
+        str(
+            request.get("step_id") or request.get("planner_step_id") or ""
+        ).strip(): index
+        for index, request in enumerate(planned_requests)
+        if isinstance(request, Mapping)
+    }
+    if (
+        set(request_indexes) != set(by_step_id)
+        or any(
+            request_indexes[dependency] >= request_indexes[step_id]
+            for step_id, request in by_step_id.items()
+            for dependency in request["depends_on"]
+        )
+        or any(
+            request_indexes[step_id] <= source_request_index
+            for step_id in descendant_step_ids
+        )
+        or any(
+            dependency not in descendant_step_ids
+            and request_indexes[dependency] > source_request_index
+            for step_id in descendant_step_ids
+            for dependency in by_step_id[step_id]["depends_on"]
+        )
+    ):
+        return "", []
+    resume_requests = [
+        deepcopy(dict(request))
+        for request in planned_requests[source_request_index + 1 :]
+        if str(
+            request.get("step_id") or request.get("planner_step_id") or ""
+        ).strip()
+        in descendant_step_ids
+    ]
+    if len(resume_requests) != len(descendant_step_ids):
+        return "", []
+    return source_tool_call_id, resume_requests
+
+
+def _runtime_terminal_winners_for_run(
+    timeline: Sequence[Mapping[str, Any]],
+    *,
+    run_id: str,
+) -> list[tuple[int, dict[str, Any]]]:
+    winners: list[tuple[int, dict[str, Any]]] = []
+    seen_call_ids: set[str] = set()
+    clean_run_id = str(run_id or "").strip()
+    if not clean_run_id:
+        return winners
+    for index, raw_event in enumerate(timeline):
+        if not isinstance(raw_event, Mapping):
+            continue
+        payload = raw_event.get("payload")
+        event = (
+            {**dict(payload), **dict(raw_event)}
+            if isinstance(payload, Mapping)
+            else dict(raw_event)
+        )
+        if str(event.get("event") or event.get("event_type") or "").strip() not in {
+            "agent.tool.call",
+            "agent.tool.failed",
+            "agent.tool.skipped",
+        }:
+            continue
+        if str(event.get("run_id") or "").strip() != clean_run_id:
+            continue
+        tool_call_id = str(event.get("tool_call_id") or "").strip()
+        if not tool_call_id or tool_call_id in seen_call_ids:
+            continue
+        seen_call_ids.add(tool_call_id)
+        winners.append((index, event))
+    return winners
+
+
+def _runtime_goal_verification_recovery_lineage(
+    followup_context: Mapping[str, Any],
+    *,
+    contract: GoalContract,
+    timeline: list[dict[str, Any]],
+    run_id: str,
+) -> dict[str, str]:
+    if str(followup_context.get("planning_reason") or "").strip() != (
+        "planner_replan_after_verification_failed"
+    ):
+        return {}
+    replan_requests = _mapping_list(followup_context.get("replan_requests"))
+    candidates = [
+        request
+        for request in replan_requests
+        if str(request.get("trigger") or "").strip() == "verification_failed"
+    ]
+    if len(candidates) != 1:
+        return {}
+    replan_request = candidates[0]
+    root_verifier_step_id = str(
+        replan_request.get("source_step_id") or ""
+    ).strip()
+    failed_verifier_tool = str(
+        replan_request.get("source_tool_name") or ""
+    ).strip()
+    root_plan_id = str(
+        replan_request.get("plan_id")
+        or followup_context.get("plan_id")
+        or ""
+    ).strip()
+    replan_request_id = str(replan_request.get("request_id") or "").strip()
+    matching_criteria = [
+        criterion
+        for criterion in contract.criteria
+        if root_verifier_step_id in criterion.verifier_step_ids
+        and criterion.criterion_id
+        in runtime_goal_assessment(contract, timeline).unsatisfied_criterion_ids
+    ]
+    if (
+        len(matching_criteria) != 1
+        or not root_verifier_step_id
+        or not failed_verifier_tool
+        or not root_plan_id
+        or not replan_request_id
+        or str(replan_request.get("run_id") or "").strip() != run_id
+        or str(replan_request.get("plan_id") or "").strip() != root_plan_id
+        or str(replan_request.get("source") or "").strip()
+        != "runtime_tool_request_runner"
+    ):
+        return {}
+    criterion = matching_criteria[0]
+    failed_verifier_event: Mapping[str, Any] | None = None
+    failed_index = -1
+    winners = _runtime_terminal_winners_for_run(timeline, run_id=run_id)
+    for index, event in reversed(winners):
+        if str(event.get("detail") or event.get("tool") or "").strip() != (
+            failed_verifier_tool
+        ):
+            continue
+        if str(
+            event.get("step_id") or event.get("planner_step_id") or ""
+        ).strip() != root_verifier_step_id:
+            continue
+        result = event.get("result") if isinstance(event.get("result"), Mapping) else {}
+        if result.get("ok") is not False or not _runtime_owned_terminal_event(
+            event,
+            result,
+            run_id=run_id,
+            plan_id=root_plan_id,
+        ):
+            continue
+        tool_call_id = str(event.get("tool_call_id") or "").strip()
+        if not tool_call_id:
+            continue
+        failed_verifier_event = event
+        failed_index = index
+        break
+    if failed_verifier_event is None:
+        return {}
+    root_source_candidates: list[Mapping[str, Any]] = []
+    for index, event in winners:
+        if index >= failed_index:
+            break
+        source_step_id = str(
+            event.get("step_id") or event.get("planner_step_id") or ""
+        ).strip()
+        if source_step_id not in criterion.source_step_ids:
+            continue
+        tool_name = str(event.get("detail") or event.get("tool") or "").strip()
+        if not set(criterion.required_capabilities).issubset(
+            set(capability_ids_for_tool(tool_name))
+        ):
+            continue
+        result = event.get("result") if isinstance(event.get("result"), Mapping) else {}
+        if (
+            result.get("ok") is not True
+            or not str(event.get("tool_call_id") or "").strip()
+            or not _runtime_owned_terminal_event(
+                event,
+                result,
+                run_id=run_id,
+                plan_id=root_plan_id,
+            )
+        ):
+            continue
+        root_source_candidates.append(event)
+    if not root_source_candidates:
+        return {}
+    root_source_event = root_source_candidates[-1]
+    failed_result = (
+        failed_verifier_event.get("result")
+        if isinstance(failed_verifier_event.get("result"), Mapping)
+        else {}
+    )
+    root_result = (
+        root_source_event.get("result")
+        if isinstance(root_source_event.get("result"), Mapping)
+        else {}
+    )
+    failed_provider = _runtime_execution_provider_identity(failed_result)
+    root_provider = _runtime_execution_provider_identity(root_result)
+    if not root_provider or failed_provider != root_provider:
+        return {}
+    root_source_step_id = str(
+        root_source_event.get("step_id")
+        or root_source_event.get("planner_step_id")
+        or ""
+    ).strip()
+    return {
+        "criterion_id": criterion.criterion_id,
+        "root_source_tool_call_id": str(
+            root_source_event.get("tool_call_id") or ""
+        ).strip(),
+        "root_source_step_id": root_source_step_id,
+        "root_verifier_step_id": root_verifier_step_id,
+        "root_plan_id": root_plan_id,
+        "root_provider_kind": root_provider["provider_kind"],
+        "root_provider_id": root_provider["provider_id"],
+        "failed_verifier_tool_call_id": str(
+            failed_verifier_event.get("tool_call_id") or ""
+        ).strip(),
+        "failed_verifier_tool": failed_verifier_tool,
+        "replan_request_id": replan_request_id,
+        "recovery_action": "repair_after_failed_verification",
+    }
+
+
+def _request_matches_runtime_goal_recovery_lineage(
+    request: Mapping[str, Any],
+    lineage: Mapping[str, str],
+) -> bool:
+    return bool(
+        str(request.get("replan_trigger") or "").strip()
+        == "verification_failed"
+        and str(request.get("replan_request_id") or "").strip()
+        == str(lineage.get("replan_request_id") or "").strip()
+        and str(request.get("plan_id") or "").strip()
+        == str(lineage.get("root_plan_id") or "").strip()
+        and str(request.get("tool") or request.get("tool_name") or "").strip()
+    )
+
+
 def _runtime_replan_request_needs_code_repair(request: Mapping[str, Any]) -> bool:
     if str(request.get("trigger") or "").strip() != "verification_failed":
         return False
@@ -8737,10 +14783,628 @@ def _timeline_replan_request_payloads(
             continue
         payload = event.get("payload")
         if isinstance(payload, Mapping):
-            if str(payload.get("source") or "").strip() != "runtime_tool_request_runner":
+            source = str(payload.get("source") or "").strip()
+            if source not in _RUNTIME_REPLAN_INGESTION_SOURCES:
                 continue
-            payloads.append(dict(payload))
+            if (
+                source == _RUNTIME_RECOVERY_CONTINUATION_REPLAN_SOURCE
+                and not _runtime_recovery_continuation_payload_is_trusted(
+                    payload,
+                    timeline=timeline,
+                )
+            ):
+                continue
+            payloads.append(copy_live_replan_payload(payload))
     return payloads
+
+
+def _runtime_recovery_continuation_replan_payload(
+    result: OutcomeLoopResult,
+    *,
+    timeline: Sequence[Mapping[str, Any]],
+    run_id: str,
+) -> dict[str, Any]:
+    """Build one replan request from an executor-grounded recovery batch."""
+
+    recovery = result.recovery_action_result
+    clean_run_id = str(run_id or "").strip()
+    source_tool_call_id = str(result.source_tool_call_id or "").strip()
+    if (
+        not clean_run_id
+        or not source_tool_call_id
+        or result.disposition is not OutcomeLoopDisposition.CONTINUE_PLAN
+        or result.outcome.status is OutcomeStatus.SUCCESS
+        or recovery is None
+        or recovery.disposition is not RecoveryActionDisposition.CONTINUE_PLAN
+        or not recovery.attempts
+    ):
+        return {}
+    source_match = _runtime_recovery_executor_terminal_event(
+        timeline,
+        run_id=clean_run_id,
+        tool_call_id=source_tool_call_id,
+        tool_name=result.outcome.tool_name,
+    )
+    if source_match is None:
+        return {}
+    source_index, source_event = source_match
+    source_result = source_event.get("result")
+    if not isinstance(source_result, Mapping) or source_result != result.outcome.raw:
+        return {}
+
+    plan = result.recovery_plan
+    plan_metadata = (
+        plan.metadata
+        if plan is not None and isinstance(plan.metadata, Mapping)
+        else {}
+    )
+    source_goal_contract_id = str(
+        source_event.get("goal_contract_id") or ""
+    ).strip()
+    source_goal_criterion_id = str(
+        source_event.get("goal_criterion_id") or ""
+    ).strip()
+    if (
+        not source_goal_contract_id
+        or not source_goal_criterion_id
+        or (
+            str(plan_metadata.get("goal_contract_id") or "").strip()
+            and str(plan_metadata.get("goal_contract_id") or "").strip()
+            != source_goal_contract_id
+        )
+        or (
+            str(plan_metadata.get("goal_criterion_id") or "").strip()
+            and str(plan_metadata.get("goal_criterion_id") or "").strip()
+            != source_goal_criterion_id
+        )
+    ):
+        # A continuation may refine only the target of the already-bound
+        # root criterion.  Recovery-plan metadata is advisory unless it
+        # exactly agrees with the executor-owned source receipt.
+        return {}
+    recovery_action = str(getattr(plan, "action", "") or "").strip()
+    recovery_scope_id = str(getattr(plan, "scope_id", "") or "").strip()
+    observations: list[dict[str, Any]] = []
+    observation_identities: list[tuple[str, str, str]] = []
+    seen_observation_call_ids: set[str] = set()
+    for batch in recovery.attempts:
+        for request in batch.requests:
+            if not isinstance(request, Mapping):
+                continue
+            observation_tool = str(request.get("tool") or "").strip()
+            observation_call_id = str(request.get("tool_call_id") or "").strip()
+            if (
+                not observation_tool
+                or not observation_call_id
+                or observation_call_id in seen_observation_call_ids
+                or str(request.get("source") or "").strip()
+                != "runtime_internal_recovery"
+                or str(request.get("source_tool_call_id") or "").strip()
+                != source_tool_call_id
+                or str(request.get("recovery_link_kind") or "").strip()
+                != "coordinator_action"
+                or (
+                    recovery_action
+                    and str(request.get("recovery_action") or "").strip()
+                    != recovery_action
+                )
+                or (
+                    recovery_scope_id
+                    and str(request.get("recovery_scope_id") or "").strip()
+                    != recovery_scope_id
+                )
+            ):
+                continue
+            batch_result = batch.tool_result_for(observation_call_id)
+            if (
+                batch_result is None
+                or batch_result.event_type != "agent.tool.call"
+                or not isinstance(batch_result.result, Mapping)
+                or batch_result.result.get("ok") is not True
+            ):
+                continue
+            observation_match = _runtime_recovery_executor_terminal_event(
+                timeline,
+                run_id=clean_run_id,
+                tool_call_id=observation_call_id,
+                tool_name=observation_tool,
+            )
+            if observation_match is None:
+                continue
+            observation_index, observation_event = observation_match
+            if observation_index <= source_index:
+                continue
+            observed_result = observation_event.get("result")
+            if (
+                not isinstance(observed_result, Mapping)
+                or observed_result != batch_result.result
+                or str(observation_event.get("source") or "").strip()
+                != "runtime_internal_recovery"
+                or str(
+                    observation_event.get("source_tool_call_id") or ""
+                ).strip()
+                != source_tool_call_id
+                or str(
+                    observation_event.get("recovery_link_kind") or ""
+                ).strip()
+                != "coordinator_action"
+                or (
+                    recovery_action
+                    and str(
+                        observation_event.get("recovery_action") or ""
+                    ).strip()
+                    != recovery_action
+                )
+            ):
+                continue
+            request_input = (
+                request.get("input")
+                if isinstance(request.get("input"), Mapping)
+                else {}
+            )
+            observed_input = (
+                observation_event.get("input_preview")
+                if isinstance(observation_event.get("input_preview"), Mapping)
+                else {}
+            )
+            if dict(observed_input) != dict(request_input):
+                continue
+            snapshot = _runtime_grounded_recovery_observation(
+                observation_event,
+                source_tool_call_id=source_tool_call_id,
+                recovery_action=recovery_action,
+            )
+            if not snapshot:
+                continue
+            seen_observation_call_ids.add(observation_call_id)
+            observations.append(snapshot)
+            observation_identities.append(
+                (
+                    observation_call_id,
+                    observation_tool,
+                    str(observation_event.get("request_id") or "").strip(),
+                )
+            )
+    if not observations:
+        return {}
+
+    request_id = _runtime_recovery_continuation_request_id(
+        run_id=clean_run_id,
+        source_tool_call_id=source_tool_call_id,
+        recovery_action=recovery_action,
+        observation_identities=observation_identities,
+    )
+    source_provider = _runtime_execution_provider_identity(
+        source_result,
+        expected_tool=result.outcome.tool_name,
+    )
+    last_observation = observations[-1]
+    metadata = {
+        "source_tool_call_id": source_tool_call_id,
+        "source_request_id": str(source_event.get("request_id") or "").strip(),
+        "source_plan_id": str(source_event.get("plan_id") or "").strip(),
+        "source_step_id": str(
+            source_event.get("step_id")
+            or source_event.get("planner_step_id")
+            or ""
+        ).strip(),
+        "source_provider_kind": str(source_provider.get("provider_kind") or ""),
+        "source_provider_id": str(source_provider.get("provider_id") or ""),
+        "recovery_action": recovery_action,
+        "recovery_scope_id": recovery_scope_id,
+        "recovery_observation_tool_call_id": str(
+            last_observation.get("source_tool_call_id") or ""
+        ),
+        "recovery_observation_tool": str(
+            last_observation.get("source_tool") or ""
+        ),
+    }
+    payload: dict[str, Any] = {
+        "request_id": request_id,
+        "trigger": "recovery_observation_ready",
+        "status": "requested",
+        "source": _RUNTIME_RECOVERY_CONTINUATION_REPLAN_SOURCE,
+        "run_id": clean_run_id,
+        "plan_id": str(source_event.get("plan_id") or "").strip(),
+        "source_step_id": str(
+            source_event.get("step_id")
+            or source_event.get("planner_step_id")
+            or ""
+        ).strip(),
+        "source_tool_name": result.outcome.tool_name,
+        "source_tool_call_id": source_tool_call_id,
+        "goal_contract_id": source_goal_contract_id,
+        "goal_criterion_id": source_goal_criterion_id,
+        "source_outcome_status": result.outcome.status.value,
+        "source_outcome_reason": result.outcome.reason,
+        "target_capability_id": str(
+            (plan.required_capabilities[0] if plan and plan.required_capabilities else "")
+        ).strip(),
+        "condition": "grounded_recovery_observation_available",
+        "reason": recovery.reason or "recovery_observation_ready",
+        "failure_detail": result.outcome.reason,
+        "recovery_action": recovery_action,
+        "recovery_scope_id": recovery_scope_id,
+        "recovery_observation_tool_call_id": str(
+            last_observation.get("source_tool_call_id") or ""
+        ),
+        "grounded_observation": last_observation,
+        "grounded_observations": observations,
+        "metadata": {
+            key: value for key, value in metadata.items() if value not in (None, "")
+        },
+    }
+    if plan is not None and isinstance(plan.metadata, Mapping):
+        for key in (
+            "goal_subgoal_id",
+            "root_plan_id",
+            "root_source_step_id",
+        ):
+            value = str(plan.metadata.get(key) or "").strip()
+            if value:
+                payload[key] = value
+    compact = {
+        key: value
+        for key, value in payload.items()
+        if value not in (None, "", [], {})
+    }
+    if not _runtime_recovery_continuation_payload_is_trusted(
+        compact,
+        timeline=timeline,
+    ):
+        return {}
+    return compact
+
+
+def _runtime_recovery_continuation_payload_is_trusted(
+    payload: Mapping[str, Any],
+    *,
+    timeline: Sequence[Mapping[str, Any]],
+) -> bool:
+    """Replay a persisted continuation against both executor-owned calls."""
+
+    if str(payload.get("source") or "").strip() != (
+        _RUNTIME_RECOVERY_CONTINUATION_REPLAN_SOURCE
+    ):
+        return False
+    run_id = str(payload.get("run_id") or "").strip()
+    source_tool_call_id = str(payload.get("source_tool_call_id") or "").strip()
+    source_tool = str(payload.get("source_tool_name") or "").strip()
+    goal_contract_id = str(payload.get("goal_contract_id") or "").strip()
+    goal_criterion_id = str(payload.get("goal_criterion_id") or "").strip()
+    recovery_action = str(payload.get("recovery_action") or "").strip()
+    recovery_scope_id = str(payload.get("recovery_scope_id") or "").strip()
+    metadata = (
+        payload.get("metadata")
+        if isinstance(payload.get("metadata"), Mapping)
+        else {}
+    )
+    if (
+        _string_list(payload.get("fallback_tools"))
+        or _mapping_list(payload.get("recovery_actions"))
+        or _mapping_list(metadata.get("recovery_actions"))
+        or _string_list(payload.get("recommended_tools"))
+        or str(payload.get("replan_prompt") or "").strip()
+        or payload.get(RUNTIME_PRIVATE_REPLAN_CONTEXT_KEY) is not None
+    ):
+        # This source reports an already-completed observation and grants no
+        # auto-execution authority.  A persisted payload cannot be upgraded
+        # into a fallback plan by adding public recovery fields.
+        return False
+    observations = [
+        dict(item)
+        for item in _mapping_list(payload.get("grounded_observations"))
+    ]
+    grounded_observation = payload.get("grounded_observation")
+    if (
+        not run_id
+        or not source_tool_call_id
+        or not source_tool
+        or not goal_contract_id
+        or not goal_criterion_id
+        or not recovery_action
+        or not recovery_scope_id
+        or not observations
+        or not isinstance(grounded_observation, Mapping)
+        or dict(grounded_observation) != observations[-1]
+    ):
+        return False
+    source_match = _runtime_recovery_executor_terminal_event(
+        timeline,
+        run_id=run_id,
+        tool_call_id=source_tool_call_id,
+        tool_name=source_tool,
+    )
+    if source_match is None:
+        return False
+    source_index, source_event = source_match
+    source_result = source_event.get("result")
+    if not isinstance(source_result, Mapping):
+        return False
+    source_step_id = str(
+        source_event.get("step_id")
+        or source_event.get("planner_step_id")
+        or ""
+    ).strip()
+    source_plan_id = str(source_event.get("plan_id") or "").strip()
+    source_request_id = str(source_event.get("request_id") or "").strip()
+    source_provider = _runtime_execution_provider_identity(
+        source_result,
+        expected_tool=source_tool,
+    )
+    if (
+        str(source_event.get("goal_contract_id") or "").strip()
+        != goal_contract_id
+        or str(source_event.get("goal_criterion_id") or "").strip()
+        != goal_criterion_id
+        or not source_step_id
+        or not source_plan_id
+        or not source_request_id
+        or str(payload.get("plan_id") or "").strip() != source_plan_id
+        or str(payload.get("source_step_id") or "").strip() != source_step_id
+        or str(metadata.get("source_tool_call_id") or "").strip()
+        != source_tool_call_id
+        or str(metadata.get("source_request_id") or "").strip()
+        != source_request_id
+        or str(metadata.get("source_plan_id") or "").strip()
+        != source_plan_id
+        or str(metadata.get("source_step_id") or "").strip()
+        != source_step_id
+        or str(metadata.get("source_provider_kind") or "").strip()
+        != str(source_provider.get("provider_kind") or "").strip()
+        or str(metadata.get("source_provider_id") or "").strip()
+        != str(source_provider.get("provider_id") or "").strip()
+        or str(metadata.get("recovery_action") or "").strip()
+        != recovery_action
+        or str(metadata.get("recovery_scope_id") or "").strip()
+        != recovery_scope_id
+    ):
+        return False
+    normalized_source = from_tool_result(
+        source_tool,
+        source_result,
+        capability_ids_for_tool(source_tool),
+    )
+    if (
+        normalized_source.status is OutcomeStatus.SUCCESS
+        or normalized_source.status.value
+        != str(payload.get("source_outcome_status") or "").strip()
+        or normalized_source.reason
+        != str(payload.get("source_outcome_reason") or "").strip()
+    ):
+        return False
+
+    identities: list[tuple[str, str, str]] = []
+    seen_call_ids: set[str] = set()
+    for observation in observations:
+        observation_call_id = str(
+            observation.get("source_tool_call_id") or ""
+        ).strip()
+        observation_tool = str(observation.get("source_tool") or "").strip()
+        if (
+            not observation_call_id
+            or not observation_tool
+            or observation_tool
+            not in _RUNTIME_REPLAN_GROUNDING_OBSERVATION_TOOLS
+            or observation_call_id in seen_call_ids
+            or str(observation.get("recovery_source_tool_call_id") or "").strip()
+            != source_tool_call_id
+            or str(observation.get("grounded_by") or "").strip()
+            != _RUNTIME_RECOVERY_CONTINUATION_REPLAN_SOURCE
+        ):
+            return False
+        observation_match = _runtime_recovery_executor_terminal_event(
+            timeline,
+            run_id=run_id,
+            tool_call_id=observation_call_id,
+            tool_name=observation_tool,
+        )
+        if observation_match is None:
+            return False
+        observation_index, observation_event = observation_match
+        if (
+            observation_index <= source_index
+            or str(observation_event.get("source") or "").strip()
+            != "runtime_internal_recovery"
+            or str(observation_event.get("source_tool_call_id") or "").strip()
+            != source_tool_call_id
+            or str(observation_event.get("recovery_link_kind") or "").strip()
+            != "coordinator_action"
+            or str(observation_event.get("recovery_action") or "").strip()
+            != recovery_action
+            or str(observation_event.get("recovery_scope_id") or "").strip()
+            != recovery_scope_id
+            or str(observation_event.get("goal_contract_id") or "").strip()
+            != goal_contract_id
+            or str(observation_event.get("goal_criterion_id") or "").strip()
+            != goal_criterion_id
+            or _runtime_grounded_recovery_observation(
+                observation_event,
+                source_tool_call_id=source_tool_call_id,
+                recovery_action=recovery_action,
+            )
+            != observation
+        ):
+            return False
+        seen_call_ids.add(observation_call_id)
+        identities.append(
+            (
+                observation_call_id,
+                observation_tool,
+                str(observation_event.get("request_id") or "").strip(),
+            )
+        )
+    expected_request_id = _runtime_recovery_continuation_request_id(
+        run_id=run_id,
+        source_tool_call_id=source_tool_call_id,
+        recovery_action=recovery_action,
+        observation_identities=identities,
+    )
+    return str(payload.get("request_id") or "").strip() == expected_request_id
+
+
+def _runtime_recovery_executor_terminal_event(
+    timeline: Sequence[Mapping[str, Any]],
+    *,
+    run_id: str,
+    tool_call_id: str,
+    tool_name: str,
+) -> tuple[int, dict[str, Any]] | None:
+    """Return the first provider-attested terminal owned by Runtime."""
+
+    expected_run_id = str(run_id or "").strip()
+    expected_call_id = str(tool_call_id or "").strip()
+    expected_tool = str(tool_name or "").strip()
+    if not expected_run_id or not expected_call_id or not expected_tool:
+        return None
+    for index, raw_event in enumerate(timeline):
+        if not isinstance(raw_event, Mapping):
+            continue
+        nested = (
+            raw_event.get("payload")
+            if isinstance(raw_event.get("payload"), Mapping)
+            else {}
+        )
+        event = {**dict(nested), **dict(raw_event)}
+        event_types = {
+            str(source.get(key) or "").strip()
+            for source in (raw_event, nested)
+            for key in ("event", "event_type")
+            if str(source.get(key) or "").strip()
+        }
+        run_ids = {
+            str(source.get("run_id") or "").strip()
+            for source in (raw_event, nested)
+            if str(source.get("run_id") or "").strip()
+        }
+        actors = {
+            str(source.get("actor") or "").strip()
+            for source in (raw_event, nested)
+            if str(source.get("actor") or "").strip()
+        }
+        authorities = {
+            str(source.get("execution_authority") or "").strip()
+            for source in (raw_event, nested)
+            if str(source.get("execution_authority") or "").strip()
+        }
+        call_ids = {
+            str(source.get("tool_call_id") or "").strip()
+            for source in (raw_event, nested)
+            if str(source.get("tool_call_id") or "").strip()
+        }
+        request_ids = {
+            str(source.get("request_id") or "").strip()
+            for source in (raw_event, nested)
+            if str(source.get("request_id") or "").strip()
+        }
+        plan_ids = {
+            str(source.get("plan_id") or "").strip()
+            for source in (raw_event, nested)
+            if str(source.get("plan_id") or "").strip()
+        }
+        step_ids = {
+            str(source.get(key) or "").strip()
+            for source in (raw_event, nested)
+            for key in ("step_id", "planner_step_id")
+            if str(source.get(key) or "").strip()
+        }
+        tool_names = {
+            str(source.get(key) or "").strip()
+            for source in (raw_event, nested)
+            for key in ("tool", "detail")
+            if str(source.get(key) or "").strip()
+        }
+        goal_contract_ids = {
+            str(source.get("goal_contract_id") or "").strip()
+            for source in (raw_event, nested)
+            if str(source.get("goal_contract_id") or "").strip()
+        }
+        goal_criterion_ids = {
+            str(source.get("goal_criterion_id") or "").strip()
+            for source in (raw_event, nested)
+            if str(source.get("goal_criterion_id") or "").strip()
+        }
+        result = event.get("result")
+        if (
+            len(event_types) != 1
+            or not event_types.issubset(
+                {"agent.tool.call", "agent.tool.failed", "agent.tool.skipped"}
+            )
+            or run_ids != {expected_run_id}
+            or actors != {"native_runtime"}
+            or authorities != {"runtime_tool_executor"}
+            or call_ids != {expected_call_id}
+            or len(request_ids) > 1
+            or len(plan_ids) > 1
+            or len(step_ids) > 1
+            or tool_names != {expected_tool}
+            or len(goal_contract_ids) > 1
+            or len(goal_criterion_ids) > 1
+            or not isinstance(result, Mapping)
+            or not _runtime_execution_provider_identity(
+                result,
+                expected_tool=expected_tool,
+            )
+        ):
+            continue
+        return index, event
+    return None
+
+
+def _runtime_grounded_recovery_observation(
+    event: Mapping[str, Any],
+    *,
+    source_tool_call_id: str,
+    recovery_action: str,
+) -> dict[str, Any]:
+    result = event.get("result")
+    if not isinstance(result, Mapping) or result.get("ok") is not True:
+        return {}
+    tool_name = str(event.get("tool") or event.get("detail") or "").strip()
+    input_preview = (
+        event.get("input_preview")
+        if isinstance(event.get("input_preview"), Mapping)
+        else {}
+    )
+    snapshot = followup_content_snapshot_for_tool_call(
+        tool_name,
+        dict(result),
+        dict(input_preview),
+    )
+    observation_call_id = str(event.get("tool_call_id") or "").strip()
+    if not snapshot or not observation_call_id:
+        return {}
+    return {
+        **snapshot,
+        "source_tool_call_id": observation_call_id,
+        "recovery_source_tool_call_id": str(source_tool_call_id or "").strip(),
+        "recovery_action": str(recovery_action or "").strip(),
+        "grounded_by": _RUNTIME_RECOVERY_CONTINUATION_REPLAN_SOURCE,
+    }
+
+
+def _runtime_recovery_continuation_request_id(
+    *,
+    run_id: str,
+    source_tool_call_id: str,
+    recovery_action: str,
+    observation_identities: Sequence[tuple[str, str, str]],
+) -> str:
+    seed = json.dumps(
+        {
+            "run_id": str(run_id or "").strip(),
+            "source_tool_call_id": str(source_tool_call_id or "").strip(),
+            "recovery_action": str(recovery_action or "").strip(),
+            "observations": [list(identity) for identity in observation_identities],
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    return (
+        "runtime-recovery-continuation-"
+        f"{hashlib.sha256(seed.encode('utf-8')).hexdigest()[:24]}"
+    )
 
 
 def _pending_runtime_replan_payloads(
@@ -8762,24 +15426,668 @@ def _pending_auto_replan_recovery_requests_with_task_context(
     timeline: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     allowed_tool_list = list(allowed_tools)
+    consumed_identities = recovery_action_identities_from_timeline(timeline)
     requests: list[dict[str, Any]] = []
     for payload in replan_payloads:
         if not isinstance(payload, Mapping):
             continue
         raw_start = payload.get("runtime_tool_timeline_start")
         tool_timeline_start = int(raw_start) if isinstance(raw_start, int) else 0
-        requests.extend(
-            _auto_replan_recovery_requests_with_task_context(
-                [dict(payload)],
-                allowed_tool_list,
+        candidates = _auto_replan_recovery_requests_with_task_context(
+            [dict(payload)],
+            allowed_tool_list,
+            timeline,
+            tool_timeline_start=min(
+                len(timeline),
+                max(0, tool_timeline_start),
+            ),
+        )
+        for request in candidates:
+            if recovery_request_repeats_stalled_discovery(
+                request,
                 timeline,
                 tool_timeline_start=min(
                     len(timeline),
                     max(0, tool_timeline_start),
                 ),
+            ):
+                continue
+            identity = ensure_recovery_action_identity(request)
+            if identity and identity in consumed_identities:
+                continue
+            requests.append(request)
+    return requests
+
+
+def _runtime_replan_request_action_id(request: Mapping[str, Any]) -> str:
+    return str(
+        request.get("replan_recovery_action_id")
+        or request.get("action_id")
+        or ""
+    ).strip()
+
+
+def _runtime_replan_effectful_action_signatures(
+    payload: Mapping[str, Any],
+) -> tuple[str, ...]:
+    metadata = (
+        payload.get("metadata")
+        if isinstance(payload.get("metadata"), Mapping)
+        else {}
+    )
+    authorized_tools = {
+        *_RUNTIME_REPLAN_ACTION_AUTO_SAFE_TOOLS,
+        *_string_list(payload.get("fallback_tools")),
+    }
+    actions = [
+        *_mapping_list(metadata.get("recovery_actions")),
+        *_mapping_list(payload.get("recovery_actions")),
+    ]
+    for action in actions:
+        tool_name = str(action.get("tool") or action.get("tool_name") or "").strip()
+        if tool_name:
+            authorized_tools.add(tool_name)
+        for deferred in materialized_deferred_items(action):
+            deferred_tool = str(
+                deferred.get("tool") or deferred.get("tool_name") or ""
+            ).strip()
+            if deferred_tool:
+                authorized_tools.add(deferred_tool)
+    try:
+        candidates = _auto_replan_recovery_requests(
+            [dict(payload)],
+            authorized_tools,
+        )
+    except (TypeError, ValueError):
+        return ()
+    signatures: list[str] = []
+    for request in candidates:
+        tool_name = str(request.get("tool") or "").strip()
+        if not tool_name or tool_name in READ_ONLY_OBSERVATION_TOOLS:
+            continue
+        request_input = (
+            request.get("input")
+            if isinstance(request.get("input"), Mapping)
+            else {}
+        )
+        signature = canonical_replan_action_signature(
+            tool_name,
+            request_input,
+            action_id=_runtime_replan_request_action_id(request),
+        )
+        if signature and signature not in signatures:
+            signatures.append(signature)
+    return tuple(signatures)
+
+
+def _runtime_replan_private_binding_from_payload(
+    payload: Mapping[str, Any],
+) -> dict[str, str]:
+    metadata = (
+        payload.get("metadata")
+        if isinstance(payload.get("metadata"), Mapping)
+        else {}
+    )
+    binding = {
+        "run_id": str(payload.get("run_id") or "").strip(),
+        "replan_request_id": str(payload.get("request_id") or "").strip(),
+        "source_tool_call_id": str(
+            metadata.get("source_tool_call_id") or ""
+        ).strip(),
+        "source_request_id": str(
+            metadata.get("source_request_id") or ""
+        ).strip(),
+        "source_plan_id": str(metadata.get("source_plan_id") or "").strip(),
+        "source_step_id": str(metadata.get("source_step_id") or "").strip(),
+        "source_tool": str(payload.get("source_tool_name") or "").strip(),
+        "source_provider_kind": str(
+            metadata.get("source_provider_kind") or ""
+        ).strip(),
+        "source_provider_id": str(
+            metadata.get("source_provider_id") or ""
+        ).strip(),
+        "goal_contract_id": str(payload.get("goal_contract_id") or "").strip(),
+        "goal_criterion_id": str(payload.get("goal_criterion_id") or "").strip(),
+    }
+    if (
+        str(payload.get("source") or "").strip()
+        != "runtime_tool_request_runner"
+        or any(not value for value in binding.values())
+        or str(payload.get("plan_id") or "").strip()
+        != binding["source_plan_id"]
+        or str(payload.get("source_step_id") or "").strip()
+        != binding["source_step_id"]
+    ):
+        return {}
+    return binding
+
+
+def _runtime_replan_payload_with_private_authority(
+    payload: Mapping[str, Any],
+    *,
+    timeline: Sequence[Mapping[str, Any]],
+    run_id: str,
+) -> dict[str, Any]:
+    public_payload = dict(payload)
+    public_payload.pop(RUNTIME_PRIVATE_REPLAN_CONTEXT_KEY, None)
+    binding = _runtime_replan_private_binding_from_payload(public_payload)
+    if (
+        not binding
+        or binding["run_id"] != str(run_id or "").strip()
+        or not _runtime_replan_private_source_matches(
+            binding,
+            timeline=timeline,
+        )
+    ):
+        return public_payload
+    context = mint_private_replan_context(
+        binding=binding,
+        action_signatures=_runtime_replan_effectful_action_signatures(public_payload),
+    )
+    if context:
+        return RuntimeAuthorizedReplanPayload(
+            public_payload,
+            private_context=context,
+        )
+    return public_payload
+
+
+def _runtime_replan_private_source_matches(
+    binding: Mapping[str, str],
+    *,
+    timeline: Sequence[Mapping[str, Any]],
+) -> bool:
+    matches = 0
+    for raw_event in timeline:
+        if not isinstance(raw_event, Mapping):
+            continue
+        raw_payload = (
+            raw_event.get("payload")
+            if isinstance(raw_event.get("payload"), Mapping)
+            else {}
+        )
+        event = {**dict(raw_payload), **dict(raw_event)}
+        event_type = str(
+            event.get("event") or event.get("event_type") or ""
+        ).strip()
+        result = event.get("result")
+        if (
+            event_type
+            not in {"agent.tool.call", "agent.tool.failed", "agent.tool.skipped"}
+            or not isinstance(result, Mapping)
+            or str(event.get("run_id") or "").strip() != binding["run_id"]
+            or str(event.get("tool_call_id") or "").strip()
+            != binding["source_tool_call_id"]
+            or str(event.get("request_id") or "").strip()
+            != binding["source_request_id"]
+            or str(event.get("plan_id") or "").strip()
+            != binding["source_plan_id"]
+            or str(
+                event.get("step_id") or event.get("planner_step_id") or ""
+            ).strip()
+            != binding["source_step_id"]
+            or str(event.get("tool") or event.get("detail") or "").strip()
+            != binding["source_tool"]
+            or str(event.get("goal_contract_id") or "").strip()
+            != binding["goal_contract_id"]
+            or str(event.get("goal_criterion_id") or "").strip()
+            != binding["goal_criterion_id"]
+            or not _runtime_owned_terminal_event(
+                event,
+                result,
+                run_id=binding["run_id"],
+                plan_id=binding["source_plan_id"],
+            )
+            or _runtime_execution_provider_identity(result)
+            != {
+                "provider_kind": binding["source_provider_kind"],
+                "provider_id": binding["source_provider_id"],
+            }
+        ):
+            continue
+        matches += 1
+        if matches > 1:
+            return False
+    return matches == 1
+
+
+def _replace_in_memory_runtime_replan_payload(
+    timeline: list[dict[str, Any]],
+    *,
+    dedupe_key: tuple[str, str, str],
+    payload: Mapping[str, Any],
+) -> None:
+    for event in reversed(timeline):
+        if not isinstance(event, dict):
+            continue
+        if _runtime_replan_event_type(
+            str(event.get("event") or event.get("event_type") or "").strip()
+        ) != "agent.replan.requested":
+            continue
+        current = (
+            event.get("payload")
+            if isinstance(event.get("payload"), Mapping)
+            else {}
+        )
+        if _replan_payload_dedupe_key(current) != dedupe_key:
+            continue
+        event["payload"] = copy_live_replan_payload(payload)
+        return
+
+
+def _bind_trusted_runtime_replan_goal_requests(
+    requests: list[dict[str, Any]],
+    replan_payloads: Sequence[Mapping[str, Any]],
+    *,
+    contract: GoalContract | None,
+    timeline: Sequence[Mapping[str, Any]],
+    run_id: str,
+) -> list[dict[str, Any]]:
+    """Authorize fallback attempts only from an exact failed Runtime fact.
+
+    Replan events are persisted projections and are not execution authority by
+    themselves.  This gate replays their source identity against the immutable
+    Goal contract and the provider-attested first terminal event, then mints a
+    fresh request identity for one bounded effectful fallback plus its safe
+    observation batch.  Stale/public replans remain visible for diagnosis but
+    cannot execute a side effect.
+    """
+
+    clean_run_id = str(run_id or "").strip()
+    if (
+        not requests
+        or contract is None
+        or not clean_run_id
+        or contract.run_id != clean_run_id
+    ):
+        return []
+    payload_by_id = {
+        str(payload.get("request_id") or "").strip(): payload
+        for payload in replan_payloads
+        if isinstance(payload, Mapping)
+        and str(payload.get("request_id") or "").strip()
+    }
+    assessment = runtime_goal_assessment(contract, timeline)
+    effectful_source_calls: set[str] = set()
+    seen_request_signatures: set[tuple[str, str]] = set()
+    bound: list[dict[str, Any]] = []
+    for request in requests:
+        replan_request_id = str(
+            request.get("replan_request_id") or ""
+        ).strip()
+        payload = payload_by_id.get(replan_request_id)
+        if payload is None:
+            continue
+        source = _trusted_runtime_replan_source(
+            payload,
+            contract=contract,
+            assessment=assessment,
+            timeline=timeline,
+            run_id=clean_run_id,
+        )
+        if not source:
+            continue
+        source_call_id = str(source["source_tool_call_id"])
+        criterion = contract.criterion(str(source["criterion_id"]))
+        tool_name = str(request.get("tool") or "").strip()
+        tool_capabilities = set(capability_ids_for_tool(tool_name))
+        is_observation = tool_name in READ_ONLY_OBSERVATION_TOOLS
+        capability_compatible = bool(
+            criterion is not None
+            and set(criterion.required_capabilities).issubset(tool_capabilities)
+        )
+        if criterion is None or not tool_name:
+            continue
+        source_is_observation_only = (
+            str(source.get("source_observation_only") or "").strip() == "true"
+        )
+        # The exact failed source may authorize several policy-filtered reads
+        # needed to decide the next action.  It may never authorize an
+        # unrelated write, and only one capability-compatible effectful retry
+        # is minted for a source terminal.
+        if source_is_observation_only and not is_observation:
+            continue
+        if not is_observation and (
+            not capability_compatible
+            or not criterion.required_capabilities
+            or str(source.get("source_retryable") or "").strip() != "true"
+            or str(source.get("source_step_id") or "").strip()
+            not in {*criterion.source_step_ids, *criterion.verifier_step_ids}
+            or source_call_id in effectful_source_calls
+        ):
+            continue
+        if not is_observation:
+            trusted_signatures = trusted_private_replan_action_signatures(
+                payload,
+                binding={
+                    "run_id": clean_run_id,
+                    "replan_request_id": replan_request_id,
+                    "source_tool_call_id": source_call_id,
+                    "source_request_id": str(source["source_request_id"]),
+                    "source_plan_id": str(source["source_plan_id"]),
+                    "source_step_id": str(source["source_step_id"]),
+                    "source_tool": str(source["source_tool"]),
+                    "source_provider_kind": str(source["source_provider_kind"]),
+                    "source_provider_id": str(source["source_provider_id"]),
+                    "goal_contract_id": contract.contract_id,
+                    "goal_criterion_id": criterion.criterion_id,
+                },
+            )
+            request_input = (
+                request.get("input")
+                if isinstance(request.get("input"), Mapping)
+                else {}
+            )
+            candidate_signature = canonical_replan_action_signature(
+                tool_name,
+                request_input,
+                action_id=_runtime_replan_request_action_id(request),
+            )
+            if not candidate_signature or candidate_signature not in trusted_signatures:
+                continue
+        request_signature = _trusted_runtime_replan_request_signature(request)
+        if request_signature in seen_request_signatures:
+            continue
+        item = dict(request)
+        ensure_tool_call_id(item)
+        # Persisted/model requests do not choose planner authority.  Bind every
+        # fallback to the exact Goal step that produced the trusted terminal.
+        bound_step_id = str(source["source_step_id"])
+        item.update(
+            {
+                "source": "runtime_planner",
+                "planning_reason": "planner_replan_fallback_recovery",
+                "plan_id": str(source["source_plan_id"]),
+                "step_id": bound_step_id,
+                "planner_step_id": bound_step_id,
+                "goal_contract_id": contract.contract_id,
+                "goal_criterion_id": criterion.criterion_id,
+                "root_goal_unchanged": True,
+                "replan_source_tool_call_id": source_call_id,
+                "replan_source_request_id": str(source["source_request_id"]),
+                "replan_source_step_id": str(source["source_step_id"]),
+            }
+        )
+        expected_target = criterion.expected.get("target")
+        if is_observation:
+            # Observation receipts can guide the loop, but they are not the
+            # root action and must not carry synthetic completion evidence.
+            item["observation_only"] = True
+            item["goal_completion_authority"] = False
+            for key in (
+                "action_target",
+                "postcondition_verified",
+                "verification_passed",
+                "verified",
+                "state",
+                "target",
+            ):
+                item.pop(key, None)
+            capability_id = str(item.get("capability_id") or "").strip()
+            if capability_id not in tool_capabilities:
+                if tool_capabilities:
+                    item["capability_id"] = sorted(tool_capabilities)[0]
+                else:
+                    item.pop("capability_id", None)
+        else:
+            for key in (
+                "postcondition_verified",
+                "verification_passed",
+                "verified",
+                "state",
+                "target",
+                "goal_completion_authority",
+                "observation_only",
+            ):
+                item.pop(key, None)
+            if isinstance(expected_target, Mapping) and expected_target:
+                item["action_target"] = dict(expected_target)
+            else:
+                item.pop("action_target", None)
+            effectful_source_calls.add(source_call_id)
+        if not str(item.get("request_id") or "").strip():
+            digest = hashlib.sha256(
+                (
+                    f"{replan_request_id}\0{source_call_id}\0"
+                    f"{item['tool_call_id']}\0{tool_name}"
+                ).encode("utf-8")
+            ).hexdigest()[:16]
+            item["request_id"] = f"runtime-replan-request-{digest}"
+        seen_request_signatures.add(request_signature)
+        bound.append(item)
+        if len(bound) >= _MODEL_FOLLOWUP_MAX_AUTO_PENDING_REQUESTS:
+            break
+    return bound
+
+
+def _trusted_runtime_replan_request_signature(
+    request: Mapping[str, Any],
+) -> tuple[str, str]:
+    tool_name = str(request.get("tool") or "").strip()
+    request_input = (
+        request.get("input") if isinstance(request.get("input"), Mapping) else {}
+    )
+    try:
+        normalized_input = json.dumps(
+            dict(request_input),
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            default=str,
+        )
+    except (TypeError, ValueError):
+        normalized_input = repr(
+            sorted(
+                dict(request_input).items(),
+                key=lambda item: str(item[0]),
             )
         )
-    return requests
+    return tool_name, normalized_input
+
+
+def _trusted_runtime_replan_source(
+    payload: Mapping[str, Any],
+    *,
+    contract: GoalContract,
+    assessment: Any,
+    timeline: Sequence[Mapping[str, Any]],
+    run_id: str,
+) -> dict[str, str]:
+    metadata = (
+        payload.get("metadata")
+        if isinstance(payload.get("metadata"), Mapping)
+        else {}
+    )
+    identity = {
+        "source_tool_call_id": str(
+            metadata.get("source_tool_call_id") or ""
+        ).strip(),
+        "source_request_id": str(
+            metadata.get("source_request_id") or ""
+        ).strip(),
+        "source_plan_id": str(metadata.get("source_plan_id") or "").strip(),
+        "source_step_id": str(metadata.get("source_step_id") or "").strip(),
+        "source_tool": str(payload.get("source_tool_name") or "").strip(),
+        "source_provider_kind": str(
+            metadata.get("source_provider_kind") or ""
+        ).strip(),
+        "source_provider_id": str(
+            metadata.get("source_provider_id") or ""
+        ).strip(),
+    }
+    payload_contract_id = str(payload.get("goal_contract_id") or "").strip()
+    payload_criterion_id = str(payload.get("goal_criterion_id") or "").strip()
+    payload_source = str(payload.get("source") or "").strip()
+    if payload_source == _RUNTIME_RECOVERY_CONTINUATION_REPLAN_SOURCE:
+        if not _runtime_recovery_continuation_payload_is_trusted(
+            payload,
+            timeline=timeline,
+        ):
+            return {}
+    elif payload_source != "runtime_tool_request_runner":
+        return {}
+    if (
+        str(payload.get("run_id") or "").strip() != run_id
+        or not str(payload.get("request_id") or "").strip()
+        or payload_contract_id != contract.contract_id
+        or not payload_criterion_id
+        or any(not value for value in identity.values())
+        or str(payload.get("plan_id") or "").strip()
+        != identity["source_plan_id"]
+        or str(payload.get("source_step_id") or "").strip()
+        != identity["source_step_id"]
+    ):
+        return {}
+    matches: list[
+        tuple[Mapping[str, Any], Mapping[str, Any], Any]
+    ] = []
+    for raw_event in timeline:
+        if not isinstance(raw_event, Mapping):
+            continue
+        raw_payload = (
+            raw_event.get("payload")
+            if isinstance(raw_event.get("payload"), Mapping)
+            else {}
+        )
+        event = {**dict(raw_payload), **dict(raw_event)}
+        event_type = str(
+            event.get("event") or event.get("event_type") or ""
+        ).strip()
+        result = event.get("result")
+        if (
+            event_type not in {
+                "agent.tool.call",
+                "agent.tool.failed",
+                "agent.tool.skipped",
+            }
+            or not isinstance(result, Mapping)
+            or str(event.get("run_id") or "").strip() != run_id
+            or str(event.get("tool_call_id") or "").strip()
+            != identity["source_tool_call_id"]
+            or str(event.get("request_id") or "").strip()
+            != identity["source_request_id"]
+            or str(event.get("plan_id") or "").strip()
+            != identity["source_plan_id"]
+            or str(
+                event.get("step_id") or event.get("planner_step_id") or ""
+            ).strip()
+            != identity["source_step_id"]
+            or str(event.get("tool") or event.get("detail") or "").strip()
+            != identity["source_tool"]
+            or str(event.get("goal_contract_id") or "").strip()
+            != payload_contract_id
+            or str(event.get("goal_criterion_id") or "").strip()
+            != payload_criterion_id
+        ):
+            continue
+        if not _runtime_owned_terminal_event(
+            event,
+            result,
+            run_id=run_id,
+            plan_id=identity["source_plan_id"],
+        ):
+            continue
+        provider = _runtime_execution_provider_identity(result)
+        if provider != {
+            "provider_kind": identity["source_provider_kind"],
+            "provider_id": identity["source_provider_id"],
+        }:
+            continue
+        outcome = from_tool_result(
+            identity["source_tool"],
+            result,
+            capabilities=capability_ids_for_tool(identity["source_tool"]),
+        )
+        if outcome.status not in {
+            OutcomeStatus.FAILED,
+            OutcomeStatus.PARTIAL,
+            OutcomeStatus.SKIPPED,
+        }:
+            continue
+        matches.append((event, result, outcome))
+    if len(matches) != 1:
+        return {}
+    source_event, _source_result, source_outcome = matches[0]
+    criterion_ids = {
+        evidence.criterion_id
+        for evidence in assessment.evidence
+        if evidence.kind == "tool_outcome"
+        and evidence.source_tool_call_id == identity["source_tool_call_id"]
+        and evidence.status in {
+            OutcomeStatus.FAILED.value,
+            OutcomeStatus.PARTIAL.value,
+            OutcomeStatus.SKIPPED.value,
+        }
+    }
+    source_observation_only = bool(
+        source_outcome.status is OutcomeStatus.SKIPPED
+        or identity["source_tool"] in READ_ONLY_OBSERVATION_TOOLS
+    )
+    if len(criterion_ids) == 1:
+        criterion_id = next(iter(criterion_ids))
+        if payload_criterion_id != criterion_id:
+            return {}
+        return {
+            **identity,
+            "criterion_id": criterion_id,
+            "source_kind": "goal_failure_evidence",
+            "source_observation_only": (
+                "true" if source_observation_only else "false"
+            ),
+            "source_retryable": "true" if source_outcome.retryable else "false",
+        }
+    if criterion_ids or identity["source_tool"] not in READ_ONLY_OBSERVATION_TOOLS:
+        return {}
+    criterion_id = _goal_bound_runtime_observation_criterion_id(
+        contract,
+        source_event,
+        payload,
+    )
+    if not criterion_id:
+        return {}
+    return {
+        **identity,
+        "criterion_id": criterion_id,
+        "source_kind": "goal_bound_observation_failure",
+        "source_observation_only": "true",
+        "source_retryable": "true" if source_outcome.retryable else "false",
+    }
+
+
+def _goal_bound_runtime_observation_criterion_id(
+    contract: GoalContract,
+    event: Mapping[str, Any],
+    payload: Mapping[str, Any],
+) -> str:
+    if str(event.get("source") or "").strip() != "runtime_planner":
+        return ""
+    step_id = str(
+        event.get("step_id") or event.get("planner_step_id") or ""
+    ).strip()
+    capability_id = str(event.get("capability_id") or "").strip()
+    payload_contract_id = str(payload.get("goal_contract_id") or "").strip()
+    payload_criterion_id = str(payload.get("goal_criterion_id") or "").strip()
+    event_contract_id = str(event.get("goal_contract_id") or "").strip()
+    event_criterion_id = str(event.get("goal_criterion_id") or "").strip()
+    if (
+        payload_contract_id != contract.contract_id
+        or event_contract_id != contract.contract_id
+        or not payload_criterion_id
+        or event_criterion_id != payload_criterion_id
+    ):
+        return ""
+    candidates = [
+        criterion
+        for criterion in contract.criteria
+        if step_id in {*criterion.source_step_ids, *criterion.verifier_step_ids}
+        and set(criterion.required_capabilities).issubset({capability_id})
+    ]
+    if len(candidates) != 1:
+        return ""
+    criterion_id = candidates[0].criterion_id
+    if payload_criterion_id != criterion_id or event_criterion_id != criterion_id:
+        return ""
+    return criterion_id
 
 
 def _handled_runtime_replan_request_identities(
@@ -8789,9 +16097,24 @@ def _handled_runtime_replan_request_identities(
     for event in timeline:
         if not isinstance(event, Mapping):
             continue
-        if str(event.get("event") or "").strip() != "agent.replan.recovery.updated":
-            continue
+        event_type = str(event.get("event") or event.get("event_type") or "").strip()
+        base_event_type = _runtime_progress_base_event_type(event_type)
         payload = event.get("payload") if isinstance(event.get("payload"), Mapping) else {}
+        if base_event_type == "agent.recovery.planned" and str(
+            event.get("recovery_owner") or payload.get("recovery_owner") or ""
+        ).strip() == "coordinator":
+            identity = str(
+                event.get("replan_request_id")
+                or payload.get("replan_request_id")
+                or ""
+            ).strip()
+            if identity:
+                handled.add(identity)
+            continue
+        if base_event_type != "agent.replan.recovery.updated":
+            continue
+        if recovery_action_identities_from_timeline([event]):
+            continue
         identity = str(
             event.get("request_id")
             or payload.get("request_id")
@@ -9018,15 +16341,43 @@ def _runtime_replan_recovery_observations(
     requests: Iterable[Mapping[str, Any]],
     timeline: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
+    request_list = [request for request in requests if isinstance(request, Mapping)]
     request_ids = {
         str(request.get("request_id") or "").strip()
-        for request in requests
-        if isinstance(request, Mapping) and str(request.get("request_id") or "").strip()
+        for request in request_list
+        if str(request.get("request_id") or "").strip()
     }
-    if not request_ids or not timeline:
-        return []
     observations: list[dict[str, Any]] = []
     seen: set[tuple[str, str, str]] = set()
+    for request in request_list:
+        if str(request.get("source") or "").strip() != (
+            _RUNTIME_RECOVERY_CONTINUATION_REPLAN_SOURCE
+        ):
+            continue
+        embedded = _mapping_list(request.get("grounded_observations"))
+        if not embedded and isinstance(request.get("grounded_observation"), Mapping):
+            embedded = [dict(request["grounded_observation"])]
+        for observation in embedded:
+            if str(observation.get("grounded_by") or "").strip() != (
+                _RUNTIME_RECOVERY_CONTINUATION_REPLAN_SOURCE
+            ):
+                continue
+            signature = (
+                str(observation.get("source_tool") or "").strip(),
+                str(observation.get("source_tool_call_id") or "").strip(),
+                str(
+                    observation.get("text")
+                    or observation.get("summary")
+                    or observation.get("path")
+                    or ""
+                ).strip(),
+            )
+            if not all(signature[:2]) or signature in seen:
+                continue
+            seen.add(signature)
+            observations.append(dict(observation))
+    if not request_ids or not timeline:
+        return observations[-6:]
     for event in timeline:
         if not _runtime_replan_recovery_tool_event(event, request_ids):
             continue
@@ -9083,6 +16434,14 @@ def _attach_replan_observation_trace(
         "target_app_name",
         "target_app_query",
         "target_search_text",
+        "materialized_from_request_id",
+        "materialization_source_request_id",
+        "materialization_source_step_id",
+        "materialization_binding_id",
+        "materialized_content_sha256",
+        "materialization_authority",
+        "goal_contract_id",
+        "goal_criterion_id",
         "runtime_stage",
         "runtime_role",
     ):
@@ -9865,6 +17224,201 @@ def _runtime_planner_completed_direct_requests_with_unavailable_replan(
     )
 
 
+def _runtime_planner_verified_app_open_before_unavailable_deferred_verification(
+    planned_tool_requests: Iterable[Mapping[str, Any]],
+    replan_payloads: Iterable[Mapping[str, Any]],
+    timeline: list[dict[str, Any]],
+    *,
+    tool_timeline_start: int,
+) -> tuple[list[dict[str, Any]], int] | None:
+    raw_requests = list(planned_tool_requests)
+    if not raw_requests or any(
+        not isinstance(request, Mapping) for request in raw_requests
+    ):
+        return None
+    requests = [request for request in raw_requests if isinstance(request, Mapping)]
+    raw_payloads = list(replan_payloads)
+    if (
+        len(raw_payloads) != len(requests)
+        or any(not isinstance(payload, Mapping) for payload in raw_payloads)
+    ):
+        return None
+    payloads = [payload for payload in raw_payloads if isinstance(payload, Mapping)]
+    if not payloads or any(
+        str(payload.get("trigger") or "").strip() != "tool_unavailable"
+        for payload in payloads
+    ):
+        return None
+
+    expected_app_identities: list[str] = []
+    for request in requests:
+        tool_name = str(request.get("tool") or "").strip()
+        request_input = (
+            request.get("input")
+            if isinstance(request.get("input"), Mapping)
+            else None
+        )
+        app_name = (
+            str(request_input.get("app_name") or "").strip()
+            if isinstance(request_input, Mapping)
+            else ""
+        )
+        app_identity = _strict_canonical_app_identity(app_name)
+        if (
+            request.get("continue_to_model") is not True
+            or tool_name not in _DAILY_DESKTOP_VERIFY_TOOLS
+            or not app_name
+            or not app_identity
+        ):
+            return None
+        expected_app_identities.append(app_identity)
+    if not _runtime_planner_deferred_verifiers_have_distinct_unavailable_replans(
+        requests,
+        payloads,
+    ):
+        return None
+
+    matched_primary_events: list[tuple[int, str, dict[str, Any]]] = []
+    used_event_indexes: set[int] = set()
+    timeline_end = min(tool_timeline_start, len(timeline))
+    for expected_app_identity in expected_app_identities:
+        matched_event: tuple[int, str, dict[str, Any], Mapping[str, Any]] | None = None
+        for event_index in range(timeline_end - 1, -1, -1):
+            if event_index in used_event_indexes:
+                continue
+            event = timeline[event_index]
+            if str(event.get("event") or "").strip() != "agent.tool.call":
+                continue
+            event_tool = str(event.get("detail") or "").strip()
+            if event_tool not in _RUNTIME_REPLAN_NO_REPEAT_AFTER_SUCCESS_TOOLS:
+                continue
+            event_input = (
+                event.get("input_preview")
+                if isinstance(event.get("input_preview"), Mapping)
+                else {}
+            )
+            expected_event_app = str(event_input.get("app_name") or "").strip()
+            if (
+                not expected_event_app
+                or _strict_canonical_app_identity(expected_event_app)
+                != expected_app_identity
+            ):
+                continue
+            result = event.get("result") if isinstance(event.get("result"), Mapping) else {}
+            matched_event = (event_index, event_tool, dict(event_input), result)
+            break
+        if matched_event is None:
+            return None
+        event_index, event_tool, event_input, result = matched_event
+        data = result.get("data") if isinstance(result.get("data"), Mapping) else {}
+        observed_app = str(data.get("app_name") or "").strip()
+        if (
+            result.get("ok") is not True
+            or data.get("launch_verified") is not True
+            or not observed_app
+            or _strict_canonical_app_identity(observed_app) != expected_app_identity
+            or _strict_canonical_app_identity(
+                str(event_input.get("app_name") or "")
+            )
+            != _strict_canonical_app_identity(observed_app)
+        ):
+            return None
+        used_event_indexes.add(event_index)
+        matched_primary_events.append((event_index, event_tool, event_input))
+    matched_primary_events.sort(key=lambda item: item[0])
+    return (
+        [
+            {
+                "tool": event_tool,
+                "input": event_input,
+                "source": "runtime_planner",
+                "planning_reason": "planner_verified_primary_postcondition",
+            }
+            for _event_index, event_tool, event_input in matched_primary_events
+        ],
+        matched_primary_events[0][0],
+    )
+
+
+def _strict_canonical_app_identity(value: str) -> str:
+    compact = compact_app_alias(value)
+    if not compact:
+        return ""
+    return _STRICT_CANONICAL_APP_IDENTITIES.get(compact, compact)
+
+
+def _runtime_planner_deferred_verifiers_have_distinct_unavailable_replans(
+    requests: list[Mapping[str, Any]],
+    payloads: list[Mapping[str, Any]],
+) -> bool:
+    payload_to_request: dict[int, int] = {}
+
+    def assign(request_index: int, visited_payloads: set[int]) -> bool:
+        request = requests[request_index]
+        for payload_index, payload in enumerate(payloads):
+            if (
+                payload_index in visited_payloads
+                or not _runtime_planner_replan_matches_deferred_verifier(
+                    request,
+                    payload,
+                )
+            ):
+                continue
+            visited_payloads.add(payload_index)
+            previous_request = payload_to_request.get(payload_index)
+            if previous_request is None or assign(previous_request, visited_payloads):
+                payload_to_request[payload_index] = request_index
+                return True
+        return False
+
+    return all(assign(index, set()) for index in range(len(requests)))
+
+
+def _runtime_planner_replan_matches_deferred_verifier(
+    request: Mapping[str, Any],
+    payload: Mapping[str, Any],
+) -> bool:
+    metadata = (
+        payload.get("metadata")
+        if isinstance(payload.get("metadata"), Mapping)
+        else {}
+    )
+    source_tool = str(
+        payload.get("source_tool_name")
+        or metadata.get("source_tool_name")
+        or ""
+    ).strip()
+    if source_tool != str(request.get("tool") or "").strip():
+        return False
+    request_step_id = str(
+        request.get("step_id") or request.get("planner_step_id") or ""
+    ).strip()
+    payload_step_id = str(
+        payload.get("source_step_id") or payload.get("planner_step_id") or ""
+    ).strip()
+    if request_step_id and payload_step_id and request_step_id != payload_step_id:
+        return False
+    input_preview = (
+        metadata.get("input_preview")
+        if isinstance(metadata.get("input_preview"), Mapping)
+        else payload.get("input_preview")
+        if isinstance(payload.get("input_preview"), Mapping)
+        else {}
+    )
+    payload_app_name = str(input_preview.get("app_name") or "").strip()
+    if not payload_app_name:
+        return True
+    request_input = (
+        request.get("input") if isinstance(request.get("input"), Mapping) else {}
+    )
+    return (
+        _strict_canonical_app_identity(payload_app_name)
+        == _strict_canonical_app_identity(
+            str(request_input.get("app_name") or "")
+        )
+    )
+
+
 def _runtime_replan_payload_is_missing_desktop_observation(payload: Mapping[str, Any]) -> bool:
     metadata = payload.get("metadata") if isinstance(payload.get("metadata"), Mapping) else {}
     capability_id = str(
@@ -10069,6 +17623,783 @@ def _flatten_runtime_replan_payloads(
     return payloads
 
 
+_APPROVED_DISPATCH_RECEIPT_ACTIONS = frozenset(
+    {
+        "dispatch_management",
+        "dispatch_shortcut",
+        "dispatch_submit",
+    }
+)
+
+_APPROVAL_DISPATCH_INPUT_CONTEXT_KEYS = frozenset(
+    {
+        "agent_id",
+        "agent_name",
+        "capability_id",
+        "core_id",
+        "decision_id",
+        "group_id",
+        "group_run_id",
+        "intent_kind",
+        "member_agent_id",
+        "member_agent_name",
+        "plan_id",
+        "planner_step_id",
+        "planning_reason",
+        "replan_request_id",
+        "replan_signal_ids",
+        "replan_trigger",
+        "replan_triggers",
+        "requires_observation",
+        "requires_post_action_verification",
+        "run_group_id",
+        "runtime_doctrine",
+        "runtime_execution_envelope",
+        "runtime_execution_metadata",
+        "runtime_role",
+        "runtime_stage",
+        "source",
+        "source_run_id",
+        "source_runnable_id",
+        "source_runnable_name",
+        "step_id",
+        "task_id",
+        "tool_plan_id",
+        "workflow_id",
+        "workflow_node_id",
+        "workflow_node_label",
+        "workflow_run_id",
+        "workspace_id",
+        "yachiyo_execution_envelope",
+    }
+)
+
+
+def _approved_tool_post_action_verification_request(
+    timeline: list[dict[str, Any]],
+    *,
+    allowed_tools: list[str],
+) -> dict[str, Any]:
+    approved_event_index = -1
+    approved_event: Mapping[str, Any] | None = None
+    for index in range(len(timeline) - 1, -1, -1):
+        event = timeline[index]
+        if str(event.get("event") or event.get("event_type") or "").strip() != (
+            "agent.tool.call"
+        ):
+            continue
+        result = event.get("result") if isinstance(event.get("result"), Mapping) else {}
+        if (
+            event.get("approval_resume_result_canonical") is True
+            and event.get("approved") is True
+            and result.get("ok") is True
+            and not result.get("approval_required")
+        ):
+            approved_event_index = index
+            approved_event = event
+            break
+    if approved_event is None:
+        return {}
+
+    tool_name = str(
+        approved_event.get("detail")
+        or approved_event.get("tool")
+        or approved_event.get("tool_name")
+        or ""
+    ).strip()
+    plan_id = str(approved_event.get("plan_id") or "").strip()
+    step_id = str(
+        approved_event.get("step_id") or approved_event.get("planner_step_id") or ""
+    ).strip()
+    request_id = str(approved_event.get("request_id") or "").strip()
+    tool_call_id = str(approved_event.get("tool_call_id") or "").strip()
+    approval_id = str(approved_event.get("approval_id") or "").strip()
+    decision_id = str(approved_event.get("decision_id") or "").strip()
+    if (
+        not tool_name
+        or not decision_id
+        or not plan_id
+        or not step_id
+        or not request_id
+        or not tool_call_id
+        or not approval_id
+    ):
+        # A canonical approval fact without the full production identity can
+        # never establish a dispatch receipt.  It may still be observed by a
+        # generic verifier below, but is deliberately ineligible for the
+        # no-verifier fast path.
+        approval_chain_identity_complete = False
+    else:
+        approval_chain_identity_complete = request_id.startswith(
+            f"{plan_id}:request:"
+        )
+
+    approval_required_event = next(
+        (
+            event
+            for event in reversed(timeline[:approved_event_index])
+            if str(event.get("event") or event.get("event_type") or "").strip()
+            in {
+                "agent.desktop.intent_approval_required",
+                "agent.tool.approval_required",
+            }
+            and str(
+                event.get("detail") or event.get("tool") or event.get("tool_name") or ""
+            ).strip()
+            == tool_name
+            and str(event.get("decision_id") or "").strip() == decision_id
+            and str(event.get("plan_id") or "").strip() == plan_id
+            and str(event.get("step_id") or event.get("planner_step_id") or "").strip()
+            == step_id
+            and str(event.get("approval_id") or "").strip() == approval_id
+        ),
+        None,
+    ) if approval_chain_identity_complete else None
+    pending_tool_event = next(
+        (
+            event
+            for event in reversed(timeline[:approved_event_index])
+            if str(event.get("event") or event.get("event_type") or "").strip()
+            == "agent.tool.call"
+            and str(event.get("detail") or event.get("tool") or "").strip()
+            == tool_name
+            and str(event.get("decision_id") or "").strip() == decision_id
+            and str(event.get("plan_id") or "").strip() == plan_id
+            and str(event.get("step_id") or event.get("planner_step_id") or "").strip()
+            == step_id
+            and str(event.get("request_id") or "").strip() == request_id
+            and str(event.get("tool_call_id") or "").strip() == tool_call_id
+            and isinstance(event.get("result"), Mapping)
+            and event["result"].get("approval_required") is True
+        ),
+        None,
+    ) if approval_chain_identity_complete else None
+    if _runtime_native_receipt_satisfied_action(
+        timeline,
+        tool_timeline_start=approved_event_index + 1,
+        plan_id=plan_id,
+        source_step_id=step_id,
+        source_request_id=request_id,
+        source_tool=tool_name,
+    ):
+        return {}
+
+    input_preview = (
+        approved_event.get("input_preview")
+        if isinstance(approved_event.get("input_preview"), Mapping)
+        else {}
+    )
+    result = (
+        approved_event.get("result")
+        if isinstance(approved_event.get("result"), Mapping)
+        else {}
+    )
+    execution_event = _approved_dispatch_successful_execution_event(
+        timeline,
+        canonical_index=approved_event_index,
+        approval_event=approval_required_event,
+        pending_event=pending_tool_event,
+        decision_id=decision_id,
+        plan_id=plan_id,
+        step_id=step_id,
+        request_id=request_id,
+        tool_call_id=tool_call_id,
+        tool_name=tool_name,
+        canonical_input=input_preview,
+        canonical_result=result,
+    )
+    if execution_event is not None and _approved_tool_has_exact_dispatch_receipt(
+        execution_event,
+        tool_name=tool_name,
+        input_preview=(
+            execution_event.get("input_preview")
+            if isinstance(execution_event.get("input_preview"), Mapping)
+            else {}
+        ),
+        result=(
+            execution_event.get("result")
+            if isinstance(execution_event.get("result"), Mapping)
+            else {}
+        ),
+    ):
+        return {}
+    source_request = {
+        **dict(execution_event or approved_event),
+        "tool": tool_name,
+        "input": dict(
+            execution_event.get("input_preview")
+            if isinstance((execution_event or {}).get("input_preview"), Mapping)
+            else input_preview
+        ),
+        "decision_id": decision_id,
+        "plan_id": plan_id,
+        "step_id": step_id,
+        "planner_step_id": step_id,
+        "request_id": request_id,
+        "tool_call_id": tool_call_id,
+        "approval_id": approval_id,
+        "requires_post_action_verification": True,
+    }
+    return _post_action_verification_request(
+        tool_name,
+        source_request,
+        result,
+        allowed_tools=allowed_tools,
+        remaining_requests=[],
+        active_window_target=None,
+    )
+
+
+def _approved_dispatch_successful_execution_event(
+    timeline: list[dict[str, Any]],
+    *,
+    canonical_index: int,
+    approval_event: Mapping[str, Any] | None,
+    pending_event: Mapping[str, Any] | None,
+    decision_id: str,
+    plan_id: str,
+    step_id: str,
+    request_id: str,
+    tool_call_id: str,
+    tool_name: str,
+    canonical_input: Mapping[str, Any],
+    canonical_result: Mapping[str, Any],
+) -> Mapping[str, Any] | None:
+    """Return the real executor event that closes an approval dispatch chain."""
+
+    if approval_event is None or pending_event is None:
+        return None
+    approval_index = next(
+        (index for index, event in enumerate(timeline) if event is approval_event),
+        -1,
+    )
+    pending_index = next(
+        (index for index, event in enumerate(timeline) if event is pending_event),
+        -1,
+    )
+    if not (0 <= pending_index < approval_index < canonical_index):
+        return None
+    canonical_input_signature = _dispatch_tool_input_signature(
+        tool_name,
+        canonical_input,
+    )
+    pending_input = (
+        pending_event.get("input_preview")
+        if isinstance(pending_event.get("input_preview"), Mapping)
+        else {}
+    )
+    approval_input = (
+        approval_event.get("input_preview")
+        if isinstance(approval_event.get("input_preview"), Mapping)
+        else {}
+    )
+    if (
+        not canonical_input_signature
+        or _dispatch_tool_input_signature(tool_name, pending_input)
+        != canonical_input_signature
+        or _dispatch_tool_input_signature(tool_name, approval_input)
+        != canonical_input_signature
+    ):
+        return None
+    expected_identity = {
+        "decision_id": decision_id,
+        "plan_id": plan_id,
+        "step_id": step_id,
+        "request_id": request_id,
+        "tool_call_id": tool_call_id,
+    }
+    for event in reversed(timeline[approval_index + 1 : canonical_index]):
+        if str(event.get("event") or event.get("event_type") or "").strip() != (
+            "agent.tool.call"
+        ):
+            continue
+        if event.get("approval_resume_result_canonical") is True:
+            continue
+        event_tool = str(
+            event.get("detail") or event.get("tool") or event.get("tool_name") or ""
+        ).strip()
+        if event_tool != tool_name:
+            continue
+        if any(
+            str(event.get(key) or "").strip() != value
+            for key, value in expected_identity.items()
+        ):
+            continue
+        event_input = (
+            event.get("input_preview")
+            if isinstance(event.get("input_preview"), Mapping)
+            else {}
+        )
+        event_result = (
+            event.get("result")
+            if isinstance(event.get("result"), Mapping)
+            else {}
+        )
+        if _dispatch_tool_input_signature(tool_name, event_input) != (
+            canonical_input_signature
+        ):
+            continue
+        if dict(event_result) != dict(canonical_result):
+            continue
+        return event
+    return None
+
+
+def _approved_tool_has_exact_dispatch_receipt(
+    execution_event: Mapping[str, Any],
+    *,
+    tool_name: str,
+    input_preview: Mapping[str, Any],
+    result: Mapping[str, Any],
+) -> bool:
+    action_target = (
+        execution_event.get("action_target")
+        if isinstance(execution_event.get("action_target"), Mapping)
+        else {}
+    )
+    dispatch_action = str(action_target.get("action") or "").strip()
+    if dispatch_action not in _APPROVED_DISPATCH_RECEIPT_ACTIONS:
+        return False
+    execution_step_id = str(
+        execution_event.get("step_id")
+        or execution_event.get("planner_step_id")
+        or ""
+    ).strip()
+    if dispatch_action == "dispatch_management":
+        if dict(action_target) != {"action": "dispatch_management"}:
+            return False
+    elif (
+        not execution_step_id
+        or str(action_target.get("step_id") or "").strip() != execution_step_id
+    ):
+        return False
+    if dispatch_action != _dispatch_action_for_tool_input(tool_name, input_preview):
+        return False
+    if (
+        result.get("ok") is not True
+        or result.get("approval_required")
+        or str(result.get("action") or "").strip() != tool_name
+    ):
+        return False
+
+    data = result.get("data") if isinstance(result.get("data"), Mapping) else {}
+    if dispatch_action == "dispatch_shortcut":
+        if tool_name == "desktop.safe_key":
+            requested_action = str(input_preview.get("action") or "").strip().lower()
+            return bool(
+                str(data.get("key_action") or "").strip().lower() == requested_action
+                and data.get("repeat_count") == input_preview.get("repeat_count", 1)
+            )
+        if tool_name == "desktop.safe_scroll":
+            return bool(
+                str(data.get("direction") or "").strip().lower()
+                == str(input_preview.get("direction") or "").strip().lower()
+                and data.get("pages") == input_preview.get("pages", 1)
+            )
+        if tool_name == "desktop.safe_click":
+            return bool(
+                data.get("x") == input_preview.get("x")
+                and data.get("y") == input_preview.get("y")
+                and data.get("click_count") == 1
+                and data.get("explicit_user_coordinates") is True
+            )
+        requested_action = str(input_preview.get("action") or "").strip()
+        if is_semantic_safe_shortcut(tool_name, input_preview):
+            return False
+        if requested_action:
+            receipt_action = str(
+                data.get("shortcut_action") or data.get("requested_action") or ""
+            ).strip()
+            return bool(receipt_action and receipt_action == requested_action)
+        requested_key = str(input_preview.get("key") or "").strip().casefold()
+        receipt_key = str(data.get("key") or "").strip().casefold()
+        if not requested_key or receipt_key != requested_key:
+            return False
+        return _dispatch_receipt_modifiers(data.get("modifiers")) == (
+            _dispatch_receipt_modifiers(input_preview.get("modifiers"))
+        )
+    if dispatch_action == "dispatch_submit":
+        if tool_name == "desktop.search_submit":
+            return _dispatch_key_receipt(data, key="return", modifiers=())
+        requested_action = str(input_preview.get("action") or "submit").strip().lower()
+        receipt_action = str(data.get("submit_action") or "").strip().lower()
+        return bool(
+            receipt_action == requested_action
+            and _dispatch_key_receipt(data, key="return", modifiers=())
+        )
+    expected_management = {
+        "desktop.hide_app": ("h", ("command",)),
+        "desktop.minimize_window": ("m", ("command",)),
+        "desktop.close_window": ("w", ("command",)),
+        "desktop.quit_app": ("q", ("command",)),
+    }.get(tool_name)
+    return bool(
+        expected_management
+        and _dispatch_key_receipt(
+            data,
+            key=expected_management[0],
+            modifiers=expected_management[1],
+        )
+    )
+
+
+def _dispatch_action_for_tool_input(
+    tool_name: str,
+    input_preview: Mapping[str, Any],
+) -> str:
+    clean_tool = str(tool_name or "").strip()
+    if clean_tool in {
+        "desktop.hide_app",
+        "desktop.minimize_window",
+        "desktop.close_window",
+        "desktop.quit_app",
+    }:
+        return (
+            "dispatch_management"
+            if _dispatch_tool_input_signature(clean_tool, input_preview)
+            else ""
+        )
+    if clean_tool in {"desktop.search_submit", "desktop.submit_foreground"}:
+        return (
+            "dispatch_submit"
+            if _dispatch_tool_input_signature(clean_tool, input_preview)
+            else ""
+        )
+    return "dispatch_shortcut" if _dispatch_tool_input_signature(clean_tool, input_preview) else ""
+
+
+def _dispatch_tool_input_signature(
+    tool_name: str,
+    input_preview: Mapping[str, Any],
+) -> tuple[Any, ...]:
+    clean_tool = str(tool_name or "").strip()
+    if clean_tool in {"desktop.hotkey", "desktop.shortcut"}:
+        if not _dispatch_input_has_only(input_preview, {"key", "modifiers"}):
+            return ()
+        key = str(input_preview.get("key") or "").strip().casefold()
+        return (
+            clean_tool,
+            key,
+            _dispatch_receipt_modifiers(input_preview.get("modifiers")),
+        ) if key else ()
+    if clean_tool == "desktop.safe_shortcut":
+        if is_semantic_safe_shortcut(clean_tool, input_preview):
+            return ()
+        if not _dispatch_input_has_only(input_preview, {"action"}):
+            return ()
+        action = str(input_preview.get("action") or "").strip().lower()
+        return (clean_tool, action) if action else ()
+    if clean_tool == "desktop.safe_key":
+        if not _dispatch_input_has_only(input_preview, {"action", "repeat_count"}):
+            return ()
+        action = str(input_preview.get("action") or "").strip().lower()
+        repeat_count = input_preview.get("repeat_count", 1)
+        return (clean_tool, action, repeat_count) if action else ()
+    if clean_tool == "desktop.safe_scroll":
+        if not _dispatch_input_has_only(input_preview, {"direction", "pages"}):
+            return ()
+        direction = str(input_preview.get("direction") or "").strip().lower()
+        pages = input_preview.get("pages", 1)
+        return (clean_tool, direction, pages) if direction in {"up", "down"} else ()
+    if clean_tool == "desktop.safe_click":
+        if not _dispatch_input_has_only(input_preview, {"x", "y"}):
+            return ()
+        x = input_preview.get("x")
+        y = input_preview.get("y")
+        return (clean_tool, x, y) if x is not None and y is not None else ()
+    if clean_tool in {
+        "desktop.hide_app",
+        "desktop.minimize_window",
+        "desktop.close_window",
+        "desktop.quit_app",
+        "desktop.search_submit",
+    }:
+        return (
+            (clean_tool,)
+            if _dispatch_input_has_only(input_preview, set())
+            else ()
+        )
+    if clean_tool == "desktop.submit_foreground":
+        if not _dispatch_input_has_only(input_preview, {"action"}):
+            return ()
+        action = str(input_preview.get("action") or "submit").strip().lower()
+        return (clean_tool, action) if action in {"send", "submit", "confirm"} else ()
+    return ()
+
+
+def _dispatch_input_has_only(
+    input_preview: Mapping[str, Any],
+    executable_keys: set[str],
+) -> bool:
+    return set(input_preview).issubset(
+        executable_keys | _APPROVAL_DISPATCH_INPUT_CONTEXT_KEYS
+    )
+
+
+def _dispatch_key_receipt(
+    data: Mapping[str, Any],
+    *,
+    key: str,
+    modifiers: Iterable[str],
+) -> bool:
+    return bool(
+        str(data.get("key") or "").strip().casefold() == str(key).casefold()
+        and _dispatch_receipt_modifiers(data.get("modifiers"))
+        == _dispatch_receipt_modifiers(list(modifiers))
+    )
+
+
+def _dispatch_receipt_modifiers(value: Any) -> tuple[str, ...]:
+    return tuple(sorted(item.casefold() for item in _string_list(value)))
+
+
+def _runtime_planner_completed_exact_verified_discovery_action_chain(
+    planned_tool_requests: Iterable[Mapping[str, Any]],
+    timeline: list[dict[str, Any]],
+    *,
+    tool_timeline_start: int,
+) -> bool:
+    requests = [request for request in planned_tool_requests if isinstance(request, Mapping)]
+    if not requests:
+        return False
+    discovery_requests = [
+        request
+        for request in requests
+        if str(request.get("tool") or "").strip() in _DAILY_DESKTOP_DISCOVERY_TOOLS
+        and str(request.get("tool") or "").strip() not in _DAILY_DESKTOP_VERIFY_TOOLS
+    ]
+    verification_requests = [
+        request
+        for request in requests
+        if str(request.get("tool") or "").strip() in _DAILY_DESKTOP_VERIFY_TOOLS
+    ]
+    action_requests = [
+        request
+        for request in requests
+        if request not in discovery_requests and request not in verification_requests
+    ]
+    if not discovery_requests or len(action_requests) != 1:
+        return False
+    if len(discovery_requests) + len(verification_requests) + len(action_requests) != len(
+        requests
+    ):
+        return False
+    action_request = action_requests[0]
+    action_tool = str(action_request.get("tool") or "").strip()
+    if action_tool not in _DIRECT_DAILY_DESKTOP_TOOLS:
+        return False
+    if (
+        str(action_request.get("source") or "").strip() != "runtime_planner"
+        or str(action_request.get("risk_level") or "").strip() != "low"
+        or bool(action_request.get("approval_required"))
+        or action_request.get("requires_post_action_verification") is not True
+    ):
+        return False
+
+    plan_ids = {str(request.get("plan_id") or "").strip() for request in requests}
+    if len(plan_ids) != 1 or not next(iter(plan_ids)):
+        return False
+    plan_id = next(iter(plan_ids))
+    for request in requests:
+        tool_name = str(request.get("tool") or "").strip()
+        if tool_name in _DAILY_DESKTOP_VERIFY_TOOLS:
+            continue
+        if _exact_runtime_planner_tool_event(
+            request,
+            timeline,
+            tool_timeline_start=tool_timeline_start,
+        ) is None:
+            return False
+
+    action_step_id = str(
+        action_request.get("step_id") or action_request.get("planner_step_id") or ""
+    ).strip()
+    action_request_id = str(action_request.get("request_id") or "").strip()
+    if not action_step_id or not action_request_id:
+        return False
+    return _runtime_native_receipt_satisfied_action(
+        timeline,
+        tool_timeline_start=tool_timeline_start,
+        plan_id=plan_id,
+        source_step_id=action_step_id,
+        source_request_id=action_request_id,
+        source_tool=action_tool,
+    )
+
+
+def _exact_runtime_planner_tool_event(
+    request: Mapping[str, Any],
+    timeline: list[dict[str, Any]],
+    *,
+    tool_timeline_start: int,
+) -> Mapping[str, Any] | None:
+    tool_name = str(request.get("tool") or "").strip()
+    plan_id = str(request.get("plan_id") or "").strip()
+    step_id = str(request.get("step_id") or request.get("planner_step_id") or "").strip()
+    request_id = str(request.get("request_id") or "").strip()
+    if not tool_name or not plan_id or not step_id or not request_id:
+        return None
+    if not request_id.startswith(f"{plan_id}:request:"):
+        return None
+    for event in reversed(timeline[max(0, int(tool_timeline_start or 0)) :]):
+        if str(event.get("event") or event.get("event_type") or "").strip() != (
+            "agent.tool.call"
+        ):
+            continue
+        if str(event.get("detail") or event.get("tool") or "").strip() != tool_name:
+            continue
+        if str(event.get("plan_id") or "").strip() != plan_id:
+            continue
+        if str(event.get("step_id") or event.get("planner_step_id") or "").strip() != step_id:
+            continue
+        if str(event.get("request_id") or "").strip() != request_id:
+            continue
+        result = event.get("result") if isinstance(event.get("result"), Mapping) else {}
+        if result.get("ok") is True and not result.get("approval_required"):
+            return event
+    return None
+
+
+def _latest_exact_runtime_planner_tool_event(
+    request: Mapping[str, Any],
+    timeline: list[dict[str, Any]],
+    *,
+    tool_timeline_start: int,
+) -> Mapping[str, Any] | None:
+    tool_name = str(request.get("tool") or "").strip()
+    plan_id = str(request.get("plan_id") or "").strip()
+    step_id = str(request.get("step_id") or request.get("planner_step_id") or "").strip()
+    request_id = str(request.get("request_id") or "").strip()
+    if not tool_name or not plan_id or not step_id or not request_id:
+        return None
+    if not request_id.startswith(f"{plan_id}:request:"):
+        return None
+    for event in reversed(timeline[max(0, int(tool_timeline_start or 0)) :]):
+        if str(event.get("event") or event.get("event_type") or "").strip() != (
+            "agent.tool.call"
+        ):
+            continue
+        if str(event.get("detail") or event.get("tool") or "").strip() != tool_name:
+            continue
+        if str(event.get("plan_id") or "").strip() != plan_id:
+            continue
+        if str(event.get("step_id") or event.get("planner_step_id") or "").strip() != step_id:
+            continue
+        if str(event.get("request_id") or "").strip() != request_id:
+            continue
+        return event
+    return None
+
+
+def _latest_scoped_runtime_tool_event(
+    request: Mapping[str, Any],
+    timeline: list[dict[str, Any]],
+    *,
+    tool_timeline_start: int,
+) -> Mapping[str, Any] | None:
+    exact_event = _latest_exact_runtime_planner_tool_event(
+        request,
+        timeline,
+        tool_timeline_start=tool_timeline_start,
+    )
+    if exact_event is not None:
+        return exact_event
+    if any(
+        str(request.get(key) or "").strip()
+        for key in ("plan_id", "step_id", "planner_step_id", "request_id")
+    ):
+        return None
+    tool_name = str(request.get("tool") or "").strip()
+    source = str(request.get("source") or "").strip()
+    planning_reason = str(request.get("planning_reason") or "").strip()
+    if not tool_name or not source or not planning_reason:
+        return None
+    if not (
+        (source == "daily_desktop_metadata" and planning_reason == "structured_recovery_metadata")
+        or (
+            source == "runtime_verification"
+            and planning_reason.startswith("runtime_")
+            and planning_reason.endswith("_verification")
+        )
+    ):
+        return None
+    request_input = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+    target_app_name = str(request.get("target_app_name") or "").strip()
+    for event in reversed(timeline[max(0, int(tool_timeline_start or 0)) :]):
+        if str(event.get("event") or event.get("event_type") or "").strip() != (
+            "agent.tool.call"
+        ):
+            continue
+        if str(event.get("detail") or event.get("tool") or "").strip() != tool_name:
+            continue
+        if str(event.get("source") or "").strip() != source:
+            continue
+        if str(event.get("planning_reason") or "").strip() != planning_reason:
+            continue
+        event_input = (
+            event.get("input_preview")
+            if isinstance(event.get("input_preview"), Mapping)
+            else {}
+        )
+        if any(
+            str(event_input.get(key) or "").strip()
+            != str(request_input.get(key) or "").strip()
+            for key in ("app_name", "action", "target", "path", "url")
+            if str(request_input.get(key) or "").strip()
+        ):
+            continue
+        if target_app_name and str(event.get("target_app_name") or "").strip() != target_app_name:
+            continue
+        return event
+    return None
+
+
+def _runtime_native_receipt_satisfied_action(
+    timeline: list[dict[str, Any]],
+    *,
+    tool_timeline_start: int,
+    plan_id: str,
+    source_step_id: str,
+    source_request_id: str,
+    source_tool: str,
+) -> bool:
+    for event in timeline[max(0, int(tool_timeline_start or 0)) :]:
+        if str(event.get("event") or event.get("event_type") or "").strip() != (
+            "agent.post_action_verification.satisfied"
+        ):
+            continue
+        if str(event.get("source") or "").strip() != "runtime_native_postcondition_receipt":
+            continue
+        if str(event.get("plan_id") or "").strip() != plan_id:
+            continue
+        verifier_step_id = str(
+            event.get("step_id") or event.get("planner_step_id") or ""
+        ).strip()
+        verifier_request_id = str(event.get("request_id") or "").strip()
+        if not verifier_step_id or not verifier_request_id:
+            continue
+        if (
+            not verifier_request_id.startswith(f"{plan_id}:request:")
+            or verifier_request_id == source_request_id
+        ):
+            continue
+        result = event.get("result") if isinstance(event.get("result"), Mapping) else {}
+        event_source_request_id = str(
+            event.get("source_request_id") or result.get("source_request_id") or ""
+        ).strip()
+        if event_source_request_id and event_source_request_id != source_request_id:
+            continue
+        if (
+            result.get("ok") is True
+            and result.get("postcondition_verified") is True
+            and result.get("verification_satisfied_by_native_receipt") is True
+            and str(result.get("source_step_id") or "").strip() == source_step_id
+            and str(result.get("source_tool") or "").strip() == source_tool
+        ):
+            return True
+    return False
+
+
 def _runtime_planner_completed_terminal_direct_requests_with_trailing_verification(
     planned_tool_requests: Iterable[Mapping[str, Any]],
     timeline: list[dict[str, Any]],
@@ -10167,6 +18498,251 @@ def _runtime_planner_completed_terminal_direct_requests_with_verification_replan
     )
 
 
+def _runtime_planner_trailing_verification_failure_outcome(
+    planned_tool_requests: Iterable[Mapping[str, Any]],
+    replan_payloads: Iterable[Mapping[str, Any]],
+    timeline: list[dict[str, Any]],
+    *,
+    tool_timeline_start: int,
+) -> dict[str, Any] | None:
+    requests = [request for request in planned_tool_requests if isinstance(request, Mapping)]
+    if not requests:
+        return None
+    plan_ids = {str(request.get("plan_id") or "").strip() for request in requests}
+    if len(plan_ids) != 1:
+        return None
+
+    primary_index = -1
+    primary_request: Mapping[str, Any] | None = None
+    for index, request in enumerate(requests):
+        tool_name = str(request.get("tool") or "").strip()
+        if (
+            tool_name in _DIRECT_DAILY_DESKTOP_TOOLS
+            and tool_name not in _DAILY_DESKTOP_DISCOVERY_TOOLS
+            and tool_name not in _DAILY_DESKTOP_VERIFY_TOOLS
+        ):
+            primary_index = index
+            primary_request = request
+    if primary_index < 0 or primary_request is None:
+        return None
+    primary_tool = str(primary_request.get("tool") or "").strip()
+    if primary_tool in _DIRECT_DAILY_DESKTOP_TERMINAL_ACTION_TOOLS:
+        return None
+    primary_event = _latest_scoped_runtime_tool_event(
+        primary_request,
+        timeline,
+        tool_timeline_start=tool_timeline_start,
+    )
+    if primary_event is None:
+        return None
+
+    trailing_requests = requests[primary_index + 1 :]
+    if not trailing_requests or any(
+        str(request.get("tool") or "").strip()
+        not in {*_DAILY_DESKTOP_DISCOVERY_TOOLS, *_DAILY_DESKTOP_VERIFY_TOOLS}
+        for request in trailing_requests
+    ):
+        return None
+    verification_requests = [
+        request
+        for request in trailing_requests
+        if str(request.get("tool") or "").strip() in _DAILY_DESKTOP_VERIFY_TOOLS
+    ]
+    if not verification_requests:
+        return None
+    if not next(iter(plan_ids)):
+        if not (
+            str(primary_request.get("source") or "").strip() == "daily_desktop_metadata"
+            and str(primary_request.get("planning_reason") or "").strip()
+            == "structured_recovery_metadata"
+            and all(
+                str(request.get("source") or "").strip() == "runtime_verification"
+                for request in verification_requests
+            )
+        ):
+            return None
+    verification_tools = {
+        str(request.get("tool") or "").strip() for request in verification_requests
+    }
+
+    payloads: list[Mapping[str, Any]] = []
+    for payload in replan_payloads:
+        if not isinstance(payload, Mapping):
+            continue
+        nested_requests = (
+            payload.get("replan_requests")
+            if isinstance(payload.get("replan_requests"), list)
+            else []
+        )
+        payloads.extend(item for item in nested_requests if isinstance(item, Mapping))
+        if _runtime_replan_payload_tool_candidates(payload):
+            payloads.append(payload)
+    if not payloads or not all(
+        _runtime_replan_payload_is_trailing_verification_failure(
+            payload,
+            verification_tools,
+        )
+        for payload in payloads
+    ):
+        return None
+
+    primary_step_id = str(
+        primary_request.get("step_id") or primary_request.get("planner_step_id") or ""
+    ).strip()
+    failed_verifier_event: Mapping[str, Any] | None = None
+    for verification_request in verification_requests:
+        dependency_ids = {
+            str(step_id or "").strip()
+            for step_id in verification_request.get("depends_on", [])
+            if str(step_id or "").strip()
+        }
+        desktop_loop = (
+            verification_request.get("desktop_loop")
+            if isinstance(verification_request.get("desktop_loop"), Mapping)
+            else {}
+        )
+        dependency_ids.update(
+            str(step_id or "").strip()
+            for step_id in desktop_loop.get("verification_target_step_ids", [])
+            if str(step_id or "").strip()
+        )
+        if primary_step_id and dependency_ids and primary_step_id not in dependency_ids:
+            continue
+        verifier_event = _latest_scoped_runtime_tool_event(
+            verification_request,
+            timeline,
+            tool_timeline_start=tool_timeline_start,
+        )
+        if verifier_event is None:
+            continue
+        verifier_result = (
+            verifier_event.get("result")
+            if isinstance(verifier_event.get("result"), Mapping)
+            else {}
+        )
+        if verifier_result.get("ok") is False or verifier_result.get(
+            "verification_failed"
+        ) is True:
+            failed_verifier_event = verifier_event
+            break
+    if failed_verifier_event is None:
+        return None
+
+    primary_input = (
+        primary_event.get("input_preview")
+        if isinstance(primary_event.get("input_preview"), Mapping)
+        else primary_request.get("input")
+        if isinstance(primary_request.get("input"), Mapping)
+        else {}
+    )
+    primary_result = (
+        primary_event.get("result")
+        if isinstance(primary_event.get("result"), Mapping)
+        else {}
+    )
+    if primary_tool in {"app.open", "desktop.open_app"}:
+        app_name = _payload_text(primary_result, dict(primary_input), "app_name")
+        target = _display_target_name(app_name, "的请求")
+        summary = (
+            f"已向 macOS 发送打开{target}，但未能确认它已成为前台应用；请确认后重试。"
+            if target
+            else "已发送打开应用的请求，但未能确认它已成为前台应用；请确认后重试。"
+        )
+    else:
+        action_summary = str(primary_result.get("summary") or "已执行桌面操作").strip().rstrip(
+            "。"
+        )
+        summary = f"{action_summary}，但后续验证失败；请确认后重试。"
+    return {
+        "summary": summary,
+        "tool": primary_tool,
+        "input_preview": dict(primary_input),
+        "tool_call_id": str(
+            primary_event.get("tool_call_id") or primary_event.get("id") or ""
+        ).strip(),
+    }
+
+
+def _runtime_clipboard_transfer_verification_failure(
+    timeline: list[dict[str, Any]],
+    *,
+    tool_timeline_start: int,
+) -> dict[str, Any] | None:
+    """Project an exact copy/paste readback failure as an honest direct result."""
+
+    failure_reasons = {
+        "clipboard_copy_source_unbound",
+        "clipboard_copy_source_unverified",
+        "clipboard_paste_source_or_readback_unverified",
+    }
+    verifier_event: Mapping[str, Any] | None = None
+    verifier_result: Mapping[str, Any] = {}
+    for event in reversed(timeline[max(0, int(tool_timeline_start or 0)) :]):
+        if str(event.get("event") or event.get("event_type") or "").strip() != (
+            "agent.tool.call"
+        ):
+            continue
+        result = event.get("result") if isinstance(event.get("result"), Mapping) else {}
+        if (
+            result.get("verification_failed") is True
+            and str(result.get("reason") or "").strip() in failure_reasons
+        ):
+            verifier_event = event
+            verifier_result = result
+            break
+    if verifier_event is None:
+        return None
+    source_tool_call_id = str(
+        verifier_result.get("source_tool_call_id")
+        or verifier_event.get("source_tool_call_id")
+        or ""
+    ).strip()
+    if not source_tool_call_id:
+        return None
+    source_event = next(
+        (
+            event
+            for event in reversed(
+                timeline[max(0, int(tool_timeline_start or 0)) :]
+            )
+            if str(event.get("event") or event.get("event_type") or "").strip()
+            == "agent.tool.call"
+            and str(event.get("tool_call_id") or "").strip()
+            == source_tool_call_id
+        ),
+        None,
+    )
+    if source_event is None:
+        return None
+    source_tool = str(
+        source_event.get("detail") or source_event.get("tool") or ""
+    ).strip()
+    source_input = (
+        source_event.get("input_preview")
+        if isinstance(source_event.get("input_preview"), Mapping)
+        else {}
+    )
+    action = str(source_input.get("action") or "").strip().lower()
+    if source_tool not in {
+        "desktop.safe_shortcut",
+        "desktop.shortcut",
+        "app.open_and_safe_shortcut",
+        "app.focus_and_safe_shortcut",
+    } or action not in {"copy", "paste"}:
+        return None
+    summary = (
+        "已执行复制，但无法确认剪贴板内容来自当前选区；任务已停止。"
+        if action == "copy"
+        else "已执行粘贴，但无法确认剪贴板内容与目标输入框回读一致；任务已停止。"
+    )
+    return {
+        "summary": summary,
+        "tool": source_tool,
+        "input_preview": dict(source_input),
+        "tool_call_id": source_tool_call_id,
+    }
+
+
 def _runtime_planner_followup_requests_are_only_verification(
     planned_tool_requests: Iterable[Mapping[str, Any]],
 ) -> bool:
@@ -10213,8 +18789,29 @@ def _runtime_planner_completed_direct_requests_with_successful_verification(
         )
     ]
     if not primary_indexes:
-        return False
+        # A full direct plan can be executed in multiple Runner batches.  The
+        # operate batch may already have produced a strictly correlated native
+        # receipt, allowing the later verifier batch to project a satisfied
+        # verification without repeating the OS read.  That projection is the
+        # terminal evidence; it must not trigger a model call merely because
+        # the primary request lives in an earlier batch.
+        return _runtime_planner_native_receipt_satisfied_verifications(
+            requests,
+            timeline,
+            tool_timeline_start=tool_timeline_start,
+        )
     last_primary_index = primary_indexes[-1]
+    verification_requests = [
+        request
+        for request in requests[last_primary_index + 1 :]
+        if str(request.get("tool") or "").strip() in _DAILY_DESKTOP_VERIFY_TOOLS
+    ]
+    if verification_requests and _runtime_planner_native_receipt_satisfied_verifications(
+        verification_requests,
+        timeline,
+        tool_timeline_start=tool_timeline_start,
+    ):
+        return True
     if not all(
         _runtime_planner_tool_request_completed(
             requests[index],
@@ -10224,11 +18821,6 @@ def _runtime_planner_completed_direct_requests_with_successful_verification(
         for index in primary_indexes
     ):
         return False
-    verification_requests = [
-        request
-        for request in requests[last_primary_index + 1 :]
-        if str(request.get("tool") or "").strip() in _DAILY_DESKTOP_VERIFY_TOOLS
-    ]
     if not verification_requests:
         return False
     return all(
@@ -10239,6 +18831,67 @@ def _runtime_planner_completed_direct_requests_with_successful_verification(
         )
         for request in verification_requests
     )
+
+
+def _runtime_planner_native_receipt_satisfied_verifications(
+    requests: list[Mapping[str, Any]],
+    timeline: list[dict[str, Any]],
+    *,
+    tool_timeline_start: int,
+) -> bool:
+    verification_requests = [
+        request
+        for request in requests
+        if str(request.get("tool") or request.get("tool_name") or "").strip()
+        in _DAILY_DESKTOP_VERIFY_TOOLS
+    ]
+    if not verification_requests:
+        return False
+    if any(
+        str(request.get("tool") or request.get("tool_name") or "").strip()
+        not in {*_DAILY_DESKTOP_DISCOVERY_TOOLS, *_DAILY_DESKTOP_VERIFY_TOOLS}
+        for request in requests
+    ):
+        return False
+    events = timeline[max(0, int(tool_timeline_start or 0)) :]
+    for request in verification_requests:
+        tool_name = str(
+            request.get("tool") or request.get("tool_name") or ""
+        ).strip()
+        plan_id = str(request.get("plan_id") or "").strip()
+        step_id = str(
+            request.get("step_id") or request.get("planner_step_id") or ""
+        ).strip()
+        if not plan_id or not step_id:
+            return False
+        matched = False
+        for event in events:
+            if str(event.get("event") or event.get("event_type") or "").strip() != (
+                "agent.post_action_verification.satisfied"
+            ):
+                continue
+            event_tool = str(
+                event.get("detail") or event.get("tool") or event.get("tool_name") or ""
+            ).strip()
+            if event_tool != tool_name:
+                continue
+            if str(event.get("plan_id") or "").strip() != plan_id:
+                continue
+            if str(
+                event.get("step_id") or event.get("planner_step_id") or ""
+            ).strip() != step_id:
+                continue
+            result = event.get("result") if isinstance(event.get("result"), Mapping) else {}
+            if (
+                result.get("ok") is True
+                and result.get("postcondition_verified") is True
+                and result.get("verification_satisfied_by_native_receipt") is True
+            ):
+                matched = True
+                break
+        if not matched:
+            return False
+    return True
 
 
 def _runtime_planner_direct_verification_request_succeeded(
@@ -11068,6 +19721,12 @@ def _runtime_planner_verification_failure_payloads(
             tool_events[: max(0, event_index - 1)],
             tool_event,
         )
+        if _runtime_planner_native_receipt_satisfies_verification(
+            tool_events[: max(0, event_index - 1)],
+            tool_event,
+            result,
+        ):
+            continue
         target_missing = False
         if _runtime_planner_verification_requires_exact_target_match(
             tool_events[: max(0, event_index - 1)],
@@ -11127,6 +19786,55 @@ def _runtime_planner_verification_failure_payloads(
         )
         payloads.append(payload)
     return payloads
+
+
+def _runtime_planner_native_receipt_satisfies_verification(
+    prior_events: Iterable[Mapping[str, Any]],
+    verifier_event: Mapping[str, Any],
+    result: Mapping[str, Any],
+) -> bool:
+    if (
+        str(verifier_event.get("source") or "").strip()
+        != "runtime_native_postcondition_receipt"
+        or result.get("ok") is not True
+        or result.get("postcondition_verified") is not True
+        or result.get("verification_satisfied_by_native_receipt") is not True
+    ):
+        return False
+    source_call_id = str(result.get("source_tool_call_id") or "").strip()
+    source_tool = str(result.get("source_tool") or "").strip()
+    source_step_id = str(result.get("source_step_id") or "").strip()
+    if not source_call_id or not source_tool or not source_step_id:
+        return False
+    for key, expected in (
+        ("source_tool_call_id", source_call_id),
+        ("source_step_id", source_step_id),
+    ):
+        claimed = str(verifier_event.get(key) or "").strip()
+        if claimed != expected:
+            return False
+    verifier_plan_id = str(verifier_event.get("plan_id") or "").strip()
+    for event in reversed(list(prior_events)):
+        if str(event.get("event") or "").strip() != "agent.tool.call":
+            continue
+        if str(event.get("tool_call_id") or "").strip() != source_call_id:
+            continue
+        if str(event.get("detail") or event.get("tool") or "").strip() != source_tool:
+            return False
+        if str(event.get("step_id") or event.get("planner_step_id") or "").strip() != (
+            source_step_id
+        ):
+            return False
+        source_plan_id = str(event.get("plan_id") or "").strip()
+        if (verifier_plan_id or source_plan_id) and (
+            not verifier_plan_id or verifier_plan_id != source_plan_id
+        ):
+            return False
+        source_result = (
+            event.get("result") if isinstance(event.get("result"), Mapping) else {}
+        )
+        return source_result.get("ok") is True
+    return False
 
 
 def _runtime_planner_verification_context(
@@ -11470,6 +20178,161 @@ def _runtime_planner_unavailable_failure_payloads(decision: Any) -> list[dict[st
     return payloads
 
 
+def _goal_contract_requires_effectful_execution(
+    contract: GoalContract | None,
+) -> bool:
+    return bool(
+        contract is not None
+        and any(
+            criterion.required
+            and (criterion.effectful or not criterion.response_satisfiable)
+            for criterion in contract.criteria
+        )
+    )
+
+
+def _runtime_planner_unavailable_goal_payload(
+    decision: Any,
+    unavailable_payloads: Iterable[Mapping[str, Any]],
+    replan_payloads: Iterable[Mapping[str, Any]],
+    *,
+    goal_contract: GoalContract | None,
+    run_id: str,
+) -> dict[str, Any]:
+    failures = [
+        dict(payload)
+        for payload in unavailable_payloads
+        if isinstance(payload, Mapping)
+    ]
+    replans = [
+        dict(payload)
+        for payload in replan_payloads
+        if isinstance(payload, Mapping)
+    ]
+    plan = getattr(decision, "plan", None)
+    missing_capabilities = _ordered_text_list(
+        str(payload.get("capability_id") or "").strip()
+        for payload in failures
+    )
+    missing_tools = _ordered_text_list(
+        str(
+            payload.get("tool_name")
+            or (
+                payload.get("metadata", {}).get("planned_tool_name")
+                if isinstance(payload.get("metadata"), Mapping)
+                else ""
+            )
+            or ""
+        ).strip()
+        for payload in failures
+    )
+    missing_permissions = _ordered_text_list(
+        permission
+        for payload in failures
+        for permission in _string_list(
+            (
+                payload.get("metadata", {}).get("missing_permissions")
+                if isinstance(payload.get("metadata"), Mapping)
+                else []
+            )
+        )
+    )
+    blocking_conditions = _ordered_text_list(
+        condition
+        for payload in failures
+        for condition in _string_list(
+            (
+                payload.get("metadata", {}).get("blocking_conditions")
+                if isinstance(payload.get("metadata"), Mapping)
+                else []
+            )
+        )
+    )
+    blocked_reason = _runtime_planner_unavailable_blocked_reason(
+        missing_permissions=missing_permissions,
+        blocking_conditions=blocking_conditions,
+        missing_tools=missing_tools,
+        missing_capabilities=missing_capabilities,
+    )
+    payload = {
+        "status": "awaiting_user",
+        "completion_impact": "await_user",
+        "retryable": True,
+        "blocked_reason": blocked_reason,
+        "recommended_action": {
+            "permission": "grant_permission",
+            "install": "install_component",
+            "configuration": "configure_capability",
+            "capability_not_enabled": "enable_capability",
+            "unsupported": "use_supported_workflow",
+        }[blocked_reason],
+        "run_id": str(run_id or "").strip(),
+        "decision_id": str(getattr(decision, "decision_id", "") or "").strip(),
+        "plan_id": str(getattr(plan, "plan_id", "") or "").strip(),
+        "goal_contract_id": str(
+            goal_contract.contract_id if goal_contract is not None else ""
+        ).strip(),
+        "missing_capabilities": missing_capabilities,
+        "missing_tools": missing_tools,
+        "missing_permissions": missing_permissions,
+        "blocking_conditions": blocking_conditions,
+        "blocked_step_ids": _ordered_text_list(
+            str(payload.get("source_step_id") or "").strip()
+            for payload in failures
+        ),
+        "replan_request_ids": _ordered_text_list(
+            str(payload.get("request_id") or "").strip()
+            for payload in replans
+        ),
+        "root_goal_unchanged": True,
+        "actor": "native_runtime",
+        "visibility": "internal",
+        "source": "runtime_planner",
+    }
+    return {
+        key: value
+        for key, value in payload.items()
+        if value not in (None, "", [], {})
+    }
+
+
+def _runtime_planner_unavailable_blocked_reason(
+    *,
+    missing_permissions: list[str],
+    blocking_conditions: list[str],
+    missing_tools: list[str],
+    missing_capabilities: list[str],
+) -> str:
+    normalized_conditions = " ".join(blocking_conditions).casefold()
+    if missing_permissions or "permission" in normalized_conditions:
+        return "permission"
+    if any(token in normalized_conditions for token in ("install", "not_installed")):
+        return "install"
+    if any(
+        token in normalized_conditions
+        for token in ("config", "credential", "provider_required", "not_configured")
+    ):
+        return "configuration"
+    if missing_tools or missing_capabilities:
+        return "capability_not_enabled"
+    return "unsupported"
+
+
+def _runtime_planner_unavailable_user_summary(payload: Mapping[str, Any]) -> str:
+    return {
+        "permission": "任务暂时无法继续：请先授予所需权限，然后重试。",
+        "install": "任务暂时无法继续：请先安装所需组件，然后重试。",
+        "configuration": "任务暂时无法继续：请先完成相关配置，然后重试。",
+        "capability_not_enabled": (
+            "任务暂时无法继续：请先在 Agent 设置中开启所需能力，然后重试。"
+        ),
+        "unsupported": "当前版本暂不支持完成这个任务。",
+    }.get(
+        str(payload.get("blocked_reason") or "").strip(),
+        "任务暂时无法继续，请检查 Agent 设置后重试。",
+    )
+
+
 def _runtime_planner_step_is_ui_verification(step_id: str, tool_name: str) -> bool:
     return (
         str(step_id or "").strip()
@@ -11723,6 +20586,53 @@ def _task_progress_requires_post_action_verification(*values: Any) -> bool:
     return False
 
 
+def _runtime_planner_step_has_following_ui_verification(
+    step_id: str,
+    steps: Iterable[Any],
+    following_tool_events: Iterable[Mapping[str, Any]],
+    *,
+    todos_by_step: Mapping[str, Any] | None = None,
+    checkpoints_by_step: Mapping[str, list[Any]] | None = None,
+) -> bool:
+    for candidate_step in steps:
+        depends_on = _string_list(getattr(candidate_step, "depends_on", None))
+        tool_name = str(getattr(candidate_step, "tool_name", "") or "").strip()
+        if step_id not in depends_on or tool_name not in {
+            "desktop.ui_elements",
+            "desktop.read_ui",
+        }:
+            continue
+        candidate_step_id = str(getattr(candidate_step, "step_id", "") or "").strip()
+        if step_id in _task_progress_verified_step_ids(
+            candidate_step,
+            (todos_by_step or {}).get(candidate_step_id),
+            *(checkpoints_by_step or {}).get(candidate_step_id, []),
+        ):
+            # A declared verifier owns completion of its source step.  Let
+            # its verification-target projection record verifier completion
+            # first and source completion second; look-ahead must not promote
+            # the effectful action from readable UI text alone.
+            return False
+        for event in following_tool_events:
+            event_step_id = str(
+                event.get("step_id") or event.get("planner_step_id") or ""
+            ).strip()
+            if event_step_id and event_step_id != candidate_step_id:
+                continue
+            if not event_step_id and str(event.get("detail") or "").strip() != tool_name:
+                continue
+            result = event.get("result") if isinstance(event.get("result"), Mapping) else {}
+            data = result.get("data") if isinstance(result.get("data"), Mapping) else {}
+            elements = _ui_elements_from_result(result, data)
+            return bool(
+                result.get("ok") is True
+                and not result.get("approval_required")
+                and result.get("verification_failed") is not True
+                and _ui_observation_has_readable_text(result, data, elements)
+            )
+    return False
+
+
 def _task_progress_mapping_requires_post_action_verification(value: Any) -> bool:
     if not isinstance(value, Mapping):
         return False
@@ -11847,7 +20757,19 @@ def _task_progress_verified_step_ids(*values: Any) -> list[str]:
             ids.append(step_id)
     if ids:
         return _ordered_text_list(ids)
-    if _task_progress_runtime_stage(*values) != "verify":
+    runtime_stage = _task_progress_runtime_stage(*values)
+    runtime_role = str(
+        next(
+            (
+                _task_progress_nested_value(value, "runtime_role")
+                for value in values
+                if _task_progress_nested_value(value, "runtime_role")
+            ),
+            "",
+        )
+        or ""
+    ).strip()
+    if runtime_stage != "verify" and runtime_role != "inspect_ui":
         return []
     for value in values:
         depends_on = (
@@ -12039,6 +20961,11 @@ def _task_progress_result_preview(result: Mapping[str, Any]) -> dict[str, Any]:
         "exit_code",
         "blocked_by_user_goal",
         "approval_required",
+        "content_verified",
+        "launch_verified",
+        "postcondition_verified",
+        "verification_passed",
+        "verified",
     ):
         if key in result:
             preview[key] = result.get(key)
@@ -12046,6 +20973,45 @@ def _task_progress_result_preview(result: Mapping[str, Any]) -> dict[str, Any]:
     if stderr:
         preview["stderr"] = stderr[:500]
     return preview
+
+
+_RUNTIME_PLANNER_PROGRESS_EVENT_TYPES = {
+    "agent.task.workspace_item.updated",
+    "agent.task.todo.updated",
+    "agent.task.checkpoint.updated",
+    "agent.replan.recovery.updated",
+}
+
+
+def _runtime_planner_is_progress_event(event_type: str) -> bool:
+    return _runtime_progress_base_event_type(str(event_type or "").strip()) in (
+        _RUNTIME_PLANNER_PROGRESS_EVENT_TYPES
+    )
+
+
+def _runtime_planner_decision_exists(
+    timeline: list[dict[str, Any]],
+    *,
+    decision_id: str,
+    scope_context: Mapping[str, Any] | None,
+) -> bool:
+    expected_scope = _runtime_planner_scope_context(scope_context or {})
+    for event in timeline:
+        if not isinstance(event, Mapping):
+            continue
+        payload = (
+            event.get("payload")
+            if isinstance(event.get("payload"), Mapping)
+            else {}
+        )
+        event_decision_id = str(
+            event.get("decision_id") or payload.get("decision_id") or ""
+        ).strip()
+        if event_decision_id != decision_id:
+            continue
+        if _runtime_planner_scope_context(event) == expected_scope:
+            return True
+    return False
 
 
 def _runtime_planner_initial_task_updates(
@@ -12180,6 +21146,8 @@ def _append_runtime_task_progress_event(
         return
     scoped_event_type = _runtime_progress_event_type(event_type, payload)
     event_payload = _runtime_progress_event_payload(payload, event_type, scoped_event_type)
+    if run_id:
+        event_payload["run_id"] = str(run_id).strip()
     timeline.append(timeline_factory(scoped_event_type, detail, **event_payload))
     if run_id and append_run_event is not None:
         append_run_event(run_id, scoped_event_type, event_payload)
@@ -12257,6 +21225,7 @@ def _runtime_task_update_exists(
     identity = str(payload.get(identity_key) or "").strip() if identity_key else ""
     status = str(payload.get("status") or "").strip()
     decision_id = str(payload.get("decision_id") or "").strip()
+    expected_scope = _runtime_planner_scope_context(payload)
     return any(
         isinstance(event, dict)
         and _runtime_progress_base_event_type(str(event.get("event") or "").strip())
@@ -12300,6 +21269,7 @@ def _runtime_task_update_exists(
             ).strip()
             == status
         )
+        and _runtime_planner_scope_context(event) == expected_scope
         for event in timeline
     )
 
@@ -13030,6 +22000,18 @@ def _selection_payload_has_model_followup_target(
     return False
 
 
+def _only_persists_model_generated_artifacts(
+    requests: Iterable[Mapping[str, Any]],
+) -> bool:
+    items = [request for request in requests if isinstance(request, Mapping)]
+    return bool(items) and all(
+        str(request.get("tool") or "").strip() == "artifact.write"
+        and isinstance(request.get("input"), Mapping)
+        and bool(str(request["input"].get("content") or "").strip())
+        for request in items
+    )
+
+
 def _selection_payload_has_discovered_media_playback_target(
     selection_payload: Mapping[str, Any],
 ) -> bool:
@@ -13642,7 +22624,12 @@ def _auto_replan_app_search_observed_result_requests(
         planning_reason=planning_reason,
     )
     if requests:
-        return _replan_recovery_requests_with_task_context(requests, payloads, timeline)
+        enriched = _replan_recovery_requests_with_task_context(
+            requests,
+            payloads,
+            timeline,
+        )
+        return _drop_replayed_approved_replan_operate_requests(enriched, timeline)
     target = (
         selection_payload.get("followup_target")
         if isinstance(selection_payload.get("followup_target"), Mapping)
@@ -13688,7 +22675,425 @@ def _auto_replan_app_search_observed_result_requests(
         requests,
         selection_payload,
     )
-    return _replan_recovery_requests_with_task_context(requests, payloads, timeline)
+    enriched = _replan_recovery_requests_with_task_context(
+        requests,
+        payloads,
+        timeline,
+    )
+    return _drop_replayed_approved_replan_operate_requests(enriched, timeline)
+
+
+def _drop_replayed_approved_replan_operate_requests(
+    requests: Iterable[Mapping[str, Any]],
+    timeline: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Never replay an approved foreground mutation while replanning.
+
+    Approval resume writes one canonical, identity-bearing tool result.  A later
+    observation/replan may legitimately ask for another verifier, but it must
+    not recreate the already executed operate step.  Matching is deliberately
+    scoped to the exact plan and step plus the structured action signature; no
+    summaries or other free-form text participate in the decision.
+    """
+
+    filtered: list[dict[str, Any]] = []
+    for request in requests:
+        item = dict(request)
+        if not _replan_observed_action_operate_request(item):
+            filtered.append(item)
+            continue
+        if not _canonical_approved_replan_action_state(item, timeline):
+            filtered.append(item)
+    return filtered
+
+
+def _replayed_approved_replan_operate_requests_verified(
+    requests: Iterable[Mapping[str, Any]],
+    timeline: list[dict[str, Any]],
+) -> bool:
+    operate_requests = [
+        request
+        for request in requests
+        if _replan_observed_action_operate_request(request)
+    ]
+    return bool(operate_requests) and all(
+        _canonical_approved_replan_action_state(request, timeline) == "verified"
+        for request in operate_requests
+    )
+
+
+def _replan_observed_action_operate_request(request: Mapping[str, Any]) -> bool:
+    runtime_stage = str(request.get("runtime_stage") or "").strip()
+    runtime_role = str(request.get("runtime_role") or "").strip()
+    action_target = (
+        request.get("action_target")
+        if isinstance(request.get("action_target"), Mapping)
+        else {}
+    )
+    action = str(action_target.get("action") or "").strip()
+    if (
+        runtime_stage == "verify"
+        or runtime_role in {"verify_result", "inspect_ui"}
+        or action == "verify_after_action"
+    ):
+        return False
+    return runtime_stage == "operate" or action in {
+        "click",
+        "click_ui",
+        "type_text",
+        "type_ui",
+    }
+
+
+def _replan_observed_action_verification_request(
+    request: Mapping[str, Any],
+) -> bool:
+    tool_name = str(request.get("tool") or request.get("tool_name") or "").strip()
+    runtime_stage = str(request.get("runtime_stage") or "").strip()
+    runtime_role = str(request.get("runtime_role") or "").strip()
+    action_target = (
+        request.get("action_target")
+        if isinstance(request.get("action_target"), Mapping)
+        else {}
+    )
+    return bool(
+        tool_name in _DAILY_DESKTOP_VERIFY_TOOLS
+        and (
+            runtime_stage == "verify"
+            or runtime_role in {"verify_result", "inspect_ui"}
+            or str(action_target.get("action") or "").strip()
+            == "verify_after_action"
+        )
+    )
+
+
+def _canonical_approved_replan_action_state(
+    request: Mapping[str, Any],
+    timeline: list[dict[str, Any]],
+) -> str:
+    """Return ``executed``/``verified`` for an exact canonical approved action."""
+
+    plan_id = str(request.get("plan_id") or "").strip()
+    step_id = str(
+        request.get("step_id") or request.get("planner_step_id") or ""
+    ).strip()
+    request_tool = str(request.get("tool") or request.get("tool_name") or "").strip()
+    signature = _replan_observed_action_semantic_signature(request)
+    if not plan_id or not step_id or not request_tool or not signature:
+        return ""
+    request_id = str(request.get("request_id") or "").strip()
+    semantic_hotkey = signature[0] == "hotkey"
+    request_tool_call_id = str(request.get("tool_call_id") or "").strip()
+    request_approval_id = str(request.get("approval_id") or "").strip()
+    request_decision_id = str(request.get("decision_id") or "").strip()
+    if semantic_hotkey and not all(
+        (request_id, request_tool_call_id, request_approval_id)
+    ):
+        return ""
+
+    canonical_index = -1
+    for index in range(len(timeline) - 1, -1, -1):
+        event = timeline[index]
+        if str(event.get("event") or event.get("event_type") or "").strip() != (
+            "agent.tool.call"
+        ):
+            continue
+        result = event.get("result") if isinstance(event.get("result"), Mapping) else {}
+        if (
+            event.get("approval_resume_result_canonical") is not True
+            or event.get("approved") is not True
+            or result.get("ok") is not True
+            or result.get("approval_required")
+        ):
+            continue
+        if str(event.get("plan_id") or "").strip() != plan_id:
+            continue
+        event_step_id = str(
+            event.get("step_id") or event.get("planner_step_id") or ""
+        ).strip()
+        if event_step_id != step_id:
+            continue
+        if semantic_hotkey:
+            if str(event.get("request_id") or "").strip() != request_id:
+                continue
+            if (
+                str(event.get("tool_call_id") or "").strip()
+                != request_tool_call_id
+            ):
+                continue
+            if str(event.get("approval_id") or "").strip() != request_approval_id:
+                continue
+            if request_decision_id and (
+                str(event.get("decision_id") or "").strip()
+                != request_decision_id
+            ):
+                continue
+        event_tool = str(
+            event.get("detail") or event.get("tool") or event.get("tool_name") or ""
+        ).strip()
+        if not _followup_plan_tools_match(request_tool, event_tool):
+            continue
+        if semantic_hotkey:
+            if str(result.get("action") or "").strip() != event_tool:
+                continue
+            result_data = (
+                result.get("data")
+                if isinstance(result.get("data"), Mapping)
+                else {}
+            )
+            request_input = (
+                request.get("input")
+                if isinstance(request.get("input"), Mapping)
+                else {}
+            )
+            if (
+                str(result_data.get("key") or "").strip().casefold()
+                != str(request_input.get("key") or "").strip().casefold()
+                or _dispatch_receipt_modifiers(result_data.get("modifiers"))
+                != _dispatch_receipt_modifiers(request_input.get("modifiers"))
+            ):
+                continue
+        if _replan_observed_action_semantic_signature(event) != signature:
+            continue
+        canonical_index = index
+        break
+    if canonical_index < 0:
+        return ""
+    if _approved_replan_action_has_verified_task_progress(
+        request,
+        timeline,
+        canonical_index=canonical_index,
+    ):
+        return "verified"
+    return "executed"
+
+
+def _replan_observed_action_semantic_signature(
+    value: Mapping[str, Any],
+) -> tuple[str, str, str, str, int, str]:
+    payload = (
+        value.get("input")
+        if isinstance(value.get("input"), Mapping)
+        else value.get("input_preview")
+        if isinstance(value.get("input_preview"), Mapping)
+        else {}
+    )
+    action_target = (
+        value.get("action_target")
+        if isinstance(value.get("action_target"), Mapping)
+        else payload.get("action_target")
+        if isinstance(payload.get("action_target"), Mapping)
+        else {}
+    )
+    explicit_action = str(
+        action_target.get("action")
+        or value.get("runtime_role")
+        or payload.get("runtime_role")
+        or ""
+    ).strip()
+    explicit_action = {
+        "click_ui": "click",
+        "dispatch_shortcut": "hotkey",
+        "keyboard_shortcut": "hotkey",
+        "type_ui": "type_text",
+    }.get(explicit_action, explicit_action)
+    tool_name = str(
+        value.get("tool") or value.get("tool_name") or value.get("detail") or ""
+    ).strip()
+    tool_action = _replan_observed_action_from_tool(tool_name)
+    if explicit_action and tool_action and explicit_action != tool_action:
+        return ()
+    action = explicit_action or tool_action
+    if action not in {"click", "hotkey", "type_text"}:
+        return ()
+    app_name = str(
+        payload.get("app_name")
+        or action_target.get("app_name")
+        or value.get("target_app_name")
+        or ""
+    ).strip()
+    if action == "hotkey":
+        key = str(
+            payload.get("key") or action_target.get("key") or ""
+        ).strip().casefold()
+        if not key:
+            return ()
+        modifiers = _dispatch_receipt_modifiers(
+            payload.get("modifiers")
+            if payload.get("modifiers") is not None
+            else action_target.get("modifiers")
+        )
+        return (
+            action,
+            _strict_canonical_app_identity(app_name),
+            key,
+            ",".join(modifiers),
+            0,
+            "",
+        )
+    target = _normalize_observed_desktop_text(
+        str(payload.get("target") or action_target.get("target") or "")
+    )
+    role_filter = str(
+        payload.get("role_filter") or action_target.get("role_filter") or ""
+    ).strip().casefold()
+    click_count = (
+        _clean_model_followup_int(payload.get("click_count"), default=1)
+        if action == "click"
+        else 0
+    )
+    text = str(payload.get("text") or "") if action == "type_text" else ""
+    text_digest = hashlib.sha256(text.encode("utf-8")).hexdigest() if text else ""
+    if not target:
+        return ()
+    return (
+        action,
+        _strict_canonical_app_identity(app_name),
+        target,
+        role_filter,
+        click_count,
+        text_digest,
+    )
+
+
+def _replan_observed_action_from_tool(tool_name: str) -> str:
+    clean_tool = str(tool_name or "").strip()
+    if clean_tool in {
+        "desktop.hotkey",
+        "desktop.shortcut",
+    }:
+        return "hotkey"
+    if clean_tool in {
+        "app.focus_and_click_ui_element",
+        "app.open_and_click_ui_element",
+        "desktop.click_ui_element",
+        "desktop.safe_click",
+        "desktop.click",
+    }:
+        return "click"
+    if clean_tool in {
+        "app.focus_and_type_into_ui_element",
+        "app.open_and_type_into_ui_element",
+        "app.focus_and_safe_type_text",
+        "app.open_and_safe_type_text",
+        "desktop.type_into_ui_element",
+        "desktop.safe_type_text",
+        "desktop.type_text",
+        "desktop.type",
+    }:
+        return "type_text"
+    return ""
+
+
+def _approved_replan_action_has_verified_task_progress(
+    request: Mapping[str, Any],
+    timeline: list[dict[str, Any]],
+    *,
+    canonical_index: int,
+) -> bool:
+    plan_id = str(request.get("plan_id") or "").strip()
+    step_id = str(
+        request.get("step_id") or request.get("planner_step_id") or ""
+    ).strip()
+    verified_progress: dict[
+        str,
+        dict[tuple[str, str], int],
+    ] = {
+        "agent.task.todo.updated": {},
+        "agent.task.checkpoint.updated": {},
+    }
+    for event_index, event in enumerate(
+        timeline[max(0, canonical_index + 1) :],
+        start=max(0, canonical_index + 1),
+    ):
+        event_name = str(event.get("event") or event.get("event_type") or "").strip()
+        base_event_name = _runtime_progress_base_event_type(event_name)
+        if base_event_name not in verified_progress:
+            continue
+        if str(event.get("plan_id") or "").strip() != plan_id:
+            continue
+        if str(event.get("step_id") or "").strip() != step_id:
+            continue
+        verifier_step_id = str(event.get("verified_by_step_id") or "").strip()
+        verifier_tool = str(event.get("verification_tool") or "").strip()
+        if str(event.get("status") or "").strip() != "completed":
+            continue
+        if str(event.get("verification_status") or "").strip() != "verified":
+            continue
+        if not verifier_step_id or not verifier_tool:
+            continue
+        if base_event_name == "agent.task.todo.updated":
+            todo = event.get("todo") if isinstance(event.get("todo"), Mapping) else {}
+            if str(todo.get("step_id") or "").strip() != step_id:
+                continue
+        else:
+            checkpoint = (
+                event.get("checkpoint")
+                if isinstance(event.get("checkpoint"), Mapping)
+                else {}
+            )
+            if str(checkpoint.get("after_step_id") or "").strip() != step_id:
+                continue
+            if step_id not in _string_list(checkpoint.get("verifies")):
+                continue
+        verified_progress[base_event_name][
+            (verifier_step_id, verifier_tool)
+        ] = event_index
+
+    common_evidence = set(verified_progress["agent.task.todo.updated"]).intersection(
+        verified_progress["agent.task.checkpoint.updated"]
+    )
+    for verifier_step_id, verifier_tool in common_evidence:
+        progress_index = min(
+            verified_progress["agent.task.todo.updated"][(verifier_step_id, verifier_tool)],
+            verified_progress["agent.task.checkpoint.updated"][(verifier_step_id, verifier_tool)],
+        )
+        if _approved_replan_action_successful_verifier_event(
+            timeline,
+            canonical_index=canonical_index,
+            progress_index=progress_index,
+            plan_id=plan_id,
+            verifier_step_id=verifier_step_id,
+            verifier_tool=verifier_tool,
+        ):
+            return True
+    return False
+
+
+def _approved_replan_action_successful_verifier_event(
+    timeline: list[dict[str, Any]],
+    *,
+    canonical_index: int,
+    progress_index: int,
+    plan_id: str,
+    verifier_step_id: str,
+    verifier_tool: str,
+) -> bool:
+    for event in timeline[max(0, canonical_index + 1) : max(0, progress_index)]:
+        if str(event.get("event") or event.get("event_type") or "").strip() != (
+            "agent.tool.call"
+        ):
+            continue
+        if str(event.get("detail") or event.get("tool") or "").strip() != verifier_tool:
+            continue
+        if str(event.get("plan_id") or "").strip() != plan_id:
+            continue
+        event_step_id = str(
+            event.get("step_id") or event.get("planner_step_id") or ""
+        ).strip()
+        if event_step_id and event_step_id != verifier_step_id:
+            continue
+        request_id = str(event.get("request_id") or "").strip()
+        if request_id and not request_id.startswith(f"{plan_id}:"):
+            continue
+        result = event.get("result") if isinstance(event.get("result"), Mapping) else {}
+        if (
+            result.get("ok") is True
+            and result.get("approval_required") is not True
+            and result.get("verification_failed") is not True
+        ):
+            return True
+    return False
 
 
 def _replan_payloads_include_blocked_step(
@@ -13998,7 +23403,7 @@ def _observed_action_verification_request(
             "role_filter": str(role_filter or "").strip(),
             "limit": _clean_model_followup_int(target.get("limit"), default=80),
         }
-    return _with_observed_action_metadata(
+    request = _with_observed_action_metadata(
         _request_like(
             tool_name,
             input_payload,
@@ -14011,6 +23416,9 @@ def _observed_action_verification_request(
         role_filter=role_filter,
         evidence={"strategy": "post_action_observation"},
     )
+    request["requires_observation"] = True
+    request["requires_post_action_verification"] = False
+    return request
 
 
 def _auto_desktop_observed_type_requests(
@@ -14434,6 +23842,7 @@ def _request_observability_metadata(request: Mapping[str, Any]) -> dict[str, Any
         "intent_kind",
         "step_id",
         "planner_step_id",
+        "source_step_id",
         "capability_id",
         "core_id",
         "workspace_id",
@@ -14445,9 +23854,23 @@ def _request_observability_metadata(request: Mapping[str, Any]) -> dict[str, Any
         "recovery_action_tool",
         "recovery_source_tool",
         "recovery_source_event_type",
+        "recovery_suggested_tool",
+        "recovery_link_kind",
+        "recovery_action",
+        "recovery_scope_id",
+        "replan_recovery_identity",
+        "recovery_origin_tool_call_id",
+        "goal_contract_id",
+        "goal_criterion_id",
+        "goal_subgoal_id",
+        "root_source_tool_call_id",
+        "root_source_step_id",
+        "root_verifier_step_id",
+        "root_plan_id",
         "deferred_tool",
         "permission_target",
         "risk_level",
+        "verification_predicate_kind",
         "target_app_name",
         "target_app_query",
         "target_search_text",
@@ -14500,10 +23923,18 @@ def _request_observability_metadata(request: Mapping[str, Any]) -> dict[str, Any
         "approval_required",
         "requires_observation",
         "requires_post_action_verification",
+        "recovery_context_trusted",
+        "root_goal_unchanged",
     ):
         if isinstance(request.get(key), bool):
             payload[key] = bool(request.get(key))
-    for key in ("replan_triggers", "replan_signal_ids"):
+    for key in (
+        "replan_triggers",
+        "replan_signal_ids",
+        "depends_on",
+        "verified_step_ids",
+        "verification_target_step_ids",
+    ):
         values = [
             str(item or "").strip()
             for item in request.get(key, [])
@@ -14514,12 +23945,13 @@ def _request_observability_metadata(request: Mapping[str, Any]) -> dict[str, Any
     payload.update(_runtime_trace_metadata_from_mapping(request))
     for key in (
         "followup_target",
-        "action_target",
         "observation_evidence",
         "observation_retry",
         "verification_target",
         "deferred_input",
         "deferred_context",
+        "deferred_verifier_context",
+        "runtime_observation_scope",
         "desktop_execution_policy",
         "desktop_loop",
         "desktop_provider_session",
@@ -14529,12 +23961,59 @@ def _request_observability_metadata(request: Mapping[str, Any]) -> dict[str, Any
         value = request.get(key)
         if isinstance(value, Mapping) and value:
             payload[key] = dict(value)
+    action_target = _request_contract_action_target(request)
+    if action_target:
+        payload["action_target"] = action_target
     deferred_continuation = request.get("deferred_continuation")
     if isinstance(deferred_continuation, list):
         items = [dict(item) for item in deferred_continuation if isinstance(item, Mapping)]
         if items:
             payload["deferred_continuation"] = items
     return payload
+
+
+def _request_contract_action_target(request: Mapping[str, Any]) -> dict[str, Any]:
+    """Return the step target used when the immutable contract was planned."""
+
+    step_id = str(
+        request.get("step_id") or request.get("planner_step_id") or ""
+    ).strip()
+    raw_checkpoints = request.get("task_checkpoints")
+    for raw_checkpoint in (
+        raw_checkpoints if isinstance(raw_checkpoints, (list, tuple)) else ()
+    ):
+        if not isinstance(raw_checkpoint, Mapping):
+            continue
+        after_step_id = str(raw_checkpoint.get("after_step_id") or "").strip()
+        if step_id and after_step_id and after_step_id != step_id:
+            continue
+        checkpoint_payload = (
+            raw_checkpoint.get("payload")
+            if isinstance(raw_checkpoint.get("payload"), Mapping)
+            else {}
+        )
+        action_target = checkpoint_payload.get("action_target")
+        if isinstance(action_target, Mapping) and action_target:
+            return dict(action_target)
+    raw_workspace_items = request.get("task_workspace_items")
+    for raw_item in (
+        raw_workspace_items if isinstance(raw_workspace_items, (list, tuple)) else ()
+    ):
+        if not isinstance(raw_item, Mapping):
+            continue
+        source_step_id = str(raw_item.get("source_step_id") or "").strip()
+        if step_id and source_step_id and source_step_id != step_id:
+            continue
+        metadata = (
+            raw_item.get("metadata")
+            if isinstance(raw_item.get("metadata"), Mapping)
+            else {}
+        )
+        action_target = metadata.get("action_target")
+        if isinstance(action_target, Mapping) and action_target:
+            return dict(action_target)
+    action_target = request.get("action_target")
+    return dict(action_target) if isinstance(action_target, Mapping) else {}
 
 
 def _runtime_planner_request_trace_metadata(
@@ -14557,6 +24036,50 @@ def _runtime_planner_execution_metadata(
     payload["runtime_planner_execution_context"] = True
     if isinstance(extra, Mapping):
         payload.update(extra)
+    return payload
+
+
+def _fresh_planner_goal_contract_template(
+    selection: DirectToolSelection,
+    immutable_original_goal: str,
+) -> dict[str, Any]:
+    """Bind a fresh run only to the exact side-effect-free planner decision.
+
+    The planner is invoked once before tools are eligible.  Every authority
+    layer must still name the immutable user goal; otherwise a forged/stale
+    selection could turn a conversational request into an unrelated effect.
+    """
+
+    original_goal = str(immutable_original_goal or "").strip()
+    decision = selection.decision
+    selected_intent = getattr(decision, "selected_intent", None)
+    plan = getattr(decision, "plan", None)
+    plan_intent = getattr(plan, "intent", None)
+    task_core = getattr(plan, "task_core", None)
+    goal_contract = getattr(task_core, "goal_contract", None)
+    authority_goals = (
+        str(getattr(decision, "prompt", "") or "").strip(),
+        str(getattr(selected_intent, "user_goal", "") or "").strip(),
+        str(getattr(plan_intent, "user_goal", "") or "").strip(),
+        str(getattr(goal_contract, "original_goal", "") or "").strip(),
+    )
+    if (
+        not original_goal
+        or decision is None
+        or selected_intent is None
+        or plan is None
+        or plan_intent is None
+        or goal_contract is None
+        or any(value != original_goal for value in authority_goals)
+        or str(getattr(selected_intent, "intent_id", "") or "").strip()
+        != str(getattr(plan_intent, "intent_id", "") or "").strip()
+        or str(getattr(goal_contract, "intent_kind", "") or "").strip()
+        != str(getattr(selected_intent, "kind", "") or "").strip()
+    ):
+        raise ValueError("planner_goal_conflict")
+    payload = goal_contract.model_dump()
+    if not isinstance(payload, dict):
+        raise ValueError("planner_goal_conflict")
     return payload
 
 
@@ -14627,56 +24150,15 @@ def _split_combined_foreground_app_requests(
     requests: list[dict[str, Any]],
     allowed_tools: Iterable[str],
 ) -> list[dict[str, Any]]:
-    allowed = {str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()}
-    split_requests: list[dict[str, Any]] = []
-    changed = False
-    for request in requests:
-        tool_name = str(request.get("tool") or request.get("tool_name") or "").strip()
-        payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
-        app_name = str(payload.get("app_name") or "").strip()
-        if tool_name in {"app.open_and_safe_shortcut", "app.focus_and_safe_shortcut"}:
-            action = str(payload.get("action") or "").strip()
-            if action in {"new_document", "new_note", "new_task"}:
-                split_requests.append(request)
-                continue
-            replacement = _split_combined_app_prefix_requests(
-                request,
-                app_name=app_name,
-                starts_open=tool_name.startswith("app.open"),
-                allowed=allowed,
-            )
-            if replacement and action and "desktop.safe_shortcut" in allowed:
-                replacement.append(
-                    _derived_foreground_request(
-                        request,
-                        "desktop.safe_shortcut",
-                        {"action": action},
-                    )
-                )
-                split_requests.extend(replacement)
-                changed = True
-                continue
-        if tool_name in {"app.open_and_safe_type_text", "app.focus_and_safe_type_text"}:
-            text = str(payload.get("text") or "").strip()
-            replacement = _split_combined_app_prefix_requests(
-                request,
-                app_name=app_name,
-                starts_open=tool_name.startswith("app.open"),
-                allowed=allowed,
-            )
-            if replacement and text and "desktop.safe_type_text" in allowed:
-                replacement.append(
-                    _derived_foreground_request(
-                        request,
-                        "desktop.safe_type_text",
-                        {"text": text},
-                    )
-                )
-                split_requests.extend(replacement)
-                changed = True
-                continue
-        split_requests.append(request)
-    return split_requests if changed else requests
+    """Keep broker-atomic foreground actions intact at the execution boundary.
+
+    The composite tool identity is the locking contract. ``presentation`` is
+    user-facing summary metadata and must never decide whether focus/open and
+    the following shortcut or text input share one foreground lock. The
+    ``allowed_tools`` argument remains part of this compatibility boundary;
+    policy validation still happens in the normal tool runner.
+    """
+    return requests
 
 
 def _split_combined_app_prefix_requests(
@@ -14789,6 +24271,424 @@ def _runtime_planner_execution_requests_with_selection_inputs(
     return updated if changed else execution_requests
 
 
+_RUNTIME_PLANNER_OBSERVED_TYPE_TOOLS = frozenset(
+    {
+        "app.focus_and_type_into_ui_element",
+        "app.open_and_type_into_ui_element",
+        "desktop.type_into_ui_element",
+    }
+)
+
+_RUNTIME_PLANNER_UI_OBSERVATION_TOOLS = frozenset(
+    {
+        "desktop.inspect_app",
+        "desktop.read_ui",
+        "desktop.ui_elements",
+    }
+)
+
+
+def _runtime_planner_goal_contract_payload(
+    decision: Any | None,
+) -> dict[str, Any]:
+    plan = getattr(decision, "plan", None)
+    task_core = getattr(plan, "task_core", None)
+    contract = getattr(task_core, "goal_contract", None)
+    if contract is None:
+        return {}
+    payload = contract.model_dump() if hasattr(contract, "model_dump") else {}
+    return dict(payload) if isinstance(payload, Mapping) else {}
+
+
+def _runtime_planner_declared_verifier_step_id(
+    goal_contract: Mapping[str, Any] | None,
+    *,
+    source_step_id: str,
+) -> str:
+    if not isinstance(goal_contract, Mapping) or not source_step_id:
+        return ""
+    criteria = goal_contract.get("criteria")
+    for criterion in criteria if isinstance(criteria, list) else []:
+        if not isinstance(criterion, Mapping):
+            continue
+        if source_step_id not in _string_list(criterion.get("source_step_ids")):
+            continue
+        verifier_ids = _string_list(criterion.get("verifier_step_ids"))
+        if len(verifier_ids) == 1:
+            return verifier_ids[0]
+    return ""
+
+
+def _bind_runtime_planner_declared_verifiers(
+    requests: list[dict[str, Any]],
+    goal_contract: Mapping[str, Any] | None,
+) -> list[dict[str, Any]]:
+    """Bind generated trailing observations to the declared Goal verifier."""
+
+    bound = [deepcopy(request) for request in requests if isinstance(request, Mapping)]
+    for verifier_index, verifier in enumerate(bound):
+        if str(verifier.get("runtime_stage") or "").strip() != "verify":
+            continue
+        existing_verifier_step_id = str(
+            verifier.get("step_id") or verifier.get("planner_step_id") or ""
+        ).strip()
+        source_index = _runtime_planner_generated_verifier_source_index(
+            bound,
+            before_index=verifier_index,
+        )
+        if source_index < 0:
+            continue
+        source = bound[source_index]
+        source_step_id = str(
+            source.get("step_id") or source.get("planner_step_id") or ""
+        ).strip()
+        if (
+            existing_verifier_step_id
+            and existing_verifier_step_id != source_step_id
+        ):
+            continue
+        verifier_step_id = _runtime_planner_declared_verifier_step_id(
+            goal_contract,
+            source_step_id=source_step_id,
+        )
+        if not verifier_step_id:
+            continue
+        source_request_id = str(source.get("request_id") or "").strip()
+        verifier_tool = str(verifier.get("tool") or "").strip()
+        app_name = _runtime_planner_request_app_name(source, verifier)
+        source_input = (
+            source.get("input") if isinstance(source.get("input"), Mapping) else {}
+        )
+        enriched = deepcopy(verifier)
+        enriched.update(
+            {
+                "step_id": verifier_step_id,
+                "planner_step_id": verifier_step_id,
+                "capability_id": "desktop.app_discovery",
+                "depends_on": [source_step_id],
+                "source_step_id": source_step_id,
+                "runtime_stage": "verify",
+                "runtime_role": "verify_result",
+                "approval_required": False,
+                "risk_level": "low",
+                "requires_observation": True,
+                "requires_post_action_verification": False,
+                "source": "runtime_verification",
+                "planning_reason": "planner_runtime_declared_verification",
+                "verification_predicate_kind": (
+                    "exact_submit_dispatch_receipt"
+                    if str(source.get("tool") or "").strip()
+                    == "desktop.submit_foreground"
+                    else ""
+                ),
+                "action_target": {
+                    key: value
+                    for key, value in {
+                        "kind": "desktop_app" if app_name else "desktop_ui",
+                        "action": "verify_after_action",
+                        "app_name": app_name,
+                        "target": str(source_input.get("target") or "").strip(),
+                        "role_filter": str(source_input.get("role_filter") or "").strip(),
+                        "step_id": verifier_step_id,
+                    }.items()
+                    if value
+                },
+                "verification_targets": [{"step_id": source_step_id}],
+            }
+        )
+        if source_request_id:
+            enriched["source_request_id"] = source_request_id
+            enriched["request_id"] = (
+                f"{source_request_id}:verify:{verifier_step_id}:{verifier_tool}"
+            )
+        for key in (
+            "decision_id",
+            "plan_id",
+            "tool_plan_id",
+            "core_id",
+            "workspace_id",
+            "task_id",
+            "intent_kind",
+        ):
+            value = source.get(key)
+            if value not in (None, "", [], {}):
+                enriched[key] = deepcopy(value)
+        bound[verifier_index] = enriched
+    return bound
+
+
+def _runtime_planner_generated_verifier_source_index(
+    requests: list[dict[str, Any]],
+    *,
+    before_index: int,
+) -> int:
+    for index in range(before_index - 1, -1, -1):
+        request = requests[index]
+        if request.get("requires_post_action_verification") is not True:
+            continue
+        if str(request.get("runtime_stage") or "").strip() != "operate":
+            continue
+        if not str(request.get("step_id") or request.get("planner_step_id") or "").strip():
+            continue
+        return index
+    return -1
+
+
+def _defer_runtime_planner_desktop_type_until_observed(
+    requests: list[dict[str, Any]],
+    *,
+    goal_contract: Mapping[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Project a planner type step only after its scoped UI observation.
+
+    The immutable planner envelope remains the source of every step.  This
+    projection merely places the observation at the execution boundary and
+    carries the already-planned type/verifier/submit suffix as a deferred
+    continuation.  It prevents a semantic type tool from racing ahead of the
+    UI state that authorizes its target.
+    """
+
+    planned = [deepcopy(request) for request in requests if isinstance(request, Mapping)]
+    for action_index, action in enumerate(planned):
+        action_tool = str(action.get("tool") or "").strip()
+        if action_tool not in _RUNTIME_PLANNER_OBSERVED_TYPE_TOOLS:
+            continue
+        if str(action.get("runtime_stage") or "").strip() != "operate":
+            continue
+        action_input = action.get("input") if isinstance(action.get("input"), Mapping) else {}
+        if not str(action_input.get("target") or "").strip() or not str(
+            action_input.get("text") or ""
+        ):
+            continue
+        action_step_id = str(
+            action.get("step_id") or action.get("planner_step_id") or ""
+        ).strip()
+        action_plan_id = str(action.get("plan_id") or "").strip()
+        dependencies = set(_string_list(action.get("depends_on")))
+        if not action_step_id or not dependencies:
+            continue
+
+        observation_index = _runtime_planner_type_observation_index(
+            planned,
+            before_index=action_index,
+            dependency_step_ids=dependencies,
+            plan_id=action_plan_id,
+        )
+        if observation_index < 0:
+            continue
+        observation = planned[observation_index]
+        observation_step_id = str(
+            observation.get("step_id")
+            or observation.get("planner_step_id")
+            or ""
+        ).strip()
+        app_name = _runtime_planner_request_app_name(observation, action)
+
+        deferred_observation = deepcopy(observation)
+        deferred_observation["continue_to_model"] = True
+        deferred_observation["deferred_tool"] = action_tool
+        deferred_observation["deferred_input"] = dict(action_input)
+        deferred_observation["deferred_context"] = _runtime_planner_deferred_context(
+            action
+        )
+        deferred_observation["runtime_observation_scope"] = {
+            key: value
+            for key, value in {
+                "decision_id": str(action.get("decision_id") or "").strip(),
+                "plan_id": action_plan_id,
+                "observation_step_id": observation_step_id,
+                "app_name": app_name,
+            }.items()
+            if value
+        }
+        if app_name:
+            deferred_observation.setdefault("target_app_name", app_name)
+
+        verifier_index = _runtime_planner_type_verifier_index(
+            planned,
+            after_index=action_index,
+            action_step_id=action_step_id,
+            plan_id=action_plan_id,
+        )
+        if verifier_index >= 0:
+            deferred_observation["deferred_verifier_context"] = (
+                _runtime_planner_deferred_context(planned[verifier_index])
+            )
+            continuation = [
+                deepcopy(request)
+                for index, request in enumerate(planned[action_index + 1 :], start=action_index + 1)
+                if index != verifier_index
+            ]
+        else:
+            verifier_context = _runtime_planner_synthetic_type_verifier_context(
+                action,
+                observation,
+                app_name=app_name,
+                goal_contract=goal_contract,
+            )
+            deferred_observation["deferred_verifier_context"] = verifier_context
+            continuation = [deepcopy(request) for request in planned[action_index + 1 :]]
+
+        if continuation:
+            deferred_observation["deferred_continuation"] = continuation
+        return [*planned[:observation_index], deferred_observation]
+    return planned
+
+
+def _runtime_planner_scoped_observation_deferral(
+    requests: Iterable[Mapping[str, Any]],
+) -> bool:
+    return any(
+        isinstance(request.get("runtime_observation_scope"), Mapping)
+        and bool(request.get("runtime_observation_scope"))
+        for request in requests
+        if isinstance(request, Mapping)
+    )
+
+
+def _runtime_planner_type_observation_index(
+    requests: list[dict[str, Any]],
+    *,
+    before_index: int,
+    dependency_step_ids: set[str],
+    plan_id: str,
+) -> int:
+    for index in range(before_index - 1, -1, -1):
+        request = requests[index]
+        tool_name = str(request.get("tool") or "").strip()
+        if tool_name not in _RUNTIME_PLANNER_UI_OBSERVATION_TOOLS:
+            continue
+        if str(request.get("runtime_stage") or "").strip() != "discover":
+            continue
+        request_plan_id = str(request.get("plan_id") or "").strip()
+        if plan_id and request_plan_id != plan_id:
+            continue
+        step_id = str(
+            request.get("step_id") or request.get("planner_step_id") or ""
+        ).strip()
+        if step_id in dependency_step_ids:
+            return index
+    return -1
+
+
+def _runtime_planner_type_verifier_index(
+    requests: list[dict[str, Any]],
+    *,
+    after_index: int,
+    action_step_id: str,
+    plan_id: str,
+) -> int:
+    for index in range(after_index + 1, len(requests)):
+        request = requests[index]
+        if str(request.get("runtime_stage") or "").strip() != "verify":
+            continue
+        if str(request.get("tool") or "").strip() not in (
+            _RUNTIME_PLANNER_UI_OBSERVATION_TOOLS | _DAILY_DESKTOP_VERIFY_TOOLS
+        ):
+            continue
+        request_plan_id = str(request.get("plan_id") or "").strip()
+        if plan_id and request_plan_id != plan_id:
+            continue
+        if action_step_id in _string_list(request.get("depends_on")):
+            return index
+    return -1
+
+
+def _runtime_planner_request_app_name(*requests: Mapping[str, Any]) -> str:
+    for request in requests:
+        request_input = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+        action_target = (
+            request.get("action_target")
+            if isinstance(request.get("action_target"), Mapping)
+            else {}
+        )
+        for source in (request_input, action_target, request):
+            app_name = str(
+                source.get("app_name") or source.get("target_app_name") or ""
+            ).strip()
+            if app_name and not _runtime_planner_placeholder_app_name(app_name):
+                return app_name
+    return ""
+
+
+def _runtime_planner_deferred_context(request: Mapping[str, Any]) -> dict[str, Any]:
+    context = deepcopy(dict(request))
+    for key in (
+        "tool",
+        "tool_name",
+        "input",
+        "continue_to_model",
+        "deferred_tool",
+        "deferred_input",
+        "deferred_context",
+        "deferred_verifier_context",
+        "deferred_continuation",
+    ):
+        context.pop(key, None)
+    return context
+
+
+def _runtime_planner_synthetic_type_verifier_context(
+    action: Mapping[str, Any],
+    observation: Mapping[str, Any],
+    *,
+    app_name: str,
+    goal_contract: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    action_step_id = str(
+        action.get("step_id") or action.get("planner_step_id") or ""
+    ).strip()
+    verifier_step_id = (
+        _runtime_planner_declared_verifier_step_id(
+            goal_contract,
+            source_step_id=action_step_id,
+        )
+        or f"{action_step_id}-postcondition"
+    )
+    action_input = action.get("input") if isinstance(action.get("input"), Mapping) else {}
+    action_target = {
+        key: value
+        for key, value in {
+            "kind": "desktop_app" if app_name else "desktop_ui",
+            "action": "verify_after_action",
+            "app_name": app_name,
+            "target": str(action_input.get("target") or "").strip(),
+            "role_filter": str(action_input.get("role_filter") or "").strip(),
+            "step_id": verifier_step_id,
+        }.items()
+        if value
+    }
+    return {
+        key: value
+        for key, value in {
+            "decision_id": str(action.get("decision_id") or "").strip(),
+            "plan_id": str(action.get("plan_id") or "").strip(),
+            "tool_plan_id": str(action.get("tool_plan_id") or "").strip(),
+            "core_id": str(action.get("core_id") or "").strip(),
+            "workspace_id": str(action.get("workspace_id") or "").strip(),
+            "task_id": str(action.get("task_id") or "").strip(),
+            "step_id": verifier_step_id,
+            "planner_step_id": verifier_step_id,
+            "capability_id": str(
+                observation.get("capability_id") or "desktop.app_discovery"
+            ).strip(),
+            "depends_on": [action_step_id],
+            "runtime_doctrine": "discover_operate_verify",
+            "runtime_stage": "verify",
+            "runtime_role": "verify_result",
+            "approval_required": False,
+            "risk_level": "low",
+            "requires_observation": True,
+            "requires_post_action_verification": False,
+            "action_target": action_target,
+                "source": "runtime_verification",
+                "planning_reason": "planner_runtime_type_postcondition",
+                "verification_predicate_kind": "exact_typed_content_present",
+            }.items()
+        if value not in (None, "", [], {})
+    }
+
+
 def _runtime_planner_request_without_resolved_selection_hints(
     request: dict[str, Any],
 ) -> dict[str, Any]:
@@ -14884,6 +24784,11 @@ def _runtime_execution_context_tool_requests(
     )
     if requests:
         return requests
+    if _runtime_execution_envelope_has_requests(runtime_execution_envelope):
+        # The envelope is the authoritative execution contract. When it owns
+        # requests but projects none as executable, they are blocked (or
+        # terminal), so legacy metadata must not resurrect and run them.
+        return None
     if not isinstance(runtime_execution_metadata, Mapping):
         return None
     requests = runtime_execution_requests_from_metadata(
@@ -14902,6 +24807,52 @@ def _runtime_execution_envelope_has_requests(
     return isinstance(requests, list) and bool(requests)
 
 
+def _runtime_execution_envelope_has_only_materialization_blockers(
+    runtime_execution_envelope: Mapping[str, Any] | None,
+    blocked_requests: Iterable[Mapping[str, Any]],
+) -> bool:
+    if not isinstance(runtime_execution_envelope, Mapping):
+        return False
+    blocked_ids = {
+        str(request.get("request_id") or "").strip()
+        for request in blocked_requests
+        if isinstance(request, Mapping) and str(request.get("request_id") or "").strip()
+    }
+    requests = runtime_execution_envelope.get("requests")
+    raw_blocked = [
+        request
+        for request in (requests if isinstance(requests, list) else [])
+        if isinstance(request, Mapping)
+        and str(request.get("request_id") or "").strip() in blocked_ids
+    ]
+    if not blocked_ids or len(raw_blocked) != len(blocked_ids):
+        return False
+    for request in raw_blocked:
+        tool_name = str(request.get("tool_name") or request.get("tool") or "").strip()
+        raw_input = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+        status = str(request.get("status") or "").strip()
+        route = (
+            request.get("desktop_execution_route")
+            if isinstance(request.get("desktop_execution_route"), Mapping)
+            else {}
+        )
+        if (
+            status not in {"blocked", "waiting_approval"}
+            or not str(request.get("plan_id") or runtime_execution_envelope.get("plan_id") or "").strip()
+            or not str(request.get("step_id") or "").strip()
+            or route.get("can_execute") is False
+            or not _tool_request_requires_model_materialization(
+                {
+                    "tool": tool_name,
+                    "input": dict(raw_input),
+                    "continue_to_model": True,
+                }
+            )
+        ):
+            return False
+    return True
+
+
 def _runtime_execution_context_selection_payload(
     runtime_execution_envelope: Mapping[str, Any] | None,
     runtime_execution_metadata: Mapping[str, Any] | None,
@@ -14918,7 +24869,12 @@ def _runtime_execution_context_selection_payload(
         else metadata.get("yachiyo_execution_envelope")
     )
     envelope = dict(envelope) if isinstance(envelope, Mapping) else {}
-    tool_names = _tool_names_from_requests(direct_tool_requests)
+    direct_requests = [
+        dict(request)
+        for request in (direct_tool_requests or [])
+        if isinstance(request, Mapping)
+    ]
+    tool_names = _tool_names_from_requests(direct_requests)
     if not tool_names:
         tool_names = [
             str(tool or "").strip()
@@ -14952,6 +24908,11 @@ def _runtime_execution_context_selection_payload(
         "selected_request_count": len(tool_names),
         "execution_request_count": len(tool_names),
     }
+    for request in direct_requests:
+        followup_target = request.get("followup_target")
+        if isinstance(followup_target, Mapping):
+            payload["followup_target"] = dict(followup_target)
+            break
     if envelope:
         payload["yachiyo_execution_envelope"] = envelope
     if tool_names:
@@ -15202,16 +25163,24 @@ def _tool_requests_without_model_followup_and_deferred_continuation(
 def _direct_sequence_requests_with_safe_deferred_continuations(
     requests: Iterable[Mapping[str, Any]],
 ) -> list[dict[str, Any]]:
+    root_requests = [dict(request) for request in requests if isinstance(request, Mapping)]
     expanded: list[dict[str, Any]] = []
     allowed = {str(tool or "").strip() for tool in _DIRECT_DAILY_DESKTOP_TOOLS}
-    for request in requests:
+    root_identities = {
+        identity
+        for request in root_requests
+        if (identity := _direct_sequence_request_exact_identity(request)) is not None
+    }
+
+    def append_with_continuations(request: Mapping[str, Any]) -> None:
         if not isinstance(request, Mapping):
-            continue
+            return
         item = dict(request)
         expanded.append(item)
-        if bool(item.get("continue_to_model")):
-            continue
-        for continuation in materialized_deferred_items(item):
+        deferred_items = materialized_deferred_items(item)
+        if bool(item.get("continue_to_model")) and not deferred_items:
+            return
+        for continuation in deferred_items:
             next_request = safe_deferred_continuation_request(
                 continuation,
                 allowed,
@@ -15229,8 +25198,35 @@ def _direct_sequence_requests_with_safe_deferred_continuations(
                 "planning_reason",
                 "planner_replan_deferred_continuation",
             )
-            expanded.append(next_request)
+            # Recovery scheduling may already have materialized this verifier
+            # as a top-level, source-bound request.  Do not synthesize a weak
+            # duplicate during terminal aggregation; preserve the executed
+            # root request and its exact source receipt instead.
+            next_identity = _direct_sequence_request_exact_identity(next_request)
+            if next_identity is not None and next_identity in root_identities:
+                continue
+            append_with_continuations(next_request)
+
+    for request in root_requests:
+        append_with_continuations(request)
     return expanded
+
+
+def _direct_sequence_request_exact_identity(
+    request: Mapping[str, Any],
+) -> tuple[str, str, str, str] | None:
+    plan_id = str(request.get("plan_id") or "").strip()
+    step_id = str(
+        request.get("step_id") or request.get("planner_step_id") or ""
+    ).strip()
+    tool_name = str(request.get("tool") or "").strip()
+    if not plan_id or not step_id or not tool_name:
+        return None
+    request_input = (
+        request.get("input") if isinstance(request.get("input"), Mapping) else {}
+    )
+    _, input_signature = _tool_request_signature(tool_name, request_input)
+    return plan_id, step_id, tool_name, input_signature
 
 
 def _desktop_intent_verification_evidence(
@@ -15723,6 +25719,85 @@ def _latest_desktop_observation_has_target_match(
     return False
 
 
+def _runtime_planner_deferred_observation_scope_matches(
+    request: Mapping[str, Any],
+    target: Mapping[str, Any],
+    timeline: list[dict[str, Any]],
+) -> bool:
+    """Require the exact runtime-owned observation that deferred this action."""
+
+    scope = (
+        request.get("runtime_observation_scope")
+        if isinstance(request.get("runtime_observation_scope"), Mapping)
+        else {}
+    )
+    if not scope:
+        return True
+    observation: Mapping[str, Any] | None = None
+    for event in reversed(timeline):
+        if str(event.get("event") or "").strip() != "agent.tool.call":
+            continue
+        if str(event.get("detail") or event.get("tool") or "").strip() not in (
+            _RUNTIME_PLANNER_UI_OBSERVATION_TOOLS
+        ):
+            continue
+        observation = event
+        break
+    if observation is None:
+        return False
+    result = (
+        observation.get("result")
+        if isinstance(observation.get("result"), Mapping)
+        else {}
+    )
+    if result.get("ok") is not True:
+        return False
+    for scope_key, event_keys in (
+        ("decision_id", ("decision_id",)),
+        ("plan_id", ("plan_id",)),
+        ("observation_step_id", ("step_id", "planner_step_id")),
+    ):
+        expected = str(scope.get(scope_key) or "").strip()
+        if not expected:
+            continue
+        observed = next(
+            (
+                str(observation.get(key) or "").strip()
+                for key in event_keys
+                if str(observation.get(key) or "").strip()
+            ),
+            "",
+        )
+        if observed != expected:
+            return False
+    expected_app = str(
+        scope.get("app_name")
+        or target.get("app_name")
+        or target.get("target_app_name")
+        or ""
+    ).strip()
+    if expected_app:
+        input_preview = (
+            observation.get("input_preview")
+            if isinstance(observation.get("input_preview"), Mapping)
+            else {}
+        )
+        data = result.get("data") if isinstance(result.get("data"), Mapping) else {}
+        observed_app = str(
+            input_preview.get("app_name")
+            or data.get("app_name")
+            or result.get("app_name")
+            or ""
+        ).strip()
+        if (
+            not observed_app
+            or compact_app_name_hint(observed_app)
+            != compact_app_name_hint(expected_app)
+        ):
+            return False
+    return True
+
+
 def _latest_desktop_observation_elements(timeline: list[dict[str, Any]]) -> list[Any]:
     for event in reversed(timeline):
         if str(event.get("event") or "").strip() != "agent.tool.call":
@@ -15975,11 +26050,16 @@ def _drop_completed_auto_followup_prefix(
     tool_timeline_start: int,
 ) -> list[dict[str, Any]]:
     remaining = list(requests)
-    while remaining and _auto_followup_request_completed(
-        remaining[0],
-        timeline,
-        tool_timeline_start=tool_timeline_start,
-    ):
+    completion_cursor = tool_timeline_start
+    while remaining:
+        next_cursor = _auto_followup_request_completion_cursor(
+            remaining[0],
+            timeline,
+            tool_timeline_start=completion_cursor,
+        )
+        if next_cursor is None:
+            break
+        completion_cursor = next_cursor
         remaining = remaining[1:]
     return remaining
 
@@ -16017,17 +26097,30 @@ def _auto_followup_request_completed(
     *,
     tool_timeline_start: int,
 ) -> bool:
-    if (
-        request.get("deferred_tool")
-        or request.get("deferred_input")
-        or request.get("deferred_continuation")
-    ):
-        return False
+    return (
+        _auto_followup_request_completion_cursor(
+            request,
+            timeline,
+            tool_timeline_start=tool_timeline_start,
+        )
+        is not None
+    )
+
+
+def _auto_followup_request_completion_cursor(
+    request: Mapping[str, Any],
+    timeline: list[dict[str, Any]],
+    *,
+    tool_timeline_start: int,
+) -> int | None:
     tool_name = str(request.get("tool") or "").strip()
     if not tool_name:
-        return False
+        return None
     request_input = request.get("input") if isinstance(request.get("input"), Mapping) else {}
-    for event in timeline[tool_timeline_start:]:
+    for event_index, event in enumerate(
+        timeline[tool_timeline_start:],
+        start=tool_timeline_start,
+    ):
         if str(event.get("event") or "").strip() != "agent.tool.call":
             continue
         if str(event.get("detail") or "").strip() != tool_name:
@@ -16039,11 +26132,28 @@ def _auto_followup_request_completed(
         if tool_name == "artifact.write":
             request_path = str(request_input.get("path") or "").strip()
             event_path = str(event_input.get("path") or "").strip()
-            if request_path and request_path == event_path:
-                return True
-        if _auto_followup_input_matches_event(request_input, event_input):
-            return True
-    return False
+            if not request_path or request_path != event_path:
+                continue
+        elif not _auto_followup_input_matches_event(request_input, event_input):
+            continue
+        cursor = event_index + 1
+        deferred_items = materialized_deferred_items(request)
+        if any(not isinstance(item, Mapping) for item in deferred_items):
+            continue
+        chain_completed = True
+        for item in deferred_items:
+            next_cursor = _auto_followup_request_completion_cursor(
+                item,
+                timeline,
+                tool_timeline_start=cursor,
+            )
+            if next_cursor is None:
+                chain_completed = False
+                break
+            cursor = next_cursor
+        if chain_completed:
+            return cursor
+    return None
 
 
 def _auto_followup_input_matches_event(
@@ -16053,7 +26163,11 @@ def _auto_followup_input_matches_event(
     comparable = {
         str(key): value
         for key, value in request_input.items()
-        if str(key) not in {"selection_source", "query"}
+        if str(key) not in {"selection_source", "query", "app_query"}
+        and not (
+            str(key) == "app_name"
+            and str(value or "").strip().casefold().startswith("<selected app from ")
+        )
     }
     if not comparable:
         return True
@@ -16401,11 +26515,12 @@ def _auto_replan_ui_observed_action_requests(
         if not requests:
             continue
         requests = _annotate_replan_ui_observed_action_requests(requests, payload)
-        return _replan_recovery_requests_with_task_context(
+        enriched = _replan_recovery_requests_with_task_context(
             requests,
             [dict(payload)],
             timeline,
         )
+        return _drop_replayed_approved_replan_operate_requests(enriched, timeline)
     return []
 
 
@@ -16692,12 +26807,24 @@ def _annotate_replan_ui_observed_action_requests(
     annotated: list[dict[str, Any]] = []
     request_id = str(payload.get("request_id") or "").strip()
     trigger = str(payload.get("trigger") or "tool_failure").strip() or "tool_failure"
+    action_step_id = str(
+        payload.get("source_step_id") or payload.get("planner_step_id") or ""
+    ).strip()
     for request in requests:
         item = dict(request)
+        is_verifier = _replan_observed_action_verification_request(item)
         if request_id:
             item["replan_request_id"] = request_id
         item["replan_trigger"] = trigger
         _attach_replan_payload_trace_metadata(item, payload)
+        if is_verifier:
+            item["runtime_stage"] = "verify"
+            item["runtime_role"] = "verify_result"
+            item["requires_observation"] = True
+            item["requires_post_action_verification"] = False
+            if action_step_id:
+                item["depends_on"] = [action_step_id]
+                item["verification_target_step_ids"] = [action_step_id]
         annotated.append(item)
     return annotated
 
@@ -17084,6 +27211,13 @@ def _auto_replan_ui_search_observed_result_requests(
         result_request = _replan_ui_next_result_click_request(planned[source_index + 1 :])
         if not result_request:
             continue
+        policy_payload = _trusted_replan_planned_continuation_policy_payload(
+            result_request,
+            payload,
+            timeline,
+        )
+        if not policy_payload:
+            continue
         observed_target = _observed_action_target_from_replan_ui_result_request(
             result_request,
             payload,
@@ -17110,6 +27244,7 @@ def _auto_replan_ui_search_observed_result_requests(
             requests,
             payload,
             result_request,
+            policy_payload=policy_payload,
         )
         return _replan_recovery_requests_with_task_context(
             requests,
@@ -17292,7 +27427,23 @@ def _annotate_replan_ui_search_observed_result_requests(
     requests: list[dict[str, Any]],
     payload: Mapping[str, Any],
     result_request: Mapping[str, Any],
+    *,
+    policy_payload: Mapping[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
+    action_policy = _trusted_replan_observed_result_action_policy(
+        result_request,
+        policy_payload or payload,
+    )
+    if not action_policy:
+        return []
+    action_tool = str(result_request.get("tool") or "").strip()
+    action_step_id = str(result_request.get("step_id") or "").strip()
+    action_request_id = str(result_request.get("request_id") or "").strip()
+    deferred_verifier_context = (
+        result_request.get("deferred_verifier_context")
+        if isinstance(result_request.get("deferred_verifier_context"), Mapping)
+        else {}
+    )
     annotated: list[dict[str, Any]] = []
     for request in requests:
         item = dict(request)
@@ -17314,9 +27465,227 @@ def _annotate_replan_ui_search_observed_result_requests(
             value = result_request.get(key)
             if value not in (None, "", [], {}):
                 item[key] = value
+        if str(item.get("tool") or "").strip() == action_tool:
+            item.update(action_policy)
+        else:
+            verifier_tool = str(item.get("tool") or "").strip()
+            if verifier_tool not in READ_ONLY_OBSERVATION_TOOLS:
+                return []
+            for key in (
+                "step_id",
+                "planner_step_id",
+                "capability_id",
+                "task_todo",
+                "task_checkpoints",
+                "task_workspace_items",
+                "verification_targets",
+                "task_verification_targets",
+                "verification_predicate_kind",
+            ):
+                value = deferred_verifier_context.get(key)
+                if value not in (None, "", [], {}):
+                    item[key] = deepcopy(value)
+            if item.get("step_id"):
+                item["planner_step_id"] = str(
+                    deferred_verifier_context.get("planner_step_id")
+                    or item.get("step_id")
+                    or ""
+                ).strip()
+            verifier_target = deferred_verifier_context.get("action_target")
+            if isinstance(verifier_target, Mapping):
+                item["action_target"] = dict(verifier_target)
+            item["source"] = str(
+                deferred_verifier_context.get("source")
+                or "runtime_verification"
+            ).strip()
+            item["approval_required"] = False
+            item["risk_level"] = "low"
+            item["runtime_stage"] = "verify"
+            item["runtime_role"] = "verify_result"
+            item["depends_on"] = [action_step_id]
+            item["verification_target_step_ids"] = [action_step_id]
+            item["source_request_id"] = action_request_id
         _attach_replan_payload_trace_metadata(item, payload)
+        if str(item.get("tool") or "").strip() == action_tool:
+            # The replan payload describes the earlier failed step.  Keep its
+            # trace identity, but do not let its runtime role overwrite the
+            # immutable next action's task policy.
+            item.update(action_policy)
+        else:
+            item["approval_required"] = False
+            item["risk_level"] = "low"
+            item["runtime_stage"] = "verify"
+            item["runtime_role"] = "verify_result"
+            item["requires_observation"] = True
+            item["requires_post_action_verification"] = False
         annotated.append(item)
     return annotated
+
+
+def _trusted_replan_planned_continuation_policy_payload(
+    result_request: Mapping[str, Any],
+    payload: Mapping[str, Any],
+    timeline: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Authorize only the next immutable planner step after recovery succeeded."""
+
+    source_step_id = str(
+        payload.get("source_step_id") or payload.get("planner_step_id") or ""
+    ).strip()
+    result_step_id = str(
+        result_request.get("step_id")
+        or result_request.get("planner_step_id")
+        or ""
+    ).strip()
+    if source_step_id == result_step_id:
+        return dict(payload)
+    plan_id = str(result_request.get("plan_id") or "").strip()
+    decision_id = str(result_request.get("decision_id") or "").strip()
+    request_id = str(result_request.get("request_id") or "").strip()
+    dependencies = _string_list(result_request.get("depends_on"))
+    if (
+        str(payload.get("trigger") or "").strip() != "tool_failure"
+        or str(result_request.get("source") or "").strip() != "runtime_planner"
+        or not all((source_step_id, result_step_id, plan_id, decision_id, request_id))
+        or str(payload.get("plan_id") or "").strip() != plan_id
+        or str(payload.get("decision_id") or "").strip() != decision_id
+        or not request_id.startswith(f"{plan_id}:request:")
+        or not dependencies
+        or not all(
+            _timeline_has_successful_replan_dependency(
+                timeline,
+                plan_id=plan_id,
+                step_id=dependency,
+            )
+            for dependency in dependencies
+        )
+    ):
+        return {}
+    source_tool = str(
+        payload.get("source_tool_name") or payload.get("tool_name") or ""
+    ).strip()
+    failed_source_exists = any(
+        str(event.get("event") or event.get("event_type") or "").strip()
+        == "agent.tool.call"
+        and str(event.get("plan_id") or "").strip() == plan_id
+        and str(
+            event.get("step_id") or event.get("planner_step_id") or ""
+        ).strip()
+        == source_step_id
+        and str(event.get("detail") or event.get("tool") or "").strip()
+        == source_tool
+        and isinstance(event.get("result"), Mapping)
+        and event["result"].get("ok") is False
+        for event in timeline
+    )
+    if not source_tool or not failed_source_exists:
+        return {}
+    return {
+        **dict(payload),
+        "source_step_id": result_step_id,
+        "planner_step_id": result_step_id,
+    }
+
+
+def _trusted_replan_observed_result_action_policy(
+    result_request: Mapping[str, Any],
+    payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    if str(result_request.get("source") or "").strip() != "runtime_planner":
+        return {}
+    request_id = str(result_request.get("request_id") or "").strip()
+    decision_id = str(result_request.get("decision_id") or "").strip()
+    plan_id = str(result_request.get("plan_id") or "").strip()
+    step_id = str(
+        result_request.get("step_id")
+        or result_request.get("planner_step_id")
+        or ""
+    ).strip()
+    run_id = str(payload.get("run_id") or "").strip()
+    if not all((request_id, decision_id, plan_id, step_id, run_id)):
+        return {}
+    if str(payload.get("decision_id") or "").strip() != decision_id:
+        return {}
+    if str(payload.get("plan_id") or "").strip() != plan_id:
+        return {}
+    if str(
+        payload.get("source_step_id")
+        or payload.get("planner_step_id")
+        or ""
+    ).strip() != step_id:
+        return {}
+
+    task_todo = (
+        result_request.get("task_todo")
+        if isinstance(result_request.get("task_todo"), Mapping)
+        else {}
+    )
+    task_metadata = (
+        task_todo.get("metadata")
+        if isinstance(task_todo.get("metadata"), Mapping)
+        else {}
+    )
+    tool_name = str(result_request.get("tool") or "").strip()
+    if not tool_name or str(task_todo.get("tool_name") or "").strip() != tool_name:
+        return {}
+    if str(task_todo.get("step_id") or "").strip() != step_id:
+        return {}
+
+    approval_required = result_request.get("approval_required")
+    todo_approval_required = task_todo.get("approval_required")
+    if not isinstance(approval_required, bool) or not isinstance(
+        todo_approval_required,
+        bool,
+    ):
+        return {}
+    if approval_required is not todo_approval_required:
+        return {}
+    risk_level = str(result_request.get("risk_level") or "").strip().lower()
+    todo_risk_level = str(task_metadata.get("risk_level") or "").strip().lower()
+    if not risk_level or risk_level != todo_risk_level:
+        return {}
+
+    depends_on = _string_list(result_request.get("depends_on"))
+    todo_depends_on = _string_list(task_todo.get("depends_on"))
+    if not depends_on or depends_on != todo_depends_on:
+        return {}
+    action_target = (
+        result_request.get("action_target")
+        if isinstance(result_request.get("action_target"), Mapping)
+        else {}
+    )
+    todo_action_target = (
+        task_metadata.get("action_target")
+        if isinstance(task_metadata.get("action_target"), Mapping)
+        else {}
+    )
+    if not todo_action_target:
+        todo_action_target = _request_contract_action_target(result_request)
+    if not action_target or dict(action_target) != dict(todo_action_target):
+        return {}
+    request_input = (
+        result_request.get("input")
+        if isinstance(result_request.get("input"), Mapping)
+        else {}
+    )
+    if str(request_input.get("target") or "").strip() != str(
+        action_target.get("target") or ""
+    ).strip():
+        return {}
+    return {
+        "approval_required": approval_required,
+        "risk_level": risk_level,
+        "depends_on": depends_on,
+        "action_target": dict(action_target),
+        "runtime_stage": str(
+            result_request.get("runtime_stage") or "operate"
+        ).strip(),
+        "runtime_role": str(
+            result_request.get("runtime_role") or "operate_ui"
+        ).strip(),
+        "requires_post_action_verification": True,
+        "policy_source": "runtime_planner_task_todo",
+    }
 
 
 def _auto_replan_focus_recovery_requests(
@@ -17918,8 +28287,16 @@ def _auto_replan_recovery_requests(
     replan_payloads: list[dict[str, Any]],
     allowed_tools: Iterable[str],
 ) -> list[dict[str, Any]]:
-    return _dedupe_replan_recovery_requests(
+    # Planner-authored recovery actions own their deferred verification chain.
+    # Keep them ahead of heuristic focus/observation fallbacks so deduplication
+    # cannot discard the source action (and its deferred contract) while
+    # retaining only a verifier that would run too early.
+    requests = _dedupe_replan_recovery_requests(
         [
+            *_auto_replan_runtime_recovery_action_requests(
+                replan_payloads,
+                allowed_tools,
+            ),
             *_auto_replan_focus_recovery_requests(
                 replan_payloads,
                 allowed_tools,
@@ -17936,11 +28313,62 @@ def _auto_replan_recovery_requests(
                 replan_payloads,
                 allowed_tools,
             ),
-            *_auto_replan_runtime_recovery_action_requests(
-                replan_payloads,
-                allowed_tools,
-            ),
         ]
+    )
+    requests = _prefer_authoritative_nonrepeat_replan_actions(requests)
+    return _bind_replan_deferred_request_dependencies(requests)
+
+
+def _prefer_authoritative_nonrepeat_replan_actions(
+    requests: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Collapse equivalent idempotent recovery effects from duplicate replans.
+
+    A failed tool can emit both its provider-authored replan event and the
+    runtime's normalized replan event.  Both may contain the same safe app-open
+    recovery.  Executing both is never useful and can make a verifier depend on
+    the normalized action's verifier step instead of the actual source action.
+    Prefer the request that carries the strongest planner action identity and
+    deferred verification contract.
+    """
+
+    result: list[dict[str, Any]] = []
+    index_by_effect: dict[tuple[str, str, str], int] = {}
+    for request in requests:
+        tool_name = str(request.get("tool") or "").strip()
+        if tool_name not in _RUNTIME_REPLAN_NO_REPEAT_AFTER_SUCCESS_TOOLS:
+            result.append(request)
+            continue
+        request_input = (
+            request.get("input")
+            if isinstance(request.get("input"), Mapping)
+            else {}
+        )
+        effect_key = (
+            str(request.get("plan_id") or "").strip(),
+            *_tool_request_signature(tool_name, request_input),
+        )
+        existing_index = index_by_effect.get(effect_key)
+        if existing_index is None:
+            index_by_effect[effect_key] = len(result)
+            result.append(request)
+            continue
+        existing = result[existing_index]
+        if _replan_recovery_action_authority_score(
+            request
+        ) > _replan_recovery_action_authority_score(existing):
+            result[existing_index] = request
+    return result
+
+
+def _replan_recovery_action_authority_score(request: Mapping[str, Any]) -> int:
+    return sum(
+        (
+            8 if str(request.get("replan_recovery_action_id") or "").strip() else 0,
+            4 if str(request.get("action_id") or "").strip() else 0,
+            2 if materialized_deferred_items(request) else 0,
+            1 if str(request.get("goal_contract_id") or "").strip() else 0,
+        )
     )
 
 
@@ -17959,11 +28387,195 @@ def _auto_replan_recovery_requests_with_task_context(
         timeline,
         tool_timeline_start=tool_timeline_start,
     )
-    return _replan_recovery_requests_with_task_context(
+    requests = _replan_recovery_requests_with_task_context(
         requests,
         replan_payloads,
         timeline,
     )
+    return _topologically_order_replan_recovery_requests(requests, timeline)
+
+
+def _bind_replan_deferred_request_dependencies(
+    requests: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Bind an already-materialized verifier to its recovery source action."""
+
+    bound = [dict(request) for request in requests]
+    for source_index, source in enumerate(bound):
+        source_step_id = str(
+            source.get("step_id") or source.get("planner_step_id") or ""
+        ).strip()
+        if not source_step_id:
+            continue
+        source_plan_id = str(source.get("plan_id") or "").strip()
+        for deferred in materialized_deferred_items(source):
+            if not isinstance(deferred, Mapping):
+                continue
+            match_index = _matching_replan_deferred_request_index(
+                bound,
+                deferred,
+                after_index=source_index,
+                plan_id=source_plan_id,
+            )
+            if match_index is None:
+                continue
+            verifier = dict(bound[match_index])
+            for key in (
+                "step_id",
+                "planner_step_id",
+                "capability_id",
+                "target_capability_id",
+                "runtime_stage",
+                "runtime_role",
+                "decision_id",
+                "run_id",
+                "replan_request_id",
+                "replan_trigger",
+                "replan_triggers",
+                "action_id",
+                "replan_recovery_action_id",
+                "goal_contract_id",
+                "goal_criterion_id",
+                "action_target",
+                "verification_target",
+                "verification_targets",
+            ):
+                value = deferred.get(key)
+                if value not in (None, "", [], {}):
+                    verifier[key] = deepcopy(value)
+            deferred_reason = str(deferred.get("planning_reason") or "").strip()
+            if deferred_reason:
+                verifier["planning_reason"] = deferred_reason
+            # A materialized safe verifier is the planner-authored terminal
+            # continuation for this recovery action.  A heuristic observation
+            # candidate may have carried a stale model-followup flag before it
+            # was bound; retaining it would call the model after exact success.
+            verifier.pop("continue_to_model", None)
+            dependencies = _string_list(verifier.get("depends_on"))
+            if source_step_id not in dependencies:
+                dependencies.append(source_step_id)
+            verifier["depends_on"] = dependencies
+            verifier["source_step_id"] = source_step_id
+            if source_plan_id:
+                verifier["plan_id"] = source_plan_id
+            verifier.setdefault(
+                "planning_reason",
+                "planner_replan_deferred_continuation",
+            )
+            bound[match_index] = verifier
+    return bound
+
+
+def _matching_replan_deferred_request_index(
+    requests: list[dict[str, Any]],
+    deferred: Mapping[str, Any],
+    *,
+    after_index: int,
+    plan_id: str,
+) -> int | None:
+    deferred_tool = str(
+        deferred.get("tool") or deferred.get("tool_name") or ""
+    ).strip()
+    deferred_input = (
+        deferred.get("input") if isinstance(deferred.get("input"), Mapping) else {}
+    )
+    for index in range(after_index + 1, len(requests)):
+        candidate = requests[index]
+        if str(candidate.get("tool") or "").strip() != deferred_tool:
+            continue
+        candidate_plan_id = str(candidate.get("plan_id") or "").strip()
+        if plan_id and candidate_plan_id and candidate_plan_id != plan_id:
+            continue
+        candidate_input = (
+            candidate.get("input")
+            if isinstance(candidate.get("input"), Mapping)
+            else {}
+        )
+        if _auto_followup_input_matches_event(deferred_input, candidate_input):
+            return index
+    return None
+
+
+def _topologically_order_replan_recovery_requests(
+    requests: list[dict[str, Any]],
+    timeline: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Order same-plan recovery steps and reject ambiguous dependency graphs."""
+
+    if not requests:
+        return requests
+    step_nodes: dict[tuple[str, str], list[int]] = {}
+    steps_by_id: dict[str, set[str]] = {}
+    for index, request in enumerate(requests):
+        step_id = str(
+            request.get("step_id") or request.get("planner_step_id") or ""
+        ).strip()
+        if not step_id:
+            continue
+        plan_id = str(request.get("plan_id") or "").strip()
+        step_nodes.setdefault((plan_id, step_id), []).append(index)
+        steps_by_id.setdefault(step_id, set()).add(plan_id)
+
+    edges: dict[int, set[int]] = {index: set() for index in range(len(requests))}
+    indegree = [0] * len(requests)
+    for index, request in enumerate(requests):
+        plan_id = str(request.get("plan_id") or "").strip()
+        for dependency in _string_list(request.get("depends_on")):
+            candidates = step_nodes.get((plan_id, dependency), [])
+            if not candidates:
+                if dependency in steps_by_id:
+                    raise ValueError("runtime_replan_recovery_dependency_wrong_plan")
+                if _timeline_has_successful_replan_dependency(
+                    timeline,
+                    plan_id=plan_id,
+                    step_id=dependency,
+                ):
+                    continue
+                raise ValueError("runtime_replan_recovery_dependency_missing")
+            for source_index in candidates:
+                if source_index == index:
+                    raise ValueError("runtime_replan_recovery_dependency_cycle")
+                if index in edges[source_index]:
+                    continue
+                edges[source_index].add(index)
+                indegree[index] += 1
+
+    ready = [index for index, count in enumerate(indegree) if count == 0]
+    ordered_indices: list[int] = []
+    while ready:
+        current = ready.pop(0)
+        ordered_indices.append(current)
+        for dependent in sorted(edges[current]):
+            indegree[dependent] -= 1
+            if indegree[dependent] == 0:
+                ready.append(dependent)
+    if len(ordered_indices) != len(requests):
+        raise ValueError("runtime_replan_recovery_dependency_cycle")
+    return [requests[index] for index in ordered_indices]
+
+
+def _timeline_has_successful_replan_dependency(
+    timeline: list[dict[str, Any]],
+    *,
+    plan_id: str,
+    step_id: str,
+) -> bool:
+    for event in reversed(timeline):
+        if str(event.get("event") or event.get("event_type") or "").strip() != (
+            "agent.tool.call"
+        ):
+            continue
+        event_plan_id = str(event.get("plan_id") or "").strip()
+        if event_plan_id != plan_id:
+            continue
+        event_step_id = str(
+            event.get("step_id") or event.get("planner_step_id") or ""
+        ).strip()
+        if event_step_id != step_id:
+            continue
+        result = event.get("result") if isinstance(event.get("result"), Mapping) else {}
+        return result.get("ok") is True and not result.get("approval_required")
+    return False
 
 
 def _drop_completed_nonrepeat_replan_recovery_prefix(
@@ -17973,24 +28585,26 @@ def _drop_completed_nonrepeat_replan_recovery_prefix(
     *,
     tool_timeline_start: int,
 ) -> list[dict[str, Any]]:
-    remaining = list(requests)
-    while (
-        remaining
-        and str(remaining[0].get("tool") or "").strip()
-        in _RUNTIME_REPLAN_NO_REPEAT_AFTER_SUCCESS_TOOLS
-        and _runtime_replan_source_request_completed(
-            remaining[0],
-            timeline,
-            tool_timeline_start=tool_timeline_start,
-        )
-    ):
-        completed_request = remaining[0]
-        deferred_requests = _completed_nonrepeat_replan_deferred_requests(
-            completed_request,
-            allowed_tools,
-        )
-        remaining = [*deferred_requests, *remaining[1:]]
-    return remaining
+    remaining: list[dict[str, Any]] = []
+    for request in requests:
+        if (
+            str(request.get("tool") or "").strip()
+            in _RUNTIME_REPLAN_NO_REPEAT_AFTER_SUCCESS_TOOLS
+            and _runtime_replan_source_request_completed(
+                request,
+                timeline,
+                tool_timeline_start=tool_timeline_start,
+            )
+        ):
+            remaining.extend(
+                _completed_nonrepeat_replan_deferred_requests(
+                    request,
+                    allowed_tools,
+                )
+            )
+            continue
+        remaining.append(request)
+    return _dedupe_replan_recovery_requests(remaining)
 
 
 def _completed_nonrepeat_replan_deferred_requests(
@@ -18529,6 +29143,13 @@ def _auto_replan_runtime_recovery_action_requests(
 
 
 def _runtime_replan_action_auto_start_blocked(action: Mapping[str, Any]) -> bool:
+    permission_target = str(action.get("permission_target") or "").strip().casefold()
+    if (
+        permission_target
+        and permission_target not in _RUNTIME_REPLAN_INTERNAL_PERMISSION_TARGETS
+        and permission_target not in _RUNTIME_REPLAN_AUTO_SAFE_CAPABILITY_TARGETS
+    ):
+        return True
     metadata = action.get("metadata") if isinstance(action.get("metadata"), Mapping) else {}
     explicit = metadata.get("runtime_replan_auto_start_eligible")
     if isinstance(explicit, bool):
@@ -18638,12 +29259,14 @@ def _auto_replan_recovery_deferred_continuation_requests(
     for source_request in recovery_requests:
         if not isinstance(source_request, Mapping):
             continue
-        if not _runtime_replan_source_request_completed(
+        source_completion = _runtime_replan_source_request_completion_event(
             source_request,
             timeline,
             tool_timeline_start=tool_timeline_start,
-        ):
+        )
+        if source_completion is None:
             continue
+        source_event_index, source_event = source_completion
         for item in materialized_deferred_items(source_request):
             request = safe_deferred_continuation_request(
                 item,
@@ -18664,13 +29287,222 @@ def _auto_replan_recovery_deferred_continuation_requests(
                 "planning_reason",
                 "planner_replan_deferred_continuation",
             )
+            request = _bind_replan_deferred_request_to_source_event(
+                request,
+                source_request=source_request,
+                source_event=source_event,
+            )
+            if _exact_replan_deferred_verifier_completed_after_source(
+                request,
+                source_event_index=source_event_index,
+                source_event=source_event,
+                timeline=timeline,
+            ):
+                continue
             requests.append(request)
     requests = _dedupe_replan_recovery_requests(requests)
-    return _drop_completed_auto_followup_prefix(
+    return _topologically_order_replan_recovery_requests(
         requests,
         timeline,
-        tool_timeline_start=tool_timeline_start,
     )
+
+
+def _runtime_replan_source_request_completion_event(
+    request: Mapping[str, Any],
+    timeline: list[dict[str, Any]],
+    *,
+    tool_timeline_start: int,
+) -> tuple[int, Mapping[str, Any]] | None:
+    """Return the exact successful invocation of a recovery source action."""
+
+    tool_name = str(request.get("tool") or "").strip()
+    if not tool_name:
+        return None
+    request_input = (
+        request.get("input") if isinstance(request.get("input"), Mapping) else {}
+    )
+    expected = {
+        key: str(request.get(key) or "").strip()
+        for key in ("plan_id", "request_id", "tool_call_id")
+    }
+    expected_step_id = str(
+        request.get("step_id") or request.get("planner_step_id") or ""
+    ).strip()
+    for event_index in range(len(timeline) - 1, max(-1, tool_timeline_start - 1), -1):
+        event = timeline[event_index]
+        if str(event.get("event") or event.get("event_type") or "").strip() != (
+            "agent.tool.call"
+        ):
+            continue
+        if str(event.get("detail") or event.get("tool") or "").strip() != tool_name:
+            continue
+        result = event.get("result") if isinstance(event.get("result"), Mapping) else {}
+        if result.get("ok") is not True or result.get("approval_required"):
+            continue
+        if expected["plan_id"] and str(event.get("plan_id") or "").strip() != expected[
+            "plan_id"
+        ]:
+            continue
+        event_step_id = str(
+            event.get("step_id") or event.get("planner_step_id") or ""
+        ).strip()
+        if expected_step_id and event_step_id != expected_step_id:
+            continue
+        if expected["request_id"] and str(event.get("request_id") or "").strip() != expected[
+            "request_id"
+        ]:
+            continue
+        if expected["tool_call_id"] and str(event.get("tool_call_id") or "").strip() != expected[
+            "tool_call_id"
+        ]:
+            continue
+        event_input = (
+            event.get("input_preview")
+            if isinstance(event.get("input_preview"), Mapping)
+            else {}
+        )
+        if not _auto_followup_input_matches_event(request_input, event_input):
+            continue
+        return event_index, event
+    return None
+
+
+def _bind_replan_deferred_request_to_source_event(
+    request: dict[str, Any],
+    *,
+    source_request: Mapping[str, Any],
+    source_event: Mapping[str, Any],
+) -> dict[str, Any]:
+    bound = dict(request)
+    source_step_id = str(
+        source_event.get("step_id")
+        or source_event.get("planner_step_id")
+        or source_request.get("step_id")
+        or source_request.get("planner_step_id")
+        or ""
+    ).strip()
+    if source_step_id:
+        bound["source_step_id"] = source_step_id
+        dependencies = _string_list(bound.get("depends_on"))
+        if source_step_id not in dependencies:
+            dependencies.append(source_step_id)
+        bound["depends_on"] = dependencies
+        verification_steps = _string_list(bound.get("verification_target_step_ids"))
+        if source_step_id not in verification_steps:
+            verification_steps.append(source_step_id)
+        bound["verification_target_step_ids"] = verification_steps
+    source_request_id = str(
+        source_event.get("request_id") or source_request.get("request_id") or ""
+    ).strip()
+    if source_request_id:
+        bound["source_request_id"] = source_request_id
+    source_tool_call_id = str(
+        source_event.get("tool_call_id")
+        or source_request.get("tool_call_id")
+        or ""
+    ).strip()
+    if source_tool_call_id:
+        bound["source_tool_call_id"] = source_tool_call_id
+    source_tool = str(
+        source_event.get("detail")
+        or source_event.get("tool")
+        or source_request.get("tool")
+        or ""
+    ).strip()
+    if source_tool:
+        bound["source_tool"] = source_tool
+    for key in ("run_id", "decision_id", "plan_id", "goal_contract_id", "goal_criterion_id"):
+        value = source_event.get(key) or source_request.get(key)
+        if value not in (None, "", [], {}):
+            bound[key] = deepcopy(value)
+    return bound
+
+
+def _exact_replan_deferred_verifier_completed_after_source(
+    request: Mapping[str, Any],
+    *,
+    source_event_index: int,
+    source_event: Mapping[str, Any],
+    timeline: list[dict[str, Any]],
+) -> bool:
+    """Accept only a fresh, same-plan verifier receipt for this invocation."""
+
+    tool_name = str(request.get("tool") or "").strip()
+    source_tool_call_id = str(source_event.get("tool_call_id") or "").strip()
+    source_request_id = str(source_event.get("request_id") or "").strip()
+    source_step_id = str(
+        source_event.get("step_id") or source_event.get("planner_step_id") or ""
+    ).strip()
+    if not tool_name or not source_step_id or not (
+        source_tool_call_id or source_request_id
+    ):
+        return False
+    expected_plan_id = str(request.get("plan_id") or "").strip()
+    expected_step_id = str(
+        request.get("step_id") or request.get("planner_step_id") or ""
+    ).strip()
+    request_input = (
+        request.get("input") if isinstance(request.get("input"), Mapping) else {}
+    )
+    for event in timeline[source_event_index + 1 :]:
+        if str(event.get("event") or event.get("event_type") or "").strip() != (
+            "agent.tool.call"
+        ):
+            continue
+        if str(event.get("detail") or event.get("tool") or "").strip() != tool_name:
+            continue
+        if str(event.get("plan_id") or "").strip() != expected_plan_id:
+            continue
+        event_step_id = str(
+            event.get("step_id") or event.get("planner_step_id") or ""
+        ).strip()
+        if expected_step_id and event_step_id != expected_step_id:
+            continue
+        event_input = (
+            event.get("input_preview")
+            if isinstance(event.get("input_preview"), Mapping)
+            else {}
+        )
+        if not _auto_followup_input_matches_event(request_input, event_input):
+            continue
+        result = event.get("result") if isinstance(event.get("result"), Mapping) else {}
+        if (
+            result.get("ok") is not True
+            or result.get("approval_required")
+            or result.get("verification_failed") is True
+        ):
+            continue
+        event_source_call_id = str(
+            event.get("source_tool_call_id")
+            or result.get("source_tool_call_id")
+            or ""
+        ).strip()
+        event_source_request_id = str(
+            event.get("source_request_id")
+            or result.get("source_request_id")
+            or ""
+        ).strip()
+        if source_tool_call_id:
+            if event_source_call_id != source_tool_call_id:
+                continue
+        elif event_source_request_id != source_request_id:
+            continue
+        event_source_step_id = str(
+            event.get("source_step_id")
+            or result.get("source_step_id")
+            or ""
+        ).strip()
+        if event_source_step_id != source_step_id:
+            continue
+        data = result.get("data") if isinstance(result.get("data"), Mapping) else {}
+        if not (
+            result.get("postcondition_verified") is True
+            or result.get("verification_satisfied_by_native_receipt") is True
+            or data.get("postcondition_verified") is True
+        ):
+            continue
+        return True
+    return False
 
 
 def _runtime_replan_source_request_completed(
@@ -18982,17 +29814,30 @@ def _dedupe_replan_recovery_requests(
     requests: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
-    seen: set[tuple[str, tuple[tuple[str, str], ...], str]] = set()
+    seen: set[
+        tuple[str, str]
+        | tuple[str, tuple[tuple[str, str], ...], str]
+    ] = set()
     for request in requests:
         if not isinstance(request, dict):
             continue
         tool_name = str(request.get("tool") or "").strip()
         request_input = request.get("input") if isinstance(request.get("input"), Mapping) else {}
         request_id = str(request.get("replan_request_id") or "").strip()
+        identity = ensure_recovery_action_identity(request)
         signature = (
-            tool_name,
-            tuple(sorted((str(key), str(value)) for key, value in request_input.items())),
-            request_id,
+            ("recovery", identity)
+            if identity
+            else (
+                tool_name,
+                tuple(
+                    sorted(
+                        (str(key), str(value))
+                        for key, value in request_input.items()
+                    )
+                ),
+                request_id,
+            )
         )
         if not tool_name or signature in seen:
             continue
@@ -19049,7 +29894,18 @@ def _auto_discovered_app_followup_requests(
     target_action = str(target.get("target_action") or "").strip()
     safe_shortcut_action = str(target.get("safe_shortcut_action") or "").strip()
     requests: list[dict[str, Any]] = []
-    if target_action == "safe_shortcut" and safe_shortcut_action:
+    if target_action == "click":
+        requests.extend(
+            _discovered_app_click_requests(
+                app_query,
+                app_name,
+                target,
+                allowed,
+                source=source,
+                planning_reason=planning_reason,
+            )
+        )
+    elif target_action == "safe_shortcut" and safe_shortcut_action:
         requests.extend(
             _discovered_app_safe_shortcut_requests(
                 app_query,
@@ -19212,6 +30068,27 @@ def _annotate_auto_followup_requests_from_tool_plan(
                 str(item.get("step_id") or "").strip(),
             ).items():
                 item.setdefault(key, value)
+            task_todo = (
+                item.get("task_todo")
+                if isinstance(item.get("task_todo"), Mapping)
+                else {}
+            )
+            task_metadata = (
+                task_todo.get("metadata")
+                if isinstance(task_todo.get("metadata"), Mapping)
+                else {}
+            )
+            for key in ("runtime_doctrine", "runtime_stage", "runtime_role"):
+                value = str(task_metadata.get(key) or "").strip()
+                if value:
+                    item.setdefault(key, value)
+            for key in (
+                "requires_observation",
+                "requires_post_action_verification",
+            ):
+                value = task_metadata.get(key)
+                if isinstance(value, bool):
+                    item.setdefault(key, value)
         if str(item.get("step_id") or "").strip() and not str(
             item.get("planner_step_id") or ""
         ).strip():
@@ -19385,8 +30262,8 @@ def _followup_plan_tools_match(request_tool: str, plan_tool: str) -> bool:
     )
 
 
-def _auto_followup_plan_step_trace(step: Mapping[str, Any]) -> dict[str, str]:
-    trace: dict[str, str] = {}
+def _auto_followup_plan_step_trace(step: Mapping[str, Any]) -> dict[str, Any]:
+    trace: dict[str, Any] = {}
     for source_key, target_key in (
         ("step_id", "step_id"),
         ("capability_id", "capability_id"),
@@ -19394,6 +30271,15 @@ def _auto_followup_plan_step_trace(step: Mapping[str, Any]) -> dict[str, str]:
         value = str(step.get(source_key) or "").strip()
         if value:
             trace[target_key] = value
+    dependencies = _string_list(step.get("depends_on"))
+    if dependencies:
+        trace["depends_on"] = dependencies
+    approval_required = step.get("approval_required")
+    if isinstance(approval_required, bool):
+        trace["approval_required"] = approval_required
+    risk_level = str(step.get("risk_level") or "").strip()
+    if risk_level:
+        trace["risk_level"] = risk_level
     return trace
 
 
@@ -19873,6 +30759,75 @@ def _discovered_app_safe_shortcut_requests(
     return []
 
 
+def _discovered_app_click_requests(
+    app_query: str,
+    app_name: str,
+    target: Mapping[str, Any],
+    allowed: set[str],
+    *,
+    source: str,
+    planning_reason: str,
+) -> list[dict[str, Any]]:
+    target_label = str(target.get("target") or "").strip()
+    if not target_label:
+        return []
+    click_input = {
+        "target": target_label,
+        "role_filter": str(target.get("role_filter") or "").strip(),
+        "limit": _positive_int(target.get("limit"), default=80),
+        "click_count": _positive_int(target.get("click_count"), default=1),
+    }
+    app_scoped_tool = _first_allowed_tool(
+        ("app.open_and_click_ui_element",),
+        allowed,
+    )
+    if app_scoped_tool:
+        request = _with_discovered_app_resolution(
+            _request_like(
+                app_scoped_tool,
+                {"app_name": app_name, **click_input},
+                source=source,
+                planning_reason=planning_reason,
+            ),
+            app_query,
+            app_name,
+        )
+        request["approval_required"] = True
+        request["risk_level"] = "medium"
+        return [request]
+    prepare_tool = _first_allowed_tool(
+        ("app.open", "desktop.open_app"),
+        allowed,
+    )
+    if not prepare_tool or "desktop.click_ui_element" not in allowed:
+        return []
+    click_request = _with_discovered_app_resolution(
+        _request_like(
+            "desktop.click_ui_element",
+            click_input,
+            source=source,
+            planning_reason=planning_reason,
+        ),
+        app_query,
+        app_name,
+    )
+    click_request["approval_required"] = True
+    click_request["risk_level"] = "medium"
+    return [
+        _with_discovered_app_resolution(
+            _request_like(
+                prepare_tool,
+                {"app_name": app_name},
+                source=source,
+                planning_reason=planning_reason,
+            ),
+            app_query,
+            app_name,
+        ),
+        click_request,
+    ]
+
+
 def _discovered_app_open_path_request(
     app_query: str,
     app_name: str,
@@ -20295,14 +31250,15 @@ def _discovered_app_communication_compose_requests(
         and body
         and "desktop.submit_foreground" in allowed
     ):
-        requests.append(
-            _request_like(
-                "desktop.submit_foreground",
-                {"action": "send"},
-                source=source,
-                planning_reason=planning_reason,
-            )
+        send_request = _request_like(
+            "desktop.submit_foreground",
+            {"action": "send"},
+            source=source,
+            planning_reason=planning_reason,
         )
+        send_request["approval_required"] = True
+        send_request["risk_level"] = "high"
+        requests.append(send_request)
     return requests
 
 
@@ -21078,6 +32034,40 @@ def _latest_model_followup_context(
     return {}
 
 
+def _latest_model_replan_trace_context(
+    timeline: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Return correlation-only Runtime replan context for request binding.
+
+    A pure replan context intentionally is not a general pending-execution
+    context: treating it as one after the retry completes can force an extra
+    model turn.  Tool-request binding still needs its Runtime-owned trace, so
+    this narrow reader is used only at that boundary; every claimed source is
+    replay-validated later before it gains execution authority.
+    """
+
+    for raw_event in reversed(timeline):
+        if not isinstance(raw_event, Mapping):
+            continue
+        if str(raw_event.get("event") or "").strip() != (
+            "agent.model.followup_context"
+        ):
+            continue
+        context = {
+            str(key): value
+            for key, value in raw_event.items()
+            if key != "timestamp"
+        }
+        if (
+            str(context.get("source") or "").strip() == "runtime_planner"
+            and str(context.get("status") or "").strip() == "ready"
+            and bool(_mapping_list(context.get("replan_requests")))
+        ):
+            return context
+        return {}
+    return {}
+
+
 def _model_followup_context_target(context: Mapping[str, Any]) -> dict[str, Any]:
     target = context.get("followup_target") if isinstance(context, Mapping) else {}
     if isinstance(target, dict):
@@ -21236,9 +32226,11 @@ _MODEL_FOLLOWUP_AUTO_PENDING_TOOLS = {
     "clipboard.write",
     "screen.capture",
     "terminal.run",
+    "workspace.read",
 }
 
 _MODEL_FOLLOWUP_MAX_AUTO_PENDING_REQUESTS = 6
+_RUNTIME_SEMANTIC_ARTIFACT_RETRY_AUTHORITY = object()
 
 _RUNTIME_ORCHESTRATION_SCOPE_KEYS = (
     "group_run_id",
@@ -21258,10 +32250,23 @@ def _model_followup_pending_plan_requests(
     *,
     generated_content: str = "",
     timeline: list[dict[str, Any]] | None = None,
+    allow_materialization_rebind: bool = False,
+    semantic_artifact_retry: Mapping[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     if not isinstance(followup_context, Mapping):
         return []
-    raw_steps = _model_followup_pending_trace_items(followup_context)
+    raw_steps = (
+        _model_followup_materialization_rebind_steps(
+            followup_context,
+            timeline=timeline,
+            semantic_artifact_retry=semantic_artifact_retry,
+        )
+        if allow_materialization_rebind
+        else _model_followup_auto_executable_pending_steps(
+            followup_context,
+            timeline=timeline,
+        )
+    )
     if not raw_steps:
         return []
     allowed = {str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()}
@@ -21350,10 +32355,16 @@ def _model_followup_pending_plan_continuation_requests(
         followup_context.get("planning_reason") or "planner_followup_pending_plan"
     ).strip()
     requests: list[dict[str, Any]] = []
+    authoritative_statuses, _has_complete_task_state = (
+        _model_followup_authoritative_step_statuses(followup_context, steps)
+    )
     for step in steps[last_completed_index + 1 :]:
         step_id = str(step.get("step_id") or "").strip()
         if step_id and step_id in completed_step_ids:
             continue
+        status = authoritative_statuses.get(step_id) or _model_followup_step_status(step)
+        if status in _MODEL_FOLLOWUP_NON_EXECUTABLE_STEP_STATUSES:
+            break
         dependencies = _string_list(step.get("depends_on"))
         if any(dependency not in completed_step_ids for dependency in dependencies):
             break
@@ -21516,7 +32527,10 @@ def _model_followup_pending_plan_replan_payloads(
             ),
             "trigger": trigger,
             "status": "requested",
-            "source": "runtime_planner",
+            # This request is emitted only after the trusted Runner observed
+            # the terminal tool result. The planner describes the fallback,
+            # but it is not the authority for the failure fact.
+            "source": "runtime_tool_request_runner",
             "run_id": str(run_id or request.get("run_id") or followup_context.get("run_id") or "").strip(),
             "task_id": str(request.get("task_id") or followup_context.get("task_id") or "").strip(),
             "decision_id": str(
@@ -21916,6 +32930,40 @@ def _attach_model_followup_pending_plan_trace_metadata(
     step: Mapping[str, Any],
     followup_context: Mapping[str, Any],
 ) -> None:
+    # Input bindings are planner authority, never model authority.  Model
+    # requests are reduced to protocol/tool/input before this point, while
+    # runtime-generated follow-ups may already carry metadata; in both cases
+    # the exact pending step is canonical and replaces any supplied binding.
+    request.pop("input_bindings", None)
+    raw_input_bindings = step.get("input_bindings")
+    if isinstance(raw_input_bindings, list):
+        input_bindings = [
+            dict(binding)
+            for binding in raw_input_bindings
+            if isinstance(binding, Mapping)
+        ]
+        if input_bindings:
+            request["input_bindings"] = input_bindings
+    task_todo = step.get("task_todo") if isinstance(step.get("task_todo"), Mapping) else {}
+    task_metadata = (
+        task_todo.get("metadata")
+        if isinstance(task_todo.get("metadata"), Mapping)
+        else {}
+    )
+    if any(
+        source.get("approval_required") is True
+        for source in (step, task_todo, task_metadata)
+    ):
+        request["approval_required"] = True
+    for key in ("risk_level", "policy_reason"):
+        value = str(
+            step.get(key)
+            or task_todo.get(key)
+            or task_metadata.get(key)
+            or ""
+        ).strip()
+        if value:
+            request[key] = value
     for key in (
         "request_id",
         "decision_id",
@@ -21959,7 +33007,14 @@ def _attach_model_followup_pending_plan_trace_metadata(
         value = step.get(key)
         if value not in (None, "", [], {}):
             request[key] = value
-    for key in ("depends_on", "fallback_tools", "replan_triggers", "replan_signal_ids"):
+    for key in (
+        "depends_on",
+        "fallback_tools",
+        "replan_triggers",
+        "replan_signal_ids",
+        "verified_step_ids",
+        "verification_target_step_ids",
+    ):
         if key in request:
             continue
         values = _string_list(step.get(key))
@@ -21969,6 +33024,7 @@ def _attach_model_followup_pending_plan_trace_metadata(
         "task_todo",
         "task_checkpoints",
         "task_workspace_items",
+        "verification_targets",
         "task_verification_targets",
     ):
         if key in request:
@@ -21978,6 +33034,31 @@ def _attach_model_followup_pending_plan_trace_metadata(
             request[key] = dict(value)
         elif isinstance(value, list) and value:
             request[key] = [dict(item) for item in value if isinstance(item, Mapping)]
+    if "verification_target_step_ids" not in request:
+        targets = _mapping_list(request.get("task_verification_targets"))
+        if not targets:
+            targets = _mapping_list(request.get("verification_targets"))
+        target_step_ids = [
+            str(target.get("step_id") or "").strip()
+            for target in targets
+            if str(target.get("step_id") or "").strip()
+        ]
+        if target_step_ids:
+            request["verification_target_step_ids"] = list(
+                dict.fromkeys(target_step_ids)
+            )
+    for key in (
+        "action_target",
+        "observation_evidence",
+        "observation_retry",
+        "checkpoint_policy",
+        "desktop_loop",
+    ):
+        if key in request:
+            continue
+        value = step.get(key)
+        if isinstance(value, Mapping) and value:
+            request[key] = dict(value)
 
 
 def _pending_plan_request_with_timeline_resolved_app(
@@ -22061,15 +33142,38 @@ def _pending_plan_request_with_timeline_resolved_app(
 def _model_followup_requests_with_pending_plan_metadata(
     requests: list[dict[str, Any]],
     followup_context: Mapping[str, Any] | None,
+    *,
+    trusted_request_metadata: bool = False,
 ) -> list[dict[str, Any]]:
-    if not requests or not isinstance(followup_context, Mapping):
+    if not requests:
         return requests
+    if not trusted_request_metadata:
+        requests = [
+            _model_followup_request_protocol_payload(request)
+            for request in requests
+            if isinstance(request, Mapping)
+        ]
+    if not isinstance(followup_context, Mapping):
+        return requests
+    require_executable_binding = (
+        trusted_request_metadata
+        and _model_followup_context_has_authoritative_execution_state(
+            followup_context
+        )
+    )
     raw_steps = _model_followup_pending_trace_items(followup_context)
     if not raw_steps:
-        return requests
-    steps = [step for step in raw_steps if isinstance(step, Mapping)]
+        return [] if require_executable_binding else requests
+    steps = (
+        _model_followup_auto_executable_pending_steps(
+            followup_context,
+            raw_steps=raw_steps,
+        )
+        if require_executable_binding
+        else [step for step in raw_steps if isinstance(step, Mapping)]
+    )
     if not steps:
-        return requests
+        return [] if require_executable_binding else requests
     annotated: list[dict[str, Any]] = []
     cursor = 0
     for request in requests:
@@ -22105,8 +33209,35 @@ def _model_followup_requests_with_pending_plan_metadata(
                 step,
                 followup_context,
             )
+        elif require_executable_binding:
+            # Runtime-generated compatibility follow-ups are never an
+            # alternate execution authority.  Once planner state exists, an
+            # exact executable step must re-bind every generated request;
+            # blocked, approval-waiting, dependency-unsatisfied, and stale
+            # requests therefore fail closed instead of escaping through the
+            # legacy followup_target lane.
+            continue
         annotated.append(item)
     return annotated
+
+
+def _model_followup_request_protocol_payload(
+    request: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Keep model-owned protocol data, then rebuild runtime correlation metadata."""
+
+    return {
+        key: request[key]
+        for key in (
+            "protocol",
+            "tool",
+            "input",
+            "tool_call_id",
+            "call_id",
+            "id",
+        )
+        if key in request
+    }
 
 
 def _model_followup_pending_trace_items(
@@ -22125,6 +33256,934 @@ def _model_followup_pending_trace_items(
     return _model_followup_task_core_pending_trace_items(followup_context)
 
 
+_MODEL_FOLLOWUP_NON_EXECUTABLE_STEP_STATUSES = frozenset(
+    {
+        "blocked",
+        "cancelled",
+        "canceled",
+        "failed",
+        "skipped",
+        "terminal",
+        "unavailable",
+        "waiting_approval",
+    }
+)
+
+_MODEL_FOLLOWUP_COMPLETED_STEP_STATUSES = frozenset(
+    {"completed", "succeeded", "success", "verified"}
+)
+
+
+def _model_followup_context_has_authoritative_execution_state(
+    followup_context: Mapping[str, Any],
+) -> bool:
+    for key in ("pending_execution_requests", "pending_plan_steps"):
+        if isinstance(followup_context.get(key), list):
+            return True
+    for key in (
+        "task_core",
+        "task_progress",
+        "yachiyo_execution_envelope",
+        "execution_envelope",
+        "runtime_execution_envelope",
+    ):
+        if isinstance(followup_context.get(key), Mapping) and followup_context.get(key):
+            return True
+    return isinstance(followup_context.get("replan_requests"), list) and bool(
+        followup_context.get("replan_requests")
+    )
+
+
+def _model_followup_step_status(
+    step: Mapping[str, Any],
+    *,
+    default: str = "planned",
+) -> str:
+    task_todo = step.get("task_todo") if isinstance(step.get("task_todo"), Mapping) else {}
+    return str(
+        task_todo.get("status")
+        or step.get("runtime_status")
+        or step.get("status")
+        or default
+    ).strip()
+
+
+def _model_followup_authoritative_step_statuses(
+    followup_context: Mapping[str, Any],
+    raw_steps: Iterable[Mapping[str, Any]],
+) -> tuple[dict[str, str], bool]:
+    statuses: dict[str, str] = {}
+
+    def record(step_id: Any, status: Any) -> None:
+        clean_step_id = str(step_id or "").strip()
+        clean_status = str(status or "").strip()
+        if clean_step_id and clean_status:
+            statuses[clean_step_id] = clean_status
+
+    for step in raw_steps:
+        if isinstance(step, Mapping):
+            record(step.get("step_id") or step.get("planner_step_id"), _model_followup_step_status(step))
+
+    task_progress = (
+        followup_context.get("task_progress")
+        if isinstance(followup_context.get("task_progress"), Mapping)
+        else {}
+    )
+    for todo in _mapping_list(task_progress.get("todos")):
+        record(todo.get("step_id"), todo.get("status"))
+    for status, key in (
+        ("completed", "completed_steps"),
+        ("blocked", "blocked_steps"),
+        ("waiting_approval", "waiting_approval_steps"),
+    ):
+        for step_id in _string_list(task_progress.get(key)):
+            record(step_id, status)
+
+    task_core = (
+        followup_context.get("task_core")
+        if isinstance(followup_context.get("task_core"), Mapping)
+        else {}
+    )
+    task_core_todos = _mapping_list(task_core.get("todos"))
+    for todo in task_core_todos:
+        record(todo.get("step_id"), todo.get("status"))
+    for checkpoint in _mapping_list(task_core.get("checkpoints")):
+        checkpoint_status = str(checkpoint.get("status") or "").strip()
+        step_id = str(
+            checkpoint.get("after_step_id") or checkpoint.get("step_id") or ""
+        ).strip()
+        current_status = statuses.get(step_id, "")
+        if (
+            checkpoint_status in _MODEL_FOLLOWUP_NON_EXECUTABLE_STEP_STATUSES
+            and current_status not in _MODEL_FOLLOWUP_COMPLETED_STEP_STATUSES
+        ):
+            record(step_id, checkpoint_status)
+    return statuses, bool(task_core_todos)
+
+
+def _model_followup_auto_executable_pending_steps(
+    followup_context: Mapping[str, Any],
+    *,
+    raw_steps: Iterable[Mapping[str, Any]] | None = None,
+    timeline: Iterable[Mapping[str, Any]] | None = None,
+) -> list[Mapping[str, Any]]:
+    steps = [
+        step
+        for step in (
+            raw_steps
+            if raw_steps is not None
+            else _model_followup_pending_trace_items(followup_context)
+        )
+        if isinstance(step, Mapping)
+    ]
+    if not steps:
+        return []
+    statuses, has_complete_task_state = _model_followup_authoritative_step_statuses(
+        followup_context,
+        steps,
+    )
+    authoritative_completed_step_ids = _model_followup_authoritative_completed_step_ids(
+        followup_context,
+        timeline or (),
+    )
+    for completed_step_id in authoritative_completed_step_ids:
+        statuses[completed_step_id] = "completed"
+    completed_step_ids = set(authoritative_completed_step_ids)
+    scheduled_step_ids: set[str] = set()
+    executable: list[Mapping[str, Any]] = []
+    for step in steps:
+        step_id = str(step.get("step_id") or step.get("planner_step_id") or "").strip()
+        status = statuses.get(step_id) or _model_followup_step_status(step)
+        if (
+            status in _MODEL_FOLLOWUP_COMPLETED_STEP_STATUSES
+            and step_id in completed_step_ids
+        ):
+            continue
+        if status in _MODEL_FOLLOWUP_NON_EXECUTABLE_STEP_STATUSES:
+            continue
+        dependencies = _string_list(step.get("depends_on"))
+        dependency_unsatisfied = False
+        for dependency in dependencies:
+            if dependency in completed_step_ids or dependency in scheduled_step_ids:
+                continue
+            if has_complete_task_state or dependency in statuses:
+                dependency_unsatisfied = True
+                break
+        if dependency_unsatisfied:
+            continue
+        executable.append(step)
+        if step_id:
+            scheduled_step_ids.add(step_id)
+    return executable
+
+
+def _model_followup_authoritative_completed_step_ids(
+    followup_context: Mapping[str, Any],
+    timeline: Iterable[Mapping[str, Any]],
+) -> set[str]:
+    expected_plan_id = str(followup_context.get("plan_id") or "").strip()
+    expected_decision_id = str(followup_context.get("decision_id") or "").strip()
+    expected_run_id = str(followup_context.get("run_id") or "").strip()
+    expected_step_values = [
+        *_model_followup_task_core_pending_trace_items(followup_context),
+        *_model_followup_pending_trace_items(followup_context),
+    ]
+    expected_steps = {
+        str(step.get("step_id") or step.get("planner_step_id") or "").strip(): step
+        for step in expected_step_values
+        if isinstance(step, Mapping)
+        and str(step.get("step_id") or step.get("planner_step_id") or "").strip()
+    }
+    timeline_events = [event for event in timeline if isinstance(event, Mapping)]
+    completed: set[str] = set()
+    for event in timeline_events:
+        payload = event.get("payload") if isinstance(event.get("payload"), Mapping) else {}
+        event_type = str(
+            event.get("event") or event.get("event_type") or payload.get("event") or ""
+        ).strip()
+        if event_type not in {
+            "agent.task.todo.updated",
+            "agent.task.checkpoint.updated",
+        }:
+            continue
+        status = str(event.get("status") or payload.get("status") or "").strip()
+        if status not in _MODEL_FOLLOWUP_COMPLETED_STEP_STATUSES:
+            continue
+        plan_id = str(event.get("plan_id") or payload.get("plan_id") or "").strip()
+        decision_id = str(
+            event.get("decision_id") or payload.get("decision_id") or ""
+        ).strip()
+        run_id = str(event.get("run_id") or payload.get("run_id") or "").strip()
+        if expected_plan_id and plan_id != expected_plan_id:
+            continue
+        if expected_decision_id and decision_id != expected_decision_id:
+            continue
+        if expected_run_id and run_id != expected_run_id:
+            continue
+        source = str(event.get("source") or payload.get("source") or "").strip()
+        source_event = (
+            event.get("source_event")
+            if isinstance(event.get("source_event"), Mapping)
+            else payload.get("source_event")
+            if isinstance(payload.get("source_event"), Mapping)
+            else {}
+        )
+        result_preview = (
+            event.get("result_preview")
+            if isinstance(event.get("result_preview"), Mapping)
+            else payload.get("result_preview")
+            if isinstance(payload.get("result_preview"), Mapping)
+            else {}
+        )
+        step_id = str(
+            event.get("step_id")
+            or payload.get("step_id")
+            or event.get("planner_step_id")
+            or payload.get("planner_step_id")
+            or ""
+        ).strip()
+        expected_step = expected_steps.get(step_id, {})
+        expected_tool = str(
+            expected_step.get("tool_name")
+            or expected_step.get("tool")
+            or ""
+        ).strip()
+        event_tool = str(event.get("tool") or payload.get("tool") or "").strip()
+        source_tool_call_id = str(source_event.get("tool_call_id") or "").strip()
+        visibility = str(
+            event.get("visibility") or payload.get("visibility") or ""
+        ).strip()
+        actor = str(event.get("actor") or payload.get("actor") or "").strip()
+        verification_status = str(
+            event.get("verification_status")
+            or payload.get("verification_status")
+            or ""
+        ).strip()
+        verified_by_step_id = str(
+            event.get("verified_by_step_id")
+            or payload.get("verified_by_step_id")
+            or ""
+        ).strip()
+        verification_tool = str(
+            event.get("verification_tool")
+            or payload.get("verification_tool")
+            or ""
+        ).strip()
+        verified_task_completion = bool(
+            verification_status == "verified"
+            and verified_by_step_id
+            and verification_tool
+        )
+        receipt_step_id = verified_by_step_id if verified_task_completion else step_id
+        receipt_tool = verification_tool if verified_task_completion else expected_tool
+        receipt_step = expected_steps.get(receipt_step_id, expected_step)
+        if (
+            source
+            not in {
+                "runtime_planner",
+                "runtime_post_action_auto_verify",
+            }
+            or str(source_event.get("event") or "").strip() != "agent.tool.call"
+            or not source_tool_call_id
+            or not expected_tool
+            or event_tool != receipt_tool
+            or str(source_event.get("detail") or "").strip() != receipt_tool
+            or result_preview.get("ok") is not True
+            or result_preview.get("approval_required") is True
+            or result_preview.get("verification_failed") is True
+            or visibility == "public"
+            or actor in {"assistant", "model", "user"}
+        ):
+            continue
+        if not _model_followup_completion_provider_matches(
+            receipt_step,
+            result_preview,
+        ):
+            continue
+        if not _model_followup_completion_has_terminal_receipt(
+            timeline_events,
+            run_id=run_id,
+            decision_id=decision_id,
+            plan_id=plan_id,
+            step_id=receipt_step_id,
+            tool_name=receipt_tool,
+            tool_call_id=source_tool_call_id,
+        ):
+            continue
+        if not (
+            expected_tool in READ_ONLY_OBSERVATION_TOOLS
+            or expected_tool in _MODEL_FOLLOWUP_PRIMARY_OBSERVATION_TOOLS
+            or verified_task_completion
+            or _model_followup_effectful_completion_verified(event, payload, result_preview)
+        ):
+            continue
+        if step_id:
+            completed.add(step_id)
+    return completed
+
+
+def _model_followup_completion_has_terminal_receipt(
+    timeline: Iterable[Mapping[str, Any]],
+    *,
+    run_id: str,
+    decision_id: str,
+    plan_id: str,
+    step_id: str,
+    tool_name: str,
+    tool_call_id: str,
+) -> bool:
+    for event in timeline:
+        if str(event.get("event") or event.get("event_type") or "").strip() != (
+            "agent.tool.call"
+        ):
+            continue
+        if str(event.get("run_id") or "").strip() != run_id:
+            continue
+        if str(event.get("decision_id") or "").strip() != decision_id:
+            continue
+        if str(event.get("plan_id") or "").strip() != plan_id:
+            continue
+        if str(event.get("step_id") or event.get("planner_step_id") or "").strip() != step_id:
+            continue
+        if str(event.get("detail") or event.get("tool") or "").strip() != tool_name:
+            continue
+        if str(event.get("tool_call_id") or "").strip() != tool_call_id:
+            continue
+        if str(event.get("visibility") or "").strip() == "public" or str(
+            event.get("actor") or ""
+        ).strip() in {"assistant", "model", "user"}:
+            continue
+        result = event.get("result") if isinstance(event.get("result"), Mapping) else {}
+        if result.get("ok") is True and not result.get("approval_required"):
+            return True
+    return False
+
+
+def _model_followup_completion_provider_matches(
+    expected_step: Mapping[str, Any],
+    result_preview: Mapping[str, Any],
+) -> bool:
+    route = (
+        expected_step.get("desktop_execution_route")
+        if isinstance(expected_step.get("desktop_execution_route"), Mapping)
+        else {}
+    )
+    expected_kind = str(route.get("selected_provider_kind") or "").strip()
+    expected_id = str(route.get("selected_provider_id") or "").strip()
+    if not expected_kind and not expected_id:
+        return True
+    desktop_provider = (
+        result_preview.get("desktop_provider")
+        if isinstance(result_preview.get("desktop_provider"), Mapping)
+        else {}
+    )
+    provider = (
+        desktop_provider.get("provider")
+        if isinstance(desktop_provider.get("provider"), Mapping)
+        else {}
+    )
+    if desktop_provider.get("routed") is not True:
+        return False
+    return bool(
+        (not expected_kind or str(provider.get("provider_kind") or "").strip() == expected_kind)
+        and (not expected_id or str(provider.get("provider_id") or "").strip() == expected_id)
+    )
+
+
+def _model_followup_effectful_completion_verified(
+    event: Mapping[str, Any],
+    payload: Mapping[str, Any],
+    result_preview: Mapping[str, Any],
+) -> bool:
+    if any(
+        result_preview.get(key) is True
+        for key in (
+            "content_verified",
+            "launch_verified",
+            "postcondition_verified",
+            "verification_passed",
+            "verified",
+        )
+    ):
+        return True
+    verification_status = str(
+        event.get("verification_status")
+        or payload.get("verification_status")
+        or ""
+    ).strip()
+    verified_by_step_id = str(
+        event.get("verified_by_step_id")
+        or payload.get("verified_by_step_id")
+        or ""
+    ).strip()
+    verification_tool = str(
+        event.get("verification_tool")
+        or payload.get("verification_tool")
+        or ""
+    ).strip()
+    return bool(
+        verification_status == "verified"
+        and verified_by_step_id
+        and verification_tool
+    )
+
+
+def _goal_contract_requires_semantic_artifact_assessment(
+    contract: GoalContract | None,
+) -> bool:
+    return bool(
+        contract is not None
+        and any(
+            SEMANTIC_ARTIFACT_ADEQUACY_PREDICATE
+            in criterion.required_verification_predicates
+            for criterion in contract.criteria
+        )
+    )
+
+
+def _trusted_semantic_artifact_retry_context(
+    contract: GoalContract | None,
+    followup_context: Mapping[str, Any] | None,
+    timeline: Sequence[Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Authorize one exact planner-tail replay after a trusted failed verdict."""
+
+    if (
+        contract is None
+        or not isinstance(followup_context, Mapping)
+        or str(followup_context.get("source") or "").strip()
+        != "runtime_planner"
+    ):
+        return {}
+    # A newer exact digest must be assessed before an older failed digest can
+    # authorize another rewrite.
+    if pending_semantic_artifact_assessment_candidates(contract, timeline):
+        return {}
+    assessment = runtime_goal_assessment(contract, timeline)
+    if assessment.completed:
+        return {}
+    plan_id = str(followup_context.get("plan_id") or "").strip()
+    if not plan_id:
+        return {}
+    task_core = (
+        followup_context.get("task_core")
+        if isinstance(followup_context.get("task_core"), Mapping)
+        else {}
+    )
+    task_contract = (
+        task_core.get("goal_contract")
+        if isinstance(task_core.get("goal_contract"), Mapping)
+        else {}
+    )
+    task_contract_id = str(task_contract.get("contract_id") or "").strip()
+    if task_contract_id and task_contract_id != contract.contract_id:
+        return {}
+
+    steps = [
+        step
+        for step in _model_followup_pending_trace_items(followup_context)
+        if isinstance(step, Mapping)
+    ]
+    step_positions: dict[str, list[int]] = {}
+    for index, step in enumerate(steps):
+        step_id = str(step.get("step_id") or step.get("planner_step_id") or "").strip()
+        if step_id:
+            step_positions.setdefault(step_id, []).append(index)
+
+    semantic_evidence = next(
+        (
+            evidence
+            for evidence in reversed(assessment.evidence)
+            if evidence.verification_predicate
+            == SEMANTIC_ARTIFACT_ADEQUACY_PREDICATE
+            and evidence.status in {"insufficient", "uncertain"}
+            and not evidence.verified
+            and evidence.plan_id == plan_id
+        ),
+        None,
+    )
+    if semantic_evidence is None:
+        return {}
+    criterion = contract.criterion(semantic_evidence.criterion_id)
+    if (
+        criterion is None
+        or EXACT_FILE_CONTENT_PRESENT_PREDICATE
+        not in criterion.required_verification_predicates
+        or SEMANTIC_ARTIFACT_ADEQUACY_PREDICATE
+        not in criterion.required_verification_predicates
+        or semantic_evidence.source_step_id not in criterion.source_step_ids
+        or semantic_evidence.verifier_step_id not in criterion.verifier_step_ids
+    ):
+        return {}
+
+    exact_evidence = next(
+        (
+            evidence
+            for evidence in reversed(assessment.evidence)
+            if evidence.criterion_id == semantic_evidence.criterion_id
+            and evidence.verification_predicate
+            == EXACT_FILE_CONTENT_PRESENT_PREDICATE
+            and evidence.verified
+            and evidence.source_tool_call_id
+            == semantic_evidence.source_tool_call_id
+            and evidence.verifier_tool_call_id
+            == semantic_evidence.verifier_tool_call_id
+            and evidence.source_step_id == semantic_evidence.source_step_id
+            and evidence.verifier_step_id == semantic_evidence.verifier_step_id
+            and evidence.plan_id == semantic_evidence.plan_id
+        ),
+        None,
+    )
+    if exact_evidence is None:
+        return {}
+    observed_path = str(
+        semantic_evidence.observed.get("observed_path") or ""
+    ).strip()
+    content_sha256 = str(
+        semantic_evidence.observed.get("content_sha256") or ""
+    ).strip().casefold()
+    content_length = semantic_evidence.observed.get("content_length")
+    exact_content = exact_evidence.observed.get("content")
+    if (
+        normalized_workspace_relative_path(observed_path) != observed_path
+        or re.fullmatch(r"[0-9a-f]{64}", content_sha256) is None
+        or isinstance(content_length, bool)
+        or not isinstance(content_length, int)
+        or content_length <= 0
+        or not isinstance(exact_content, str)
+        or not exact_content
+        or len(exact_content.encode("utf-8")) != content_length
+        or hashlib.sha256(exact_content.encode("utf-8")).hexdigest()
+        != content_sha256
+        or str(exact_evidence.observed.get("observed_path") or "").strip()
+        != observed_path
+        or str(exact_evidence.observed.get("content_sha256") or "")
+        .strip()
+        .casefold()
+        != content_sha256
+        or exact_evidence.observed.get("content_length") != content_length
+    ):
+        return {}
+    expected = criterion.expected if isinstance(criterion.expected, Mapping) else {}
+    expected_target = (
+        expected.get("target")
+        if isinstance(expected.get("target"), Mapping)
+        else {}
+    )
+    if declared_workspace_output_path(expected_target) != observed_path:
+        return {}
+
+    source_positions = step_positions.get(semantic_evidence.source_step_id, [])
+    verifier_positions = step_positions.get(semantic_evidence.verifier_step_id, [])
+    if (
+        len(source_positions) != 1
+        or len(verifier_positions) != 1
+        or source_positions[0] >= verifier_positions[0]
+    ):
+        return {}
+    source_index = source_positions[0]
+    verifier_index = verifier_positions[0]
+    verifier_step = steps[verifier_index]
+    verifier_input = (
+        verifier_step.get("input_preview")
+        if isinstance(verifier_step.get("input_preview"), Mapping)
+        else verifier_step.get("input")
+        if isinstance(verifier_step.get("input"), Mapping)
+        else {}
+    )
+    if normalized_workspace_relative_path(verifier_input.get("path")) != observed_path:
+        return {}
+
+    # Compute only the dependency-connected source -> verifier slice. A
+    # semantic failure cannot revive unrelated completed planner work.
+    slice_steps = steps[source_index : verifier_index + 1]
+    reachable = {semantic_evidence.source_step_id}
+    for step in slice_steps[1:]:
+        step_id = str(step.get("step_id") or step.get("planner_step_id") or "").strip()
+        if step_id and any(
+            dependency in reachable
+            for dependency in _string_list(step.get("depends_on"))
+        ):
+            reachable.add(step_id)
+    if semantic_evidence.verifier_step_id not in reachable:
+        return {}
+    required = {semantic_evidence.verifier_step_id}
+    for step in reversed(slice_steps):
+        step_id = str(step.get("step_id") or step.get("planner_step_id") or "").strip()
+        if step_id in required:
+            required.update(
+                dependency
+                for dependency in _string_list(step.get("depends_on"))
+                if dependency in reachable
+            )
+    if semantic_evidence.source_step_id not in required:
+        return {}
+    retry_step_ids = tuple(
+        str(step.get("step_id") or step.get("planner_step_id") or "").strip()
+        for step in slice_steps
+        if str(step.get("step_id") or step.get("planner_step_id") or "").strip()
+        in required
+    )
+    if (
+        not retry_step_ids
+        or retry_step_ids[0] != semantic_evidence.source_step_id
+        or retry_step_ids[-1] != semantic_evidence.verifier_step_id
+    ):
+        return {}
+    return {
+        "authority": _RUNTIME_SEMANTIC_ARTIFACT_RETRY_AUTHORITY,
+        "contract_id": contract.contract_id,
+        "criterion_id": criterion.criterion_id,
+        "plan_id": plan_id,
+        "source_step_id": semantic_evidence.source_step_id,
+        "verifier_step_id": semantic_evidence.verifier_step_id,
+        "observed_path": observed_path,
+        "previous_content_sha256": content_sha256,
+        "previous_content_length": content_length,
+        "retry_step_ids": retry_step_ids,
+    }
+
+
+def _model_followup_materialization_rebind_steps(
+    followup_context: Mapping[str, Any],
+    *,
+    timeline: Iterable[Mapping[str, Any]] | None = None,
+    semantic_artifact_retry: Mapping[str, Any] | None = None,
+) -> list[Mapping[str, Any]]:
+    steps = [
+        step
+        for step in _model_followup_pending_trace_items(followup_context)
+        if isinstance(step, Mapping)
+    ]
+    if not steps:
+        return []
+    statuses, has_complete_task_state = _model_followup_authoritative_step_statuses(
+        followup_context,
+        steps,
+    )
+    authoritative_completed_step_ids = _model_followup_authoritative_completed_step_ids(
+        followup_context,
+        timeline or (),
+    )
+    for completed_step_id in authoritative_completed_step_ids:
+        statuses[completed_step_id] = "completed"
+    completed_step_ids = set(authoritative_completed_step_ids)
+    semantic_retry_step_ids: tuple[str, ...] = ()
+    if (
+        isinstance(semantic_artifact_retry, Mapping)
+        and semantic_artifact_retry.get("authority")
+        is _RUNTIME_SEMANTIC_ARTIFACT_RETRY_AUTHORITY
+        and str(semantic_artifact_retry.get("plan_id") or "").strip()
+        == str(followup_context.get("plan_id") or "").strip()
+    ):
+        semantic_retry_step_ids = tuple(
+            dict.fromkeys(_string_list(semantic_artifact_retry.get("retry_step_ids")))
+        )
+    semantic_retry_allowed = set(semantic_retry_step_ids)
+    scheduled_step_ids: set[str] = set()
+    candidates: list[Mapping[str, Any]] = []
+    terminal_statuses = _MODEL_FOLLOWUP_NON_EXECUTABLE_STEP_STATUSES.difference(
+        {"blocked", "waiting_approval"}
+    )
+    for step in steps:
+        step_id = str(step.get("step_id") or step.get("planner_step_id") or "").strip()
+        if semantic_retry_step_ids and step_id not in semantic_retry_allowed:
+            continue
+        status = statuses.get(step_id) or _model_followup_step_status(step)
+        if (
+            status in _MODEL_FOLLOWUP_COMPLETED_STEP_STATUSES
+            and step_id in completed_step_ids
+            and step_id not in semantic_retry_allowed
+        ):
+            continue
+        if status in terminal_statuses and step_id not in semantic_retry_allowed:
+            continue
+        dependencies = _string_list(step.get("depends_on"))
+        if any(
+            dependency not in completed_step_ids
+            and dependency not in scheduled_step_ids
+            and (has_complete_task_state or dependency in statuses)
+            for dependency in dependencies
+        ):
+            continue
+        candidates.append(step)
+        if step_id:
+            scheduled_step_ids.add(step_id)
+    if semantic_retry_step_ids and tuple(
+        str(step.get("step_id") or step.get("planner_step_id") or "").strip()
+        for step in candidates
+    ) != semantic_retry_step_ids:
+        # A semantic retry may replay only the exact Runtime-authorized tail.
+        # Missing, reordered, or newly injected steps fail closed.
+        return []
+    return candidates
+
+
+def _fresh_materialized_execution_bindings(
+    requests: Iterable[Mapping[str, Any]],
+    followup_context: Mapping[str, Any],
+    *,
+    generated_content: str,
+    goal_contract: GoalContract | None,
+    run_id: str = "",
+) -> list[dict[str, Any]]:
+    """Re-authorize a model-materialized plan tail without reviving old requests."""
+
+    content = str(generated_content or "")
+    candidates = [dict(request) for request in requests if isinstance(request, Mapping)]
+    if not content.strip() or not candidates or goal_contract is None:
+        return []
+    source_steps = [
+        step
+        for step in _model_followup_pending_trace_items(followup_context)
+        if isinstance(step, Mapping)
+    ]
+    source_by_step_id = {
+        str(step.get("step_id") or step.get("planner_step_id") or "").strip(): step
+        for step in source_steps
+        if str(step.get("step_id") or step.get("planner_step_id") or "").strip()
+    }
+    materialized_source_step_id = ""
+    materialized_source_request_id = ""
+    for request in candidates:
+        step_id = str(request.get("step_id") or request.get("planner_step_id") or "").strip()
+        source_step = source_by_step_id.get(step_id, {})
+        source_tool = str(
+            source_step.get("tool_name")
+            or source_step.get("tool")
+            or request.get("tool")
+            or ""
+        ).strip()
+        source_input = (
+            source_step.get("input_preview")
+            if isinstance(source_step.get("input_preview"), Mapping)
+            else source_step.get("input")
+            if isinstance(source_step.get("input"), Mapping)
+            else {}
+        )
+        if _tool_request_requires_model_materialization(
+            {
+                "tool": source_tool,
+                "input": dict(source_input),
+                "continue_to_model": True,
+            }
+        ):
+            materialized_source_step_id = step_id
+            materialized_source_request_id = str(
+                source_step.get("request_id") or request.get("request_id") or ""
+            ).strip()
+            break
+    if not materialized_source_step_id or not materialized_source_request_id:
+        return []
+    candidate_step_ids = {
+        str(request.get("step_id") or request.get("planner_step_id") or "").strip()
+        for request in candidates
+        if str(request.get("step_id") or request.get("planner_step_id") or "").strip()
+    }
+    criterion = next(
+        (
+            item
+            for item in goal_contract.criteria
+            if candidate_step_ids.intersection(item.source_step_ids)
+        ),
+        None,
+    )
+    if criterion is None:
+        return []
+    plan_id = str(
+        followup_context.get("plan_id")
+        or candidates[0].get("plan_id")
+        or ""
+    ).strip()
+    if not plan_id:
+        return []
+    content_sha256 = hashlib.sha256(content.encode("utf-8")).hexdigest()
+    binding_seed = "\n".join(
+        (
+            "materialization-binding-v1",
+            str(run_id or "").strip(),
+            goal_contract.contract_id,
+            criterion.criterion_id,
+            plan_id,
+            materialized_source_request_id,
+            content_sha256,
+            json.dumps(
+                [
+                    _materialization_immutable_request_identity(
+                        source_by_step_id.get(
+                            str(
+                                request.get("step_id")
+                                or request.get("planner_step_id")
+                                or ""
+                            ).strip(),
+                            {},
+                        ),
+                        fallback_request=request,
+                    )
+                    for request in candidates
+                ],
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            ),
+        )
+    )
+    binding_id = (
+        "materialization-binding-"
+        f"{hashlib.sha256(binding_seed.encode('utf-8')).hexdigest()[:20]}"
+    )
+    fresh_request_ids: dict[str, str] = {}
+    rebound: list[dict[str, Any]] = []
+    for index, request in enumerate(candidates):
+        step_id = str(request.get("step_id") or request.get("planner_step_id") or "").strip()
+        source_step = source_by_step_id.get(step_id, {})
+        old_request_id = str(
+            source_step.get("request_id") or request.get("request_id") or ""
+        ).strip()
+        if not step_id or not old_request_id:
+            return []
+        request_seed = "\n".join(
+            (binding_id, str(index), old_request_id, step_id, str(request.get("tool") or ""))
+        )
+        fresh_request_id = (
+            f"{plan_id}:materialized:"
+            f"{hashlib.sha256(request_seed.encode('utf-8')).hexdigest()[:20]}"
+        )
+        dependencies = _string_list(request.get("depends_on"))
+        rebound_request = dict(request)
+        for key in ("tool_call_id", "call_id", "id"):
+            rebound_request.pop(key, None)
+        rebound_request.update(
+            {
+                "request_id": fresh_request_id,
+                "materialized_from_request_id": old_request_id,
+                "materialization_source_request_id": materialized_source_request_id,
+                "materialization_source_step_id": materialized_source_step_id,
+                "materialization_binding_id": binding_id,
+                "materialized_content_sha256": content_sha256,
+                "materialized_content_length": len(content),
+                "materialization_authority": "runtime_planner_fresh_binding",
+                "goal_contract_id": goal_contract.contract_id,
+                "goal_criterion_id": criterion.criterion_id,
+                "root_goal_unchanged": True,
+                "plan_id": plan_id,
+                "step_id": step_id,
+                "planner_step_id": step_id,
+            }
+        )
+        source_dependency = next(
+            (dependency for dependency in dependencies if dependency in fresh_request_ids),
+            "",
+        )
+        if source_dependency:
+            rebound_request["source_request_id"] = fresh_request_ids[source_dependency]
+            rebound_request["source_step_id"] = source_dependency
+        else:
+            rebound_request["source_request_id"] = old_request_id
+        fresh_request_ids[step_id] = fresh_request_id
+        rebound.append(rebound_request)
+    return rebound
+
+
+def _materialization_immutable_request_identity(
+    source_step: Mapping[str, Any],
+    *,
+    fallback_request: Mapping[str, Any],
+) -> dict[str, Any]:
+    source_input = (
+        source_step.get("input_preview")
+        if isinstance(source_step.get("input_preview"), Mapping)
+        else source_step.get("input")
+        if isinstance(source_step.get("input"), Mapping)
+        else fallback_request.get("input")
+        if isinstance(fallback_request.get("input"), Mapping)
+        else {}
+    )
+    mutable_body_keys = {
+        "body",
+        "code",
+        "command",
+        "content",
+        "diff",
+        "patch",
+        "text",
+    }
+    immutable_input = {
+        str(key): value
+        for key, value in source_input.items()
+        if str(key) not in mutable_body_keys
+    }
+    action_target = (
+        source_step.get("action_target")
+        if isinstance(source_step.get("action_target"), Mapping)
+        else fallback_request.get("action_target")
+        if isinstance(fallback_request.get("action_target"), Mapping)
+        else {}
+    )
+    return {
+        "request_id": str(
+            source_step.get("request_id")
+            or fallback_request.get("request_id")
+            or ""
+        ).strip(),
+        "step_id": str(
+            source_step.get("step_id")
+            or source_step.get("planner_step_id")
+            or fallback_request.get("step_id")
+            or fallback_request.get("planner_step_id")
+            or ""
+        ).strip(),
+        "tool": str(
+            source_step.get("tool_name")
+            or source_step.get("tool")
+            or fallback_request.get("tool")
+            or ""
+        ).strip(),
+        "input": immutable_input,
+        "action_target": dict(action_target),
+    }
+
+
 def _model_followup_task_core_pending_trace_items(
     followup_context: Mapping[str, Any],
 ) -> list[Mapping[str, Any]]:
@@ -22138,6 +34197,12 @@ def _model_followup_task_core_pending_trace_items(
     workspace = task_core.get("workspace") if isinstance(task_core.get("workspace"), Mapping) else {}
     workspace_id = str(workspace.get("workspace_id") or "").strip()
     workspace_items = workspace.get("items") if isinstance(workspace.get("items"), list) else []
+    todos = [todo for todo in task_core.get("todos", []) if isinstance(todo, Mapping)]
+    todos_by_step = {
+        str(todo.get("step_id") or "").strip(): todo
+        for todo in todos
+        if str(todo.get("step_id") or "").strip()
+    }
     items_by_step: dict[str, list[Mapping[str, Any]]] = {}
     for item in workspace_items:
         if not isinstance(item, Mapping):
@@ -22153,9 +34218,7 @@ def _model_followup_task_core_pending_trace_items(
         if step_id:
             checkpoints_by_step.setdefault(step_id, []).append(checkpoint)
     items: list[Mapping[str, Any]] = []
-    for todo in task_core.get("todos", []):
-        if not isinstance(todo, Mapping):
-            continue
+    for todo in todos:
         status = str(todo.get("status") or "").strip()
         if status not in {"", "pending", "planned", "waiting_approval"}:
             continue
@@ -22192,6 +34255,11 @@ def _model_followup_task_core_pending_trace_items(
             value = metadata.get(key)
             if value not in (None, "", [], {}):
                 payload[key] = value
+        depends_on = _string_list(todo.get("depends_on"))
+        if not depends_on:
+            depends_on = _string_list(metadata.get("depends_on"))
+        if depends_on:
+            payload["depends_on"] = depends_on
         if bool(todo.get("approval_required")) or bool(metadata.get("approval_required")):
             payload["approval_required"] = True
         if workspace_step_items:
@@ -22204,6 +34272,47 @@ def _model_followup_task_core_pending_trace_items(
         core_id = str(task_core.get("core_id") or "").strip()
         if core_id:
             payload["core_id"] = core_id
+        verification_targets = _model_followup_task_core_verification_targets(
+            payload,
+            todos_by_step=todos_by_step,
+            checkpoints_by_step=checkpoints_by_step,
+            workspace_items_by_step=items_by_step,
+        )
+        if verification_targets:
+            target_step_ids = [
+                str(target.get("step_id") or "").strip()
+                for target in verification_targets
+                if str(target.get("step_id") or "").strip()
+            ]
+            payload["verified_step_ids"] = target_step_ids
+            payload["verification_target_step_ids"] = target_step_ids
+            payload["verification_targets"] = (
+                _runtime_planner_compact_task_verification_targets(
+                    verification_targets
+                )
+            )
+            payload["task_verification_targets"] = verification_targets
+            checkpoint_policy = (
+                dict(metadata.get("checkpoint_policy"))
+                if isinstance(metadata.get("checkpoint_policy"), Mapping)
+                else {}
+            )
+            checkpoint_policy["verification_target_step_ids"] = target_step_ids
+            payload["checkpoint_policy"] = checkpoint_policy
+            desktop_loop = (
+                dict(metadata.get("desktop_loop"))
+                if isinstance(metadata.get("desktop_loop"), Mapping)
+                else {}
+            )
+            desktop_loop["verification_target_step_ids"] = target_step_ids
+            for key, target_key in (
+                ("runtime_stage", "stage"),
+                ("runtime_role", "role"),
+            ):
+                value = str(payload.get(key) or "").strip()
+                if value:
+                    desktop_loop[target_key] = value
+            payload["desktop_loop"] = desktop_loop
         for key in _RUNTIME_ORCHESTRATION_SCOPE_KEYS:
             value = str(followup_context.get(key) or "").strip()
             if value:
@@ -22212,6 +34321,38 @@ def _model_followup_task_core_pending_trace_items(
         if len(items) >= _MODEL_FOLLOWUP_MAX_AUTO_PENDING_REQUESTS:
             break
     return items
+
+
+def _model_followup_task_core_verification_targets(
+    step: Mapping[str, Any],
+    *,
+    todos_by_step: Mapping[str, Mapping[str, Any]],
+    checkpoints_by_step: Mapping[str, list[Mapping[str, Any]]],
+    workspace_items_by_step: Mapping[str, list[Mapping[str, Any]]],
+) -> list[dict[str, Any]]:
+    runtime_stage = str(step.get("runtime_stage") or "").strip()
+    runtime_role = str(step.get("runtime_role") or "").strip()
+    if runtime_stage != "verify" and runtime_role not in {
+        "inspect_ui",
+        "verify_result",
+    }:
+        return []
+    target_step_ids = _ordered_text_list(_string_list(step.get("depends_on")))
+    targets: list[dict[str, Any]] = []
+    for step_id in target_step_ids:
+        target: dict[str, Any] = {"step_id": step_id}
+        todo = todos_by_step.get(step_id)
+        if isinstance(todo, Mapping) and todo:
+            target["todo"] = dict(todo)
+        checkpoints = checkpoints_by_step.get(step_id, [])
+        if checkpoints:
+            target["checkpoints"] = [dict(item) for item in checkpoints]
+        workspace_items = workspace_items_by_step.get(step_id, [])
+        if workspace_items:
+            target["workspace_items"] = [dict(item) for item in workspace_items]
+        if len(target) > 1:
+            targets.append(target)
+    return targets
 
 
 def _model_followup_task_core_step_metadata(
@@ -22267,6 +34408,37 @@ def _model_followup_request_matches_pending_step(
     ).strip()
     if step_path and request_path and step_path != request_path:
         return False
+    body_source = str(step_input.get("body_source") or "").strip()
+    mutable_text = body_source in {
+        "analysis_artifact",
+        "model_generated_content",
+        "report_artifact",
+    }
+    immutable_keys = [
+        "app_name",
+        "target_app_name",
+        "recipient",
+        "action",
+        "target",
+        "role_filter",
+        "title_contains",
+        "query",
+        "url",
+    ]
+    if not mutable_text:
+        immutable_keys.extend(("text", "body", "content"))
+    for key in immutable_keys:
+        expected = step_input.get(key)
+        if expected in (None, "", [], {}):
+            continue
+        actual = request_input.get(key)
+        if actual in (None, "", [], {}):
+            return False
+        if isinstance(expected, str) or isinstance(actual, str):
+            if str(actual).strip().casefold() != str(expected).strip().casefold():
+                return False
+        elif actual != expected:
+            return False
     return True
 
 
@@ -22334,6 +34506,21 @@ def _model_followup_pending_plan_request(
         )
         if not input_payload:
             return {}
+        if _pending_plan_binds_artifact_path(step):
+            # The artifact is the durable handoff.  Do not copy the model
+            # response directly into the effectful desktop request; the tool
+            # runner resolves the correlated artifact path and reads its
+            # broker-owned content immediately before execution.
+            for key in (
+                "body_source",
+                "artifact_path",
+                "target_action",
+                "container_action",
+            ):
+                value = raw_input.get(key)
+                if value not in (None, "", [], {}):
+                    input_payload[key] = value
+            input_payload.pop("text", None)
     else:
         if not raw_input and tool_name not in {
             "desktop.active_window",
@@ -22460,6 +34647,20 @@ def _model_followup_text_entry_pending_input(
             return {}, {}
         payload["app_name"] = app_name
     return payload, input_resolution
+
+
+def _pending_plan_binds_artifact_path(step: Mapping[str, Any]) -> bool:
+    bindings = step.get("input_bindings")
+    if not isinstance(bindings, list):
+        return False
+    return any(
+        isinstance(binding, Mapping)
+        and str(binding.get("source_tool_name") or "").strip() == "artifact.write"
+        and str(binding.get("source_result_path") or "").strip() == "/path"
+        and str(binding.get("target_input_path") or "").strip()
+        == "/input/artifact_path"
+        for binding in bindings
+    )
 
 
 def _model_followup_resolved_app_input(
@@ -22715,24 +34916,1001 @@ def _join_followup_workspace_path(base_path: str, name: str) -> str:
 def _tool_requests_with_pending_plan_metadata(
     tool_requests: list[dict[str, Any]],
     timeline: list[dict[str, Any]],
+    *,
+    run_id: str = "",
 ) -> list[dict[str, Any]]:
     if not tool_requests:
         return tool_requests
     followup_context = _latest_model_followup_context(timeline)
+    trace_only_replan_context = False
     if not followup_context:
-        return tool_requests
+        followup_context = _latest_model_replan_trace_context(timeline)
+        trace_only_replan_context = bool(followup_context)
     tool_requests = _model_followup_requests_with_pending_plan_metadata(
         tool_requests,
         followup_context,
     )
-    tool_requests = [
-        _explicit_model_tool_request_without_auto_verification(request)
-        for request in tool_requests
-    ]
-    return _model_followup_requests_with_context_trace_metadata(
+    if followup_context:
+        tool_requests = [
+            _explicit_model_tool_request_without_auto_verification(request)
+            for request in tool_requests
+        ]
+        tool_requests = _model_followup_requests_with_context_trace_metadata(
+            tool_requests,
+            followup_context,
+            mark_trace_only_replan=trace_only_replan_context,
+        )
+    return _tool_requests_with_latest_suggested_tool_recovery_identity(
         tool_requests,
-        followup_context,
+        timeline,
+        run_id=run_id,
     )
+
+
+_RUNTIME_MODEL_REPLAN_TRACE_MARKER = "_runtime_model_replan_trace_attached"
+
+
+def _runtime_untrusted_tool_selection_request(
+    request: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Project an untrusted request down to tool selection and arguments.
+
+    Approval, risk, provider, policy, lineage, and completion fields are all
+    Runtime authority.  A raw direct/model request can select a tool and its
+    schema arguments only; Runtime mints every executable identity and policy
+    claim after this boundary.
+    """
+
+    raw_input = request.get("input")
+    return {
+        "tool": str(request.get("tool") or "").strip(),
+        "input": (
+            deepcopy(dict(raw_input))
+            if isinstance(raw_input, Mapping)
+            else {}
+        ),
+    }
+
+
+def _runtime_model_tool_selection_request(
+    request: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Keep only ToolRequestParser protocol correlation beside selection."""
+
+    item = _runtime_untrusted_tool_selection_request(request)
+    protocol = str(request.get("protocol") or "").strip()
+    if protocol in {"json_fallback", "tool_calls"}:
+        item["protocol"] = protocol
+    tool_call_id = str(request.get("tool_call_id") or "").strip()
+    if tool_call_id:
+        item["tool_call_id"] = tool_call_id
+    if protocol == "tool_calls":
+        function_name = str(request.get("function_name") or "").strip()
+        if function_name:
+            item["function_name"] = function_name
+    return item
+
+
+def _runtime_bind_unscoped_tools_to_goal_contract(
+    tool_requests: list[dict[str, Any]],
+    *,
+    contract: GoalContract | None,
+    timeline: Sequence[Mapping[str, Any]],
+    run_id: str,
+    iteration: int,
+    trusted_runtime_metadata: bool = False,
+) -> list[dict[str, Any]]:
+    """Mint Runtime authority for one unambiguous model-selected goal step.
+
+    Model output may choose a schema-valid tool and arguments, but it never
+    gets to author plan, step, request, or Goal identities.  When one tool maps
+    to exactly one still-unsatisfied immutable criterion, Runtime binds that
+    invocation to the declared source step.  Ambiguous or foreign contracts
+    remain unbound and therefore cannot create effectful completion/recovery
+    evidence.
+    """
+
+    requests = [
+        (
+            dict(request)
+            if trusted_runtime_metadata
+            else _runtime_untrusted_tool_selection_request(request)
+        )
+        for request in tool_requests
+        if isinstance(request, Mapping)
+    ]
+    clean_run_id = str(run_id or "").strip()
+    if (
+        not requests
+        or contract is None
+        or not clean_run_id
+        or str(contract.run_id or "").strip() != clean_run_id
+    ):
+        return requests
+    try:
+        goal_assessment = runtime_goal_assessment(contract, timeline)
+        unsatisfied = set(goal_assessment.unsatisfied_criterion_ids)
+    except (TypeError, ValueError):
+        return requests
+    authority_digest = hashlib.sha256(
+        (
+            f"{contract.contract_id}\0{clean_run_id}\0{int(iteration)}"
+        ).encode("utf-8")
+    ).hexdigest()[:16]
+    plan_id = f"runtime-model-plan-{authority_digest}"
+    decision_id = f"runtime-model-decision-{authority_digest}"
+    tool_plan_id = f"runtime-model-tool-plan-{authority_digest}"
+    bound: list[dict[str, Any]] = []
+    for index, request in enumerate(requests, start=1):
+        item = dict(request)
+        runtime_replan_trace_attached = (
+            item.pop(_RUNTIME_MODEL_REPLAN_TRACE_MARKER, None) is True
+        )
+        if any(
+            str(item.get(key) or "").strip()
+            for key in ("goal_contract_id", "goal_criterion_id")
+        ):
+            bound.append(item)
+            continue
+        existing_plan_id = str(item.get("plan_id") or "").strip()
+        deferred_context = (
+            item.get("deferred_context")
+            if isinstance(item.get("deferred_context"), Mapping)
+            else {}
+        )
+        existing_step_id = str(
+            item.get("step_id")
+            or item.get("planner_step_id")
+            or deferred_context.get("step_id")
+            or deferred_context.get("planner_step_id")
+            or ""
+        ).strip()
+        existing_request_id = str(item.get("request_id") or "").strip()
+        has_existing_runtime_identity = bool(
+            existing_plan_id or existing_step_id or existing_request_id
+        )
+        trusted_replan_source = _runtime_model_trusted_replan_trace_source(
+            item,
+            contract=contract,
+            assessment=goal_assessment,
+            timeline=timeline,
+            run_id=clean_run_id,
+        )
+        trusted_replan_criterion_id = str(
+            trusted_replan_source.get("criterion_id") or ""
+        ).strip()
+        if runtime_replan_trace_attached and not trusted_replan_source:
+            # The trace was attached by Runtime, but its failed fact does not
+            # replay to this Goal contract (for example, a read-only recovery
+            # that is unrelated to the remaining effectful criterion).  Drop
+            # correlation-only fields and resume ordinary safe model binding;
+            # a stale replan must not block an otherwise exact next step.
+            item = _runtime_model_tool_selection_request(item)
+            existing_plan_id = ""
+            existing_step_id = ""
+            existing_request_id = ""
+            deferred_context = {}
+            has_existing_runtime_identity = False
+        trusted_trace_only = bool(
+            trusted_replan_criterion_id
+            and existing_plan_id
+            and not existing_step_id
+            and not existing_request_id
+        )
+        if trusted_trace_only:
+            # ``_tool_requests_with_pending_plan_metadata`` attached this
+            # correlation-only plan id after stripping model metadata.  It is
+            # not an executable identity; the binder below must mint a fresh
+            # request/step identity for the refined target.
+            has_existing_runtime_identity = False
+        if has_existing_runtime_identity and (
+            str(item.get("source") or "").strip() != "runtime_planner"
+            or not all(
+                (existing_plan_id, existing_step_id, existing_request_id)
+            )
+        ):
+            # Model/public partial identities never become Runtime authority.
+            bound.append(item)
+            continue
+        tool_name = str(item.get("tool") or "").strip()
+        tool_capabilities = set(capability_ids_for_tool(tool_name))
+        capabilities = {
+            *tool_capabilities,
+            str(item.get("capability_id") or "").strip(),
+            str(deferred_context.get("capability_id") or "").strip(),
+        }
+        capabilities.discard("")
+        if (
+            trusted_trace_only
+            and tool_name in _RUNTIME_REPLAN_GROUNDING_OBSERVATION_TOOLS
+            and trusted_replan_source.get("source_retryable") == "true"
+        ):
+            criterion = contract.criterion(trusted_replan_criterion_id)
+            if (
+                criterion is not None
+                and criterion.criterion_id in unsatisfied
+                and criterion.required
+                and criterion.effectful
+            ):
+                tool_call_id = ensure_tool_call_id(item)
+                observation_digest = hashlib.sha256(
+                    (
+                        f"{contract.contract_id}\0"
+                        f"{trusted_replan_source['replan_request_id']}\0"
+                        f"{int(iteration)}\0{index}\0{tool_call_id}\0{tool_name}"
+                    ).encode("utf-8")
+                ).hexdigest()[:16]
+                observation_step_id = (
+                    f"runtime-replan-observation-{observation_digest}"
+                )
+                item.update(
+                    {
+                        "source": "runtime_model_replan_observation",
+                        "planning_reason": "runtime_model_replan_observation",
+                        # Keep the root plan only as a replay correlation.  A
+                        # fresh step/request identity prevents this read from
+                        # masquerading as the failed effectful source step.
+                        "plan_id": str(
+                            trusted_replan_source["source_plan_id"]
+                        ),
+                        "tool_plan_id": (
+                            f"runtime-replan-observation-plan-{observation_digest}"
+                        ),
+                        "step_id": observation_step_id,
+                        "planner_step_id": observation_step_id,
+                        "request_id": (
+                            f"runtime-replan-observation-request-{observation_digest}"
+                        ),
+                        "source_step_id": str(
+                            trusted_replan_source["source_step_id"]
+                        ),
+                        "source_request_id": str(
+                            trusted_replan_source["source_request_id"]
+                        ),
+                        "source_tool_call_id": str(
+                            trusted_replan_source["source_tool_call_id"]
+                        ),
+                        "goal_contract_id": contract.contract_id,
+                        "goal_criterion_id": criterion.criterion_id,
+                        "root_goal_unchanged": True,
+                        "observation_only": True,
+                        "goal_completion_authority": False,
+                    }
+                )
+                if tool_capabilities:
+                    item["capability_id"] = sorted(tool_capabilities)[0]
+                else:
+                    item.pop("capability_id", None)
+                for key in (
+                    "action_target",
+                    "postcondition_verified",
+                    "verification_passed",
+                    "verified",
+                    "state",
+                    "target",
+                ):
+                    item.pop(key, None)
+                bound.append(item)
+                continue
+        candidates = [
+            criterion
+            for criterion in contract.criteria
+            if criterion.criterion_id in unsatisfied
+            and (
+                not trusted_replan_criterion_id
+                or criterion.criterion_id == trusted_replan_criterion_id
+            )
+            and criterion.required
+            and criterion.effectful
+            and (
+                (
+                    has_existing_runtime_identity
+                    and existing_step_id
+                    in {*criterion.source_step_ids, *criterion.verifier_step_ids}
+                )
+                or (
+                    not has_existing_runtime_identity
+                    and len(criterion.source_step_ids) == 1
+                )
+            )
+            and bool(criterion.required_capabilities)
+            and set(criterion.required_capabilities).issubset(capabilities)
+            and _runtime_model_input_matches_goal_target(
+                item,
+                criterion.expected,
+                contract=contract,
+                criterion_id=criterion.criterion_id,
+                timeline=timeline,
+            )
+        ]
+        if len(candidates) != 1:
+            bound.append(item)
+            continue
+        criterion = candidates[0]
+        if has_existing_runtime_identity:
+            item.update(
+                {
+                    "step_id": existing_step_id,
+                    "planner_step_id": existing_step_id,
+                    "goal_contract_id": contract.contract_id,
+                    "goal_criterion_id": criterion.criterion_id,
+                    "root_goal_unchanged": True,
+                }
+            )
+            expected_target = criterion.expected.get("target")
+            if isinstance(expected_target, Mapping) and expected_target:
+                item["action_target"] = dict(expected_target)
+            bound.append(item)
+            continue
+        tool_call_id = ensure_tool_call_id(item)
+        step_id = str(criterion.source_step_ids[0]).strip()
+        request_digest = hashlib.sha256(
+            (
+                f"{plan_id}\0{index}\0{tool_call_id}\0{tool_name}"
+            ).encode("utf-8")
+        ).hexdigest()[:16]
+        item.update(
+            {
+                "source": "runtime_model_tool_binding",
+                "planning_reason": "runtime_model_tool_goal_binding",
+                "decision_id": decision_id,
+                "plan_id": plan_id,
+                "tool_plan_id": tool_plan_id,
+                "step_id": step_id,
+                "planner_step_id": step_id,
+                "request_id": f"runtime-model-request-{request_digest}",
+                "goal_contract_id": contract.contract_id,
+                "goal_criterion_id": criterion.criterion_id,
+                "root_goal_unchanged": True,
+            }
+        )
+        expected_target = criterion.expected.get("target")
+        if isinstance(expected_target, Mapping) and expected_target:
+            item["action_target"] = dict(expected_target)
+        if len(criterion.required_capabilities) == 1:
+            item["capability_id"] = criterion.required_capabilities[0]
+        bound.append(item)
+    return bound
+
+
+def _runtime_model_trusted_replan_trace_criterion_id(
+    request: Mapping[str, Any],
+    *,
+    contract: GoalContract,
+    assessment: Any,
+    timeline: Sequence[Mapping[str, Any]],
+    run_id: str,
+) -> str:
+    """Resolve Runtime-attached replan trace metadata to one Goal criterion."""
+
+    trusted = _runtime_model_trusted_replan_trace_source(
+        request,
+        contract=contract,
+        assessment=assessment,
+        timeline=timeline,
+        run_id=run_id,
+    )
+    return str(trusted.get("criterion_id") or "").strip()
+
+
+def _runtime_model_trusted_replan_trace_source(
+    request: Mapping[str, Any],
+    *,
+    contract: GoalContract,
+    assessment: Any,
+    timeline: Sequence[Mapping[str, Any]],
+    run_id: str,
+) -> dict[str, str]:
+    """Replay one correlation-only model follow-up trace to its failed fact.
+
+    The model never supplies this authority: its protocol projection is
+    stripped before Runtime attaches the latest follow-up trace.  Both the
+    ordinary tool-runner replan and a coordinator continuation still have to
+    replay through ``_trusted_runtime_replan_source`` before they can guide an
+    observation or a refined retry.
+    """
+
+    replan_request_id = str(request.get("replan_request_id") or "").strip()
+    request_plan_id = str(request.get("plan_id") or "").strip()
+    request_run_id = str(request.get("run_id") or "").strip()
+    if (
+        not replan_request_id
+        or not request_plan_id
+        or request_run_id != str(run_id or "").strip()
+        or str(request.get("step_id") or request.get("planner_step_id") or "").strip()
+        or str(request.get("request_id") or "").strip()
+    ):
+        return {}
+    mutable_timeline = [
+        dict(event) for event in timeline if isinstance(event, Mapping)
+    ]
+    candidates = [
+        payload
+        for payload in _pending_runtime_replan_payloads(mutable_timeline)
+        if str(payload.get("request_id") or "").strip() == replan_request_id
+        and str(payload.get("source") or "").strip()
+        in {
+            "runtime_tool_request_runner",
+            _RUNTIME_RECOVERY_CONTINUATION_REPLAN_SOURCE,
+        }
+        and str(payload.get("plan_id") or "").strip() == request_plan_id
+        and str(payload.get("run_id") or "").strip() == request_run_id
+    ]
+    if len(candidates) != 1:
+        return {}
+    trusted = _trusted_runtime_replan_source(
+        candidates[0],
+        contract=contract,
+        assessment=assessment,
+        timeline=mutable_timeline,
+        run_id=request_run_id,
+    )
+    if not trusted:
+        return {}
+    if (
+        trusted.get("source_retryable") != "true"
+        and str(candidates[0].get("source") or "").strip()
+        != _RUNTIME_RECOVERY_CONTINUATION_REPLAN_SOURCE
+    ):
+        return {}
+    return {
+        **trusted,
+        "replan_request_id": replan_request_id,
+    }
+
+
+def _runtime_model_input_matches_goal_target(
+    request: Mapping[str, Any],
+    expected: Mapping[str, Any],
+    *,
+    contract: GoalContract | None = None,
+    criterion_id: str = "",
+    timeline: Sequence[Mapping[str, Any]] = (),
+) -> bool:
+    target = expected.get("target")
+    if not isinstance(target, Mapping):
+        return True
+    request_input = (
+        request.get("input")
+        if isinstance(request.get("input"), Mapping)
+        else {}
+    )
+    comparable_keys = (
+        "query",
+        "app_name",
+        "path",
+        "target_path",
+        "action",
+        "target",
+    )
+    mismatches: dict[str, str] = {}
+    for key in comparable_keys:
+        expected_value = target.get(key)
+        observed_value = request_input.get(key)
+        if expected_value in (None, "") or observed_value in (None, ""):
+            continue
+        if str(observed_value).strip().casefold() != str(expected_value).strip().casefold():
+            if key == "action":
+                return False
+            mismatches[key] = str(observed_value).strip()
+    if not mismatches:
+        return True
+    return _runtime_model_replan_target_is_observation_grounded(
+        mismatches,
+        contract=contract,
+        criterion_id=criterion_id,
+        timeline=timeline,
+    )
+
+
+_RUNTIME_REPLAN_GROUNDABLE_TARGET_KEYS = frozenset(
+    {
+        "query",
+        "app_name",
+        "path",
+        "target_path",
+        "target",
+    }
+)
+
+_RUNTIME_REPLAN_PATH_OBSERVATION_FIELDS = frozenset(
+    {
+        "artifact_path",
+        "artifact_paths",
+        "destination_path",
+        "display_path",
+        "file_path",
+        "output_path",
+        "path",
+        "target_path",
+    }
+)
+_RUNTIME_REPLAN_APP_OBSERVATION_FIELDS = frozenset(
+    {
+        "active_app_name",
+        "app_name",
+        "application_name",
+        "bundle_id",
+        "bundle_identifier",
+        "canonical_name",
+        "discovered_app_name",
+        "frontmost_app",
+        "name",
+        "owner_name",
+    }
+)
+_RUNTIME_REPLAN_QUERY_OBSERVATION_FIELDS = frozenset(
+    {
+        "alias",
+        "aliases",
+        "alternate_name",
+        "alternate_names",
+        "canonical_name",
+        "description",
+        "href",
+        "label",
+        "name",
+        "original_name",
+        "original_title",
+        "snippet",
+        "text",
+        "title",
+        "url",
+        "value",
+    }
+)
+_RUNTIME_REPLAN_OBSERVATION_FIELDS_BY_TARGET_KEY = {
+    "app_name": _RUNTIME_REPLAN_APP_OBSERVATION_FIELDS,
+    "path": _RUNTIME_REPLAN_PATH_OBSERVATION_FIELDS,
+    "query": _RUNTIME_REPLAN_QUERY_OBSERVATION_FIELDS,
+    "target": frozenset(
+        {
+            *_RUNTIME_REPLAN_APP_OBSERVATION_FIELDS,
+            *_RUNTIME_REPLAN_PATH_OBSERVATION_FIELDS,
+            *_RUNTIME_REPLAN_QUERY_OBSERVATION_FIELDS,
+            "id",
+            "identifier",
+        }
+    ),
+    "target_path": _RUNTIME_REPLAN_PATH_OBSERVATION_FIELDS,
+}
+_RUNTIME_REPLAN_OBSERVATION_CONTROL_SUBTREES = frozenset(
+    {
+        "approval",
+        "arguments",
+        "desktop_execution_policy",
+        "goal",
+        "goal_contract",
+        "input",
+        "input_preview",
+        "metadata",
+        "observability",
+        "policy",
+        "provenance",
+        "recovery",
+        "request",
+        "request_metadata",
+        "trace",
+        "verification",
+    }
+)
+_RUNTIME_REPLAN_OBSERVATION_CONTROL_PREFIXES = (
+    "_",
+    "approval_",
+    "execution_",
+    "goal_",
+    "planner_",
+    "provider_",
+    "recovery_",
+    "request_",
+    "runtime_",
+    "source_",
+    "tool_",
+    "verification_",
+)
+
+# Some capability-level discovery tools are outside the stricter desktop
+# observation policy set.  Their provider-attested payloads may still ground
+# a later target identifier; they never satisfy an effectful root criterion
+# by themselves.
+_RUNTIME_REPLAN_GROUNDING_OBSERVATION_TOOLS = frozenset(
+    {
+        *READ_ONLY_OBSERVATION_TOOLS,
+        "browser.search",
+        "workspace.list",
+    }
+)
+
+
+def _runtime_model_replan_target_is_observation_grounded(
+    mismatches: Mapping[str, str],
+    *,
+    contract: GoalContract | None,
+    criterion_id: str,
+    timeline: Sequence[Mapping[str, Any]],
+) -> bool:
+    """Accept a changed target only when Runtime can replay its provenance.
+
+    A model may use a real read-only observation to resolve an alias, app,
+    path, or other target identifier after a retryable action failed.  The
+    model's prose and arguments are never evidence on their own: the failed
+    source, replan request, observation executor, provider receipt, and exact
+    replacement value must all be present in this process-owned timeline.
+    """
+
+    clean_criterion_id = str(criterion_id or "").strip()
+    if (
+        not mismatches
+        or contract is None
+        or not clean_criterion_id
+        or any(
+            key not in _RUNTIME_REPLAN_GROUNDABLE_TARGET_KEYS
+            or not str(value or "").strip()
+            for key, value in mismatches.items()
+        )
+    ):
+        return False
+    mutable_timeline = [dict(event) for event in timeline if isinstance(event, Mapping)]
+    assessment = runtime_goal_assessment(contract, mutable_timeline)
+    trusted_sources: list[tuple[Mapping[str, Any], dict[str, str], int]] = []
+    for payload in _pending_runtime_replan_payloads(mutable_timeline):
+        source = _trusted_runtime_replan_source(
+            payload,
+            contract=contract,
+            assessment=assessment,
+            timeline=mutable_timeline,
+            run_id=contract.run_id,
+        )
+        if (
+            source.get("criterion_id") != clean_criterion_id
+            or (
+                source.get("source_retryable") != "true"
+                and str(payload.get("source") or "").strip()
+                != _RUNTIME_RECOVERY_CONTINUATION_REPLAN_SOURCE
+            )
+            or (
+                source.get("source_observation_only") == "true"
+                and str(payload.get("source") or "").strip()
+                != _RUNTIME_RECOVERY_CONTINUATION_REPLAN_SOURCE
+            )
+        ):
+            continue
+        replan_request_id = str(payload.get("request_id") or "").strip()
+        replan_index = next(
+            (
+                index
+                for index, event in enumerate(mutable_timeline)
+                if _runtime_replan_event_type(
+                    str(event.get("event") or event.get("event_type") or "").strip()
+                )
+                == "agent.replan.requested"
+                and isinstance(event.get("payload"), Mapping)
+                and str(event["payload"].get("request_id") or "").strip()
+                == replan_request_id
+            ),
+            -1,
+        )
+        if replan_index >= 0:
+            trusted_sources.append((payload, source, replan_index))
+    if len(trusted_sources) != 1:
+        return False
+    trusted_payload, trusted_source, replan_index = trusted_sources[0]
+    grounded_values: dict[str, set[str]] = {
+        key: set() for key in mismatches
+    }
+    if str(trusted_payload.get("source") or "").strip() == (
+        _RUNTIME_RECOVERY_CONTINUATION_REPLAN_SOURCE
+    ):
+        # The coordinator executes discovery before it emits the replan
+        # request. Replay validation above has already correlated each compact
+        # snapshot to a provider-attested executor event. Read target evidence
+        # from those executor results, never from the snapshot's provenance.
+        for observation in _mapping_list(
+            trusted_payload.get("grounded_observations")
+        ):
+            observation_match = _runtime_recovery_executor_terminal_event(
+                mutable_timeline,
+                run_id=contract.run_id,
+                tool_call_id=str(
+                    observation.get("source_tool_call_id") or ""
+                ).strip(),
+                tool_name=str(observation.get("source_tool") or "").strip(),
+            )
+            if observation_match is None:
+                return False
+            observation_result = observation_match[1].get("result")
+            if not isinstance(observation_result, Mapping):
+                return False
+            for target_key in grounded_values:
+                grounded_values[target_key].update(
+                    _runtime_observation_scalar_values(
+                        observation_result,
+                        target_key=target_key,
+                    )
+                )
+    else:
+        for raw_event in mutable_timeline[replan_index + 1 :]:
+            nested = (
+                raw_event.get("payload")
+                if isinstance(raw_event.get("payload"), Mapping)
+                else {}
+            )
+            event = {**dict(nested), **dict(raw_event)}
+            event_type = str(
+                event.get("event") or event.get("event_type") or ""
+            ).strip()
+            tool_name = str(event.get("tool") or event.get("detail") or "").strip()
+            result = event.get("result")
+            event_step_id = str(
+                event.get("step_id") or event.get("planner_step_id") or ""
+            ).strip()
+            source_step_id = str(
+                trusted_source.get("source_step_id") or ""
+            ).strip()
+            independent_observation_step = bool(
+                event_step_id
+                and event_step_id != source_step_id
+                and event.get("observation_only") is True
+                and event.get("goal_completion_authority") is False
+                and str(event.get("source_step_id") or "").strip()
+                == source_step_id
+                and str(event.get("source_tool_call_id") or "").strip()
+                == str(
+                    trusted_source.get("source_tool_call_id") or ""
+                ).strip()
+                and str(event.get("source_request_id") or "").strip()
+                == str(
+                    trusted_source.get("source_request_id") or ""
+                ).strip()
+                and str(event.get("goal_contract_id") or "").strip()
+                == contract.contract_id
+                and str(event.get("goal_criterion_id") or "").strip()
+                == clean_criterion_id
+            )
+            if (
+                event_type != "agent.tool.call"
+                or tool_name not in _RUNTIME_REPLAN_GROUNDING_OBSERVATION_TOOLS
+                or not isinstance(result, Mapping)
+                or result.get("ok") is not True
+                or str(event.get("run_id") or "").strip() != contract.run_id
+                or str(event.get("actor") or "").strip() != "native_runtime"
+                or str(event.get("execution_authority") or "").strip()
+                != "runtime_tool_executor"
+                or str(event.get("replan_request_id") or "").strip()
+                != str(trusted_payload.get("request_id") or "").strip()
+                or str(event.get("plan_id") or "").strip()
+                != str(trusted_source.get("source_plan_id") or "").strip()
+                or (
+                    event_step_id != source_step_id
+                    and not independent_observation_step
+                )
+                or not str(event.get("tool_call_id") or "").strip()
+                or not _runtime_execution_provider_identity(result)
+            ):
+                continue
+            for target_key in grounded_values:
+                grounded_values[target_key].update(
+                    _runtime_observation_scalar_values(
+                        result,
+                        target_key=target_key,
+                    )
+                )
+    return all(
+        str(value).strip().casefold() in grounded_values.get(key, set())
+        for key, value in mismatches.items()
+    )
+
+
+def _runtime_observation_scalar_values(
+    value: Any,
+    *,
+    target_key: str,
+) -> set[str]:
+    """Return only domain values that can evidence one target field.
+
+    Observation results may carry Runtime provenance, policy, request echoes,
+    and recovery lineage beside their domain payload.  Recursing through all
+    strings lets those control-plane values authorize a changed model target.
+    This extractor therefore uses a small semantic field allowlist and skips
+    control-plane subtrees before accepting exact scalar values.
+    """
+
+    allowed_fields = _RUNTIME_REPLAN_OBSERVATION_FIELDS_BY_TARGET_KEY.get(
+        str(target_key or "").strip()
+    )
+    if not allowed_fields:
+        return set()
+    values: set[str] = set()
+
+    def collect(nested: Any, *, scalar_allowed: bool = False) -> None:
+        if isinstance(nested, Mapping):
+            for raw_field, child in nested.items():
+                field = str(raw_field or "").strip().casefold()
+                if (
+                    not field
+                    or field in _RUNTIME_REPLAN_OBSERVATION_CONTROL_SUBTREES
+                    or field.startswith(
+                        _RUNTIME_REPLAN_OBSERVATION_CONTROL_PREFIXES
+                    )
+                ):
+                    continue
+                collect(child, scalar_allowed=field in allowed_fields)
+            return
+        if isinstance(nested, (list, tuple, set, frozenset)):
+            for child in nested:
+                collect(child, scalar_allowed=scalar_allowed)
+            return
+        if scalar_allowed and isinstance(nested, str) and nested.strip():
+            values.add(nested.strip().casefold())
+
+    collect(value)
+    return values
+
+
+def _tool_requests_with_latest_suggested_tool_recovery_identity(
+    tool_requests: list[dict[str, Any]],
+    timeline: list[dict[str, Any]],
+    *,
+    run_id: str,
+) -> list[dict[str, Any]]:
+    """Link a model-selected suggested tool to the exact failed attempt.
+
+    Model-authored correlation fields have already been stripped before this
+    helper runs. The resulting marker is therefore runtime-owned and can be
+    trusted by the final outcome evaluator without trusting model prose.
+    """
+
+    suggestions = _latest_model_tool_recovery_suggestions(
+        timeline,
+        run_id=run_id,
+    )
+    if not tool_requests or not suggestions:
+        return tool_requests
+    annotated: list[dict[str, Any]] = []
+    used_source_call_ids: set[str] = set()
+    for request in tool_requests:
+        item = dict(request)
+        request_tool = str(item.get("tool") or "").strip()
+        if not request_tool or str(item.get("source_tool_call_id") or "").strip():
+            annotated.append(item)
+            continue
+        for suggestion in reversed(suggestions):
+            source_call_id = str(suggestion.get("tool_call_id") or "").strip()
+            if (
+                not source_call_id
+                or source_call_id in used_source_call_ids
+                or request_tool
+                != str(suggestion.get("suggested_tool") or "").strip()
+            ):
+                continue
+            item["source_tool_call_id"] = source_call_id
+            source_request_id = str(suggestion.get("request_id") or "").strip()
+            if source_request_id:
+                item["source_request_id"] = source_request_id
+            source_step_id = str(suggestion.get("step_id") or "").strip()
+            if source_step_id:
+                item["source_step_id"] = source_step_id
+            item["recovery_link_kind"] = "suggested_tool"
+            item["recovery_source_tool"] = str(suggestion.get("tool") or "").strip()
+            item["recovery_suggested_tool"] = request_tool
+            used_source_call_ids.add(source_call_id)
+            break
+        annotated.append(item)
+    return annotated
+
+
+def _latest_model_tool_recovery_suggestions(
+    timeline: list[dict[str, Any]],
+    *,
+    run_id: str,
+) -> list[dict[str, str]]:
+    clean_run_id = str(run_id or "").strip()
+    if not clean_run_id:
+        return []
+    latest_model_response_index = -1
+    for index in range(len(timeline) - 1, -1, -1):
+        event = timeline[index]
+        payload = (
+            event.get("payload")
+            if isinstance(event.get("payload"), Mapping)
+            else event
+        )
+        event_type = str(
+            event.get("event")
+            or event.get("event_type")
+            or payload.get("event")
+            or payload.get("event_type")
+            or ""
+        ).strip()
+        if (
+            event_type == "agent.model.response"
+            and _runtime_event_matches_exact_run(
+                event,
+                payload,
+                run_id=clean_run_id,
+            )
+        ):
+            latest_model_response_index = index
+            break
+
+    first_by_call_id: dict[
+        str,
+        tuple[int, Mapping[str, Any], Mapping[str, Any]],
+    ] = {}
+    for index, event in enumerate(
+        timeline[latest_model_response_index + 1 :],
+        start=latest_model_response_index + 1,
+    ):
+        event_type = str(event.get("event") or event.get("event_type") or "").strip()
+        if event_type not in {
+            "agent.tool.call",
+            "agent.tool.failed",
+            "agent.tool.skipped",
+        }:
+            continue
+        payload = event.get("payload") if isinstance(event.get("payload"), Mapping) else event
+        if not _runtime_event_matches_exact_run(
+            event,
+            payload,
+            run_id=clean_run_id,
+        ):
+            continue
+        result = payload.get("result") if isinstance(payload.get("result"), Mapping) else {}
+        tool_call_id = str(payload.get("tool_call_id") or "").strip()
+        if not tool_call_id or tool_call_id in first_by_call_id:
+            continue
+        # A Runtime tool-call id has one terminal winner.  Later terminal
+        # projections, whether success or failure, cannot rewrite recovery
+        # eligibility for the first accepted fact.
+        first_by_call_id[tool_call_id] = (index, payload, result)
+
+    suggestions: list[tuple[int, dict[str, str]]] = []
+    for tool_call_id, (index, payload, result) in first_by_call_id.items():
+        if result.get("ok") is not False:
+            continue
+        source_tool = str(
+            payload.get("tool") or payload.get("detail") or ""
+        ).strip()
+        if not source_tool:
+            continue
+        for suggested_tool in _string_list(result.get("suggested_tool")):
+            suggestions.append(
+                (
+                    index,
+                    {
+                        "tool_call_id": tool_call_id,
+                        "request_id": str(payload.get("request_id") or "").strip(),
+                        "step_id": str(
+                            payload.get("step_id")
+                            or payload.get("planner_step_id")
+                            or ""
+                        ).strip(),
+                        "tool": source_tool,
+                        "suggested_tool": suggested_tool,
+                    },
+                )
+            )
+    return [
+        suggestion
+        for _index, suggestion in sorted(suggestions, key=lambda item: item[0])
+    ]
+
+
+def _runtime_event_matches_exact_run(
+    event: Mapping[str, Any],
+    payload: Mapping[str, Any],
+    *,
+    run_id: str,
+) -> bool:
+    """Reject unscoped or conflicting wrapper/payload Run identities."""
+
+    clean_run_id = str(run_id or "").strip()
+    outer_run_id = str(event.get("run_id") or "").strip()
+    payload_run_id = str(payload.get("run_id") or "").strip()
+    if not clean_run_id or (outer_run_id and payload_run_id and outer_run_id != payload_run_id):
+        return False
+    observed_run_id = payload_run_id or outer_run_id
+    return bool(observed_run_id and observed_run_id == clean_run_id)
 
 
 def _explicit_model_tool_request_without_auto_verification(
@@ -22759,18 +35937,28 @@ def _model_tool_requests_are_verification_recovery_actions(
 def _model_followup_requests_with_context_trace_metadata(
     requests: list[dict[str, Any]],
     followup_context: Mapping[str, Any],
+    *,
+    mark_trace_only_replan: bool = False,
 ) -> list[dict[str, Any]]:
     if not requests or not isinstance(followup_context, Mapping):
         return requests
-    trace = _model_followup_context_trace_metadata(followup_context)
-    if not trace:
-        return requests
+    replan_requests = _mapping_list(followup_context.get("replan_requests"))
+    replan_assignments = _model_followup_request_replan_assignments(
+        requests,
+        replan_requests,
+    )
+    has_ambiguous_replan_context = len(replan_requests) > 1
     planning_reason = str(followup_context.get("planning_reason") or "").strip()
     annotated: list[dict[str, Any]] = []
-    for request in requests:
+    for index, request in enumerate(requests):
         if not isinstance(request, dict):
             continue
         item = dict(request)
+        trace = _model_followup_context_trace_metadata(
+            followup_context,
+            replan_request=replan_assignments.get(index),
+            allow_implicit_replan=not has_ambiguous_replan_context,
+        )
         for key, value in trace.items():
             if key in {"replan_triggers", "replan_signal_ids"}:
                 values = _ordered_text_list(
@@ -22781,17 +35969,210 @@ def _model_followup_requests_with_context_trace_metadata(
                 continue
             if not str(item.get(key) or "").strip():
                 item[key] = value
+        if (
+            mark_trace_only_replan
+            and str(trace.get("replan_request_id") or "").strip()
+        ):
+            item[_RUNTIME_MODEL_REPLAN_TRACE_MARKER] = True
         if planning_reason and not str(item.get("planning_reason") or "").strip():
             item["planning_reason"] = planning_reason
         annotated.append(item)
     return annotated
 
 
+def _model_followup_request_replan_assignments(
+    requests: Sequence[Mapping[str, Any]],
+    replan_requests: Sequence[Mapping[str, Any]],
+) -> dict[int, Mapping[str, Any]]:
+    """Match each model request to one unambiguous Runtime replan, or none.
+
+    A follow-up context may contain failures from several Goal criteria.  The
+    historical first-item projection correlated every model request to the
+    first failure.  This matcher uses only semantic request facts (explicit
+    Runtime id, step, tool/capability, and target evidence), permits one replan
+    to ground multiple follow-up requests, and rejects ties or colliding Runtime
+    replan identities instead of guessing.
+    """
+
+    replans = [item for item in replan_requests if isinstance(item, Mapping)]
+    if not requests or not replans:
+        return {}
+    if len(replans) == 1:
+        return {
+            index: replans[0]
+            for index, request in enumerate(requests)
+            if isinstance(request, Mapping)
+        }
+
+    replan_identity_counts: dict[tuple[str, ...], int] = {}
+    for replan in replans:
+        identity = _model_followup_replan_identity(replan)
+        replan_identity_counts[identity] = replan_identity_counts.get(identity, 0) + 1
+
+    tentative: dict[int, Mapping[str, Any]] = {}
+    for index, request in enumerate(requests):
+        if not isinstance(request, Mapping):
+            continue
+        scored = [
+            (_model_followup_request_replan_match_score(request, replan), replan)
+            for replan in replans
+        ]
+        best_score = max((score for score, _replan in scored), default=0)
+        best = [
+            replan
+            for score, replan in scored
+            if score == best_score and best_score > 0
+        ]
+        if (
+            len(best) == 1
+            and replan_identity_counts.get(
+                _model_followup_replan_identity(best[0]),
+                0,
+            )
+            == 1
+        ):
+            tentative[index] = best[0]
+    return tentative
+
+
+def _model_followup_replan_identity(
+    replan: Mapping[str, Any],
+) -> tuple[str, ...]:
+    request_id = str(replan.get("request_id") or "").strip()
+    if request_id:
+        return ("request_id", request_id)
+    return (
+        "source",
+        str(replan.get("plan_id") or "").strip(),
+        str(replan.get("source_step_id") or "").strip(),
+        str(replan.get("source_tool_name") or "").strip(),
+    )
+
+
+def _model_followup_request_replan_match_score(
+    request: Mapping[str, Any],
+    replan: Mapping[str, Any],
+) -> int:
+    """Return a correlation score; zero means the pair is not grounded."""
+
+    replan_id = str(replan.get("request_id") or "").strip()
+    explicit_replan_id = str(request.get("replan_request_id") or "").strip()
+    if explicit_replan_id:
+        return 10_000 if explicit_replan_id == replan_id else 0
+
+    score = 0
+    request_step_id = str(
+        request.get("step_id") or request.get("planner_step_id") or ""
+    ).strip()
+    source_step_id = str(replan.get("source_step_id") or "").strip()
+    if request_step_id and source_step_id and request_step_id == source_step_id:
+        score += 1_000
+
+    tool_name = str(request.get("tool") or request.get("tool_name") or "").strip()
+    source_tool = str(replan.get("source_tool_name") or "").strip()
+    if tool_name and tool_name == source_tool:
+        score += 500
+    elif tool_name and tool_name in _model_followup_replan_candidate_tools(replan):
+        score += 400
+
+    request_capabilities = {
+        *capability_ids_for_tool(tool_name),
+        str(request.get("capability_id") or "").strip(),
+    }
+    request_capabilities.discard("")
+    target_capability = str(replan.get("target_capability_id") or "").strip()
+    if target_capability and target_capability in request_capabilities:
+        score += 250
+
+    request_targets = _model_followup_request_target_values(request)
+    replan_target = _replan_recovery_target(replan)
+    explicit_target_values = {
+        str(value or "").strip().casefold()
+        for value in replan_target.values()
+        if str(value or "").strip()
+    }
+    if explicit_target_values:
+        score += 100 * len(request_targets.intersection(explicit_target_values))
+
+    grounded_observations = _mapping_list(replan.get("grounded_observations"))
+    if not grounded_observations and isinstance(
+        replan.get("grounded_observation"), Mapping
+    ):
+        grounded_observations = [dict(replan["grounded_observation"])]
+    for target_key, target_value in _model_followup_request_target_items(request):
+        if any(
+            target_value
+            in _runtime_observation_scalar_values(
+                observation,
+                target_key=target_key,
+            )
+            for observation in grounded_observations
+        ):
+            score += 150
+    return score
+
+
+def _model_followup_replan_candidate_tools(
+    replan: Mapping[str, Any],
+) -> set[str]:
+    metadata = replan.get("metadata") if isinstance(replan.get("metadata"), Mapping) else {}
+    tools = {
+        *_string_list(replan.get("fallback_tools")),
+        *_string_list(replan.get("recommended_tools")),
+        *_string_list(metadata.get("recommended_tools")),
+    }
+    for action in (
+        *_mapping_list(replan.get("recovery_actions")),
+        *_mapping_list(metadata.get("recovery_actions")),
+    ):
+        tool_name = str(action.get("tool") or action.get("tool_name") or "").strip()
+        if tool_name:
+            tools.add(tool_name)
+    for observation in (
+        *_mapping_list(replan.get("grounded_observations")),
+        *_mapping_list(replan.get("recovery_observations")),
+    ):
+        tool_name = str(observation.get("source_tool") or "").strip()
+        if tool_name:
+            tools.add(tool_name)
+    return tools
+
+
+def _model_followup_request_target_items(
+    request: Mapping[str, Any],
+) -> tuple[tuple[str, str], ...]:
+    request_input = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+    items: list[tuple[str, str]] = []
+    for target_key in _RUNTIME_REPLAN_GROUNDABLE_TARGET_KEYS:
+        raw_value = request_input.get(target_key)
+        if raw_value in (None, ""):
+            continue
+        value = str(raw_value).strip().casefold()
+        if value:
+            items.append((target_key, value))
+    return tuple(items)
+
+
+def _model_followup_request_target_values(
+    request: Mapping[str, Any],
+) -> set[str]:
+    return {value for _key, value in _model_followup_request_target_items(request)}
+
+
 def _model_followup_context_trace_metadata(
     followup_context: Mapping[str, Any],
+    *,
+    replan_request: Mapping[str, Any] | None = None,
+    allow_implicit_replan: bool = True,
 ) -> dict[str, Any]:
     trace: dict[str, Any] = {}
-    replan_request = _first_model_followup_replan_request(followup_context)
+    replan_candidates = _mapping_list(followup_context.get("replan_requests"))
+    if replan_request is None and allow_implicit_replan and len(replan_candidates) == 1:
+        replan_request = replan_candidates[0]
+    if replan_request is None and len(replan_candidates) > 1:
+        return {}
+    selected_replan = replan_request if isinstance(replan_request, Mapping) else {}
+    multiple_replans = len(replan_candidates) > 1
     task_core = (
         followup_context.get("task_core")
         if isinstance(followup_context.get("task_core"), Mapping)
@@ -22802,6 +36183,7 @@ def _model_followup_context_trace_metadata(
         if isinstance(task_core, Mapping) and isinstance(task_core.get("workspace"), Mapping)
         else {}
     )
+    context_trace_source = {} if multiple_replans else followup_context
     for key in (
         "decision_id",
         "plan_id",
@@ -22814,10 +36196,11 @@ def _model_followup_context_trace_metadata(
         "target_app_name",
         "target_app_query",
         "target_search_text",
+        "verification_predicate_kind",
     ):
         value = str(
-            followup_context.get(key)
-            or replan_request.get(key)
+            selected_replan.get(key)
+            or context_trace_source.get(key)
             or task_core.get(key)
             or workspace.get(key)
             or ""
@@ -22826,40 +36209,44 @@ def _model_followup_context_trace_metadata(
             trace[key] = value
 
     request_id = str(
-        followup_context.get("replan_request_id")
-        or followup_context.get("request_id")
-        or replan_request.get("replan_request_id")
-        or replan_request.get("request_id")
+        selected_replan.get("replan_request_id")
+        or selected_replan.get("request_id")
+        or context_trace_source.get("replan_request_id")
+        or context_trace_source.get("request_id")
         or ""
     ).strip()
     if request_id:
         trace["replan_request_id"] = request_id
 
     trigger = str(
-        followup_context.get("replan_trigger")
-        or followup_context.get("trigger")
-        or replan_request.get("replan_trigger")
-        or replan_request.get("trigger")
+        selected_replan.get("replan_trigger")
+        or selected_replan.get("trigger")
+        or context_trace_source.get("replan_trigger")
+        or context_trace_source.get("trigger")
         or ""
     ).strip()
     if trigger:
         trace["replan_trigger"] = trigger
         trace["replan_triggers"] = _ordered_text_list(
-            [*_string_list(followup_context.get("triggers")), trigger]
+            [*_string_list(context_trace_source.get("triggers")), trigger]
         )
 
     target_capability_id = str(
-        followup_context.get("capability_id")
-        or followup_context.get("target_capability_id")
-        or replan_request.get("capability_id")
-        or replan_request.get("target_capability_id")
+        selected_replan.get("capability_id")
+        or selected_replan.get("target_capability_id")
+        or context_trace_source.get("capability_id")
+        or context_trace_source.get("target_capability_id")
         or ""
     ).strip()
     if target_capability_id:
         trace["capability_id"] = target_capability_id
 
     if not any(trace.get(key) for key in ("target_app_name", "target_app_query", "target_search_text")):
-        recovery_target = _first_model_followup_recovery_target(followup_context)
+        recovery_target = (
+            _replan_recovery_target(selected_replan)
+            if selected_replan
+            else _first_model_followup_recovery_target(followup_context)
+        )
         for key in ("target_app_name", "target_app_query", "target_search_text"):
             value = str(recovery_target.get(key) or "").strip()
             if value:
@@ -23079,7 +36466,7 @@ def _model_followup_terminal_pending_input(
 ) -> dict[str, Any]:
     if isinstance(raw_input, Mapping):
         command = str(raw_input.get("command") or "").strip()
-        if command:
+        if command and not _command_tool_request_looks_like_placeholder(command):
             return _terminal_run_input_payload(raw_input, command)
     command = _terminal_command_from_model_followup_content(generated_content)
     if not command:
@@ -23396,10 +36783,37 @@ def _model_followup_artifact_target_completed(
     for event in reversed(timeline):
         if str(event.get("event") or "").strip() != "agent.tool.call":
             continue
-        if str(event.get("detail") or "").strip() != "artifact.write":
-            continue
+        tool = str(event.get("detail") or "").strip()
         result = event.get("result") if isinstance(event.get("result"), Mapping) else {}
         if result.get("ok") is not True:
+            continue
+        if tool == "data.analyze":
+            produced_paths = {
+                str(result.get("artifact_path") or "").strip(),
+                *(
+                    str(item).strip()
+                    for item in result.get("artifact_paths") or []
+                    if isinstance(item, str)
+                ),
+                *(
+                    str(item.get("path") or "").strip()
+                    for collection_name in ("artifact_manifest", "artifacts")
+                    for item in (
+                        result.get(collection_name)
+                        if isinstance(result.get(collection_name), list)
+                        else []
+                    )
+                    if isinstance(item, Mapping)
+                ),
+            }
+            if any(
+                produced_path
+                and (produced_path == path or produced_path.endswith(f"/{path}"))
+                for produced_path in produced_paths
+            ):
+                return True
+            continue
+        if tool != "artifact.write":
             continue
         input_preview = (
             event.get("input_preview")
@@ -23974,9 +37388,14 @@ def _visible_daily_desktop_completed_steps(
         for index, step in enumerate(completed_steps)
         if not _is_daily_desktop_discovery_completed_step(step)
         and str(step.get("tool") or "") not in _DAILY_DESKTOP_VERIFY_TOOLS
+        and not _is_internal_daily_desktop_verification_step(step)
     ]
     if not primary_indexes:
-        visible_steps = list(completed_steps)
+        visible_steps = [
+            step
+            for step in completed_steps
+            if not _is_internal_daily_desktop_verification_step(step)
+        ]
         while (
             len(visible_steps) > 1
             and _is_daily_desktop_discovery_prefix_completed_step(visible_steps[0])
@@ -23988,6 +37407,8 @@ def _visible_daily_desktop_completed_steps(
     visible_steps: list[dict[str, Any]] = []
     for index, step in enumerate(completed_steps):
         tool_name = str(step.get("tool") or "")
+        if _is_internal_daily_desktop_verification_step(step):
+            continue
         if (
             _is_daily_desktop_discovery_completed_step(step)
             and (index < first_primary or index > last_primary)
@@ -23995,19 +37416,39 @@ def _visible_daily_desktop_completed_steps(
             continue
         if (
             tool_name in _DAILY_DESKTOP_VERIFY_TOOLS
-            and index > last_primary
-            and not _is_deferred_observed_ui_request(step)
-            and not _is_requested_ui_readback(completed_steps, index, first_primary, last_primary)
-            and not _is_preserved_active_window_verification(completed_steps, index)
-            and not _is_preserved_runtime_planner_verification(
+            and not _is_requested_visual_capture(step)
+            and not _is_requested_ui_readback(
                 completed_steps,
                 index,
+                first_primary,
                 last_primary,
             )
         ):
             continue
         visible_steps.append(step)
-    return visible_steps or completed_steps
+    return _coalesced_app_preparation_composite_steps(
+        visible_steps or completed_steps
+    )
+
+
+def _is_internal_daily_desktop_verification_step(
+    step: Mapping[str, Any],
+) -> bool:
+    return bool(
+        str(step.get("source") or "").strip()
+        in {
+            "runtime_native_postcondition_receipt",
+            "runtime_post_action_auto_verify",
+            "runtime_verification",
+        }
+    )
+
+
+def _is_requested_visual_capture(step: Mapping[str, Any]) -> bool:
+    return bool(
+        str(step.get("tool") or "").strip() == "screen.capture"
+        and str(step.get("runtime_role") or "").strip() == "capture_visual_state"
+    )
 
 
 def _daily_desktop_step_has_placeholder_app(
@@ -24228,6 +37669,7 @@ def _daily_desktop_sequence_summary_steps(
 ) -> list[dict[str, Any]]:
     if not visible_steps:
         return []
+    visible_steps = _coalesced_app_preparation_composite_steps(visible_steps)
     visible_steps = _coalesced_open_focus_type_summary_steps(visible_steps)
     visible_steps = _coalesced_open_focus_find_summary_steps(visible_steps)
     if (
@@ -24241,6 +37683,48 @@ def _daily_desktop_sequence_summary_steps(
         ]
         return primary_steps or visible_steps
     return visible_steps
+
+
+def _coalesced_app_preparation_composite_steps(
+    visible_steps: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if len(visible_steps) < 2:
+        return visible_steps
+    coalesced: list[dict[str, Any]] = []
+    index = 0
+    while index < len(visible_steps):
+        if index + 1 >= len(visible_steps):
+            coalesced.append(visible_steps[index])
+            break
+        preparation = visible_steps[index]
+        composite = visible_steps[index + 1]
+        preparation_tool = str(preparation.get("tool") or "").strip()
+        composite_tool = str(composite.get("tool") or "").strip()
+        app_name = _summary_step_app_name(preparation)
+        if (
+            preparation_tool
+            in {"app.open", "desktop.open_app", "app.focus", "desktop.focus_app"}
+            and composite_tool.startswith(("app.focus_and_", "app.open_and_"))
+            and app_name
+            and _summary_step_app_name(composite) == app_name
+        ):
+            combined = dict(composite)
+            if preparation_tool in {"app.open", "desktop.open_app"}:
+                if composite_tool.startswith("app.focus_and_"):
+                    combined["tool"] = composite_tool.replace(
+                        "app.focus_and_",
+                        "app.open_and_",
+                        1,
+                    )
+                summary = str(combined.get("summary") or "")
+                if summary.startswith("已切到"):
+                    combined["summary"] = "已打开" + summary[len("已切到") :]
+            coalesced.append(combined)
+            index += 2
+            continue
+        coalesced.append(preparation)
+        index += 1
+    return coalesced
 
 
 def _coalesced_open_focus_type_summary_steps(

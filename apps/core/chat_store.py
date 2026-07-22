@@ -630,6 +630,104 @@ class ChatStore:
             )
             conn.commit()
 
+    def upsert_projection_message(self, msg: StoredMessage) -> StoredMessage:
+        """Atomically persist an idempotent derived message projection.
+
+        Projection callers use a deterministic ``message_id``.  SQLite's
+        primary-key conflict boundary therefore covers separate ChatSession
+        instances as well as separate Python locks.  A late active-state poll
+        is not allowed to overwrite an already terminal projection.
+        """
+        safe_content = _redact_chat_text(msg.content)
+        safe_error = _redact_optional_chat_text(msg.error)
+        safe_attachments_json = _redact_chat_json_text(msg.attachments_json, fallback="[]")
+        safe_metadata_json = _redact_chat_json_text(msg.metadata_json, fallback="{}")
+        with self._lock:
+            conn = self._get_conn()
+            conn.execute(
+                """
+                INSERT INTO chat_messages
+                    (message_id, session_id, role, content, status, task_id, error,
+                     created_at, attachments_json, metadata_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(message_id) DO UPDATE SET
+                    content = CASE
+                        WHEN chat_messages.status IN ('completed', 'failed')
+                         AND excluded.status IN ('pending', 'processing')
+                        THEN chat_messages.content
+                        ELSE excluded.content
+                    END,
+                    status = CASE
+                        WHEN chat_messages.status IN ('completed', 'failed')
+                         AND excluded.status IN ('pending', 'processing')
+                        THEN chat_messages.status
+                        ELSE excluded.status
+                    END,
+                    task_id = CASE
+                        WHEN chat_messages.status IN ('completed', 'failed')
+                         AND excluded.status IN ('pending', 'processing')
+                        THEN chat_messages.task_id
+                        ELSE excluded.task_id
+                    END,
+                    error = CASE
+                        WHEN chat_messages.status IN ('completed', 'failed')
+                         AND excluded.status IN ('pending', 'processing')
+                        THEN chat_messages.error
+                        ELSE excluded.error
+                    END,
+                    attachments_json = CASE
+                        WHEN chat_messages.status IN ('completed', 'failed')
+                         AND excluded.status IN ('pending', 'processing')
+                        THEN chat_messages.attachments_json
+                        ELSE excluded.attachments_json
+                    END,
+                    metadata_json = CASE
+                        WHEN chat_messages.status IN ('completed', 'failed')
+                         AND excluded.status IN ('pending', 'processing')
+                        THEN chat_messages.metadata_json
+                        ELSE excluded.metadata_json
+                    END
+                WHERE chat_messages.session_id = excluded.session_id
+                  AND chat_messages.role = excluded.role
+                """,
+                (
+                    msg.message_id,
+                    msg.session_id,
+                    msg.role,
+                    safe_content,
+                    msg.status,
+                    msg.task_id,
+                    safe_error,
+                    msg.created_at,
+                    safe_attachments_json,
+                    safe_metadata_json,
+                ),
+            )
+            row = conn.execute(
+                """
+                SELECT message_id, session_id, role, content, status, task_id, error,
+                       created_at, attachments_json, metadata_json
+                FROM chat_messages
+                WHERE message_id = ? AND session_id = ? AND role = ?
+                """,
+                (msg.message_id, msg.session_id, msg.role),
+            ).fetchone()
+            conn.commit()
+        if row is None:
+            raise RuntimeError("projection message identity collision")
+        return StoredMessage(
+            message_id=row["message_id"],
+            session_id=row["session_id"],
+            role=row["role"],
+            content=row["content"],
+            status=row["status"],
+            task_id=row["task_id"],
+            error=row["error"],
+            created_at=row["created_at"],
+            attachments_json=row["attachments_json"] or "[]",
+            metadata_json=row["metadata_json"] or "{}",
+        )
+
     def update_message_status(
         self, message_id: str, status: str, error: Optional[str] = None
     ) -> None:

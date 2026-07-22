@@ -25,6 +25,7 @@ export function MessageApprovalRequestCard({
   renderCodePreview,
   runId,
   runStatus,
+  showTechnicalDetails = false,
 }: {
   approvalId?: string;
   approvalSignature?: string;
@@ -33,6 +34,7 @@ export function MessageApprovalRequestCard({
   renderCodePreview: (codeText: string, codeLanguage: string) => string;
   runId: string;
   runStatus: string;
+  showTechnicalDetails?: boolean;
 }) {
   const workflowApproval = details.tool === 'workflow.approval';
   const toolLabel = runtimeToolDisplayLabel(details.tool);
@@ -55,7 +57,7 @@ export function MessageApprovalRequestCard({
       data-testid="chat-message-approval-card"
     >
       <RuntimeApprovalCard
-        actions={runId ? (
+        actions={showTechnicalDetails && runId ? (
           <button
             type="button"
             data-run-id={runId}
@@ -73,6 +75,11 @@ export function MessageApprovalRequestCard({
         testId="chat-message-approval-runtime-card"
         variant="compact"
       />
+      {!approvalId ? (
+        <p className="message-error" data-testid="chat-message-approval-stale">
+          审批信息已过期，请刷新后重试。
+        </p>
+      ) : null}
       {details.goal ? (
         <section className="message-approval-section">
           <span>关联任务</span>
@@ -120,7 +127,7 @@ function messageApprovalSnapshot({
     ? `${details.requester} 等待人工确认`
     : `${details.requester} 请求${toolLabel}`;
   return {
-    approval_id: approvalId || runId || `${details.tool}:message`,
+    approval_id: approvalId || '',
     description: workflowApproval ? '批准后会继续当前 Workflow' : '批准后会继续当前任务',
     input_preview: messageApprovalInputPreview(details),
     run_id: runId || undefined,

@@ -104,7 +104,10 @@ def planner_first_direct_tool_selection(
             selected_source="daily_desktop_intent",
         )
     return DirectToolSelection(
-        decision=None,
+        # Keep the side-effect-free planner decision even when it selected no
+        # direct tool.  Fresh runtimes bind their immutable GoalContract from
+        # this exact decision and must not invoke the planner a second time.
+        decision=decision,
         requests=[],
         event_payload=planner_selection_payload(
             decision=decision,

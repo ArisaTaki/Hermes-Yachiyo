@@ -1,3 +1,5 @@
+import type { Ref } from 'react';
+
 import {
   contextFromSession,
   sessionDisplayName,
@@ -18,6 +20,7 @@ type ChatSessionSidebarProps = {
   assistantProfile: AssistantProfilePayload | null;
   assistantProfileLoading: boolean;
   currentSessionId: string;
+  conversationMutationLocked: boolean;
   expandedAgentIds: Set<string>;
   groupSessions: SessionItem[];
   normalizedSessionQuery: string;
@@ -29,12 +32,14 @@ type ChatSessionSidebarProps = {
   unassignedSessions: SessionItem[];
   visibleSessions: SessionItem[];
   formatSessionSideLabel: (session: SessionItem) => string;
-  formatTokenCount: (value?: number) => string;
   onCreate: () => void;
+  onClose: () => void;
   onSearchChange: (value: string) => void;
   onSwitchSession: (sessionId: string, anchorMessageId?: string) => void | Promise<void>;
   onTabChange: (tab: 'agents' | 'groups') => void;
   onToggleAgentGroup: (agentId: string) => void;
+  mobileOpen: boolean;
+  closeButtonRef: Ref<HTMLButtonElement>;
 };
 
 export function ChatSessionSidebar({
@@ -42,6 +47,7 @@ export function ChatSessionSidebar({
   assistantProfile,
   assistantProfileLoading,
   currentSessionId,
+  conversationMutationLocked,
   expandedAgentIds,
   groupSessions,
   normalizedSessionQuery,
@@ -53,17 +59,35 @@ export function ChatSessionSidebar({
   unassignedSessions,
   visibleSessions,
   formatSessionSideLabel,
-  formatTokenCount,
   onCreate,
+  onClose,
   onSearchChange,
   onSwitchSession,
   onTabChange,
   onToggleAgentGroup,
+  mobileOpen,
+  closeButtonRef,
 }: ChatSessionSidebarProps) {
   return (
-    <aside className="chat-sidebar hy-chat-sessions" aria-label="会话列表">
+    <aside
+      className={`chat-sidebar hy-chat-sessions${mobileOpen ? ' is-mobile-open' : ''}`}
+      id="chat-session-sidebar"
+      aria-label="会话列表"
+    >
       <div className="chat-sidebar-header hy-chat-sessions-head">
-        <div className="chat-sidebar-title">会话列表</div>
+        <div className="chat-sidebar-title-row">
+          <div className="chat-sidebar-title">会话列表</div>
+          <button
+            type="button"
+            className="chat-sidebar-close"
+            aria-label="关闭会话列表"
+            title="关闭会话列表"
+            onClick={onClose}
+            ref={closeButtonRef}
+          >
+            <UiIcon name="close" />
+          </button>
+        </div>
         <input
           type="search"
           className="chat-search"
@@ -103,6 +127,7 @@ export function ChatSessionSidebar({
           title={sessionTab === 'groups' ? '创建群组' : '新建对话'}
           aria-label={sessionTab === 'groups' ? '创建群组' : '新建对话'}
           onClick={onCreate}
+          disabled={conversationMutationLocked}
         >
           <UiIcon name="plus" />
         </button>
@@ -117,7 +142,6 @@ export function ChatSessionSidebar({
                 assistantProfileLoading={assistantProfileLoading}
                 currentSessionId={currentSessionId}
                 formatSessionSideLabel={formatSessionSideLabel}
-                formatTokenCount={formatTokenCount}
                 key={session.session_id}
                 normalizedSessionQuery={normalizedSessionQuery}
                 onSwitchSession={onSwitchSession}
@@ -141,7 +165,6 @@ export function ChatSessionSidebar({
                   className="unassigned-chat-item"
                   currentSessionId={currentSessionId}
                   formatSessionSideLabel={formatSessionSideLabel}
-                  formatTokenCount={formatTokenCount}
                   key={session.session_id}
                   normalizedSessionQuery={normalizedSessionQuery}
                   onSwitchSession={onSwitchSession}
@@ -173,7 +196,6 @@ export function ChatSessionSidebar({
                             assistantProfileLoading={assistantProfileLoading}
                             currentSessionId={currentSessionId}
                             formatSessionSideLabel={formatSessionSideLabel}
-                            formatTokenCount={formatTokenCount}
                             key={session.session_id}
                             normalizedSessionQuery={normalizedSessionQuery}
                             onSwitchSession={onSwitchSession}
@@ -200,7 +222,6 @@ export function ChatSessionSidebar({
                 assistantProfileLoading={assistantProfileLoading}
                 currentSessionId={currentSessionId}
                 formatSessionSideLabel={formatSessionSideLabel}
-                formatTokenCount={formatTokenCount}
                 key={session.session_id}
                 normalizedSessionQuery={normalizedSessionQuery}
                 onSwitchSession={onSwitchSession}
@@ -226,7 +247,6 @@ function ChatSessionListItem({
   className = '',
   currentSessionId,
   formatSessionSideLabel,
-  formatTokenCount,
   normalizedSessionQuery,
   onSwitchSession,
   runnables,
@@ -239,7 +259,6 @@ function ChatSessionListItem({
   className?: string;
   currentSessionId: string;
   formatSessionSideLabel: (session: SessionItem) => string;
-  formatTokenCount: (value?: number) => string;
   normalizedSessionQuery: string;
   onSwitchSession: (sessionId: string, anchorMessageId?: string) => void | Promise<void>;
   runnables: RunnableSummary[];
@@ -273,7 +292,6 @@ function ChatSessionListItem({
         <span className="chat-item-time">
           {formatSessionSideLabel(session)}
         </span>
-        <span className="chat-item-token">{formatTokenCount(session.token_count)}</span>
       </span>
     </button>
   );

@@ -1,4 +1,10 @@
-import { apiDelete, apiGet, apiPatch, apiPost } from '../../lib/bridge';
+import {
+  apiDelete,
+  apiGet,
+  apiPatch,
+  apiPost,
+  shouldFallbackToLegacyRoute,
+} from '../../lib/bridge';
 import type {
   AgentDefinitionSnapshot,
   AgentDeskSnapshot,
@@ -801,24 +807,41 @@ export async function deleteYachiyoRun(
   ));
 }
 
-export async function approveYachiyoRunApproval(runId: string): Promise<YachiyoRunTimelineSnapshot> {
+export async function approveYachiyoRunApproval(
+  runId: string,
+  approvalId: string,
+): Promise<YachiyoRunTimelineSnapshot> {
   const encodedRunId = encodeURIComponent(runId);
-  return apiPost<YachiyoRunTimelineSnapshot>(`/yachiyo/studio/runs/${encodedRunId}/approval/approve`, {}).catch(() => (
-    apiPost<YachiyoRunTimelineSnapshot>(`/ui/runs/${encodedRunId}/approval/approve`, {})
-  ));
+  const body = { approval_id: approvalId };
+  return apiPost<YachiyoRunTimelineSnapshot>(
+    `/yachiyo/studio/runs/${encodedRunId}/approval/approve`,
+    body,
+  ).catch((error: unknown) => {
+    if (!shouldFallbackToLegacyRoute(error)) throw error;
+    return apiPost<YachiyoRunTimelineSnapshot>(
+      `/ui/runs/${encodedRunId}/approval/approve`,
+      body,
+    );
+  });
 }
 
 export async function rejectYachiyoRunApproval(
   runId: string,
+  approvalId: string,
   reason = '',
 ): Promise<YachiyoRunTimelineSnapshot> {
   const encodedRunId = encodeURIComponent(runId);
+  const body = { approval_id: approvalId, reason: reason || undefined };
   return apiPost<YachiyoRunTimelineSnapshot>(
     `/yachiyo/studio/runs/${encodedRunId}/approval/reject`,
-    reason ? { reason } : {},
-  ).catch(() => (
-    apiPost<YachiyoRunTimelineSnapshot>(`/ui/runs/${encodedRunId}/approval/reject`, reason ? { reason } : {})
-  ));
+    body,
+  ).catch((error: unknown) => {
+    if (!shouldFallbackToLegacyRoute(error)) throw error;
+    return apiPost<YachiyoRunTimelineSnapshot>(
+      `/ui/runs/${encodedRunId}/approval/reject`,
+      body,
+    );
+  });
 }
 
 export async function startYachiyoWorkflowRun(

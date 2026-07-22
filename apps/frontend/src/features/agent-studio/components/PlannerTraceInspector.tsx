@@ -546,7 +546,7 @@ export function PlannerTraceInspector({
           {trace.steps.map((step, index) => (
             <PlannerTraceStepRow key={step.step_id || `${step.title}-${index}`} step={step} index={index} />
           ))}
-          {!trace.steps.length ? <span className="studio-tool-empty">No planned steps</span> : null}
+          {!trace.steps.length ? <span className="studio-tool-empty">暂无规划步骤</span> : null}
         </div>
 
         {approvalsRequired.length || artifactsExpected.length || openQuestions.length ? (

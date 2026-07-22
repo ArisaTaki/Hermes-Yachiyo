@@ -173,6 +173,30 @@ class TestNativeAgentUnavailableExecutor:
 
 
 class TestNativeAgentExecutor:
+    def test_deleted_task_session_does_not_fall_back_to_current_chat(
+        self,
+        tmp_path,
+        monkeypatch,
+    ):
+        store = ChatStore(db_path=str(tmp_path / "chat.db"))
+        current = ChatSession(session_id="current-chat")
+        current.attach_store(store, load_existing=False)
+        deleted = ChatSession(session_id="deleted-task-chat")
+        deleted.attach_store(store, load_existing=False)
+        store.delete_session(deleted.session_id)
+        task = _make_task("late task result")
+        task.chat_session_id = deleted.session_id
+        monkeypatch.setattr("apps.core.chat_store.get_chat_store", lambda: store)
+
+        try:
+            executor = NativeAgentExecutor(chat_session=current)
+
+            assert executor._chat_session_for_task(task) is None
+            assert store.get_session(deleted.session_id) is None
+            assert store.load_messages(current.session_id, limit=0) == []
+        finally:
+            store.close()
+
     def test_record_activity_uses_injected_activity_store(self, tmp_path, monkeypatch):
         activity_store = ActivityStore(db_path=str(tmp_path / "activity.db"))
 
@@ -362,6 +386,222 @@ class TestNativeAgentExecutor:
         assert "current assistant should be excluded" not in contents
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "reply",
+        ("Terminal", "Apple Music", "Google Chrome", "DaVinci Resolve"),
+    )
+    async def test_run_continues_immediately_preceding_runtime_clarification(
+        self,
+        reply,
+        monkeypatch,
+    ):
+        calls: list[tuple[str, object]] = []
+        session = ChatSession(session_id="clarification-session")
+        prior_message_id = session.add_user_message("帮我打开一个软件")
+        session.link_message_to_task(prior_message_id, "prior-task")
+        question = "请补充要操作的具体对象。"
+        session.add_assistant_message(question, task_id="prior-task")
+        current_message_id = session.add_user_message(reply)
+        session.link_message_to_task(current_message_id, "test001")
+
+        pending = {
+            "run_id": "run-awaiting",
+            "task_id": "prior-task",
+            "session_id": session.session_id,
+            "kind": "main_chat_run",
+            "status": "awaiting_user",
+            "user_goal": "帮我打开一个软件",
+            "result": question,
+            "timeline": [
+                {
+                    "event": "agent.plan.clarification_required",
+                    "source": "runtime_model_intent_planner",
+                    "original_goal": "帮我打开一个软件",
+                    "question": question,
+                    "rationale": "model-only text must never become authority",
+                }
+            ],
+        }
+
+        class FakeRuntimeService:
+            def latest_awaiting_user_main_chat_run(self, session_id):
+                calls.append(("lookup", session_id))
+                return pending
+
+            def start_main_chat_run(self, **payload):
+                calls.append(("start", payload))
+                return {"run_id": "run-continuation"}
+
+            def execute_main_chat_model_loop(self, run_id, messages, **kwargs):
+                calls.append(
+                    (
+                        "execute",
+                        {"run_id": run_id, "messages": messages, "kwargs": kwargs},
+                    )
+                )
+                return {
+                    "run_id": run_id,
+                    "status": "running",
+                    "result": f"已打开 {reply}。",
+                }
+
+            def complete_main_chat_run(self, run_id, result):
+                calls.append(("complete", {"run_id": run_id, "result": result}))
+                return {"run_id": run_id, "status": "completed", "result": result}
+
+            def fail_main_chat_run(self, _run_id, _error):
+                raise AssertionError("clarification continuation should not fail")
+
+        monkeypatch.setattr(
+            executor_mod,
+            "_append_oha_delegation_context",
+            lambda context, **_kwargs: context,
+        )
+        task = _make_task(reply)
+        task.chat_session_id = session.session_id
+        executor = NativeAgentExecutor(
+            chat_session=session,
+            runtime_service_getter=FakeRuntimeService,
+        )
+        monkeypatch.setattr(executor, "_chat_session_for_task", lambda _task: session)
+
+        result = await executor.run(task)
+
+        assert result == f"已打开 {reply}。"
+        start_payload = next(payload for name, payload in calls if name == "start")
+        assert start_payload["user_goal"] == f"帮我打开一个软件\n{reply}"
+        continuation = start_payload["metadata"]
+        assert continuation["runtime_clarification_continuation"] is True
+        assert continuation["continued_from_run_id"] == "run-awaiting"
+        assert continuation["clarification_authority"] == {
+            "version": 1,
+            "original_goal": "帮我打开一个软件",
+            "user_reply": reply,
+        }
+        assert question not in repr(continuation)
+        assert "model-only text" not in repr(continuation)
+        execute_payload = next(payload for name, payload in calls if name == "execute")
+        assert execute_payload["kwargs"]["runtime_execution_metadata"] == {
+            key: value
+            for key, value in continuation.items()
+            if key != "source_message_id"
+        }
+        assert pending["status"] == "awaiting_user"
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "fresh_goal",
+        ("打开 Safari", "明天天气怎么样？", "不用了"),
+    )
+    async def test_run_does_not_absorb_independent_goal_into_stale_clarification(
+        self,
+        fresh_goal,
+        monkeypatch,
+    ):
+        calls: list[tuple[str, object]] = []
+        session = ChatSession(session_id="fresh-goal-session")
+        prior_message_id = session.add_user_message("帮我打开一个软件")
+        session.link_message_to_task(prior_message_id, "prior-task")
+        question = "请说明要打开哪个软件。"
+        session.add_assistant_message(question, task_id="prior-task")
+        current_message_id = session.add_user_message(fresh_goal)
+        session.link_message_to_task(current_message_id, "test001")
+
+        class FakeRuntimeService:
+            def latest_awaiting_user_main_chat_run(self, _session_id):
+                return {
+                    "run_id": "run-awaiting",
+                    "task_id": "prior-task",
+                    "session_id": session.session_id,
+                    "kind": "main_chat_run",
+                    "status": "awaiting_user",
+                    "user_goal": "帮我打开一个软件",
+                    "result": question,
+                    "timeline": [
+                        {
+                            "event": "agent.plan.clarification_required",
+                            "source": "runtime_model_intent_planner",
+                            "original_goal": "帮我打开一个软件",
+                            "question": question,
+                        }
+                    ],
+                }
+
+            def start_main_chat_run(self, **payload):
+                calls.append(("start", payload))
+                return {"run_id": "run-fresh"}
+
+            def execute_main_chat_model_loop(self, run_id, _messages, **_kwargs):
+                return {"run_id": run_id, "status": "running", "result": "fresh"}
+
+            def complete_main_chat_run(self, run_id, result):
+                return {"run_id": run_id, "status": "completed", "result": result}
+
+            def fail_main_chat_run(self, _run_id, _error):
+                raise AssertionError("fresh goal should not fail")
+
+        monkeypatch.setattr(
+            executor_mod,
+            "_append_oha_delegation_context",
+            lambda context, **_kwargs: context,
+        )
+        task = _make_task(fresh_goal)
+        task.chat_session_id = session.session_id
+        executor = NativeAgentExecutor(
+            chat_session=session,
+            runtime_service_getter=FakeRuntimeService,
+        )
+        monkeypatch.setattr(executor, "_chat_session_for_task", lambda _task: session)
+
+        assert await executor.run(task) == "fresh"
+        start_payload = next(payload for name, payload in calls if name == "start")
+        assert start_payload["user_goal"] == fresh_goal
+        assert "runtime_clarification_continuation" not in start_payload["metadata"]
+
+    def test_clarification_continuation_requires_immediate_chat_adjacency(self):
+        session = ChatSession(session_id="nonadjacent-clarification-session")
+        prior_message_id = session.add_user_message("帮我打开一个软件")
+        session.link_message_to_task(prior_message_id, "prior-task")
+        question = "请说明要打开哪个软件。"
+        session.add_assistant_message(question, task_id="prior-task")
+        unrelated_id = session.add_user_message("我们先聊点别的")
+        session.link_message_to_task(unrelated_id, "other-task")
+        session.add_assistant_message("好的。", task_id="other-task")
+        current_message_id = session.add_user_message("Terminal")
+        session.link_message_to_task(current_message_id, "test001")
+        task = _make_task("Terminal")
+        task.chat_session_id = session.session_id
+        pending = {
+            "run_id": "run-awaiting",
+            "task_id": "prior-task",
+            "session_id": session.session_id,
+            "kind": "main_chat_run",
+            "status": "awaiting_user",
+            "user_goal": "帮我打开一个软件",
+            "result": question,
+            "timeline": [
+                {
+                    "event": "agent.plan.clarification_required",
+                    "source": "runtime_model_intent_planner",
+                    "original_goal": "帮我打开一个软件",
+                    "question": question,
+                }
+            ],
+        }
+        service = types.SimpleNamespace(
+            latest_awaiting_user_main_chat_run=lambda _session_id: pending
+        )
+
+        assert (
+            executor_mod._clarification_continuation_for_task(
+                service,
+                session,
+                task,
+            )
+            is None
+        )
+
+    @pytest.mark.asyncio
     async def test_run_limits_chat_history_by_context_chars(self, monkeypatch):
         calls: list[tuple[str, object]] = []
         session = ChatSession(session_id="context-char-limit-test")
@@ -545,7 +785,13 @@ class TestNativeAgentExecutor:
         result = await executor.run(_make_task("需要审批"))
 
         assert result == "审批后回复"
-        assert calls == ["start", "execute_loop", "get_run", "complete"]
+        assert calls == [
+            "start",
+            "execute_loop",
+            "get_run",
+            "get_run",
+            "complete",
+        ]
 
     @pytest.mark.asyncio
     async def test_run_times_out_main_chat_approval_through_runtime_boundary(self, monkeypatch):
@@ -585,13 +831,19 @@ class TestNativeAgentExecutor:
                         else "等待审批：terminal.run"
                     ),
                     "pending_approval": {} if self.status == "cancelled" else {
+                        "approval_id": "approval-timeout-1",
                         "tool": "terminal.run",
                         "input_preview": {"command": "printf waiting"},
                     },
                 }
 
-            def timeout_run_approval(self, _run_id, reason):
-                calls.append(f"timeout:{reason}")
+            def timeout_run_approval(
+                self,
+                _run_id,
+                reason,
+                expected_approval_id,
+            ):
+                calls.append(f"timeout:{reason}:{expected_approval_id}")
                 self.status = "cancelled"
                 return {
                     "run_id": "main_chat_run_timeout",
@@ -628,7 +880,7 @@ class TestNativeAgentExecutor:
         assert excinfo.value.reason == "approval_timeout"
         assert str(excinfo.value) == "工具审批已超时：approval_wait_timeout"
         assert calls[0:2] == ["start", "execute_loop"]
-        assert "timeout:approval_wait_timeout" in calls
+        assert "timeout:approval_wait_timeout:approval-timeout-1" in calls
         assert not any(call == "cancel" for call in calls)
 
     @pytest.mark.asyncio
@@ -775,31 +1027,61 @@ class TestExecutorHelpers:
         assert "偏好：回答简洁" in wrapped
         assert wrapped.endswith("帮我总结")
 
-    def test_cross_session_memory_context_collects_explicit_preferences(self):
-        session = types.SimpleNamespace(session_id="old", created_at="2026-05-20T10:00:00+00:00")
+    def test_cross_session_memory_context_uses_managed_confirmed_preferences(self):
         store = types.SimpleNamespace(
-            list_sessions=lambda limit=80: [session],
-            load_messages=lambda _session_id, limit=80: [
-                types.SimpleNamespace(
-                    role="user",
-                    content="请记住：不要擅自推送 github，需要获得许可再推送。",
-                    created_at="2026-05-20T10:01:00+00:00",
-                ),
-                types.SimpleNamespace(
-                    role="assistant",
-                    content="记住了",
-                    created_at="2026-05-20T10:01:05+00:00",
-                ),
-            ],
+            list_sessions=lambda **_kwargs: (_ for _ in ()).throw(
+                AssertionError("raw chat history must not be scanned")
+            ),
+        )
+        memory_service = types.SimpleNamespace(
+            context_for=lambda **query: (
+                "- preference/session [memory-1] (actor=user): "
+                "不要擅自推送 github，需要获得许可再推送。"
+                if query["session_id"] == "new"
+                else ""
+            )
+        )
+
+        context = build_cross_session_memory_context(
+            "new",
+            store=store,
+            memory_service=memory_service,
+        )
+
+        assert "[长期记忆]" in context
+        assert "不要擅自推送 github，需要获得许可再推送" in context
+        assert "actor=user" in context
+
+    def test_cross_session_memory_context_without_injected_service_fails_closed(
+        self,
+        monkeypatch,
+    ):
+        accessor_calls: list[bool] = []
+
+        def global_runtime_service():
+            accessor_calls.append(True)
+            return types.SimpleNamespace(
+                memory_services=types.SimpleNamespace(
+                    context_for=lambda **_query: "global runtime memory",
+                )
+            )
+
+        monkeypatch.setattr(
+            "apps.shell.agent_runtime.get_agent_runtime_service",
+            global_runtime_service,
+        )
+        store = types.SimpleNamespace(
+            list_sessions=lambda **_kwargs: (_ for _ in ()).throw(
+                AssertionError("raw chat history must not be scanned")
+            ),
         )
 
         context = build_cross_session_memory_context("new", store=store)
 
-        assert "[长期记忆]" in context
-        assert "不要擅自推送 github，需要获得许可再推送" in context
-        assert "历史会话 2026-05-20" in context
+        assert context == ""
+        assert accessor_calls == []
 
-    def test_cross_session_memory_context_scans_full_long_sessions(self):
+    def test_cross_session_memory_context_never_scans_full_long_sessions(self):
         session = types.SimpleNamespace(session_id="long", created_at="2026-05-20T10:00:00+00:00")
         old_memory = types.SimpleNamespace(
             role="user",
@@ -826,10 +1108,14 @@ class TestExecutorHelpers:
             load_messages=load_messages,
         )
 
-        context = build_cross_session_memory_context("new", store=store)
+        context = build_cross_session_memory_context(
+            "new",
+            store=store,
+            memory_service=types.SimpleNamespace(context_for=lambda **_query: ""),
+        )
 
-        assert requested_limits == [0]
-        assert "不要擅自推送 GitHub，必须先获得许可" in context
+        assert requested_limits == []
+        assert context == ""
 
     def test_format_environment_context_includes_local_time_period(self):
         local_tz = datetime.now().astimezone().tzinfo

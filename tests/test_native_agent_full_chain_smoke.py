@@ -149,8 +149,14 @@ def test_multi_tool_pipeline_check_requires_read_then_artifact(tmp_path):
             assert run_id == "run-pipeline"
             return {
                 "events": [
-                    {"event_type": "agent.tool.call"},
-                    {"event_type": "agent.tool.call"},
+                    {
+                        "event_type": "agent.desktop.intent_planned",
+                        "payload": {"tool": "workspace.read"},
+                    },
+                    {
+                        "event_type": "agent.desktop.intent_planned",
+                        "payload": {"tool": "artifact.write"},
+                    },
                     {"event_type": "agent.completed"},
                 ]
             }
@@ -165,9 +171,53 @@ def test_multi_tool_pipeline_check_requires_read_then_artifact(tmp_path):
     assert result["name"] == "agent_multi_tool_pipeline"
     assert result["ok"] is True
     assert result["tool_call_count"] == 2
+    assert result["executed_tools"] == ["workspace.read", "artifact.write"]
+    assert result["tool_evidence_source"] == "public_plan_and_outcome"
     assert result["artifact_paths"] == ["pipeline-report.md"]
     tool_policy = service.agent_payload["tool_policy"]
     assert tool_policy == {"allowed_tools": ["workspace.read", "artifact.write"]}
     instructions = str(service.agent_payload["instructions"])
     assert "First call workspace_read" in instructions
     assert "After you receive the tool result, call artifact_write" in instructions
+
+
+def test_workspace_read_check_requires_runtime_execution_evidence(tmp_path):
+    class FakeService:
+        def create_agent(self, _payload):
+            return {"agent_id": "agent-reader"}
+
+        def create_agent_run(self, payload):
+            assert payload["agent_id"] == "agent-reader"
+            return {
+                "run_id": "run-reader",
+                "status": "completed",
+                "result": "MIYABI-742 Oha-Yachiyo",
+                "artifacts": [],
+            }
+
+        def list_run_events(self, run_id, *, include_internal=False):
+            assert run_id == "run-reader"
+            assert include_internal is True
+            return {
+                "events": [
+                    {
+                        "event_type": "agent.desktop.intent_planned",
+                        "payload": {"tool": "workspace.read"},
+                    },
+                    {"event_type": "agent.completed", "payload": {}},
+                ]
+            }
+
+    result = smoke._run_workspace_read(
+        FakeService(),
+        Path(tmp_path),
+        {"provider": "openai_compatible", "model": "demo"},
+    )
+
+    assert result["name"] == "agent_workspace_read"
+    assert result["ok"] is False
+    assert result["planned_tools"] == ["workspace.read"]
+    assert result["executed_tools"] == []
+    assert result["tool_evidence_source"] == (
+        "internal_runtime_tool_event_and_result"
+    )

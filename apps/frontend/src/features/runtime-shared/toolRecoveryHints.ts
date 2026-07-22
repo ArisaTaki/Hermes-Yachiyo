@@ -18,7 +18,7 @@ export function runtimeToolRecoveryHintsFromRecord(source: Record<string, unknow
     const tools = stringList(data.recommended_tools);
     const fieldText = fields.length ? fields.join('/') : 'fallback_x/fallback_y';
     const toolText = tools.length ? tools.join(' -> ') : 'screen.capture -> desktop.click';
-    hints.push(`Chrome CDP 不可用时不能直接用 CSS selector 点击；请先用 ${toolText} 观察目标位置，再提供 ${fieldText} 坐标。`);
+    hints.push(`Chrome CDP 不可用，已停止网页点击；请先启用 CDP。若确需操作当前桌面，请在受监督前台模式中确认后使用 ${toolText} 与 ${fieldText}。`);
   }
   hints.push(...blockingConditionRecoveryHints(source));
   hints.push(...permissionRecoveryHints(source));
@@ -63,7 +63,7 @@ const PERMISSION_RECOVERY_HINTS: Record<string, string> = {
   accessibility: '在 macOS「系统设置 > 隐私与安全性 > 辅助功能」允许 Oha-Yachiyo 或当前终端控制电脑。',
   automation: '在 macOS「系统设置 > 隐私与安全性 > 自动化」允许 Oha-Yachiyo 控制 System Events、Music 或目标应用。',
   automation_or_accessibility: '在 macOS 隐私设置中检查自动化和辅助功能权限；当前动作通常至少需要其中一项。',
-  chrome_cdp: 'Chrome CDP 不可用；请启动带 remote debugging 的 Chrome，或改用 screen.capture 加前台点击/输入工具。',
+  chrome_cdp: 'Chrome CDP 不可用；请在工具中心启用浏览器后台控制。若确需操作当前桌面，请切换到受监督前台并明确确认。',
   camera: '在 macOS「系统设置 > 隐私与安全性 > 相机」允许 Oha-Yachiyo 或当前运行环境使用相机。',
   files_and_folders: '在 macOS「系统设置 > 隐私与安全性 > 文件和文件夹」允许 Oha-Yachiyo 或当前运行环境访问目标文件夹。',
   full_disk_access: '在 macOS「系统设置 > 隐私与安全性 > 完全磁盘访问」允许 Oha-Yachiyo 或当前运行环境访问本地文件。',

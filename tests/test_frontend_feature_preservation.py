@@ -252,17 +252,17 @@ def test_frontend_preserves_top_level_product_routes_and_navigation() -> None:
         [
             "{ view: 'chat', label: '对话'",
             "{ view: 'tasks', label: '任务'",
-            "{ view: 'agents', label: 'Agent Studio'",
+            "{ view: 'agents', label: '代理工作台'",
             "{ view: 'memories', label: '记忆'",
-            "{ view: 'skills', label: 'Skills'",
+            "{ view: 'skills', label: '技能库'",
             "{ view: 'bubble', label: '气泡模式'",
             "{ view: 'live2d', label: 'Live2D 模式'",
             "{ view: 'proactive-tts', label: '主动关怀'",
             "{ view: 'tools', label: '能力中心'",
             "{ view: 'diagnostics', label: '诊断详情'",
-            "if (view === 'tasks') return 'Oha Yachiyo — 任务';",
-            "if (view === 'memories') return 'Oha Yachiyo — 记忆';",
-            "if (view === 'skills') return 'Oha Yachiyo — Skills';",
+            "if (view === 'tasks') return 'Oha-Yachiyo — 任务';",
+            "if (view === 'memories') return 'Oha-Yachiyo — 记忆';",
+            "if (view === 'skills') return 'Oha-Yachiyo — 技能库';",
             "if (itemView === 'memories') return activeView === 'memories' || studioTab === 'memory';",
             "if (itemView === 'skills') return activeView === 'skills' || studioTab === 'skills' || studioTab === 'skill-groups';",
         ],
@@ -317,8 +317,9 @@ def test_launcher_views_expose_session_summary_e2e_selectors() -> None:
             "const [desktopReadinessNotice, setDesktopReadinessNotice] = useState<LauncherDesktopReadinessNotice>(null);",
             "LAUNCHER_READINESS_POLL_INTERVAL_MS",
             "setDesktopReadinessNotice(chatDesktopPermissionNotice(await getYachiyoReadiness()))",
-            "const tasks = await listYachiyoTasks();",
-            "launcherAgentTaskFromPublicTasks(tasks, payload.chat?.agent_task || null)",
+            "setPublicAgentTask(payload.chat?.agent_task || null);",
+            "startLauncherPolling({",
+            "intervalMs: () => pollIntervalRef.current,",
             "launcherAgentTaskIsActive(publicAgentTask || data?.chat?.agent_task)",
             "const result = await apiPost<LauncherQuickMessageResult>('/ui/launcher/quick-message'",
             "setAgentTaskSnapshot: setPublicAgentTask,",
@@ -372,7 +373,7 @@ def test_launcher_views_expose_session_summary_e2e_selectors() -> None:
             'data-testid="bubble-launcher-quick-input-field"',
             'data-testid="bubble-launcher-quick-input-delegate"',
             'data-testid="bubble-launcher-quick-input-submit"',
-            'data-testid={`${mode}-launcher-readiness-notice`}',
+            "data-testid={mode === 'bubble' ? 'bubble-launcher-readiness-notice' : 'live2d-launcher-readiness-notice'}",
             'data-testid={`${mode}-launcher-readiness-title`}',
             'data-testid={`${mode}-launcher-readiness-detail`}',
             "mode: data?.mode || 'bubble'",
@@ -399,9 +400,14 @@ def test_launcher_views_expose_session_summary_e2e_selectors() -> None:
             "statusLabel: 'live2d-launcher-status-label'",
             "recentSession: 'live2d-launcher-recent-session'",
             "elementRegion(desktopReadinessRef.current)",
+            "const agentTaskRef = useRef<HTMLElement | null>(null);",
+            "agentTask: agentTaskRef.current",
+            "containerRef={agentTaskRef}",
+            "const uiRegions = [resourceHint, reply, agentTask, readinessNotice, quickInput]",
             "readinessNotice: desktopReadinessRef.current",
+            ".launcher-agent-task-light, .launcher-agent-task-compact",
             ".launcher-desktop-readiness-notice",
-            "const params = launcherChatOpenParams(data, sessionId);",
+            "const params = launcherAgentTaskChatParams(task) || launcherChatOpenParams(data, sessionId);",
             "function launcherChatOpenParams(data: LauncherPayload | null, sessionId: string): Record<string, string> | undefined",
             "if (conversationKind) params.conversation_kind = conversationKind;",
             "if (latestTaskId) params.task_id = latestTaskId;",
@@ -424,109 +430,51 @@ def test_launcher_views_expose_session_summary_e2e_selectors() -> None:
             "task.status === 'running') return 1;",
             "task.status === 'queued') return 2;",
             "launcherAgentTaskUpdatedAt(right) - launcherAgentTaskUpdatedAt(left)",
-            "return task.status === 'queued' || task.status === 'running' || task.status === 'waiting_approval';",
+            "if (['completed', 'success', 'succeeded', 'failed', 'cancelled', 'canceled'].includes(status)) return false;",
+            "return status === 'queued' || status === 'running' || status === 'waiting_approval';",
         ],
     )
     _assert_contains(
         "apps/frontend/src/features/yachiyo-chat/components/LauncherAgentTaskLight.tsx",
         [
             "export function LauncherAgentTaskLight",
-            "import { RuntimeDebugSummary } from '../../runtime-shared/components/RuntimeDebugSummary';",
-            "plannerSummaryChips",
-            "plannerSummaryDetail",
-            "plannerSummaryFromTask",
+            "import { consumerTaskPresentation } from '../consumerTaskPresentation';",
             "export function launcherAgentTaskSummary",
             "export function launcherAgentTaskTitle",
             "AgentTaskLightSnapshot",
             "export function launcherAgentTaskLightSnapshot",
-            "const lightTask = launcherAgentTaskLightSnapshot(currentTask);",
-            "const studioTarget = yachiyoTaskStudioTarget(currentTask, lightTask.open_in_studio_url || '');",
-            "const { runId, studioUrl } = studioTarget;",
-            "const studioParams = studioTarget.routeParams;",
-            "const approval = lightTask.pending_approval || launcherAgentTaskPendingApproval(currentTask);",
+            "const presentation = consumerTaskPresentation(currentTask, variant === 'panel' ? 'panel' : 'launcher');",
+            "if (presentation.visibility === 'hidden') return null;",
+            "if (presentation.visibility === 'compact')",
+            "if (mode === 'bubble') return null;",
+            "containerRef?: MutableRefObject<HTMLElement | null>;",
+            "ref={rememberContainer}",
             "return String(task.title || '').trim() || fallback;",
-            "runtimeToolDisplayLabelOrName",
-            "runtimeTimelineEventLabel",
-            "const approvalTitle = approval.tool_name",
-            "? runtimeToolDisplayLabelOrName(approval.tool_name)",
-            "return `审批 · ${approvalTitle || '人工确认'}`;",
-            "const toolCall = task.tool_calls?.find((item) => item.tool_name);",
-            "if (toolCall) return launcherAgentTaskToolCallLabel(toolCall);",
-            "function launcherAgentTaskToolCallLabel",
-            "function launcherAgentTaskToolCallStatusLabel",
-            "function launcherAgentTaskEventLabel",
-            "const executionEnvelope = task.runtime_execution_envelope || null;",
-            "const executionRiskCounts = launcherAgentTaskRuntimeRiskCounts(executionEnvelope);",
-            "const executionRiskLabel = launcherAgentTaskRuntimeRiskLabel(executionRiskCounts);",
-            "kind: 'execution'",
-            "? `exec ${executionRequestCount} ${executionRiskLabel}`",
-            "launcherAgentTaskRuntimeRiskTitle(executionRiskCounts)",
-            "function launcherAgentTaskRuntimeRiskCounts(",
-            "function launcherAgentTaskRuntimeRiskLabel(risks: Array<[string, number]>): string",
-            "function launcherAgentTaskRuntimeRiskTitle(risks: Array<[string, number]>): string",
-            "const workspaceItems = task.task_core?.workspace?.items || [];",
-            "const totalWorkspaceItems = progress?.total_workspace_items ?? workspaceItems.length;",
-            "const completedWorkspaceItems = progress?.completed_workspace_items",
-            "const blockedWorkspaceItems = progress?.blocked_workspace_items",
-            "kind: 'workspace'",
-            "label: `work ${completedWorkspaceItems}/${totalWorkspaceItems}`",
-            "blockedWorkspaceItems > 0 ? 'warning'",
-            "const label = runtimeTimelineEventLabel(event);",
-            "return label || '运行事件';",
             "export function launcherAgentTaskChatParams",
             "const DEFAULT_LAUNCHER_AGENT_TASK_TEST_IDS",
-            "taskPermissionRecoveryFromTaskFacts",
-            "yachiyoTaskPrimaryReplanRecoveryAction",
-            "yachiyoTaskRuntimeExecutionRetryActions",
-            "const permissionRecovery = taskPermissionRecoveryFromTaskFacts(",
-            "currentTask.tool_calls",
-            "const replanRecoveryAction = yachiyoTaskPrimaryReplanRecoveryAction(currentTask);",
-            "const runtimeRetryAction = yachiyoTaskRuntimeExecutionRetryActions(currentTask, 1)[0] || null;",
-            "permissionRecovery.kind === 'permission' ? '需要权限' : '需要处理'",
-            "`恢复计划 · ${launcherReplanRecoveryLabel(replanRecoveryAction.recovery)}`",
-            "`运行重试 · ${runtimeRetryAction.tool}`",
+            "const permissionRecovery = presentation.permissionRecovery;",
+            "const replanRecoveryAction = presentation.replanRecoveryAction;",
+            "const runtimeRetryAction = presentation.runtimeRetryAction;",
             "data-blocking-conditions={permissionRecovery.blockingConditions.join(',')}",
             "data-recovery-kind={permissionRecovery.kind}",
             "blocking_conditions: permissionRecovery.blockingConditions.join(',')",
             "bubble-launcher-agent-task-approve",
             "bubble-launcher-agent-task-open-diagnostics",
             "bubble-launcher-agent-task-run-recovery-action",
-            "bubble-launcher-agent-task-planner-summary",
-            "bubble-launcher-agent-task-runtime-debug",
+            "bubble-launcher-agent-task-compact",
             "live2d-launcher-agent-task-reject",
             "live2d-launcher-agent-task-open-diagnostics",
             "live2d-launcher-agent-task-run-recovery-action",
-            "live2d-launcher-agent-task-planner-summary",
-            "live2d-launcher-agent-task-runtime-debug",
+            "live2d-launcher-agent-task-compact",
             "function launcherAgentTaskTestIds(",
             "testIdPrefix = `${mode}-launcher`",
             "if (testIdPrefix === `${mode}-launcher`) return DEFAULT_LAUNCHER_AGENT_TASK_TEST_IDS[mode];",
-            "const taskTitle = launcherAgentTaskTitle(currentTask);",
-            "launcherAgentTaskDetail(currentTask)",
-            "launcherAgentTaskPendingApproval(currentTask)",
             "onApproveApproval?: LauncherTaskApprovalHandler;",
             "onCancelTask?: LauncherTaskCancelHandler;",
             "onRejectApproval?: LauncherTaskApprovalHandler;",
             "onRunRecoveryAction?: LauncherTaskRecoveryHandler;",
             "const permissionRecoveryAction = permissionRecovery?.actions[0] || null;",
             "const primaryReplanRecoveryAction = permissionRecoveryAction ? null : replanRecoveryAction;",
-            "const plannerSummary = plannerSummaryFromTask(currentTask);",
-            "const plannerChips = plannerSummary",
-            "launcherAgentTaskPlannerChips(plannerSummary",
-            "data-planner-intent-kind={plannerSummary?.intentKind || ''}",
-            "data-plan-capabilities={plannerSummary?.capabilities.join(',') || ''}",
-            "data-plan-tools={plannerSummary?.tools.join(',') || ''}",
-            "data-runtime-approval-count={runtimeEnvelope?.approvals_required?.length || 0}",
-            "data-runtime-request-count={runtimeEnvelope?.requests?.length || 0}",
-            "data-runtime-risk-levels={runtimeRiskCounts.map(([risk, count]) => `${risk}:${count}`).join(',')}",
-            "className=\"launcher-agent-task-planner\"",
-            "data-testid={testIds.plannerSummary}",
-            "title={plannerSummaryDetail(plannerSummary)}",
-            "data-planner-chip-kind={chip.kind}",
-            "data-planner-chip-value={chip.value}",
-            "testId={testIds.runtimeDebug}",
-            "summary={lightTask.runtime_debug || currentTask.runtime_debug}",
-            "sourceLabel={mode === 'bubble' ? 'Bubble runtime' : 'Live2D runtime'}",
             "const primaryRuntimeRetryAction = permissionRecoveryAction || primaryReplanRecoveryAction ? null : runtimeRetryAction;",
             "const primaryRecoveryAction = permissionRecoveryAction || primaryReplanRecoveryAction?.action || primaryRuntimeRetryAction || null;",
             "data-replan-recovery-action-id={primaryReplanRecoveryAction?.action.action_id || ''}",
@@ -535,31 +483,46 @@ def test_launcher_views_expose_session_summary_e2e_selectors() -> None:
             "data-runtime-retry-action-id={primaryRuntimeRetryAction?.action_id || ''}",
             "data-runtime-retry-input-source={primaryRuntimeRetryAction?.retry_input_source || ''}",
             "void onRunRecoveryAction?.(currentTask, primaryRecoveryAction);",
-            "function launcherReplanRecoveryLabel(recovery: YachiyoTaskReplanRecoverySnapshot): string",
-            "yachiyoTaskStudioTarget(currentTask",
             "open_in_studio_url: yachiyoTaskStudioUrl(task) || null,",
             "void openAppView('chat', launcherAgentTaskChatParams(currentTask));",
-            "void openAppView('agents', studioParams);",
             "void openAppView('diagnostics'",
             "desktop_tools: permissionRecovery.tools.join(',')",
             "permission_targets: permissionRecovery.targets.join(',')",
-            "data-studio-url={studioUrl}",
             "data-desktop-tools={permissionRecovery.tools.join(',')}",
             "data-blocking-conditions={permissionRecovery.blockingConditions.join(',')}",
             "data-permission-targets={permissionRecovery.targets.join(',')}",
             "data-recovery-kind={permissionRecovery.kind}",
-            "<strong>{taskTitle}</strong>",
+            "<strong>{presentation.title}</strong>",
+            "<small data-testid={testIds.detail}>{presentation.detail}</small>",
             "data-testid={testIds.light}",
+            "data-testid={testIds.compact}",
             "data-testid={testIds.openChat}",
-            "data-testid={testIds.openStudio}",
             "data-testid={testIds.diagnostics}",
             "data-testid={testIds.recovery}",
-            "Agent Studio",
             "data-testid={testIds.approvalActions}",
             "data-testid={testIds.approve}",
             "data-testid={testIds.reject}",
             "data-testid={testIds.cancel}",
             "function launcherAgentTaskCanCancel(task: AgentTaskSnapshot): boolean",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/consumerTaskPresentation.ts",
+        [
+            "export type ConsumerTaskPresentationVisibility = 'hidden' | 'compact' | 'action' | 'summary';",
+            "export function consumerTaskPresentation(",
+            "const approval = terminalSuccess || cancelled || failed ? null : pendingTaskApproval(task);",
+            "const exposeRecovery = failed || explicitlyNeedsAction;",
+            "const actionRequired = ['approval', 'permission', 'recovery', 'failed'].includes(state);",
+            "surface === 'panel'",
+            "state === 'running'",
+            "? 'compact'",
+            ": 'hidden';",
+            "Runtime facts enter here; tool, planner,",
+            "policy, and risk identifiers never leave as visible copy.",
+            "title = '需要你的确认';",
+            "'需要系统权限';",
+            "detail = '正在处理…';",
         ],
     )
     _assert_contains(
@@ -585,11 +548,28 @@ def test_launcher_views_expose_session_summary_e2e_selectors() -> None:
         ],
     )
     _assert_not_contains(
+        "apps/frontend/src/views/LauncherView.tsx",
+        [
+            "listYachiyoTasks",
+            "launcherAgentTaskFromPublicTasks",
+            "window.setInterval(refresh, processing ? ACTIVE_POLL_INTERVAL_MS : IDLE_POLL_INTERVAL_MS)",
+        ],
+    )
+    _assert_not_contains(
         "apps/frontend/src/features/yachiyo-chat/components/LauncherAgentTaskLight.tsx",
         [
             "studioRunRouteParams",
             "yachiyoTaskStudioGroupRunId",
             "yachiyoTaskStudioRunId",
+            "RuntimeDebugSummary",
+            "plannerSummaryFromTask",
+            "runtimeTimelineEventLabel",
+            "runtimeToolDisplayLabelOrName",
+            "data-progress-chip-kind",
+            "data-planner-chip-kind",
+            "data-runtime-risk-levels",
+            "openAppView('agents'",
+            "Agent Studio",
         ],
     )
     _assert_contains(
@@ -611,8 +591,9 @@ def test_launcher_views_expose_session_summary_e2e_selectors() -> None:
             "function useLauncherModePayload(mode: 'bubble' | 'live2d', active = true)",
             "const payload = await apiGet<LauncherPayload>(`/ui/launcher?mode=${mode}`);",
             "const [publicAgentTask, setPublicAgentTask] = useState<AgentTaskSnapshot | null>(null);",
-            "const tasks = await listYachiyoTasks();",
-            "launcherAgentTaskFromPublicTasks(tasks, payload.chat?.agent_task || null)",
+            "setPublicAgentTask(payload.chat?.agent_task || null);",
+            "return startLauncherPolling({",
+            "intervalMs: () => pollIntervalRef.current,",
             "launcherAgentTaskIsActive(publicAgentTask || data?.chat?.agent_task)",
             "startYachiyoTaskRecoveryAction",
             "async function runLauncherModeRecoveryAction(",
@@ -644,8 +625,7 @@ def test_launcher_views_expose_session_summary_e2e_selectors() -> None:
             "rejectAgentTaskApproval",
             "startAgentTask",
             "launcherPayloadHasActiveTask(data)",
-            "window.setInterval(",
-            "processing ? LAUNCHER_PAGE_ACTIVE_POLL_INTERVAL_MS : LAUNCHER_PAGE_IDLE_POLL_INTERVAL_MS",
+            "pollIntervalRef.current = processing",
             "LauncherAgentTaskLight",
             "onApproveApproval={approveAgentTaskApproval}",
             "onCancelTask={cancelAgentTask}",
@@ -659,6 +639,13 @@ def test_launcher_views_expose_session_summary_e2e_selectors() -> None:
             "data-testid={`${mode}-mode-task-composer`}",
             "data-testid={`${mode}-mode-task-input`}",
             "data-testid={`${mode}-mode-task-submit`}",
+        ],
+    )
+    _assert_not_contains(
+        "apps/frontend/src/views/OpenDesignView.tsx",
+        [
+            "listYachiyoTasks",
+            "launcherAgentTaskFromPublicTasks",
         ],
     )
     _assert_contains(
@@ -683,7 +670,8 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "refreshYachiyoTasksForSession,",
             "apiPost<",
             "sendLegacyChatMessage({",
-            "retryLegacyChatMessage(message.id)",
+            "retryLegacyChatMessage(",
+            "retryClientMessageId,",
             "'/ui/chat/session/clear'",
             "'/ui/chat/session/delete'",
             "'/ui/chat/session/discard-empty'",
@@ -702,7 +690,8 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "planner_entrypoint: publicTaskTarget",
             "const runYachiyoTaskRecoveryAction = useCallback(async (",
             "startYachiyoTaskRecoveryAction({",
-            "onStartedTask: (startedTask) => rememberYachiyoTasks([startedTask])",
+            "onStartedTask: (startedTask) => {",
+            "if (isSubmissionConversationCurrent(identity)) rememberYachiyoTasks([startedTask]);",
             "startFallbackTask: (recoveryStart) => startPublicYachiyoTask({",
             "metadata: recoveryStart.metadata",
             "result.mode === 'replan'",
@@ -753,7 +742,7 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "export type LegacyChatMessageResult",
             "agent_task?: AgentTaskSnapshot | null;",
             "export async function sendLegacyChatMessage",
-            "return apiPost('/ui/chat/messages', request);",
+            "return apiPost('/ui/chat/messages', request, options);",
             "export async function retryLegacyChatMessage",
             "return apiPost('/ui/chat/messages/retry', {",
             "export async function createChatGroupSession",
@@ -839,7 +828,7 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "if (taskId) expectPendingAssistantReply(taskId);",
             "chatRunnableRunningStatusText(runnableLabel)",
             "chatRunnableSettledStatusText({",
-            "pollAgentRunInBackground(taskId)",
+            "pollAgentRunInBackground(taskId, {",
             "Fall through to the legacy Chat API with the same idempotency key.",
         ],
     )
@@ -856,7 +845,7 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "if (!runnableResult.runnableCommand) return false;",
             "setStatus(chatRunnableRunningStatusText(runnableLabel));",
             "if (options.refreshTaskSnapshot) void refreshYachiyoTaskById(resultRunId);",
-            "pollAgentRunInBackground(resultRunId);",
+            "pollAgentRunInBackground(resultRunId, { identity: options.identity });",
             "setStatus(chatRunnableSettledStatusText({",
             "await refreshMessages();",
             "await loadSessions();",
@@ -905,9 +894,8 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "export function latestFailedMessage",
             "export function latestVisibleActivity",
             "export function activityLabel",
-            "runtimeToolDisplayLabelOrName",
-            "if (label) return runtimeToolDisplayLabelOrName(label);",
-            "return runtimeToolDisplayLabelOrName(String(event.tool_name || '').trim());",
+            "const CONSUMER_ACTIVITY_LABEL_BY_PHASE",
+            "return CONSUMER_ACTIVITY_LABEL_BY_PHASE[phase] || '处理中...';",
             "export function activityRunId",
             "export function activityGroupRunId",
             "event?.metadata?.group_dispatch_run_group_id",
@@ -1055,7 +1043,7 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "export function formatShortTime",
             "export function clampComposerHeight",
             "export function storedComposerHeight",
-            "compactStatusText(activityLabel(headerActivity))",
+            "status.includes('等待审批') ? status : '处理中...'",
             "normalizeSessionContext(context)",
             "groupMemberCount(normalized)",
         ],
@@ -1121,8 +1109,9 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "void openAppView(notice.action_view || 'diagnostics', notice.action_params || {});",
             "className=\"chat-toast-close\"",
             "import { deriveChatSessionState } from '../features/yachiyo-chat/sessionDerivedState';",
-            "handleLegacyChatRunnableResult(result, { refreshTaskSnapshot: true })",
-            "handleLegacyChatRunnableResult(result)",
+            "handleLegacyChatRunnableResult(result, {",
+            "refreshTaskSnapshot: true,",
+            "identity: {",
             "} = useMemo(() => deriveChatSessionState({",
             "messageMatchesPendingAssistantReply(message, taskId)",
             "selectedGroupAgentIds,",
@@ -1300,6 +1289,66 @@ def test_chat_ui_preserves_sessions_groups_attachments_and_approval_paths() -> N
             "export function ChatFullPageLoading",
             "role=\"status\"",
             "正在准备对话...",
+        ],
+    )
+
+
+def test_chat_ui_preserves_optimistic_delivery_across_conversation_transitions() -> None:
+    _assert_contains(
+        "apps/frontend/src/views/ChatView.tsx",
+        [
+            "const optimisticOutboxRef = useRef<Map<string, ChatMessage>>(new Map());",
+            "conversationClientMessageKey(",
+            "conversationClientMessageSessionPrefix(",
+            "optimisticOutboxMessagesForConversation(",
+            "submittedMessageSequencesRef.current,",
+            "forgetOptimisticOutboxMessage(responseSessionId, clientMessageId, true);",
+            "const composerDraftAtRetry = latestComposerDraftRef.current;",
+            "composerDraftsEqual(",
+            "当前草稿已保留",
+            "blockConversationTransitionDuringSubmission()",
+            "消息正在提交，请稍候再切换会话",
+            "const OPTIMISTIC_RECONCILIATION_TIMEOUT_MS = 90_000;",
+            "optimisticReconciliationRef",
+            "beginOptimisticDeliveryReconciliation(",
+            "canonicalClientDeliveryIsTerminal(",
+            "cancelOptimisticDeliveryReconciliations();",
+            "deliveryState === 'pending' || deliveryState === 'uncertain'",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/clientMessages.ts",
+        [
+            "export function createOptimisticUserMessage",
+            "export function conversationClientMessageKey",
+            "export function conversationClientMessageSessionPrefix",
+            "client_submitted_sequence: submittedSequence",
+            "export function reconcileOptimisticUserMessages",
+            "const sourceMessages = [...currentMessages, ...outboxMessages];",
+            "orderedMessages.splice(insertIndex, 0, pendingMessage);",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/types.ts",
+        [
+            "client_submitted_sequence?: number;",
+        ],
+    )
+    _assert_contains(
+        "scripts/smoke_chat_public_task_ui.mjs",
+        [
+            "--outbox-switch-only",
+            "uncertain outbox survives session round trip and reuses its id",
+            "--same-client-id-sessions-only",
+            "same client id remains isolated across session outboxes and canonical cleanup",
+            "--draft-preservation-only",
+            "rejected uncertain retry preserves newer text and attachment draft",
+            "--ordering-only",
+            "optimistic A stays before canonical B and its reply",
+            "--public-preaccept-only",
+            "public pre-accept blocks mutation, then new session opens after settlement",
+            "--late-failed-reconciliation-only",
+            "hidden Chat reconciles one late failed canonical message without raw timeout",
         ],
     )
 
@@ -1513,10 +1562,6 @@ def test_chat_group_summary_ui_smoke_uses_group_create_send_and_summary_status()
             "data-testid=\"chat-composer-send\"",
             "data-testid=\"chat-message-summary-status\"",
             "data-testid=\"chat-message-followup-status\"",
-            "data-testid=\"chat-message-activity-open-run-detail\"",
-            "data-testid=\"chat-message-open-run-detail\"",
-            "data-testid=\"agent-run-detail\"",
-            "data-testid=\"agent-run-detail-execution-event\"",
             "group_agent_summary_task_id",
             "group_agent_summary_pending",
             "group_agent_summary_status: summaryCompleted ? 'completed' : 'processing'",
@@ -1526,28 +1571,13 @@ def test_chat_group_summary_ui_smoke_uses_group_create_send_and_summary_status()
             "GROUP_FOLLOWUP_TEXT",
             "GROUP_AVATAR_DATA_URL",
             "group avatar picker fallback targets file input",
-            "new File([blob], 'group-avatar.svg', { type: 'image/svg+xml' })",
+            "Uint8Array.from(atob(payload)",
+            "new File([bytes], 'group-avatar.svg', { type: 'image/svg+xml' })",
             "group avatar preview rendered",
             "group avatar cleared",
             "group avatar was not submitted as a data URL",
             "chat-group-ui-main-summary-message",
             "chat-group-ui-followup-message",
-            "url.pathname === `/ui/runs/${GROUP_SUMMARY_RUN_ID}`",
-            "url.pathname === '/yachiyo/studio/agents'",
-            "url.pathname === '/yachiyo/studio/skills'",
-            "url.pathname === '/yachiyo/studio/skills/sources'",
-            "url.pathname === '/yachiyo/studio/skill-folders'",
-            "url.pathname === '/yachiyo/studio/groups'",
-            "url.pathname === '/yachiyo/studio/memories'",
-            "url.pathname === '/yachiyo/studio/future-tasks'",
-            "url.pathname === '/yachiyo/studio/runs'",
-            "url.pathname === '/yachiyo/studio/group-runs'",
-            "url.pathname === `/yachiyo/studio/runs/${GROUP_SUMMARY_RUN_ID}/timeline`",
-            "url.pathname === `/yachiyo/studio/runs/${GROUP_AGENT_RUN_ID}/timeline`",
-            "url.pathname === `/yachiyo/studio/runs/${GROUP_SUMMARY_RUN_ID}/events`",
-            "url.pathname === `/yachiyo/studio/group-runs/${RUN_GROUP_ID}/events`",
-            "function eventPage",
-            "next_after_sequence",
             "group_followup_for_task_ids",
             "group_followup_for_agent_message_ids",
             "data-summary-tone') === 'completed'",
@@ -1559,26 +1589,19 @@ def test_chat_group_summary_ui_smoke_uses_group_create_send_and_summary_status()
             "launcher task handoff highlighted group summary",
             "data-followup-task-ids') === ${JSON.stringify(GROUP_AGENT_TASK_ID)}",
             "data-followup-agent-message-ids') === 'chat-group-ui-agent-summary-message'",
+            "followup.textContent.includes('已作为当前群组任务补充')",
             "group follow-up status rendered",
             "GROUP_AGENT_RUN_ID",
             "run_id: GROUP_AGENT_RUN_ID",
-            "row?.getAttribute('data-run-id') === ${JSON.stringify(GROUP_AGENT_RUN_ID)}",
-            "row?.getAttribute('data-run-status') === 'completed'",
-            "openRun?.getAttribute('data-run-id') === ${JSON.stringify(GROUP_AGENT_RUN_ID)}",
-            "openRun?.getAttribute('data-run-status') === 'completed'",
-            "url.pathname === `/ui/runs/${GROUP_AGENT_RUN_ID}`",
-            "url.pathname === `/yachiyo/studio/runs/${GROUP_AGENT_RUN_ID}/events`",
-            "run.completed",
-            "agent.run.completed",
-            "outputEvent?.textContent.includes(${JSON.stringify(GROUP_SUMMARY_RESULT)})",
-            "completedEvent?.textContent.includes(${JSON.stringify(GROUP_SUMMARY_RESULT)})",
-            "outputEvent?.textContent.includes(${JSON.stringify(GROUP_AGENT_RESULT)})",
-            "completedEvent?.textContent.includes(${JSON.stringify(GROUP_AGENT_RESULT)})",
-            "detail?.getAttribute('data-task-id') === ${JSON.stringify(SUMMARY_TASK_ID)}",
-            "detail?.getAttribute('data-task-id') === ${JSON.stringify(GROUP_AGENT_TASK_ID)}",
-            "detail?.getAttribute('data-session-id') === ${JSON.stringify(GROUP_SESSION_ID)}",
-            "data-run-event-run-id",
-            "group summary Run Detail replay verified",
+            "data-summary-tone') === 'pending'",
+            "data-summary-status') === 'processing'",
+            "document.body.textContent.includes('Group UI Agent accepted the task')",
+            "data-summary-tone') === 'completed'",
+            "data-summary-status') === 'completed'",
+            "summary.textContent.includes('主模型已整理')",
+            "!summary.textContent.includes('等待主模型整理')",
+            "!summaryMessage?.querySelector('[data-testid=\"chat-message-open-run-detail\"]')",
+            "group summary chat retained without Run Detail CTA",
             "!document.body.textContent.includes('oha.group_dispatch')",
             "!document.body.textContent.includes('<oha_group_dispatch>')",
             "!document.body.textContent.includes('run_oha_agent')",
@@ -1611,7 +1634,9 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
     _assert_contains(
         "apps/frontend/src/features/yachiyo-chat/hooks/useChatSessions.ts",
         [
-            "if (payload.current_session_id) void refreshYachiyoTasksForSession(payload.current_session_id);",
+            "const ACTIVE_TASKS_REFRESH_INTERVAL_MS = 2000;",
+            "const IDLE_TASKS_REFRESH_INTERVAL_MS = 10_000;",
+            "refreshTasksIfDue(currentSessionId, !poll);",
         ],
     )
     _assert_contains(
@@ -1625,17 +1650,20 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "ImageAttachmentViewer",
             "renderMarkdown(fencedCode(codeText, codeLanguage), message.id || '', copiedCodeBlockKey)",
             "formatTime={formatTime}",
-            "messageMetaText(message, formatTime, message.status, message.created_at)",
+            "const messageCancelledByRunStatus = ['cancelled', 'canceled'].includes(runStatus);",
+            "const effectiveMessageStatus = messageCancelledByRunStatus ? 'cancelled' : String(message.status || '');",
+            "messageMetaText(message, formatTime, effectiveMessageStatus, message.created_at)",
             "onOpenStudio={onOpenRunDetails}",
             "onApproveApproval={onApproveTaskApproval}",
             "onRejectApproval={onRejectTaskApproval}",
             "onCancelTask={onCancelTask}",
-            "const showPublicTaskCard = Boolean(publicTaskSnapshot);",
-            "const showLegacyApprovalDetails = Boolean(approvalDetails && !showPublicTaskCard);",
+            "const publicTaskHasVisibleExecution = agentTaskHasVisibleExecution(publicTaskSnapshot);",
+                "const showCanonicalTaskApproval = Boolean(",
+                "const showLegacyApprovalDetails = Boolean(approvalDetails && !showCanonicalTaskApproval);",
             "const showLegacyAgentProgress = Boolean(showAgentProgress && !showPublicTaskCard);",
             "{showLegacyApprovalDetails && approvalDetails ? (",
             ") : showLegacyAgentProgress ? (",
-            ") : isProcessingEmpty && !showPublicTaskCard ? (",
+            ") : isProcessingEmpty ? (",
             "hidden={Boolean(showLegacyApprovalDetails || showLegacyAgentProgress)}",
         ],
     )
@@ -1648,7 +1676,9 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "cancelYachiyoTask(task.task_id)",
             "yachiyoTaskRunId(nextTask) || approval.run_id || task.task_id",
             "yachiyoTaskStatusMessage(nextTask, action)",
-            "pollAgentRunInBackground(nextRunId, { ignoreInitialApprovalRequired: action === 'approve' });",
+            "pollAgentRunInBackground(nextRunId, {",
+            "identity,",
+            "ignoreInitialApprovalRequired: action === 'approve',",
             "focusComposerSoon();",
         ],
     )
@@ -1662,8 +1692,27 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "refreshYachiyoTasksForSession",
             "refreshYachiyoTaskById",
             "refreshYachiyoTaskSnapshotsForRunIds",
+            "shouldRememberTaskSnapshot(task, existing)",
+            "candidate?.task_id === task.task_id",
+            "incomingUpdatedAt < existingUpdatedAt",
+            "isTerminalTaskStatus(existing.status)",
+            "const agentTaskFetchInFlightRef = useRef<Map<string, Promise<void>>>(new Map());",
+            "if (current) return current;",
+            "TASK_SNAPSHOT_REQUEST_TIMEOUT_MS",
+            "listYachiyoTasks(cleanSessionId, {",
+            "getYachiyoTask(cleanTaskId, {",
+            "signal: requestController.signal,",
             "The Chat surface keeps using legacy messages if the new facade is unavailable.",
             "Message metadata still provides a fallback task card for legacy runs.",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/api.ts",
+        [
+            "type ApiRequestOptions",
+            "options: ApiRequestOptions = {},",
+            "apiGet<{ tasks?: AgentTaskSnapshot[] }>(`/yachiyo/tasks${query}`, options)",
+            "apiGet(`/yachiyo/tasks/${encodeURIComponent(taskId)}`, options)",
         ],
     )
     _assert_not_contains(
@@ -1684,8 +1733,9 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
         "apps/frontend/src/features/yachiyo-chat/components/MessageAgentTaskCard.tsx",
         [
             "export function MessageAgentTaskCard",
+            "if (hidden || message.role !== 'assistant') return null;",
             "agentTaskSnapshotFromMessage(message, displayContent)",
-            "publicTaskSnapshot || agentTaskSnapshotFromMessage(message, displayContent)",
+            "const task = publicTask || (agentTaskHasVisibleExecution(messageTask, message) ? messageTask : null);",
             "onOpenStudio={onOpenStudio}",
             "onApproveApproval={onApproveApproval}",
             "onRejectApproval={onRejectApproval}",
@@ -1786,6 +1836,7 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
         "apps/frontend/src/features/yachiyo-chat/hooks/useYachiyoTaskEventReplay.ts",
         [
             "useEffect",
+            "useRef",
             "useState",
             "listYachiyoTaskEvents",
             "mergeRuntimeRunEventPages",
@@ -1804,26 +1855,42 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "const [replayHasMore, setReplayHasMore] = useState(false);",
             "const [replayLoading, setReplayLoading] = useState(false);",
             "const [replayNextAfterSequence, setReplayNextAfterSequence] = useState(0);",
-            "const timelineEvents = replayEvents.length ? replayEvents : recentEvents;",
-            "const replayApprovals = replayEvents.length ? approvalsFromRunEventReplay(replayEvents) : [];",
-            "const replayArtifacts = replayEvents.length ? artifactsFromRunEventReplay(replayEvents) : [];",
-            "const replayToolCalls = replayEvents.length ? toolCallsFromRunEventReplay(replayEvents) : [];",
-            "const approvalFacts = mergeApprovalSnapshots(approvals, replayApprovals);",
-            "const artifactFacts = mergeArtifactSnapshots(artifacts, replayArtifacts) as ArtifactSnapshot[];",
-            "const toolCallFacts = mergeToolCallSnapshots(toolCalls, replayToolCalls) as ToolCallSnapshot[];",
-            "const timelineSummaryEvents = timelineEvents.slice(-3);",
-            "const timelineEventSource = replayEvents.length ? 'run_event_page' : 'task_snapshot';",
-            "listYachiyoTaskEvents(taskId, 0, TASK_EVENT_PAGE_SIZE)",
+            "{ enabled = true }: { enabled?: boolean } = {},",
+            "const replayEventsRef = useRef<PublicRunEvent[]>([]);",
+            "const replayNextAfterSequenceRef = useRef(0);",
+            "const replayRequestIdRef = useRef(0);",
+            "const replayTaskIdRef = useRef(String(task.task_id || '').trim());",
+            "const currentReplayEvents = replayBelongsToTask ? replayEvents : EMPTY_RUN_EVENTS;",
+            "const derivedTimelineEvents = currentReplayEvents.length ? currentReplayEvents : recentEvents;",
+            "approvalFacts: mergeApprovalSnapshots(approvals, replayApprovals),",
+            "artifactFacts: mergeArtifactSnapshots(artifacts, replayArtifacts) as ArtifactSnapshot[],",
+            "timelineEvents: derivedTimelineEvents,",
+            "timelineEventSource: currentReplayEvents.length ? 'run_event_page' : 'task_snapshot',",
+            "timelineSummaryEvents: derivedTimelineEvents.slice(-3),",
+            "toolCallFacts: mergeToolCallSnapshots(toolCalls, replayToolCalls) as ToolCallSnapshot[],",
+            "} = useMemo(() => {",
+            "const taskChanged = replayTaskIdRef.current !== taskId;",
+            "if (taskChanged) {",
+            "if (!enabled || !taskId) {",
+            "replayRequestIdRef.current += 1;",
+            "const afterSequence = taskChanged",
+            "listYachiyoTaskEvents(taskId, afterSequence, TASK_EVENT_PAGE_SIZE)",
+            "mergeRuntimeRunEventPages(taskChanged ? [] : replayEventsRef.current, incomingEvents)",
+            "requestId !== replayRequestIdRef.current",
+            "replayTaskIdRef.current !== taskId",
             "const loadMoreTaskEvents = useCallback(async () => {",
-            "const events = mergeRuntimeRunEventPages(replayEvents, incomingEvents);",
-            "setReplayNextAfterSequence(runEventPageNextCursor(page, events, afterSequence));",
-            "runEventSequenceCursor(replayEvents, 0)",
+            "const events = mergeRuntimeRunEventPages(replayEventsRef.current, incomingEvents);",
+            "const nextAfterSequence = runEventPageNextCursor(page, events, afterSequence);",
+            "setReplayNextAfterSequence(nextAfterSequence);",
+            "runEventSequenceCursor(replayEventsRef.current, 0)",
         ],
     )
     _assert_contains(
         "apps/frontend/src/features/yachiyo-chat/components/AgentTaskCard.tsx",
         [
             "useYachiyoTaskEventReplay",
+            "const [runtimeDetailsOpen, setRuntimeDetailsOpen] = useState(false);",
+            "useYachiyoTaskEventReplay(task, { enabled: !isChatSurface && runtimeDetailsOpen });",
             "yachiyoTaskApprovalStudioTarget",
             "const runId = yachiyoTaskRunId(task);",
             "const studioRunId = yachiyoTaskStudioRunId(task);",
@@ -1835,40 +1902,40 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "data-event-source={timelineEventSource}",
             "const permissionRecovery = taskPermissionRecoveryFromTaskFacts(timelineEvents, toolCallFacts);",
             'data-testid="yachiyo-agent-task-card"',
-            'data-testid="yachiyo-agent-task-permission-recovery"',
+            'data-testid="yachiyo-agent-task-canonical-recovery"',
             'data-testid="yachiyo-agent-task-recovery-actions"',
             'data-testid="yachiyo-agent-task-run-recovery-action"',
-            'data-testid="yachiyo-agent-task-run-retry-action"',
-            "data-required-retry-fields={retryFields.join(',')}",
-            "data-missing-retry-fields={missingRetryFields.join(',')}",
-            "data-retry-input-source={retryAction.retry_input_source || ''}",
+            "data-required-retry-fields={requiredFields.join(',')}",
+            "data-missing-retry-fields={missingFields.join(',')}",
+            "data-retry-input-source={action.retry_input_source || ''}",
             "data-selected-retry-x={selectedRetryPoint?.x ?? ''}",
             "data-selected-retry-y={selectedRetryPoint?.y ?? ''}",
-            "data-retry-input-schema={JSON.stringify(retryAction.retry_input_schema || {})}",
-            "retryAction?.retry_input_source === 'screen_capture_artifact'",
+            "data-retry-input-schema={JSON.stringify(action.retry_input_schema || {})}",
+            "action.retry_input_source === 'screen_capture_artifact'",
             "taskRecoveryRetryActionWithSelectedCoordinate(",
             "runtimeToolRecoveryActionWithInputPatch",
-            "runtimeToolRecoveryMissingRequiredFields(retryAction)",
-            "missingRetryFields.length > 0",
+            "runtimeToolRecoveryMissingRequiredFields(action)",
+            "missingFields.length > 0",
             "yachiyo-agent-task-retry-contract",
             'data-testid="yachiyo-agent-task-open-diagnostics"',
             "onRunRecoveryAction?.(task, action)",
             "runtimeToolRecoveryRetryAction(action)",
-            "onRunRecoveryAction?.(task, retryAction)",
             "export type TaskPermissionRecoveryAction",
             "RuntimeToolRecoveryAction",
-            "runtimeToolRecoveryActionsFromRecords",
-            "function executableRecoveryActionsFromEvents",
-            "data-desktop-tools={permissionRecovery.tools.join(',')}",
-            "data-permission-targets={permissionRecovery.targets.join(',')}",
+            "data-desktop-tools={permissionRecovery?.tools.join(',') || ''}",
+            "data-permission-targets={permissionRecovery?.targets.join(',') || ''}",
             "href={permissionRecovery.href}",
-            "permissionRecovery.hints.map((hint)",
+            "permissionRecovery?.hints.slice(0, 3).map((hint)",
             "yachiyo-agent-task-recovery-hint",
             'data-testid="yachiyo-agent-task-open-studio"',
             "href={studioUrl}",
             "data-studio-url={studioUrl}",
             "onOpenStudio(undefined, studioUrl)",
             'data-testid="yachiyo-agent-task-cancel"',
+            'data-testid="yachiyo-agent-task-runtime-details"',
+            'data-testid="yachiyo-agent-task-runtime-details-body"',
+            "<span>运行详情</span>",
+            "setRuntimeDetailsOpen(event.currentTarget.open)",
             'testId="yachiyo-agent-task-timeline"',
             "<ApprovalCard",
             'data-testid="yachiyo-task-approval-open-studio"',
@@ -1895,9 +1962,63 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "taskId={task.task_id}",
             "toolCallFacts.length",
             "<ToolCallSummary events={timelineEvents} toolCalls={toolCallFacts} />",
-            "approvalFacts.slice(0, 2).map((approval)",
+            "visibleApprovalFacts.slice(0, 2).map((approval, approvalIndex)",
+            "surface?: 'chat' | 'task';",
+            "if (isChatSurface && !hasChatContent) return null;",
+            "!isChatSurface ? (",
+            "!isChatSurface && studioRunId && studioUrl && onOpenStudio",
             "artifactFacts.slice(0, 3).map((artifact)",
             "在 Agent Studio 中查看",
+            "export function taskPermissionRecoveryFromEvents",
+            "return taskPermissionRecoveryFromTaskFacts(events, []);",
+            "export function taskPermissionRecoveryFromTaskFacts",
+            "data-plan-followup-targets={summary.followupTargets.join(',')}",
+            "task.runtime_execution_envelope",
+            "RuntimeExecutionEnvelopeSummary",
+            'testId="yachiyo-agent-task-runtime-execution"',
+            'variant="chat"',
+            "const runtimeExecutionRetryActions = yachiyoTaskRuntimeExecutionRetryActions(task);",
+            "const canonicalRecoveryItems = taskCanonicalRecoveryItems(",
+            "task.replan_recoveries?.length",
+            "function TaskCanonicalRecoverySummary",
+            "function taskCanonicalRecoveryItems(",
+            "function taskCanonicalRecoveryIdentity(",
+            "yachiyoTaskReplanRecoveryActions(recovery)",
+            "data-recovery-action-id={action.action_id || ''}",
+            "data-recovery-action-identity={item.identity}",
+            "data-recovery-sources={item.sources.join(',')}",
+            "data-replan-recovery-request-id={recovery.request_id}",
+            "onRunRecoveryAction?.(task, action)",
+            "const progress = task.task_progress;",
+            "data-progress-status={progress?.status || ''}",
+            "data-pending-verification-count={pendingVerificationCount}",
+            "data-failed-verification-count={failedVerificationCount}",
+            "data-latest-verification-status={progress?.latest_verification_status || ''}",
+            "data-latest-replan-request-id={progress?.latest_replan_request_id || ''}",
+            "data-needs-replan={String(progress?.needs_replan === true)}",
+            "const workspaceItems = (task.task_core?.workspace?.items || [])",
+            "const checkpoints = (task.task_core?.checkpoints || [])",
+            "const visibleWorkspaceItems = workspaceItems.slice(0, 2);",
+            "const visibleCheckpoints = checkpoints.slice(0, 2);",
+            "data-workspace-item-count={workspaceItemCount}",
+            "data-completed-workspace-count={completedWorkspaceItemCount}",
+            "data-blocked-workspace-count={blockedWorkspaceItemCount}",
+            "data-completed-checkpoint-count={completedCheckpointCount}",
+            "data-task-workspace-item-id={item.item_id}",
+            "data-task-workspace-item-kind={item.kind || ''}",
+            "data-task-checkpoint-id={checkpoint.checkpoint_id}",
+            "function taskCoreWorkspaceItemTitle",
+            "function taskCoreCheckpointTitle",
+            "function taskCoreMilestoneTone",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/taskPermissionRecovery.ts",
+        [
+            "export type TaskPermissionRecoveryAction",
+            "RuntimeToolRecoveryAction",
+            "runtimeToolRecoveryActionsFromRecords",
+            "function executableRecoveryActionsFromEvents",
             "export function taskPermissionRecoveryFromEvents",
             "return taskPermissionRecoveryFromTaskFacts(events, []);",
             "export function taskPermissionRecoveryFromTaskFacts",
@@ -1935,51 +2056,6 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "desktopToolsFromEvent",
             "desktopToolsFromToolCall",
             "String(event.event_type || '').includes('tool')",
-            "data-plan-followup-targets={summary.followupTargets.join(',')}",
-            "task.runtime_execution_envelope",
-            "RuntimeExecutionEnvelopeSummary",
-            'testId="yachiyo-agent-task-runtime-execution"',
-            'variant="chat"',
-            "const runtimeExecutionRetryActions = yachiyoTaskRuntimeExecutionRetryActions(task);",
-            "function TaskRuntimeExecutionRetryActions",
-            'data-testid="yachiyo-agent-task-runtime-retry-actions"',
-            'data-testid="yachiyo-agent-task-run-runtime-retry-action"',
-            "data-runtime-retry-input-source={action.retry_input_source || ''}",
-            "task.replan_recoveries?.length",
-            "function TaskReplanRecoverySummary",
-            'data-testid="yachiyo-agent-task-replan-recovery"',
-            'data-testid="yachiyo-agent-task-run-replan-recovery-action"',
-            "yachiyoTaskReplanRecoveryActions(recovery)",
-            "data-replan-recovery-action-id={action.action_id || ''}",
-            "data-replan-recovery-action-deferred-continuation={deferredContinuationPreview}",
-            "data-replan-recovery-action-deferred-continuation-count={deferredContinuationCount}",
-            "function taskRecoveryDeferredContinuationPreview",
-            "deferredContinuationPreview ? `continues: ${deferredContinuationPreview}` : ''",
-            "deferredContinuationCount ? ` · continues ${deferredContinuationCount}` : ''",
-            "deferredContinuationPreview ? ` · next: ${deferredContinuationPreview}` : ''",
-            "data-replan-recovery-request-id={recovery.request_id}",
-            "onRunRecoveryAction?.(task, action)",
-            "const progress = task.task_progress;",
-            "data-progress-status={progress?.status || ''}",
-            "data-pending-verification-count={pendingVerificationCount}",
-            "data-failed-verification-count={failedVerificationCount}",
-            "data-latest-verification-status={progress?.latest_verification_status || ''}",
-            "data-latest-replan-request-id={progress?.latest_replan_request_id || ''}",
-            "data-needs-replan={String(progress?.needs_replan === true)}",
-            "const workspaceItems = (task.task_core?.workspace?.items || [])",
-            "const checkpoints = (task.task_core?.checkpoints || [])",
-            "const visibleWorkspaceItems = workspaceItems.slice(0, 2);",
-            "const visibleCheckpoints = checkpoints.slice(0, 2);",
-            "data-workspace-item-count={workspaceItemCount}",
-            "data-completed-workspace-count={completedWorkspaceItemCount}",
-            "data-blocked-workspace-count={blockedWorkspaceItemCount}",
-            "data-completed-checkpoint-count={completedCheckpointCount}",
-            "data-task-workspace-item-id={item.item_id}",
-            "data-task-workspace-item-kind={item.kind || ''}",
-            "data-task-checkpoint-id={checkpoint.checkpoint_id}",
-            "function taskCoreWorkspaceItemTitle",
-            "function taskCoreCheckpointTitle",
-            "function taskCoreMilestoneTone",
         ],
     )
     _assert_contains(
@@ -2219,6 +2295,7 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
         "apps/frontend/src/features/runtime-shared/components/RuntimeToolCallSummary.tsx",
         [
             "export type RuntimeToolCallSummaryItem",
+            "executionRoute?: Record<string, unknown>;",
             "policyReason?: string;",
             "riskLevel?: string;",
             "export function RuntimeToolCallSummary",
@@ -2229,7 +2306,7 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "if (publicRunEventIsSecret(event)) continue;",
             "runtimeToolDisplayLabelOrName",
             "runtimeToolFamily",
-            "<strong>{runtimeToolSummaryDisplayName(tool.name, tool.status)}</strong>",
+            "<strong>{runtimeToolSummaryDisplayName(tool.name, tool.status, tool.executionRoute)}</strong>",
             "data-policy-reason={tool.policyReason || ''}",
             "data-risk-level={tool.riskLevel || ''}",
             "{tool.riskLevel ? <em title={tool.policyReason || undefined}>{tool.riskLevel}</em> : null}",
@@ -2238,6 +2315,9 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "if (tool === 'app.focus_and_safe_type_text') return '正在聚焦应用并输入文字';",
             "if (tool === 'app.open_and_safe_shortcut') return '正在打开应用并执行快捷动作';",
             "if (tool === 'app.focus_and_safe_shortcut') return '正在聚焦应用并执行快捷动作';",
+            "runtimeToolExecutionRouteFromSnapshot(toolCall)",
+            "runtimeToolExecutionRouteFromEvent(event, name)",
+            "return `正在${runtimeToolDisplayLabel(tool, executionRoute)}`;",
             'testId = \'runtime-tool-call-summary\'',
             'itemTestId = \'runtime-tool-call-summary-item\'',
             "'agent.tool.approval_required'",
@@ -2301,7 +2381,7 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "if (tool === 'screen.capture') return '正在截图';",
             "if (tool === 'desktop.active_window') return '正在读取前台窗口';",
             "if (tool === 'media.apple_music_play') return '正在打开 Music';",
-            "return runtimeToolDisplayLabelOrName(name);",
+            "return runtimeToolDisplayLabelOrName(name, executionRoute);",
         ],
     )
     _assert_contains(
@@ -2474,8 +2554,8 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
     _assert_contains(
         "apps/frontend/src/features/runtime-shared/approval.ts",
         [
-            "export function runtimeToolDisplayLabel",
-            "export function runtimeToolDisplayLabelOrName",
+            "export function runtimeToolDisplayLabel(toolName: string, desktopExecutionRoute?: unknown)",
+            "export function runtimeToolDisplayLabelOrName(toolName: string, desktopExecutionRoute?: unknown)",
             "export function runtimeToolFamily",
             "export function approvalPreviewTarget",
             "return hotkey ? `快捷键 ${hotkey}` : '';",
@@ -2495,7 +2575,18 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "if (tool === 'app.focus_and_safe_type_text') return '聚焦应用并输入文字';",
             "if (tool === 'app.open_and_safe_shortcut') return '打开应用并执行快捷动作';",
             "if (tool === 'app.focus_and_safe_shortcut') return '聚焦应用并执行快捷动作';",
-            "if (tool === 'desktop.safe_click') return '点击前台界面';",
+            "tool === 'app.open_and_click_ui_element'",
+            "tool === 'app.focus_and_click_ui_element'",
+            "tool === 'app.open_and_type_into_ui_element'",
+            "tool === 'app.focus_and_type_into_ui_element'",
+            "if (tool === 'desktop.click_ui_element') {",
+            "if (surface === 'background') return '后台点击指定应用控件';",
+            "if (tool === 'desktop.type_into_ui_element') {",
+            "if (surface === 'background') return '后台向指定应用控件输入文字';",
+            "if (surface === 'background') return '后台向指定应用输入文字';",
+            "if (surface === 'foreground') return '输入前台文字';",
+            "if (surface === 'background') return '后台点击指定应用界面';",
+            "if (surface === 'foreground') return '点击前台界面';",
             "if (tool === 'desktop.click') return '点击前台界面';",
             "if (tool === 'browser.open_url') return '打开网页';",
             "if (tool === 'browser.open_url_and_extract_text') return '打开并读取网页';",
@@ -2504,6 +2595,10 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "if (tool.startsWith('browser.')) return 'browser';",
             "if (runtimeToolLooksInternalId(tool)) return display;",
             "function runtimeToolLooksInternalId",
+            "function runtimeDesktopExecutionSurface",
+            "providerKind === 'background_desktop'",
+            "providerKind === 'local_desktop'",
+            "record.requires_user_foreground_session === true",
             "/^[a-z][a-z0-9_]*(\\.[a-z][a-z0-9_]*)+$/i.test(toolName)",
             "/^[a-z][a-z0-9]+(?:_[a-z0-9]+)+$/i.test(toolName)",
         ],
@@ -2530,10 +2625,24 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
         ],
     )
     _assert_contains(
+        "apps/frontend/src/features/runtime-shared/artifactPresentation.ts",
+        [
+            "export type RuntimeArtifactPresentationMode = 'consumer' | 'diagnostic';",
+            "export function runtimeArtifactPresentation(",
+            "export function runtimeArtifactReadError(",
+            "if (mode === 'consumer') return CONSUMER_ARTIFACT_READ_ERROR;",
+            "tooltip: title,",
+            "tooltip: path || label,",
+        ],
+    )
+    _assert_contains(
         "apps/frontend/src/features/runtime-shared/components/RuntimeArtifactPreview.tsx",
         [
             "export type RuntimeArtifactVariant",
             "export function RuntimeArtifactPreview",
+            "presentationMode = 'diagnostic'",
+            "runtimeArtifactPresentation(artifact, presentationMode)",
+            "title={presentation.tooltip || undefined}",
             "variant = 'compact'",
             "actions?: ReactNode;",
             "actionsClassName = 'runtime-artifact-actions'",
@@ -2576,6 +2685,10 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "export type RuntimeImageArtifactPointSelection",
             "export function RuntimeReadableArtifactPreview",
             "export function RuntimeReadableArtifactContentPreview",
+            "presentationMode = 'diagnostic'",
+            "runtimeArtifactReadError(err, presentationMode, errorFallback)",
+            "presentationMode={presentationMode}",
+            "label={presentation.label}",
             "useState",
             "RuntimeArtifactPreview",
             "readArtifact?: (",
@@ -2962,8 +3075,8 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "approveYachiyoChatRunApproval",
             "rejectYachiyoChatRunApproval",
             "return getYachiyoTask(runId);",
-            "return approveYachiyoTask(runId);",
-            "return rejectYachiyoTask(runId, undefined, reason);",
+            "return approveYachiyoTask(runId, approvalId);",
+            "return rejectYachiyoTask(runId, approvalId, reason);",
             "function yachiyoTaskApprovalPath",
             "approvals/${encodeURIComponent(cleanApprovalId)}/${action}",
             "approveYachiyoTask",
@@ -3056,7 +3169,12 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
                 "provider?.desktop_backend_ready_for_public_release)"
             ),
             "available && adapterReady && healthChecked && healthOk && backendReleaseReady",
-            "providerReadiness.provider_id && !providerReadiness.ready",
+                "const providerNeedsAttention = Boolean(",
+                "&& !providerReadiness.ready",
+            "providerReadiness.provider_kind === 'local_desktop'",
+            "missing.every((issue) => issue.token === 'chrome_cdp')",
+            "toolReadiness.tools.every((tool) => tool.startsWith('browser.'))",
+            "if (browserEnhancementOnly) return null;",
             "${providerLabel} 运行时已安装，但当前主机权限或桌面会话未就绪",
             "const permissionRecoveryHints",
             "const blockingConditionRecoveryHints",
@@ -3073,16 +3191,16 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "camera: '相机权限'",
             "music_app: 'Music.app'",
             "chrome_cdp: 'Chrome CDP 调试端口'",
-            "降级可用：${formatDesktopToolList(toolReadiness.degraded)}。",
-            "暂不可用：${formatDesktopToolList(toolReadiness.unavailable)}。",
+                "降级可用：${formatDesktopToolList(visibleToolReadiness.degraded)}。",
+                "暂不可用：${formatDesktopToolList(visibleToolReadiness.unavailable)}。",
             "需要在 macOS「系统设置 > 隐私与安全性 > 屏幕录制」允许 Oha-Yachiyo。",
             "Music.app 未安装、无法启动，或暂时不可被自动化控制",
             "action_label: '打开诊断'",
             "action_view: 'diagnostics'",
             "command: 'native doctor'",
             "if (missing.length) actionParams.permission_targets = missing.map((issue) => issue.token).join(',')",
-            "if (blocking.length) actionParams.blocking_conditions = blocking.map((issue) => issue.token).join(',')",
-            "if (toolReadiness.tools.length) actionParams.desktop_tools = toolReadiness.tools.join(',')",
+                "actionParams.blocking_conditions = visibleBlocking.map((issue) => issue.token).join(',')",
+                "if (visibleToolReadiness.tools.length) actionParams.desktop_tools = visibleToolReadiness.tools.join(',')",
             "return_to: 'chat'",
         ],
     )
@@ -3637,6 +3755,8 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "export function normalizeStudioTab",
             "export function isStudioTopTabActive",
             "export function studioTabLabel",
+            "export function studioTabTestId",
+            "return 'agent-studio-tab-groups';",
             "export function AgentStudioLoadingState",
         ],
     )
@@ -3704,9 +3824,11 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "export function AgentStudioChrome",
             "isStudioTopTabActive(tab, item)",
             "studioTabLabel(item)",
+            "studioTabTestId(item)",
             "AgentStudioLoadingState",
+            "data-testid={studioTabTestId(item)}",
             'className="agent-studio-hero"',
-            "Workflow 图",
+            "<h1>代理工作台</h1>",
             'className="agent-studio-tabs"',
             'className="skill-library-subnav"',
             "Skills 列表",
@@ -4205,12 +4327,13 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
         [
             "export function useRunApprovalActions",
             "const approveRunById = useCallback(async (",
-            "const approvalRequest = approveYachiyoRunApproval(runId).then(publicRunTimelineToStudioRunSpec);",
+            "await approveYachiyoRunApproval(runId, approvalId),",
+            "rememberApprovedRun(currentRun);",
             "void pollApprovedRunProgress(runId, selectedAfterAction)",
             "updatedRuns.push(publicRunTimelineToStudioRunSpec(await getYachiyoRunTimeline(nextSelectedRunId)));",
             "await refreshRunGroupsForRuns(updatedRuns);",
             "const rejectRunById = useCallback(async (",
-            "const run = publicRunTimelineToStudioRunSpec(await rejectYachiyoRunApproval(runId));",
+            "await rejectYachiyoRunApproval(runId, approvalId),",
             "const cancelRunById = useCallback(async (",
             "const run = publicRunTimelineToStudioRunSpec(await cancelYachiyoRun(runId));",
             "statusMessage: nextSelectedRunId ? '已取消子 Run，Workflow 已终止。' : 'Run 已取消。'",
@@ -4368,8 +4491,13 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "前台输入会作用在当前桌面焦点窗口",
             "Browser/CDP 工具需要 Chrome 调试端口",
             "agentToolCapabilitySummaries(draft, toolCatalog)",
-            "桌面工具权限未就绪",
+            "if (message === 'Browser: chrome_cdp') return;",
+            "工具运行条件未就绪",
         ],
+    )
+    _assert_not_contains(
+        "apps/frontend/src/features/agent-studio/hooks/useAgentRunReadiness.ts",
+        ["桌面工具权限未就绪"],
     )
     _assert_contains(
         "apps/frontend/src/features/agent-studio/hooks/useAgentToolCatalog.ts",
@@ -5078,7 +5206,7 @@ def test_agent_studio_uses_extracted_runtime_shared_components() -> None:
             'data-testid="agent-run-detail-group-run-replay"',
             'testId="agent-run-detail-group-run-events"',
             'data-testid="agent-run-detail-group-run-load-more-events"',
-            "replayHasMore ? 'Load more GroupRun Events' : 'GroupRun replay complete'",
+            "replayHasMore ? '加载更多 GroupRun 事件' : 'GroupRun 回放已完成'",
             "GroupRun planner facts · Intent / Capability / Plan / Selection",
             "plannerSummary={groupRunPlannerSummary}",
             "taskCore={groupRunTaskCore}",
@@ -5597,10 +5725,14 @@ def test_chat_delegated_summary_ui_smoke_uses_activity_approval_summary_and_run_
             "data-testid=\"chat-composer-approval-notice\"",
             "data-approval-source') === 'activity'",
             "data-testid=\"chat-composer-approval-open-run-detail\"",
-            "data-testid=\"chat-composer-approval-approve\"",
-            "data-testid=\"chat-composer-approval-reject\"",
-            "data-testid=\"chat-message-activity-open-run-detail\"",
-            "data-testid=\"chat-message-open-run-detail\"",
+            "data-testid=\"chat-message-approval-card\"",
+            "data-testid=\"chat-message-approval-actions\"",
+            "data-testid=\"chat-message-approval-approve\"",
+            "data-testid=\"chat-message-approval-reject\"",
+            "canonicalHint?.textContent.includes('任务卡或消息')",
+            "openRun.textContent.includes('Agent Studio')",
+            "!document.querySelector('[data-testid=\"chat-composer-approval-approve\"]')",
+            "!document.querySelector('[data-testid=\"chat-composer-approval-reject\"]')",
             "data-testid=\"agent-run-detail\"",
             "data-testid=\"agent-run-detail-execution-event\"",
             "SUMMARY_RUN_ID",
@@ -5614,28 +5746,21 @@ def test_chat_delegated_summary_ui_smoke_uses_activity_approval_summary_and_run_
             "agent.run.cancelled",
             "agent.run.completed",
             "run.completed",
-            "outputEvent?.textContent.includes(${JSON.stringify(DELEGATED_RESULT)})",
-            "completedEvent?.textContent.includes(${JSON.stringify(DELEGATED_RESULT)})",
-            "outputEvent?.textContent.includes(${JSON.stringify(SUMMARY_RESULT)})",
-            "completedEvent?.textContent.includes(${JSON.stringify(SUMMARY_RESULT)})",
             "detail?.getAttribute('data-task-id') === ${JSON.stringify(SOURCE_TASK_ID)}",
-            "detail?.getAttribute('data-task-id') === ${JSON.stringify(SUMMARY_TASK_ID)}",
             "detail?.getAttribute('data-session-id') === ${JSON.stringify(SESSION_ID)}",
             "loadChat(win, {",
             "conversation_kind: 'agent'",
             "task_id: ${JSON.stringify(SOURCE_TASK_ID)}",
             "summary?.className.includes('search-highlighted')",
             "launcher task handoff highlighted delegated summary",
-            "delegated summary Run Detail replay verified",
             "REJECTED_SUMMARY_RESULT",
-            "row?.getAttribute('data-run-id') === ${JSON.stringify(DELEGATED_RUN_ID)}",
-            "row?.getAttribute('data-run-status') === 'approval_required'",
-            "row?.getAttribute('data-run-status') === 'cancelled'",
-            "row?.getAttribute('data-run-status') === 'completed'",
-            "openRun?.getAttribute('data-run-id') === ${JSON.stringify(DELEGATED_RUN_ID)}",
             "openRun?.getAttribute('data-run-status') === 'approval_required'",
-            "openRun?.getAttribute('data-run-status') === 'cancelled'",
-            "openRun?.getAttribute('data-run-status') === 'completed'",
+            "summary?.textContent.includes(${JSON.stringify(REJECTED_SUMMARY_RESULT)})",
+            "summary?.textContent.includes(${JSON.stringify(SUMMARY_RESULT)})",
+            "!summary.textContent.includes('run_oha_agent')",
+            "!document.body.textContent.includes('<oha_delegation>')",
+            "delegated reject summary rendered",
+            "delegated summary rendered",
             "run_oha_agent",
             "<oha_delegation>",
             "assertMockBridgeContract",
@@ -5723,19 +5848,16 @@ def test_launcher_session_summary_ui_smoke_uses_bubble_and_live2d_summary_paths(
             "live2d delegated task did not call /yachiyo/tasks",
             "metadata?.launcher_surface === 'desktop_launcher'",
             "bridgeState.approvalPayloads",
-            "launcher public Yachiyo task snapshots were not requested",
+            "launcher idle refresh must not list all Yachiyo tasks:",
             "missing bubble launcher task approve",
             "missing live2d launcher task reject",
             "bubble launcher task approval",
             "live2d launcher task rejection",
-            "taskStudio.textContent.includes('Agent Studio')",
-            "bubble launcher task opened Agent Studio",
             "bubble launcher task opened Diagnostics",
-            "live2d launcher task opened Agent Studio",
+            "bubble consumer task action stays free of runtime diagnostics",
+            "live2d consumer task action stays free of runtime diagnostics",
             "Music permission required",
             "permission_targets: ['music_app', 'automation']",
-            "call?.view === 'agents'",
-            "call?.params?.run === ${JSON.stringify(PUBLIC_RUN_ID)}",
             "call?.view === 'diagnostics'",
             "call?.params?.permission_targets === 'music_app,automation'",
             "bridgeState.ackPayloads",
@@ -5745,9 +5867,9 @@ def test_launcher_session_summary_ui_smoke_uses_bubble_and_live2d_summary_paths(
             "openView: async (view, params) =>",
             "call?.view === 'chat'",
             "call?.params?.session_id ===",
-            "call?.params?.conversation_kind === 'group'",
-            "call?.params?.task_id === ${JSON.stringify(GROUP_TASK_ID)}",
             "call?.params?.session_id === ${JSON.stringify(DELEGATED_SESSION_ID)}",
+            "call?.params?.task_id === ${JSON.stringify(PUBLIC_TASK_ID)}",
+            "compact bubble opened matching task chat",
             "call?.params?.conversation_kind === 'agent'",
             "call?.params?.task_id === ${JSON.stringify(DELEGATED_TASK_ID)}",
             "live2d open-chat session handoff verified",
@@ -5755,6 +5877,21 @@ def test_launcher_session_summary_ui_smoke_uses_bubble_and_live2d_summary_paths(
             "!bodyText.includes('<oha_group_dispatch>')",
             "!bodyText.includes('run_oha_agent')",
             "!bodyText.includes('<oha_delegation>')",
+            "url.pathname === '/__smoke/running-public-task'",
+            "url.pathname === '/__smoke/completed-public-task'",
+            "bubble running task stays compact and diagnostic-free",
+            "live2d running task uses compact loading cue",
+            "completed bubble ignores stale approval flags",
+            "completed launcher task leaves latest reply without task chrome",
+            "window.__ohaLauncherHitRegionCalls",
+            "setLauncherHitRegions: async (mode, payload) =>",
+            "live2d compact task registered its desktop hit region",
+            "live2d action task registered its desktop hit region",
+            "consumer running/completed Launcher presentation verified",
+            "!bodyText.includes('Runtime Debug')",
+            "!bodyText.includes('Agent Studio')",
+            "!bodyText.includes('workspace.write_patch')",
+            "!bodyText.includes('media.apple_music_play')",
             "bridgeState.quickMessagePayload",
             "bubble quick input did not call /yachiyo/tasks",
             "live2d quick input did not call /yachiyo/tasks",
@@ -6045,7 +6182,9 @@ def test_chat_ui_preserves_image_approval_and_cancel_interaction_wiring() -> Non
             "const outgoingAttachments = attachments;",
             "retainComposerDraft(text, outgoingAttachments);",
             "setAttachments(outgoingAttachments);",
-            "const imageAttachDisabled = isSending || !canAttachImages(executor) || attachments.length >= MAX_ATTACHMENTS;",
+            "const imageAttachDisabled = conversationTransitionLocked",
+            "|| conversationTransitionRef.current",
+            "conversationTransitionLocked={conversationTransitionLocked}",
             "if (imageAttachDisabled) {",
             "if (isSending || !canAttachImages(executor)) {",
             "const detail = imageInputBlockedNoticeText({",
@@ -6065,12 +6204,11 @@ def test_chat_ui_preserves_image_approval_and_cancel_interaction_wiring() -> Non
             "setProcessingCount(nextProcessingCount);",
             "onCancelProcessing={() => void cancelProcessing()}",
             "useChatRunApprovalActions({",
-            "onApprove={() => void resolveApprovalMessage(message, 'approve')}",
-            "onReject={() => void resolveApprovalMessage(message, 'reject')}",
-            "onApproveComposerApproval={() => {",
-            "if (composerApprovalItem) void resolveApprovalItem(composerApprovalItem, 'approve');",
-            "onRejectComposerApproval={() => {",
-            "if (composerApprovalItem) void resolveApprovalItem(composerApprovalItem, 'reject');",
+                "fallbackApprovalItem={fallbackApprovalItem}",
+                "? resolveApprovalItem(fallbackApprovalItem, 'approve')",
+                ": resolveApprovalMessage(message, 'approve')",
+                "? resolveApprovalItem(fallbackApprovalItem, 'reject')",
+                ": resolveApprovalMessage(message, 'reject')",
             "onOpenComposerApprovalDetails={() => {",
             "if (composerApprovalItem) openRunDetails(composerApprovalItem.runId);",
             "onRevealComposerApproval={() => {",
@@ -6156,8 +6294,9 @@ def test_chat_ui_preserves_image_approval_and_cancel_interaction_wiring() -> Non
             "routeTaskId: currentParam('task_id').trim()",
             "actionsRef.current = {",
             "const requestedTaskId = routeTaskId;",
-            "apiPost<{ ok?: boolean; error?: string }>('/ui/chat/sessions/load'",
-            "const [messagePayload] = await Promise.all([actions.refreshMessages(), actions.loadSessions()]);",
+            "switchConversation: (sessionId: string) => Promise<ChatRouteHandoffMessagesPayload>;",
+            "? await actions.switchConversation(requestedSessionId)",
+            ": (await Promise.all([actions.refreshMessages(), actions.loadSessions()]))[0]",
             "const messageId = taskHandoffMessageId(messagePayload.messages, requestedTaskId);",
             "actions.revealMessage(messageId);",
             "actions.setStatus('已定位到关联任务消息');",
@@ -6171,19 +6310,90 @@ def test_chat_ui_preserves_image_approval_and_cancel_interaction_wiring() -> Non
         "apps/frontend/src/features/yachiyo-chat/hooks/useChatSessions.ts",
         [
             "export function useChatSessions",
-            "apiGet<SessionsPayload>(`/ui/chat/sessions?${query.toString()}`)",
-            "if (debouncedSessionQuery) query.set('query', debouncedSessionQuery);",
+            "apiGet<SessionsPayload>(`/ui/chat/sessions?${query.toString()}`, {",
+            "if (queryValue) query.set('query', queryValue);",
+            "const sessionsExplicitLoadEpochRef = useRef(0);",
+            "const sessionsInFlightRef = useRef<Promise<SessionsPayload | undefined> | null>(null);",
+            "const loadSessionsSnapshot = useCallback(",
+            "queryValue === latestDebouncedSessionQueryRef.current",
+            "!poll || loadEpoch === sessionsExplicitLoadEpochRef.current",
+            "if (options.poll && current) return current;",
+            ": ++sessionsExplicitLoadEpochRef.current;",
+            "current.catch(() => undefined).then(execute)",
             "setSessions(payload);",
-            "if (payload.current_session_id) void refreshYachiyoTasksForSession(payload.current_session_id);",
-            "setSessions(null);",
-            "setSessionsLoaded(true);",
+            "const ACTIVE_TASKS_REFRESH_INTERVAL_MS = 2000;",
+            "const IDLE_TASKS_REFRESH_INTERVAL_MS = 10_000;",
+            "const refreshTasksIfDue = useCallback((sessionId: string, force = false): Promise<void> => {",
+            "const refreshDue = forceRefresh",
+            "if (!sessionChanged && tasksRefreshInFlightRef.current && !forceRefresh) {",
+            "refreshYachiyoTasksForSession(sessionId)",
+            "const taskRefresh = refreshTasksIfDue(currentSessionId, !poll);",
+            "if (!poll) await taskRefresh;",
+            "if (previousProcessingRef.current && !isProcessing) forceTasksRefreshRef.current = true;",
+            "timeoutMs: CHAT_SESSIONS_REQUEST_TIMEOUT_MS,",
+            "if (isCurrentRequest()) setSessions(null);",
+            "if (isCurrentRequest()) setSessionsLoaded(true);",
             "setDebouncedSessionQuery(sessionQuery.trim());",
             "setTimeout(() => {",
             "void loadSessions();",
-            "const timer = window.setInterval(",
-            "() => void loadSessions(),",
-            "isProcessing ? activePollIntervalMs : idlePollIntervalMs",
-            "return () => window.clearInterval(timer);",
+            "const interval = isProcessing ? activePollIntervalMs : idlePollIntervalMs;",
+            "scheduleSessionsLoad({ poll: true })",
+            "if (disposed || document.hidden) return;",
+            "document.addEventListener('visibilitychange', handleVisibilityChange);",
+            "document.removeEventListener('visibilitychange', handleVisibilityChange);",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/lib/bridge.ts",
+        [
+            "export type ApiRequestOptions = {",
+            "signal?: AbortSignal;",
+            "timeoutMs?: number;",
+            "function createBridgeAbortContext(options: ApiRequestOptions)",
+            "async function withBridgeAbortContext<T>(",
+            "function awaitBridgePreflight<T>(",
+            "awaitBridgePreflight(bridgeUrl(), abortContext, options)",
+            "awaitBridgePreflight(bridgeJsonHeaders(), abortContext, options)",
+            "controller.abort();",
+            "error.name = 'TimeoutError';",
+            "options: ApiRequestOptions = {},",
+        ],
+    )
+    _assert_contains(
+        chat_view,
+        [
+            "const messageExplicitRefreshEpochRef = useRef(0);",
+            "const messageRefreshInFlightRef = useRef<Promise<ChatMessagesRefreshResult> | null>(null);",
+            "if (options.poll && current) return current;",
+            ": ++messageExplicitRefreshEpochRef.current;",
+            "current.catch(() => undefined).then(execute)",
+            "conversationToken === conversationLoadTokenRef.current",
+            "!poll || refreshEpoch === messageExplicitRefreshEpochRef.current",
+            "refreshMessages({ poll: true })",
+            "if (disposed || document.hidden) return;",
+            "document.addEventListener('visibilitychange', handleVisibilityChange);",
+            "document.removeEventListener('visibilitychange', handleVisibilityChange);",
+            "const DEFAULT_CHAT_REQUEST_TIMEOUT_MS = 15_000;",
+            "const CHAT_REQUEST_TIMEOUT_MS = chatRequestTimeoutMs();",
+            "timeoutMs: CHAT_REQUEST_TIMEOUT_MS,",
+            "const conversationMutationTailRef = useRef<Promise<void>>(Promise.resolve());",
+            "function enqueueConversationMutation<T>(mutation: () => Promise<T>): Promise<T>",
+            "conversationMutationTailRef.current = pending.then(() => undefined, () => undefined);",
+            "enqueueConversationMutation(() => apiPost('/ui/chat/session/delete', {",
+            "session_id: targetSessionId,",
+            "conversationMutationLocked={conversationTransitionLocked}",
+            "switchRequestId !== sessionSwitchRequestIdRef.current",
+            "latestSessionSwitchTargetRef.current = sessionId;",
+            "const authoritativeSessions = await loadSessionsSnapshot();",
+            "if (authoritativeSessionId && refreshed) {",
+            "isMarkedSessionSwitchFailureUncertain(error)",
+            "无法确认服务端当前会话，请重试切换",
+        ],
+    )
+    _assert_not_contains(
+        chat_view,
+        [
+            "return { is_processing: false, messages: [] };",
         ],
     )
     _assert_not_contains(
@@ -6218,6 +6428,10 @@ def test_chat_ui_preserves_image_approval_and_cancel_interaction_wiring() -> Non
             "aria-label={`移除 ${attachment.name}`}",
             "onClick={() => onRemoveAttachment(attachment.id)}",
             "onClick={onCancelProcessing}",
+            "conversationTransitionLocked: boolean;",
+            "data-conversation-transition-locked={String(conversationTransitionLocked)}",
+            "disabled={conversationTransitionLocked}",
+            "const sendDisabled = conversationTransitionLocked",
             "className=\"chat-stop-btn\"",
             "aria-label={processingCount > 1 ? `停止当前 ${processingCount} 项任务` : '停止当前任务'}",
         ],
@@ -6232,7 +6446,7 @@ def test_chat_ui_preserves_image_approval_and_cancel_interaction_wiring() -> Non
     _assert_occurs("apps/frontend/src/features/yachiyo-chat/components/ChatComposer.tsx", "data-testid=\"chat-image-file-input\"", 1)
     _assert_occurs("apps/frontend/src/features/yachiyo-chat/components/ChatComposer.tsx", "disabled={imageAttachDisabled}", 2)
     _assert_occurs(chat_view, "if (imageAttachDisabled) {", 3)
-    _assert_occurs(chat_view, "import.meta.env.DEV", 1)
+    _assert_occurs(chat_view, "import.meta.env.DEV", 2)
     _assert_contains(
         "apps/frontend/src/features/yachiyo-chat/types.ts",
         [
@@ -6290,8 +6504,10 @@ def test_chat_ui_exposes_stable_e2e_selectors_for_image_cancel_approval_flow() -
             "data-testid=\"chat-message-approval-approve\"",
             "data-testid=\"chat-message-approval-reject\"",
             "data-testid=\"chat-message-retry\"",
-            "data-testid=\"chat-message-open-run-detail\"",
-            'data-testid="chat-message-open-run-detail"\n              onClick={() => onOpenRunDetails(runId)}\n            >\n              Agent Studio',
+            "const showInlineRunDetails = CHAT_TECHNICAL_EXECUTION_VISIBLE",
+            "failurePresentation?.kind === 'unknown' && runId",
+            'data-testid="chat-message-failure-open-detail"',
+            "查看详情",
         ],
     )
     _assert_contains(
@@ -6330,7 +6546,8 @@ def test_chat_image_attachment_ui_smoke_uses_file_input_path() -> None:
             "chooseChatImages: async () =>",
             "chat desktop image picker should not click hidden file input",
             "desktop native image picker API rendered attachment preview",
-            "new File([blob], 'smoke-image.svg', { type: 'image/svg+xml' })",
+            "Uint8Array.from(atob(payload)",
+            "new File([bytes], 'smoke-image.svg', { type: 'image/svg+xml' })",
             "new DataTransfer()",
             "transfer.items.add(file)",
             "Object.defineProperty(input, 'files', { configurable: true, value: transfer.files })",
@@ -6369,16 +6586,10 @@ def test_chat_image_attachment_ui_smoke_uses_file_input_path() -> None:
             "attachment.width !== 24 || attachment.height !== 24",
             "assistant-chat-image-ui-smoke-reply",
             "RUN_RESULT",
-            "`/ui/runs/${RUN_ID}`",
-            "`/yachiyo/studio/runs/${RUN_ID}/events`",
-            "model.output.completed",
-            "run.completed",
-            r'''document.querySelector('[data-message-id=\\"assistant-chat-image-ui-smoke-reply\\"] [data-testid=\\"chat-message-open-run-detail\\"]').click()''',
-            "openRun.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)}",
-            "openRun.getAttribute('data-run-status') === 'completed'",
-            "detail?.getAttribute('data-run-kind') === 'main_chat_run'",
-            "outputEvent?.textContent.includes(${JSON.stringify(RUN_RESULT)})",
-            "image message Run Detail replay verified",
+            "reply?.textContent.includes(${JSON.stringify(RUN_RESULT)})",
+            "reply?.querySelector('[data-testid=\"chat-message-open-run-detail\"]') == null",
+            "image assistant reply stays consumer-safe without Run Detail action",
+            "image assistant reply kept Run Detail hidden",
             "chat-image-viewer-modal",
             "document.querySelector('[data-testid=\"chat-image-viewer-stage\"] img')",
             "image?.getAttribute('alt') === 'smoke-image-cdp.svg'",
@@ -6409,16 +6620,15 @@ def test_chat_run_detail_handoff_ui_smoke_uses_completed_message_run_metadata() 
             "FAILED_MESSAGE_ID",
             "request.method === 'POST' && url.pathname === '/ui/chat/messages/retry'",
             "bridgeState.retryPayloads",
-            "retryPayload.message_id !== FAILED_MESSAGE_ID",
+            "bridgeState.retryPayloads.some((payload) => payload.message_id !== FAILED_MESSAGE_ID)",
             "data-testid=\"chat-message-retry\"",
-            "button.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)}",
-            "button.getAttribute('data-run-status') === 'completed'",
-            "failedButton.getAttribute('data-run-id') === ${JSON.stringify(FAILED_RUN_ID)}",
-            "failedButton.getAttribute('data-run-status') === 'failed'",
             r'''document.querySelector('[data-message-id="${FAILED_MESSAGE_ID}"] [data-testid="chat-message-retry"]')''',
-            r'''document.querySelector('[data-message-id="${FAILED_MESSAGE_ID}"] [data-testid="chat-message-open-run-detail"]')''',
-            "openFailedRun.getAttribute('data-run-id') !== ${JSON.stringify(FAILED_RUN_ID)}",
-            "openFailedRun.getAttribute('data-run-status') !== 'failed'",
+            r'''document.querySelector('[data-message-id="${FAILED_MESSAGE_ID}"] [data-testid="chat-message-failure-open-detail"]')''',
+            "consumer Chat hides successful Run Detail and keeps failed detail action",
+            "bodyText.includes('查看详情')",
+            "state.publicTaskPayloads[0]?.prompt === ${JSON.stringify(FAILED_USER_PROMPT)}",
+            "!state.publicTaskPayloads[0]?.prompt.includes(${JSON.stringify(FAILED_RUN_ERROR)})",
+            "failed Chat retry rejection releases submitting state with original prompt",
             "data-run-status') === 'failed'",
             "model.request.failed",
             "agent.run.failed",
@@ -6433,22 +6643,16 @@ def test_chat_run_detail_handoff_ui_smoke_uses_completed_message_run_metadata() 
             "completed Chat message copied",
             "window.__ohaChatCopiedText[1] ===",
             "completed Chat code block copied",
-            "data-testid=\"chat-message-open-run-detail\"",
-            r'''document.querySelector('[data-message-id="${COMPLETED_MESSAGE_ID}"] [data-testid="chat-message-open-run-detail"]')''',
-            "openRun.getAttribute('data-run-id') !== ${JSON.stringify(RUN_ID)}",
-            "openRun.getAttribute('data-run-status') !== 'completed'",
+            r'''document.querySelector('[data-message-id="${COMPLETED_MESSAGE_ID}"] [data-testid="chat-message-open-run-detail"]') == null''',
+            "completed Chat message after failed Run Detail stays consumer-safe",
+            "completed Chat message keeps Run Detail hidden",
             "data-testid=\"agent-run-detail\"",
             "data-testid=\"agent-run-detail-task\"",
             "data-testid=\"agent-run-detail-result\"",
             "data-testid=\"agent-run-detail-execution-event\"",
-            "`/ui/runs/${RUN_ID}`",
-            "`/yachiyo/studio/runs/${RUN_ID}/events`",
+            "`/ui/runs/${FAILED_RUN_ID}`",
+            "`/yachiyo/studio/runs/${FAILED_RUN_ID}/events`",
             "agent.run.started",
-            "model.output.completed",
-            "agent.run.completed",
-            'outputEvent?.textContent.includes(${JSON.stringify(`"output": "${RUN_RESULT}"`)})',
-            "completedEvent?.textContent.includes(${JSON.stringify(RUN_RESULT)})",
-            "completed Chat message opened matching Run Detail",
         ],
     )
 
@@ -6465,35 +6669,30 @@ def test_chat_agent_progress_ui_smoke_uses_run_detail_polling_and_replay() -> No
             "runnable_kind: 'agent'",
             "run_progress_title: PROGRESS_TITLE",
             "RUN_RESULT",
-            "data-testid=\"chat-agent-run-progress-card\"",
-            "data-testid=\"chat-agent-run-progress-open-run-detail\"",
-            "button?.getAttribute('data-run-id') === smoke.runId",
-            "button?.getAttribute('data-run-status') === 'processing'",
-            "openRun.getAttribute('data-run-id') !== smoke.runId",
-            "openRun.getAttribute('data-run-status') !== 'processing'",
-            "data-testid=\"agent-run-detail\"",
-            "data-testid=\"agent-run-detail-task\"",
-            "data-testid=\"agent-run-detail-execution-event\"",
-            "`/ui/runs/${RUN_ID}`",
-            "url.pathname === '/yachiyo/studio/agents'",
-            "url.pathname === '/yachiyo/studio/skills'",
-            "url.pathname === '/yachiyo/studio/groups'",
-            "url.pathname === '/yachiyo/studio/runs'",
-            "url.pathname === `/yachiyo/studio/runs/${RUN_ID}/timeline`",
-            "`/yachiyo/studio/runs/${RUN_ID}/events`",
-            "`/yachiyo/studio/group-runs/${RUN_GROUP_ID}/events`",
-            "function groupRunEventsPage(url)",
             "url.pathname === '/__smoke/complete-run'",
-            "agent.run.started",
-            "model.output.completed",
-            "agent.run.completed",
-            "startedEvent.textContent.includes(smoke.taskId)",
-            "startedEvent.textContent.includes(smoke.runGoal)",
+            "const typing = document.querySelector('.message.assistant.processing .loading-dots');",
+            "const card = document.querySelector('[data-testid=\"chat-agent-run-progress-card\"]');",
+            "const button = document.querySelector('[data-testid=\"chat-agent-run-progress-open-run-detail\"]');",
+            "const activity = document.querySelector('[data-testid=\"chat-message-activity-list\"]');",
+            "const taskCard = document.querySelector('[data-testid=\"yachiyo-agent-task-card\"]');",
+            "const runDetail = document.querySelector('[data-testid=\"agent-run-detail\"]');",
+            "&& Boolean(typing)",
+            "&& !card",
+            "&& !button",
+            "&& !activity",
+            "&& !taskCard",
+            "&& !runDetail",
+            "&& window.location.hash === '#/chat';",
+            "consumer Chat shows typing without technical execution UI",
+            "completed reply stays free of technical execution UI",
+            "consumer Chat suppresses technical progress surfaces",
+            "consumer Chat completed without technical execution surfaces",
+        ],
+    )
+    _assert_not_contains(
+        smoke_script,
+        [
             "Chat Agent progress opened matching running Run Detail",
-            "detail?.getAttribute('data-run-status') === 'completed'",
-            "result?.textContent.includes(smoke.runResult)",
-            "outputEvent?.getAttribute('data-run-event-sequence') === '2'",
-            "completedEvent?.getAttribute('data-run-event-sequence') === '3'",
             "Chat Agent progress completed Run Detail replay verified",
         ],
     )
@@ -6513,10 +6712,12 @@ def test_chat_cancel_ui_smoke_uses_stop_buttons_and_cancel_route() -> None:
             "assistant-cancel-ui-smoke-cancelled",
             "Still running cancel smoke.",
             "Cancelled by user from Chat UI smoke.",
-            "/yachiyo/studio/runs/${RUN_ID}/events",
-            "run.cancelled",
-            "data-run-status') === 'cancelled'",
-            "cancelled message Run Detail replay verified",
+            "processingMessage?.className.includes('processing')",
+            "!cancelledMessage?.className.includes('error')",
+            "cancelledMessage?.textContent.includes('· 已取消')",
+            "!document.body.textContent.includes('处理失败：')",
+            "document.body.textContent.includes(${JSON.stringify(RUN_RESULT)})",
+            "status !== '取消失败'",
             "expected two chat cancel calls",
             "composer stop cancelled chat",
             "header stop cancelled chat",
@@ -6524,20 +6725,58 @@ def test_chat_cancel_ui_smoke_uses_stop_buttons_and_cancel_route() -> None:
     )
 
 
-def test_chat_smokes_use_agent_studio_handoff_copy() -> None:
-    smoke_scripts = [
-        "scripts/smoke_chat_cancel_ui.mjs",
-        "scripts/smoke_chat_agent_progress_ui.mjs",
-        "scripts/smoke_chat_approval_ui.mjs",
-        "scripts/smoke_chat_delegated_summary_ui.mjs",
-        "scripts/smoke_chat_group_summary_ui.mjs",
-        "scripts/smoke_chat_image_attachment_ui.mjs",
-        "scripts/smoke_chat_run_detail_handoff_ui.mjs",
+def test_chat_smokes_preserve_consumer_execution_disclosure_contracts() -> None:
+    expected_contracts = {
+        "scripts/smoke_chat_agent_progress_ui.mjs": [
+            "consumer Chat shows typing without technical execution UI",
+            "completed reply stays free of technical execution UI",
+        ],
+        "scripts/smoke_chat_public_task_ui.mjs": [
+            "consumer Chat keeps approval actions without technical execution UI",
+            "public task approval continued without technical history",
+        ],
+        "scripts/smoke_chat_approval_ui.mjs": [
+            "data-testid=\"chat-message-approval-approve\"",
+            "data-testid=\"chat-message-approval-reject\"",
+            "!document.querySelector('[data-testid=\"chat-composer-approval-approve\"]')",
+            "!document.querySelector('[data-testid=\"chat-composer-approval-reject\"]')",
+        ],
+        "scripts/smoke_chat_delegated_summary_ui.mjs": [
+            "data-testid=\"chat-message-approval-approve\"",
+            "data-testid=\"chat-message-approval-reject\"",
+            "!document.querySelector('[data-testid=\"chat-composer-approval-approve\"]')",
+            "!document.querySelector('[data-testid=\"chat-composer-approval-reject\"]')",
+        ],
+        "scripts/smoke_chat_group_summary_ui.mjs": [
+            "group summary chat retained without Run Detail CTA",
+        ],
+        "scripts/smoke_chat_image_attachment_ui.mjs": [
+            "image assistant reply stays consumer-safe without Run Detail action",
+        ],
+        "scripts/smoke_chat_run_detail_handoff_ui.mjs": [
+            "consumer Chat hides successful Run Detail and keeps failed detail action",
+            "data-testid=\"chat-message-failure-open-detail\"",
+        ],
+        "scripts/smoke_chat_cancel_ui.mjs": [
+            "!cancelledMessage?.className.includes('error')",
+            "!document.body.textContent.includes('处理失败：')",
+        ],
+    }
+    for smoke_script, fragments in expected_contracts.items():
+        _assert_contains(smoke_script, fragments)
+    _assert_contains(
         "scripts/smoke_packaged_chat_native_file_upload.mjs",
-    ]
-    for smoke_script in smoke_scripts:
-        _assert_contains(smoke_script, ["textContent.includes('Agent Studio')"])
-        _assert_not_contains(smoke_script, ["textContent.includes('运行详情')"])
+        [
+            "&& !openRun;",
+            "PACKAGED_CHAT_INTERNAL_ACTIVITY_SENTINEL",
+            "PACKAGED_CHAT_INTERNAL_RECOVERY_SENTINEL",
+            "forbiddenSelectors.every((selector) => !document.querySelector(selector))",
+            "internal_execution_hidden: true",
+            "window.history.pushState(null, '', route);",
+            "window.dispatchEvent(new Event('oha-route-change'));",
+            "run_detail_navigation_source: 'direct_agent_studio_route'",
+        ],
+    )
 
 
 def test_chat_message_approval_card_uses_readable_tool_labels() -> None:
@@ -6583,8 +6822,7 @@ def test_chat_message_approval_card_uses_readable_tool_labels() -> None:
             "data-approval-tool={details.tool}",
             "data-run-id={runId || ''}",
             "data-run-status={runStatus || ''}",
-            "data-testid=\"chat-composer-approval-approve\"",
-            "data-testid=\"chat-composer-approval-reject\"",
+            "data-testid=\"chat-composer-approval-canonical-hint\"",
             "data-testid=\"chat-composer-approval-open-run-detail\"",
             "`${details.requester} 请求${toolLabel}`",
             "runtimeToolDisplayLabel(details.tool)",
@@ -6592,6 +6830,13 @@ def test_chat_message_approval_card_uses_readable_tool_labels() -> None:
             "data-testid=\"chat-composer-approval-reveal\"",
             "data-testid=\"chat-composer-approval-previous\"",
             "data-testid=\"chat-composer-approval-next\"",
+        ],
+    )
+    _assert_not_contains(
+        "apps/frontend/src/features/yachiyo-chat/components/ComposerApprovalNotice.tsx",
+        [
+            "data-testid=\"chat-composer-approval-approve\"",
+            "data-testid=\"chat-composer-approval-reject\"",
         ],
     )
     _assert_contains(
@@ -6653,7 +6898,7 @@ def test_chat_message_approval_card_uses_readable_tool_labels() -> None:
     )
 
 
-def test_chat_approval_ui_smoke_uses_message_and_composer_actions() -> None:
+def test_chat_approval_ui_smoke_uses_one_canonical_task_action_surface() -> None:
     smoke_script = "scripts/smoke_chat_approval_ui.mjs"
     _assert_contains(
         smoke_script,
@@ -6666,30 +6911,24 @@ def test_chat_approval_ui_smoke_uses_message_and_composer_actions() -> None:
             "document.querySelector('[data-testid=\"chat-message-approval-actions\"]')",
             "document.querySelector('[data-testid=\"chat-message-approval-approve\"]')",
             "document.querySelector('[data-testid=\"chat-message-approval-reject\"]')",
-            "document.querySelector('[data-testid=\"chat-message-approval-open-run-detail\"]')",
             "document.querySelector('[data-testid=\"chat-composer-approval-notice\"]')",
-            "document.querySelector('[data-testid=\"chat-composer-approval-approve\"]')",
-            "document.querySelector('[data-testid=\"chat-composer-approval-reject\"]')",
+            "document.querySelector('[data-testid=\"chat-composer-approval-canonical-hint\"]')",
             "document.querySelector('[data-testid=\"chat-composer-approval-open-run-detail\"]')",
-            "openRun?.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)}",
-            "openRun?.getAttribute('data-run-status') === 'approval_required'",
+            "composerHint?.textContent.includes('任务卡或消息')",
             "composer?.getAttribute('data-run-status') === 'approval_required'",
             "composerOpenRun?.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)}",
             "composerOpenRun?.getAttribute('data-run-status') === 'approval_required'",
-            'document.querySelector("[data-testid=yachiyo-task-approval-open-studio]")',
-            "document.querySelector(\"[data-testid=chat-message-approval-open-run-detail]\")",
+            "composerOpenRun.textContent.includes('Agent Studio')",
+            "!document.querySelector('[data-testid=\"chat-composer-approval-approve\"]')",
+            "!document.querySelector('[data-testid=\"chat-composer-approval-reject\"]')",
             r'''document.querySelector('[data-testid=\\"chat-message-approval-approve\\"]').click()''',
             r'''document.querySelector('[data-testid=\\"chat-message-approval-reject\\"]').click()''',
-            r'''document.querySelector('[data-message-id=\\"assistant-chat-approval-ui-smoke-approved\\"] [data-testid=\\"chat-message-open-run-detail\\"]').click()''',
             r'''document.querySelector('[data-testid=\\"chat-composer-approval-open-run-detail\\"]').click()''',
-            r'''document.querySelector('[data-testid=\\"chat-composer-approval-approve\\"]').click()''',
-            r'''document.querySelector('[data-testid=\\"chat-composer-approval-reject\\"]').click()''',
             "data-testid=\"agent-run-detail\"",
             "data-testid=\"agent-run-detail-approval\"",
             "data-testid=\"agent-run-approval-request\"",
             "data-testid=\"agent-run-detail-execution-event\"",
             "detail?.getAttribute('data-run-status') === 'approval_required'\n      && detail?.getAttribute('data-task-id') === ${JSON.stringify(TASK_ID)}",
-            "detail?.getAttribute('data-run-status') === 'completed'\n      && detail?.getAttribute('data-task-id') === ${JSON.stringify(TASK_ID)}",
             "detail?.getAttribute('data-session-id') === ${JSON.stringify(SESSION_ID)}",
             "approvalRequiredEvent?.textContent.includes('terminal.run')",
             "approvalRequiredEvent?.textContent.includes(${JSON.stringify(APPROVAL_COMMAND)})",
@@ -6697,21 +6936,13 @@ def test_chat_approval_ui_smoke_uses_message_and_composer_actions() -> None:
             "approvalRequiredEvent?.textContent.includes('Chat approval UI smoke')",
             "Approved from Chat approval UI smoke.",
             "Rejected from chat",
-            "waitForApprovedRunDetailHandoff",
-            "detail?.getAttribute('data-run-status') === 'completed'",
-            "eventTypes.includes('agent.tool.approval_approved')",
-            "eventTypes.includes('agent.tool.call')",
-            "eventTypes.includes('run.completed')",
-            "toolCallEvent?.textContent.includes(${JSON.stringify(APPROVAL_COMMAND)})",
-            "message approval opened Run Detail",
-            "approved message Run Detail replay verified",
+            "task approval opened Run Detail",
             "composer approval opened Run Detail",
-            "expected two chat approval approve calls",
-            "expected two chat approval reject calls",
-            "message approval approved",
-            "message approval rejected",
-            "composer approval approved",
-            "composer approval rejected",
+            "failed approve preserved the canonical task approval for retry",
+            "expected one canonical chat approval approve call",
+            "expected one canonical chat approval reject call",
+            "canonical task approval approved",
+            "canonical task approval rejected",
         ],
     )
 
@@ -7029,7 +7260,7 @@ def test_chat_approval_run_detail_handoff_preserves_route_and_replay_wiring() ->
     _assert_contains(
         "apps/frontend/src/features/agent-studio/hooks/useRunApprovalActions.ts",
         [
-            "void refresh(approvalFollowupRefreshOptions(selectedAfterAction)).catch(() => undefined);",
+            "await refresh(approvalFollowupRefreshOptions(selectedAfterAction)).catch(() => undefined);",
         ],
     )
     _assert_contains(
@@ -7057,7 +7288,7 @@ def test_chat_ui_preserves_delegated_summary_processing_state_wiring() -> None:
             "activePollIntervalMs: ACTIVE_POLL_INTERVAL_MS",
             "createDelegatedRunSummaryOptions: delegatedRunSummaryOptions",
             "useChatRunApprovalActions({",
-            "function delegatedRunSummaryOptions()",
+            "function delegatedRunSummaryOptions(identity: ConversationIdentity)",
             "MessageBubble",
         ],
     )
@@ -7120,6 +7351,14 @@ def test_chat_ui_preserves_delegated_summary_processing_state_wiring() -> None:
     _assert_contains(
         "apps/frontend/src/features/yachiyo-chat/hooks/useChatRunPolling.ts",
         [
+            "? Boolean(refreshed.is_processing)",
+            ": isProcessingRef.current;",
+            ": chatStillProcessing ? 1 : 0;",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/hooks/useChatRunPolling.ts",
+        [
             "export function useChatRunPolling",
             "const maxAttempts = 600;",
             "const run = await getChatRunSnapshot(runId);",
@@ -7127,7 +7366,8 @@ def test_chat_ui_preserves_delegated_summary_processing_state_wiring() -> None:
             "if (isChatRunTerminalStatus(status))",
             "rememberRunApprovalDetails(run)",
             "setStatus(nextApprovalStatusText(run))",
-            "createDelegatedRunSummary(runId, createDelegatedRunSummaryOptions())",
+            "createDelegatedRunSummary(",
+            "createDelegatedRunSummaryOptions(options.identity)",
             "chatRunCompletionProcessingState(",
             "chatRunCompletionStatusText({",
             "chatRunProgressStatusText(runLabel, attempt, interval)",
@@ -7145,13 +7385,20 @@ def test_chat_ui_preserves_delegated_summary_processing_state_wiring() -> None:
         [
             "export function useChatRunApprovalActions",
             "const resolveApprovalRun = useCallback",
-            "const approvalPromise = approveChatRunApproval(runId);",
-            "const run = await rejectChatRunApproval(runId, 'Rejected from chat');",
-            "pollAgentRunInBackground(runId, { summarizeDelegatedRun, ignoreInitialApprovalRequired: true });",
+            "const run = await approveChatRunApproval(runId, approvalId);",
+            "const refreshed = await refreshApprovalProjection(identity);",
+            "resolveComposerApprovalItem(composerItemId);",
+            "const run = await rejectChatRunApproval(runId, approvalId, 'Rejected from chat');",
+            "pollAgentRunInBackground(runId, {",
+            "ignoreInitialApprovalRequired: true,",
             "let delegatedSummary = { created: false, error: '', taskId: '', isProcessing: false, processingCount: 0 };",
-            "delegatedSummary = await createDelegatedRunSummary(runId, createDelegatedRunSummaryOptions());",
+            "delegatedSummary = await createDelegatedRunSummary(",
+            "createDelegatedRunSummaryOptions(identity)",
             "chatRunCompletionProcessingState(",
             "chatApprovalRejectionCompletionStatusText({",
+            "? Boolean(refreshed.is_processing)",
+            ": isProcessingRef.current;",
+            ": chatStillProcessing ? 1 : 0;",
             "resolveApprovalMessage",
             "resolveApprovalItem",
         ],
@@ -7223,88 +7470,14 @@ def test_chat_ui_preserves_delegated_summary_processing_state_wiring() -> None:
         ],
     )
     _assert_contains(
-        "apps/frontend/src/features/yachiyo-chat/components/AgentRunProgressCard.tsx",
-        [
-            "export function AgentRunProgressCard",
-            'data-testid="chat-agent-run-progress-card"',
-            "data-run-id={runId}",
-            "data-run-status={runStatus}",
-            "data-run-group-id={runGroupId}",
-            "data-runnable-kind={runnableKind}",
-            "data-runnable-id={runnableId}",
-            'data-testid="chat-agent-run-progress-open-run-detail"',
-            "Agent Studio",
-        ],
-    )
-    _assert_contains(
-        "apps/frontend/src/features/yachiyo-chat/components/MessageActivityList.tsx",
-        [
-            "export function MessageActivityList",
-            "activityRunDetailTarget",
-            "runtimeToolDisplayLabelOrName",
-            'data-testid="chat-message-activity-list"',
-            'data-testid="chat-message-activity-row"',
-            "data-activity-status={displayStatus || ''}",
-            "data-activity-tool={event.tool_name || ''}",
-            "data-run-id={runId || ''}",
-            "data-run-status={displayStatus || ''}",
-            "const { runId, studioUrl } = activityRunDetailTarget(event);",
-            "const activityTitle = messageActivityTitle(event);",
-            "const activityDetail = messageActivityDetail(event, activityTitle);",
-            "<strong>{activityTitle}</strong>",
-            "{activityDetail ? <small>{activityDetail}</small> : null}",
-            "function messageActivityTitle",
-            "return runtimeToolDisplayLabelOrName(toolName);",
-            "function messageActivityDetail",
-            "if (messageActivityLooksJson(detail)) return '';",
-            "if (messageActivityLooksInternalLabel(detail)) return '';",
-            "if (messageActivityLooksRuntimeId(detail)) return '';",
-            'data-testid="chat-message-activity-open"',
-            'data-testid="chat-message-activity-open-run-detail"',
-            "Agent Studio",
-        ],
-    )
-    _assert_not_contains(
-        "apps/frontend/src/features/yachiyo-chat/components/MessageActivityList.tsx",
-        [
-            "studioRunUrl",
-            "function activityRunId",
-            "function activityGroupRunId",
-            "event?.metadata?.run_id",
-            "event?.metadata?.workflow_run_id",
-            "event?.metadata?.run_group_id",
-            "event?.metadata?.group_dispatch_run_group_id",
-        ],
-    )
-    _assert_not_contains(
-        "apps/frontend/src/features/yachiyo-chat/components/MessageActivityList.tsx",
-        [
-            "JSON.stringify(metadata",
-            "message-activity-expanded",
-            'data-testid="chat-message-activity-toggle"',
-            "展开调用记录",
-            "{event.detail ? <small>{event.detail}</small> : null}",
-        ],
-    )
-    _assert_not_contains(
-        "apps/frontend/src/features/yachiyo-chat/components/AgentRunProgressCard.tsx",
-        ["运行详情"],
-    )
-    _assert_not_contains(
-        "apps/frontend/src/features/yachiyo-chat/components/MessageApprovalRequestCard.tsx",
-        ["运行详情"],
-    )
-    _assert_not_contains(
-        "apps/frontend/src/features/yachiyo-chat/components/ComposerApprovalNotice.tsx",
-        ["运行详情"],
-    )
-    _assert_contains(
         "apps/frontend/src/features/yachiyo-chat/components/MessageBubble.tsx",
-        ["workflowStudioAction.label"],
-    )
-    _assert_contains(
-        "apps/frontend/src/features/yachiyo-chat/messageWorkflowGuidance.ts",
-        ["在 Agent Studio 中运行"],
+        [
+            "const CHAT_TECHNICAL_EXECUTION_VISIBLE = false;",
+            "CHAT_TECHNICAL_EXECUTION_VISIBLE && hasVisibleAgentExecution",
+            "CHAT_TECHNICAL_EXECUTION_VISIBLE && workflowStudioAction",
+            "showTechnicalDetails={CHAT_TECHNICAL_EXECUTION_VISIBLE}",
+            "<TypingIndicator />",
+        ],
     )
     _assert_not_contains("apps/frontend/src/views/ChatView.tsx", ["运行详情", "去 Runs 运行"])
 
@@ -9686,6 +9859,10 @@ def test_agent_studio_skill_folders_ui_smoke_uses_folder_management_paths() -> N
         ],
     )
     _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/AgentStudioChrome.tsx",
+        ["data-testid={studioTabTestId('skill-groups')}"],
+    )
+    _assert_contains(
         "apps/frontend/src/features/agent-studio/hooks/useSkillFolderManagement.ts",
         [
             "const folder = publicSkillFolderToSkillFolderSpec(await createYachiyoSkillFolder({ name }));",
@@ -9712,6 +9889,8 @@ def test_agent_studio_skill_folders_ui_smoke_uses_folder_management_paths() -> N
             "data-testid=\"skill-folder-open\"",
             "data-testid=\"skill-import-folder-select\"",
             "data-testid=\"skill-library-folder-filter\"",
+            "win.webContents.reload();",
+            "data-testid=\"agent-studio-tab-skill-groups\"",
             "data-testid=\"skill-folder-delete\"",
             "data-testid=\"confirm-action\"",
             "assertMockBridgeContract",
@@ -9902,12 +10081,13 @@ def test_agent_studio_preserves_workflow_child_approval_refresh_wiring() -> None
         [
             "const approveRunById = useCallback(async (",
             "const selectedAfterAction = nextSelectedRunId || runId;",
-            "const approvalRequest = approveYachiyoRunApproval(runId).then(publicRunTimelineToStudioRunSpec);",
+            "await approveYachiyoRunApproval(runId, approvalId),",
+            "rememberApprovedRun(currentRun);",
             "void pollApprovedRunProgress(runId, selectedAfterAction)",
             "updatedRuns.push(publicRunTimelineToStudioRunSpec(await getYachiyoRunTimeline(nextSelectedRunId)));",
             "await refreshRunGroupsForRuns(updatedRuns);",
             "const rejectRunById = useCallback(async (",
-            "const run = publicRunTimelineToStudioRunSpec(await rejectYachiyoRunApproval(runId));",
+            "await rejectYachiyoRunApproval(runId, approvalId),",
             "upsertRunDetailCache(updatedRuns);",
             "setSelectedRunId(selectedAfterAction);",
             "const cancelRunById = useCallback(async (",
@@ -9930,7 +10110,8 @@ def test_agent_studio_preserves_workflow_child_approval_refresh_wiring() -> None
         "approveRunApproval",
         [
             "/yachiyo/studio/runs/${encodeURIComponent(runId)}/approval/approve",
-            "apiPost(`/ui/runs/${encodeURIComponent(runId)}/approval/approve`, {})",
+            "apiPost(`/ui/runs/${encodeURIComponent(runId)}/approval/approve`, body)",
+            "if (!shouldFallbackToLegacyRoute(error)) throw error;",
         ],
     )
     _assert_function_contains(
@@ -9939,7 +10120,8 @@ def test_agent_studio_preserves_workflow_child_approval_refresh_wiring() -> None
         [
             "/yachiyo/studio/runs/${encodeURIComponent(runId)}/approval/reject",
             "apiPost(`/ui/runs/${encodeURIComponent(runId)}/approval/reject`",
-            "reason ? { reason } : {}",
+            "approval_id: approvalId",
+            "if (!shouldFallbackToLegacyRoute(error)) throw error;",
         ],
     )
 
@@ -9956,6 +10138,50 @@ def test_agent_studio_preserves_workflow_child_approval_run_detail_wiring() -> N
             "onApproveRunById={approveRunById}",
             "onRejectRunById={rejectRunById}",
             "onCancelRunById={cancelRunById}",
+        ],
+    )
+
+
+def test_approval_mutations_only_fallback_for_explicitly_missing_routes() -> None:
+    bridge_source = _read("apps/frontend/src/lib/bridge.ts")
+    fallback_statuses_match = re.search(
+        r"return \[([^\]]+)\]\.includes\(Number\(statusMatch\[1\]\)\);",
+        bridge_source,
+    )
+    assert fallback_statuses_match is not None
+    fallback_statuses = {
+        int(value.strip())
+        for value in fallback_statuses_match.group(1).split(",")
+    }
+    assert fallback_statuses == {404, 405, 501}
+    assert 400 not in fallback_statuses
+    assert 409 not in fallback_statuses
+    _assert_contains(
+        "apps/frontend/src/lib/bridge.ts",
+        [
+            "export function shouldFallbackToLegacyRoute(error: unknown): boolean",
+            "if (!statusMatch) return false;",
+            "return [404, 405, 501].includes(Number(statusMatch[1]));",
+        ],
+    )
+    _assert_not_contains(
+        "apps/frontend/src/lib/bridge.ts",
+        ["[404, 405, 501, 503]", "if (!statusMatch) return true;"],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/runSnapshots.ts",
+        [
+            "if (!shouldFallbackToLegacyRoute(error)) throw error;",
+            "await approveLegacyChatRunApproval(runId, approvalId)",
+            "await rejectLegacyChatRunApproval(runId, approvalId, reason)",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-studio/api.ts",
+        [
+            "if (!shouldFallbackToLegacyRoute(error)) throw error;",
+            "const body = { approval_id: approvalId };",
+            "const body = { approval_id: approvalId, reason: reason || undefined };",
         ],
     )
     _assert_contains(
@@ -9993,16 +10219,105 @@ def test_agent_studio_preserves_workflow_child_approval_run_detail_wiring() -> N
         "apps/frontend/src/features/agent-studio/hooks/useRunApprovalActions.ts",
         [
             "const selectedAfterAction = nextSelectedRunId || runId;",
-            "const selectedAfterRun = selectedAfterAction !== runId ? runById.get(selectedAfterAction) || null : null;",
-            "makeRunContinuingAfterApproval(selectedAfterRun, '已批准子 Agent，Workflow 正在继续执行。')",
-            "const approvalRequest = approveYachiyoRunApproval(runId).then(publicRunTimelineToStudioRunSpec);",
+            "await approveYachiyoRunApproval(runId, approvalId),",
+            "rememberApprovedRun(currentRun);",
             "void pollApprovedRunProgress(runId, selectedAfterAction).catch",
             "updatedRuns.push(publicRunTimelineToStudioRunSpec(await getYachiyoRunTimeline(nextSelectedRunId)));",
             "await refreshRunGroupsForRuns(updatedRuns);",
-            "const run = publicRunTimelineToStudioRunSpec(await rejectYachiyoRunApproval(runId));",
+            "await rejectYachiyoRunApproval(runId, approvalId),",
             "upsertRunDetailCache(updatedRuns);",
             "setSelectedRunId(selectedAfterAction);",
         ],
+    )
+
+
+def test_approval_ui_waits_for_server_authority_and_preserves_failed_retry() -> None:
+    chat_actions = _read("apps/frontend/src/features/yachiyo-chat/hooks/useChatRunApprovalActions.ts")
+    approve_await = chat_actions.index("const run = await approveChatRunApproval(runId, approvalId);")
+    resolve_after_approve = chat_actions.index("resolveComposerApprovalItem(composerItemId);", approve_await)
+    poll_after_approve = chat_actions.index(
+        "pollAgentRunInBackground(runId, {\n          identity,\n          summarizeDelegatedRun,\n          ignoreInitialApprovalRequired: true,\n        });",
+        approve_await,
+    )
+    assert approve_await < resolve_after_approve < poll_after_approve
+    assert "approvalPromise" not in chat_actions
+    assert "void approvalPromise" not in chat_actions
+    assert "await refreshApprovalProjection(identity);" in chat_actions
+    assert "审批信息已过期，请刷新后重试。" in chat_actions
+
+    studio_actions = _read("apps/frontend/src/features/agent-studio/hooks/useRunApprovalActions.ts")
+    studio_approve_await = studio_actions.index("await approveYachiyoRunApproval(runId, approvalId),")
+    studio_upsert = studio_actions.index("upsertRunDetailCache(updatedRuns);", studio_approve_await)
+    studio_poll = studio_actions.index("void pollApprovedRunProgress(runId, selectedAfterAction).catch", studio_approve_await)
+    assert studio_approve_await < studio_upsert < studio_poll
+    assert "optimisticRuns" not in studio_actions
+    assert "makeRunContinuingAfterApproval" not in studio_actions
+    assert "await refresh(approvalFollowupRefreshOptions(selectedAfterAction)).catch" in studio_actions
+
+    _assert_contains(
+        "apps/frontend/src/features/runtime-shared/components/RuntimeApprovalGate.tsx",
+        [
+            "const hasApprovalId = Boolean(String(approval.approval_id || '').trim());",
+            "const actionable = pending && hasApprovalId;",
+            'data-testid="runtime-approval-stale"',
+            "审批信息已过期，请刷新后重试。",
+        ],
+    )
+    _assert_contains(
+        "scripts/smoke_chat_approval_ui.mjs",
+        [
+            "failNextApprove: true",
+            "legacyApproveCalls: 0",
+            "sendJson(response, 409",
+            "waitForRetryableApproval",
+                "failed approve preserved the canonical task approval for retry",
+            "expected no legacy approve fallback after 409",
+        ],
+    )
+
+
+def test_approval_snapshots_never_fabricate_action_ids() -> None:
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/taskSnapshots.ts",
+        [
+            "approval_id: String(pending.approval_id || '').trim(),",
+            "approval_id: String(workflowPending.approval_id || '').trim(),",
+        ],
+    )
+    _assert_not_contains(
+        "apps/frontend/src/features/yachiyo-chat/taskSnapshots.ts",
+        [
+            "pending.approval_id || runId",
+            "workflowPending.approval_id || childRunId",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/components/MessageApprovalRequestCard.tsx",
+        ["approval_id: approvalId || '',"],
+    )
+    _assert_not_contains(
+        "apps/frontend/src/features/yachiyo-chat/components/MessageApprovalRequestCard.tsx",
+        ["approvalId || runId", "`${details.tool}:message`"],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/components/AgentTaskCard.tsx",
+        ["Boolean(String(approval.approval_id || '').trim())"],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/components/ApprovalCard.tsx",
+        [
+            "const stalePendingApproval =",
+            'data-testid="yachiyo-task-approval-stale"',
+            "审批信息已过期，请刷新后重试。",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/WorkflowChildApprovalBridge.tsx",
+        ["approval_id: pendingApproval?.approval_id || '',"],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/ApprovalInspector.tsx",
+        ["approval_id: selectedRunApproval.approval_id || '',"],
     )
     _assert_contains(
         "apps/frontend/src/features/agent-studio/components/WorkflowChildApprovalBridge.tsx",
@@ -10082,6 +10397,49 @@ def test_model_profiles_ui_preserves_source_lifecycle_paths() -> None:
             "onConfirm: () => void removeSource(),",
         ],
     )
+
+
+def test_model_profiles_consumer_setup_flow_uses_progressive_disclosure() -> None:
+    relative_path = "apps/frontend/src/views/ModelProfilesView.tsx"
+    _assert_contains(
+        relative_path,
+        [
+            "type ConsumerModelChoices = {",
+            "function consumerModelChoices(",
+            "usesFullCatalogFallback: true",
+            "function consumerProfileLabel(",
+            "const basicModelChoices = useMemo(",
+            'data-testid="model-basic-model-select"',
+            "该服务没有可靠的默认模型，请手动选择。",
+            'testId="model-advanced-model-settings"',
+            'data-testid="model-raw-model-id"',
+            'testId="model-source-advanced-settings"',
+            'testId="remote-model-catalog-disclosure"',
+            'testId="model-runtime-mapping-disclosure"',
+            "id: 'openai_compatible'",
+            "if (preset.id === 'openai') return 'gpt-4.1-mini';",
+            "function applyProvider(provider: string)",
+            "value={sourceDraft.base_url}",
+            "const catalogMatch = modelCatalog.find((model) => model.id === modelName);",
+        ],
+    )
+    _assert_not_contains(
+        relative_path,
+        [
+            "<span>{sourceDraft.name}/{model.model}</span>",
+            "preset.id === 'openai' || preset.id === 'openai_compatible'",
+        ],
+    )
+    source = _read(relative_path)
+    provider_index = source.index('<span>AI 服务</span>')
+    api_key_index = source.index("value={sourceDraft.api_key}")
+    basic_model_index = source.index('data-testid="model-basic-model-select"')
+    advanced_model_index = source.index('testId="model-advanced-model-settings"')
+    raw_model_index = source.index('data-testid="model-raw-model-id"')
+    advanced_source_index = source.index('testId="model-source-advanced-settings"')
+    base_url_index = source.index("value={sourceDraft.base_url}")
+    assert provider_index < api_key_index < basic_model_index < advanced_model_index < raw_model_index
+    assert advanced_source_index < base_url_index
 
 
 def test_desktop_presence_features_preserve_live2d_screenshot_and_tts_entrypoints() -> None:
@@ -10346,5 +10704,551 @@ def test_runtime_shared_debug_surfaces_capability_context() -> None:
             "capabilityTitle: runtimeEventContextString(event, payload, 'capability_title')",
             "capabilitySelectedTools: runtimeEventContextStringList(event, payload, 'capability_selected_tools')",
             "capabilityPlannedStepIds: runtimeEventContextStringList(event, payload, 'capability_planned_step_ids')",
+        ],
+    )
+
+
+def test_runtime_tool_labels_follow_desktop_execution_route() -> None:
+    _assert_contains(
+        "apps/frontend/src/features/runtime-shared/approval.ts",
+        [
+            "providerKind === 'background_desktop'",
+            "providerId === 'cua-driver'",
+            "providerKind === 'local_desktop'",
+            "sessionKind === 'user_foreground'",
+            "record.requires_user_foreground_session === true",
+            "if (surface === 'background') return '后台向指定应用输入文字';",
+            "if (surface === 'foreground') return '输入前台文字';",
+            "return '输入文字';",
+            "if (surface === 'background') return '后台点击指定应用界面';",
+            "if (surface === 'foreground') return '点击前台界面';",
+            "return '点击界面';",
+            "if (surface === 'background') return '后台点击指定应用控件';",
+            "if (surface === 'foreground') return '点击前台应用控件';",
+            "return '点击应用控件';",
+            "if (surface === 'background') return '后台向指定应用控件输入文字';",
+            "if (surface === 'foreground') return '向前台应用控件输入文字';",
+            "return '向应用控件输入文字';",
+        ],
+    )
+    _assert_not_contains(
+        "apps/frontend/src/features/runtime-shared/approval.ts",
+        [
+            "if (tool === 'desktop.safe_type_text') return '输入前台文字';",
+            "if (tool === 'desktop.safe_click') return '点击前台界面';",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/runtime-shared/components/RuntimeToolCallSummary.tsx",
+        [
+            "executionRoute?: Record<string, unknown>;",
+            "runtimeToolExecutionRouteFromSnapshot(toolCall)",
+            "runtimeToolExecutionRouteFromEvent(event, name)",
+            "runtimeToolExecutionRequestRoute(envelope, toolName)",
+            "previous.executionRoute = executionRoute;",
+            "runtimeToolDisplayLabelOrName(name, executionRoute)",
+            "return `正在${runtimeToolDisplayLabel(tool, executionRoute)}`;",
+        ],
+    )
+    _assert_not_contains(
+        "apps/frontend/src/features/runtime-shared/components/RuntimeToolCallSummary.tsx",
+        ["previous.executionRoute = executionRoute || previous.executionRoute;"],
+    )
+
+
+def test_unverified_desktop_intent_is_public_compact_and_truthful() -> None:
+    _assert_contains(
+        "apps/frontend/src/features/runtime-shared/desktopEvents.ts",
+        [
+            "| 'unverified';",
+            "runtimeEventIsDesktopIntent(eventType, 'unverified')",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/utils/runTimeline.ts",
+        [
+            "runtimeEventIsDesktopIntent(name, 'unverified')",
+            "`操作效果未能验证 · ${toolLabel}`",
+            "if (runtimeEventIsDesktopIntent(name, 'unverified')) return 'danger';",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/runtime-shared/components/RuntimeTimelineSummary.tsx",
+        [
+            "runtimeEventIsDesktopIntent(type, 'unverified')",
+            "`操作效果未能验证 · ${toolLabel}`",
+            "return '操作效果未能验证';",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/runtime-shared/components/RuntimeToolCallSummary.tsx",
+        [
+            "'agent.desktop.intent_unverified'",
+            "runtimeEventIsDesktopIntent(eventType, 'unverified')",
+            "if (runtimeEventIsDesktopIntent(eventType, 'unverified')) return 'failed';",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/runtime-shared/runEventFacts.ts",
+        [
+            "if (runtimeEventIsDesktopIntent(eventType, 'unverified')) return 'failed';",
+            "if (runtimeEventIsDesktopIntent(eventType, 'unverified')) {",
+            "'reason',",
+            "'error',",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/runtime-shared/components/ExpandableRuntimeContent.tsx",
+        [
+            "forceCollapse = false",
+            "forceCollapse?: boolean;",
+            "const shouldCollapse = forceCollapse || runPayloadShouldCollapse(content);",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/runtime-shared/components/RuntimeTimelineEventList.tsx",
+        [
+            "!runtimeEventIsDesktopIntent(eventName, 'unverified')",
+            "forceCollapse={runtimeEventIsDesktopIntent(eventName, 'unverified')}",
+        ],
+    )
+
+
+def test_tool_center_projects_passive_background_control_readiness_for_consumers() -> None:
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/readiness.ts",
+        [
+            "export type BackgroundControlReadinessStatus =",
+            "| 'ready'",
+            "| 'installed_unchecked'",
+            "| 'setup_required'",
+            "| 'attention'",
+            "| 'unknown';",
+            "export type BackgroundControlReadiness = {",
+            "export function backgroundControlReadiness(",
+            "const configured = strictBooleanValue(provider?.configured);",
+            "const available = strictBooleanValue(provider?.available);",
+            "const adapterReady = strictBooleanValue(provider?.adapter_ready);",
+            "const healthChecked = strictBooleanValue(health?.checked);",
+            "const healthOk = strictBooleanValue(health?.ok);",
+            "available === true",
+            "adapterReady === true",
+            "foregroundTakeoverRequired === false",
+            "providerReadiness.status === 'installed_not_checked'",
+            "visibleToolReadiness",
+            "issue.token !== 'desktop_permission_diagnostics_not_checked'",
+            "visibleBlocking",
+            "configured === true && healthChecked === false",
+            "configured === true && healthChecked === true",
+            "desktopSessionIsolated",
+            "foregroundTakeoverRequired",
+            "adapterReady",
+            "providerId",
+            "supportedTools",
+            "blockers",
+            "默认不移动你的鼠标、不切换当前窗口",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/views/ToolCenterView.tsx",
+        [
+            "import { getYachiyoReadiness } from '../features/yachiyo-chat/api';",
+            "getYachiyoReadiness().catch(() => null)",
+            "setBackgroundControl(backgroundControlReadiness(readiness));",
+            "if (disposed || refreshing) return;",
+            "setBackgroundControl(backgroundControlReadiness(null));",
+            "<BackgroundControlCard readiness={backgroundControl} />",
+            'data-testid="background-control-card"',
+            "<h2>后台操控</h2>",
+            'testId="background-control-advanced"',
+            "与当前桌面同一会话，不是虚拟机隔离",
+            "未由被动状态确认（不能视为已授权）",
+            "执行通道未就绪",
+            "readiness.blockers.length",
+            "? readiness.blockers.join('、')",
+            "? '无'",
+            ": '尚未检查'",
+        ],
+    )
+    _assert_not_contains(
+        "apps/frontend/src/views/ToolCenterView.tsx",
+        [
+            "installBackgroundControl",
+            "openBackgroundControlSettings",
+        ],
+    )
+
+
+def test_consumer_settings_and_compact_bubble_use_progressive_disclosure() -> None:
+    _assert_contains(
+        "apps/frontend/src/components/SettingsDisclosure.tsx",
+        [
+            '<details className="settings-disclosure"',
+            '<summary className="settings-item settings-disclosure-summary">',
+            'data-testid={testId}',
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/views/ModeSettingsView.tsx",
+        [
+            'testId="assistant-persona-advanced"',
+            'testId="user-profile-advanced"',
+            'testId="ai-service-advanced"',
+            'summary="精确设置"',
+            '<SettingsSection title="权限与隐私">',
+            '<SettingsSection title="高级选项">',
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/views/LauncherView.tsx",
+        [
+            "export function bubbleCompactTaskStatus(",
+            "return '需要你确认';",
+            'data-testid="bubble-launcher-task-status"',
+            "desktopReadinessNotice.action_view || 'diagnostics'",
+            "launcherAgentTaskChatParams(task) || launcherChatOpenParams(data, sessionId)",
+            "openLauncherPrimaryTarget('bubble', data, agentTask || null)",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/styles/app.css",
+        [
+            "@media (max-width: 220px) and (max-height: 220px)",
+            ".bubble-shell .launcher-agent-task-light,",
+            ".bubble-shell .bubble-task-status",
+            ".settings-disclosure[open] > .settings-disclosure-summary",
+        ],
+    )
+    _assert_contains(
+        "scripts/smoke_launcher_session_summary_ui.mjs",
+        [
+            "assertCompactBubbleLayout(compactWin, 112)",
+            "assertCompactBubbleLayout(compactWin, 192)",
+            "compact Bubble leaked full launcher UI",
+            "compact bubble opened matching task chat",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/AgentEditorPanel.tsx",
+        [
+            'testId="agent-advanced-model-output"',
+            'testId="agent-advanced-capabilities"',
+            'testId="agent-advanced-workspace"',
+            '<h3>可用能力</h3>',
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/views/ModelProfilesView.tsx",
+        [
+            'testId="model-source-advanced-settings"',
+            'testId="remote-model-catalog-disclosure"',
+            'testId="model-runtime-mapping-disclosure"',
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/views/ProactiveTtsSettingsView.tsx",
+        [
+            'testId="proactive-trigger-advanced-settings"',
+            'testId="tts-http-advanced-settings"',
+            'testId="tts-command-advanced-settings"',
+        ],
+    )
+
+
+def test_no_tool_chat_reply_uses_loading_without_agent_execution_ui() -> None:
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/taskSnapshots.ts",
+        [
+            "export function agentTaskHasVisibleExecution(",
+            "task.tool_calls?.length",
+            "task.pending_approvals?.length",
+            "task.replan_recoveries?.length",
+            "task.artifacts?.length",
+            "event.actor",
+            "payload.tool_name",
+            "payload.tool_call_id",
+            "tool_name: event.tool_name || undefined,",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/components/MessageBubble.tsx",
+        [
+            "agentTaskHasVisibleExecution",
+            "agentTaskSnapshotFromMessage(message, displayContent)",
+            "messageHasRunContext(message) && hasVisibleAgentExecution",
+            "const publicTaskHasVisibleExecution = agentTaskHasVisibleExecution(publicTaskSnapshot);",
+            "!showAgentTaskCard && !showLegacyAgentProgress",
+            ": isProcessingEmpty ? (",
+            "<TypingIndicator />",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/components/MessageAgentTaskCard.tsx",
+        [
+            "agentTaskHasVisibleExecution",
+            "const task = publicTask || (agentTaskHasVisibleExecution(messageTask, message) ? messageTask : null);",
+            "if (!task) return null;",
+        ],
+    )
+    _assert_contains(
+        "scripts/smoke_chat_public_task_ui.mjs",
+        [
+            "--no-tool-only",
+            "dots.length === 3",
+            "no-tool reply shows three loading dots without execution UI",
+            "completed no-tool reply stays free of execution UI",
+        ],
+    )
+
+
+def test_consumer_chat_hides_internal_runtime_chrome() -> None:
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/messageState.ts",
+        [
+            "const CONSUMER_ACTIVITY_LABEL_BY_PHASE",
+            "return CONSUMER_ACTIVITY_LABEL_BY_PHASE[phase] || '处理中...';",
+        ],
+    )
+    _assert_not_contains(
+        "apps/frontend/src/features/yachiyo-chat/messageState.ts",
+        [
+            "event.title || event.detail",
+            "runtimeToolDisplayLabelOrName(String(event.tool_name",
+        ],
+    )
+    _assert_not_contains(
+        "apps/frontend/src/features/yachiyo-chat/displayState.ts",
+        [
+            "Native Agent",
+            "compactStatusText(activityLabel(headerActivity))",
+            "executorLabel(executor)",
+        ],
+    )
+    _assert_not_contains(
+        "apps/frontend/src/features/yachiyo-chat/components/ChatHeader.tsx",
+        [
+            "onOpenSessionIdDialog",
+            "查看/复制会话 ID",
+        ],
+    )
+    _assert_not_contains(
+        "apps/frontend/src/features/yachiyo-chat/components/ChatSessionSidebar.tsx",
+        [
+            "chat-item-token",
+            "formatTokenCount",
+        ],
+    )
+    _assert_not_contains(
+        "apps/frontend/src/views/ChatView.tsx",
+        [
+            "currentTokenLabel",
+            "formatTokenCount={formatTokenCount}",
+            "<SessionIdDialog",
+            "onOpenSessionIdDialog",
+        ],
+    )
+
+
+def test_consumer_chat_failures_are_localized_and_fail_closed() -> None:
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/consumerFailure.ts",
+        [
+            "export type ConsumerFailureKind =",
+            "approval_required: {",
+            "permission_required: {",
+            "cancelled: {",
+            "verification_failed: {",
+            "content_not_found: {",
+            "app_not_found: {",
+            "target_not_found: {",
+            "unknown: {",
+            "没有找到可播放的匹配内容",
+            "可在 Agent Studio 查看详情",
+            "const technicalConfigurationFailure =",
+            "did not contain",
+            "if (strongContentNoMatch && !technicalConfigurationFailure)",
+            "return FAILURE_PRESENTATIONS.unknown;",
+            "export function consumerMessageFailurePresentation(",
+            "export function consumerTaskFailurePresentation(",
+            "const pendingApprovalId = firstApprovalId(",
+            "approvalRequired: Boolean(pendingApprovalId)",
+            "missing[_ -]?permissions?",
+            "no playable match(?:es)?",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/components/MessageBubble.tsx",
+        [
+            "consumerMessageFailurePresentation",
+            "consumerFailureText",
+            "const visibleDisplayContent =",
+            "const visibleMessageError =",
+            "summaryNotice?.tone === 'failed'",
+            "data-testid=\"chat-message-failure-detail\"",
+            "failurePresentation && role !== 'user' ? null",
+        ],
+    )
+    _assert_not_contains(
+        "apps/frontend/src/features/yachiyo-chat/components/MessageBubble.tsx",
+        [
+            '<div className="message-error">{message.error}</div>',
+            "renderMarkdown(displayContent, message.id || '', copiedCodeBlockKey)",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/components/AgentTaskCard.tsx",
+        [
+            "consumerTaskFailurePresentation",
+            "const chatFailurePresentation =",
+            "chatFailurePresentation?.title",
+            "chatFailurePresentation.detail",
+            "!isChatSurface && task.summary",
+            "action.action_kind === 'permission_recovery' ? '检查权限' : '重试'",
+            "isChatSurface ? '需要补充信息后才能重试'",
+            "presentationMode={isChatSurface ? 'consumer' : 'diagnostic'}",
+        ],
+    )
+    _assert_not_contains(
+        "apps/frontend/src/features/yachiyo-chat/components/AgentTaskCard.tsx",
+        [
+            "task.summary && (!isChatSurface || showChatFailure)",
+        ],
+    )
+
+
+def test_consumer_chat_hides_technical_execution_but_keeps_actions() -> None:
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/components/MessageBubble.tsx",
+        [
+            "const CHAT_TECHNICAL_EXECUTION_VISIBLE = false;",
+            "CHAT_TECHNICAL_EXECUTION_VISIBLE && hasVisibleAgentExecution",
+            "CHAT_TECHNICAL_EXECUTION_VISIBLE && workflowStudioAction",
+            "showTechnicalDetails={CHAT_TECHNICAL_EXECUTION_VISIBLE}",
+            "chatTaskHasRunnableRecoveryAction",
+            "const showMessageRetry = showRetry && !taskRecoveryReplacesMessageRetry;",
+            "<TypingIndicator />",
+            "artifactCount > 0 && runId",
+            'data-testid="chat-message-open-artifacts"',
+            "查看全部结果（{artifactCount}）",
+        ],
+    )
+    _assert_not_contains(
+        "apps/frontend/src/features/yachiyo-chat/components/MessageBubble.tsx",
+        ["CHAT_TECHNICAL_EXECUTION_VISIBLE && artifactCount > 0 && runId"],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/components/MessageAgentTaskCard.tsx",
+        ['surface="chat"'],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/components/AgentTaskCard.tsx",
+        [
+            "surface = 'task'",
+            "const isChatSurface = surface === 'chat';",
+            "if (isChatSurface && !hasChatContent) return null;",
+            "visibleApprovalFacts.length",
+            "artifactFacts.length",
+            "isChatSurface && artifactFacts.length > 3",
+            'data-testid="yachiyo-agent-task-open-more-artifacts"',
+            "查看更多结果",
+            "showChatFailure",
+            "const visibleRecoveryItems = isChatSurface",
+            "chatTaskRecoveryItems(task, canonicalRecoveryItems)",
+            "action.approval_required === true",
+            "const failedCandidates = explicitlyActionable.length ? explicitlyActionable : items;",
+            "runtimeToolRecoveryMissingRequiredFields(action).length === 0",
+            "return runnableCandidate ? [runnableCandidate] : failedCandidates.slice(0, 1);",
+            "export function chatTaskHasRunnableRecoveryAction(task: AgentTaskSnapshot): boolean",
+            "['completed', 'success', 'succeeded'].includes(String(task.status || '').toLowerCase())",
+            "!isChatSurface && studioRunId && studioUrl && onOpenStudio",
+            "!isChatSurface ? (",
+            "isChatSurface && permissionRecovery && !items.length",
+            'data-testid="yachiyo-agent-task-open-recovery-help"',
+            "查看解决办法",
+            "surface={surface}",
+        ],
+    )
+    _assert_contains(
+        "scripts/smoke_chat_public_task_ui.mjs",
+        [
+            "--internal-recovery-only",
+            "trigger: 'runtime_observation_retry'",
+            "trigger: 'tool_failure'",
+            "A task-wide user-action flag must not promote every internal retry",
+            "needs_user_action: true",
+            "running internal recovery stays hidden in consumer Chat",
+            "messageRetries.length === 0",
+            "runnableRetries.length === 1",
+            "failed message and task share one consumer-friendly retry",
+            "completed stale task recovery does not hide message retry",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/components/MessageApprovalRequestCard.tsx",
+        [
+            "showTechnicalDetails = false",
+            "actions={showTechnicalDetails && runId ? (",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/components/AgentRunProgressCard.tsx",
+        [
+            "showTechnicalDetails = false",
+            "{showTechnicalDetails && runId ? (",
+        ],
+    )
+
+
+def test_agent_execution_visibility_preserves_late_tools_and_actionable_recovery() -> None:
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/taskSnapshots.ts",
+        [
+            "message?: YachiyoTaskChatMessage | null,",
+            "message?.activity_events?.some(messageActivityHasVisibleExecution)",
+            "taskRuntimeEnvelopeHasActionableRecovery(task)",
+            "source.missing_permissions",
+            "source.blocking_conditions",
+            "source.recovery_actions",
+            "request.observation_retry",
+            "const allowPlannedRetries =",
+            "task.task_progress?.needs_replan === true",
+            "Number(task.task_progress?.failed_verification_count || 0) > 0",
+            "return allowPlannedRetries || runtimeExecutionEvidenceNeedsRetry(evidence);",
+            "evidence.verification_failed === true",
+            "evidence.foreground_required === true && evidence.foreground_ready === false",
+        ],
+    )
+    _assert_not_contains(
+        "apps/frontend/src/features/yachiyo-chat/taskSnapshots.ts",
+        [
+            "if (task.runtime_execution_envelope?.requests?.length) return true;",
+            "return unknownValueHasEntries(retry);",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/components/MessageBubble.tsx",
+        [
+            "const publicTaskHasVisibleExecution = agentTaskHasVisibleExecution(publicTaskSnapshot);",
+            "const messageTaskHasVisibleExecution = agentTaskHasVisibleExecution(messageTaskSnapshot, message);",
+            "const visibleAgentTaskSnapshot = publicTaskHasVisibleExecution",
+            "const showAgentTaskCard = Boolean(",
+            "!showAgentTaskCard && !showLegacyAgentProgress",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/components/MessageAgentTaskCard.tsx",
+        [
+            "const publicTask = publicTaskSnapshot && agentTaskHasVisibleExecution(publicTaskSnapshot)",
+            "const messageTask = agentTaskSnapshotFromMessage(message, displayContent);",
+            "const task = publicTask || (agentTaskHasVisibleExecution(messageTask, message) ? messageTask : null);",
+        ],
+    )
+    _assert_contains(
+        "scripts/smoke_chat_public_task_ui.mjs",
+        [
+            "request_id: 'request-chat-no-tool-planned'",
+            "observation_retry: {",
+            "needs_replan: false",
+            "failed_verification_count: 0",
         ],
     )

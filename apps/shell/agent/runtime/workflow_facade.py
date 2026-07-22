@@ -18,8 +18,14 @@ class RuntimeWorkflowFacadeMixin:
         self,
         payload: dict[str, Any],
         on_complete: Callable[[dict[str, Any]], None] | None = None,
+        deferred_execution_start_sink: Callable[[Callable[[], None]], None]
+        | None = None,
     ) -> dict[str, Any]:
-        return self.workflow_run_async_coordinator.create_async(payload, on_complete=on_complete)
+        return self.workflow_run_async_coordinator.create_async(
+            payload,
+            on_complete=on_complete,
+            deferred_execution_start_sink=deferred_execution_start_sink,
+        )
 
     def _workflow_parent_runs_waiting_for_child(
         self,

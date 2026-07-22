@@ -36,6 +36,7 @@ TOOL_FUNCTION_NAMES = {
     "data.analyze": "data_analyze",
     "screen.capture": "screen_capture",
     "desktop.permissions": "desktop_permissions",
+    "desktop.permissions.verify": "desktop_permissions_verify",
     "desktop.active_window": "desktop_active_window",
     "desktop.running_apps": "desktop_running_apps",
     "desktop.list_apps": "desktop_list_apps",
@@ -165,6 +166,7 @@ SAFE_SHORTCUT_ACTIONS = (
     "new_window",
     "new_document",
     "new_note",
+    "new_task",
     "new_reminder",
     "new_event",
     "refresh",
@@ -269,6 +271,7 @@ LOW_RISK_DESKTOP_TOOL_NAMES = (
     "desktop.minimize_window",
 )
 MEDIUM_RISK_DESKTOP_TOOL_NAMES = (
+    "desktop.permissions.verify",
     "app.quit",
     "app.open_and_click_ui_element",
     "app.focus_and_click_ui_element",
@@ -580,6 +583,20 @@ class ToolDescriptor:
                 value = payload.get("limit")
                 if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 200:
                     raise AgentRuntimeError("desktop.inspect_app 参数 limit 必须是 1-200 的整数")
+        if self.name == "desktop.verify" and "verification_goal" in payload:
+            verification_goal = payload.get("verification_goal")
+            if verification_goal != "app_running":
+                raise AgentRuntimeError(
+                    "desktop.verify 参数 verification_goal 必须是以下值之一：app_running"
+                )
+            if (
+                not isinstance(payload.get("app_name"), str)
+                or not str(payload.get("app_name") or "").strip()
+            ):
+                raise AgentRuntimeError(
+                    "desktop.verify 参数 app_name 在 verification_goal=app_running 时"
+                    "必须是非空字符串"
+                )
         if self.name in {
             "desktop.ui_elements",
             "desktop.click_ui_element",
@@ -651,6 +668,12 @@ class ToolDescriptor:
             for key in ("selection_source", "query", "app_resolution_reason"):
                 if key in payload and not isinstance(payload.get(key), str):
                     raise AgentRuntimeError(f"{self.name} 参数 {key} 必须是字符串")
+        if (
+            self.name == "app.open"
+            and "bring_to_front" in payload
+            and not isinstance(payload.get("bring_to_front"), bool)
+        ):
+            raise AgentRuntimeError("app.open 参数 bring_to_front 必须是布尔值")
         if self.name == "media.apple_music_play" and not str(
             payload.get("query") or ""
         ).strip():
@@ -1451,8 +1474,19 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
     "desktop.permissions": ToolDescriptor(
         name="desktop.permissions",
         description=(
-            "Read desktop execution permission readiness, missing permission targets, "
-            "and affected tools. Low-risk diagnostic state."
+            "Passively read cached desktop permission readiness, missing permission "
+            "targets, and affected tools. Never activates an app, sends Apple Events, "
+            "or prompts for permission; unchecked state is reported as not_checked."
+        ),
+        properties={},
+    ),
+    "desktop.permissions.verify": ToolDescriptor(
+        name="desktop.permissions.verify",
+        description=(
+            "Interactively verify macOS desktop permissions. This may contact Finder, "
+            "Music, or System Events and can momentarily affect the foreground desktop, "
+            "so it requires explicit user approval. Do not use for ordinary diagnostic "
+            "questions; use desktop.permissions instead."
         ),
         properties={},
     ),
@@ -1589,11 +1623,12 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
     "desktop.inspect_app": ToolDescriptor(
         name="desktop.inspect_app",
         description=(
-            "Inspect a named desktop app end-to-end for planning: discover installed app "
-            "matches, optionally open and focus it, read windows and named-app UI elements, "
+            "Inspect a named desktop app for planning: discover installed app matches, read "
+            "windows and named-app UI elements, and optionally open or focus it only when "
+            "explicitly requested, "
             "then return readiness, visibility limits, recommended next tools, and recovery "
-            "actions. This is low-risk observable state and does not click, type, or bypass "
-            "approval gates."
+            "actions. The default is passive observation and does not click, type, open, or "
+            "focus an app."
         ),
         properties={
             "app_name": {
@@ -1602,11 +1637,11 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
             },
             "open_if_needed": {
                 "type": "boolean",
-                "description": "Open the app when it is not already running. Defaults true.",
+                "description": "Open the app when it is not already running. Defaults false and requires foreground authorization when true.",
             },
             "focus": {
                 "type": "boolean",
-                "description": "Attempt to bring the app foreground for readiness verification. Defaults true.",
+                "description": "Attempt to bring the app foreground for readiness verification. Defaults false and requires foreground authorization when true.",
             },
             "role_filter": {
                 "type": "string",
@@ -1712,7 +1747,9 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
         description=(
             "Read desktop state after an operation to verify visible progress. With app_name it "
             "uses the same non-mutating app inspection path as desktop.inspect_app with "
-            "open_if_needed=false and focus=false; without app_name it reads the active window."
+            "open_if_needed=false and focus=false; without app_name it reads the active window. "
+            "When verification_goal is app_running, it checks only whether the app process is "
+            "running and does not inspect or focus its UI."
         ),
         properties={
             "app_name": {
@@ -1729,6 +1766,11 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
                 "maximum": 200,
                 "description": "Maximum number of UI elements to return when app_name is provided. Defaults to 80.",
             },
+            "verification_goal": {
+                "type": "string",
+                "enum": ["app_running"],
+                "description": "Optional app launch verification mode that checks running state without UI inspection or focus.",
+            },
         },
     ),
     "app.status": ToolDescriptor(
@@ -1742,6 +1784,13 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
         description="Open a local desktop application by display name.",
         properties={
             "app_name": {"type": "string", "description": "Application name."},
+            "bring_to_front": {
+                "type": "boolean",
+                "description": (
+                    "Optional delivery constraint. Set false to require a "
+                    "background desktop provider; local execution fails closed."
+                ),
+            },
             **_APP_SELECTION_METADATA_PROPERTIES,
         },
         required=("app_name",),
@@ -2204,8 +2253,9 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
     "media.apple_music_play": ToolDescriptor(
         name="media.apple_music_play",
         description=(
-            "Search the local Apple Music library and start playback. "
-            "If direct playback fails, open Music as a fallback."
+            "Play an exact Apple Music match without foreground UI input. Searches the "
+            "local library first, then the official Apple catalog only after a local miss; "
+            "reports a partial result unless track identity and playing state are verified."
         ),
         properties={"query": {"type": "string", "description": "Song, album, or artist query."}},
         required=("query",),
@@ -2701,7 +2751,8 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
         name="browser.open_url",
         description=(
             "Open an absolute http(s) URL in a CDP-controlled browser tab. "
-            "Falls back to the system browser when Chrome CDP is unavailable."
+            "Fails safely when Chrome CDP is unavailable and never activates the "
+            "system browser implicitly."
         ),
         properties={"url": {"type": "string", "description": "Absolute http(s) URL."}},
         required=("url",),
@@ -2710,7 +2761,7 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
         name="browser.open_url_and_extract_text",
         description=(
             "Open an absolute http(s) URL, then extract visible text from that browser page. "
-            "Opening may fall back to the system browser; text extraction requires Chrome CDP."
+            "Opening and text extraction both require Chrome CDP."
         ),
         properties={
             "url": {"type": "string", "description": "Absolute http(s) URL."},
@@ -2744,30 +2795,19 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
         name="browser.click",
         description=(
             "Click an element in the current browser page by CSS selector, text=<label>, "
-            "search-result=N, or point=x,y. "
-            "If Chrome CDP is unavailable, provide fallback_x and fallback_y after observing "
-            "the screen so the tool can safely fall back to foreground desktop clicking."
+            "search-result=N, or page-local point=x,y through Chrome CDP. "
+            "Fails safely when CDP is unavailable and never clicks the real desktop implicitly."
         ),
         properties={
             "selector": {
                 "type": "string",
                 "description": "CSS selector, text=<label>, search-result=N, or point=x,y target to click.",
             },
-            "fallback_x": {
-                "type": "number",
-                "minimum": 0,
-                "description": "Optional screen x coordinate for no-CDP foreground fallback.",
-            },
-            "fallback_y": {
-                "type": "number",
-                "minimum": 0,
-                "description": "Optional screen y coordinate for no-CDP foreground fallback.",
-            },
             "click_count": {
                 "type": "integer",
                 "minimum": 1,
                 "maximum": 3,
-                "description": "Optional foreground fallback click count. Defaults to 1.",
+                "description": "Optional page-element click count. Defaults to 1.",
             },
         },
         required=("selector",),
@@ -2776,8 +2816,8 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
         name="browser.type_text",
         description=(
             "Set text into an input-like element in the current browser page by CSS selector "
-            "or point=x,y. If Chrome CDP is unavailable, provide fallback_x and fallback_y "
-            "after observing the screen so the tool can click the coordinate and type."
+            "or page-local point=x,y through Chrome CDP. Fails safely when CDP is unavailable "
+            "and never types into the real desktop implicitly."
         ),
         properties={
             "selector": {
@@ -2785,16 +2825,6 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
                 "description": "CSS selector or point=x,y target to focus and edit.",
             },
             "text": {"type": "string", "description": "Text to enter."},
-            "fallback_x": {
-                "type": "number",
-                "minimum": 0,
-                "description": "Optional screen x coordinate for no-CDP foreground fallback.",
-            },
-            "fallback_y": {
-                "type": "number",
-                "minimum": 0,
-                "description": "Optional screen y coordinate for no-CDP foreground fallback.",
-            },
         },
         required=("selector", "text"),
     ),

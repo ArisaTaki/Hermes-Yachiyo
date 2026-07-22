@@ -11,6 +11,10 @@ from apps.shell.agent.runtime.runnables import (
     RuntimeRunnableResolver,
     RuntimeRunnableRunCoordinator,
 )
+from apps.shell.agent.runtime.run_group_attachments import (
+    RUN_GROUP_ATTACHMENT_PAYLOAD_KEY,
+    issue_run_group_child_attachment,
+)
 
 
 def test_runnable_catalog_remains_exported_from_legacy_module() -> None:
@@ -342,6 +346,30 @@ def test_runnable_run_coordinator_dispatches_workflow_run_async() -> None:
             },
         )
     ]
+
+
+def test_runnable_run_coordinator_forwards_internal_group_attachment() -> None:
+    calls: list[tuple[str, dict[str, object]]] = []
+    coordinator = _run_coordinator(calls)
+    attachment = issue_run_group_child_attachment(
+        run_group_id="group-1",
+        parent_run_id="parent-run-1",
+        child_kind="agent_run",
+        child_runnable_id="agent-1",
+        child_identity="group-member:group-1:1:agent-1",
+    )
+
+    coordinator.create_run_async(
+        runnable_id="agent-1",
+        user_goal="Join group",
+        run_group_id="group-1",
+        client_run_id=attachment.child_identity,
+        run_group_attachment=attachment,
+    )
+
+    assert calls[0][0] == "agent_async"
+    assert calls[0][1]["client_run_id"] == attachment.child_identity
+    assert calls[0][1][RUN_GROUP_ATTACHMENT_PAYLOAD_KEY] is attachment
 
 
 def test_runnable_run_coordinator_validates_delegation_kind_and_goal() -> None:

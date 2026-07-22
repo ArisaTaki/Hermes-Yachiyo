@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 
 from apps.shell.agent.runtime.errors import AgentRuntimeError
+from apps.shell.yachiyo_agent import legacy_ports as legacy_ports_module
 from apps.shell.yachiyo_agent.legacy_ports import LegacyStudioPort
 
 
@@ -163,9 +164,12 @@ def test_legacy_studio_agent_run_enriches_foreground_direct_tool_requests(
 
     assert run["run_id"] == "agent-run-1"
     assert session_calls[0][1] is True
-    assert session_calls[0][0]["requests"][0]["desktop_execution_policy"][
-        "prefer_isolated_desktop"
-    ] is True
+    execution_policy = session_calls[0][0]["requests"][0][
+        "desktop_execution_policy"
+    ]
+    assert execution_policy["mode"] == "preview_input"
+    assert execution_policy["prefer_isolated_desktop"] is True
+    assert execution_policy["require_sandbox_for_keyboard_mouse"] is True
     assert session_calls[0][0]["provider_manifest"] == (
         "tmp/virtual-provider.manifest.json"
     )
@@ -174,6 +178,22 @@ def test_legacy_studio_agent_run_enriches_foreground_direct_tool_requests(
     assert direct_request["desktop_execution_route"]["selected_provider_id"] == (
         "local-isolated-desktop"
     )
+
+
+def test_legacy_daily_chat_keeps_inherited_supervised_live_policy() -> None:
+    inherited_policy = {
+        "mode": "supervised_live",
+        "allow_live_foreground": True,
+        "prefer_isolated_desktop": False,
+        "require_sandbox_for_keyboard_mouse": False,
+        "source": "daily_chat",
+    }
+
+    execution_policy = legacy_ports_module._desktop_provider_session_policy_from_metadata(
+        {"desktop_execution_policy": inherited_policy}
+    )
+
+    assert execution_policy == inherited_policy
 
 
 def test_legacy_studio_workflow_run_appends_runtime_planner_events(
@@ -235,6 +255,7 @@ def test_legacy_studio_workflow_run_appends_runtime_planner_events(
         "desktop.list_apps",
         "app.open",
     ]
+    assert envelope["requests"][2]["status"] == "unavailable"
     events = runtime.events["workflow-run-1"]
     assert [event["event_type"] for event in events[:4]] == [
         "agent.intent.selected",
@@ -377,13 +398,6 @@ def test_legacy_studio_group_run_records_group_run_started_event() -> None:
         "group.run.intent.selected",
         "group.run.plan.created",
         "group.run.task_core.created",
-        "group.run.plan.step",
-        "group.run.task.workspace_item.updated",
-        "group.run.task.workspace_item.updated",
-        "group.run.task.todo.updated",
-        "group.run.task.todo.updated",
-        "group.run.task.checkpoint.updated",
-        "group.run.task.checkpoint.updated",
         "group.member.started",
         "group.member.started",
     ]
@@ -394,6 +408,9 @@ def test_legacy_studio_group_run_records_group_run_started_event() -> None:
     assert runtime.events["run-1"][first_planner_index + 1]["event_type"] == "agent.plan.created"
     assert runtime.events["run-1"][first_planner_index + 2]["event_type"] == "agent.task_core.created"
     assert runtime.events["run-1"][first_planner_index + 3]["event_type"] == "agent.plan.step"
+    assert runtime.events["run-1"][first_planner_index + 3]["payload"]["step"][
+        "tool_name"
+    ] == "group.start"
     started = group_run["events"][0]
     assert started["run_id"] == "run-1"
     assert started["payload"]["group_run_id"] == "group-run-1"
@@ -423,7 +440,7 @@ def test_legacy_studio_group_run_records_group_run_started_event() -> None:
         for event in group_run["events"]
         if event["event_type"] == "group.run.plan.step"
     ]
-    assert group_step_tools == ["workspace.list"]
+    assert group_step_tools == []
 
 
 def test_legacy_studio_group_run_scopes_planner_execution_envelope_to_group_run() -> None:
@@ -464,23 +481,14 @@ def test_legacy_studio_group_run_records_member_failed_and_cancelled_events() ->
     )
 
     event_types = [event["event_type"] for event in group_run["events"]]
-    assert event_types[:6] == [
+    assert event_types[:5] == [
         "group.run.started",
         "group.run.plan",
         "group.run.intent.selected",
         "group.run.plan.created",
         "group.run.task_core.created",
-        "group.run.plan.step",
     ]
-    assert event_types[6:12] == [
-        "group.run.task.workspace_item.updated",
-        "group.run.task.workspace_item.updated",
-        "group.run.task.todo.updated",
-        "group.run.task.todo.updated",
-        "group.run.task.checkpoint.updated",
-        "group.run.task.checkpoint.updated",
-    ]
-    assert event_types[12:] == [
+    assert event_types[5:] == [
         "group.member.started",
         "group.member.failed",
         "group.member.started",
@@ -532,7 +540,11 @@ def test_legacy_studio_port_accepts_reject_decision_payload() -> None:
     )
 
     assert rejected["status"] == "failed"
-    assert runtime.last_reject_request == {"run_id": "run-1", "reason": "No"}
+    assert runtime.last_reject_request == {
+        "run_id": "run-1",
+        "reason": "No",
+        "expected_approval_id": "approval-1",
+    }
 
 
 def test_legacy_studio_port_accepts_approve_decision_payload() -> None:
@@ -549,7 +561,10 @@ def test_legacy_studio_port_accepts_approve_decision_payload() -> None:
     )
 
     assert approved["status"] == "completed"
-    assert runtime.last_approve_request == {"run_id": "run-1"}
+    assert runtime.last_approve_request == {
+        "run_id": "run-1",
+        "expected_approval_id": "approval-1",
+    }
 
 
 def test_legacy_studio_port_rejects_mismatched_approval_id() -> None:
@@ -604,14 +619,24 @@ def test_legacy_studio_port_routes_workflow_parent_approval_to_child_run() -> No
     }
     port = LegacyStudioPort(runtime)
 
-    approved = port.approve_run_approval("workflow-run-1")
+    approved = port.approve_run_approval(
+        "workflow-run-1",
+        {"approval_id": "approval-child"},
+    )
     rejected = port.reject_run_approval(
         "workflow-run-1",
         {"approval_id": "approval-child", "reason": "No"},
     )
 
-    assert runtime.last_approve_request == {"run_id": "workflow-child-1"}
-    assert runtime.last_reject_request == {"run_id": "workflow-child-1", "reason": "No"}
+    assert runtime.last_approve_request == {
+        "run_id": "workflow-child-1",
+        "expected_approval_id": "approval-child",
+    }
+    assert runtime.last_reject_request == {
+        "run_id": "workflow-child-1",
+        "reason": "No",
+        "expected_approval_id": "approval-child",
+    }
     assert approved["run_id"] == "workflow-run-1"
     assert rejected["run_id"] == "workflow-run-1"
     assert approved["runs"][0]["run_id"] == "workflow-child-1"
@@ -934,16 +959,32 @@ class _FakeGroupRuntime:
             "events": list(self.events.get(run_id, [])),
         }
 
-    def reject_run_approval(self, run_id: str, reason: str = "") -> dict[str, Any]:
-        self.last_reject_request = {"run_id": run_id, "reason": reason}
+    def reject_run_approval(
+        self,
+        run_id: str,
+        reason: str = "",
+        expected_approval_id: str = "",
+    ) -> dict[str, Any]:
+        self.last_reject_request = {
+            "run_id": run_id,
+            "reason": reason,
+            "expected_approval_id": expected_approval_id,
+        }
         return {
             "run_id": run_id,
             "status": "failed",
             "user_goal": "Rejected",
         }
 
-    def approve_run_approval(self, run_id: str) -> dict[str, Any]:
-        self.last_approve_request = {"run_id": run_id}
+    def approve_run_approval(
+        self,
+        run_id: str,
+        expected_approval_id: str,
+    ) -> dict[str, Any]:
+        self.last_approve_request = {
+            "run_id": run_id,
+            "expected_approval_id": expected_approval_id,
+        }
         return {
             "run_id": run_id,
             "status": "completed",

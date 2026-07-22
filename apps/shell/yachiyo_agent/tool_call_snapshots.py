@@ -19,13 +19,15 @@ def tool_call_snapshots_from_payloads(
     *,
     run_id: str = "",
     events: list[PublicRunEvent] | None = None,
+    include_unmatched_event_calls: bool = True,
 ) -> list[ToolCallSnapshot]:
     if isinstance(payloads, list):
         calls = [tool_call_snapshot_from_payload(item, run_id=run_id) for item in payloads]
         for event_call in tool_call_snapshots_from_events(events or []):
             matching_index = latest_matching_tool_call_index(calls, event_call)
             if matching_index is None:
-                calls.append(event_call)
+                if include_unmatched_event_calls:
+                    calls.append(event_call)
                 continue
             calls[matching_index] = merge_tool_call_snapshots(
                 calls[matching_index],

@@ -99,4 +99,13 @@ def replan_continuation_response(
 
 
 def bad_request(exc: Exception) -> HTTPException:
-    return HTTPException(status_code=400, detail=redact_api_error_detail(exc))
+    detail = redact_api_error_detail(exc)
+    status_code = 409 if any(
+        marker in str(detail or "")
+        for marker in (
+            "approval_generation_mismatch",
+            "approval_generation_projection_missing",
+            "approval_generation_conflict",
+        )
+    ) else 400
+    return HTTPException(status_code=status_code, detail=detail)

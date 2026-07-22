@@ -6,7 +6,7 @@ from apps.shell.agent.repositories.artifacts import RunArtifactRepository
 from apps.shell.agent.repositories.events import RunEventRepository
 from apps.shell.agent.repositories.future_tasks import AgentFutureTaskStore
 from apps.shell.agent.repositories.groups import RunGroupRepository
-from apps.shell.agent.repositories.memories import AgentMemoryStore
+from apps.shell.agent.repositories.memories import AgentMemoryStore, MemoryQuery
 from apps.shell.agent.repositories.row_projections import RuntimeRowProjector
 from apps.shell.agent.repositories.runs import RunRepository
 from apps.shell.agent.repositories.skill_folders import SkillFolderRepository
@@ -27,6 +27,7 @@ __all__ = [
     "AgentDefinitionRepository",
     "AgentFutureTaskStore",
     "AgentMemoryStore",
+    "MemoryQuery",
     "ApprovalRepository",
     "LockedConnection",
     "LockedCursor",

@@ -8,6 +8,7 @@ from typing import Any
 from apps.shell.agent.runtime.desktop_tool_labels import (
     TASK_PROGRESS_DESKTOP_TOOL_LABELS as _DESKTOP_TOOL_PROGRESS_LABELS,
 )
+from apps.shell.agent.runtime.approval_snapshots import approval_executable_input
 from apps.shell.agent.runtime.events import redact_json_value, redact_secrets
 
 from .approval_event_snapshots import (
@@ -52,11 +53,63 @@ from .task_progress_snapshots import task_progress_summary_from_task_core
 _ACTIVE_TASK_STATUSES = {"queued", "running", "waiting_approval"}
 _PLANNED_DESKTOP_INTENT_EVENT_TYPE = "agent.desktop.intent_planned"
 _UNAVAILABLE_DESKTOP_INTENT_EVENT_TYPE = "agent.desktop.intent_unavailable"
+_UNVERIFIED_DESKTOP_INTENT_EVENT_TYPE = "agent.desktop.intent_unverified"
 _APPROVAL_REQUIRED_DESKTOP_INTENT_EVENT_TYPE = "agent.desktop.intent_approval_required"
 _COMPLETED_DESKTOP_INTENT_EVENT_TYPE = "agent.desktop.intent_completed"
+_PERMISSION_PREFLIGHT_DESKTOP_EVENT_TYPE = "agent.desktop.permission_preflight"
 _PERMISSION_RECOVERY_DESKTOP_EVENT_TYPE = "agent.desktop.permission_recovery"
 _READINESS_RECOVERED_DESKTOP_EVENT_TYPE = "agent.desktop.readiness_recovered"
 _TOOL_CALL_EVENT_TYPE = "agent.tool.call"
+_CHAT_PUBLIC_DESKTOP_EVENT_TYPES = {
+    _PLANNED_DESKTOP_INTENT_EVENT_TYPE,
+    _UNAVAILABLE_DESKTOP_INTENT_EVENT_TYPE,
+    _UNVERIFIED_DESKTOP_INTENT_EVENT_TYPE,
+    _APPROVAL_REQUIRED_DESKTOP_INTENT_EVENT_TYPE,
+    _COMPLETED_DESKTOP_INTENT_EVENT_TYPE,
+    _PERMISSION_PREFLIGHT_DESKTOP_EVENT_TYPE,
+    _PERMISSION_RECOVERY_DESKTOP_EVENT_TYPE,
+    _READINESS_RECOVERED_DESKTOP_EVENT_TYPE,
+}
+_CHAT_PUBLIC_EVENT_STATUSES = {
+    "approval_required",
+    "approved",
+    "blocked",
+    "cancelled",
+    "completed",
+    "expired",
+    "failed",
+    "pending",
+    "permission_required",
+    "planned",
+    "recovered",
+    "rejected",
+    "requested",
+    "running",
+    "skipped",
+    "timeout",
+    "unavailable",
+    "unverified",
+}
+_CHAT_PUBLIC_EVENT_CONTEXT_FIELDS = (
+    "actor",
+    "agent_id",
+    "agent_name",
+    "core_id",
+    "group_id",
+    "group_run_id",
+    "member_agent_id",
+    "member_agent_name",
+    "parent_run_id",
+    "run_group_id",
+    "source_run_id",
+    "source_runnable_id",
+    "source_runnable_name",
+    "workflow_id",
+    "workflow_node_id",
+    "workflow_node_label",
+    "workflow_run_id",
+    "workspace_id",
+)
 _RECOVERABLE_FOREGROUND_READINESS_CONDITIONS = {
     "app_not_found",
     "app_not_running",
@@ -80,9 +133,25 @@ _DAILY_DESKTOP_DISCOVERY_PREFIX_TOOLS = {
 }
 _DAILY_DESKTOP_VERIFY_TOOLS = {
     "desktop.active_window",
+    "desktop.verify",
     "desktop.windows",
     "desktop.ui_elements",
     "desktop.inspect_app",
+}
+_INTERNAL_RUNTIME_RECOVERY_OBSERVATION_TOOLS = {
+    "browser.current_page",
+    "browser.screenshot",
+    "desktop.active_window",
+    "desktop.inspect_app",
+    "desktop.list_apps",
+    "desktop.list_windows",
+    "desktop.permissions",
+    "desktop.read_ui",
+    "desktop.running_apps",
+    "desktop.ui_elements",
+    "desktop.verify",
+    "desktop.windows",
+    "screen.capture",
 }
 _CHAT_TOOL_INPUT_TRACE_KEYS = {
     "approval_id",
@@ -135,6 +204,8 @@ _CHAT_TOOL_INPUT_TRACE_KEYS = {
     "app_resolution_score",
     "app_resolution_confidence",
     "app_resolution_reason",
+    "app_resolution_matched_name",
+    "app_resolution_matched_name_source",
     "requested_app_name",
     "resolved_app_name",
     "resolved_app_path",
@@ -185,25 +256,32 @@ def agent_task_snapshot_from_payload(
             run_id=run_id,
             group_run_id=group_run_id,
             keys=("pending_approvals", "pending_approval"),
-            events=recent_events,
+            events=all_events,
         )
         if approval.status == "pending"
     ]
     approvals = _chat_sanitized_approvals(approvals)
     status = task_status_from_value(payload.get("status"))
+    if status not in _ACTIVE_TASK_STATUSES:
+        approvals = []
     current_step = _optional_text(payload.get("current_step"))
     progress_text = _optional_text(payload.get("progress_text"))
     derived_progress = _desktop_intent_progress_text(
-        recent_events,
+        all_events,
         task_status=status,
         has_explicit_progress=bool(current_step or progress_text),
     )
+    explicit_tool_call_payloads = payload.get("tool_calls")
     tool_calls = tool_call_snapshots_from_payloads(
-        payload.get("tool_calls"),
+        explicit_tool_call_payloads,
         run_id=run_id,
-        events=recent_events,
+        events=all_events,
+        include_unmatched_event_calls=not bool(
+            isinstance(explicit_tool_call_payloads, list)
+            and explicit_tool_call_payloads
+        ),
     )
-    tool_calls = _chat_task_tool_calls(tool_calls, recent_events)
+    tool_calls = _chat_task_tool_calls(tool_calls, all_events)
     tool_calls = _chat_sanitized_tool_calls(tool_calls)
     runtime_execution_envelope = runtime_execution_envelope_from_payload(
         payload,
@@ -212,12 +290,12 @@ def agent_task_snapshot_from_payload(
     active_task = status in _ACTIVE_TASK_STATUSES
     recovery_needs_user_action = (
         _has_desktop_recovery_user_action(
-            recent_events,
+            all_events,
             tool_calls,
             all_events=all_events,
         )
         if active_task
-        else _has_completed_desktop_recovery_user_action(recent_events)
+        else _has_completed_desktop_recovery_user_action(all_events)
     )
     needs_user_action = bool(
         approvals
@@ -452,7 +530,11 @@ def _chat_task_tool_calls(
         *approval_events,
     ]
     if not desktop_step_events:
-        return tool_calls
+        return [
+            tool_call
+            for tool_call in tool_calls
+            if not _internal_chat_tool_call(tool_call)
+        ]
 
     visible_events: list[PublicRunEvent] = []
     for event in desktop_step_events:
@@ -465,7 +547,39 @@ def _chat_task_tool_calls(
             payload["steps"] = steps
         visible_events.append(event.model_copy(update={"payload": payload}))
     visible_tool_calls = tool_call_snapshots_from_payloads(None, events=visible_events)
-    return visible_tool_calls or tool_calls
+    return visible_tool_calls or [
+        tool_call
+        for tool_call in tool_calls
+        if not _internal_chat_tool_call(tool_call)
+    ]
+
+
+def _internal_chat_tool_call(tool_call: ToolCallSnapshot) -> bool:
+    return bool(
+        _internal_verification_tool_call(tool_call)
+        or _internal_runtime_recovery_observation_tool_call(tool_call)
+    )
+
+
+def _internal_verification_tool_call(tool_call: ToolCallSnapshot) -> bool:
+    return bool(
+        str(tool_call.runtime_stage or "").strip() == "verify"
+        or str(tool_call.runtime_role or "").strip() == "verify_result"
+        or str(tool_call.source or "").strip()
+        in {"runtime_verification", "runtime_post_action_auto_verify"}
+        or str(tool_call.planning_reason or "").strip()
+        in {"runtime_post_action_auto_verify", "planner_followup_verify_code_changes"}
+    )
+
+
+def _internal_runtime_recovery_observation_tool_call(
+    tool_call: ToolCallSnapshot,
+) -> bool:
+    return bool(
+        str(tool_call.source or "").strip() == "runtime_replan_recovery"
+        and str(tool_call.tool_name or "").strip()
+        in _INTERNAL_RUNTIME_RECOVERY_OBSERVATION_TOOLS
+    )
 
 
 def _chat_tool_calls_with_pending_approvals(
@@ -509,6 +623,25 @@ def _deduped_chat_tool_calls(
     visible: list[ToolCallSnapshot] = []
     seen: set[tuple[str, str, str]] = set()
     for tool_call in tool_calls:
+        if tool_call.status == "waiting_approval":
+            alias_index = next(
+                (
+                    index
+                    for index, current in enumerate(visible)
+                    if current.status == "waiting_approval"
+                    and current.tool_name == tool_call.tool_name
+                    and (
+                        current.input_preview == tool_call.input_preview
+                        or not current.input_preview
+                        or not tool_call.input_preview
+                    )
+                ),
+                -1,
+            )
+            if alias_index >= 0:
+                if tool_call.input_preview and not visible[alias_index].input_preview:
+                    visible[alias_index] = tool_call
+                continue
         key = (
             tool_call.tool_name,
             tool_call.status,
@@ -528,17 +661,28 @@ def _chat_sanitized_approvals(
 
 
 def _chat_sanitized_approval(approval: ApprovalCardSnapshot) -> ApprovalCardSnapshot:
-    clean_input = {
-        key: value
-        for key, value in approval.input_preview.items()
-        if key not in _CHAT_TOOL_INPUT_TRACE_KEYS
-    }
+    executable_input = approval_executable_input(
+        approval.tool_name or "",
+        approval.input_preview,
+    )
+    clean_input = dict(executable_input) if isinstance(executable_input, Mapping) else {}
     if clean_input == approval.input_preview:
         return approval
     return approval.model_copy(update={"input_preview": clean_input})
 
 
 def _chat_sanitized_tool_call(tool_call: ToolCallSnapshot) -> ToolCallSnapshot:
+    if tool_call.status == "waiting_approval":
+        executable_input = approval_executable_input(
+            tool_call.tool_name,
+            tool_call.input_preview,
+        )
+        clean_input = (
+            dict(executable_input) if isinstance(executable_input, Mapping) else {}
+        )
+        if clean_input == tool_call.input_preview:
+            return tool_call
+        return tool_call.model_copy(update={"input_preview": clean_input})
     trace_keys = set(_CHAT_TOOL_INPUT_TRACE_KEYS)
     if _chat_tool_input_query_is_trace(tool_call):
         trace_keys.add("query")
@@ -574,6 +718,7 @@ def _visible_daily_desktop_completed_steps(raw_steps: Any) -> list[dict[str, Any
         for index, step in enumerate(steps)
         if _text(step.get("tool") or step.get("tool_name")) not in _DAILY_DESKTOP_DISCOVERY_TOOLS
         and _text(step.get("tool") or step.get("tool_name")) not in _DAILY_DESKTOP_VERIFY_TOOLS
+        and not _daily_desktop_internal_verify_step(step)
     ]
     if not primary_indexes:
         visible_steps = list(steps)
@@ -590,18 +735,86 @@ def _visible_daily_desktop_completed_steps(raw_steps: Any) -> list[dict[str, Any
     visible_steps: list[dict[str, Any]] = []
     for index, step in enumerate(steps):
         tool_name = _text(step.get("tool") or step.get("tool_name"))
+        if _daily_desktop_internal_verify_step(step):
+            continue
         if tool_name in _DAILY_DESKTOP_DISCOVERY_TOOLS and (
             index < first_primary or index > last_primary
         ):
             continue
         if (
             tool_name in _DAILY_DESKTOP_VERIFY_TOOLS
-            and index > last_primary
-            and not _is_requested_ui_readback(steps, index, first_primary, last_primary)
+            and not _is_requested_ui_readback(
+                steps,
+                index,
+                first_primary,
+                last_primary,
+            )
         ):
             continue
         visible_steps.append(step)
-    return _coalesced_open_focus_find_steps(visible_steps or steps)
+    return _coalesced_open_focus_find_steps(
+        _coalesced_app_preparation_composite_steps(visible_steps or steps)
+    )
+
+
+def _daily_desktop_internal_verify_step(step: Mapping[str, Any]) -> bool:
+    return bool(
+        _text(step.get("runtime_stage")) == "verify"
+        or _text(step.get("runtime_role")) == "verify_result"
+        or _text(step.get("source"))
+        in {"runtime_verification", "runtime_post_action_auto_verify"}
+        or (
+            _text(step.get("source")) == "runtime_replan_recovery"
+            and _text(step.get("tool") or step.get("tool_name"))
+            in _INTERNAL_RUNTIME_RECOVERY_OBSERVATION_TOOLS
+        )
+    )
+
+
+def _coalesced_app_preparation_composite_steps(
+    steps: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if len(steps) < 2:
+        return steps
+    coalesced: list[dict[str, Any]] = []
+    index = 0
+    while index < len(steps):
+        if index + 1 >= len(steps):
+            coalesced.append(steps[index])
+            break
+        preparation = steps[index]
+        composite = steps[index + 1]
+        preparation_tool = _text(
+            preparation.get("tool") or preparation.get("tool_name")
+        )
+        composite_tool = _text(composite.get("tool") or composite.get("tool_name"))
+        app_name = _summary_step_app_name(preparation)
+        if (
+            preparation_tool
+            in {"app.open", "desktop.open_app", "app.focus", "desktop.focus_app"}
+            and composite_tool.startswith(("app.focus_and_", "app.open_and_"))
+            and app_name
+            and _summary_step_app_name(composite) == app_name
+        ):
+            combined = dict(composite)
+            if preparation_tool in {"app.open", "desktop.open_app"}:
+                if composite_tool.startswith("app.focus_and_"):
+                    open_tool = composite_tool.replace(
+                        "app.focus_and_",
+                        "app.open_and_",
+                        1,
+                    )
+                    combined["tool"] = open_tool
+                    combined["tool_name"] = open_tool
+                summary = _text(combined.get("summary"))
+                if summary.startswith("已切到"):
+                    combined["summary"] = "已打开" + summary[len("已切到") :]
+            coalesced.append(combined)
+            index += 2
+            continue
+        coalesced.append(preparation)
+        index += 1
+    return coalesced
 
 
 def _coalesced_open_focus_find_steps(
@@ -759,15 +972,53 @@ def task_status_from_value(value: Any) -> str:
 
 
 def _chat_visible_events(events: list[PublicRunEvent]) -> list[PublicRunEvent]:
-    return [
-        _chat_sanitized_recent_event(event)
-        for event in events
-        if event.visibility == "user" and event.sensitivity == "public"
-    ]
+    visible: list[PublicRunEvent] = []
+    for event in events:
+        if (
+            event.visibility != "user"
+            or event.sensitivity != "public"
+            or _legacy_internal_chat_event(event)
+        ):
+            continue
+        projected = _chat_sanitized_recent_event(event)
+        if projected is not None:
+            visible.append(projected)
+    return visible
 
 
-def _chat_sanitized_recent_event(event: PublicRunEvent) -> PublicRunEvent:
-    if not event.event_type.startswith("task."):
+def _legacy_internal_chat_event(event: PublicRunEvent) -> bool:
+    event_type = str(event.event_type or "").strip()
+    payload = event.payload if isinstance(event.payload, Mapping) else {}
+    source = str(payload.get("source") or "").strip()
+    runtime_stage = str(payload.get("runtime_stage") or "").strip()
+    runtime_role = str(payload.get("runtime_role") or "").strip()
+    tool_name = _event_tool_name(event)
+    return bool(
+        event_type == "agent.model.followup_context"
+        or event_type.startswith("agent.post_action_verification.")
+        or source
+        in {
+            "runtime_native_postcondition_receipt",
+            "runtime_post_action_auto_verify",
+            "runtime_verification",
+        }
+        or runtime_stage == "verify"
+        or runtime_role == "verify_result"
+        or tool_name == "desktop.verify"
+        or (
+            source == "runtime_replan_recovery"
+            and tool_name in _INTERNAL_RUNTIME_RECOVERY_OBSERVATION_TOOLS
+        )
+    )
+
+
+def _chat_sanitized_recent_event(
+    event: PublicRunEvent,
+) -> PublicRunEvent | None:
+    event_type = str(event.event_type or "").strip()
+    if _chat_high_risk_recent_event_type(event_type):
+        return _chat_projected_high_risk_recent_event(event)
+    if not event_type.startswith("task."):
         return event
     clean_payload = {
         key: value
@@ -777,6 +1028,261 @@ def _chat_sanitized_recent_event(event: PublicRunEvent) -> PublicRunEvent:
     if clean_payload == event.payload:
         return event
     return event.model_copy(update={"payload": clean_payload})
+
+
+def _chat_high_risk_recent_event_type(event_type: str) -> bool:
+    clean_type = str(event_type or "").strip()
+    return bool(
+        clean_type.startswith(("agent.desktop.", "agent.tool.", "tool."))
+        or _chat_approval_event_status(clean_type)
+    )
+
+
+def _chat_projected_high_risk_recent_event(
+    event: PublicRunEvent,
+) -> PublicRunEvent | None:
+    event_type = str(event.event_type or "").strip()
+    approval_status = _chat_approval_event_status(event_type)
+    if int(event.schema_version or 1) != 1:
+        return None
+    if not (
+        event_type in _CHAT_PUBLIC_DESKTOP_EVENT_TYPES
+        or approval_status
+    ):
+        return None
+
+    payload = event.payload if isinstance(event.payload, Mapping) else {}
+    nested_pending = (
+        payload.get("pending_approval")
+        if isinstance(payload.get("pending_approval"), Mapping)
+        else {}
+    )
+    tool_name = _text(
+        payload.get("tool")
+        or payload.get("tool_name")
+        or nested_pending.get("tool")
+        or nested_pending.get("tool_name")
+        or event.detail
+    )
+    if tool_name == "desktop.verify":
+        return None
+    status = _chat_public_event_status(
+        event_type,
+        payload,
+        approval_status=approval_status,
+    )
+    summary = _chat_public_event_summary(event, payload, tool_name=tool_name)
+    raw_input = next(
+        (
+            value
+            for value in (
+                payload.get("input_preview"),
+                payload.get("input"),
+                nested_pending.get("input_preview"),
+                nested_pending.get("input"),
+            )
+            if isinstance(value, Mapping)
+        ),
+        {},
+    )
+    input_preview = _chat_public_event_input(tool_name, raw_input)
+    public_payload: dict[str, Any] = {}
+    if tool_name:
+        public_payload["tool"] = tool_name
+    if status:
+        public_payload["status"] = status
+    if summary:
+        public_payload["summary"] = summary
+    if input_preview:
+        public_payload["input_preview"] = input_preview
+    if event_type in {
+        _PERMISSION_PREFLIGHT_DESKTOP_EVENT_TYPE,
+        _PERMISSION_RECOVERY_DESKTOP_EVENT_TYPE,
+    }:
+        public_payload.update(_chat_public_permission_recovery_payload(payload))
+
+    updates: dict[str, Any] = {
+        "payload": public_payload,
+        "title": None,
+        "detail": summary or tool_name or None,
+    }
+    updates.update({field: None for field in _CHAT_PUBLIC_EVENT_CONTEXT_FIELDS})
+    return event.model_copy(update=updates)
+
+
+def _chat_public_permission_recovery_payload(
+    payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    data = payload.get("data") if isinstance(payload.get("data"), Mapping) else {}
+    permission_targets = _chat_public_text_list(
+        [
+            *_result_text_list(
+                payload,
+                "permission_targets",
+                "missing_permissions",
+            ),
+            *_result_text_list(
+                data,
+                "permission_targets",
+                "missing_permissions",
+            ),
+        ]
+    )
+    public_payload: dict[str, Any] = {
+        "permission_error": bool(
+            payload.get("permission_error")
+            or data.get("permission_error")
+            or permission_targets
+        ),
+        "permission_targets": permission_targets,
+        "affected_tools": _chat_public_text_list(
+            [
+                *_result_text_list(payload, "affected_tools"),
+                *_result_text_list(data, "affected_tools"),
+            ]
+        ),
+        "recovery_hints": _chat_public_text_list(
+            [
+                *_result_text_list(payload, "recovery_hints"),
+                *_result_text_list(data, "recovery_hints"),
+            ]
+        ),
+    }
+    tool_call_id = _text(redact_secrets(payload.get("tool_call_id")))
+    if tool_call_id:
+        public_payload["tool_call_id"] = tool_call_id[:240]
+    return {
+        key: value
+        for key, value in public_payload.items()
+        if value not in (None, "", [], {}) or key == "permission_error"
+    }
+
+
+def _chat_public_text_list(values: list[str]) -> list[str]:
+    items: list[str] = []
+    for value in values:
+        safe = _text(redact_secrets(value))[:240]
+        if safe and safe not in items:
+            items.append(safe)
+        if len(items) >= 24:
+            break
+    return items
+
+
+def _chat_public_event_input(
+    tool_name: str,
+    value: Mapping[str, Any],
+) -> dict[str, Any]:
+    executable = approval_executable_input(tool_name, dict(value))
+    if not isinstance(executable, Mapping):
+        return {}
+    cleaned = _chat_public_event_input_value(executable)
+    redacted = redact_json_value(cleaned)
+    return dict(redacted) if isinstance(redacted, Mapping) else {}
+
+
+def _chat_public_event_input_value(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return {
+            str(key): _chat_public_event_input_value(item)
+            for key, item in value.items()
+            if str(key) not in _CHAT_TOOL_INPUT_TRACE_KEYS
+        }
+    if isinstance(value, list):
+        return [_chat_public_event_input_value(item) for item in value]
+    return value
+
+
+def _chat_public_event_summary(
+    event: PublicRunEvent,
+    payload: Mapping[str, Any],
+    *,
+    tool_name: str,
+) -> str:
+    result = payload.get("result") if isinstance(payload.get("result"), Mapping) else {}
+    output_preview = (
+        payload.get("output_preview")
+        if isinstance(payload.get("output_preview"), Mapping)
+        else {}
+    )
+    for value in (
+        payload.get("summary"),
+        result.get("summary"),
+        output_preview.get("summary"),
+        event.title,
+        event.detail if _text(event.detail) != tool_name else "",
+    ):
+        summary = _text(redact_secrets(value))
+        if summary:
+            return summary
+    return ""
+
+
+def _chat_public_event_status(
+    event_type: str,
+    payload: Mapping[str, Any],
+    *,
+    approval_status: str = "",
+) -> str:
+    raw_status = _text(payload.get("status")).lower()
+    if raw_status in _CHAT_PUBLIC_EVENT_STATUSES:
+        return raw_status
+    if approval_status:
+        return approval_status
+    result = payload.get("result") if isinstance(payload.get("result"), Mapping) else {}
+    if result.get("approval_required") is True:
+        return "approval_required"
+    if result.get("permission_error") is True or _result_text_list(
+        result,
+        "permission_targets",
+        "missing_permissions",
+    ):
+        return "permission_required"
+    if result.get("verification_failed") is True:
+        return "unverified"
+    if result.get("ok") is True:
+        return "completed"
+    if result.get("ok") is False:
+        return "failed"
+    status_by_type = {
+        _PLANNED_DESKTOP_INTENT_EVENT_TYPE: "planned",
+        _UNAVAILABLE_DESKTOP_INTENT_EVENT_TYPE: "unavailable",
+        _UNVERIFIED_DESKTOP_INTENT_EVENT_TYPE: "unverified",
+        _APPROVAL_REQUIRED_DESKTOP_INTENT_EVENT_TYPE: "approval_required",
+        _COMPLETED_DESKTOP_INTENT_EVENT_TYPE: "completed",
+        _PERMISSION_PREFLIGHT_DESKTOP_EVENT_TYPE: "permission_required",
+        _PERMISSION_RECOVERY_DESKTOP_EVENT_TYPE: "permission_required",
+        _READINESS_RECOVERED_DESKTOP_EVENT_TYPE: "recovered",
+        "agent.tool.skipped": "skipped",
+    }
+    return status_by_type.get(event_type, "")
+
+
+def _chat_approval_event_status(event_type: str) -> str:
+    clean_type = str(event_type or "").strip()
+    suffix_statuses = {
+        "approval_required": "approval_required",
+        "approval_approved": "approved",
+        "approval_rejected": "rejected",
+        "approval_timeout": "timeout",
+        "approval_cancelled": "cancelled",
+        "approval_canceled": "cancelled",
+        "approval_expired": "expired",
+    }
+    for suffix, status in suffix_statuses.items():
+        if clean_type.endswith(f".{suffix}"):
+            return status
+    return {
+        "approval.required": "approval_required",
+        "approval.approved": "approved",
+        "approval.rejected": "rejected",
+        "approval.timeout": "timeout",
+        "approval.cancelled": "cancelled",
+        "approval.canceled": "cancelled",
+        "tool.approval_required": "approval_required",
+        "tool.approved": "approved",
+        "tool.rejected": "rejected",
+    }.get(clean_type, "")
 
 
 def _desktop_intent_progress_text(
@@ -798,6 +1304,7 @@ def _desktop_intent_progress_text(
         if (desktop_event_type or event.event_type) not in {
             _PLANNED_DESKTOP_INTENT_EVENT_TYPE,
             _UNAVAILABLE_DESKTOP_INTENT_EVENT_TYPE,
+            _UNVERIFIED_DESKTOP_INTENT_EVENT_TYPE,
             _APPROVAL_REQUIRED_DESKTOP_INTENT_EVENT_TYPE,
             _COMPLETED_DESKTOP_INTENT_EVENT_TYPE,
             _READINESS_RECOVERED_DESKTOP_EVENT_TYPE,
@@ -826,6 +1333,12 @@ def _desktop_intent_progress_text(
                 "无法执行桌面动作",
                 detail=_unavailable_desktop_intent_detail(payload),
             )
+        if desktop_event_type == _UNVERIFIED_DESKTOP_INTENT_EVENT_TYPE:
+            return _progress_text(
+                "操作效果未能验证",
+                label,
+                "桌面操作效果未能验证",
+            )
         if desktop_event_type == _PLANNED_DESKTOP_INTENT_EVENT_TYPE:
             return f"准备执行 · {label}" if label else "准备执行桌面动作"
         if desktop_event_type == _READINESS_RECOVERED_DESKTOP_EVENT_TYPE:
@@ -836,6 +1349,7 @@ def _desktop_intent_progress_text(
 def _has_desktop_intent_result_event(events: list[PublicRunEvent]) -> bool:
     result_event_types = {
         _UNAVAILABLE_DESKTOP_INTENT_EVENT_TYPE,
+        _UNVERIFIED_DESKTOP_INTENT_EVENT_TYPE,
         _APPROVAL_REQUIRED_DESKTOP_INTENT_EVENT_TYPE,
         _COMPLETED_DESKTOP_INTENT_EVENT_TYPE,
         _TOOL_CALL_EVENT_TYPE,
@@ -860,6 +1374,7 @@ def _desktop_intent_event_type(event_type: str) -> str:
     if event_name in {
         _PLANNED_DESKTOP_INTENT_EVENT_TYPE,
         _UNAVAILABLE_DESKTOP_INTENT_EVENT_TYPE,
+        _UNVERIFIED_DESKTOP_INTENT_EVENT_TYPE,
         _APPROVAL_REQUIRED_DESKTOP_INTENT_EVENT_TYPE,
         _COMPLETED_DESKTOP_INTENT_EVENT_TYPE,
         _PERMISSION_RECOVERY_DESKTOP_EVENT_TYPE,
@@ -872,6 +1387,7 @@ def _desktop_intent_event_type(event_type: str) -> str:
     suffix_map = {
         "intent_planned": _PLANNED_DESKTOP_INTENT_EVENT_TYPE,
         "intent_unavailable": _UNAVAILABLE_DESKTOP_INTENT_EVENT_TYPE,
+        "intent_unverified": _UNVERIFIED_DESKTOP_INTENT_EVENT_TYPE,
         "intent_approval_required": _APPROVAL_REQUIRED_DESKTOP_INTENT_EVENT_TYPE,
         "intent_completed": _COMPLETED_DESKTOP_INTENT_EVENT_TYPE,
         "permission_recovery": _PERMISSION_RECOVERY_DESKTOP_EVENT_TYPE,
@@ -938,6 +1454,11 @@ def _has_desktop_recovery_user_action(
         result = payload.get("result") if isinstance(payload.get("result"), Mapping) else {}
         desktop_event_type = _desktop_intent_event_type(event.event_type)
         if (
+            desktop_event_type == _UNAVAILABLE_DESKTOP_INTENT_EVENT_TYPE
+            and _is_runtime_provider_setup_handoff(payload)
+        ):
+            return True
+        if (
             desktop_event_type == _PERMISSION_RECOVERY_DESKTOP_EVENT_TYPE
             and _has_recovery_signal(
                 payload,
@@ -988,6 +1509,11 @@ def _has_completed_desktop_recovery_user_action(events: list[PublicRunEvent]) ->
     for event in reversed(events):
         payload = event.payload if isinstance(event.payload, Mapping) else {}
         desktop_event_type = _desktop_intent_event_type(event.event_type)
+        if (
+            desktop_event_type == _UNAVAILABLE_DESKTOP_INTENT_EVENT_TYPE
+            and _is_runtime_provider_setup_handoff(payload)
+        ):
+            return True
         if desktop_event_type == _PERMISSION_RECOVERY_DESKTOP_EVENT_TYPE:
             if _has_recovery_signal(payload) and not _is_recovered_foreground_readiness_signal(
                 event,
@@ -1008,6 +1534,13 @@ def _has_completed_desktop_recovery_user_action(events: list[PublicRunEvent]) ->
             latest_readiness_recovery_sequence,
         )
     return False
+
+
+def _is_runtime_provider_setup_handoff(source: Mapping[str, Any]) -> bool:
+    return bool(
+        _text(source.get("reason")) == "runtime_execution_not_ready"
+        and "provider" in _text(source.get("blocked_by")).casefold()
+    )
 
 
 def _latest_readiness_recovery_sequence(events: list[PublicRunEvent]) -> int:

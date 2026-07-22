@@ -11,6 +11,7 @@ from apps.shell.agent.runtime.events import (
     artifact_created_payload,
     runtime_trace_input_preview,
 )
+from apps.shell.agent.runtime.tool_execution import _tool_request_trace_payload
 from apps.shell.agent_runtime import AgentRuntimeService
 from apps.shell.credential_store import MemoryCredentialStore
 
@@ -128,7 +129,11 @@ def test_artifact_created_payload_preserves_data_analysis_plan_metadata() -> Non
 def test_runtime_tool_call_event_recorder_records_lifecycle_events() -> None:
     events: list[tuple[str, str, dict[str, object]]] = []
 
-    def append_run_event(run_id: str, event_type: str, payload: dict[str, object]) -> dict[str, object]:
+    def append_run_event(
+        run_id: str,
+        event_type: str,
+        payload: dict[str, object],
+    ) -> dict[str, object]:
         events.append((run_id, event_type, payload))
         return {"run_id": run_id, "event_type": event_type, "payload": payload}
 
@@ -201,6 +206,58 @@ def test_runtime_tool_call_event_recorder_records_lifecycle_events() -> None:
     assert events[-1][2]["approved"] is True
 
 
+def test_automatic_recovery_tool_events_are_persisted_as_internal() -> None:
+    events: list[tuple[str, str, dict[str, object], str]] = []
+
+    def append_run_event(
+        run_id: str,
+        event_type: str,
+        payload: dict[str, object],
+        *,
+        visibility: str = "user",
+    ) -> dict[str, object]:
+        events.append((run_id, event_type, payload, visibility))
+        return {
+            "run_id": run_id,
+            "event_type": event_type,
+            "payload": payload,
+            "visibility": visibility,
+        }
+
+    trace = _tool_request_trace_payload(
+        {
+            "tool_call_id": "recovery-list-1",
+            "source": "runtime_replan_recovery",
+            "planning_reason": "file_resolution_discovery",
+        }
+    )
+    assert _tool_request_trace_payload(
+        {
+            "tool_call_id": "coordinator-list-1",
+            "source": "runtime_internal_recovery",
+            "planning_reason": "app_resolution_discovery",
+        }
+    )["visibility"] == "internal"
+    recorder = RuntimeToolCallEventRecorder(append_run_event=append_run_event)
+
+    recorder.started("run-1", "workspace.list", {"path": "."}, trace=trace)
+    recorder.agent_tool_call(
+        "run-1",
+        "workspace.list",
+        {"path": "."},
+        {"ok": True, "entries": []},
+        trace=trace,
+    )
+
+    assert trace["visibility"] == "internal"
+    assert [event_type for _run_id, event_type, _payload, _visibility in events] == [
+        "tool.started",
+        "agent.tool.call",
+    ]
+    assert all(visibility == "internal" for *_rest, visibility in events)
+    assert all(payload["visibility"] == "internal" for _, _, payload, _ in events)
+
+
 def test_agent_runtime_service_uses_tool_call_event_recorder(tmp_path) -> None:
     service = _service(tmp_path)
     try:
@@ -245,10 +302,33 @@ def test_agent_tool_call_emits_canonical_tool_events(tmp_path, monkeypatch) -> N
         run = service.create_agent_run(
             {"agent_id": agent["agent_id"], "user_goal": "Read README"}
         )
-        events = service.list_run_events(run["run_id"], limit=100)["events"]
-        event_types = [event["event_type"] for event in events]
-        requested = next(event for event in events if event["event_type"] == "tool.requested")
-        completed = next(event for event in events if event["event_type"] == "tool.completed")
+        public_events = service.list_run_events(run["run_id"], limit=100)["events"]
+        assert not any(
+            event["event_type"]
+            in {"tool.requested", "tool.started", "tool.completed", "agent.tool.call"}
+            for event in public_events
+        )
+        events = service.list_run_events(
+            run["run_id"], limit=100, include_internal=True
+        )["events"]
+        tool_lifecycle_events = [
+            event
+            for event in events
+            if event["event_type"]
+            in {"tool.requested", "tool.started", "tool.completed", "agent.tool.call"}
+            and event["payload"].get("tool_call_id") == "call_workspace_read"
+        ]
+        event_types = [event["event_type"] for event in tool_lifecycle_events]
+        requested = next(
+            event
+            for event in tool_lifecycle_events
+            if event["event_type"] == "tool.requested"
+        )
+        completed = next(
+            event
+            for event in tool_lifecycle_events
+            if event["event_type"] == "tool.completed"
+        )
 
         assert event_types.index("tool.requested") < event_types.index("tool.started")
         assert event_types.index("tool.started") < event_types.index("tool.completed")
@@ -257,6 +337,9 @@ def test_agent_tool_call_emits_canonical_tool_events(tmp_path, monkeypatch) -> N
         assert requested["payload"]["input_preview"]["path"] == "README.md"
         assert completed["payload"]["status"] == "completed"
         assert completed["payload"]["output_preview"]["ok"] is True
+        assert {event["payload"]["tool_call_id"] for event in tool_lifecycle_events} == {
+            "call_workspace_read"
+        }
     finally:
         service.close()
 
@@ -296,9 +379,14 @@ def test_agent_artifact_write_emits_artifact_created_without_content(tmp_path, m
             tool_policy={"allowed_tools": ["artifact.write"]},
         )
         run = service.create_agent_run(
-            {"agent_id": agent["agent_id"], "user_goal": "Write artifact"}
+            {
+                "agent_id": agent["agent_id"],
+                "user_goal": 'Write exactly "safe artifact body" to notes.md',
+            }
         )
-        events = service.list_run_events(run["run_id"], limit=100)["events"]
+        events = service.list_run_events(
+            run["run_id"], limit=100, include_internal=True
+        )["events"]
         artifact_event = next(
             event
             for event in events

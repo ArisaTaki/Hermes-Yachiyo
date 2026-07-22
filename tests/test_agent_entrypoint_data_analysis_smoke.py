@@ -39,3 +39,22 @@ def test_data_analysis_smoke_extracts_task_core_from_studio_payload() -> None:
     )
 
     assert extracted["core_id"] == "task-core-studio"
+
+
+def test_data_analysis_smoke_reads_tool_evidence_from_public_completed_steps() -> None:
+    completed_event = {
+        "payload": {
+            "steps": [
+                {"tool": "workspace.read", "result": {"ok": True}},
+                {"tool": "data.analyze", "result": {"ok": True, "rows": 3}},
+            ]
+        }
+    }
+
+    assert smoke._completed_tool_step(completed_event, "workspace.read")["result"] == {
+        "ok": True
+    }
+    assert smoke._completed_tool_step(completed_event, "data.analyze")["result"] == {
+        "ok": True,
+        "rows": 3,
+    }

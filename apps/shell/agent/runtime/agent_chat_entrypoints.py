@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -51,6 +52,7 @@ def build_runtime_agent_chat_entrypoint_setup(
     agent_run_starter: Any,
     execute_agent_run: Callable[..., dict[str, Any]],
     project_agent_run_group_if_root: Callable[[dict[str, Any]], dict[str, Any]],
+    project_agent_run_failure: Callable[..., dict[str, Any]],
     resolve_runnable: Callable[..., dict[str, Any] | None],
     update_run: Callable[..., dict[str, Any]],
     runtime_agent_timeline: Any,
@@ -75,6 +77,9 @@ def build_runtime_agent_chat_entrypoint_setup(
     trust_workspace_from_policy: Callable[..., None],
     profile_service_factory: Callable[[], Any],
     workspace_status: Callable[[], dict[str, Any]],
+    run_start_lock: Any | None = None,
+    client_request_id_from_payload: Callable[[dict[str, Any]], str] | None = None,
+    transaction_scope: Callable[[], AbstractContextManager[Any]] | None = None,
 ) -> RuntimeAgentChatEntrypointSetup:
     main_chat_config = MainChatRuntimeConfigBuilder(
         main_chat_agent_id=MAIN_CHAT_AGENT_ID,
@@ -95,11 +100,11 @@ def build_runtime_agent_chat_entrypoint_setup(
             execute_agent_run=execute_agent_run,
             project_agent_run_group_if_root=project_agent_run_group_if_root,
             resolve_runnable=resolve_runnable,
-            update_run=update_run,
-            runtime_agent_timeline=runtime_agent_timeline,
-            runtime_agent_run_events=runtime_agent_run_events,
+            get_run=get_run,
+            project_agent_run_failure=project_agent_run_failure,
             redact_error=redact_secrets,
             error_type=AgentRuntimeError,
+            lock=run_start_lock,
         ),
         agent_model_tester=RuntimeAgentModelTester(
             profile_service_factory=profile_service_factory,
@@ -137,8 +142,14 @@ def build_runtime_agent_chat_entrypoint_setup(
             update_run=update_run,
             task_run_links=task_run_links,
             task_events=runtime_task_events,
+            append_run_event=runtime_events.append,
             timeline_factory=runtime_timeline_factory,
             redact_secrets=redact_secrets,
             final_statuses=FINAL_RUN_STATUSES,
+            run_by_client_request_id=getattr(runs, "by_client_request_id", None),
+            client_request_id_from_payload=client_request_id_from_payload,
+            lock=run_start_lock,
+            error_type=AgentRuntimeError,
+            transaction_scope=transaction_scope,
         ),
     )

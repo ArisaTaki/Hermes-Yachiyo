@@ -3,6 +3,7 @@ import type { ChangeEvent } from 'react';
 import { createPortal } from 'react-dom';
 
 import { useConfirmDialog } from '../components/ConfirmDialog';
+import { SettingsDisclosure } from '../components/SettingsDisclosure';
 import {
   apiGet,
   apiPatch,
@@ -43,6 +44,7 @@ type Live2DExpressionItem = { name?: string; file?: string };
 type ModeFieldSpec = {
   key: string;
   sourceKey?: string;
+  advanced?: boolean;
   label: string;
   kind: ModeFieldKind;
   min?: number;
@@ -590,7 +592,7 @@ function ReferenceSettingsHome() {
 
   const updateDescription = updateResult?.checked
     ? (updateResult.update_available ? (updateResult.reason || '发现可用更新') : (updateResult.reason || '当前已是最新版本'))
-    : `Oha Yachiyo v${appVersion}`;
+    : `Oha-Yachiyo v${appVersion}`;
   const avatarEditorModal = avatarEditor ? (
     <AvatarEditorModal
       editor={avatarEditor}
@@ -608,25 +610,17 @@ function ReferenceSettingsHome() {
     <main className="app-shell settings-page">
       <div className="settings-page-header">
         <div className="settings-page-title">设置</div>
-        <div className="settings-page-subtitle">配置 Oha Yachiyo 的各项参数</div>
+        <div className="settings-page-subtitle">管理助手、关于你和常用体验</div>
       </div>
 
-      <SettingsSection title="通用">
-        <SettingsItem label="高级设置" description={settingsLoading ? '正在读取系统偏好...' : `启动${startMinimized ? '最小化' : '显示窗口'} · 托盘${trayEnabled ? '已启用' : '已禁用'} · Bridge 与维护`}>
-          <SettingsActionButton disabled={settingsLoading} loading={settingsLoading} onClick={() => navigateTo('settings', { mode: 'system' })}>
-            {settingsLoading ? '读取中…' : '打开'}
-          </SettingsActionButton>
-        </SettingsItem>
-      </SettingsSection>
-
-      <SettingsSection title="Agent 与 Prompt">
+      <SettingsSection title="助手">
         {assistantLoading ? (
-          <SettingsLoadingRows count={5} />
+          <SettingsLoadingRows count={3} />
         ) : (
           <>
             <SettingsItem
-              label="主 Agent 信息"
-              description="侧边栏、待机状态和对话头像使用这里的资料"
+              label="名称与头像"
+              description="用于侧边栏、桌面待机状态和对话"
               wide
             >
               <div className="settings-profile-grid">
@@ -685,27 +679,42 @@ function ReferenceSettingsHome() {
                 </label>
               </div>
             </SettingsItem>
-            <SettingsItem
-              label="人格 Prompt"
-              description="用于塑造 Agent 的语气、边界与任务优先级"
-              wide
+            <SettingsDisclosure
+              summary="回答风格与行为规则"
+              description="需要精细调整助手语气和边界时再展开"
+              testId="assistant-persona-advanced"
             >
-              <textarea
-                className="settings-textarea settings-persona-textarea"
-                value={assistantDraft.persona_prompt}
-                maxLength={12000}
-                rows={12}
-                placeholder="输入八千代的人格、语气和边界设定"
-                disabled={assistantSaving}
-                onChange={(event) => {
-                  setAssistantDraft((current) => ({ ...current, persona_prompt: event.target.value }));
-                  if (assistantStatus) setAssistantStatus('');
-                }}
-              />
-            </SettingsItem>
+              <SettingsItem
+                label="自定义回答规则"
+                description="高级文本会影响助手的语气、边界与任务优先级"
+                wide
+              >
+                <textarea
+                  className="settings-textarea settings-persona-textarea"
+                  value={assistantDraft.persona_prompt}
+                  maxLength={12000}
+                  rows={12}
+                  placeholder="输入助手的人格、语气和边界设定"
+                  disabled={assistantSaving}
+                  onChange={(event) => {
+                    setAssistantDraft((current) => ({ ...current, persona_prompt: event.target.value }));
+                    if (assistantStatus) setAssistantStatus('');
+                  }}
+                />
+              </SettingsItem>
+            </SettingsDisclosure>
+          </>
+        )}
+      </SettingsSection>
+
+      <SettingsSection title="关于你">
+        {assistantLoading ? (
+          <SettingsLoadingRows count={3} />
+        ) : (
+          <>
             <SettingsItem
-              label="用户资料"
-              description="除头像外会写入 Prompt，影响后续回复"
+              label="称呼与头像"
+              description="让助手知道如何称呼你"
               wide
             >
               <div className="settings-profile-grid">
@@ -762,44 +771,62 @@ function ReferenceSettingsHome() {
                     />
                   </div>
                 </label>
-                <label className="settings-profile-grid-wide">
-                  <span>基本信息</span>
-                  <textarea
-                    className="settings-textarea"
-                    value={assistantDraft.user_profile}
-                    maxLength={2000}
-                    rows={4}
-                    placeholder="例如：职业、常用语言、工作习惯"
-                    disabled={assistantSaving}
-                    onChange={(event) => {
-                      setAssistantDraft((current) => ({ ...current, user_profile: event.target.value }));
-                      if (assistantStatus) setAssistantStatus('');
-                    }}
-                  />
-                </label>
-                <label className="settings-profile-grid-wide">
-                  <span>偏好</span>
-                  <textarea
-                    className="settings-textarea"
-                    value={assistantDraft.user_preferences}
-                    maxLength={2000}
-                    rows={4}
-                    placeholder="例如：回答风格、代码偏好、提醒方式"
-                    disabled={assistantSaving}
-                    onChange={(event) => {
-                      setAssistantDraft((current) => ({ ...current, user_preferences: event.target.value }));
-                      if (assistantStatus) setAssistantStatus('');
-                    }}
-                  />
-                </label>
               </div>
             </SettingsItem>
+            <SettingsDisclosure
+              summary="更多个人信息"
+              description="可选；帮助助手在长期使用中更懂你"
+              testId="user-profile-advanced"
+            >
+              <SettingsItem
+                label="个人背景与偏好"
+                description="这些内容只用于个性化回复"
+                wide
+              >
+                <div className="settings-profile-grid">
+                  <label className="settings-profile-grid-wide">
+                    <span>基本信息</span>
+                    <textarea
+                      className="settings-textarea"
+                      value={assistantDraft.user_profile}
+                      maxLength={2000}
+                      rows={4}
+                      placeholder="例如：职业、常用语言、工作习惯"
+                      disabled={assistantSaving}
+                      onChange={(event) => {
+                        setAssistantDraft((current) => ({ ...current, user_profile: event.target.value }));
+                        if (assistantStatus) setAssistantStatus('');
+                      }}
+                    />
+                  </label>
+                  <label className="settings-profile-grid-wide">
+                    <span>使用偏好</span>
+                    <textarea
+                      className="settings-textarea"
+                      value={assistantDraft.user_preferences}
+                      maxLength={2000}
+                      rows={4}
+                      placeholder="例如：回答风格、代码偏好、提醒方式"
+                      disabled={assistantSaving}
+                      onChange={(event) => {
+                        setAssistantDraft((current) => ({ ...current, user_preferences: event.target.value }));
+                        if (assistantStatus) setAssistantStatus('');
+                      }}
+                    />
+                  </label>
+                </div>
+              </SettingsItem>
+              <SettingsItem
+                label="记忆与资料同步"
+                description={`记忆范围：${assistantProfile?.memory_enabled ? '已启用' : '暂未启用'} · ${assistantProfile?.memory_scope || 'local_chat_history'}`}
+              />
+            </SettingsDisclosure>
             <SettingsItem
-              label="资料同步"
-              description={`记忆范围：${assistantProfile?.memory_enabled ? '已启用' : '暂未启用'} · ${assistantProfile?.memory_scope || 'local_chat_history'}`}
+              label="保存个人化设置"
+              description="名称、头像、关于你的信息和回答风格会一起保存"
             >
               <span className={`status-pill ${/失败|错误/.test(assistantStatus) ? 'warn' : assistantStatus ? 'ok' : 'warn'}`}>
-                {assistantStatus || '读取自 Bridge'}
+                {assistantStatus || '资料只保存在本机'}
               </span>
               <SettingsActionButton
                 loading={assistantSaving}
@@ -812,17 +839,14 @@ function ReferenceSettingsHome() {
         )}
       </SettingsSection>
 
-      <SettingsSection title="模型">
+      <SettingsSection title="AI 服务">
         {modelLoading ? (
-          <SettingsLoadingRows count={3} />
+          <SettingsLoadingRows count={2} />
         ) : (
           <>
-            <SettingsItem label="模型组管理" description="统一保存、测试并复用文本、图片识别和 TTS 模型配置">
-              <SettingsActionButton onClick={() => navigateTo('provider')}>打开新版模型配置</SettingsActionButton>
-            </SettingsItem>
             <SettingsItem
-              label="当前主模型"
-              description={selectedChatProfile ? `${selectedChatProfile.name} · ${selectedChatProfile.model || '未记录模型 ID'}` : `${currentProviderOption?.label || currentProvider || '未读取到模型配置'} · ${apiKeyConfigured ? `密钥已配置${apiKeyDisplay ? `：${apiKeyDisplay}` : ''}` : '密钥未配置'}`}
+              label="日常对话"
+              description={selectedChatProfile ? `${selectedChatProfile.name} · 已连接` : `${currentProviderOption?.label || currentProvider || '尚未选择 AI 服务'} · ${apiKeyConfigured ? `已连接${apiKeyDisplay ? `：${apiKeyDisplay}` : ''}` : '需要连接'}`}
             >
               <select
                 className="settings-select settings-profile-select"
@@ -830,35 +854,47 @@ function ReferenceSettingsHome() {
                 disabled={profileApplying === 'chat'}
                 onChange={(event) => void applyModelProfileDefault('chat', event.target.value)}
               >
-                <option value="">选择已测试主模型</option>
+                <option value="">选择可用的 AI</option>
                 {availableChatProfiles.map((profile) => (
-                  <option key={profile.profile_id} value={profile.profile_id}>{profile.name} · {profile.model}</option>
+                  <option key={profile.profile_id} value={profile.profile_id}>{profile.name}</option>
                 ))}
               </select>
-              <SettingsActionButton onClick={() => navigateTo('provider')}>管理</SettingsActionButton>
+              <SettingsActionButton onClick={() => navigateTo('provider')}>管理 AI 服务</SettingsActionButton>
             </SettingsItem>
-            <SettingsItem
-              label="图片识别模型"
-              description={selectedVisionProfile ? `${selectedVisionProfile.name} · ${selectedVisionProfile.model || '未记录模型 ID'}` : nativeConfig?.vision?.model ? `${nativeConfig.vision.effective_provider || 'vision'} · ${nativeConfig.vision.model}` : '选择已通过多模态测试的 vision Profile'}
+            <SettingsItem label="连接新的 AI 服务" description="添加、测试或更换聊天服务">
+              <SettingsActionButton onClick={() => navigateTo('provider')}>打开连接管理</SettingsActionButton>
+            </SettingsItem>
+            <SettingsDisclosure
+              summary="更多 AI 选项"
+              description="图片识别、任务助手和连接详情"
+              testId="ai-service-advanced"
             >
-              <select
-                className="settings-select settings-profile-select"
-                value={selectedVisionProfileId}
-                disabled={profileApplying === 'vision'}
-                onChange={(event) => void applyModelProfileDefault('vision', event.target.value)}
+              <SettingsItem
+                label="图片识别"
+                description={selectedVisionProfile ? `${selectedVisionProfile.name} · 已连接` : nativeConfig?.vision?.model ? '已使用单独的图片识别服务' : '默认跟随日常对话服务'}
               >
-                <option value="">选择已测试视觉模型</option>
-                {availableVisionProfiles.map((profile) => (
-                  <option key={profile.profile_id} value={profile.profile_id}>{profile.name} · {profile.model}</option>
-                ))}
-              </select>
-              <SettingsActionButton onClick={() => navigateTo('provider')}>管理</SettingsActionButton>
-            </SettingsItem>
-            <SettingsItem label="Agent 模型" description="Agent Studio 只引用已验证的文本与图片识别模型组，不再在每个 Agent 里重复保存 API Key">
-              <SettingsActionButton onClick={() => navigateTo('agents')}>打开 Agent Studio</SettingsActionButton>
-            </SettingsItem>
+                <select
+                  className="settings-select settings-profile-select"
+                  value={selectedVisionProfileId}
+                  disabled={profileApplying === 'vision'}
+                  onChange={(event) => void applyModelProfileDefault('vision', event.target.value)}
+                >
+                  <option value="">跟随默认设置</option>
+                  {availableVisionProfiles.map((profile) => (
+                    <option key={profile.profile_id} value={profile.profile_id}>{profile.name}</option>
+                  ))}
+                </select>
+                <SettingsActionButton onClick={() => navigateTo('provider')}>管理</SettingsActionButton>
+              </SettingsItem>
+              <SettingsItem label="任务助手" description="为不同任务创建专用助手，并复用已经连接的 AI 服务">
+                <SettingsActionButton onClick={() => navigateTo('agents')}>管理任务助手</SettingsActionButton>
+              </SettingsItem>
+              <SettingsItem label="运行与连接详情" description="查看模型、工具和运行状态">
+                <SettingsActionButton onClick={() => navigateTo('provider')}>查看详情</SettingsActionButton>
+              </SettingsItem>
+            </SettingsDisclosure>
             {modelProfileStatus ? (
-              <SettingsItem label="模型同步状态" description={modelProfileStatus}>
+              <SettingsItem label="AI 服务状态" description={modelProfileStatus}>
                 <span className={`status-pill ${/失败|错误|不能为空|不存在/.test(modelProfileStatus) ? 'warn' : 'ok'}`}>
                   {profileApplying ? '同步中' : '完成'}
                 </span>
@@ -866,6 +902,13 @@ function ReferenceSettingsHome() {
             ) : null}
           </>
         )}
+      </SettingsSection>
+
+      <SettingsSection title="权限与隐私">
+        <SettingsItem label="桌面能力" description="管理屏幕读取、应用控制、浏览器和文件能力">
+          <SettingsActionButton onClick={() => navigateTo('tools')}>查看能力与授权</SettingsActionButton>
+        </SettingsItem>
+        <SettingsItem label="本机优先" description="助手资料和连接密钥保存在本机；敏感操作会在执行前请求确认" />
       </SettingsSection>
 
       <SettingsSection title="关于">
@@ -877,11 +920,16 @@ function ReferenceSettingsHome() {
             {updateChecking ? '检查中…' : updateResult?.update_available ? '前往更新' : '检查更新'}
           </SettingsActionButton>
         </SettingsItem>
-        <SettingsItem label="Native Runtime" description="模型、工具与 readiness 状态在模型配置和能力中心查看。">
-          <SettingsActionButton onClick={() => navigateTo('provider')}>打开模型配置</SettingsActionButton>
+        <SettingsItem label="项目主页" description="github.com/kuguya-AI-app-develop/Hermes-Yachiyo">
+          <SettingsActionButton onClick={() => void openExternalUrl('https://github.com/kuguya-AI-app-develop/Hermes-Yachiyo')}>打开</SettingsActionButton>
         </SettingsItem>
-        <SettingsItem label="项目主页" description="github.com/kuguya-AI-app-develop/oha-yachiyo">
-          <SettingsActionButton onClick={() => void openExternalUrl('https://github.com/kuguya-AI-app-develop/oha-yachiyo')}>打开</SettingsActionButton>
+      </SettingsSection>
+
+      <SettingsSection title="高级选项">
+        <SettingsItem label="系统与维护" description={settingsLoading ? '正在读取系统偏好...' : `启动${startMinimized ? '最小化' : '显示窗口'} · 托盘${trayEnabled ? '已启用' : '已禁用'} · 本机服务与维护`}>
+          <SettingsActionButton disabled={settingsLoading} loading={settingsLoading} onClick={() => navigateTo('settings', { mode: 'system' })}>
+            {settingsLoading ? '读取中…' : '打开高级设置'}
+          </SettingsActionButton>
         </SettingsItem>
       </SettingsSection>
 
@@ -1177,14 +1225,32 @@ function SpecificModeSettingsView({ mode }: { mode: string }) {
       </SettingsSection>
 
       <form onSubmit={submitModeSettings} noValidate>
-        {sections.map((section) => (
-          <SettingsSection key={section.title} title={section.title}>
-            {section.note ? <p className="settings-note" style={{ margin: '-8px 20px 12px' }}>{section.note}</p> : null}
-            <div className="settings-form-grid" style={{ padding: '12px 20px 16px' }}>
-              {section.fields.map((field) => renderModeField(field, form, updateField))}
-            </div>
-          </SettingsSection>
-        ))}
+        {sections.map((section, sectionIndex) => {
+          const everydayFields = section.fields.filter((field) => !field.advanced);
+          const advancedFields = section.fields.filter((field) => field.advanced);
+          return (
+            <SettingsSection key={section.title} title={section.title}>
+              {everydayFields.length && section.note ? <p className="settings-note" style={{ margin: '-8px 20px 12px' }}>{section.note}</p> : null}
+              {everydayFields.length ? (
+                <div className="settings-form-grid" style={{ padding: '12px 20px 16px' }}>
+                  {everydayFields.map((field) => renderModeField(field, form, updateField))}
+                </div>
+              ) : null}
+              {advancedFields.length ? (
+                <SettingsDisclosure
+                  summary="精确设置"
+                  description="需要手动调整数值、路径或匹配规则时再展开"
+                  testId={`mode-settings-${mode}-advanced-${sectionIndex}`}
+                >
+                  {!everydayFields.length && section.note ? <p className="settings-note" style={{ margin: '12px 20px 0' }}>{section.note}</p> : null}
+                  <div className="settings-form-grid" style={{ padding: '12px 20px 16px' }}>
+                    {advancedFields.map((field) => renderModeField(field, form, updateField))}
+                  </div>
+                </SettingsDisclosure>
+              ) : null}
+            </SettingsSection>
+          );
+        })}
 
         <div className="settings-savebar">
           <span className={status ? `settings-savebar-message ${statusToneClassName(status)}` : ''}>
@@ -2167,7 +2233,7 @@ function SystemSettingsView() {
         </SettingsSection>
 
         <SettingsSection title="更新">
-          <SettingsItem label="应用更新" description={`Oha Yachiyo v${payload?.app?.version || '0.4.0'} · 下载进度和版本差异在更新页处理`}>
+          <SettingsItem label="应用更新" description={`Oha-Yachiyo v${payload?.app?.version || '0.4.0'} · 下载进度和版本差异在更新页处理`}>
             <SettingsActionButton onClick={() => navigateTo('app-update')}>打开更新页</SettingsActionButton>
           </SettingsItem>
           <SettingsItem label="Native Runtime" description="Oha-Yachiyo 使用内置 Native Runtime，不再更新外部 Native 执行内核。">
@@ -2688,14 +2754,14 @@ const BUBBLE_FIELD_SECTIONS: ModeFieldSection[] = [
     title: '窗口与位置',
     note: '尺寸、默认位置、置顶和头像保存后需要重启当前模式生效；默认位置使用屏幕百分比，100% / 100% 表示右下角。',
     fields: [
-      { key: 'bubble_mode.width', sourceKey: 'width', label: '气泡宽度', kind: 'number', min: 80, max: 192, integer: true },
-      { key: 'bubble_mode.height', sourceKey: 'height', label: '气泡高度', kind: 'number', min: 80, max: 192, integer: true },
-      { key: 'bubble_mode.position_x_percent', sourceKey: 'position_x_percent', label: '默认位置 X', kind: 'percent', min: 0, max: 100, step: '1' },
-      { key: 'bubble_mode.position_y_percent', sourceKey: 'position_y_percent', label: '默认位置 Y', kind: 'percent', min: 0, max: 100, step: '1' },
+      { key: 'bubble_mode.width', sourceKey: 'width', label: '气泡宽度', kind: 'number', min: 80, max: 192, integer: true, advanced: true },
+      { key: 'bubble_mode.height', sourceKey: 'height', label: '气泡高度', kind: 'number', min: 80, max: 192, integer: true, advanced: true },
+      { key: 'bubble_mode.position_x_percent', sourceKey: 'position_x_percent', label: '默认位置 X', kind: 'percent', min: 0, max: 100, step: '1', advanced: true },
+      { key: 'bubble_mode.position_y_percent', sourceKey: 'position_y_percent', label: '默认位置 Y', kind: 'percent', min: 0, max: 100, step: '1', advanced: true },
       { key: 'bubble_mode.always_on_top', sourceKey: 'always_on_top', label: '窗口置顶', kind: 'checkbox', wide: true },
       { key: 'bubble_mode.edge_snap', sourceKey: 'edge_snap', label: '靠边吸附', kind: 'checkbox', wide: true },
-      { key: 'bubble_mode.expanded_on_start', sourceKey: 'expanded_on_start', label: '启动后展开提示', kind: 'checkbox', wide: true },
-      { key: 'bubble_mode.avatar_path', sourceKey: 'avatar_path', label: '头像路径', kind: 'text', wide: true },
+      { key: 'bubble_mode.expanded_on_start', sourceKey: 'expanded_on_start', label: '启动后展开提示', kind: 'checkbox', wide: true, advanced: true },
+      { key: 'bubble_mode.avatar_path', sourceKey: 'avatar_path', label: '头像路径', kind: 'text', wide: true, advanced: true },
     ],
   },
   {
@@ -2712,10 +2778,10 @@ const BUBBLE_FIELD_SECTIONS: ModeFieldSection[] = [
           { value: 'recent_reply', label: '最近回复' },
         ],
       },
-      { key: 'bubble_mode.summary_count', sourceKey: 'summary_count', label: '状态摘要条数', kind: 'number', min: 1, max: 3, integer: true },
+      { key: 'bubble_mode.summary_count', sourceKey: 'summary_count', label: '状态摘要条数', kind: 'number', min: 1, max: 3, integer: true, advanced: true },
       { key: 'bubble_mode.show_unread_dot', sourceKey: 'show_unread_dot', label: '新消息呼吸灯', kind: 'checkbox', wide: true },
       { key: 'bubble_mode.auto_hide', sourceKey: 'auto_hide', label: '空闲自动淡出', kind: 'checkbox', wide: true },
-      { key: 'bubble_mode.opacity', sourceKey: 'opacity', label: '透明度', kind: 'number', min: 0.2, max: 1, step: '0.01' },
+      { key: 'bubble_mode.opacity', sourceKey: 'opacity', label: '透明度', kind: 'number', min: 0.2, max: 1, step: '0.01', advanced: true },
     ],
   },
   {
@@ -2724,8 +2790,8 @@ const BUBBLE_FIELD_SECTIONS: ModeFieldSection[] = [
     fields: [
       { key: 'bubble_mode.proactive_enabled', sourceKey: 'proactive_enabled', label: '启用主动关怀', kind: 'checkbox', wide: true },
       { key: 'bubble_mode.proactive_desktop_watch_enabled', sourceKey: 'proactive_desktop_watch_enabled', label: '启用桌面观察', kind: 'checkbox', wide: true },
-      { key: 'bubble_mode.proactive_interval_seconds', sourceKey: 'proactive_interval_seconds', label: '触发间隔秒', kind: 'number', min: 300, max: 3600, integer: true },
-      { key: 'bubble_mode.proactive_trigger_probability', sourceKey: 'proactive_trigger_probability', label: '触发概率', kind: 'percent', min: 0, max: 100, step: '1' },
+      { key: 'bubble_mode.proactive_interval_seconds', sourceKey: 'proactive_interval_seconds', label: '触发间隔秒', kind: 'number', min: 300, max: 3600, integer: true, advanced: true },
+      { key: 'bubble_mode.proactive_trigger_probability', sourceKey: 'proactive_trigger_probability', label: '触发概率', kind: 'percent', min: 0, max: 100, step: '1', advanced: true },
     ],
   },
 ];
@@ -2735,10 +2801,10 @@ const LIVE2D_FIELD_SECTIONS: ModeFieldSection[] = [
     title: '模型与舞台',
     fields: [
       { key: 'live2d_mode.scale', sourceKey: 'scale', label: '角色缩放', kind: 'number', min: 0.4, max: 2, step: '0.01' },
-      { key: 'live2d_mode.model_name', sourceKey: 'model_name', label: '模型名称', kind: 'text' },
-      { key: 'live2d_mode.model_path', sourceKey: 'model_path', label: '模型路径', kind: 'text', wide: true },
-      { key: 'live2d_mode.width', sourceKey: 'width', label: '窗口宽度', kind: 'number', min: 240, integer: true },
-      { key: 'live2d_mode.height', sourceKey: 'height', label: '窗口高度', kind: 'number', min: 240, integer: true },
+      { key: 'live2d_mode.model_name', sourceKey: 'model_name', label: '模型名称', kind: 'text', advanced: true },
+      { key: 'live2d_mode.model_path', sourceKey: 'model_path', label: '模型路径', kind: 'text', wide: true, advanced: true },
+      { key: 'live2d_mode.width', sourceKey: 'width', label: '窗口宽度', kind: 'number', min: 240, integer: true, advanced: true },
+      { key: 'live2d_mode.height', sourceKey: 'height', label: '窗口高度', kind: 'number', min: 240, integer: true, advanced: true },
       {
         key: 'live2d_mode.position_anchor',
         sourceKey: 'position_anchor',
@@ -2750,8 +2816,8 @@ const LIVE2D_FIELD_SECTIONS: ModeFieldSection[] = [
           { value: 'custom', label: '自定义坐标' },
         ],
       },
-      { key: 'live2d_mode.position_x', sourceKey: 'position_x', label: '水平边距 / X', kind: 'number', integer: true },
-      { key: 'live2d_mode.position_y', sourceKey: 'position_y', label: '底部 / Y', kind: 'number', integer: true },
+      { key: 'live2d_mode.position_x', sourceKey: 'position_x', label: '水平边距 / X', kind: 'number', integer: true, advanced: true },
+      { key: 'live2d_mode.position_y', sourceKey: 'position_y', label: '底部 / Y', kind: 'number', integer: true, advanced: true },
       { key: 'live2d_mode.window_on_top', sourceKey: 'window_on_top', label: '窗口置顶', kind: 'checkbox', wide: true },
       { key: 'live2d_mode.show_on_all_spaces', sourceKey: 'show_on_all_spaces', label: 'macOS 所有桌面可见', kind: 'checkbox', wide: true },
     ],
@@ -2786,7 +2852,7 @@ const LIVE2D_FIELD_SECTIONS: ModeFieldSection[] = [
       { key: 'live2d_mode.enable_quick_input', sourceKey: 'enable_quick_input', label: '显示快捷输入入口', kind: 'checkbox', wide: true },
       { key: 'live2d_mode.auto_open_chat_window', sourceKey: 'auto_open_chat_window', label: '启动时打开主控台对话', kind: 'checkbox', wide: true },
       { key: 'live2d_mode.mouse_follow_enabled', sourceKey: 'mouse_follow_enabled', label: '鼠标跟随', kind: 'checkbox', wide: true },
-      { key: 'live2d_mode.idle_motion_group', sourceKey: 'idle_motion_group', label: '待机动作组', kind: 'text' },
+      { key: 'live2d_mode.idle_motion_group', sourceKey: 'idle_motion_group', label: '待机动作组', kind: 'text', advanced: true },
       { key: 'live2d_mode.enable_expressions', sourceKey: 'enable_expressions', label: '启用表情系统', kind: 'checkbox', wide: true },
       { key: 'live2d_mode.enable_physics', sourceKey: 'enable_physics', label: '启用物理模拟', kind: 'checkbox', wide: true },
     ],
@@ -2807,13 +2873,14 @@ const LIVE2D_FIELD_SECTIONS: ModeFieldSection[] = [
           { value: 'custom', label: '自定义' },
         ],
       },
-      { key: 'live2d_mode.render_fps', sourceKey: 'render_fps', label: '帧率上限', kind: 'number', min: 12, max: 60, integer: true },
-      { key: 'live2d_mode.render_resolution', sourceKey: 'render_resolution', label: '清晰度倍率', kind: 'number', min: 0.5, max: 2, step: '0.05' },
+      { key: 'live2d_mode.render_fps', sourceKey: 'render_fps', label: '帧率上限', kind: 'number', min: 12, max: 60, integer: true, advanced: true },
+      { key: 'live2d_mode.render_resolution', sourceKey: 'render_resolution', label: '清晰度倍率', kind: 'number', min: 0.5, max: 2, step: '0.05', advanced: true },
       {
         key: 'live2d_mode.hit_region_precision',
         sourceKey: 'hit_region_precision',
         label: '透明命中精度',
         kind: 'select',
+        advanced: true,
         options: [
           { value: 'low', label: '低' },
           { value: 'medium', label: '中' },
@@ -2832,6 +2899,7 @@ const LIVE2D_FIELD_SECTIONS: ModeFieldSection[] = [
         label: '回复内容表情规则',
         kind: 'expressionRules',
         wide: true,
+        advanced: true,
       },
     ],
   },
@@ -2841,8 +2909,8 @@ const LIVE2D_FIELD_SECTIONS: ModeFieldSection[] = [
     fields: [
       { key: 'live2d_mode.proactive_enabled', sourceKey: 'proactive_enabled', label: '启用主动关怀', kind: 'checkbox', wide: true },
       { key: 'live2d_mode.proactive_desktop_watch_enabled', sourceKey: 'proactive_desktop_watch_enabled', label: '启用桌面观察', kind: 'checkbox', wide: true },
-      { key: 'live2d_mode.proactive_interval_seconds', sourceKey: 'proactive_interval_seconds', label: '触发间隔秒', kind: 'number', min: 300, max: 3600, integer: true },
-      { key: 'live2d_mode.proactive_trigger_probability', sourceKey: 'proactive_trigger_probability', label: '触发概率', kind: 'percent', min: 0, max: 100, step: '1' },
+      { key: 'live2d_mode.proactive_interval_seconds', sourceKey: 'proactive_interval_seconds', label: '触发间隔秒', kind: 'number', min: 300, max: 3600, integer: true, advanced: true },
+      { key: 'live2d_mode.proactive_trigger_probability', sourceKey: 'proactive_trigger_probability', label: '触发概率', kind: 'percent', min: 0, max: 100, step: '1', advanced: true },
     ],
   },
 ];

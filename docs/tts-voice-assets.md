@@ -8,7 +8,7 @@ Oha-Yachiyo 的八千代 GPT-SoVITS 音色包是可选资源，和应用 DMG 分
 
 请从 GitHub Releases 的独立资源页下载：
 
-- <https://github.com/kuguya-AI-app-develop/oha-yachiyo/releases/tag/tts-assets-yachiyo-gpt-sovits-v4>
+- <https://github.com/kuguya-AI-app-develop/Hermes-Yachiyo/releases/tag/tts-assets-yachiyo-gpt-sovits-v4>
 
 资源文件名：
 

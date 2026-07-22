@@ -294,6 +294,9 @@ def _reminder_body(text: str) -> str:
         r"^(?:帮我|给我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:创建|新建|添加|新增)\s*(?:个|一个|一条|一项|新的?)?\s*"
         r"(?:提醒事项|提醒)\s*[，,、:：]?\s*(?P<body_create_prefixed>[^。！？!?]+)$",
+        r"^(?:帮我|给我|请|麻烦|能帮我|能否|能不能|可以)?(?:直接)?"
+        r"(?:制定|设置|设|定|订)\s*(?:个|一个|一条|一项|新的?)?\s*"
+        r"(?:闹钟|alarm)\s*(?:吗|嘛)?\s*[，,、:：？?]?\s*(?P<body_alarm>[^。！？!?]+)$",
         r"^(?:帮我|给我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?P<body_time_first>[^。！？!?]+?)\s*提醒我\s*(?P<body_time_after>[^。！？!?]+)$",
         r"^(?:帮我|给我|请|麻烦|能否|能不能|可以)?(?:直接)?"
@@ -332,6 +335,8 @@ def _reminder_body(text: str) -> str:
         groups = match.groupdict()
         if groups.get("body_time_first") and groups.get("body_time_after"):
             return _strip_schedule_prefix(f"{groups['body_time_first']} {groups['body_time_after']}")
+        if groups.get("body_alarm"):
+            return _strip_schedule_prefix(groups["body_alarm"])
         if groups.get("body_time_first_plain") and groups.get("body_time_after_plain"):
             return _strip_schedule_prefix(
                 f"{groups['body_time_first_plain']} {groups['body_time_after_plain']}"
@@ -506,9 +511,10 @@ def _strip_schedule_prefix(value: str) -> str:
     title = re.sub(r"^(?:的|这个|该)\s*", "", title)
     title = re.sub(r"^(?:在|于|到时候|的时候|时|要|去|做|进行|参加|记得|提醒我|叫我|让我|通知我)\s*", "", title)
     title = re.sub(r"^(?:to|for|about|that|please)\s+", "", title, flags=re.IGNORECASE)
+    title = re.sub(r"\s*(?:一下|一下子|吧|呀|好吗|可以吗|行吗)\s*$", "", title)
     title = re.sub(r"\s*(?:的时候|时|在|于)$", "", title).strip()
     title = title.strip(" .，,。")
-    if title in {"个", "一个", "一条", "一项", "新的", "我", "提醒", "提醒事项", "日程", "事件"}:
+    if title in {"个", "一个", "一条", "一项", "新的", "我", "提醒", "提醒事项", "日程", "事件", "一下"}:
         return ""
     if title.lower() in {"a", "an", "new", "reminder", "event", "meeting"}:
         return ""

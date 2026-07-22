@@ -22,6 +22,17 @@ from apps.core.build_metadata import development_features_enabled
 class CredentialStoreError(RuntimeError):
     """Raised when a credential cannot be stored or retrieved."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        operation: str = "",
+        os_status: int | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.operation = operation
+        self.os_status = os_status
+
 
 class CredentialStore(Protocol):
     def get(self, ref: str) -> str:
@@ -143,6 +154,7 @@ class KeychainCredentialStore:
     """macOS Keychain-backed credential store using Security.framework."""
 
     _ERR_SEC_SUCCESS = 0
+    _ERR_SEC_AUTH_FAILED = -25293
     _ERR_SEC_ITEM_NOT_FOUND = -25300
     _interaction_lock = threading.RLock()
 
@@ -226,7 +238,18 @@ class KeychainCredentialStore:
                     raise self._status_error("restore interaction policy", status)
 
     def _status_error(self, operation: str, status: int) -> CredentialStoreError:
-        return CredentialStoreError(f"Keychain {operation} failed with OSStatus {status}")
+        if status == self._ERR_SEC_AUTH_FAILED:
+            return CredentialStoreError(
+                "应用更新后无法读取原有钥匙串中的 API Key。"
+                "请在「模型配置」中重新保存 API Key，然后重新测试连接。",
+                operation=operation,
+                os_status=status,
+            )
+        return CredentialStoreError(
+            f"Keychain {operation} failed with OSStatus {status}",
+            operation=operation,
+            os_status=status,
+        )
 
     def _find(self, ref: str) -> tuple[str, ctypes.c_void_p | None]:
         service = self.service_name.encode("utf-8")

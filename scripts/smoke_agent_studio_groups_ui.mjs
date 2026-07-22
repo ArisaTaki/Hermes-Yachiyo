@@ -754,9 +754,7 @@ async function main() {
   ), 'group run detail runtime facts');
   console.log('[electron-smoke] group run detail verified');
   await win.webContents.executeJavaScript(\`
-  Array.from(document.querySelectorAll('.agent-studio-tabs button'))
-    .find((button) => button.textContent.trim() === 'Groups')
-    .click();
+  document.querySelector('[data-testid="agent-studio-tab-groups"]').click();
   \`, true);
   await waitFor(win, () => (
     document.querySelector('[data-testid="agent-studio-groups"]')

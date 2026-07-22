@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from apps.shell import agent_runtime
+from apps.shell.agent.runtime.errors import AgentRuntimeError
 from apps.shell.agent.runtime.run_facade import RUNTIME_UNSET, RuntimeRunFacadeMixin
 from apps.shell.agent_runtime import AgentRuntimeService
 from apps.shell.credential_store import MemoryCredentialStore
@@ -68,5 +71,196 @@ def test_native_runtime_keeps_run_facade_methods_available_after_split(tmp_path:
             first["run_id"],
             second["run_id"],
         ]
+    finally:
+        service.close()
+
+
+def test_native_run_group_terminal_guard_is_idempotent_and_fail_closed(
+    tmp_path: Path,
+) -> None:
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime-terminal-group.db",
+        workspace_dir=tmp_path / "runtime-terminal-group",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    try:
+        group = service._insert_run_group(title="Terminal guard", source="workflow")
+        run = service._insert_run(
+            kind="workflow_run",
+            runnable_id="workflow-terminal-guard",
+            user_goal="guard terminal group",
+            run_group_id=group["run_group_id"],
+        )
+        completed = service._update_run_group(
+            group["run_group_id"],
+            status="completed",
+            summary="winner",
+        )
+        assert completed is not None
+        before_events = service.list_run_events(
+            run["run_id"],
+            include_internal=True,
+        )["events"]
+
+        repeated = service._update_run_group(
+            group["run_group_id"],
+            status="completed",
+            summary="winner",
+        )
+
+        assert repeated == completed
+        assert service.list_run_events(
+            run["run_id"],
+            include_internal=True,
+        )["events"] == before_events
+        for status, summary in (
+            ("completed", "different summary"),
+            ("failed", "winner"),
+            ("running", "winner"),
+        ):
+            with pytest.raises(
+                AgentRuntimeError,
+                match="run_group_terminal_outcome_conflict",
+            ):
+                service._update_run_group(
+                    group["run_group_id"],
+                    status=status,
+                    summary=summary,
+                )
+        assert service.get_run_group(group["run_group_id"]) == completed
+        assert service.list_run_events(
+            run["run_id"],
+            include_internal=True,
+        )["events"] == before_events
+    finally:
+        service.close()
+
+
+@pytest.mark.parametrize(
+    "tampered_payload",
+    [
+        {"group_run_id": "group-forged"},
+        {"status": "failed"},
+        {"summary": "stale summary"},
+        {"child_run_ids": []},
+        {"child_run_ids": ["", "run-extra"]},
+        {"child_run_ids": ["run-duplicated", "run-duplicated"], "participant_count": 2},
+    ],
+)
+def test_native_run_group_terminal_marker_requires_exact_authoritative_payload(
+    tmp_path: Path,
+    tampered_payload: dict[str, object],
+) -> None:
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime-terminal-marker.db",
+        workspace_dir=tmp_path / "runtime-terminal-marker",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    try:
+        group = service._insert_run_group(title="Terminal marker", source="workflow")
+        first = service._insert_run(
+            kind="workflow_run",
+            runnable_id="workflow-terminal-marker",
+            user_goal="record the authoritative terminal marker",
+            run_group_id=group["run_group_id"],
+        )
+        second = service._insert_run(
+            kind="agent_run",
+            runnable_id="agent-terminal-marker",
+            user_goal="record the authoritative terminal marker",
+            run_group_id=group["run_group_id"],
+        )
+        child_run_ids = [first["run_id"], second["run_id"]]
+        canonical_payload = {
+            "child_run_ids": child_run_ids,
+            "group_run_id": group["run_group_id"],
+            "participant_count": 2,
+            "run_group_id": group["run_group_id"],
+            "status": "completed",
+            "summary": "winner",
+        }
+        service.append_run_event(
+            first["run_id"],
+            "group.run.completed",
+            {**canonical_payload, **tampered_payload},
+        )
+
+        service._update_run_group(
+            group["run_group_id"],
+            status="completed",
+            summary="winner",
+        )
+
+        terminal_events = [
+            event
+            for event in service.list_run_events(
+                first["run_id"],
+                include_internal=True,
+            )["events"]
+            if event["event_type"] == "group.run.completed"
+        ]
+        assert len(terminal_events) == 2
+        authoritative = terminal_events[-1]["payload"]
+        assert authoritative["run_group_id"] == group["run_group_id"]
+        assert authoritative["group_run_id"] == group["run_group_id"]
+        assert authoritative["status"] == "completed"
+        assert authoritative["summary"] == "winner"
+        assert authoritative["child_run_ids"] == child_run_ids
+        assert authoritative["participant_count"] == len(child_run_ids)
+    finally:
+        service.close()
+
+
+def test_native_run_group_idempotent_terminal_update_repairs_stale_marker(
+    tmp_path: Path,
+) -> None:
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime-terminal-marker-repair.db",
+        workspace_dir=tmp_path / "runtime-terminal-marker-repair",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    try:
+        group = service._insert_run_group(title="Repair terminal marker", source="workflow")
+        run = service._insert_run(
+            kind="workflow_run",
+            runnable_id="workflow-terminal-marker-repair",
+            user_goal="repair the canonical terminal marker",
+            run_group_id=group["run_group_id"],
+        )
+        service.append_run_event(
+            run["run_id"],
+            "group.run.completed",
+            {
+                "child_run_ids": [run["run_id"]],
+                "group_run_id": group["run_group_id"],
+                "participant_count": 1,
+                "run_group_id": group["run_group_id"],
+                "status": "completed",
+                "summary": "stale summary",
+            },
+        )
+        service._conn.execute(
+            "UPDATE run_groups SET status='completed', summary='winner' "
+            "WHERE run_group_id=?",
+            (group["run_group_id"],),
+        )
+        service._conn.commit()
+
+        service._update_run_group(
+            group["run_group_id"],
+            status="completed",
+            summary="winner",
+        )
+
+        terminal_events = [
+            event
+            for event in service.list_run_events(run["run_id"])["events"]
+            if event["event_type"] == "group.run.completed"
+        ]
+        assert len(terminal_events) == 2
+        assert terminal_events[-1]["payload"]["summary"] == "winner"
     finally:
         service.close()

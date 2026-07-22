@@ -9,6 +9,29 @@ class AgentRuntimeError(RuntimeError):
     """Raised when an Agent Studio operation cannot be completed."""
 
 
+class AgentWorkspaceBoundaryError(AgentRuntimeError):
+    """Raised when a workspace request is rejected by its configured boundary."""
+
+
+class AgentDirectOutcomeUnverified(AgentRuntimeError):
+    """Raised when a direct action ran but its requested outcome is unverified."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        reason: str = "desktop_verification_missing",
+        tool_name: str = "",
+        input_preview: dict[str, Any] | None = None,
+        tool_call_id: str = "",
+    ) -> None:
+        self.reason = str(reason or "desktop_verification_missing").strip()
+        self.tool_name = str(tool_name or "").strip()
+        self.input_preview = dict(input_preview or {})
+        self.tool_call_id = str(tool_call_id or "").strip()
+        super().__init__(message)
+
+
 class AgentApprovalRequired(AgentRuntimeError):  # noqa: N818 - existing runtime API name.
     """Raised internally when a run must pause for user approval."""
 

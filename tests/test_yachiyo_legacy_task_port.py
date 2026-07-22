@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from datetime import date, datetime, timedelta
 from typing import Any
 
 import pytest
 
+from apps.core.chat_session import ChatSession
+from apps.core.chat_store import ChatStore
+from apps.shell.agent_runtime import AgentRuntimeService
 from apps.shell.agent.runtime.errors import AgentRuntimeError
+from apps.shell.credential_store import MemoryCredentialStore
 from apps.shell.agent.runtime.group_runs import start_agent_group_run as start_native_group_run
 from apps.shell.yachiyo_agent.daily_desktop import (
     daily_desktop_allowed_tools,
@@ -37,6 +42,314 @@ from apps.shell.yachiyo_agent.planner_projection import planner_enriched_chat_re
 from apps.shell.yachiyo_agent.runtime_planner import RuntimePlanner
 
 
+def test_legacy_chat_direct_local_policy_preserves_explicit_background_policy() -> None:
+    background_policy = {
+        "mode": "preview_input",
+        "source": "daily_chat",
+        "prefer_background_desktop": True,
+        "avoid_user_foreground_takeover": True,
+    }
+
+    requests = (
+        legacy_ports_module._direct_tool_requests_with_legacy_chat_direct_local_policy(
+            [
+                {
+                    "tool": "app.open",
+                    "input": {"app_name": "PixelForge"},
+                    "desktop_execution_policy": background_policy,
+                }
+            ]
+        )
+    )
+
+    assert requests[0]["desktop_execution_policy"] == background_policy
+
+
+def test_legacy_chat_direct_local_policy_still_marks_unannotated_app_open() -> None:
+    requests = (
+        legacy_ports_module._direct_tool_requests_with_legacy_chat_direct_local_policy(
+            [
+                {
+                    "tool": "app.open",
+                    "input": {"app_name": "PixelForge"},
+                }
+            ]
+        )
+    )
+
+    assert requests[0]["desktop_execution_policy"]["mode"] == "allow"
+    assert (
+        requests[0]["desktop_execution_policy"]["source"]
+        == "legacy_chat_direct_local"
+    )
+
+
+def test_pending_chat_projection_event_omits_raw_attachment_payloads() -> None:
+    class Runtime:
+        def __init__(self) -> None:
+            self.events: list[dict[str, Any]] = []
+
+        @staticmethod
+        def get_task_run_link(task_id: str) -> dict[str, str]:
+            assert task_id == "task-projection-attachment"
+            return {"run_id": "run-projection-attachment"}
+
+        def append_run_event(
+            self,
+            run_id: str,
+            event_type: str,
+            payload: dict[str, Any],
+            *,
+            visibility: str,
+        ) -> None:
+            self.events.append(
+                {
+                    "run_id": run_id,
+                    "event_type": event_type,
+                    "payload": payload,
+                    "visibility": visibility,
+                }
+            )
+
+    class AppRuntime:
+        pass
+
+    runtime = Runtime()
+    starter = LegacyChatTaskStarter(AppRuntime(), runtime)
+    raw_base64 = "raw-image-marker-should-not-persist" * 200_000
+
+    metadata = starter.remember_pending_chat_user_message(
+        {
+            "prompt": "Inspect the attached image",
+            "conversation_id": "chat-projection-attachment",
+            "attachments": [
+                {
+                    "id": "attachment-1",
+                    "name": "private.png",
+                    "mime_type": "image/png",
+                    "data_url": f"data:image/png;base64,{raw_base64}",
+                    "raw_bytes": b"private-image-bytes",
+                }
+            ],
+            "metadata": {
+                "source": "chat",
+                "client_message_id": "projection-attachment-client-1",
+                "api_key": "sk-private-marker-secret123456",
+                "oversized": "x" * 100_000,
+            },
+        },
+        {
+            "task_id": "task-projection-attachment",
+            "conversation_id": "chat-projection-attachment",
+        },
+    )
+
+    event = runtime.events[-1]
+    payload = event["payload"]
+    encoded = json.dumps(payload, ensure_ascii=False)
+    assert metadata["chat_projection_pending"] is True
+    assert event["event_type"] == "chat.user_projection.pending"
+    assert event["visibility"] == "internal"
+    assert payload["attachments"] == []
+    assert payload["attachments_omitted"] is True
+    assert "data:image" not in encoded
+    assert "raw-image-marker-should-not-persist" not in encoded
+    assert "private-image-bytes" not in encoded
+    assert "sk-private-marker-secret123456" not in encoded
+    assert len(encoded.encode("utf-8")) < 64 * 1024
+
+
+def test_chat_projection_marker_is_hidden_from_public_runtime_timeline(tmp_path) -> None:
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime.db",
+        workspace_dir=tmp_path / "agent-runtime",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    task_id = "task-private-chat-projection"
+    session_id = "chat-private-projection"
+    client_message_id = "client-private-projection"
+    run = service.start_main_chat_run(
+        task_id=task_id,
+        session_id=session_id,
+        user_goal="private projection prompt",
+        client_run_id=client_message_id,
+        metadata={"source": "chat", "client_message_id": client_message_id},
+    )
+    starter = LegacyChatTaskStarter(type("AppRuntime", (), {})(), service)
+
+    try:
+        starter.remember_pending_chat_user_message(
+            {
+                "prompt": "private projection prompt",
+                "conversation_id": session_id,
+                "client_message_id": client_message_id,
+                "metadata": {
+                    "source": "chat",
+                    "client_message_id": client_message_id,
+                },
+            },
+            {"task_id": task_id, "conversation_id": session_id},
+        )
+
+        public_event_types = {
+            event["event_type"]
+            for event in service.list_run_events(run["run_id"])["events"]
+        }
+        internal_events = service.list_run_events(
+            run["run_id"],
+            include_internal=True,
+        )["events"]
+
+        assert "chat.user_projection.pending" not in public_event_types
+        marker = next(
+            event
+            for event in internal_events
+            if event["event_type"] == "chat.user_projection.pending"
+        )
+        assert marker["visibility"] == "internal"
+    finally:
+        service.close()
+
+
+@pytest.mark.parametrize(
+    "terminal_event_type",
+    ["chat.user_projection.completed", "chat.user_projection.suppressed"],
+)
+def test_durable_chat_projection_reads_terminal_marker_after_first_event_page(
+    terminal_event_type: str,
+) -> None:
+    task_id = "task-projection-paged"
+    run_id = "run-projection-paged"
+    projection = {
+        "task_id": task_id,
+        "conversation_id": "chat-projection-paged",
+        "client_message_id": "projection-paged-client",
+        "prompt": "must not be repaired again",
+        "metadata": {
+            "source": "chat",
+            "client_message_id": "projection-paged-client",
+        },
+        "attachments": [],
+    }
+    events = [
+        {
+            "sequence": 1,
+            "event_type": "chat.user_projection.pending",
+            "payload": projection,
+        },
+        *[
+            {
+                "sequence": sequence,
+                "event_type": "runtime.noise",
+                "payload": {},
+            }
+            for sequence in range(2, 252)
+        ],
+        {
+            "sequence": 252,
+            "event_type": terminal_event_type,
+            "payload": {
+                "task_id": task_id,
+                "conversation_id": projection["conversation_id"],
+                "client_message_id": projection["client_message_id"],
+            },
+        },
+    ]
+
+    class Runtime:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, Any]] = []
+
+        @staticmethod
+        def get_task_run_link(_task_id: str) -> dict[str, str]:
+            return {"run_id": run_id}
+
+        @staticmethod
+        def get_run(_run_id: str) -> dict[str, Any]:
+            return {
+                "run_id": run_id,
+                "session_id": projection["conversation_id"],
+                "client_request_id": projection["client_message_id"],
+                "run_group_source": "yachiyo_chat",
+                "user_goal": projection["prompt"],
+            }
+
+        def list_run_events(
+            self,
+            requested_run_id: str,
+            *,
+            after_sequence: int,
+            limit: int,
+            include_internal: bool,
+        ) -> dict[str, Any]:
+            assert requested_run_id == run_id
+            assert include_internal is True
+            page = [
+                event
+                for event in events
+                if int(event["sequence"]) > after_sequence
+            ][:limit]
+            next_after_sequence = max(
+                [int(event["sequence"]) for event in page] or [after_sequence]
+            )
+            self.calls.append(
+                {
+                    "after_sequence": after_sequence,
+                    "limit": limit,
+                    "include_internal": include_internal,
+                }
+            )
+            return {
+                "events": page,
+                "next_after_sequence": next_after_sequence,
+                "has_more": any(
+                    int(event["sequence"]) > next_after_sequence
+                    for event in events
+                ),
+            }
+
+    runtime = Runtime()
+    starter = LegacyChatTaskStarter(type("AppRuntime", (), {})(), runtime)
+
+    metadata = starter.pending_chat_user_message_metadata(
+        task_id,
+        {
+            "task_id": task_id,
+            "conversation_id": projection["conversation_id"],
+            "metadata": projection["metadata"],
+            "title": projection["prompt"],
+        },
+    )
+
+    assert metadata == {}
+    assert len(runtime.calls) >= 2
+
+
+def test_legacy_projection_writer_does_not_recreate_deleted_conversation(tmp_path) -> None:
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    current = ChatSession(session_id="current-chat")
+    current.attach_store(store, load_existing=False)
+    deleted = ChatSession(session_id="deleted-projection-chat")
+    deleted.attach_store(store, load_existing=False)
+    store.delete_session(deleted.session_id)
+    starter = LegacyChatTaskStarter(
+        type(
+            "AppRuntime",
+            (),
+            {"chat_session": current, "store": store},
+        )(),
+        object(),
+    )
+
+    try:
+        assert starter._chat_session_for_conversation(deleted.session_id) is None
+        assert store.get_session(deleted.session_id) is None
+        assert store.load_messages(current.session_id, limit=0) == []
+    finally:
+        store.close()
+
+
 def test_desktop_agent_entrypoint_fallback_includes_analysis_tools() -> None:
     allowed_tools = desktop_agent_entrypoint_allowed_tools()
 
@@ -50,7 +363,7 @@ def test_desktop_agent_entrypoint_fallback_includes_analysis_tools() -> None:
     assert len(allowed_tools) == len(set(allowed_tools))
 
 
-def test_main_chat_entrypoint_extends_explicit_runtime_tool_policy() -> None:
+def test_main_chat_entrypoint_respects_explicit_runtime_desktop_tool_policy() -> None:
     class Runtime:
         @staticmethod
         def _main_chat_tool_policy() -> dict[str, Any]:
@@ -59,9 +372,9 @@ def test_main_chat_entrypoint_extends_explicit_runtime_tool_policy() -> None:
     allowed_tools = main_chat_entrypoint_allowed_tools(Runtime())
 
     assert allowed_tools[0] == "workspace.read"
-    assert "desktop.list_apps" in allowed_tools
-    assert "app.open" in allowed_tools
-    assert "media.music_app_open_and_play" in allowed_tools
+    assert "desktop.list_apps" not in allowed_tools
+    assert "app.open" not in allowed_tools
+    assert "media.music_app_open_and_play" not in allowed_tools
     assert "python.run" in allowed_tools
     assert len(allowed_tools) == len(set(allowed_tools))
 
@@ -107,10 +420,9 @@ def test_daily_entrypoint_keeps_discover_operate_verify_direct_execution() -> No
 
     assert [request["tool"] for request in requests] == [
         "media.music_app_open_and_play",
-        "desktop.ui_elements",
     ]
     assert requests[0]["runtime_stage"] == "operate"
-    assert requests[-1]["runtime_stage"] == "verify"
+    assert requests[0]["checkpoint_policy"]["requires_post_action_verification"] is True
 
 
 def test_daily_entrypoint_executes_read_only_active_window_verify() -> None:
@@ -196,7 +508,22 @@ def test_direct_browser_entrypoint_ignores_artifact_followup_for_simple_open() -
             },
         ],
         "打开 GitHub 并读一下页面",
-    ) == []
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://github.com"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.extract_text",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        },
+    ]
     assert direct_browser_entrypoint_requests(
         [
             {
@@ -244,6 +571,43 @@ def test_direct_browser_entrypoint_ignores_artifact_followup_for_simple_open() -
     ]
 
 
+def test_direct_browser_entrypoint_handles_atomic_summary_and_page_screenshot() -> None:
+    atomic = {
+        "tool": "browser.open_url_and_extract_text",
+        "input": {"url": "https://github.com"},
+        "source": "runtime_planner",
+        "planning_reason": "planner_full_plan_web_research",
+        "continue_to_model": True,
+    }
+    screenshot = {
+        "tool": "browser.screenshot",
+        "input": {"reason": "capture current page"},
+        "source": "runtime_planner",
+        "planning_reason": "planner_full_plan_web_research",
+    }
+    artifact = {
+        "tool": "artifact.write",
+        "input": {"path": "research-summary.md"},
+        "source": "runtime_planner",
+        "planning_reason": "planner_full_plan_web_research",
+        "continue_to_model": True,
+    }
+
+    assert direct_browser_entrypoint_requests(
+        [atomic, artifact],
+        "打开 GitHub 并概括内容",
+    ) == [
+        {
+            **{key: value for key, value in atomic.items() if key != "continue_to_model"},
+            "presentation": "summary",
+        }
+    ]
+    assert direct_browser_entrypoint_requests(
+        [screenshot, artifact],
+        "页面截个图",
+    ) == [screenshot]
+
+
 def test_daily_desktop_requests_can_complete_with_trailing_verification_without_model() -> None:
     requests = [
         {
@@ -276,6 +640,31 @@ def test_daily_desktop_requests_can_complete_with_trailing_verification_without_
     ) is False
 
 
+def test_daily_desktop_requests_can_complete_with_deterministic_discovered_click_followup() -> None:
+    request = {
+        "tool": "desktop.list_apps",
+        "input": {"query": "Chrome", "limit": 20},
+        "source": "runtime_planner",
+        "runtime_stage": "discover",
+        "continue_to_model": True,
+        "followup_target": {
+            "kind": "desktop_discovered_app_action",
+            "app_query": "Chrome",
+            "app_name_source": "desktop.list_apps",
+            "target_action": "click",
+            "target": "登录",
+            "role_filter": "button",
+            "limit": 80,
+            "click_count": 1,
+        },
+    }
+
+    assert daily_desktop_requests_can_complete_without_model([request]) is True
+    assert daily_desktop_requests_can_complete_without_model(
+        [{**request, "followup_target": {**request["followup_target"], "target": ""}}]
+    ) is False
+
+
 def _recording_legacy_requests(
     calls: list[dict[str, Any]],
 ) -> Callable[[str, list[str]], list[dict[str, Any]]]:
@@ -305,6 +694,7 @@ def test_legacy_runtime_port_starts_and_links_chat_task() -> None:
     assert create_call[0] == "create_run_for_runnable_async"
     assert create_call[1]["runnable_id"] == "builtin:yachiyo-main"
     assert create_call[1]["user_goal"] == "Patch README"
+    assert create_call[1]["client_run_id"] == "task-1"
     assert create_call[1]["runtime_planner_entrypoint"] is True
     assert create_call[1]["daily_desktop_planning_context"] == "Patch README"
     assert [request["tool"] for request in create_call[1]["direct_tool_requests"]] == [
@@ -312,10 +702,57 @@ def test_legacy_runtime_port_starts_and_links_chat_task() -> None:
         "workspace.read",
     ]
     assert runtime.calls[1:] == [
+        ("get_task_run_link", "task-1"),
         ("link_task_run", {"task_id": "task-1", "run_id": "run-1", "session_id": "chat-1"}),
         ("get_run", "run-1"),
         ("list_run_events", "run-1"),
     ]
+
+
+def test_legacy_runtime_port_does_not_reappend_planner_events_for_idempotent_run() -> None:
+    class _IdempotentRuntime(_FakeRuntime):
+        def __init__(self) -> None:
+            super().__init__()
+            self.start_count = 0
+
+        def create_run_for_runnable_async(self, **payload: Any) -> dict[str, Any]:
+            self.start_count += 1
+            run = super().create_run_for_runnable_async(**payload)
+            return {**run, **({"idempotent": True} if self.start_count > 1 else {})}
+
+        def append_run_event(
+            self,
+            run_id: str,
+            event_type: str,
+            payload: dict[str, Any],
+        ) -> None:
+            self.calls.append(
+                (
+                    "append_run_event",
+                    {"run_id": run_id, "event_type": event_type, "payload": payload},
+                )
+            )
+
+    runtime = _IdempotentRuntime()
+    port = LegacyRuntimePort(runtime)
+    request = {
+        "prompt": "Patch README",
+        "conversation_id": "chat-1",
+        "client_task_id": "task-1",
+        "client_run_id": "planner-idempotent-1",
+    }
+
+    first = port.start_chat_task(request)
+    first_event_count = len(
+        [call for call in runtime.calls if call[0] == "append_run_event"]
+    )
+    retried = port.start_chat_task(request)
+
+    assert retried["run_id"] == first["run_id"] == "run-1"
+    assert first_event_count > 0
+    assert len([call for call in runtime.calls if call[0] == "append_run_event"]) == (
+        first_event_count
+    )
 
 
 def test_legacy_runtime_port_forwards_runtime_execution_plan_to_runnable_run() -> None:
@@ -495,11 +932,10 @@ def test_legacy_runtime_port_appends_media_planner_events() -> None:
     planner_events = [call for call in runtime.calls if call[0] == "append_run_event"]
     planner_event_types = [event[1]["event_type"] for event in planner_events]
     assert task["task_id"] == "task-1"
-    assert planner_event_types[:5] == [
+    assert planner_event_types[:4] == [
         "agent.intent.selected",
         "agent.plan.created",
         "agent.task_core.created",
-        "agent.plan.step",
         "agent.plan.step",
     ]
     assert "agent.task.todo.updated" in planner_event_types
@@ -513,7 +949,6 @@ def test_legacy_runtime_port_appends_media_planner_events() -> None:
     assert "media.playback" in capabilities
     assert [step["tool_name"] for step in plan["tool_plan"]["steps"]] == [
         "media.music_app_open_and_play",
-        "desktop.ui_elements",
     ]
 
 
@@ -851,7 +1286,7 @@ def test_planner_first_direct_selection_owns_screenshot_shortcuts_without_legacy
                 "input": {},
                 "source": "runtime_planner",
                 "planning_reason": "planner_desktop_operation",
-            },
+            }
         ]
 
     assert legacy_calls == []
@@ -1024,7 +1459,7 @@ def test_planner_first_direct_selection_owns_remaining_app_scoped_samples_withou
     cases = (
         (
             "微信关闭窗口",
-            ["desktop.list_apps", "app.focus", "desktop.close_window", "desktop.active_window"],
+            ["app.focus", "desktop.close_window"],
         ),
         (
             "在 VS Code 里执行命令 Format Document",
@@ -1430,7 +1865,11 @@ def test_planner_first_direct_selection_owns_desktop_discovery_without_legacy() 
         {
             "protocol": "json_fallback",
             "tool": "desktop.windows",
-            "input": {"app_name": "Slack"},
+            "input": {
+                "app_name": "Slack",
+                "selection_source": "desktop.list_apps",
+                "query": "Slack",
+            },
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         }
@@ -1619,11 +2058,16 @@ def test_planner_first_direct_selection_owns_app_management_without_legacy() -> 
         assert selection.event_payload["legacy_request_count"] == 0
         assert selection.requests[0]["tool"] == "desktop.list_apps"
         assert selection.requests[0]["input"]["limit"] == 20
+        resolved_tool_input = {
+            **tool_input,
+            "selection_source": "desktop.list_apps",
+            "query": selection.requests[0]["input"]["query"],
+        }
         expected_requests = [
             {
                 "protocol": "json_fallback",
                 "tool": tool_name,
-                "input": tool_input,
+                "input": resolved_tool_input,
                 "source": "runtime_planner",
                 "planning_reason": "planner_desktop_operation",
             },
@@ -1849,6 +2293,16 @@ def test_planner_first_direct_selection_owns_search_submit_and_spotlight_without
 
         assert selection.selected_source == "runtime_planner"
         assert selection.event_payload["legacy_request_count"] == 0
+        for request in selection.requests:
+            if request["tool"] == "desktop.search_submit":
+                assert request.pop("requires_post_action_verification") is False
+                assert request.pop("observation_retry") == {}
+                assert request.pop("replan_triggers") == []
+                continue
+            if request["tool"] == "desktop.safe_shortcut":
+                assert "requires_post_action_verification" not in request
+                assert "observation_retry" not in request
+                assert "replan_triggers" not in request
         assert selection.requests == expected_requests
     assert legacy_calls == []
 
@@ -1921,6 +2375,12 @@ def test_planner_first_direct_selection_owns_copy_and_app_hotkeys_without_legacy
 
         assert selection.selected_source == "runtime_planner"
         assert selection.event_payload["legacy_request_count"] == 0
+        for request in selection.requests:
+            if request["tool"] != "desktop.safe_shortcut":
+                continue
+            assert request.pop("requires_post_action_verification") is True
+            assert "observation_retry" not in request
+            assert "replan_triggers" not in request
         assert selection.requests == expected_requests
     assert legacy_calls == []
 
@@ -2066,6 +2526,23 @@ def test_planner_first_direct_selection_owns_foreground_shortcuts_before_legacy(
         ["desktop.list_apps", "app.focus_and_safe_shortcut", "desktop.safe_shortcut"],
         legacy_tool_requests=legacy_requests,
     )
+
+    for selection in (
+        open_shortcut_selection,
+        window_selection,
+        app_switch_selection,
+        browser_back_selection,
+        paste_selection,
+    ):
+        for request in selection.requests:
+            if request["tool"] != "desktop.safe_shortcut":
+                continue
+            if request["input"]["action"] in {"copy", "paste"}:
+                assert request.pop("requires_post_action_verification") is True
+            else:
+                assert "requires_post_action_verification" not in request
+            assert "observation_retry" not in request
+            assert "replan_triggers" not in request
 
     assert open_shortcut_selection.selected_source == "runtime_planner"
     assert open_shortcut_selection.event_payload["legacy_request_count"] == 0
@@ -2224,12 +2701,155 @@ def test_legacy_chat_task_starter_records_runtime_planner_metadata_and_events() 
     model_loop_call = [
         call for call in runtime.calls if call[0] == "execute_main_chat_model_loop"
     ][0]
+    start_call = [call for call in runtime.calls if call[0] == "start_main_chat_run"][0]
+    assert start_call[1]["client_run_id"] == "task-main"
     assert model_loop_call[1]["direct_tool_request"] is None
     assert [request["tool"] for request in model_loop_call[1]["direct_tool_requests"]] == [
         "desktop.list_apps",
         "app.open",
         "desktop.verify",
     ]
+
+
+def test_legacy_chat_task_starter_reuses_idempotent_chat_task_without_reexecution(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app_runtime = _FakeAppRuntime()
+    runtime = _MainChatPlannerEventRuntime()
+    chat_calls = 0
+
+    class _FakeChatAPI:
+        def __init__(self, _runtime: Any) -> None:
+            pass
+
+        def send_runnable_message_in_session(
+            self,
+            session_id: str,
+            _text: str,
+            **_kwargs: Any,
+        ) -> dict[str, Any]:
+            nonlocal chat_calls
+            chat_calls += 1
+            return {
+                "ok": True,
+                "task_id": "task-idempotent",
+                "session_id": session_id,
+                "status": "pending",
+                **({"idempotent": True} if chat_calls > 1 else {}),
+            }
+
+    monkeypatch.setattr(legacy_ports_module, "ChatAPI", _FakeChatAPI)
+    starter = LegacyChatTaskStarter(app_runtime, runtime)
+    request = {
+        "prompt": "打开 PixelForge",
+        "conversation_id": "chat-1",
+        "metadata": {"client_message_id": "replan-client-1"},
+        "direct_tool_requests": [
+            {
+                "tool": "app.open",
+                "input": {"app_name": "PixelForge"},
+                "approval_required": False,
+            }
+        ],
+    }
+
+    first = starter.start_chat_task(request)
+    retried = starter.start_chat_task(request)
+
+    assert first is not None
+    assert retried is not None
+    assert retried["task_id"] == first["task_id"] == "task-idempotent"
+    assert chat_calls == 2
+    assert len([call for call in runtime.calls if call[0] == "start_main_chat_run"]) == 1
+    assert len(
+        [call for call in runtime.calls if call[0] == "execute_main_chat_model_loop"]
+    ) == 1
+
+
+def test_legacy_chat_task_starter_reuses_claimed_main_run_after_chat_race(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app_runtime = _FakeAppRuntime()
+    chat_calls = 0
+    chat_client_ids: list[str] = []
+
+    class _ClaimingRuntime(_MainChatPlannerEventRuntime):
+        def __init__(self) -> None:
+            super().__init__()
+            self.claims: dict[str, dict[str, Any]] = {}
+
+        def start_main_chat_run(
+            self,
+            *,
+            task_id: str,
+            session_id: str,
+            user_goal: str,
+            client_run_id: str = "",
+            **kwargs: Any,
+        ) -> dict[str, Any]:
+            existing = self.claims.get(client_run_id) if client_run_id else None
+            if existing is not None:
+                return {**existing, "idempotent": True}
+            run = super().start_main_chat_run(
+                task_id=task_id,
+                session_id=session_id,
+                user_goal=user_goal,
+                **kwargs,
+            )
+            if client_run_id:
+                self.claims[client_run_id] = dict(run)
+            return run
+
+    class _RacingChatAPI:
+        def __init__(self, _runtime: Any) -> None:
+            pass
+
+        def send_runnable_message_in_session(
+            self,
+            session_id: str,
+            _text: str,
+            **_kwargs: Any,
+        ) -> dict[str, Any]:
+            nonlocal chat_calls
+            chat_calls += 1
+            chat_client_ids.append(str(_kwargs.get("client_message_id") or ""))
+            return {
+                "ok": True,
+                "task_id": f"task-race-{chat_calls}",
+                "session_id": session_id,
+                "status": "pending",
+            }
+
+    monkeypatch.setattr(legacy_ports_module, "ChatAPI", _RacingChatAPI)
+    runtime = _ClaimingRuntime()
+    starter = LegacyChatTaskStarter(app_runtime, runtime)
+    request = {
+        "prompt": "打开 PixelForge",
+        "conversation_id": "chat-1",
+        "client_run_id": "replan-main-client-1",
+        "direct_tool_requests": [
+            {
+                "tool": "app.open",
+                "input": {"app_name": "PixelForge"},
+                "approval_required": False,
+            }
+        ],
+    }
+
+    first = starter.start_chat_task(request)
+    retried = starter.start_chat_task({**request, "conversation_id": "chat-loser"})
+
+    assert first is not None
+    assert retried is not None
+    assert first["run_id"] == retried["run_id"] == "run-main"
+    assert retried["task_id"] == first["task_id"] == "task-race-1"
+    assert retried["session_id"] == first["session_id"] == "chat-1"
+    assert retried["conversation_id"] == first["conversation_id"] == "chat-1"
+    assert chat_client_ids == ["replan-main-client-1", "replan-main-client-1"]
+    assert list(runtime.claims) == ["replan-main-client-1"]
+    assert len(
+        [call for call in runtime.calls if call[0] == "execute_main_chat_model_loop"]
+    ) == 1
 
 
 def test_legacy_chat_task_starter_uses_runtime_execution_envelope_requests() -> None:
@@ -2278,9 +2898,7 @@ def test_legacy_chat_task_starter_uses_runtime_execution_envelope_requests() -> 
         "runtime-plan-test:request:1:desktop.inspect_app"
     )
     assert start_request["tool_name"] == "desktop.inspect_app"
-    assert start_request["desktop_execution_policy"]["source"] == (
-        "legacy_chat_direct_local"
-    )
+    assert "desktop_execution_policy" not in start_request
     model_loop_call = [
         call for call in runtime.calls if call[0] == "execute_main_chat_model_loop"
     ][0]
@@ -2329,7 +2947,7 @@ def test_legacy_chat_task_starter_does_not_override_runtime_planner_selection(
         call for call in runtime.calls if call[0] == "execute_main_chat_model_loop"
     ][0]
     direct_requests = model_loop_call[1]["direct_tool_requests"]
-    assert [request["tool"] for request in direct_requests] == ["notes.create"]
+    assert [request["tool"] for request in direct_requests] == ["artifact.write"]
     assert direct_requests[0]["source"] == "runtime_planner"
 
 
@@ -2471,6 +3089,215 @@ def test_legacy_chat_task_starter_prefers_top_level_runtime_execution_envelope()
     assert direct_requests[0]["planning_reason"] == "planner_full_plan_desktop_operation"
 
 
+@pytest.mark.parametrize(
+    ("runtime_execution_envelope", "metadata_runtime_envelope"),
+    [
+        ({"envelope_id": "empty-top-level", "requests": []}, None),
+        (None, {"envelope_id": "empty-metadata-runtime", "requests": []}),
+    ],
+)
+def test_legacy_chat_task_starter_skips_empty_runtime_envelopes_before_request_bearing_yachiyo(
+    monkeypatch: pytest.MonkeyPatch,
+    runtime_execution_envelope: dict[str, Any] | None,
+    metadata_runtime_envelope: dict[str, Any] | None,
+) -> None:
+    from apps.shell.yachiyo_agent import legacy_ports
+
+    monkeypatch.setattr(
+        legacy_ports,
+        "planner_first_direct_tool_selection",
+        lambda *_args, **_kwargs: DirectToolSelection(
+            decision=None,
+            requests=[],
+            event_payload={
+                "selection_source": "none",
+                "selected_tools": [],
+                "selected_reason": "no_direct_entrypoint_plan",
+            },
+            selected_source="none",
+        ),
+    )
+    yachiyo_envelope = {
+        "envelope_id": "request-bearing-yachiyo",
+        "requests": [
+            {
+                "request_id": "open-pixelforge",
+                "step_id": "open-or-focus-app",
+                "tool_name": "app.open",
+                "input": {"app_name": "PixelForge"},
+                "status": "planned",
+            }
+        ],
+    }
+    metadata: dict[str, Any] = {
+        "yachiyo_execution_envelope": yachiyo_envelope,
+    }
+    if metadata_runtime_envelope is not None:
+        metadata["runtime_execution_envelope"] = metadata_runtime_envelope
+    runtime = _MainChatPlannerEventRuntime()
+    starter = LegacyChatTaskStarter(_FakeAppRuntime(), runtime)
+
+    task = starter.execute_existing_main_chat_task(
+        task_id="task-request-bearing-yachiyo",
+        conversation_id="chat-1",
+        prompt="打开 PixelForge",
+        metadata=metadata,
+        runtime_execution_envelope=runtime_execution_envelope,
+    )
+
+    assert task is not None
+    start_call = next(call for call in runtime.calls if call[0] == "start_main_chat_run")
+    model_loop_call = next(
+        call for call in runtime.calls if call[0] == "execute_main_chat_model_loop"
+    )
+    assert start_call[1]["runtime_execution_envelope"] == yachiyo_envelope
+    assert model_loop_call[1]["runtime_execution_envelope"] == yachiyo_envelope
+    assert [
+        request["tool"] for request in model_loop_call[1]["direct_tool_requests"]
+    ] == ["app.open"]
+
+
+def test_legacy_chat_task_starter_keeps_blocked_envelope_authoritative() -> None:
+    app_runtime = _FakeAppRuntime()
+    runtime = _MainChatPlannerEventRuntime()
+    starter = LegacyChatTaskStarter(app_runtime, runtime)
+    blocked_envelope = {
+        "envelope_id": "blocked-authoritative-envelope",
+        "requests": [
+            {
+                "request_id": "blocked-open-notes",
+                "step_id": "open-notes",
+                "tool_name": "app.open",
+                "input": {"app_name": "Notes"},
+                "status": "planned",
+                "desktop_execution_policy": {
+                    "mode": "background",
+                    "prefer_background_desktop": True,
+                    "source": "runtime_planner",
+                },
+                "desktop_execution_route": {
+                    "status": "real_virtual_desktop_provider_required",
+                    "can_execute": False,
+                    "blocking_conditions": [
+                        "real_virtual_desktop_provider_required"
+                    ],
+                },
+            }
+        ],
+    }
+    metadata = {
+        "yachiyo_execution_envelope": {
+            "envelope_id": "stale-executable-envelope",
+            "requests": [
+                {
+                    "request_id": "stale-open-slack",
+                    "tool_name": "app.open",
+                    "input": {"app_name": "Slack"},
+                    "status": "planned",
+                }
+            ],
+        }
+    }
+
+    task = starter.execute_existing_main_chat_task(
+        task_id="task-blocked-authoritative-envelope",
+        conversation_id="chat-1",
+        prompt="打开 Notes",
+        metadata=metadata,
+        runtime_execution_envelope=blocked_envelope,
+        direct_tool_request={
+            "tool": "app.open",
+            "input": {"app_name": "WeChat"},
+        },
+        direct_tool_requests=[
+            {
+                "tool": "app.open",
+                "input": {"app_name": "Google Chrome"},
+            }
+        ],
+    )
+
+    assert task is not None
+    model_loop_call = next(
+        call for call in runtime.calls if call[0] == "execute_main_chat_model_loop"
+    )
+    assert model_loop_call[1]["direct_tool_request"] is None
+    assert model_loop_call[1]["direct_tool_requests"] == []
+    effective_envelope = model_loop_call[1]["runtime_execution_envelope"]
+    request = effective_envelope["requests"][0]
+    assert request["desktop_execution_route"]["can_execute"] is False
+    assert request["desktop_execution_policy"]["prefer_background_desktop"] is True
+    assert request["desktop_execution_policy"]["source"] == "runtime_planner"
+    assert request["input"]["app_name"] == "Notes"
+
+
+def test_legacy_chat_task_starter_starts_request_bearing_blocked_envelope_without_selected_requests(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from apps.shell.yachiyo_agent import legacy_ports
+
+    monkeypatch.setattr(
+        legacy_ports,
+        "planner_first_direct_tool_selection",
+        lambda *_args, **_kwargs: DirectToolSelection(
+            decision=None,
+            requests=[],
+            event_payload={
+                "selection_source": "none",
+                "selected_tools": [],
+                "selected_reason": "no_direct_entrypoint_plan",
+            },
+            selected_source="none",
+        ),
+    )
+    blocked_envelope = {
+        "envelope_id": "blocked-without-selected-requests",
+        "requests": [
+            {
+                "request_id": "blocked-open-notes",
+                "step_id": "open-notes",
+                "tool_name": "app.open",
+                "input": {"app_name": "Notes"},
+                "status": "planned",
+                "desktop_execution_policy": {
+                    "mode": "background",
+                    "prefer_background_desktop": True,
+                    "source": "runtime_planner",
+                },
+                "desktop_execution_route": {
+                    "status": "real_virtual_desktop_provider_required",
+                    "can_execute": False,
+                    "blocking_conditions": [
+                        "real_virtual_desktop_provider_required"
+                    ],
+                },
+            }
+        ],
+    }
+    runtime = _MainChatPlannerEventRuntime()
+    starter = LegacyChatTaskStarter(_FakeAppRuntime(), runtime)
+
+    task = starter.execute_existing_main_chat_task(
+        task_id="task-blocked-without-selected-requests",
+        conversation_id="chat-1",
+        prompt="打开 Notes",
+        metadata={},
+        runtime_execution_envelope=blocked_envelope,
+    )
+
+    assert task is not None
+    start_call = next(call for call in runtime.calls if call[0] == "start_main_chat_run")
+    model_loop_call = next(
+        call for call in runtime.calls if call[0] == "execute_main_chat_model_loop"
+    )
+    assert start_call[1]["direct_tool_request"] is None
+    assert start_call[1]["direct_tool_requests"] is None
+    assert start_call[1]["runtime_execution_envelope"] == blocked_envelope
+    assert model_loop_call[1]["direct_tool_request"] is None
+    assert model_loop_call[1]["direct_tool_requests"] == []
+    assert model_loop_call[1]["runtime_execution_envelope"] == blocked_envelope
+
+
 def test_legacy_chat_task_starter_appends_runtime_tool_progress_events() -> None:
     app_runtime = _FakeAppRuntime()
     runtime = _MainChatToolProgressRuntime()
@@ -2478,7 +3305,14 @@ def test_legacy_chat_task_starter_appends_runtime_tool_progress_events() -> None
     request = planner_enriched_chat_request(
         {
             "prompt": "打开 PixelForge",
-            "metadata": {"source": "launcher", "launcher_mode": "bubble"},
+            # This progress-only harness has no background provider. Explicitly
+            # authorize its local fake instead of relying on an implicit daily
+            # foreground fallback that production Chat intentionally forbids.
+            "metadata": {
+                "source": "launcher",
+                "launcher_mode": "bubble",
+                "allow_user_foreground_takeover": True,
+            },
         }
     )
 
@@ -2619,11 +3453,7 @@ def test_legacy_chat_task_starter_does_not_direct_run_approval_required_envelope
         call for call in runtime.calls if call[0] == "execute_main_chat_model_loop"
     ][0]
     direct_requests = model_loop_call[1]["direct_tool_requests"]
-    assert [request["tool"] for request in direct_requests] == [
-        "desktop.list_apps",
-        "app.open",
-        "desktop.verify",
-    ]
+    assert direct_requests == []
     assert all(request["tool"] != "terminal.run" for request in direct_requests)
     assert all(request.get("approval_required") is not True for request in direct_requests)
 
@@ -2686,7 +3516,13 @@ def test_legacy_chat_task_starter_appends_replan_for_failed_runtime_tool_result(
     request = planner_enriched_chat_request(
         {
             "prompt": "打开 PixelForge",
-            "metadata": {"source": "launcher", "launcher_mode": "bubble"},
+            # Keep this failure-projection test on its local fake through an
+            # explicit grant; normal daily Chat must retain background routing.
+            "metadata": {
+                "source": "launcher",
+                "launcher_mode": "bubble",
+                "allow_user_foreground_takeover": True,
+            },
         }
     )
 
@@ -2720,6 +3556,562 @@ def test_legacy_chat_task_starter_appends_replan_for_failed_runtime_tool_result(
     assert replans[-1]["payload"]["trigger"] == "tool_failure"
 
 
+def test_legacy_chat_task_starter_fails_blocked_desktop_outcome_instead_of_completing() -> None:
+    class _BlockedDesktopRuntime(_MainChatPlannerEventRuntime):
+        def execute_main_chat_model_loop(
+            self,
+            run_id: str,
+            messages: list[dict[str, Any]],
+            **kwargs: Any,
+        ) -> dict[str, Any]:
+            self.calls.append(
+                (
+                    "execute_main_chat_model_loop",
+                    {"run_id": run_id, "messages": messages, **kwargs},
+                )
+            )
+            return {
+                "run_id": run_id,
+                "status": "running",
+                "result": (
+                    "当前没有可用的真实隔离桌面 Provider，"
+                    "Runtime 已保留执行计划但没有执行。"
+                ),
+                "timeline": [
+                    {
+                        "event_type": "agent.desktop.intent_unavailable",
+                        "tool": "app.open",
+                        "status": "blocked",
+                        "source": "runtime_execution_envelope",
+                        "reason": "runtime_execution_not_ready",
+                        "blocked_by": "real_virtual_desktop_provider_required",
+                    }
+                ],
+            }
+
+        def fail_main_chat_run(self, run_id: str, error: Any) -> dict[str, Any]:
+            self.calls.append(
+                ("fail_main_chat_run", {"run_id": run_id, "error": str(error)})
+            )
+            return {
+                "run_id": run_id,
+                "status": "failed",
+                "result": str(error),
+            }
+
+    app_runtime = _FakeAppRuntime()
+    runtime = _BlockedDesktopRuntime()
+    starter = LegacyChatTaskStarter(app_runtime, runtime)
+
+    task = starter.execute_existing_main_chat_task(
+        task_id="task-provider-blocked",
+        conversation_id="chat-1",
+        prompt="打开 PixelForge",
+        metadata={"allow_user_foreground_takeover": True},
+    )
+
+    assert task is not None
+    assert task["status"] == "failed"
+    assert not any(call[0] == "complete_main_chat_run" for call in runtime.calls)
+    failure = next(call for call in runtime.calls if call[0] == "fail_main_chat_run")
+    assert "桌面操作未完成" in failure[1]["error"]
+    assert app_runtime.state.status_calls[-1]["status"].value == "failed"
+    assistant = app_runtime.chat_session.assistant_messages[-1]
+    assert assistant["status"].value == "failed"
+    assert assistant["error"] == failure[1]["error"]
+
+
+@pytest.mark.parametrize("provider_readiness_status", ["installed_not_checked", "unknown"])
+def test_legacy_chat_task_starter_keeps_soft_provider_readiness_non_terminal(
+    provider_readiness_status: str,
+) -> None:
+    class _SoftProviderReadinessRuntime(_MainChatPlannerEventRuntime):
+        def execute_main_chat_model_loop(
+            self,
+            run_id: str,
+            messages: list[dict[str, Any]],
+            **kwargs: Any,
+        ) -> dict[str, Any]:
+            self.calls.append(
+                (
+                    "execute_main_chat_model_loop",
+                    {"run_id": run_id, "messages": messages, **kwargs},
+                )
+            )
+            return {
+                "run_id": run_id,
+                "status": "running",
+                "result": "后台 Provider 已安装，但当前尚未完成就绪检查。",
+                "timeline": [
+                    {
+                        "event_type": "agent.desktop.intent_unavailable",
+                        "tool": "app.open",
+                        "status": "blocked",
+                        "source": "runtime_execution_envelope",
+                        "reason": "runtime_execution_not_ready",
+                        "blocked_by": provider_readiness_status,
+                        "blocked_summary": (
+                            "后台 Provider 已安装，但当前尚未完成就绪检查；"
+                            "还没有真正执行桌面操作。"
+                        ),
+                    }
+                ],
+            }
+
+        def fail_main_chat_run(self, run_id: str, error: Any) -> dict[str, Any]:
+            self.calls.append(
+                ("fail_main_chat_run", {"run_id": run_id, "error": str(error)})
+            )
+            return {"run_id": run_id, "status": "failed", "result": str(error)}
+
+    app_runtime = _FakeAppRuntime()
+    runtime = _SoftProviderReadinessRuntime()
+    starter = LegacyChatTaskStarter(app_runtime, runtime)
+
+    task = starter.execute_existing_main_chat_task(
+        task_id=f"task-provider-readiness-{provider_readiness_status}",
+        conversation_id="chat-1",
+        prompt="打开 Notes",
+        runtime_execution_envelope={
+            "envelope_id": f"soft-provider-readiness-{provider_readiness_status}",
+            "requests": [
+                {
+                    "request_id": "request-open-notes",
+                    "tool_name": "app.open",
+                    "input": {"app_name": "Notes"},
+                    "status": "planned",
+                    "desktop_execution_route": {
+                        "status": provider_readiness_status,
+                        "can_execute": False,
+                        "blocking_conditions": [provider_readiness_status],
+                    },
+                }
+            ],
+        },
+    )
+
+    assert task is not None
+    assert task["status"] == "running"
+    assert any(call[0] == "execute_main_chat_model_loop" for call in runtime.calls)
+    assert not any(call[0] == "fail_main_chat_run" for call in runtime.calls)
+    assistant_messages = app_runtime.chat_session.assistant_messages
+    assert not assistant_messages or assistant_messages[-1]["status"].value != "failed"
+
+
+def test_legacy_daily_main_chat_bridge_preserves_awaiting_user_clarification() -> None:
+    question = "是否允许将 Notes 切换到前台？"
+
+    class _AwaitingUserRuntime(_MainChatPlannerEventRuntime):
+        def execute_main_chat_model_loop(
+            self,
+            run_id: str,
+            messages: list[dict[str, Any]],
+            **kwargs: Any,
+        ) -> dict[str, Any]:
+            self.calls.append(
+                (
+                    "execute_main_chat_model_loop",
+                    {"run_id": run_id, "messages": messages, **kwargs},
+                )
+            )
+            return {
+                "run_id": run_id,
+                "status": "awaiting_user",
+                "result": question,
+                "timeline": [],
+            }
+
+        def fail_main_chat_run(self, run_id: str, error: Any) -> dict[str, Any]:
+            self.calls.append(
+                ("fail_main_chat_run", {"run_id": run_id, "error": str(error)})
+            )
+            return {"run_id": run_id, "status": "failed", "result": str(error)}
+
+    app_runtime = _FakeAppRuntime()
+    runtime = _AwaitingUserRuntime()
+    starter = LegacyChatTaskStarter(app_runtime, runtime)
+
+    task = starter.execute_existing_main_chat_task(
+        task_id="task-awaiting-user-daily",
+        conversation_id="chat-1",
+        prompt="打开 Notes",
+    )
+
+    assert task is not None
+    assert task["status"] == "awaiting_user"
+    assert task["result"] == question
+    assert not any(
+        call[0] in {"complete_main_chat_run", "fail_main_chat_run"}
+        for call in runtime.calls
+    )
+    assert [call["status"].value for call in app_runtime.state.status_calls] == [
+        "running"
+    ]
+    assistant = app_runtime.chat_session.assistant_messages[-1]
+    assert assistant["content"] == question
+    assert assistant["status"].value == "processing"
+    assert assistant["error"] is None
+    assert assistant["metadata"]["run_status"] == "awaiting_user"
+
+
+def test_runtime_managed_main_chat_bridge_preserves_awaiting_user_clarification() -> None:
+    question = "请问要操作哪个目录？"
+
+    class _AwaitingUserRuntime(_MainChatPlannerEventRuntime):
+        def execute_main_chat_model_loop(
+            self,
+            run_id: str,
+            messages: list[dict[str, Any]],
+            **kwargs: Any,
+        ) -> dict[str, Any]:
+            self.calls.append(
+                (
+                    "execute_main_chat_model_loop",
+                    {"run_id": run_id, "messages": messages, **kwargs},
+                )
+            )
+            return {
+                "run_id": run_id,
+                "status": "awaiting_user",
+                "result": question,
+                "timeline": [],
+            }
+
+        def fail_main_chat_run(self, run_id: str, error: Any) -> dict[str, Any]:
+            self.calls.append(
+                ("fail_main_chat_run", {"run_id": run_id, "error": str(error)})
+            )
+            return {"run_id": run_id, "status": "failed", "result": str(error)}
+
+    app_runtime = _FakeAppRuntime()
+    runtime = _AwaitingUserRuntime()
+    starter = LegacyChatTaskStarter(app_runtime, runtime)
+
+    task = starter._execute_runtime_managed_main_chat_direct_requests(
+        task_id="task-awaiting-user-runtime-managed",
+        conversation_id="chat-1",
+        prompt="帮我处理一下",
+        direct_tool_request={
+            "tool": "desktop.list_apps",
+            "input": {"query": ""},
+        },
+    )
+
+    assert task is not None
+    assert task["status"] == "awaiting_user"
+    assert task["result"] == question
+    assert not any(
+        call[0] in {"complete_main_chat_run", "fail_main_chat_run"}
+        for call in runtime.calls
+    )
+    assert [call["status"].value for call in app_runtime.state.status_calls] == [
+        "running"
+    ]
+    assistant = app_runtime.chat_session.assistant_messages[-1]
+    assert assistant["content"] == question
+    assert assistant["status"].value == "processing"
+    assert assistant["error"] is None
+    assert assistant["metadata"]["run_status"] == "awaiting_user"
+
+
+def test_legacy_chat_task_starter_fails_closed_when_auto_replan_has_no_server_owner() -> None:
+    class _AutoReplanRuntime(_MainChatPlannerEventRuntime):
+        def execute_main_chat_model_loop(
+            self,
+            run_id: str,
+            messages: list[dict[str, Any]],
+            **kwargs: Any,
+        ) -> dict[str, Any]:
+            self.calls.append(
+                (
+                    "execute_main_chat_model_loop",
+                    {"run_id": run_id, "messages": messages, **kwargs},
+                )
+            )
+            return {
+                "run_id": run_id,
+                "status": "running",
+                "result": "桌面验证失败，已安排自动重试。",
+                "timeline": [
+                    {
+                        "event_type": "agent.desktop.intent_unavailable",
+                        "tool": "desktop.active_window",
+                        "status": "blocked",
+                        "reason": "foreground_focus_unverified",
+                    },
+                    {
+                        "event_type": "agent.replan.requested",
+                        "payload": {
+                            "status": "requested",
+                            "trigger": "verification_failed",
+                            "metadata": {
+                                "recovery_actions": [
+                                    {
+                                        "tool": "desktop.active_window",
+                                        "metadata": {
+                                            "runtime_replan_auto_start_eligible": True,
+                                            "runtime_replan_auto_start_blockers": [],
+                                        },
+                                    }
+                                ]
+                            },
+                        },
+                    },
+                ],
+            }
+
+        def fail_main_chat_run(self, run_id: str, error: Any) -> dict[str, Any]:
+            self.calls.append(
+                ("fail_main_chat_run", {"run_id": run_id, "error": str(error)})
+            )
+            return {"run_id": run_id, "status": "failed", "result": str(error)}
+
+    app_runtime = _FakeAppRuntime()
+    runtime = _AutoReplanRuntime()
+    starter = LegacyChatTaskStarter(app_runtime, runtime)
+
+    task = starter.execute_existing_main_chat_task(
+        task_id="task-auto-replan",
+        conversation_id="chat-1",
+        prompt="打开 PixelForge",
+        metadata={"allow_user_foreground_takeover": True},
+    )
+
+    assert task is not None
+    assert task["status"] == "failed"
+    assert not any(call[0] == "complete_main_chat_run" for call in runtime.calls)
+    failure = next(call for call in runtime.calls if call[0] == "fail_main_chat_run")
+    assert "桌面操作未完成" in failure[1]["error"]
+    assert app_runtime.state.status_calls[-1]["status"].value == "failed"
+    assistant = app_runtime.chat_session.assistant_messages[-1]
+    assert assistant["status"].value == "failed"
+    assert assistant["error"] == failure[1]["error"]
+
+
+def test_legacy_chat_task_starter_fails_closed_when_event_history_is_unavailable() -> None:
+    class _UnavailableEventRuntime(_MainChatPlannerEventRuntime):
+        def execute_main_chat_model_loop(
+            self,
+            run_id: str,
+            messages: list[dict[str, Any]],
+            **kwargs: Any,
+        ) -> dict[str, Any]:
+            self.calls.append(
+                (
+                    "execute_main_chat_model_loop",
+                    {"run_id": run_id, "messages": messages, **kwargs},
+                )
+            )
+            return {
+                "run_id": run_id,
+                "status": "running",
+                "result": "任务执行完毕。",
+                "timeline": [],
+            }
+
+        def list_run_events(self, _run_id: str, **_kwargs: Any) -> dict[str, Any]:
+            raise RuntimeError("event store unavailable")
+
+        def fail_main_chat_run(self, run_id: str, error: Any) -> dict[str, Any]:
+            self.calls.append(
+                ("fail_main_chat_run", {"run_id": run_id, "error": str(error)})
+            )
+            return {"run_id": run_id, "status": "failed", "result": str(error)}
+
+    app_runtime = _FakeAppRuntime()
+    runtime = _UnavailableEventRuntime()
+    starter = LegacyChatTaskStarter(app_runtime, runtime)
+
+    task = starter.execute_existing_main_chat_task(
+        task_id="task-event-store-unavailable",
+        conversation_id="chat-1",
+        prompt="打开 PixelForge",
+        metadata={"allow_user_foreground_takeover": True},
+    )
+
+    assert task is not None
+    assert task["status"] == "failed"
+    assert not any(call[0] == "complete_main_chat_run" for call in runtime.calls)
+    failure = next(call for call in runtime.calls if call[0] == "fail_main_chat_run")
+    assert "执行事件历史" in failure[1]["error"]
+    assert app_runtime.state.status_calls[-1]["status"].value == "failed"
+    assistant = app_runtime.chat_session.assistant_messages[-1]
+    assert assistant["status"].value == "failed"
+    assert assistant["error"] == failure[1]["error"]
+
+
+def test_legacy_chat_task_starter_fails_closed_for_unpageable_partial_event_history() -> None:
+    class _UnpageableEventRuntime(_MainChatPlannerEventRuntime):
+        def execute_main_chat_model_loop(
+            self,
+            run_id: str,
+            messages: list[dict[str, Any]],
+            **kwargs: Any,
+        ) -> dict[str, Any]:
+            self.calls.append(
+                (
+                    "execute_main_chat_model_loop",
+                    {"run_id": run_id, "messages": messages, **kwargs},
+                )
+            )
+            return {
+                "run_id": run_id,
+                "status": "running",
+                "result": "任务执行完毕。",
+                "timeline": [],
+            }
+
+        def list_run_events(self, _run_id: str) -> dict[str, Any]:
+            return {
+                "events": [],
+                "has_more": True,
+                "next_after_sequence": 1,
+            }
+
+        def fail_main_chat_run(self, run_id: str, error: Any) -> dict[str, Any]:
+            self.calls.append(
+                ("fail_main_chat_run", {"run_id": run_id, "error": str(error)})
+            )
+            return {"run_id": run_id, "status": "failed", "result": str(error)}
+
+    app_runtime = _FakeAppRuntime()
+    runtime = _UnpageableEventRuntime()
+    starter = LegacyChatTaskStarter(app_runtime, runtime)
+
+    task = starter.execute_existing_main_chat_task(
+        task_id="task-unpageable-events",
+        conversation_id="chat-1",
+        prompt="打开 PixelForge",
+        metadata={"allow_user_foreground_takeover": True},
+    )
+
+    assert task is not None
+    assert task["status"] == "failed"
+    assert not any(call[0] == "complete_main_chat_run" for call in runtime.calls)
+    failure = next(call for call in runtime.calls if call[0] == "fail_main_chat_run")
+    assert "执行事件历史" in failure[1]["error"]
+
+
+def test_legacy_chat_task_starter_reads_all_event_pages_before_terminalizing() -> None:
+    class _PagedEventRuntime(_MainChatPlannerEventRuntime):
+        def __init__(self) -> None:
+            super().__init__()
+            self.page_calls: list[int] = []
+
+        def execute_main_chat_model_loop(
+            self,
+            run_id: str,
+            messages: list[dict[str, Any]],
+            **kwargs: Any,
+        ) -> dict[str, Any]:
+            self.calls.append(
+                (
+                    "execute_main_chat_model_loop",
+                    {"run_id": run_id, "messages": messages, **kwargs},
+                )
+            )
+            return {
+                "run_id": run_id,
+                "status": "running",
+                "result": "任务执行完毕。",
+                "timeline": [],
+            }
+
+        def list_run_events(
+            self,
+            _run_id: str,
+            *,
+            after_sequence: int = 0,
+            limit: int = 1000,
+        ) -> dict[str, Any]:
+            self.page_calls.append(after_sequence)
+            assert limit == 1000
+            if after_sequence == 0:
+                return {
+                    "events": [],
+                    "has_more": True,
+                    "next_after_sequence": 1,
+                }
+            return {
+                "events": [
+                    {
+                        "event_type": "agent.desktop.intent_unavailable",
+                        "sequence": 2,
+                        "tool": "app.open",
+                        "status": "blocked",
+                        "reason": "runtime_execution_not_ready",
+                    }
+                ],
+                "has_more": False,
+                "next_after_sequence": 2,
+            }
+
+        def fail_main_chat_run(self, run_id: str, error: Any) -> dict[str, Any]:
+            self.calls.append(
+                ("fail_main_chat_run", {"run_id": run_id, "error": str(error)})
+            )
+            return {"run_id": run_id, "status": "failed", "result": str(error)}
+
+    app_runtime = _FakeAppRuntime()
+    runtime = _PagedEventRuntime()
+    starter = LegacyChatTaskStarter(app_runtime, runtime)
+
+    task = starter.execute_existing_main_chat_task(
+        task_id="task-paged-events",
+        conversation_id="chat-1",
+        prompt="打开 PixelForge",
+        metadata={"allow_user_foreground_takeover": True},
+    )
+
+    assert task is not None
+    assert task["status"] == "failed"
+    assert 1 in runtime.page_calls
+    assert not any(call[0] == "complete_main_chat_run" for call in runtime.calls)
+
+
+def test_legacy_chat_task_starter_completes_run_task_and_message_with_safe_empty_summary() -> None:
+    class _EmptyResultRuntime(_MainChatPlannerEventRuntime):
+        def execute_main_chat_model_loop(
+            self,
+            run_id: str,
+            messages: list[dict[str, Any]],
+            **kwargs: Any,
+        ) -> dict[str, Any]:
+            self.calls.append(
+                (
+                    "execute_main_chat_model_loop",
+                    {"run_id": run_id, "messages": messages, **kwargs},
+                )
+            )
+            return {
+                "run_id": run_id,
+                "status": "running",
+                "result": "",
+                "timeline": [],
+            }
+
+    app_runtime = _FakeAppRuntime()
+    runtime = _EmptyResultRuntime()
+    starter = LegacyChatTaskStarter(app_runtime, runtime)
+
+    task = starter.execute_existing_main_chat_task(
+        task_id="task-empty-result",
+        conversation_id="chat-1",
+        prompt="打开 PixelForge",
+        metadata={"allow_user_foreground_takeover": True},
+    )
+
+    assert task is not None
+    assert task["status"] == "completed"
+    completion = next(call for call in runtime.calls if call[0] == "complete_main_chat_run")
+    assert completion[1]["result"] == "任务已完成。"
+    assert app_runtime.state.status_calls[-1]["status"].value == "completed"
+    assert app_runtime.state.status_calls[-1]["result"] == "任务已完成。"
+    assistant = app_runtime.chat_session.assistant_messages[-1]
+    assert assistant["status"].value == "completed"
+    assert assistant["content"] == "任务已完成。"
+
+
 def test_legacy_chat_task_starter_planned_timeline_keeps_runtime_planner_sequence() -> None:
     starter = LegacyChatTaskStarter(_FakeAppRuntime(), _MainChatPlannerEventRuntime())
 
@@ -2745,6 +4137,7 @@ def test_legacy_chat_task_starter_planned_timeline_keeps_runtime_planner_sequenc
         "app_name": "PixelForge",
         "selection_source": "desktop.list_apps",
         "query": "PixelForge",
+        "verification_goal": "app_running",
     }
 
 
@@ -2995,7 +4388,7 @@ def test_legacy_chat_task_starter_writes_explicit_note_as_artifact_fallback() ->
     metadata = app_runtime.chat_session.metadata_calls[0]["metadata"]
     assert metadata["yachiyo_runtime_planner"] is True
     assert metadata["yachiyo_intent_kind"] == "information_capture"
-    assert metadata["daily_desktop_tool"] == "notes.create"
+    assert metadata["daily_desktop_tool"] == "artifact.write"
     assert metadata["daily_desktop_source"] == "runtime_planner"
     assert metadata["daily_desktop_planning_reason"] == (
         "planner_fallback_information_capture"
@@ -3007,11 +4400,14 @@ def test_legacy_chat_task_starter_writes_explicit_note_as_artifact_fallback() ->
     direct_requests = model_loop_call[1]["direct_tool_requests"]
     assert len(direct_requests) == 1
     assert direct_requests[0]["protocol"] == "json_fallback"
-    assert direct_requests[0]["tool"] == "notes.create"
-    assert direct_requests[0]["input"] == {"body": "今天要买牛奶"}
+    assert direct_requests[0]["tool"] == "artifact.write"
+    assert direct_requests[0]["input"] == {
+        "path": "captured-note.md",
+        "content": "今天要买牛奶",
+    }
     assert direct_requests[0]["source"] == "runtime_planner"
     assert direct_requests[0]["planning_reason"] == "planner_fallback_information_capture"
-    assert direct_requests[0]["planner_step_id"] == "create-note"
+    assert direct_requests[0]["planner_step_id"] == "write-note-artifact"
 
 
 def test_legacy_chat_task_starter_passes_planner_approval_tools_to_chat_gate() -> None:
@@ -3036,13 +4432,18 @@ def test_legacy_chat_task_starter_passes_planner_approval_tools_to_chat_gate() -
     assert model_loop_call[1]["direct_tool_request"] is None
     direct_requests = model_loop_call[1]["direct_tool_requests"]
     assert [request["tool"] for request in direct_requests] == [
-        "desktop.list_apps",
+        "desktop.running_apps",
         "app.quit",
         "desktop.running_apps",
     ]
+    assert [request.get("runtime_stage") for request in direct_requests] == [
+        "discover",
+        "operate",
+        "verify",
+    ]
     assert direct_requests[1]["approval_required"] is True
     assert model_loop_call[1]["tool_policy"] == {
-        "allowed_tools": ["desktop.list_apps", "app.quit", "desktop.running_apps"],
+        "allowed_tools": ["desktop.running_apps", "app.quit", "desktop.running_apps"],
         "approval_required": {"app.quit": True},
     }
     selection_events = [
@@ -3050,7 +4451,7 @@ def test_legacy_chat_task_starter_passes_planner_approval_tools_to_chat_gate() -
         and event[1]["event_type"] == "agent.plan.selection"
     ]
     assert selection_events[0][1]["payload"]["plan_tools"] == [
-        "desktop.list_apps",
+        "desktop.running_apps",
         "app.quit",
         "desktop.running_apps",
     ]
@@ -3512,18 +4913,14 @@ def test_legacy_chat_task_starter_uses_spreadsheet_app_planner_sequence() -> Non
     assert [
         step["tool_name"]
         for step in planner_events[1][1]["payload"]["plan"]["tool_plan"]["steps"]
-    ] == ["workspace.read", "app.open", "desktop.open_path", "data.analyze"]
+    ] == ["workspace.read", "app.open", "data.analyze"]
     model_loop_call = [
         call for call in runtime.calls if call[0] == "execute_main_chat_model_loop"
     ][0]
     assert model_loop_call[1]["direct_tool_request"] is None
     direct_requests = model_loop_call[1]["direct_tool_requests"]
-    assert [request["tool"] for request in direct_requests] == [
-        "desktop.list_apps",
-        "desktop.open_path",
-        "data.analyze",
-    ]
-    assert direct_requests[2]["input"] == {
+    assert [request["tool"] for request in direct_requests] == ["data.analyze"]
+    assert direct_requests[0]["input"] == {
         "path": "data/sales.csv",
         "artifact_path": "analysis-report.md",
         "source_kind": "csv",
@@ -3532,8 +4929,8 @@ def test_legacy_chat_task_starter_uses_spreadsheet_app_planner_sequence() -> Non
             {"path": "analysis-report.md", "kind": "markdown"},
         ],
     }
-    assert direct_requests[2]["planning_reason"] == "planner_builtin_data_analysis"
-    assert direct_requests[2]["planner_step_id"] == "analyze-data-file"
+    assert direct_requests[0]["planning_reason"] == "planner_builtin_data_analysis"
+    assert direct_requests[0]["planner_step_id"] == "analyze-data-file"
 
 
 def test_legacy_chat_task_starter_uses_future_task_schedule_fallback() -> None:
@@ -3552,7 +4949,7 @@ def test_legacy_chat_task_starter_uses_future_task_schedule_fallback() -> None:
     metadata = app_runtime.chat_session.metadata_calls[0]["metadata"]
     assert metadata["yachiyo_runtime_planner"] is True
     assert metadata["yachiyo_intent_kind"] == "schedule"
-    assert metadata["daily_desktop_tool"] == "reminders.create"
+    assert metadata["daily_desktop_tool"] == "future_task.schedule"
     assert metadata["daily_desktop_source"] == "runtime_planner"
     assert metadata["daily_desktop_planning_reason"] == "planner_fallback_schedule"
     model_loop_call = [
@@ -3560,23 +4957,30 @@ def test_legacy_chat_task_starter_uses_future_task_schedule_fallback() -> None:
     ][0]
     assert model_loop_call[1]["direct_tool_request"] is None
     direct_requests = model_loop_call[1]["direct_tool_requests"]
-    assert [request["tool"] for request in direct_requests] == ["reminders.create"]
+    assert [request["tool"] for request in direct_requests] == ["future_task.schedule"]
     assert direct_requests[0]["approval_required"] is True
-    assert direct_requests[0]["input"]["due_at"] == tomorrow_0900
+    assert direct_requests[0]["input"]["title"] == "买牛奶"
+    assert datetime.fromtimestamp(
+        direct_requests[0]["input"]["scheduled_at_epoch"]
+    ).strftime("%Y-%m-%dT%H:%M") == tomorrow_0900
     assert model_loop_call[1]["tool_policy"] == {
-        "allowed_tools": ["reminders.create"],
-        "approval_required": {"reminders.create": True},
+        "allowed_tools": ["future_task.schedule"],
+        "approval_required": {"future_task.schedule": True},
     }
     assistant_message = app_runtime.chat_session.assistant_messages[0]
     assert assistant_message["metadata"]["run_status"] == "approval_required"
     assert assistant_message["metadata"]["agent_run_id"] == "run-main"
-    assert assistant_message["metadata"]["pending_approval"]["tool"] == "reminders.create"
+    assert assistant_message["metadata"]["pending_approval"]["tool"] == (
+        "future_task.schedule"
+    )
     selection_events = [
         event for event in runtime.calls
         if event[0] == "append_run_event"
         and event[1]["event_type"] == "agent.plan.selection"
     ]
-    assert selection_events[0][1]["payload"]["selected_tools"] == ["reminders.create"]
+    assert selection_events[0][1]["payload"]["selected_tools"] == [
+        "future_task.schedule"
+    ]
     assert selection_events[0][1]["payload"]["approvals_required"] == [
         "create-schedule-item"
     ]
@@ -3595,6 +4999,20 @@ def test_legacy_runtime_port_readiness_includes_desktop_execution_capabilities(m
         "apps.shell.yachiyo_agent.legacy_tasks.desktop_runtime_blocking_conditions_by_capability",
         lambda: {},
     )
+    monkeypatch.setattr(
+        "apps.shell.yachiyo_agent.legacy_tasks.sandbox_desktop_provider_status",
+        lambda *_args, **_kwargs: {
+            "available": True,
+            "adapter_ready": True,
+            "provider_kind": "background_desktop",
+            "provider_id": "cua-driver",
+            "status": "available",
+            "supported_tools": ["desktop.list_apps", "app.open"],
+            "keyboard_mouse_capture_supported": True,
+            "requires_real_sandbox_for": [],
+            "health": {"checked": True, "ok": True, "status": "healthy"},
+        },
+    )
 
     readiness = LegacyRuntimePort(runtime).readiness()
     capabilities = readiness["capabilities"]
@@ -3604,12 +5022,12 @@ def test_legacy_runtime_port_readiness_includes_desktop_execution_capabilities(m
     assert capabilities["runnables"] == 1
     assert capabilities["sandbox_provider"]["status"] == "available"
     assert capabilities["sandbox_provider"]["provider_kind"] in {
-        "local_desktop",
+        "background_desktop",
         "sandbox_desktop",
     }
     assert capabilities["desktop_provider_ready"] is True
     assert capabilities["desktop_provider_supported_tools"]
-    if capabilities["sandbox_provider"]["provider_kind"] == "local_desktop":
+    if capabilities["sandbox_provider"]["provider_kind"] == "background_desktop":
         assert "desktop.list_apps" in capabilities["desktop_provider_supported_tools"]
     assert capabilities["desktop_execution"]["platform"] in {
         "macos",
@@ -3697,8 +5115,8 @@ def test_legacy_runtime_port_readiness_reports_sandbox_provider_health(
     assert capabilities["desktop_provider_ready"] is True
     assert capabilities["desktop_provider_supported_tools"] == ["desktop.list_apps"]
     assert capabilities["sandbox_provider"]["status"] == "available"
-    assert capabilities["sandbox_provider"]["health"]["checked"] is True
-    assert capabilities["sandbox_provider"]["health"]["status"] == "ready"
+    assert capabilities["sandbox_provider"]["health"]["checked"] is False
+    assert capabilities["sandbox_provider"]["health"]["status"] == "not_checked"
 
 
 def test_legacy_runtime_port_readiness_reports_desktop_runtime_blockers(monkeypatch) -> None:
@@ -3918,7 +5336,10 @@ def test_legacy_runtime_port_routes_group_task_approval_to_matching_child_run() 
 
     approved = port.approve("task-group-1", {"approval_id": "approval-2"})
 
-    assert ("approve_run_approval", "run-2") in runtime.calls
+    assert (
+        "approve_run_approval",
+        {"run_id": "run-2", "expected_approval_id": "approval-2"},
+    ) in runtime.calls
     assert approved["task_id"] == "task-group-1"
 
 
@@ -4123,7 +5544,13 @@ def test_legacy_runtime_port_routes_workflow_task_approval_and_artifact_to_child
     approved = port.approve("task-workflow-1", {"approval_id": "approval-child-1"})
     artifact = port.read_task_artifact("task-workflow-1", "analysis.md")
 
-    assert ("approve_run_approval", "workflow-child-1") in runtime.calls
+    assert (
+        "approve_run_approval",
+        {
+            "run_id": "workflow-child-1",
+            "expected_approval_id": "approval-child-1",
+        },
+    ) in runtime.calls
     assert approved["task_id"] == "task-workflow-1"
     assert approved["metadata"]["workflow_run_id"] == "workflow-run-1"
     assert artifact["run_id"] == "workflow-child-1"
@@ -4180,7 +5607,10 @@ def test_legacy_runtime_port_preserves_workflow_identity_after_task_approval() -
         }
     )
 
-    approved = port.approve("task-workflow-1")
+    approved = port.approve(
+        "task-workflow-1",
+        {"approval_id": "approval-workflow-1"},
+    )
     rejected = port.reject(
         "task-workflow-1",
         {
@@ -4200,8 +5630,21 @@ def test_legacy_runtime_port_preserves_workflow_identity_after_task_approval() -
     assert rejected["kind"] == "workflow_run"
     assert rejected["workflow_run_id"] == "workflow-run-1"
     assert rejected["workflow_id"] == "workflow-1"
-    assert ("approve_run_approval", "workflow-run-1") in runtime.calls
-    assert ("reject_run_approval", {"run_id": "workflow-run-1", "reason": "No"}) in runtime.calls
+    assert (
+        "approve_run_approval",
+        {
+            "run_id": "workflow-run-1",
+            "expected_approval_id": "approval-workflow-1",
+        },
+    ) in runtime.calls
+    assert (
+        "reject_run_approval",
+        {
+            "run_id": "workflow-run-1",
+            "reason": "No",
+            "expected_approval_id": "approval-workflow-1",
+        },
+    ) in runtime.calls
 
 
 def test_legacy_runtime_port_resolves_task_link_for_approval_actions() -> None:
@@ -4215,12 +5658,15 @@ def test_legacy_runtime_port_resolves_task_link_for_approval_actions() -> None:
         }
     )
 
-    approved = port.approve("task-1")
+    approved = port.approve("task-1", {"approval_id": "approval-1"})
 
     assert approved["task_id"] == "task-1"
     assert approved["session_id"] == "chat-1"
     assert approved["task_run_link_run_status"] == "running"
-    assert ("approve_run_approval", "run-1") in runtime.calls
+    assert (
+        "approve_run_approval",
+        {"run_id": "run-1", "expected_approval_id": "approval-1"},
+    ) in runtime.calls
     assert ("get_task_run_link", "task-1") in runtime.calls
 
 
@@ -4238,7 +5684,10 @@ def test_legacy_runtime_port_honors_matching_task_approval_id() -> None:
     approved = port.approve("task-1", {"approval_id": "approval-1"})
 
     assert approved["status"] == "completed"
-    assert ("approve_run_approval", "run-1") in runtime.calls
+    assert (
+        "approve_run_approval",
+        {"run_id": "run-1", "expected_approval_id": "approval-1"},
+    ) in runtime.calls
 
 
 def test_legacy_runtime_port_rejects_mismatched_task_approval_id() -> None:
@@ -4255,7 +5704,7 @@ def test_legacy_runtime_port_rejects_mismatched_task_approval_id() -> None:
     with pytest.raises(AgentRuntimeError, match="审批 ID 与当前待审批项不匹配"):
         port.approve("task-1", {"approval_id": "wrong-approval"})
 
-    assert ("approve_run_approval", "run-1") not in runtime.calls
+    assert not any(call[0] == "approve_run_approval" for call in runtime.calls)
 
 
 def test_legacy_runtime_port_resolves_task_link_for_timeline() -> None:
@@ -4679,16 +6128,38 @@ class _FakeRuntime:
         except KeyError:
             raise KeyError(task_id) from None
 
-    def approve_run_approval(self, run_id: str) -> dict[str, Any]:
-        self.calls.append(("approve_run_approval", run_id))
+    def approve_run_approval(
+        self,
+        run_id: str,
+        expected_approval_id: str,
+    ) -> dict[str, Any]:
+        self.calls.append((
+            "approve_run_approval",
+            {
+                "run_id": run_id,
+                "expected_approval_id": expected_approval_id,
+            },
+        ))
         return {
             "run_id": run_id,
             "user_goal": "Patch README",
             "status": "completed",
         }
 
-    def reject_run_approval(self, run_id: str, reason: str = "") -> dict[str, Any]:
-        self.calls.append(("reject_run_approval", {"run_id": run_id, "reason": reason}))
+    def reject_run_approval(
+        self,
+        run_id: str,
+        reason: str = "",
+        expected_approval_id: str = "",
+    ) -> dict[str, Any]:
+        self.calls.append((
+            "reject_run_approval",
+            {
+                "run_id": run_id,
+                "reason": reason,
+                "expected_approval_id": expected_approval_id,
+            },
+        ))
         return {
             "run_id": run_id,
             "user_goal": "Patch README",
@@ -4833,6 +6304,7 @@ class _MainChatPlannerEventRuntime:
         task_id: str,
         session_id: str,
         user_goal: str,
+        client_run_id: str = "",
         metadata: dict[str, Any] | None = None,
         runtime_execution_envelope: dict[str, Any] | None = None,
         direct_tool_request: dict[str, Any] | None = None,
@@ -4845,6 +6317,7 @@ class _MainChatPlannerEventRuntime:
                     "task_id": task_id,
                     "session_id": session_id,
                     "user_goal": user_goal,
+                    "client_run_id": client_run_id,
                     "metadata": metadata,
                     "runtime_execution_envelope": runtime_execution_envelope,
                     "direct_tool_request": direct_tool_request,

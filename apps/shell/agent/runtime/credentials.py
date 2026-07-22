@@ -13,6 +13,15 @@ def agent_model_credential_ref(agent_id: str) -> str:
     return f"agent:{agent_id}:model_api_key"
 
 
+def _runtime_credential_error_message(exc: CredentialStoreError) -> str:
+    if getattr(exc, "os_status", None) == -25293:
+        return (
+            "应用更新后无法读取原有钥匙串中的 API Key。"
+            "请在 Agent Studio 中重新保存 API Key，然后重新测试连接。"
+        )
+    return redact_api_error_text(exc)
+
+
 class RuntimeCredentialService:
     """Thin error-redacting facade over the configured credential store."""
 
@@ -29,7 +38,7 @@ class RuntimeCredentialService:
         try:
             self._credential_store.set(ref, secret)
         except CredentialStoreError as exc:
-            raise AgentRuntimeError(redact_api_error_text(exc)) from exc
+            raise AgentRuntimeError(_runtime_credential_error_message(exc)) from None
 
     def read(self, ref: str) -> str:
         ref = str(ref or "").strip()
@@ -38,7 +47,7 @@ class RuntimeCredentialService:
         try:
             return self._credential_store.get(ref)
         except CredentialStoreError as exc:
-            raise AgentRuntimeError(redact_api_error_text(exc)) from exc
+            raise AgentRuntimeError(_runtime_credential_error_message(exc)) from None
 
     def delete(self, ref: str) -> None:
         ref = str(ref or "").strip()
@@ -46,5 +55,5 @@ class RuntimeCredentialService:
             return
         try:
             self._credential_store.delete(ref)
-        except CredentialStoreError:
+        except Exception:
             pass

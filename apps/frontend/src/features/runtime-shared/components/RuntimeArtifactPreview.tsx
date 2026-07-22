@@ -1,6 +1,10 @@
 import type { ReactNode } from 'react';
 
 import type { ArtifactSnapshot } from '../types';
+import {
+  runtimeArtifactPresentation,
+  type RuntimeArtifactPresentationMode,
+} from '../artifactPresentation';
 import { runtimeAnchorId } from '../runtimeAnchors';
 
 export type RuntimeArtifactSnapshot = Pick<
@@ -60,6 +64,7 @@ export function RuntimeArtifactPreview({
   artifact,
   as: Component = 'div',
   className = 'yachiyo-task-artifact',
+  presentationMode = 'diagnostic',
   testId = 'runtime-artifact-preview',
   variant = 'compact',
 }: {
@@ -70,10 +75,12 @@ export function RuntimeArtifactPreview({
   artifact: RuntimeArtifactSnapshot;
   as?: 'div' | 'span';
   className?: string;
+  presentationMode?: RuntimeArtifactPresentationMode;
   testId?: string;
   variant?: RuntimeArtifactVariant;
 }) {
-  const label = artifact.title || artifact.path || artifact.kind || 'Artifact';
+  const presentation = runtimeArtifactPresentation(artifact, presentationMode);
+  const label = presentation.label;
   const metadata = variant === 'full' ? artifactMetadataItems(artifact) : [];
   const anchorValue = artifact.artifact_id || artifact.path || '';
   const anchorKind = artifact.artifact_id ? 'artifact' : 'artifact-path';
@@ -110,7 +117,7 @@ export function RuntimeArtifactPreview({
       data-runtime-anchor-kind={anchorKind}
       data-runtime-anchor-value={anchorValue}
       data-testid={testId}
-      title={artifact.path || label}
+      title={presentation.tooltip || undefined}
     >
       <span>{artifact.kind || 'artifact'}</span>
       <strong>{label}</strong>

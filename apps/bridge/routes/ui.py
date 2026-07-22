@@ -61,14 +61,20 @@ class SendChatMessageRequest(BaseModel):
     attachments: list[dict[str, Any]] = Field(default_factory=list)
     runnable_id: str = ""
     client_message_id: str = ""
+    # Compatibility alias for older desktop bundles. New clients must use
+    # client_message_id; keeping this input-only alias makes retries safe
+    # during an app/backend rolling upgrade.
+    message_id: str = ""
 
 
 class RetryChatMessageRequest(BaseModel):
     message_id: str
+    client_message_id: str = ""
 
 
 class SummarizeDelegatedRunRequest(BaseModel):
     run_id: str
+    conversation_id: str = ""
 
 
 class CreateChatGroupRequest(BaseModel):
@@ -115,6 +121,10 @@ class LauncherPositionRequest(BaseModel):
 
 class LoadChatSessionRequest(BaseModel):
     session_id: str
+
+
+class DeleteChatSessionRequest(BaseModel):
+    session_id: str = ""
 
 
 class DeleteActivityEventsRequest(BaseModel):
@@ -687,7 +697,15 @@ async def import_live2d_archive_path(request: Live2DResourcePathRequest) -> dict
 
 @router.get("/chat/messages")
 async def get_chat_messages(limit: int = 0, anchor_message_id: str = "") -> dict[str, Any]:
-    return ChatAPI(get_runtime()).get_messages(limit, anchor_message_id=anchor_message_id)
+    runtime = get_runtime()
+    session_id = str(runtime.chat_session.session_id or "").strip()
+    chat_api = ChatAPI(runtime)
+    return await asyncio.to_thread(
+        chat_api.get_messages_in_session,
+        session_id,
+        limit,
+        anchor_message_id=anchor_message_id,
+    )
 
 
 @router.post("/chat/messages")
@@ -695,11 +713,16 @@ async def send_chat_message(
     request: SendChatMessageRequest,
     http_request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
-    idempotency_key = request.client_message_id
+    idempotency_key = request.client_message_id or request.message_id
     headers = getattr(http_request, "headers", None)
     if not idempotency_key and headers is not None:
         idempotency_key = str(headers.get("idempotency-key", "") or "")
-    return ChatAPI(get_runtime()).send_message(
+    runtime = get_runtime()
+    session_id = str(runtime.chat_session.session_id or "").strip()
+    chat_api = ChatAPI(runtime)
+    return await asyncio.to_thread(
+        chat_api.send_message_in_session,
+        session_id,
         request.text,
         request.attachments,
         runnable_id=request.runnable_id,
@@ -709,12 +732,18 @@ async def send_chat_message(
 
 @router.post("/chat/messages/retry")
 async def retry_chat_message(request: RetryChatMessageRequest) -> dict[str, Any]:
-    return ChatAPI(get_runtime()).retry_message(request.message_id)
+    return ChatAPI(get_runtime()).retry_message(
+        request.message_id,
+        client_message_id=request.client_message_id,
+    )
 
 
 @router.post("/chat/delegated-run-summary")
 async def summarize_delegated_run(request: SummarizeDelegatedRunRequest) -> dict[str, Any]:
-    return ChatAPI(get_runtime()).summarize_delegated_run(request.run_id)
+    return ChatAPI(get_runtime()).summarize_delegated_run(
+        request.run_id,
+        conversation_id=request.conversation_id,
+    )
 
 
 @router.post("/chat/groups")
@@ -761,7 +790,13 @@ async def clear_chat_session() -> dict[str, Any]:
 
 @router.post("/chat/session/discard-empty")
 async def discard_empty_chat_session() -> dict[str, Any]:
-    return ChatAPI(get_runtime()).discard_empty_current_session()
+    runtime = get_runtime()
+    target_session_id = str(runtime.chat_session.session_id or "").strip()
+    chat_api = ChatAPI(runtime)
+    return await asyncio.to_thread(
+        chat_api.discard_empty_current_session,
+        target_session_id,
+    )
 
 
 @router.post("/chat/session/cancel")
@@ -770,8 +805,20 @@ async def cancel_chat_session_tasks() -> dict[str, Any]:
 
 
 @router.post("/chat/session/delete")
-async def delete_chat_session() -> dict[str, Any]:
-    return ChatAPI(get_runtime()).delete_current_session()
+async def delete_chat_session(
+    request: DeleteChatSessionRequest | None = None,
+) -> dict[str, Any]:
+    runtime = get_runtime()
+    target_session_id = str(
+        request.session_id
+        if request is not None and request.session_id
+        else runtime.chat_session.session_id
+    ).strip()
+    chat_api = ChatAPI(runtime)
+    return await asyncio.to_thread(
+        chat_api.delete_session,
+        target_session_id,
+    )
 
 
 @router.get("/chat/sessions")

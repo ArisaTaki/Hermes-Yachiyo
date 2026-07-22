@@ -5,6 +5,9 @@ from __future__ import annotations
 import inspect
 from typing import Any
 
+from apps.shell.agent.runtime.run_group_attachments import (
+    RunGroupChildAttachment,
+)
 from apps.shell.yachiyo_agent.policy import group_tool_policy_for_id, merge_tool_policies
 
 
@@ -14,6 +17,7 @@ def create_runnable_run(
     runnable_id: str,
     user_goal: str,
     run_group_id: str = "",
+    upstream: str = "",
     client_run_id: str = "",
     on_complete: Any | None = None,
     agent_override: dict[str, Any] | None = None,
@@ -23,6 +27,9 @@ def create_runnable_run(
     metadata: dict[str, Any] | None = None,
     direct_tool_requests: list[dict[str, Any]] | None = None,
     daily_desktop_planning_context: str | None = None,
+    project_root_group: bool | None = None,
+    run_group_attachment: RunGroupChildAttachment | None = None,
+    deferred_execution_start_sink: Any | None = None,
 ) -> dict[str, Any]:
     create_async = getattr(runtime, "create_run_for_runnable_async", None)
     payload = {
@@ -30,6 +37,10 @@ def create_runnable_run(
         "user_goal": user_goal,
         "run_group_id": run_group_id,
     }
+    if upstream:
+        payload["upstream"] = upstream
+    if client_run_id:
+        payload["client_run_id"] = client_run_id
     if agent_override is not None:
         payload["agent_override"] = agent_override
     if daily_desktop_policy_overlay:
@@ -44,10 +55,15 @@ def create_runnable_run(
         payload["direct_tool_requests"] = direct_tool_requests
     if daily_desktop_planning_context is not None:
         payload["daily_desktop_planning_context"] = daily_desktop_planning_context
+    if project_root_group is not None:
+        payload["project_root_group"] = bool(project_root_group)
+    if run_group_attachment is not None:
+        payload["run_group_attachment"] = run_group_attachment
+    if deferred_execution_start_sink is not None:
+        payload["deferred_execution_start_sink"] = deferred_execution_start_sink
     if callable(create_async):
         payload["on_complete"] = on_complete
         return _call_with_supported_kwargs(create_async, payload)
-    payload["client_run_id"] = client_run_id
     return _call_with_supported_kwargs(runtime.create_run_for_runnable, payload)
 
 

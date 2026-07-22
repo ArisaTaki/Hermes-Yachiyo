@@ -28,6 +28,11 @@ export type {
 
 export type YachiyoReadinessSnapshot = ReadinessSnapshot;
 
+export type ConversationIdentity = {
+  conversationToken: number;
+  sessionId: string;
+};
+
 export type PendingAttachment = {
   id: string;
   name: string;
@@ -69,6 +74,7 @@ export type ChatActivityEvent = {
   status?: string;
   duration_seconds?: number | null;
   created_at?: string;
+  visibility?: 'user' | 'internal' | string;
   metadata?: {
     run_id?: string;
     workflow_run_id?: string;
@@ -89,6 +95,11 @@ export type ChatParticipant = {
 };
 
 export type ChatMessageMetadata = {
+  client_message_id?: string;
+  client_optimistic?: boolean;
+  client_conversation_token?: number;
+  client_session_id?: string;
+  client_submitted_sequence?: number;
   sender?: ChatParticipant;
   target?: ChatParticipant;
   runnable_kind?: string;
@@ -163,6 +174,7 @@ export type ChatMessage = {
 export type MessagesPayload = {
   ok?: boolean;
   error?: string;
+  session_id?: string;
   is_processing?: boolean;
   processing_count?: number;
   messages?: ChatMessage[];

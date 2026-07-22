@@ -17,6 +17,10 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from scripts.app_version import read_product_version
+from scripts.release_integrity import (
+    SOURCE_TREE_FINGERPRINT_RE,
+    capture_source_tree_provenance,
+)
 
 DEFAULT_OUTPUT = ROOT / "apps" / "frontend" / "public" / "oha-yachiyo-build.json"
 CHANNEL_CHOICES = ("stable", "alpha", "experimental")
@@ -87,6 +91,8 @@ def build_metadata(
     run_number: int,
     repository: str,
     built_at: str,
+    dirty: bool,
+    source_tree_fingerprint: str,
 ) -> dict[str, Any]:
     latest_branch = latest_branch_for_channel(channel)
     short_commit = commit[:7] if commit and commit != "dev" else "dev"
@@ -107,6 +113,9 @@ def build_metadata(
             f"{latest_branch}-latest/Oha-Yachiyo-{latest_branch}-latest.json"
         ),
         "built_at": built_at,
+        "dirty": dirty,
+        "source_tree_fingerprint": source_tree_fingerprint,
+        "release_publishable": not dirty,
     }
 
 
@@ -125,6 +134,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--run-number", type=int)
     parser.add_argument("--repository")
     parser.add_argument("--built-at")
+    parser.add_argument("--source-tree-fingerprint")
+    source_state = parser.add_mutually_exclusive_group()
+    source_state.add_argument("--source-dirty", dest="source_dirty", action="store_true")
+    source_state.add_argument("--source-clean", dest="source_dirty", action="store_false")
+    parser.set_defaults(source_dirty=None)
     args = parser.parse_args(argv)
 
     source_branch = args.source_branch or default_source_branch()
@@ -139,6 +153,23 @@ def main(argv: list[str] | None = None) -> int:
         run_number = _env_int("GITHUB_RUN_NUMBER", build_number)
     repository = args.repository or os.getenv("GITHUB_REPOSITORY", "").strip() or "local/oha-yachiyo"
     built_at = args.built_at or datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    if (args.source_tree_fingerprint is None) != (args.source_dirty is None):
+        parser.error(
+            "--source-tree-fingerprint must be paired with --source-clean or --source-dirty"
+        )
+    if args.source_tree_fingerprint is None:
+        provenance = capture_source_tree_provenance(ROOT)
+        if commit.lower() != provenance.commit:
+            parser.error(
+                "build metadata commit must match the captured source provenance HEAD"
+            )
+        source_tree_fingerprint = provenance.source_tree_fingerprint
+        source_dirty = provenance.dirty
+    else:
+        source_tree_fingerprint = args.source_tree_fingerprint.strip().lower()
+        source_dirty = bool(args.source_dirty)
+    if not SOURCE_TREE_FINGERPRINT_RE.fullmatch(source_tree_fingerprint):
+        parser.error("--source-tree-fingerprint must be sha256 followed by 64 lowercase hex digits")
 
     metadata = build_metadata(
         channel=channel,
@@ -149,6 +180,8 @@ def main(argv: list[str] | None = None) -> int:
         run_number=run_number,
         repository=repository,
         built_at=built_at,
+        dirty=source_dirty,
+        source_tree_fingerprint=source_tree_fingerprint,
     )
     output = args.output if args.output.is_absolute() else ROOT / args.output
     write_metadata(output, metadata)

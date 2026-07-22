@@ -5,7 +5,9 @@ from __future__ import annotations
 import sqlite3
 from collections.abc import Callable
 from typing import Any
+from uuid import uuid4
 
+from apps.shell.agent.repositories.sqlite import repository_transaction
 from apps.shell.agent.runtime.errors import AgentRuntimeError
 
 
@@ -65,6 +67,39 @@ class AgentDefinitionRepository:
         self._main_chat_agent_id = main_chat_agent_id
         self._error_type = error_type
 
+    def _delete_credential_quietly(self, ref: str) -> None:
+        if not str(ref or "").strip():
+            return
+        try:
+            self._delete_credential(ref)
+        except Exception:
+            # Credential cleanup is compensating and must not hide the primary
+            # repository result. Native errors may also contain secret text.
+            pass
+
+    def _cleanup_staged_credential_if_unreferenced(
+        self,
+        *,
+        agent_id: str,
+        staged_ref: str,
+    ) -> None:
+        if not staged_ref:
+            return
+        try:
+            row = self._conn.execute(
+                "SELECT model_credential_ref FROM agents WHERE agent_id=?",
+                (agent_id,),
+            ).fetchone()
+        except Exception:
+            return
+        current_ref = (
+            str(row["model_credential_ref"] or "").strip()
+            if row is not None
+            else ""
+        )
+        if current_ref != staged_ref:
+            self._delete_credential_quietly(staged_ref)
+
     def list(self) -> dict[str, Any]:
         self._ensure_row_factory()
         cursor = self._conn.execute("SELECT * FROM agents ORDER BY category, name")
@@ -101,12 +136,38 @@ class AgentDefinitionRepository:
                     "api_key": "",
                 },
             }
-        self._ensure_row_factory()
-        cursor = self._conn.execute("SELECT * FROM agents WHERE agent_id=?", (agent_id,))
-        row = cursor.fetchone()
+        for _attempt in range(3):
+            self._ensure_row_factory()
+            cursor = self._conn.execute(
+                "SELECT * FROM agents WHERE agent_id=?",
+                (agent_id,),
+            )
+            row = cursor.fetchone()
+            if row is None:
+                raise KeyError(agent_id)
+            named_row = self._coerce_named_row(row, cursor.description)
+            credential_ref = str(
+                named_row["model_credential_ref"] or ""
+            ).strip()
+            try:
+                agent = self._row_to_agent_private(named_row)
+            except Exception:
+                if self._current_credential_ref(agent_id) != credential_ref:
+                    continue
+                raise
+            if self._current_credential_ref(agent_id) != credential_ref:
+                continue
+            return agent
+        raise self._error_type("Agent 模型凭据正在更新，请稍后重试")
+
+    def _current_credential_ref(self, agent_id: str) -> str:
+        row = self._conn.execute(
+            "SELECT model_credential_ref FROM agents WHERE agent_id=?",
+            (agent_id,),
+        ).fetchone()
         if row is None:
             raise KeyError(agent_id)
-        return self._row_to_agent_private(self._coerce_named_row(row, cursor.description))
+        return str(row["model_credential_ref"] or "").strip()
 
     def create(self, payload: dict[str, Any], *, seed: bool = False) -> dict[str, Any]:
         name = str(payload.get("name") or "").strip()
@@ -177,21 +238,56 @@ class AgentDefinitionRepository:
     def update(self, agent_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         if str(agent_id or "").strip() in self._system_agent_ids:
             raise self._error_type("系统 Agent 不能修改")
-        current = self.get_private(agent_id)
+        rotation = {
+            "previous_ref": "",
+            "staged_ref": "",
+            "credential_ref": "",
+        }
+        try:
+            with repository_transaction(self._conn):
+                self._update_in_transaction(agent_id, payload, rotation)
+        except Exception:
+            self._cleanup_staged_credential_if_unreferenced(
+                agent_id=agent_id,
+                staged_ref=rotation["staged_ref"],
+            )
+            raise
+        if (
+            rotation["previous_ref"]
+            and rotation["previous_ref"] != rotation["credential_ref"]
+        ):
+            self._delete_credential_quietly(rotation["previous_ref"])
+        return self.get(agent_id)
+
+    def _update_in_transaction(
+        self,
+        agent_id: str,
+        payload: dict[str, Any],
+        rotation: dict[str, str],
+    ) -> None:
+        current = self.get(agent_id)
+        ref_row = self._conn.execute(
+            "SELECT model_credential_ref FROM agents WHERE agent_id=?",
+            (agent_id,),
+        ).fetchone()
+        if ref_row is None:
+            raise KeyError(agent_id)
+        previous_credential_ref = str(
+            ref_row["model_credential_ref"] or ""
+        ).strip()
+        rotation["previous_ref"] = previous_credential_ref
         if "name" in payload:
             self._ensure_global_name_available(str(payload.get("name") or ""), ignore_agent_id=agent_id)
         next_agent = {**current, **{key: value for key, value in payload.items() if key not in {"model_config"}}}
         self._validate_agent_profile_refs(next_agent)
-        model_config = {**current.get("model_config", {}), **(payload.get("model_config") or {})}
-        api_key = str(model_config.get("api_key") or "")
-        if "model_config" in payload and "api_key" not in payload.get("model_config", {}):
-            api_key = str(current.get("model_config", {}).get("api_key") or "")
-        if "model_config" in payload and "api_key" in payload.get("model_config", {}) and not api_key:
-            api_key = str(current.get("model_config", {}).get("api_key") or "")
-        credential_ref = str(current.get("model_config", {}).get("credential_ref") or "").strip()
-        if api_key:
-            credential_ref = credential_ref or self._agent_model_credential_ref(agent_id)
-            self._store_credential(credential_ref, api_key)
+        model_config_patch = payload.get("model_config") or {}
+        model_config = {**current.get("model_config", {}), **model_config_patch}
+        explicit_api_key = (
+            str(model_config_patch.get("api_key") or "").strip()
+            if "api_key" in model_config_patch
+            else ""
+        )
+        credential_ref = previous_credential_ref
         now = self._now()
         category = str(next_agent.get("category") or "custom")
         model_mode = str(next_agent.get("model_mode") or "profile")
@@ -200,6 +296,15 @@ class AgentDefinitionRepository:
         workspace_policy = self._compile_workspace_policy(next_agent.get("workspace_policy"))
         workspace_policy = self._assign_default_agent_workdir(agent_id, workspace_policy, tool_policy)
         self._trust_workspace_from_policy(workspace_policy, source=f"agent:{agent_id}", commit=False)
+        staged_credential_ref = ""
+        if explicit_api_key:
+            staged_credential_ref = (
+                f"{self._agent_model_credential_ref(agent_id)}:{uuid4().hex}"
+            )
+            credential_ref = staged_credential_ref
+            rotation["staged_ref"] = staged_credential_ref
+            self._store_credential(staged_credential_ref, explicit_api_key)
+        rotation["credential_ref"] = credential_ref
         self._conn.execute(
             """
             UPDATE agents
@@ -235,8 +340,6 @@ class AgentDefinitionRepository:
                 agent_id,
             ),
         )
-        self._conn.commit()
-        return self.get(agent_id)
 
     def delete(self, agent_id: str) -> dict[str, Any]:
         if str(agent_id or "").strip() in self._system_agent_ids:

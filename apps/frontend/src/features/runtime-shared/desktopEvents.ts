@@ -2,7 +2,8 @@ export type RuntimeDesktopIntentSuffix =
   | 'planned'
   | 'approval_required'
   | 'completed'
-  | 'unavailable';
+  | 'unavailable'
+  | 'unverified';
 
 export type RuntimeDesktopProviderSessionSuffix =
   | 'required'
@@ -55,7 +56,8 @@ export function runtimeEventIsDailyDesktopToolEvent(eventType: string): boolean 
   return runtimeEventIsDesktopPermissionRecovery(eventType)
     || runtimeEventIsDesktopIntent(eventType, 'approval_required')
     || runtimeEventIsDesktopIntent(eventType, 'completed')
-    || runtimeEventIsDesktopIntent(eventType, 'unavailable');
+    || runtimeEventIsDesktopIntent(eventType, 'unavailable')
+    || runtimeEventIsDesktopIntent(eventType, 'unverified');
 }
 
 function runtimeEventIsDesktopEvent(eventType: string, eventName: string): boolean {

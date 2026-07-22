@@ -1,8 +1,4 @@
 import {
-  activityLabel,
-  compactStatusText,
-} from './messageState';
-import {
   groupMemberCount,
   normalizeSessionContext,
 } from './sessionState';
@@ -19,8 +15,7 @@ export const COMPOSER_HEIGHT_STORAGE_KEY = 'oha.chat.composerHeight';
 
 export function executorLabel(executor: ExecutorPayload | null) {
   if (!executor?.available) return '未就绪';
-  if (executor.executor === 'NativeAgentExecutor') return 'Native Agent';
-  return executor.executor || '可用';
+  return '可用';
 }
 
 export function canAttachImages(executor: ExecutorPayload | null) {
@@ -57,19 +52,13 @@ export function attachmentHelpText(executor: ExecutorPayload | null) {
 
 export function headerStatusText(
   isProcessing: boolean,
-  headerActivity: ChatActivityEvent | null,
+  _headerActivity: ChatActivityEvent | null,
   status: string,
-  executor: ExecutorPayload | null,
+  _executor: ExecutorPayload | null,
   context: ChatSessionContext,
 ) {
   const base = isProcessing
-    ? (
-      status.includes('等待审批')
-        ? status
-        : headerActivity
-          ? `处理中 · ${compactStatusText(activityLabel(headerActivity))}`
-          : '处理中'
-    )
+    ? (status.includes('等待审批') ? status : '处理中...')
     : status;
   const normalized = normalizeSessionContext(context);
   if (normalized.conversation_kind === 'agent') return `${base} · Agent`;
@@ -82,7 +71,7 @@ export function headerStatusText(
     return count ? `${base} · 群组 · ${count} 成员` : `${base} · 群组`;
   }
   if (normalized.conversation_kind === 'unassigned') return base;
-  return `${base} · ${executorLabel(executor)}`;
+  return base;
 }
 
 export function sessionSideLabel(session: SessionItem) {

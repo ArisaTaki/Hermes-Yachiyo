@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import threading
+from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any
 
+import pytest
+
 from apps.shell import agent_runtime
-from apps.shell.agent.runtime.errors import AgentApprovalRequired
 from apps.shell.agent.runtime.agent_runs import (
     AgentRunStart,
     RuntimeAgentRunAsyncCoordinator,
@@ -16,6 +18,22 @@ from apps.shell.agent.runtime.agent_runs import (
     RuntimeAgentRunStarter,
     _agent_run_execution_options,
     _with_entrypoint_runtime_planner,
+)
+from apps.shell.agent.runtime.errors import AgentApprovalRequired
+from apps.shell.agent.runtime.events import (
+    RUNTIME_EXECUTION_PROVENANCE_KEY,
+    RUNTIME_EXECUTION_PROVENANCE_VERSION,
+    RUNTIME_LOCAL_TOOL_BROKER_PROVENANCE_SOURCE,
+)
+from apps.shell.agent.runtime.goal_contract import GoalContract, GoalCriterion
+from apps.shell.agent.runtime.goal_runtime import (
+    goal_contract_event_payload,
+    runtime_goal_contract,
+)
+from apps.shell.agent.runtime.group_runs import start_agent_group_run
+from apps.shell.agent.runtime.run_group_attachments import (
+    RUN_GROUP_ATTACHMENT_PAYLOAD_KEY,
+    issue_run_group_child_attachment,
 )
 from apps.shell.agent_runtime import AgentRuntimeService
 from apps.shell.credential_store import MemoryCredentialStore
@@ -37,6 +55,7 @@ class _PreparedAgentRun:
     artifacts: list[dict[str, Any]]
     context: str = "prepared-context"
     broker: Any = "prepared-broker"
+    goal_contract: dict[str, Any] | None = None
 
 
 def _starter(
@@ -46,7 +65,14 @@ def _starter(
 ) -> RuntimeAgentRunStarter:
     def get_run_group(run_group_id: str) -> dict[str, Any]:
         state.setdefault("validated_groups", []).append(run_group_id)
-        return {"run_group_id": run_group_id}
+        return state.get("group_records", {}).get(
+            run_group_id,
+            {
+                "run_group_id": run_group_id,
+                "status": "running",
+                "child_run_ids": ["parent-run-1"],
+            },
+        )
 
     def insert_run_group(**kwargs: Any) -> dict[str, Any]:
         run_group_id = f"group-{len(state.setdefault('groups', [])) + 1}"
@@ -62,8 +88,19 @@ def _starter(
             state.setdefault("by_client", {})[client_request_id] = {**run, "idempotent": True}
         return run
 
+    def get_run(run_id: str) -> dict[str, Any]:
+        return state.get("run_records", {}).get(
+            run_id,
+            {
+                "run_id": run_id,
+                "run_group_id": "group-existing",
+                "kind": "agent_run",
+            },
+        )
+
     return RuntimeAgentRunStarter(
         get_run_group=get_run_group,
+        get_run=get_run,
         insert_run_group=insert_run_group,
         insert_run=insert_run,
         run_by_client_request_id=lambda value: state.setdefault("by_client", {}).get(value),
@@ -152,12 +189,354 @@ def test_agent_run_executor_projects_completed_agent_run() -> None:
                     "envelope_id": "env-agent",
                     "requests": [],
                 },
-                "runtime_execution_metadata": {"yachiyo_runtime_planner": True},
-                "run_id": "run-1",
-            },
+                    "runtime_execution_metadata": {"yachiyo_runtime_planner": True},
+                    "run_id": "run-1",
+                    "original_goal": "Ship",
+                },
         ),
         ("completed", "run-1", "Done", prepared.timeline, prepared.artifacts),
     ]
+
+
+def test_agent_run_executor_preserves_envelope_goal_contract_as_single_authority() -> None:
+    user_goal = "Open TextEdit and type the exact marker"
+    envelope_contract = GoalContract(
+        contract_id="goal-contract-envelope",
+        original_goal=user_goal,
+        intent_kind="desktop_operation",
+        criteria=(
+            GoalCriterion(
+                criterion_id="criterion-type-marker",
+                description="Type and verify the marker",
+                effectful=True,
+                required_capabilities=("desktop.ui_operation",),
+                source_step_ids=("operate-foreground-ui",),
+                verifier_step_ids=("verify-desktop-result",),
+            ),
+        ),
+    )
+    preparation_contract = GoalContract(
+        contract_id="goal-contract-preparation",
+        original_goal=user_goal,
+        intent_kind="desktop_operation",
+        criteria=(
+            GoalCriterion(
+                criterion_id="criterion-preparation",
+                description="A separately compiled preparation criterion",
+                effectful=True,
+                required_capabilities=("desktop.app_control",),
+                source_step_ids=("open-or-focus-app",),
+            ),
+        ),
+    )
+    prepared = _PreparedAgentRun(
+        timeline=[],
+        artifacts=[],
+        goal_contract=preparation_contract.to_payload(),
+    )
+    observed_metadata: list[dict[str, Any]] = []
+
+    class _Preparer:
+        @staticmethod
+        def prepare(*_args: Any, **_kwargs: Any) -> _PreparedAgentRun:
+            return prepared
+
+        @staticmethod
+        def write_context_artifact(*_args: Any) -> None:
+            return None
+
+    class _Outcomes:
+        @staticmethod
+        def completed(
+            run_id: str,
+            result: str,
+            **_kwargs: Any,
+        ) -> dict[str, Any]:
+            return {"run_id": run_id, "status": "completed", "result": result}
+
+        @staticmethod
+        def failed(
+            run_id: str,
+            exc: Exception,
+            **_kwargs: Any,
+        ) -> dict[str, Any]:
+            return {"run_id": run_id, "status": "failed", "error": str(exc)}
+
+    def continue_agent(*_args: Any, **kwargs: Any) -> str:
+        metadata = dict(kwargs.get("runtime_execution_metadata") or {})
+        observed_metadata.append(metadata)
+        restored = runtime_goal_contract(
+            run_id="run-envelope-contract",
+            original_goal=user_goal,
+            runtime_execution_envelope=kwargs.get("runtime_execution_envelope"),
+            runtime_execution_metadata=metadata,
+            messages=[],
+            timeline=[],
+        )
+        assert restored is not None
+        return restored.contract_id
+
+    executor = RuntimeAgentRunExecutor(
+        preparer=_Preparer(),
+        continue_custom_api_agent=continue_agent,
+        agent_run_outcomes=_Outcomes(),
+        approval_pause=object(),
+    )
+
+    result = executor.execute(
+        "run-envelope-contract",
+        {"agent_id": "builtin:yachiyo-main"},
+        user_goal,
+        runtime_execution_envelope={
+            "envelope_id": "envelope-textedit",
+            "task_core": {"goal_contract": envelope_contract.to_payload()},
+            "requests": [],
+        },
+        runtime_execution_metadata={"source": "packaged_acceptance"},
+    )
+
+    assert result == {
+        "run_id": "run-envelope-contract",
+        "status": "completed",
+        "result": "goal-contract-envelope",
+    }
+    assert observed_metadata == [{"source": "packaged_acceptance"}]
+
+
+def test_agent_run_executor_blocks_internal_tool_failure_before_studio_completion() -> None:
+    prepared = _PreparedAgentRun(
+        timeline=[{"event": "agent.run.started"}],
+        artifacts=[],
+    )
+    event_queries: list[dict[str, Any]] = []
+    projected: list[str] = []
+
+    class _Preparer:
+        @staticmethod
+        def prepare(*_args: Any, **_kwargs: Any) -> _PreparedAgentRun:
+            return prepared
+
+        @staticmethod
+        def write_context_artifact(*_args: Any) -> None:
+            return None
+
+    class _Outcomes:
+        @staticmethod
+        def completed(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+            projected.append("completed")
+            return {"status": "completed"}
+
+        @staticmethod
+        def failed(
+            run_id: str,
+            exc: Exception,
+            **_kwargs: Any,
+        ) -> dict[str, Any]:
+            projected.append("failed")
+            return {
+                "run_id": run_id,
+                "status": "failed",
+                "reason": str(getattr(exc, "reason", "")),
+            }
+
+    def list_run_events(
+        _run_id: str,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        event_queries.append(dict(kwargs))
+        return {
+            "events": [
+                {
+                    "run_id": "run-internal-failure",
+                    "event_type": "agent.tool.outcome",
+                    "visibility": "internal",
+                    "payload": {
+                        "tool": "terminal.run",
+                        "tool_call_id": "terminal-failed",
+                        "status": "failed",
+                        "reason": "command_failed",
+                        "visibility": "internal",
+                    },
+                }
+            ]
+            if kwargs.get("include_internal") is True
+            else []
+        }
+
+    executor = RuntimeAgentRunExecutor(
+        preparer=_Preparer(),
+        continue_custom_api_agent=lambda *_args, **_kwargs: "model claimed done",
+        agent_run_outcomes=_Outcomes(),
+        approval_pause=object(),
+        list_run_events=list_run_events,
+    )
+
+    result = executor.execute(
+        "run-internal-failure",
+        {"agent_id": "agent-1"},
+        "Run a terminal task",
+    )
+
+    assert result == {
+        "run_id": "run-internal-failure",
+        "status": "failed",
+        "reason": "command_failed",
+    }
+    assert projected == ["failed"]
+    assert event_queries
+    assert all(query.get("include_internal") is True for query in event_queries)
+
+
+def _stale_tail_goal_contract(run_id: str) -> GoalContract:
+    return GoalContract(
+        contract_id="goal-stale-authoritative-tail",
+        run_id=run_id,
+        original_goal="Analyze the selected file",
+        intent_kind="data_analysis",
+        criteria=(
+            GoalCriterion(
+                criterion_id="criterion-analyze-selected-file",
+                description="Analyze the selected file",
+                effectful=True,
+                required_capabilities=("data.analysis",),
+                expected={
+                    "state": "fulfilled",
+                    "target": {
+                        "kind": "workspace_file",
+                        "action": "analyze_data_file",
+                    },
+                },
+                source_step_ids=("analyze-data",),
+            ),
+        ),
+    )
+
+
+def _stale_tail_tool_event(run_id: str) -> dict[str, Any]:
+    return {
+        "event": "agent.tool.call",
+        "run_id": run_id,
+        "actor": "native_runtime",
+        "execution_authority": "runtime_tool_executor",
+        "detail": "data.analyze",
+        "tool_call_id": "call-analyze-tail",
+        "request_id": "request-analyze-tail",
+        "plan_id": "plan-analyze-tail",
+        "step_id": "analyze-data",
+        "capability_id": "data.analysis",
+        "action_target": {
+            "kind": "workspace_file",
+            "action": "analyze_data_file",
+        },
+        "result": {
+            "ok": True,
+            "postcondition_verified": True,
+            RUNTIME_EXECUTION_PROVENANCE_KEY: {
+                "source": RUNTIME_LOCAL_TOOL_BROKER_PROVENANCE_SOURCE,
+                "version": RUNTIME_EXECUTION_PROVENANCE_VERSION,
+            },
+        },
+    }
+
+
+def test_agent_run_executor_merges_current_authoritative_tail_before_commit() -> None:
+    run_id = "run-stale-authoritative-tail"
+    contract = _stale_tail_goal_contract(run_id)
+    prepared = _PreparedAgentRun(timeline=[{"event": "agent.run.started"}], artifacts=[])
+
+    class _Preparer:
+        @staticmethod
+        def prepare(*_args: Any, **_kwargs: Any) -> _PreparedAgentRun:
+            return prepared
+
+        @staticmethod
+        def write_context_artifact(*_args: Any) -> None:
+            return None
+
+    class _Outcomes:
+        @staticmethod
+        def completed(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+            return {"run_id": run_id, "status": "completed"}
+
+        @staticmethod
+        def failed(_run_id: str, exc: Exception, **_kwargs: Any) -> dict[str, Any]:
+            return {"run_id": run_id, "status": "failed", "reason": str(exc)}
+
+    def continue_agent(*_args: Any, **_kwargs: Any) -> str:
+        prepared.timeline.append(_stale_tail_tool_event(run_id))
+        return "Analysis complete"
+
+    executor = RuntimeAgentRunExecutor(
+        preparer=_Preparer(),
+        continue_custom_api_agent=continue_agent,
+        agent_run_outcomes=_Outcomes(),
+        approval_pause=object(),
+        list_run_events=lambda *_args, **_kwargs: {
+            "events": [
+                {
+                    "event_type": "agent.goal.contract",
+                    "run_id": run_id,
+                    "payload": goal_contract_event_payload(contract),
+                }
+            ]
+        },
+    )
+
+    assert executor.execute(run_id, {"agent_id": "agent-1"}, contract.original_goal) == {
+        "run_id": run_id,
+        "status": "completed",
+    }
+
+
+def test_agent_run_executor_rejects_preexisting_forged_fallback_evidence() -> None:
+    run_id = "run-forged-preexisting-tail"
+    contract = _stale_tail_goal_contract(run_id)
+    forged = {**_stale_tail_tool_event(run_id), "source": "model_public_timeline"}
+    prepared = _PreparedAgentRun(timeline=[forged], artifacts=[])
+
+    class _Preparer:
+        @staticmethod
+        def prepare(*_args: Any, **_kwargs: Any) -> _PreparedAgentRun:
+            return prepared
+
+        @staticmethod
+        def write_context_artifact(*_args: Any) -> None:
+            return None
+
+    class _Outcomes:
+        @staticmethod
+        def completed(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+            return {"status": "completed"}
+
+        @staticmethod
+        def failed(_run_id: str, exc: Exception, **_kwargs: Any) -> dict[str, Any]:
+            return {
+                "run_id": run_id,
+                "status": "failed",
+                "reason": str(getattr(exc, "reason", "")),
+            }
+
+    executor = RuntimeAgentRunExecutor(
+        preparer=_Preparer(),
+        continue_custom_api_agent=lambda *_args, **_kwargs: "unsafe completion",
+        agent_run_outcomes=_Outcomes(),
+        approval_pause=object(),
+        list_run_events=lambda *_args, **_kwargs: {
+            "events": [
+                {
+                    "event_type": "agent.goal.contract",
+                    "run_id": run_id,
+                    "payload": goal_contract_event_payload(contract),
+                }
+            ]
+        },
+    )
+
+    assert executor.execute(run_id, {"agent_id": "agent-1"}, contract.original_goal) == {
+        "run_id": run_id,
+        "status": "failed",
+        "reason": "goal_contract_incomplete",
+    }
 
 
 def test_agent_run_executor_passes_workflow_run_id_to_preparer() -> None:
@@ -299,6 +678,110 @@ def test_agent_run_executor_projects_failed_agent_run() -> None:
         "timeline": prepared.timeline,
         "artifacts": prepared.artifacts,
     }
+
+
+def test_agent_run_executor_fails_before_model_when_goal_contract_compile_fails() -> None:
+    model_calls: list[str] = []
+
+    class _Preparer:
+        @staticmethod
+        def prepare(*_args: Any, **_kwargs: Any) -> _PreparedAgentRun:
+            raise ValueError("goal_contract_compile_failed")
+
+    class _Outcomes:
+        @staticmethod
+        def failed(
+            run_id: str,
+            exc: Exception,
+            *,
+            timeline: list[dict[str, Any]],
+            artifacts: list[dict[str, Any]],
+        ) -> dict[str, Any]:
+            return {
+                "run_id": run_id,
+                "status": "failed",
+                "error": str(exc),
+                "timeline": timeline,
+                "artifacts": artifacts,
+            }
+
+    executor = RuntimeAgentRunExecutor(
+        preparer=_Preparer(),
+        continue_custom_api_agent=lambda *_args, **_kwargs: model_calls.append("called")
+        or "unsafe completion",
+        agent_run_outcomes=_Outcomes(),
+        approval_pause=object(),
+    )
+
+    assert executor.execute("run-compile-failed", {}, "删除文件") == {
+        "run_id": "run-compile-failed",
+        "status": "failed",
+        "error": "goal_contract_compile_failed",
+        "timeline": [],
+        "artifacts": [],
+    }
+    assert model_calls == []
+
+
+@pytest.mark.parametrize(
+    ("mode", "expected_closes"),
+    [("completed", 1), ("failed", 1), ("approval_required", 0)],
+)
+def test_agent_run_executor_releases_browser_target_only_after_terminal_outcome(
+    mode: str,
+    expected_closes: int,
+) -> None:
+    class _ClosableBroker:
+        def __init__(self) -> None:
+            self.closes = 0
+
+        def close_owned_browser_target(self) -> None:
+            self.closes += 1
+
+    broker = _ClosableBroker()
+    prepared = _PreparedAgentRun(timeline=[], artifacts=[], broker=broker)
+
+    class _Preparer:
+        @staticmethod
+        def prepare(*_args: Any, **_kwargs: Any) -> _PreparedAgentRun:
+            return prepared
+
+        @staticmethod
+        def write_context_artifact(*_args: Any) -> None:
+            return None
+
+    class _Outcomes:
+        @staticmethod
+        def completed(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+            return {"status": "completed"}
+
+        @staticmethod
+        def failed(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+            return {"status": "failed"}
+
+    class _ApprovalPause:
+        @staticmethod
+        def project_tool_required(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+            return {"status": "approval_required"}
+
+    def continue_agent(*_args: Any, **_kwargs: Any) -> str:
+        if mode == "failed":
+            raise RuntimeError("failed")
+        if mode == "approval_required":
+            raise AgentApprovalRequired({"approval_id": "approval-1"})
+        return "done"
+
+    executor = RuntimeAgentRunExecutor(
+        preparer=_Preparer(),
+        continue_custom_api_agent=continue_agent,
+        agent_run_outcomes=_Outcomes(),
+        approval_pause=_ApprovalPause(),
+    )
+
+    result = executor.execute("run-browser", {"agent_id": "agent-1"}, "Ship")
+
+    assert result["status"] == mode
+    assert broker.closes == expected_closes
 
 
 def test_agent_run_runtime_planner_entrypoint_overlays_stale_desktop_policy() -> None:
@@ -479,6 +962,7 @@ def test_agent_run_starter_creates_root_group_and_preserves_idempotency() -> Non
     assert first.run["kind"] == "agent_run"
     assert first.run["runnable_id"] == "agent-1"
     assert first.run["run_group_id"] == "group-1"
+    assert first.run["project_root_group"] is True
     assert first.run["client_request_id"] == "client-1"
     assert state["groups"] == [
         {
@@ -494,40 +978,288 @@ def test_agent_run_starter_creates_root_group_and_preserves_idempotency() -> Non
     assert len(state["runs"]) == 1
 
 
-def test_agent_run_starter_uses_existing_group_without_root_projection() -> None:
+def test_agent_run_starter_rejects_existing_group_without_internal_lineage() -> None:
     state: dict[str, Any] = {}
     starter = _starter(state)
 
+    with pytest.raises(RuntimeError, match="run_group_attachment_authority_required"):
+        starter.start_sync(
+            {
+                "agent_id": "agent-1",
+                "user_goal": "Run in group",
+                "run_group_id": "group-existing",
+            },
+            agent={"agent_id": "agent-1", "name": "Runner"},
+            lock=threading.RLock(),
+        )
+
+    assert state.get("runs") is None
+
+
+def test_agent_run_starter_accepts_authorized_group_member() -> None:
+    state: dict[str, Any] = {
+        "group_records": {
+            "group-active": {
+                "run_group_id": "group-active",
+                "status": "running",
+                "child_run_ids": ["parent-run-1"],
+            }
+        },
+        "run_records": {
+            "parent-run-1": {
+                "run_id": "parent-run-1",
+                "run_group_id": "group-active",
+                "kind": "agent_run",
+            }
+        },
+    }
+    starter = _starter(state)
+    attachment = issue_run_group_child_attachment(
+        run_group_id="group-active",
+        parent_run_id="parent-run-1",
+        child_kind="agent_run",
+        child_runnable_id="agent-2",
+        child_identity="group-member:1:agent-2",
+    )
+
     start = starter.start_sync(
         {
-            "agent_id": "agent-1",
-            "user_goal": "Run in group",
-            "run_group_id": "group-existing",
+            "agent_id": "agent-2",
+            "user_goal": "Run as authorized group member",
+            "run_group_id": "group-active",
+            "client_run_id": attachment.child_identity,
+            RUN_GROUP_ATTACHMENT_PAYLOAD_KEY: attachment,
         },
-        agent={"agent_id": "agent-1", "name": "Runner"},
+        agent={"agent_id": "agent-2", "name": "Runner"},
         lock=threading.RLock(),
     )
 
     assert start.root_group is False
-    assert start.run["run_group_id"] == "group-existing"
-    assert state["validated_groups"] == ["group-existing"]
-    assert state.get("groups") is None
+    assert start.run["run_group_id"] == "group-active"
+    assert start.run["project_root_group"] is False
 
 
-def test_agent_run_starter_async_preserves_legacy_non_idempotent_behavior() -> None:
+def test_agent_run_starter_revalidates_attachment_on_group_idempotency_hit() -> None:
+    existing = {
+        "run_id": "existing-child-run",
+        "kind": "agent_run",
+        "runnable_id": "agent-2",
+        "user_goal": "Run as authorized group member",
+        "run_group_id": "group-active",
+        "client_request_id": "group-member:1:agent-2",
+        "idempotent": True,
+    }
+    state: dict[str, Any] = {
+        "by_client": {existing["client_request_id"]: existing},
+        "group_records": {
+            "group-active": {
+                "run_group_id": "group-active",
+                "status": "running",
+                "child_run_ids": [
+                    "parent-run-1",
+                    "other-member-run",
+                    "existing-child-run",
+                ],
+            }
+        },
+        "run_records": {
+            "parent-run-1": {
+                "run_id": "parent-run-1",
+                "run_group_id": "group-active",
+                "kind": "agent_run",
+            },
+            "other-member-run": {
+                "run_id": "other-member-run",
+                "run_group_id": "group-active",
+                "kind": "agent_run",
+            },
+        },
+    }
+    starter = _starter(state)
+    replayed_with_forged_parent = issue_run_group_child_attachment(
+        run_group_id="group-active",
+        parent_run_id="other-member-run",
+        child_kind="agent_run",
+        child_runnable_id="agent-2",
+        child_identity=str(existing["client_request_id"]),
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="run_group_attachment_existing_parent_mismatch",
+    ):
+        starter.start_sync(
+            {
+                "agent_id": "agent-2",
+                "user_goal": existing["user_goal"],
+                "run_group_id": "group-active",
+                "client_run_id": existing["client_request_id"],
+                RUN_GROUP_ATTACHMENT_PAYLOAD_KEY: replayed_with_forged_parent,
+            },
+            agent={"agent_id": "agent-2", "name": "Runner"},
+            lock=threading.RLock(),
+        )
+
+
+def test_agent_run_starter_rejects_idempotent_child_outside_group_membership() -> None:
+    existing = {
+        "run_id": "existing-child-run",
+        "kind": "agent_run",
+        "runnable_id": "agent-2",
+        "user_goal": "Run as authorized group member",
+        "run_group_id": "group-active",
+        "client_request_id": "group-member:1:agent-2",
+        "idempotent": True,
+    }
+    state: dict[str, Any] = {
+        "by_client": {existing["client_request_id"]: existing},
+        "group_records": {
+            "group-active": {
+                "run_group_id": "group-active",
+                "status": "running",
+                "child_run_ids": ["parent-run-1"],
+            }
+        },
+        "run_records": {
+            "parent-run-1": {
+                "run_id": "parent-run-1",
+                "run_group_id": "group-active",
+                "kind": "agent_run",
+            }
+        },
+    }
+    starter = _starter(state)
+    marker = issue_run_group_child_attachment(
+        run_group_id="group-active",
+        parent_run_id="parent-run-1",
+        child_kind="agent_run",
+        child_runnable_id="agent-2",
+        child_identity=str(existing["client_request_id"]),
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="run_group_attachment_existing_child_not_member",
+    ):
+        starter.start_sync(
+            {
+                "agent_id": "agent-2",
+                "user_goal": existing["user_goal"],
+                "run_group_id": "group-active",
+                "client_run_id": existing["client_request_id"],
+                RUN_GROUP_ATTACHMENT_PAYLOAD_KEY: marker,
+            },
+            agent={"agent_id": "agent-2", "name": "Runner"},
+            lock=threading.RLock(),
+        )
+
+
+def test_native_group_run_attaches_authorized_members_through_runtime(tmp_path) -> None:
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime.db",
+        workspace_dir=tmp_path / "runtime",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+
+    class _DeferredThread:
+        def __init__(self, *, target: Any, name: str, daemon: bool) -> None:
+            self.target = target
+            self.name = name
+            self.daemon = daemon
+
+        def start(self) -> None:
+            return None
+
+    try:
+        agent_ids = []
+        for name in ("Planner", "Reviewer"):
+            agent = service.create_agent(
+                {
+                    "name": name,
+                    "model_mode": "custom_api",
+                    "model_config": {
+                        "base_url": "https://api.example.test/v1",
+                        "model": "demo-model",
+                        "api_key": "sk-secret",
+                    },
+                }
+            )
+            agent_ids.append(agent["agent_id"])
+        service.agent_run_async_coordinator._thread_factory = _DeferredThread
+        original_insert_run = service.agent_run_starter._insert_run
+        attachment_transaction_states: list[bool] = []
+
+        def traced_insert_run(**kwargs: Any) -> dict[str, Any]:
+            attachment_transaction_states.append(
+                service._conn.in_managed_transaction
+            )
+            return original_insert_run(**kwargs)
+
+        service.agent_run_starter._insert_run = traced_insert_run
+
+        started = start_agent_group_run(
+            service,
+            {"group_id": "group-authorized", "objective": "Prepare report"},
+            group={
+                "group_id": "group-authorized",
+                "name": "Authorized group",
+                "members": [{"agent_id": agent_id} for agent_id in agent_ids],
+            },
+        )
+
+        assert len(started["child_run_ids"]) == 2
+        group = service.get_run_group(started["run_group_id"])
+        assert group["child_run_ids"] == started["child_run_ids"]
+        assert all(
+            service.get_run(run_id)["project_root_group"] is False
+            for run_id in started["child_run_ids"]
+        )
+        assert attachment_transaction_states == [False, True]
+    finally:
+        service.close()
+
+
+def test_agent_run_starter_persists_explicit_group_aggregator_authority() -> None:
     state: dict[str, Any] = {}
+    starter = _starter(state)
 
-    def unexpected_client_request_id(_payload: dict[str, Any]) -> str:
-        raise AssertionError("async agent runs should not consult client request id")
-
-    starter = _starter(state, client_request_id_from_payload=unexpected_client_request_id)
     start = starter.start_async(
-        {"agent_id": "agent-1", "user_goal": "Run later", "client_run_id": "ignored-client-id"},
+        {
+            "agent_id": "agent-1",
+            "user_goal": "Run as first group member",
+            "project_root_group": False,
+        },
         agent={"agent_id": "agent-1", "name": "Runner"},
     )
 
-    assert start.root_group is True
-    assert start.run["client_request_id"] == ""
+    assert start.root_group is False
+    assert start.run["run_group_id"] == "group-1"
+    assert start.run["project_root_group"] is False
+    assert len(state["groups"]) == 1
+
+
+def test_agent_run_starter_async_claims_client_request_id() -> None:
+    state: dict[str, Any] = {}
+    starter = _starter(state)
+    payload = {
+        "agent_id": "agent-1",
+        "user_goal": "Run later",
+        "client_run_id": "async-client-id",
+    }
+    first = starter.start_async(
+        payload,
+        agent={"agent_id": "agent-1", "name": "Runner"},
+    )
+    second = starter.start_async(
+        payload,
+        agent={"agent_id": "agent-1", "name": "Runner"},
+    )
+
+    assert first.root_group is True
+    assert first.run["client_request_id"] == "async-client-id"
+    assert second.existing is True
+    assert second.run["run_id"] == first.run["run_id"]
     assert len(state["runs"]) == 1
 
 
@@ -596,7 +1328,13 @@ def test_agent_run_async_coordinator_returns_processing_and_completes_in_backgro
     completions: list[dict[str, Any]] = []
 
     class _Starter:
-        def start_async(self, payload: dict[str, Any], *, agent: dict[str, Any]) -> AgentRunStart:
+        def start_async(
+            self,
+            payload: dict[str, Any],
+            *,
+            agent: dict[str, Any],
+            lock: Any,
+        ) -> AgentRunStart:
             return AgentRunStart(
                 {"run_id": "run-1", "kind": "agent_run", "run_group_id": "group-1"},
                 root_group=True,
@@ -614,9 +1352,10 @@ def test_agent_run_async_coordinator_returns_processing_and_completes_in_backgro
         },
         project_agent_run_group_if_root=lambda result: {**result, "group_projected": True},
         resolve_runnable=lambda **kwargs: {"id": kwargs["runnable_id"], "kind": "agent"},
-        update_run=lambda *_args, **_kwargs: {},
-        runtime_agent_timeline=object(),
-        runtime_agent_run_events=object(),
+        get_run=lambda run_id: {"run_id": run_id, "status": "running"},
+        project_agent_run_failure=lambda *_args, **_kwargs: pytest.fail(
+            "no failure expected"
+        ),
         redact_error=str,
         error_type=agent_runtime.AgentRuntimeError,
         thread_factory=_ImmediateThread,
@@ -644,25 +1383,45 @@ def test_agent_run_async_coordinator_returns_processing_and_completes_in_backgro
 
 def test_agent_run_async_coordinator_projects_background_failure() -> None:
     completions: list[dict[str, Any]] = []
-    failed_events: list[tuple[str, str]] = []
-    updates: list[dict[str, Any]] = []
+    projections: list[dict[str, Any]] = []
+    current = {
+        "run_id": "run-fail",
+        "kind": "agent_run",
+        "status": "running",
+        "timeline": [{"event": "agent.run.started"}],
+        "artifacts": [{"name": "context.md"}],
+    }
 
     class _Starter:
-        def start_async(self, payload: dict[str, Any], *, agent: dict[str, Any]) -> AgentRunStart:
+        def start_async(
+            self,
+            payload: dict[str, Any],
+            *,
+            agent: dict[str, Any],
+            lock: Any,
+        ) -> AgentRunStart:
             return AgentRunStart({"run_id": "run-fail", "kind": "agent_run"}, root_group=False)
-
-    class _Timeline:
-        @staticmethod
-        def failed(error: str) -> dict[str, str]:
-            return {"event": "agent.run.failed", "detail": error}
-
-    class _Events:
-        @staticmethod
-        def failed(run_id: str, error: str) -> None:
-            failed_events.append((run_id, error))
 
     def fail_execute(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
         raise RuntimeError("secret failure")
+
+    def project_failure(
+        run_id: str,
+        error: Exception,
+        *,
+        timeline: list[dict[str, Any]],
+        artifacts: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        projections.append(
+            {
+                "run_id": run_id,
+                "error": str(error),
+                "timeline": timeline,
+                "artifacts": artifacts,
+            }
+        )
+        current.update(status="failed", result=str(error))
+        return dict(current)
 
     coordinator = RuntimeAgentRunAsyncCoordinator(
         get_agent_private=lambda agent_id: {"agent_id": agent_id, "name": "Runner"},
@@ -671,9 +1430,8 @@ def test_agent_run_async_coordinator_projects_background_failure() -> None:
         execute_agent_run=fail_execute,
         project_agent_run_group_if_root=lambda result: result,
         resolve_runnable=lambda **kwargs: {"id": kwargs["runnable_id"]},
-        update_run=lambda run_id, **kwargs: updates.append({"run_id": run_id, **kwargs}) or {"run_id": run_id},
-        runtime_agent_timeline=_Timeline(),
-        runtime_agent_run_events=_Events(),
+        get_run=lambda _run_id: dict(current),
+        project_agent_run_failure=project_failure,
         redact_error=lambda error: str(error).replace("secret", "[redacted]"),
         error_type=agent_runtime.AgentRuntimeError,
         thread_factory=_ImmediateThread,
@@ -682,18 +1440,170 @@ def test_agent_run_async_coordinator_projects_background_failure() -> None:
     result = coordinator.create_async({"agent_id": "agent-1", "user_goal": "Ship"}, on_complete=completions.append)
 
     assert result["status"] == "processing"
-    assert failed_events == [("run-fail", "[redacted] failure")]
-    assert updates == [
+    assert projections == [
         {
             "run_id": "run-fail",
-            "status": "failed",
-            "result": "[redacted] failure",
-            "timeline": [{"event": "agent.run.failed", "detail": "[redacted] failure"}],
-            "artifacts": [],
-            "pending_approval": None,
+            "error": "[redacted] failure",
+            "timeline": [{"event": "agent.run.started"}],
+            "artifacts": [{"name": "context.md"}],
         }
     ]
-    assert completions == [{"run_id": "run-fail", "kind": "agent_run", "status": "failed", "result": "[redacted] failure"}]
+    assert completions == [
+        {
+            "run_id": "run-fail",
+            "kind": "agent_run",
+            "status": "failed",
+            "timeline": [{"event": "agent.run.started"}],
+            "artifacts": [{"name": "context.md"}],
+            "result": "[redacted] failure",
+        }
+    ]
+
+
+def test_agent_run_async_takeover_projects_failure_before_releasing_lease() -> None:
+    order: list[str] = []
+    current = {
+        "run_id": "run-takeover",
+        "kind": "agent_run",
+        "status": "running",
+        "timeline": [{"event": "tool.completed"}],
+        "artifacts": [{"artifact_id": "prior-effect"}],
+    }
+
+    class _Starter:
+        def start_async(
+            self,
+            _payload: dict[str, Any],
+            *,
+            agent: dict[str, Any],
+            lock: Any,
+        ) -> AgentRunStart:
+            return AgentRunStart(
+                dict(current),
+                root_group=False,
+                lease_generation=2,
+                lease_owner_token="owner-takeover",
+                takeover=True,
+            )
+
+        @contextmanager
+        def execution_lease_context(self, *_args: Any, **_kwargs: Any) -> Any:
+            order.append("lease-enter")
+            yield
+            order.append("lease-exit")
+
+        def release_async_lease(self, *_args: Any, **_kwargs: Any) -> bool:
+            order.append("lease-release")
+            return True
+
+    def project_failure(
+        _run_id: str,
+        error: Exception,
+        *,
+        timeline: list[dict[str, Any]],
+        artifacts: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        order.append("project-failure")
+        assert "async_execution_resume_checkpoint_required" in str(error)
+        assert timeline == [{"event": "tool.completed"}]
+        assert artifacts == [{"artifact_id": "prior-effect"}]
+        current.update(status="failed", result=str(error))
+        return dict(current)
+
+    completions: list[dict[str, Any]] = []
+    coordinator = RuntimeAgentRunAsyncCoordinator(
+        get_agent_private=lambda agent_id: {"agent_id": agent_id, "name": "Runner"},
+        validate_agent_run_readiness=lambda _agent: None,
+        starter=_Starter(),  # type: ignore[arg-type]
+        execute_agent_run=lambda *_args, **_kwargs: pytest.fail("must not replay"),
+        project_agent_run_group_if_root=lambda result: result,
+        resolve_runnable=lambda **kwargs: {"id": kwargs["runnable_id"]},
+        get_run=lambda _run_id: dict(current),
+        project_agent_run_failure=project_failure,
+        redact_error=str,
+        error_type=agent_runtime.AgentRuntimeError,
+        thread_factory=_ImmediateThread,
+    )
+
+    result = coordinator.create_async(
+        {"agent_id": "agent-1", "user_goal": "Ship"},
+        on_complete=completions.append,
+    )
+
+    assert result["status"] == "failed"
+    assert completions == [result]
+    assert order == [
+        "lease-enter",
+        "project-failure",
+        "lease-exit",
+        "lease-release",
+    ]
+
+
+def test_agent_run_async_coordinator_marks_run_failed_when_thread_start_raises() -> None:
+    projections: list[dict[str, Any]] = []
+    current = {
+        "run_id": "run-thread-fail",
+        "kind": "agent_run",
+        "status": "running",
+        "timeline": [],
+        "artifacts": [],
+    }
+
+    class _Starter:
+        def start_async(
+            self,
+            payload: dict[str, Any],
+            *,
+            agent: dict[str, Any],
+            lock: Any,
+        ) -> AgentRunStart:
+            return AgentRunStart(
+                {"run_id": "run-thread-fail", "kind": "agent_run"},
+                root_group=False,
+            )
+
+    class _FailingThread:
+        def __init__(self, **_kwargs: Any) -> None:
+            pass
+
+        def start(self) -> None:
+            raise RuntimeError("thread start secret")
+
+    coordinator = RuntimeAgentRunAsyncCoordinator(
+        get_agent_private=lambda agent_id: {"agent_id": agent_id, "name": "Runner"},
+        validate_agent_run_readiness=lambda _agent: None,
+        starter=_Starter(),  # type: ignore[arg-type]
+        execute_agent_run=lambda *_args, **_kwargs: {},
+        project_agent_run_group_if_root=lambda result: result,
+        resolve_runnable=lambda **kwargs: {"id": kwargs["runnable_id"]},
+        get_run=lambda _run_id: dict(current),
+        project_agent_run_failure=lambda run_id, error, **kwargs: (
+            projections.append(
+                {"run_id": run_id, "error": str(error), **kwargs}
+            )
+            or {
+                **current,
+                "status": "failed",
+                "result": str(error),
+            }
+        ),
+        redact_error=lambda error: str(error).replace("secret", "[redacted]"),
+        error_type=agent_runtime.AgentRuntimeError,
+        thread_factory=_FailingThread,
+    )
+
+    with pytest.raises(agent_runtime.AgentRuntimeError, match=r"thread start \[redacted\]"):
+        coordinator.create_async({"agent_id": "agent-1", "user_goal": "Ship"})
+
+    assert projections == [
+        {
+            "run_id": "run-thread-fail",
+            "error": "thread start [redacted]",
+            "timeline": [],
+            "artifacts": [],
+        }
+    ]
 
 
 def test_native_runtime_uses_split_agent_run_starter(tmp_path, monkeypatch) -> None:

@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
 
-import { apiPost } from '../../../lib/bridge';
 import { ROUTE_CHANGE_EVENT, currentParam } from '../../../lib/view';
 import { taskHandoffMessageId } from '../messageTaskHandoff';
 import type { ChatMessage } from '../types';
@@ -16,6 +15,7 @@ type UseChatRouteHandoffOptions = {
   refreshMessages: () => Promise<ChatRouteHandoffMessagesPayload>;
   revealMessage: (messageId: string) => void;
   setStatus: (value: string) => void;
+  switchConversation: (sessionId: string) => Promise<ChatRouteHandoffMessagesPayload>;
 };
 
 function readChatRouteHandoffParams() {
@@ -56,6 +56,7 @@ export function useChatRouteHandoff({
   refreshMessages,
   revealMessage,
   setStatus,
+  switchConversation,
 }: UseChatRouteHandoffOptions) {
   const { routeSessionId, routeTaskId } = useChatRouteHandoffParams();
   const actionsRef = useRef({
@@ -65,6 +66,7 @@ export function useChatRouteHandoff({
     refreshMessages,
     revealMessage,
     setStatus,
+    switchConversation,
   });
 
   useEffect(() => {
@@ -75,6 +77,7 @@ export function useChatRouteHandoff({
       refreshMessages,
       revealMessage,
       setStatus,
+      switchConversation,
     };
   }, [
     loadSessions,
@@ -83,25 +86,21 @@ export function useChatRouteHandoff({
     refreshMessages,
     revealMessage,
     setStatus,
+    switchConversation,
   ]);
 
   useEffect(() => {
     const requestedSessionId = routeSessionId;
     const requestedTaskId = routeTaskId;
+    let cancelled = false;
     void (async () => {
       const actions = actionsRef.current;
       await Promise.all([actions.refreshAssistantProfile(), actions.refreshExecutor()]);
-      if (requestedSessionId) {
-        try {
-          const result = await apiPost<{ ok?: boolean; error?: string }>('/ui/chat/sessions/load', {
-            session_id: requestedSessionId,
-          });
-          if (result.ok === false) throw new Error(result.error || '切换会话失败');
-        } catch (error) {
-          actions.setStatus(error instanceof Error ? error.message : '切换会话失败');
-        }
-      }
-      const [messagePayload] = await Promise.all([actions.refreshMessages(), actions.loadSessions()]);
+      if (cancelled) return;
+      const messagePayload = requestedSessionId
+        ? await actions.switchConversation(requestedSessionId)
+        : (await Promise.all([actions.refreshMessages(), actions.loadSessions()]))[0];
+      if (cancelled) return;
       if (requestedTaskId && messagePayload?.messages) {
         const messageId = taskHandoffMessageId(messagePayload.messages, requestedTaskId);
         if (messageId) {
@@ -109,6 +108,13 @@ export function useChatRouteHandoff({
           actions.setStatus('已定位到关联任务消息');
         }
       }
-    })();
+    })().catch((error) => {
+      if (!cancelled) {
+        actionsRef.current.setStatus(error instanceof Error ? error.message : '会话定位失败');
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [routeSessionId, routeTaskId]);
 }

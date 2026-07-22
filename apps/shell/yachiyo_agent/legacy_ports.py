@@ -5,26 +5,30 @@ from __future__ import annotations
 import re
 import shlex
 import sys
-
+import threading
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from apps.shell.agent.runtime.approval_tool_sets import (
     APPROVAL_PLAN_TOOLS as _APPROVAL_PLAN_TOOLS,
+)
+from apps.shell.agent.runtime.approval_tool_sets import (
     SAFE_SHORTCUT_APPROVAL_TOOLS as _SAFE_SHORTCUT_APPROVAL_TOOLS,
 )
 from apps.shell.agent.runtime.callbacks import supports_keyword
-from apps.shell.agent.runtime.desktop_execution_providers import (
-    local_desktop_execution_runtime_probe,
-)
 from apps.shell.agent.runtime.direct_request_policy import (
     approval_required_policy_from_direct_requests,
 )
 from apps.shell.agent.runtime.errors import AgentRuntimeError
+from apps.shell.agent.runtime.events import redact_json_value
+from apps.shell.agent.runtime.outcome_evaluator import evaluate_main_chat_outcome
 from apps.shell.chat_api import ChatAPI
 from packages.security import redact_api_error_text
 
+from .app_name_hints import is_legacy_app_name_hint
+from .controlled_provider_diagnostics import controlled_desktop_provider_diagnostics_payload
 from .daily_desktop import (
     daily_desktop_allowed_tools,
     daily_desktop_direct_metadata_request,
@@ -37,11 +41,7 @@ from .daily_desktop import (
     main_chat_entrypoint_allowed_tools,
     planner_first_daily_desktop_entrypoint_requests,
 )
-from .app_name_hints import is_legacy_app_name_hint
-from .desktop_permissions import (
-    desktop_permission_missing_by_capability,
-    desktop_runtime_blocking_conditions_by_capability,
-)
+from .desk import LocalAgentDeskStore
 from .desktop_execution_policy import (
     daily_entrypoint_desktop_execution_policy,
     desktop_execution_policy_payload,
@@ -50,52 +50,11 @@ from .desktop_execution_policy import (
     desktop_provider_session_strict_foreground_default,
     sandbox_desktop_provider_status,
 )
+from .desktop_permissions import (
+    cached_desktop_permission_diagnostics as _cached_desktop_permission_diagnostics,
+)
 from .desktop_plan_hints import hotkey_hint
-from .desk import LocalAgentDeskStore
 from .entrypoint_tool_selection import planner_first_direct_tool_selection
-from .legacy_event_pages import (
-    is_replay_enrichment_event as _is_replay_enrichment_event,
-    run_event_page_from_legacy_stream as _run_event_page_from_legacy_stream,
-    run_with_replay_events as _run_with_replay_events,
-)
-from .legacy_groups import (
-    chat_group_snapshot,
-    chat_group_snapshots,
-    group_definition_from_run_group,
-    save_chat_group_snapshot,
-)
-from .legacy_group_runs import start_legacy_group_run
-from .legacy_runs import LegacyRunPayloadProjector
-from .legacy_tasks import (
-    LegacyRuntimePort,
-    MAIN_CHAT_AGENT_ID,
-    _approval_id_from_decision,
-    _assert_matching_pending_approval,
-    _planner_metadata_with_desktop_readiness,
-)
-from .planner_projection import (
-    planner_run_event_payloads,
-    runtime_planner_decision,
-    runtime_planner_metadata,
-)
-from .planner_execution import (
-    planner_execution_tool_requests,
-    planner_tool_requests,
-)
-from .recovery_actions import (
-    RECOVERY_RETRY_CONTEXT_EVENT_TYPE,
-    recovery_retry_context_payload,
-)
-from .runtime_execution import (
-    runtime_execution_envelope_payload_with_request_context,
-    runtime_execution_requests_from_envelope_payload,
-    runtime_execution_requests_from_metadata,
-)
-from .runtime_progress import (
-    task_progress_event_payloads_for_tool_result,
-    task_replan_event_payloads_for_tool_result,
-)
-from .controlled_provider_diagnostics import controlled_desktop_provider_diagnostics_payload
 from .groups import group_run_snapshot_from_payload
 from .isolated_provider_session import (
     annotate_envelope_with_desktop_provider_session,
@@ -103,6 +62,53 @@ from .isolated_provider_session import (
     isolated_desktop_provider_session_status,
     start_isolated_desktop_provider_session,
     stop_isolated_desktop_provider_session,
+)
+from .legacy_event_pages import (
+    run_event_page_from_legacy_stream as _run_event_page_from_legacy_stream,
+)
+from .legacy_event_pages import (
+    run_with_replay_events as _run_with_replay_events,
+)
+from .legacy_group_runs import start_legacy_group_run
+from .legacy_groups import (
+    chat_group_snapshot,
+    chat_group_snapshots,
+    group_definition_from_run_group,
+    save_chat_group_snapshot,
+)
+from .legacy_runs import LegacyRunPayloadProjector
+from .legacy_tasks import (
+    MAIN_CHAT_AGENT_ID,
+    _approval_id_from_decision,
+    _assert_matching_pending_approval,
+    _planner_metadata_with_desktop_readiness,
+)
+from .legacy_tasks import (
+    LegacyRuntimePort as LegacyRuntimePort,  # re-export compatibility surface
+)
+from .planner_execution import (
+    planner_execution_tool_requests,
+    planner_tool_requests,
+)
+from .planner_projection import (
+    planner_run_event_payloads,
+    runtime_planner_decision,
+    runtime_planner_metadata,
+)
+from .recovery_actions import (
+    RECOVERY_RETRY_CONTEXT_EVENT_TYPE,
+    recovery_retry_context_payload,
+)
+from .runtime_execution import (
+    RUNTIME_EXECUTION_READINESS_DEFERRED,
+    runtime_execution_envelope_payload_with_request_context,
+    runtime_execution_readiness_state,
+    runtime_execution_requests_from_envelope_payload,
+    runtime_execution_requests_from_metadata,
+)
+from .runtime_progress import (
+    task_progress_event_payloads_for_tool_result,
+    task_replan_event_payloads_for_tool_result,
 )
 from .tool_catalog import runtime_tool_catalog_snapshot
 from .virtual_desktop_guest_installer import (
@@ -113,6 +119,56 @@ from .virtual_desktop_guest_installer import (
 from .workflow_run_snapshots import workflow_run_snapshot_from_payload
 
 _LEGACY_RUN_PROJECTOR = LegacyRunPayloadProjector()
+_PENDING_CHAT_PROJECTION_LOCK = threading.RLock()
+_CHAT_PROJECTION_PENDING_EVENT = "chat.user_projection.pending"
+_CHAT_PROJECTION_COMPLETED_EVENT = "chat.user_projection.completed"
+_CHAT_PROJECTION_SUPPRESSED_EVENT = "chat.user_projection.suppressed"
+_RUNTIME_MANAGED_MAIN_CHAT_SOURCES = frozenset(
+    {
+        "chat",
+        "live2d",
+    }
+)
+_CHAT_PROJECTION_EVENT_PROMPT_BYTES = 24_000
+_CHAT_PROJECTION_EVENT_METADATA_KEYS = {
+    "source",
+    "client_message_id",
+    "runnable_kind",
+    "runnable_id",
+    "workflow_id",
+    "group_id",
+    "agent_group_id",
+}
+
+
+def desktop_permission_missing_by_capability() -> dict[str, list[str]]:
+    """Compatibility seam backed only by passive cached diagnostics."""
+
+    return dict(
+        _cached_desktop_permission_diagnostics().get("missing_permissions") or {}
+    )
+
+
+def desktop_runtime_blocking_conditions_by_capability() -> dict[str, list[str]]:
+    """Compatibility seam backed only by passive cached diagnostics."""
+
+    return dict(
+        _cached_desktop_permission_diagnostics().get("blocking_conditions") or {}
+    )
+
+
+def _passive_desktop_permission_diagnostics() -> dict[str, Any]:
+    missing_permissions = desktop_permission_missing_by_capability()
+    blocking_conditions = desktop_runtime_blocking_conditions_by_capability()
+    not_checked = "desktop_permission_diagnostics_not_checked" in (
+        blocking_conditions.get("desktop_execution") or []
+    )
+    return {
+        "missing_permissions": missing_permissions,
+        "blocking_conditions": blocking_conditions,
+        "checked": not not_checked,
+        "status": "not_checked" if not_checked else "cached",
+    }
 _DAILY_DESKTOP_METADATA_DISCOVERY_TOOLS = {
     "desktop.list_apps",
     "desktop.inspect_app",
@@ -469,6 +525,8 @@ def _can_apply_legacy_chat_direct_local_policy(request: Mapping[str, Any]) -> bo
     existing = request.get("desktop_execution_policy")
     if not isinstance(existing, Mapping):
         return True
+    if existing.get("prefer_background_desktop") is True:
+        return False
     source = str(existing.get("source") or "").strip()
     mode = str(existing.get("mode") or "").strip()
     return source.startswith("daily_") or mode == "preview_input"
@@ -722,6 +780,36 @@ def _legacy_hotkey_compat_required(runtime: Any) -> bool:
     return not callable(getattr(runtime, "_main_chat_tool_policy", None))
 
 
+def _clean_blocked_main_chat_requests(value: Any) -> list[dict[str, Any]]:
+    return [
+        dict(item)
+        for item in value or []
+        if isinstance(item, Mapping) and str(item.get("tool") or "").strip()
+        and runtime_execution_readiness_state(item)
+        != RUNTIME_EXECUTION_READINESS_DEFERRED
+    ]
+
+
+def _blocked_main_chat_failure_message(
+    requests: list[dict[str, Any]],
+) -> str:
+    for request in requests:
+        route = (
+            request.get("desktop_execution_route")
+            if isinstance(request.get("desktop_execution_route"), Mapping)
+            else {}
+        )
+        for value in (
+            request.get("policy_reason"),
+            route.get("reason"),
+            request.get("blocked_by"),
+        ):
+            reason = redact_api_error_text(value, fallback="").strip()[:320]
+            if reason:
+                return f"当前无法执行此操作：{reason} 请检查桌面权限或执行环境后重试。"
+    return "当前执行环境不允许此操作，请检查桌面权限或执行环境后重试。"
+
+
 class LegacyChatTaskStarter:
     """Starts agent tasks through the existing Chat session path when available."""
 
@@ -741,18 +829,28 @@ class LegacyChatTaskStarter:
         if getattr(self._app_runtime, "chat_session", None) is None:
             return None
 
-        metadata = request.get("metadata") if isinstance(request.get("metadata"), dict) else {}
+        metadata = (
+            dict(request.get("metadata"))
+            if isinstance(request.get("metadata"), dict)
+            else {}
+        )
         attachments = [
             dict(item)
             for item in request.get("attachments") or []
             if isinstance(item, dict)
         ]
         client_message_id = str(
-            metadata.get("client_message_id")
+            request.get("client_message_id")
+            or request.get("client_run_id")
+            or request.get("client_task_id")
+            or request.get("idempotency_key")
+            or metadata.get("client_message_id")
             or metadata.get("idempotency_key")
             or metadata.get("client_task_id")
             or ""
         ).strip()
+        if client_message_id:
+            metadata["client_message_id"] = client_message_id
         send_message = ChatAPI(self._app_runtime).send_runnable_message_in_session
         send_kwargs = {
             "runnable_id": agent_id,
@@ -787,6 +885,18 @@ class LegacyChatTaskStarter:
             or metadata.get("client_task_id")
             or run_id
         ).strip()
+        if bool(result.get("idempotent")) and task_id:
+            return self._projector.chat_task_payload(
+                {
+                    **result,
+                    "task_id": task_id,
+                    "session_id": conversation_id,
+                    "user_goal": request.get("prompt") or request.get("goal") or "",
+                    "metadata": metadata,
+                },
+                conversation_id=conversation_id,
+                runtime=self._runtime,
+            )
         if not run_id:
             if agent_id != MAIN_CHAT_AGENT_ID or not task_id:
                 return None
@@ -840,6 +950,1028 @@ class LegacyChatTaskStarter:
             conversation_id=conversation_id,
             runtime=self._runtime,
         )
+
+    def start_runtime_managed_main_chat_task(
+        self,
+        request: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        if not callable(getattr(self._runtime, "start_main_chat_run", None)):
+            return None
+        if not callable(getattr(self._runtime, "execute_main_chat_model_loop", None)):
+            return None
+        if str(request.get("workflow_id") or "").strip():
+            return None
+        if str(request.get("group_id") or request.get("agent_group_id") or "").strip():
+            return None
+        if getattr(self._app_runtime, "chat_session", None) is None:
+            return None
+        metadata = (
+            dict(request.get("metadata"))
+            if isinstance(request.get("metadata"), dict)
+            else {}
+        )
+        if (
+            str(metadata.get("source") or "").strip()
+            not in _RUNTIME_MANAGED_MAIN_CHAT_SOURCES
+        ):
+            return None
+        agent_id = str(request.get("agent_id") or request.get("runnable_id") or "").strip()
+        if agent_id and agent_id != MAIN_CHAT_AGENT_ID:
+            return None
+        if any(isinstance(item, dict) for item in request.get("attachments") or []):
+            return None
+
+        prompt = str(request.get("prompt") or request.get("goal") or "")
+        conversation_id = str(
+            request.get("conversation_id")
+            or getattr(getattr(self._app_runtime, "chat_session", None), "session_id", "")
+            or ""
+        ).strip()
+        client_message_id = str(
+            request.get("client_message_id")
+            or request.get("client_run_id")
+            or request.get("client_task_id")
+            or request.get("idempotency_key")
+            or metadata.get("client_message_id")
+            or metadata.get("idempotency_key")
+            or metadata.get("client_task_id")
+            or ""
+        ).strip()
+        if client_message_id:
+            metadata["client_message_id"] = client_message_id
+        task_id = str(
+            request.get("task_id")
+            or request.get("client_task_id")
+            or metadata.get("task_id")
+            or metadata.get("client_task_id")
+            or client_message_id
+            or uuid4().hex[:12]
+        ).strip()
+        if not task_id:
+            return None
+
+        blocked_direct_tool_requests = _clean_blocked_main_chat_requests(
+            request.get("blocked_direct_tool_requests")
+        )
+        has_executable_direct_request = bool(
+            isinstance(request.get("direct_tool_request"), Mapping)
+            and str(request["direct_tool_request"].get("tool") or "").strip()
+        ) or any(
+            isinstance(item, Mapping) and str(item.get("tool") or "").strip()
+            for item in request.get("direct_tool_requests") or []
+        )
+        if blocked_direct_tool_requests and not has_executable_direct_request:
+            if not callable(getattr(self._runtime, "fail_main_chat_run", None)):
+                return None
+            return self._execute_runtime_managed_main_chat_direct_requests(
+                task_id=task_id,
+                conversation_id=conversation_id,
+                prompt=prompt,
+                metadata=metadata,
+                runtime_execution_envelope=request.get("runtime_execution_envelope"),
+                blocked_direct_tool_requests=blocked_direct_tool_requests,
+                sync_chat_terminal=False,
+            )
+
+        def _run_in_background() -> None:
+            self._execute_runtime_managed_main_chat_direct_requests(
+                task_id=task_id,
+                conversation_id=conversation_id,
+                prompt=prompt,
+                metadata=metadata,
+                runtime_execution_envelope=request.get("runtime_execution_envelope"),
+                direct_tool_request=request.get("direct_tool_request"),
+                direct_tool_requests=request.get("direct_tool_requests"),
+                blocked_direct_tool_requests=blocked_direct_tool_requests,
+            )
+
+        threading.Thread(
+            target=_run_in_background,
+            name=f"yachiyo-main-chat-{task_id[:12] or 'task'}",
+            daemon=True,
+        ).start()
+
+        return self._projector.chat_task_payload(
+            {
+                "task_id": task_id,
+                "session_id": conversation_id,
+                "conversation_id": conversation_id,
+                "status": "running",
+                "user_goal": prompt,
+                "timeline": self._planner_first_planned_timeline(
+                    prompt,
+                    metadata=metadata,
+                ),
+                "metadata": metadata,
+            },
+            conversation_id=conversation_id,
+            runtime=self._runtime,
+        )
+
+    def _execute_runtime_managed_main_chat_direct_requests(
+        self,
+        *,
+        task_id: str,
+        conversation_id: str,
+        prompt: str,
+        metadata: dict[str, Any] | None = None,
+        runtime_execution_envelope: Any | None = None,
+        direct_tool_request: Any | None = None,
+        direct_tool_requests: Any | None = None,
+        blocked_direct_tool_requests: Any | None = None,
+        sync_chat_terminal: bool = True,
+    ) -> dict[str, Any] | None:
+        metadata = _planner_metadata_with_desktop_readiness(metadata or {})
+        start_main_chat_run = getattr(self._runtime, "start_main_chat_run", None)
+        execute_main_chat_model_loop = getattr(self._runtime, "execute_main_chat_model_loop", None)
+        if not callable(start_main_chat_run) or not callable(execute_main_chat_model_loop):
+            return None
+
+        clean_direct_tool_request = (
+            dict(direct_tool_request)
+            if isinstance(direct_tool_request, dict)
+            and str(direct_tool_request.get("tool") or "").strip()
+            else None
+        )
+        clean_direct_tool_requests = [
+            dict(item)
+            for item in direct_tool_requests or []
+            if isinstance(item, dict) and str(item.get("tool") or "").strip()
+        ]
+        clean_blocked_direct_tool_requests = _clean_blocked_main_chat_requests(
+            blocked_direct_tool_requests
+        )
+        if clean_blocked_direct_tool_requests:
+            metadata = {
+                **metadata,
+                "yachiyo_runtime_blocked": True,
+                "yachiyo_blocked_direct_tool_requests": clean_blocked_direct_tool_requests,
+            }
+        if (
+            clean_direct_tool_request is None
+            and not clean_direct_tool_requests
+            and not clean_blocked_direct_tool_requests
+        ):
+            return None
+
+        def _sanitize_request(request: dict[str, Any]) -> dict[str, Any]:
+            payload = dict(request)
+            if payload.get("continue_to_model") is not True:
+                payload.pop("continue_to_model", None)
+            return payload
+
+        if clean_direct_tool_request is not None:
+            clean_direct_tool_request = _sanitize_request(clean_direct_tool_request)
+        clean_direct_tool_requests = [
+            _sanitize_request(request) for request in clean_direct_tool_requests
+        ]
+
+        self._sync_app_task_running(task_id)
+        run_id = ""
+        try:
+            start_kwargs: dict[str, Any] = {
+                "task_id": task_id,
+                "session_id": conversation_id,
+                "user_goal": prompt,
+            }
+            client_run_id = str(
+                metadata.get("client_message_id")
+                or metadata.get("idempotency_key")
+                or metadata.get("client_task_id")
+                or task_id
+                or ""
+            ).strip()
+            if client_run_id and supports_keyword(start_main_chat_run, "client_run_id"):
+                start_kwargs["client_run_id"] = client_run_id
+            if supports_keyword(start_main_chat_run, "metadata"):
+                start_kwargs["metadata"] = metadata
+            if (
+                clean_direct_tool_request is not None
+                and supports_keyword(start_main_chat_run, "direct_tool_request")
+            ):
+                start_kwargs["direct_tool_request"] = clean_direct_tool_request
+            if (
+                clean_direct_tool_requests
+                and supports_keyword(start_main_chat_run, "direct_tool_requests")
+            ):
+                start_kwargs["direct_tool_requests"] = clean_direct_tool_requests
+            effective_runtime_execution_envelope = (
+                dict(runtime_execution_envelope)
+                if isinstance(runtime_execution_envelope, Mapping)
+                else None
+            )
+            effective_runtime_execution_envelope = (
+                _runtime_execution_envelope_with_desktop_provider_session(
+                    effective_runtime_execution_envelope,
+                    direct_tool_request=clean_direct_tool_request,
+                    direct_tool_requests=clean_direct_tool_requests,
+                )
+            )
+            if (
+                effective_runtime_execution_envelope is not None
+                and supports_keyword(start_main_chat_run, "runtime_execution_envelope")
+            ):
+                start_kwargs["runtime_execution_envelope"] = (
+                    effective_runtime_execution_envelope
+                )
+            run = start_main_chat_run(**start_kwargs)
+            run_id = str(run.get("run_id") or "").strip()
+            if not run_id:
+                error_text = "任务未能启动，请稍后重试。"
+                self._sync_app_task_failed(task_id, error_text)
+                if sync_chat_terminal:
+                    self._sync_chat_assistant_message(
+                        task_id,
+                        conversation_id,
+                        error_text,
+                        status="failed",
+                        error=error_text,
+                    )
+                return self._projector.chat_task_payload(
+                    {
+                        "task_id": task_id,
+                        "session_id": conversation_id,
+                        "conversation_id": conversation_id,
+                        "status": "failed",
+                        "user_goal": prompt,
+                        "result": error_text,
+                        "summary": error_text,
+                        "metadata": metadata,
+                    },
+                    conversation_id=conversation_id,
+                    runtime=self._runtime,
+                )
+            if bool(run.get("idempotent")):
+                return self._projector.chat_task_payload(
+                    {
+                        **run,
+                        "task_id": str(run.get("task_id") or task_id),
+                        "session_id": str(run.get("session_id") or conversation_id),
+                    },
+                    conversation_id=str(run.get("session_id") or conversation_id),
+                    runtime=self._runtime,
+                )
+
+            if (
+                clean_direct_tool_request is None
+                and not clean_direct_tool_requests
+                and clean_blocked_direct_tool_requests
+            ):
+                error_text = _blocked_main_chat_failure_message(
+                    clean_blocked_direct_tool_requests
+                )
+                fail_main_chat_run = getattr(self._runtime, "fail_main_chat_run", None)
+                failed_run = (
+                    fail_main_chat_run(run_id, error_text)
+                    if callable(fail_main_chat_run)
+                    else {}
+                )
+                run = {
+                    **run,
+                    **(failed_run if isinstance(failed_run, dict) else {}),
+                    "status": "failed",
+                    "result": error_text,
+                }
+                self._sync_app_task_failed(task_id, error_text)
+                if sync_chat_terminal:
+                    self._sync_chat_assistant_message(
+                        task_id,
+                        conversation_id,
+                        error_text,
+                        status="failed",
+                        error=error_text,
+                    )
+                return self._projector.chat_task_payload(
+                    {**run, "task_id": task_id, "session_id": conversation_id},
+                    conversation_id=conversation_id,
+                    runtime=self._runtime,
+                )
+
+            model_loop_kwargs = {
+                "direct_tool_request": clean_direct_tool_request,
+                "direct_tool_requests": clean_direct_tool_requests,
+            }
+            if (
+                effective_runtime_execution_envelope is not None
+                and supports_keyword(execute_main_chat_model_loop, "runtime_execution_envelope")
+            ):
+                model_loop_kwargs["runtime_execution_envelope"] = (
+                    effective_runtime_execution_envelope
+                )
+            if supports_keyword(execute_main_chat_model_loop, "runtime_execution_metadata"):
+                model_loop_kwargs["runtime_execution_metadata"] = metadata
+            tool_policy = _main_chat_direct_request_tool_policy(
+                clean_direct_tool_request,
+                clean_direct_tool_requests,
+            )
+            if tool_policy and supports_keyword(execute_main_chat_model_loop, "tool_policy"):
+                model_loop_kwargs["tool_policy"] = tool_policy
+            run = execute_main_chat_model_loop(
+                run_id,
+                [{"role": "user", "content": prompt or "执行原始工具请求"}],
+                **model_loop_kwargs,
+            )
+            self._append_runtime_tool_progress_events(
+                run_id,
+                run,
+                direct_tool_request=clean_direct_tool_request,
+                direct_tool_requests=clean_direct_tool_requests,
+                planner_decision=None,
+                task_id=task_id,
+            )
+            status = str(run.get("status") or "").strip()
+            result_text = str(run.get("result") or "").strip()
+            if status == "approval_required":
+                pending_approval = (
+                    run.get("pending_approval")
+                    if isinstance(run.get("pending_approval"), dict)
+                    else {}
+                )
+                self._sync_chat_assistant_message(
+                    task_id,
+                    conversation_id,
+                    "等待你在 Agent Studio 中审批后继续。",
+                    status="processing",
+                    metadata={
+                        "run_status": "approval_required",
+                        "agent_run_id": run_id,
+                        "run_id": run_id,
+                        "pending_approval": pending_approval,
+                    },
+                )
+                return self._projector.chat_task_payload(
+                    {**run, "task_id": task_id, "session_id": conversation_id},
+                    conversation_id=conversation_id,
+                    runtime=self._runtime,
+                )
+            if status in {"failed", "cancelled"}:
+                terminal_text = (
+                    "任务已取消"
+                    if status == "cancelled"
+                    else result_text or f"Native Run {status}"
+                )
+                self._sync_app_task_failed(task_id, terminal_text)
+                self._sync_chat_assistant_message(
+                    task_id,
+                    conversation_id,
+                    terminal_text,
+                    status="failed",
+                    error=terminal_text,
+                )
+                return self._projector.chat_task_payload(
+                    {**run, "task_id": task_id, "session_id": conversation_id},
+                    conversation_id=conversation_id,
+                    runtime=self._runtime,
+                )
+            terminal_timeline = _run_event_timeline_for_progress(
+                self._runtime,
+                run_id,
+                run,
+            )
+            terminal_run = {
+                **run,
+                "timeline": terminal_timeline,
+            }
+            outcome = evaluate_main_chat_outcome(terminal_run)
+            if status == "awaiting_user" or outcome.kind == "awaiting_user":
+                return self._project_main_chat_awaiting_user(
+                    task_id=task_id,
+                    conversation_id=conversation_id,
+                    run_id=run_id,
+                    run=terminal_run,
+                    question=outcome.message or result_text,
+                )
+            if outcome.kind == "failed":
+                error_text = outcome.message or "桌面操作未达到可验证的完成状态。"
+                fail_main_chat_run = getattr(self._runtime, "fail_main_chat_run", None)
+                failed_run = (
+                    fail_main_chat_run(run_id, error_text)
+                    if callable(fail_main_chat_run)
+                    else {}
+                )
+                run = {
+                    **terminal_run,
+                    **(failed_run if isinstance(failed_run, dict) else {}),
+                    "status": "failed",
+                    "result": error_text,
+                }
+                self._sync_app_task_failed(task_id, error_text)
+                self._sync_chat_assistant_message(
+                    task_id,
+                    conversation_id,
+                    error_text,
+                    status="failed",
+                    error=error_text,
+                )
+                return self._projector.chat_task_payload(
+                    {**run, "task_id": task_id, "session_id": conversation_id},
+                    conversation_id=conversation_id,
+                    runtime=self._runtime,
+                )
+            if not outcome.allows_completion:
+                return self._projector.chat_task_payload(
+                    {
+                        **terminal_run,
+                        "task_id": task_id,
+                        "session_id": conversation_id,
+                        "status": "running",
+                    },
+                    conversation_id=conversation_id,
+                    runtime=self._runtime,
+                )
+            completion_text = result_text or outcome.message or "任务已完成。"
+            complete_main_chat_run = getattr(self._runtime, "complete_main_chat_run", None)
+            completed_run = (
+                complete_main_chat_run(run_id, completion_text)
+                if callable(complete_main_chat_run)
+                else {}
+            )
+            run = {
+                **terminal_run,
+                **(completed_run if isinstance(completed_run, dict) else {}),
+                "status": "completed",
+                "result": completion_text,
+            }
+            self._sync_app_task_completed(task_id, completion_text)
+            self._sync_chat_assistant_message(
+                task_id,
+                conversation_id,
+                completion_text,
+                status="completed",
+            )
+            return self._projector.chat_task_payload(
+                {**run, "task_id": task_id, "session_id": conversation_id},
+                conversation_id=conversation_id,
+                runtime=self._runtime,
+            )
+        except Exception as exc:
+            failed_run: dict[str, Any] | None = None
+            if run_id:
+                fail_main_chat_run = getattr(self._runtime, "fail_main_chat_run", None)
+                if callable(fail_main_chat_run):
+                    try:
+                        failed = fail_main_chat_run(run_id, exc)
+                        if isinstance(failed, dict):
+                            failed_run = failed
+                    except Exception:
+                        pass
+            error_text = str(exc)
+            self._sync_app_task_failed(task_id, error_text)
+            self._sync_chat_assistant_message(
+                task_id,
+                conversation_id,
+                error_text,
+                status="failed",
+                error=error_text,
+            )
+            if run_id:
+                return self._projector.chat_task_payload(
+                    {
+                        **(failed_run or {}),
+                        "run_id": run_id,
+                        "task_id": task_id,
+                        "session_id": conversation_id,
+                        "status": str((failed_run or {}).get("status") or "failed"),
+                        "result": str((failed_run or {}).get("result") or error_text),
+                    },
+                    conversation_id=conversation_id,
+                    runtime=self._runtime,
+                )
+            return None
+
+    def record_started_chat_user_message(
+        self,
+        request: dict[str, Any],
+        task: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """Persist the Chat user turn for a run started outside ChatAPI."""
+        projection = self._chat_user_projection_payload(request, task)
+        if projection is None:
+            return None
+        session_exists = self._chat_projection_session_exists(projection)
+        if session_exists is False:
+            self._clear_pending_chat_user_projection(projection["task_id"])
+            self._persist_chat_projection_state(
+                projection,
+                event_type=_CHAT_PROJECTION_SUPPRESSED_EVENT,
+            )
+            return {
+                "ok": True,
+                "suppressed": True,
+                "reason": "chat_session_deleted",
+                "task_id": projection["task_id"],
+                "session_id": projection["conversation_id"],
+            }
+        if session_exists is None:
+            raise RuntimeError("chat projection target session is unavailable")
+        result = self._record_chat_user_projection(projection)
+        self._clear_pending_chat_user_projection(projection["task_id"])
+        if isinstance(result, dict) and result.get("suppressed") is True:
+            self._persist_chat_projection_state(
+                projection,
+                event_type=_CHAT_PROJECTION_SUPPRESSED_EVENT,
+            )
+        else:
+            self._sync_terminal_chat_task_after_user_projection(task, projection)
+        return result
+
+    def _sync_terminal_chat_task_after_user_projection(
+        self,
+        task: dict[str, Any],
+        projection: dict[str, Any],
+    ) -> None:
+        status = str(task.get("status") or "").strip().lower()
+        if status not in {"completed", "failed", "cancelled"}:
+            return
+        content = str(
+            task.get("summary")
+            or task.get("result")
+            or task.get("error")
+            or ("任务已完成。" if status == "completed" else "任务未完成。")
+        ).strip()
+        run_id = str(
+            task.get("run_id")
+            or (task.get("metadata") or {}).get("run_id")
+            or ""
+        ).strip()
+        self._sync_chat_assistant_message(
+            projection["task_id"],
+            projection["conversation_id"],
+            content,
+            status="completed" if status == "completed" else "failed",
+            error=None if status == "completed" else content,
+            metadata={
+                "run_status": status,
+                **({"run_id": run_id, "agent_run_id": run_id} if run_id else {}),
+            },
+        )
+
+    def remember_pending_chat_user_message(
+        self,
+        request: dict[str, Any],
+        task: dict[str, Any],
+    ) -> dict[str, Any]:
+        projection = self._chat_user_projection_payload(request, task)
+        if projection is None:
+            return {}
+        with _PENDING_CHAT_PROJECTION_LOCK:
+            self._pending_chat_user_projections()[projection["task_id"]] = projection
+        self._persist_chat_projection_state(
+            projection,
+            event_type=_CHAT_PROJECTION_PENDING_EVENT,
+        )
+        return self._pending_chat_projection_metadata(projection)
+
+    def retry_pending_chat_user_message(
+        self,
+        task_id: str,
+        task: dict[str, Any] | None = None,
+    ) -> bool:
+        clean_task_id = str(task_id or "").strip()
+        if not clean_task_id:
+            return False
+        with _PENDING_CHAT_PROJECTION_LOCK:
+            projection = self._pending_chat_user_projections().get(clean_task_id)
+            projection = dict(projection) if isinstance(projection, dict) else None
+        if projection is None:
+            projection = self._durable_pending_chat_user_projection(
+                clean_task_id,
+                task,
+            )
+        if projection is None:
+            return False
+        session_exists = self._chat_projection_session_exists(projection)
+        if session_exists is False:
+            self._clear_pending_chat_user_projection(clean_task_id)
+            self._persist_chat_projection_state(
+                projection,
+                event_type=_CHAT_PROJECTION_SUPPRESSED_EVENT,
+            )
+            return True
+        if session_exists is None:
+            return False
+        try:
+            result = self._record_chat_user_projection(projection)
+        except Exception:
+            return False
+        self._clear_pending_chat_user_projection(clean_task_id)
+        self._persist_chat_projection_state(
+            projection,
+            event_type=(
+                _CHAT_PROJECTION_SUPPRESSED_EVENT
+                if isinstance(result, dict) and result.get("suppressed") is True
+                else _CHAT_PROJECTION_COMPLETED_EVENT
+            ),
+        )
+        return True
+
+    def pending_chat_user_message_metadata(
+        self,
+        task_id: str,
+        task: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        clean_task_id = str(task_id or "").strip()
+        with _PENDING_CHAT_PROJECTION_LOCK:
+            projection = self._pending_chat_user_projections().get(clean_task_id)
+            projection = dict(projection) if isinstance(projection, dict) else None
+        if projection is None:
+            projection = self._durable_pending_chat_user_projection(
+                clean_task_id,
+                task,
+            )
+        return self._pending_chat_projection_metadata(projection) if projection else {}
+
+    def _durable_pending_chat_user_projection(
+        self,
+        task_id: str,
+        task: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        run_id = self._chat_projection_run_id(task_id)
+        if not run_id:
+            return None
+        list_run_events = getattr(self._runtime, "list_run_events", None)
+        marker_seen = False
+        latest_marker: dict[str, Any] | None = None
+        if callable(list_run_events):
+            ordered_events: list[dict[str, Any]] = []
+            after_sequence = 0
+            while True:
+                page_kwargs: dict[str, Any] = {}
+                if supports_keyword(list_run_events, "after_sequence"):
+                    page_kwargs["after_sequence"] = after_sequence
+                if supports_keyword(list_run_events, "limit"):
+                    page_kwargs["limit"] = 200
+                if supports_keyword(list_run_events, "include_internal"):
+                    page_kwargs["include_internal"] = True
+                try:
+                    raw_events = list_run_events(run_id, **page_kwargs)
+                except Exception:
+                    raw_events = {}
+                events = (
+                    raw_events.get("events")
+                    if isinstance(raw_events, dict)
+                    else raw_events
+                )
+                page_events = [
+                    dict(event)
+                    for event in events or []
+                    if isinstance(event, dict)
+                ]
+                ordered_events.extend(page_events)
+                if not isinstance(raw_events, dict) or not raw_events.get("has_more"):
+                    break
+                next_after_sequence = int(
+                    raw_events.get("next_after_sequence")
+                    or max(
+                        [int(event.get("sequence") or 0) for event in page_events]
+                        or [after_sequence]
+                    )
+                )
+                if (
+                    "after_sequence" not in page_kwargs
+                    or next_after_sequence <= after_sequence
+                ):
+                    break
+                after_sequence = next_after_sequence
+            ordered_events.sort(key=lambda event: int(event.get("sequence") or 0))
+            for event in ordered_events:
+                event_type = str(
+                    event.get("event_type") or event.get("event") or ""
+                ).strip()
+                if event_type not in {
+                    _CHAT_PROJECTION_PENDING_EVENT,
+                    _CHAT_PROJECTION_COMPLETED_EVENT,
+                    _CHAT_PROJECTION_SUPPRESSED_EVENT,
+                }:
+                    continue
+                payload = (
+                    dict(event.get("payload"))
+                    if isinstance(event.get("payload"), dict)
+                    else {}
+                )
+                if str(payload.get("task_id") or "").strip() != task_id:
+                    continue
+                marker_seen = True
+                latest_marker = {
+                    **payload,
+                    "event_type": event_type,
+                }
+        if marker_seen:
+            if (
+                latest_marker is None
+                or latest_marker.get("event_type")
+                in {
+                    _CHAT_PROJECTION_COMPLETED_EVENT,
+                    _CHAT_PROJECTION_SUPPRESSED_EVENT,
+                }
+            ):
+                return None
+            latest_marker.pop("event_type", None)
+            return self._validated_chat_projection(latest_marker)
+        return self._chat_projection_from_persisted_task(task_id, task)
+
+    def _chat_projection_from_persisted_task(
+        self,
+        task_id: str,
+        task: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        task_payload = dict(task) if isinstance(task, dict) else {}
+        metadata = (
+            dict(task_payload.get("metadata"))
+            if isinstance(task_payload.get("metadata"), dict)
+            else {}
+        )
+        run_id = self._chat_projection_run_id(task_id)
+        try:
+            run = self._runtime.get_run(run_id) if run_id else {}
+        except Exception:
+            run = {}
+        conversation_id = str(
+            task_payload.get("conversation_id")
+            or run.get("session_id")
+            or ""
+        ).strip()
+        client_message_id = str(
+            metadata.get("client_message_id")
+            or run.get("client_request_id")
+            or ""
+        ).strip()
+        source_is_chat = (
+            str(metadata.get("source") or "").strip()
+            in _RUNTIME_MANAGED_MAIN_CHAT_SOURCES
+        )
+        source_is_chat = source_is_chat or str(
+            run.get("run_group_source") or ""
+        ).strip() == "yachiyo_chat"
+        if not source_is_chat:
+            return None
+        metadata = {
+            **metadata,
+            "source": "chat",
+            "client_message_id": client_message_id,
+        }
+        return self._validated_chat_projection(
+            {
+                "attachments": [],
+                "client_message_id": client_message_id,
+                "conversation_id": conversation_id,
+                "metadata": metadata,
+                "prompt": str(
+                    run.get("user_goal")
+                    or task_payload.get("title")
+                    or ""
+                ),
+                "task_id": task_id,
+            }
+        )
+
+    @staticmethod
+    def _validated_chat_projection(
+        projection: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        task_id = str(projection.get("task_id") or "").strip()
+        conversation_id = str(projection.get("conversation_id") or "").strip()
+        client_message_id = str(
+            projection.get("client_message_id") or ""
+        ).strip()
+        if not task_id or not conversation_id or not client_message_id:
+            return None
+        metadata = (
+            dict(projection.get("metadata"))
+            if isinstance(projection.get("metadata"), dict)
+            else {}
+        )
+        if projection.get("attachments_omitted") is True:
+            metadata["chat_projection_attachments_omitted"] = True
+        return {
+            "attachments": [
+                dict(item)
+                for item in projection.get("attachments") or []
+                if isinstance(item, dict)
+            ],
+            "client_message_id": client_message_id,
+            "conversation_id": conversation_id,
+            "metadata": metadata,
+            "prompt": str(projection.get("prompt") or ""),
+            "task_id": task_id,
+        }
+
+    def _chat_projection_run_id(self, task_id: str) -> str:
+        get_task_run_link = getattr(self._runtime, "get_task_run_link", None)
+        if callable(get_task_run_link):
+            try:
+                link = get_task_run_link(task_id)
+            except Exception:
+                link = {}
+            run_id = str(
+                link.get("run_id") if isinstance(link, dict) else ""
+            ).strip()
+            if run_id:
+                return run_id
+        return str(task_id or "").strip()
+
+    def _chat_projection_session_exists(
+        self,
+        projection: dict[str, Any],
+    ) -> bool | None:
+        session_id = str(projection.get("conversation_id") or "").strip()
+        if not session_id:
+            return False
+        store = getattr(self._app_runtime, "store", None)
+        if store is None:
+            try:
+                store = ChatAPI(self._app_runtime)._chat_store()
+            except Exception:
+                return None
+        get_session = getattr(store, "get_session", None)
+        if not callable(get_session):
+            return None
+        try:
+            return get_session(session_id) is not None
+        except Exception:
+            return None
+
+    def _persist_chat_projection_state(
+        self,
+        projection: dict[str, Any],
+        *,
+        event_type: str,
+    ) -> None:
+        append_run_event = getattr(self._runtime, "append_run_event", None)
+        if not callable(append_run_event):
+            return
+        run_id = self._chat_projection_run_id(
+            str(projection.get("task_id") or "")
+        )
+        if not run_id:
+            return
+        safe_projection = self._chat_projection_event_payload(
+            projection,
+            event_type=event_type,
+        )
+        if not isinstance(safe_projection, dict):
+            return
+        try:
+            append_kwargs: dict[str, Any] = {}
+            if supports_keyword(append_run_event, "visibility"):
+                append_kwargs["visibility"] = "internal"
+            append_run_event(
+                run_id,
+                event_type,
+                safe_projection,
+                **append_kwargs,
+            )
+        except Exception:
+            return
+
+    @staticmethod
+    def _bounded_projection_text(value: Any, max_bytes: int) -> str:
+        encoded = str(value or "").encode("utf-8")[:max_bytes]
+        return encoded.decode("utf-8", errors="ignore")
+
+    @classmethod
+    def _chat_projection_event_payload(
+        cls,
+        projection: dict[str, Any],
+        *,
+        event_type: str,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "task_id": cls._bounded_projection_text(
+                projection.get("task_id"),
+                256,
+            ),
+            "conversation_id": cls._bounded_projection_text(
+                projection.get("conversation_id"),
+                256,
+            ),
+            "client_message_id": cls._bounded_projection_text(
+                projection.get("client_message_id"),
+                256,
+            ),
+        }
+        if event_type == _CHAT_PROJECTION_PENDING_EVENT:
+            raw_metadata = (
+                projection.get("metadata")
+                if isinstance(projection.get("metadata"), dict)
+                else {}
+            )
+            safe_metadata: dict[str, Any] = {}
+            for key in _CHAT_PROJECTION_EVENT_METADATA_KEYS:
+                value = raw_metadata.get(key)
+                if isinstance(value, bool):
+                    safe_metadata[key] = value
+                elif isinstance(value, (str, int, float)):
+                    safe_metadata[key] = cls._bounded_projection_text(value, 512)
+            payload.update(
+                {
+                    "prompt": cls._bounded_projection_text(
+                        projection.get("prompt"),
+                        _CHAT_PROJECTION_EVENT_PROMPT_BYTES,
+                    ),
+                    "metadata": safe_metadata,
+                    "metadata_omitted": bool(
+                        set(raw_metadata) - _CHAT_PROJECTION_EVENT_METADATA_KEYS
+                    ),
+                    # Attachment bodies belong only in Chat storage. Copying a
+                    # data URL or raw bytes into the Runtime event log would
+                    # duplicate multi-megabyte private image data.
+                    "attachments": [],
+                    "attachments_omitted": bool(projection.get("attachments")),
+                }
+            )
+        safe_payload = redact_json_value(payload)
+        return dict(safe_payload) if isinstance(safe_payload, dict) else {}
+
+    def _chat_user_projection_payload(
+        self,
+        request: dict[str, Any],
+        task: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        metadata = (
+            dict(request.get("metadata"))
+            if isinstance(request.get("metadata"), dict)
+            else {}
+        )
+        if (
+            str(metadata.get("source") or "").strip()
+            not in _RUNTIME_MANAGED_MAIN_CHAT_SOURCES
+        ):
+            return None
+        client_message_id = str(
+            request.get("client_message_id")
+            or metadata.get("client_message_id")
+            or ""
+        ).strip()
+        conversation_id = str(
+            task.get("conversation_id")
+            or task.get("session_id")
+            or request.get("conversation_id")
+            or ""
+        ).strip()
+        task_id = str(task.get("task_id") or "").strip()
+        if not client_message_id or not conversation_id or not task_id:
+            return None
+        attachments = [
+            dict(item)
+            for item in request.get("attachments") or []
+            if isinstance(item, dict)
+        ]
+        return {
+            "attachments": attachments,
+            "client_message_id": client_message_id,
+            "conversation_id": conversation_id,
+            "metadata": metadata,
+            "prompt": str(request.get("prompt") or request.get("goal") or ""),
+            "task_id": task_id,
+        }
+
+    def _record_chat_user_projection(
+        self,
+        projection: dict[str, Any],
+    ) -> dict[str, Any]:
+        return ChatAPI(self._app_runtime).record_started_runnable_user_message_in_session(
+            str(projection.get("conversation_id") or ""),
+            str(projection.get("prompt") or ""),
+            task_id=str(projection.get("task_id") or ""),
+            client_message_id=str(projection.get("client_message_id") or ""),
+            metadata=(
+                dict(projection.get("metadata"))
+                if isinstance(projection.get("metadata"), dict)
+                else {}
+            ),
+            attachments=[
+                dict(item)
+                for item in projection.get("attachments") or []
+                if isinstance(item, dict)
+            ],
+        )
+
+    def _pending_chat_user_projections(self) -> dict[str, dict[str, Any]]:
+        store = getattr(self._app_runtime, "_yachiyo_pending_chat_projections", None)
+        if isinstance(store, dict):
+            return store
+        store = {}
+        setattr(self._app_runtime, "_yachiyo_pending_chat_projections", store)
+        return store
+
+    def _clear_pending_chat_user_projection(self, task_id: str) -> None:
+        with _PENDING_CHAT_PROJECTION_LOCK:
+            self._pending_chat_user_projections().pop(str(task_id or "").strip(), None)
+
+    @staticmethod
+    def _pending_chat_projection_metadata(
+        projection: dict[str, Any],
+    ) -> dict[str, Any]:
+        return {
+            "chat_projection_pending": True,
+            "chat_projection_warning": "任务已接收，聊天消息正在同步。",
+            "chat_projection_retry": {
+                "client_message_id": str(projection.get("client_message_id") or ""),
+                "conversation_id": str(projection.get("conversation_id") or ""),
+                "prompt": redact_api_error_text(projection.get("prompt"), fallback=""),
+            },
+        }
 
     def execute_existing_main_chat_task(
         self,
@@ -951,6 +2083,11 @@ class LegacyChatTaskStarter:
             runtime_execution_envelope,
             metadata,
         )
+        if explicit_runtime_execution_envelope:
+            # Runtime envelopes are authoritative over compatibility fields,
+            # including when every request is intentionally blocked.
+            explicit_direct_tool_request = None
+            explicit_direct_tool_requests = []
         direct_tool_request = explicit_direct_tool_request
         if (
             direct_tool_request is None
@@ -1036,6 +2173,11 @@ class LegacyChatTaskStarter:
                 )
             elif envelope_tool_requests:
                 direct_tool_requests = envelope_tool_requests
+            elif explicit_runtime_execution_envelope:
+                # A caller-supplied Runtime envelope is authoritative even
+                # when all of its requests are blocked. Do not replan the same
+                # foreground actions through the legacy direct path.
+                direct_tool_requests = []
             elif selected_source == "runtime_planner":
                 direct_tool_requests = _safe_runtime_planner_tool_requests(
                     planning_prompt,
@@ -1059,9 +2201,12 @@ class LegacyChatTaskStarter:
                 if annotated_request:
                     direct_tool_request = annotated_request[0]
             if direct_tool_requests:
-                direct_tool_requests = _direct_tool_requests_with_legacy_chat_direct_local_policy(
-                    direct_tool_requests,
-                )
+                if not explicit_runtime_execution_envelope:
+                    direct_tool_requests = (
+                        _direct_tool_requests_with_legacy_chat_direct_local_policy(
+                            direct_tool_requests,
+                        )
+                    )
                 direct_tool_requests = _direct_tool_requests_with_desktop_provider_session(
                     direct_tool_requests,
                     metadata=metadata,
@@ -1082,7 +2227,12 @@ class LegacyChatTaskStarter:
                 )
         if not task_id:
             return None
-        if not direct_tool_request and not selected_requests and not direct_tool_requests:
+        if (
+            not direct_tool_request
+            and not selected_requests
+            and not direct_tool_requests
+            and not explicit_runtime_execution_envelope
+        ):
             return None
         if direct_tool_request:
             metadata_tool_requests = [direct_tool_request]
@@ -1118,16 +2268,26 @@ class LegacyChatTaskStarter:
                 metadata,
                 direct_tool_selection_payload,
             )
-            effective_runtime_execution_envelope = (
-                _runtime_execution_envelope_with_legacy_chat_direct_local_policy(
-                    effective_runtime_execution_envelope,
+            if not explicit_runtime_execution_envelope:
+                effective_runtime_execution_envelope = (
+                    _runtime_execution_envelope_with_legacy_chat_direct_local_policy(
+                        effective_runtime_execution_envelope,
+                    )
                 )
-            )
             start_kwargs: dict[str, Any] = {
                 "task_id": task_id,
                 "session_id": conversation_id,
                 "user_goal": prompt or execution_prompt,
             }
+            client_run_id = str(
+                metadata.get("client_message_id")
+                or metadata.get("idempotency_key")
+                or metadata.get("client_task_id")
+                or task_id
+                or ""
+            ).strip()
+            if client_run_id and supports_keyword(start_main_chat_run, "client_run_id"):
+                start_kwargs["client_run_id"] = client_run_id
             if supports_keyword(start_main_chat_run, "metadata"):
                 start_kwargs["metadata"] = metadata
             if (
@@ -1158,6 +2318,18 @@ class LegacyChatTaskStarter:
             run_id = str(run.get("run_id") or "").strip()
             if not run_id:
                 return None
+            if bool(run.get("idempotent")):
+                linked_task_id = str(run.get("task_id") or task_id)
+                linked_session_id = str(run.get("session_id") or conversation_id)
+                return self._projector.chat_task_payload(
+                    {
+                        **run,
+                        "task_id": linked_task_id,
+                        "session_id": linked_session_id,
+                    },
+                    conversation_id=linked_session_id,
+                    runtime=self._runtime,
+                )
             self._append_planner_run_events(run_id, planner_decision)
             self._append_direct_tool_selection_run_event(run_id, direct_tool_selection_payload)
             append_run_event = getattr(self._runtime, "append_run_event", None)
@@ -1239,17 +2411,84 @@ class LegacyChatTaskStarter:
                     conversation_id=conversation_id,
                     runtime=self._runtime,
                 )
-            complete_main_chat_run = getattr(self._runtime, "complete_main_chat_run", None)
-            if callable(complete_main_chat_run) and result_text:
-                run = complete_main_chat_run(run_id, result_text)
-            self._sync_app_task_completed(task_id, result_text)
-            if result_text:
+            terminal_timeline = _run_event_timeline_for_progress(
+                self._runtime,
+                run_id,
+                run,
+            )
+            terminal_run = {
+                **run,
+                "timeline": terminal_timeline,
+            }
+            outcome = evaluate_main_chat_outcome(terminal_run)
+            if status == "awaiting_user" or outcome.kind == "awaiting_user":
+                return self._project_main_chat_awaiting_user(
+                    task_id=task_id,
+                    conversation_id=conversation_id,
+                    run_id=run_id,
+                    run=terminal_run,
+                    question=outcome.message or result_text,
+                )
+            if outcome.kind == "failed":
+                error_text = (
+                    outcome.message or "桌面操作未达到可验证的完成状态。"
+                )
+                fail_main_chat_run = getattr(self._runtime, "fail_main_chat_run", None)
+                failed_run = (
+                    fail_main_chat_run(run_id, error_text)
+                    if callable(fail_main_chat_run)
+                    else {}
+                )
+                run = {
+                    **terminal_run,
+                    **(failed_run if isinstance(failed_run, dict) else {}),
+                    "status": "failed",
+                    "result": error_text,
+                }
+                self._sync_app_task_failed(task_id, error_text)
                 self._sync_chat_assistant_message(
                     task_id,
                     conversation_id,
-                    result_text,
-                    status="completed",
+                    error_text,
+                    status="failed",
+                    error=error_text,
                 )
+                return self._projector.chat_task_payload(
+                    {**run, "task_id": task_id, "session_id": conversation_id},
+                    conversation_id=conversation_id,
+                    runtime=self._runtime,
+                )
+            if not outcome.allows_completion:
+                return self._projector.chat_task_payload(
+                    {
+                        **terminal_run,
+                        "task_id": task_id,
+                        "session_id": conversation_id,
+                        "status": "running",
+                    },
+                    conversation_id=conversation_id,
+                    runtime=self._runtime,
+                )
+            completion_text = result_text or outcome.message or "任务已完成。"
+            complete_main_chat_run = getattr(self._runtime, "complete_main_chat_run", None)
+            completed_run = (
+                complete_main_chat_run(run_id, completion_text)
+                if callable(complete_main_chat_run)
+                else {}
+            )
+            run = {
+                **terminal_run,
+                **(completed_run if isinstance(completed_run, dict) else {}),
+                "status": "completed",
+                "result": completion_text,
+            }
+            self._sync_app_task_completed(task_id, completion_text)
+            self._sync_chat_assistant_message(
+                task_id,
+                conversation_id,
+                completion_text,
+                status="completed",
+            )
             return self._projector.chat_task_payload(
                 {**run, "task_id": task_id, "session_id": conversation_id},
                 conversation_id=conversation_id,
@@ -1433,6 +2672,44 @@ class LegacyChatTaskStarter:
             progress_label="执行失败",
         )
 
+    def _project_main_chat_awaiting_user(
+        self,
+        *,
+        task_id: str,
+        conversation_id: str,
+        run_id: str,
+        run: Mapping[str, Any],
+        question: str,
+    ) -> dict[str, Any]:
+        clarification_text = (
+            str(question or "").strip() or "请补充任务目标、对象或期望结果。"
+        )
+        awaiting_run = {
+            **dict(run),
+            "task_id": task_id,
+            "session_id": conversation_id,
+            "status": "awaiting_user",
+            "result": clarification_text,
+            "summary": clarification_text,
+        }
+        self._sync_chat_assistant_message(
+            task_id,
+            conversation_id,
+            clarification_text,
+            status="processing",
+            metadata={
+                "run_status": "awaiting_user",
+                "agent_run_id": run_id,
+                "run_id": run_id,
+                "clarification_required": True,
+            },
+        )
+        return self._projector.chat_task_payload(
+            awaiting_run,
+            conversation_id=conversation_id,
+            runtime=self._runtime,
+        )
+
     def _sync_app_task_status(
         self,
         task_id: str,
@@ -1495,22 +2772,19 @@ class LegacyChatTaskStarter:
         current = getattr(self._app_runtime, "chat_session", None)
         if not conversation_id:
             return current
-        if str(getattr(current, "session_id", "") or "") == conversation_id:
-            return current
         try:
-            from apps.core.chat_session import ChatSession
+            from apps.core.chat_session import load_existing_chat_session
             from apps.core.chat_store import get_chat_store
 
             store = getattr(self._app_runtime, "store", None) or get_chat_store()
-            session = ChatSession(session_id=conversation_id)
-            session.attach_store(
+            return load_existing_chat_session(
                 store,
-                load_existing=True,
+                conversation_id,
+                current=current,
                 fail_active_messages=False,
             )
-            return session
         except Exception:
-            return current
+            return None
 
 class LegacyStudioPort:
     """StudioPort adapter for the current Agent Studio runtime API."""
@@ -1525,13 +2799,16 @@ class LegacyStudioPort:
 
     def list_tool_catalog(self) -> dict[str, Any]:
         try:
-            missing_permissions = desktop_permission_missing_by_capability()
+            permission_diagnostics = _passive_desktop_permission_diagnostics()
         except Exception:
-            missing_permissions = {"desktop_execution": ["permission_probe_failed"]}
-        try:
-            blocking_conditions = desktop_runtime_blocking_conditions_by_capability()
-        except Exception:
-            blocking_conditions = {}
+            permission_diagnostics = {
+                "missing_permissions": {
+                    "desktop_execution": ["permission_probe_failed"]
+                },
+                "blocking_conditions": {},
+            }
+        missing_permissions = permission_diagnostics.get("missing_permissions") or {}
+        blocking_conditions = permission_diagnostics.get("blocking_conditions") or {}
         plugin_states = None
         list_plugins = getattr(self._runtime, "list_restricted_tool_plugins", None)
         if callable(list_plugins):
@@ -1542,9 +2819,8 @@ class LegacyStudioPort:
                 plugin_states = None
         sandbox_provider = sandbox_desktop_provider_status(
             {
-                "desktop_provider_health_probe": True,
-                "desktop_provider_local_native": True,
-                "local_desktop_runtime_probe": local_desktop_execution_runtime_probe(),
+                "prefer_background_desktop": True,
+                "desktop_provider_health_probe": False,
             }
         )
         return runtime_tool_catalog_snapshot(
@@ -1828,10 +3104,14 @@ class LegacyStudioPort:
         )
 
     def create_memory(self, request: dict[str, Any]) -> dict[str, Any]:
-        return self._runtime.create_memory_item(request)
+        result = self._runtime.create_memory_item(request)
+        memory = result.get("memory") if isinstance(result, Mapping) else None
+        return dict(memory) if isinstance(memory, Mapping) else result
 
     def update_memory(self, memory_id: str, request: dict[str, Any]) -> dict[str, Any]:
-        return self._runtime.update_memory_item(memory_id, request)
+        result = self._runtime.update_memory_item(memory_id, request)
+        memory = result.get("memory") if isinstance(result, Mapping) else None
+        return dict(memory) if isinstance(memory, Mapping) else result
 
     def delete_memory(self, memory_id: str, reason: str | None = None) -> dict[str, Any]:
         return self._runtime.delete_memory_item(memory_id, reason=reason or "")
@@ -2201,7 +3481,11 @@ class LegacyStudioPort:
     ) -> dict[str, Any]:
         target_run_id = self._run_id_for_run_approval(run_id, decision)
         self._assert_run_approval(target_run_id, decision)
-        approved = self._runtime.approve_run_approval(target_run_id)
+        expected_approval_id = _approval_id_from_decision(decision)
+        approved = self._runtime.approve_run_approval(
+            target_run_id,
+            expected_approval_id,
+        )
         return self._timeline_after_child_action(run_id, target_run_id, approved)
 
     def reject_run_approval(
@@ -2211,9 +3495,11 @@ class LegacyStudioPort:
     ) -> dict[str, Any]:
         target_run_id = self._run_id_for_run_approval(run_id, decision)
         self._assert_run_approval(target_run_id, decision)
+        expected_approval_id = _approval_id_from_decision(decision)
         rejected = self._runtime.reject_run_approval(
             target_run_id,
             _rejection_reason(decision),
+            expected_approval_id,
         )
         return self._timeline_after_child_action(run_id, target_run_id, rejected)
 
@@ -2224,7 +3510,7 @@ class LegacyStudioPort:
     ) -> None:
         requested_approval_id = _approval_id_from_decision(decision)
         if not requested_approval_id:
-            return
+            raise AgentRuntimeError("approval_expected_id_required")
         _assert_matching_pending_approval(
             self._runtime.get_run(run_id),
             requested_approval_id,
@@ -2906,6 +4192,7 @@ def _main_chat_runtime_execution_envelope(
     metadata: Mapping[str, Any] | None,
     direct_tool_selection_payload: Mapping[str, Any] | None,
 ) -> dict[str, Any] | None:
+    fallback_envelope: dict[str, Any] | None = None
     for envelope in (
         runtime_execution_envelope,
         (
@@ -2916,9 +4203,13 @@ def _main_chat_runtime_execution_envelope(
         metadata.get("runtime_execution_envelope") if isinstance(metadata, Mapping) else None,
         metadata.get("yachiyo_execution_envelope") if isinstance(metadata, Mapping) else None,
     ):
-        if isinstance(envelope, Mapping):
+        if not isinstance(envelope, Mapping):
+            continue
+        if fallback_envelope is None:
+            fallback_envelope = dict(envelope)
+        if _runtime_execution_envelope_has_requests(envelope):
             return dict(envelope)
-    return None
+    return fallback_envelope
 
 
 def _has_explicit_runtime_execution_envelope(
@@ -2957,23 +4248,36 @@ def _safe_runtime_execution_envelope_requests(
     selected_requests: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     selected_requests = selected_requests or []
+    explicit_runtime_execution_envelope = _has_explicit_runtime_execution_envelope(
+        runtime_execution_envelope,
+        metadata,
+    )
+    if explicit_runtime_execution_envelope:
+        selected_requests = []
     if _has_approval_plan_tool(selected_requests):
         return []
-    raw_requests = planner_tool_requests(
+    if _has_explicit_hotkey_safe_shortcut(
         prompt,
-        allowed_tools,
-        metadata=metadata,
-    )
-    raw_approval_sequence = _runtime_planner_direct_approval_sequence_requests(
-        raw_requests,
-        allowed_tools,
-    )
-    if raw_approval_sequence and not _has_explicit_hotkey_safe_shortcut(
-        prompt,
-        raw_approval_sequence,
+        selected_requests,
         allowed_tools,
     ):
-        return raw_approval_sequence
+        return []
+    if not explicit_runtime_execution_envelope:
+        raw_requests = planner_tool_requests(
+            prompt,
+            allowed_tools,
+            metadata=metadata,
+        )
+        raw_approval_sequence = _runtime_planner_direct_approval_sequence_requests(
+            raw_requests,
+            allowed_tools,
+        )
+        if raw_approval_sequence and not _has_explicit_hotkey_safe_shortcut(
+            prompt,
+            raw_approval_sequence,
+            allowed_tools,
+        ):
+            return raw_approval_sequence
     if selected_requests:
         return []
     for requests in _runtime_execution_envelope_request_candidates(
@@ -2999,27 +4303,21 @@ def _runtime_execution_envelope_request_candidates(
     *,
     allowed_tools: list[str],
 ) -> list[list[dict[str, Any]]]:
-    candidates: list[list[dict[str, Any]]] = []
-    runtime_execution_envelope = (
-        _runtime_execution_envelope_with_legacy_chat_direct_local_policy(
-            runtime_execution_envelope,
-        )
-        or runtime_execution_envelope
-    )
-    top_level_requests = runtime_execution_requests_from_envelope_payload(
+    metadata = metadata if isinstance(metadata, Mapping) else {}
+    for envelope in (
         runtime_execution_envelope,
-        allowed_tools=allowed_tools,
-    )
-    if top_level_requests:
-        candidates.append(top_level_requests)
-    metadata = _metadata_with_legacy_chat_direct_local_envelopes(metadata)
-    metadata_requests = runtime_execution_requests_from_metadata(
-        metadata,
-        allowed_tools=allowed_tools,
-    )
-    if metadata_requests:
-        candidates.append(metadata_requests)
-    return candidates
+        metadata.get("runtime_execution_envelope"),
+        metadata.get("yachiyo_execution_envelope"),
+    ):
+        if not _runtime_execution_envelope_has_requests(envelope):
+            continue
+        return [
+            runtime_execution_requests_from_envelope_payload(
+                envelope,
+                allowed_tools=allowed_tools,
+            )
+        ]
+    return []
 
 
 def _metadata_with_legacy_chat_direct_local_envelopes(
@@ -3382,7 +4680,11 @@ def _direct_tool_request_with_provider_session_policy(
 def _desktop_provider_session_policy_from_metadata(
     metadata: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
-    if isinstance(metadata, Mapping):
+    studio_strict_foreground = (
+        _agent_studio_direct_provider_session_policy_requested(metadata)
+        and _strict_legacy_direct_foreground_provider_requested(metadata)
+    )
+    if isinstance(metadata, Mapping) and not studio_strict_foreground:
         for key in (
             "desktop_execution_policy",
             "yachiyo_desktop_execution_policy",
@@ -3391,6 +4693,21 @@ def _desktop_provider_session_policy_from_metadata(
             policy = desktop_execution_policy_payload(metadata.get(key))
             if policy:
                 return policy
+    if studio_strict_foreground or _strict_legacy_direct_foreground_provider_requested(
+        metadata
+    ):
+        return {
+            "mode": "preview_input",
+            "prefer_isolated_desktop": True,
+            "avoid_user_foreground_takeover": True,
+            "require_sandbox_for_keyboard_mouse": True,
+            "allow_media_control": True,
+            "source": "daily_chat",
+            "reason": (
+                "Legacy Chat strict foreground requests require an isolated desktop "
+                "provider before keyboard or mouse input."
+            ),
+        }
     return daily_entrypoint_desktop_execution_policy(surface="chat")
 
 
@@ -3565,21 +4882,75 @@ def _run_event_timeline_for_progress(
 ) -> list[dict[str, Any]]:
     timeline = _event_list_from_payload(run_payload)
     list_run_events = getattr(runtime, "list_run_events", None)
-    if callable(list_run_events):
+    if not callable(list_run_events):
+        return _dedupe_progress_timeline(timeline)
+
+    error_text = "无法读取完整的 Agent 执行事件历史，任务已安全终止。"
+    if not (
+        supports_keyword(list_run_events, "after_sequence")
+        and supports_keyword(list_run_events, "limit")
+    ):
         try:
-            listed = list_run_events(run_id, after_sequence=0, limit=1000)
-        except TypeError:
-            try:
-                listed = list_run_events(run_id)
-            except Exception:
-                listed = None
-        except Exception:
-            listed = None
+            listed = list_run_events(run_id)
+        except Exception as exc:
+            raise AgentRuntimeError(error_text) from exc
+        if isinstance(listed, Mapping) and bool(listed.get("has_more")):
+            raise AgentRuntimeError(error_text)
+        timeline.extend(_strict_event_list_from_payload(listed, error_text=error_text))
+        return _dedupe_progress_timeline(timeline)
+
+    after_sequence = 0
+    for _page_index in range(100):
+        list_kwargs: dict[str, Any] = {
+            "after_sequence": after_sequence,
+            "limit": 1000,
+        }
+        if supports_keyword(list_run_events, "include_internal"):
+            list_kwargs["include_internal"] = False
+        try:
+            listed = list_run_events(run_id, **list_kwargs)
+        except Exception as exc:
+            raise AgentRuntimeError(error_text) from exc
         if isinstance(listed, Mapping):
-            timeline.extend(_event_list_from_payload(dict(listed)))
-        elif isinstance(listed, list):
-            timeline.extend(item for item in listed if isinstance(item, dict))
-    return _dedupe_progress_timeline(timeline)
+            page = dict(listed)
+            timeline.extend(_strict_event_list_from_payload(page, error_text=error_text))
+            if not bool(page.get("has_more")):
+                return _dedupe_progress_timeline(timeline)
+            try:
+                next_after_sequence = int(page.get("next_after_sequence") or 0)
+            except (TypeError, ValueError) as exc:
+                raise AgentRuntimeError(error_text) from exc
+            if next_after_sequence <= after_sequence:
+                raise AgentRuntimeError(error_text)
+            after_sequence = next_after_sequence
+            continue
+        timeline.extend(_strict_event_list_from_payload(listed, error_text=error_text))
+        return _dedupe_progress_timeline(timeline)
+    raise AgentRuntimeError(error_text)
+
+
+def _strict_event_list_from_payload(
+    payload: Any,
+    *,
+    error_text: str,
+) -> list[dict[str, Any]]:
+    if isinstance(payload, list):
+        if any(not isinstance(item, dict) for item in payload):
+            raise AgentRuntimeError(error_text)
+        return [dict(item) for item in payload]
+    if not isinstance(payload, Mapping):
+        raise AgentRuntimeError(error_text)
+    event_keys = ("timeline", "events", "run_events", "recent_events")
+    present_keys = [key for key in event_keys if key in payload]
+    if not present_keys:
+        raise AgentRuntimeError(error_text)
+    events: list[dict[str, Any]] = []
+    for key in present_keys:
+        value = payload.get(key)
+        if not isinstance(value, list) or any(not isinstance(item, dict) for item in value):
+            raise AgentRuntimeError(error_text)
+        events.extend(dict(item) for item in value)
+    return events
 
 
 def _event_list_from_payload(payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -3592,18 +4963,39 @@ def _event_list_from_payload(payload: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _dedupe_progress_timeline(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    seen: set[tuple[str, str, str, str, str]] = set()
+    seen: set[tuple[Any, ...]] = set()
     result: list[dict[str, Any]] = []
     for event in events:
         event_type = str(event.get("event") or event.get("event_type") or "").strip()
         payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
-        key = (
-            event_type,
-            str(event.get("sequence") or "").strip(),
-            str(payload.get("detail") or payload.get("tool") or event.get("detail") or event.get("tool") or "").strip(),
-            str(payload.get("step_id") or event.get("step_id") or "").strip(),
-            str(payload.get("todo_id") or event.get("todo_id") or "").strip(),
-        )
+        tool_call_id = str(
+            event.get("tool_call_id") or payload.get("tool_call_id") or ""
+        ).strip()
+        run_id = str(event.get("run_id") or payload.get("run_id") or "").strip()
+        contract_id = str(
+            event.get("contract_id") or payload.get("contract_id") or ""
+        ).strip()
+        if tool_call_id and event_type in {
+            "agent.tool.call",
+            "agent.tool.failed",
+            "agent.tool.skipped",
+        }:
+            # The in-memory run timeline precedes its persisted projection and
+            # carries the richer input-resolution/GoalContract lineage.  The
+            # database copy may become visible before commit with the same
+            # call identity but fewer fields; never let that later duplicate
+            # replace the authoritative current-turn event.
+            key = ("terminal_tool_call", run_id, event_type, tool_call_id)
+        elif contract_id and event_type == "agent.goal.contract":
+            key = ("goal_contract", run_id, contract_id)
+        else:
+            key = (
+                event_type,
+                str(event.get("sequence") or "").strip(),
+                str(payload.get("detail") or payload.get("tool") or event.get("detail") or event.get("tool") or "").strip(),
+                str(payload.get("step_id") or event.get("step_id") or "").strip(),
+                str(payload.get("todo_id") or event.get("todo_id") or "").strip(),
+            )
         if key in seen:
             continue
         seen.add(key)
@@ -4298,6 +5690,34 @@ def _coalesce_legacy_direct_app_shortcut_requests(
     return coalesced
 
 
+_FINDER_APP_ONLY_SAFE_SHORTCUT_ACTIONS = frozenset(
+    {
+        "finder_airdrop",
+        "finder_get_info",
+        "finder_network",
+        "finder_quick_look",
+        "finder_recents",
+        "new_folder",
+        "parent_folder",
+        "rename_selected",
+    }
+)
+
+_READ_ONLY_APP_SHORTCUT_PREFLIGHT_TOOLS = frozenset(
+    {
+        "desktop.active_window",
+        "desktop.inspect_app",
+        "desktop.list_windows",
+        "desktop.read_ui",
+        "desktop.running_apps",
+        "desktop.ui_elements",
+        "desktop.verify",
+        "desktop.windows",
+        "screen.capture",
+    }
+)
+
+
 def _split_redundant_app_safe_shortcut_requests(
     requests: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
@@ -4320,6 +5740,14 @@ def _split_redundant_app_safe_shortcut_requests(
             and app_name in prepared_apps
         ):
             action = str(payload.get("action") or "").strip()
+            if action in _FINDER_APP_ONLY_SAFE_SHORTCUT_ACTIONS:
+                request = _deduplicate_app_only_shortcut_prepare(
+                    request,
+                    updated,
+                    app_name=app_name,
+                )
+                updated.append(request)
+                continue
             if action:
                 updated.append(
                     {
@@ -4331,6 +5759,83 @@ def _split_redundant_app_safe_shortcut_requests(
                 continue
         updated.append(request)
     return updated
+
+
+def _deduplicate_app_only_shortcut_prepare(
+    request: dict[str, Any],
+    prefix: list[dict[str, Any]],
+    *,
+    app_name: str,
+) -> dict[str, Any]:
+    """Keep app-scoped shortcut identity while folding a read-only preflight prepare."""
+
+    prepare_index = len(prefix) - 1
+    while prepare_index >= 0:
+        candidate = prefix[prepare_index]
+        candidate_tool = str(candidate.get("tool") or "").strip()
+        candidate_input = (
+            candidate.get("input") if isinstance(candidate.get("input"), dict) else {}
+        )
+        candidate_app = str(candidate_input.get("app_name") or "").strip()
+        if candidate_tool in {
+            "app.open",
+            "app.focus",
+            "desktop.open_app",
+            "desktop.focus_app",
+        }:
+            if candidate_app != app_name:
+                return request
+            break
+        if candidate_tool not in _READ_ONLY_APP_SHORTCUT_PREFLIGHT_TOOLS:
+            return request
+        prepare_index -= 1
+    if prepare_index < 0:
+        return request
+
+    prepare = prefix.pop(prepare_index)
+    prepare_step_id = str(
+        prepare.get("step_id") or prepare.get("planner_step_id") or ""
+    ).strip()
+    prepare_dependencies = [
+        str(step_id or "").strip()
+        for step_id in list(prepare.get("depends_on") or [])
+        if str(step_id or "").strip()
+    ]
+    if prepare_step_id:
+        for index in range(prepare_index, len(prefix)):
+            prefix[index] = _replace_request_dependency(
+                prefix[index],
+                prepare_step_id,
+                prepare_dependencies,
+            )
+
+    prepare_tool = str(prepare.get("tool") or "").strip()
+    if prepare_tool in {"app.open", "desktop.open_app"}:
+        request = {**request, "tool": "app.open_and_safe_shortcut"}
+    return request
+
+
+def _replace_request_dependency(
+    request: dict[str, Any],
+    removed_step_id: str,
+    replacement_step_ids: list[str],
+) -> dict[str, Any]:
+    dependencies = request.get("depends_on")
+    if not isinstance(dependencies, list) or removed_step_id not in dependencies:
+        return request
+    updated_dependencies: list[str] = []
+    for dependency in dependencies:
+        step_id = str(dependency or "").strip()
+        candidates = replacement_step_ids if step_id == removed_step_id else [step_id]
+        for candidate in candidates:
+            if candidate and candidate not in updated_dependencies:
+                updated_dependencies.append(candidate)
+    updated_request = dict(request)
+    if updated_dependencies:
+        updated_request["depends_on"] = updated_dependencies
+    else:
+        updated_request.pop("depends_on", None)
+    return updated_request
 
 
 def _has_discovered_runtime_planner_verification_chain(

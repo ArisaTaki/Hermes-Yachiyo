@@ -15,17 +15,19 @@ def test_approval_resume_timeline_smoke_covers_chat_public_snapshots():
     assert chat["started"]["needs_user_action"] is True
     assert chat["started"]["pending_approvals"][0]["approval_id"] == smoke.APPROVAL_ID
     assert chat["before_timeline"]["pending_approval"]["status"] == "pending"
+    assert chat["after_timeline"]["status"] == "completed"
     assert chat["after_timeline"]["pending_approval"] is None
     assert chat["after_timeline"]["approvals"][0]["status"] == "approved"
-    assert chat["after_timeline"]["tool_calls"][0]["status"] == "completed"
+    assert chat["after_timeline"]["tool_calls"][0]["status"] == "approved"
+    assert chat["after_timeline"]["tool_calls"][0]["output_preview"] == {}
+    assert "agent.tool.completed" not in chat["after_timeline"]["event_types"]
     assert chat["after_event_page"]["event_types"] == [
         "agent.tool.approval_approved",
-        "agent.tool.completed",
         "agent.completed",
     ]
 
 
-def test_approval_resume_timeline_smoke_covers_studio_public_snapshots():
+def test_approval_resume_timeline_smoke_covers_studio_diagnostic_snapshots():
     evidence = smoke.run_smoke()
     studio = evidence["studio"]
 
@@ -37,6 +39,7 @@ def test_approval_resume_timeline_smoke_covers_studio_public_snapshots():
     assert studio["approved_timeline"]["pending_approval"] is None
     assert studio["approved_timeline"]["approvals"][0]["status"] == "approved"
     assert studio["approved_timeline"]["tool_calls"][0]["approval_id"] == smoke.APPROVAL_ID
+    assert studio["approved_timeline"]["tool_calls"][0]["status"] == "completed"
     assert studio["approved_timeline"]["tool_calls"][0]["output_preview"]["ok"] is True
     assert studio["after_event_page"]["event_types"] == [
         "agent.tool.approval_approved",

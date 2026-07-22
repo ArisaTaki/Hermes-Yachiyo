@@ -980,6 +980,14 @@ def _fallback_recovery_tool_input(
         return {}
     if tool_name == "desktop.running_apps":
         return {}
+    if tool_name == "desktop.open_path":
+        path = _first_text(
+            request_input.get("path"),
+            input_preview.get("path"),
+            request_input.get("source"),
+            input_preview.get("source"),
+        )
+        return {"path": path} if path else None
     if tool_name in {"workspace.read", "file.read", "fs.read_file"}:
         path = _first_text(
             request_input.get("path"),
@@ -1059,6 +1067,12 @@ def _fallback_recovery_tool_metadata(tool_name: str) -> dict[str, Any]:
         "browser.screenshot": {
             "label": "重新截取网页",
             "permission_target": "browser_capture",
+            "risk_level": "low",
+            "approval_required": False,
+        },
+        "desktop.open_path": {
+            "label": "打开本地文件",
+            "permission_target": "app_launch",
             "risk_level": "low",
             "approval_required": False,
         },

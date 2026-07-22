@@ -5,6 +5,8 @@ from __future__ import annotations
 from typing import Any
 
 from apps.shell import agent_runtime
+from apps.shell.agent.runtime import installation_facade as installation_facade_module
+from apps.shell.agent.runtime.run_cancellation import RuntimeRunCancellationService
 from apps.shell.agent.runtime.shutdown import RuntimeShutdownService
 from apps.shell.agent_runtime import AgentRuntimeService
 from apps.shell.credential_store import MemoryCredentialStore
@@ -81,6 +83,61 @@ def test_runtime_shutdown_service_cancels_active_runs_and_keeps_db_open() -> Non
     assert "status NOT IN" in conn.executed_sql[0]
 
 
+def test_runtime_shutdown_reuses_cancel_once_browser_cleanup_without_duplicates() -> None:
+    conn = _FakeConnection([{"run_id": "run-browser"}])
+    credential_store = _FakeCredentialStore()
+    state = {"closed": False}
+    runs = {
+        "run-browser": {
+            "run_id": "run-browser",
+            "kind": "agent_run",
+            "status": "running",
+            "result": "",
+            "timeline": [],
+        }
+    }
+    cleanup_calls: list[str] = []
+
+    def update_run(run_id: str, **kwargs: Any) -> dict[str, Any]:
+        runs[run_id] = {**runs[run_id], **kwargs}
+        return runs[run_id]
+
+    cancellation = RuntimeRunCancellationService(
+        get_run=lambda run_id: runs[run_id],
+        update_run=update_run,
+        append_run_event=lambda *_args, **_kwargs: None,
+        timeline_factory=lambda event, detail="", **payload: {
+            "event": event,
+            "detail": detail,
+            **payload,
+        },
+        workflow_cancellation=object(),
+        workflow_run_is_group_root=lambda _run: False,
+        project_cancelled_workflow_group_if_root=lambda *_args: {},
+        resume_parent_workflows_after_child_update=lambda *_args: None,
+        project_child_run_transition=lambda result: result,
+        final_statuses={"completed", "failed", "cancelled"},
+        close_run_owned_browser_target=lambda run: cleanup_calls.append(run["run_id"]),
+    )
+    shutdown = RuntimeShutdownService(
+        conn=conn,
+        credential_store=credential_store,
+        is_closed=lambda: state["closed"],
+        mark_not_accepting=lambda: None,
+        mark_closed=lambda: state.update(closed=True),
+        cancel_terminal_process_groups=lambda: None,
+        ensure_row_factory=lambda: None,
+        cancel_run=cancellation.cancel_once,
+    )
+
+    shutdown.shutdown(close_db=False)
+    shutdown.shutdown(close_db=False)
+
+    assert runs["run-browser"]["status"] == "cancelled"
+    assert cleanup_calls == ["run-browser"]
+    assert conn.commits == 2
+
+
 def test_runtime_shutdown_service_closes_resources_when_requested() -> None:
     conn = _FakeConnection([])
     credential_store = _FakeCredentialStore()
@@ -103,6 +160,33 @@ def test_runtime_shutdown_service_closes_resources_when_requested() -> None:
     assert conn.commits == 1
     assert conn.closes == 1
     assert credential_store.closes == 1
+
+
+def test_runtime_shutdown_releases_owned_desktop_provider_only_when_closing() -> None:
+    conn = _FakeConnection([])
+    credential_store = _FakeCredentialStore()
+    releases: list[str] = []
+    state = {"closed": False, "accepting": True}
+    service = RuntimeShutdownService(
+        conn=conn,
+        credential_store=credential_store,
+        is_closed=lambda: state["closed"],
+        mark_not_accepting=lambda: state.update(accepting=False),
+        mark_closed=lambda: state.update(closed=True),
+        cancel_terminal_process_groups=lambda: None,
+        ensure_row_factory=lambda: None,
+        cancel_run=lambda _run_id: {},
+        release_desktop_provider_session_owner=lambda: releases.append("released"),
+    )
+
+    service.shutdown(close_db=False)
+
+    assert releases == []
+
+    service.shutdown(close_db=True)
+    service.shutdown(close_db=True)
+
+    assert releases == ["released"]
 
 
 def test_runtime_shutdown_service_returns_when_already_closed() -> None:
@@ -139,3 +223,44 @@ def test_native_runtime_installs_shutdown_service(tmp_path) -> None:
         assert isinstance(service.runtime_shutdown, RuntimeShutdownService)
     finally:
         service.close()
+
+
+def test_native_runtime_provider_owner_tokens_are_isolated_and_released_once(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    released: list[str] = []
+    monkeypatch.setattr(
+        installation_facade_module,
+        "_release_desktop_provider_session_owner",
+        lambda owner_token: released.append(owner_token) or {},
+    )
+    first = AgentRuntimeService(
+        db_path=tmp_path / "first.db",
+        workspace_dir=tmp_path / "first-runtime",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    second = AgentRuntimeService(
+        db_path=tmp_path / "second.db",
+        workspace_dir=tmp_path / "second-runtime",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    first_token = first._desktop_provider_session_owner_token
+    second_token = second._desktop_provider_session_owner_token
+
+    try:
+        assert first_token != second_token
+
+        first.close()
+        first.close()
+
+        assert released == [first_token]
+
+        second.close()
+
+        assert released == [first_token, second_token]
+    finally:
+        first.close()
+        second.close()

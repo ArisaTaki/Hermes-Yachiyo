@@ -2,13 +2,13 @@ import { useCallback } from 'react';
 
 import { startYachiyoTask } from '../api';
 import { chatRunnableRunningStatusText, chatRunnableSettledStatusText } from '../taskStatusText';
-import type { AgentTaskSnapshot, PendingAttachment } from '../types';
+import type { AgentTaskSnapshot, ConversationIdentity, PendingAttachment } from '../types';
 
 const MAIN_CHAT_AGENT_ID = 'builtin:yachiyo-main';
 
 type StartPublicYachiyoTaskRequest = {
   clientMessageId: string;
-  conversationId: string | null;
+  identity: ConversationIdentity;
   attachments?: PendingAttachment[];
   metadata?: Record<string, unknown>;
   prompt: string;
@@ -18,13 +18,18 @@ type StartPublicYachiyoTaskRequest = {
 
 type UseYachiyoTaskSubmitOptions = {
   expectPendingAssistantReply: (taskId: string) => void;
+  isConversationCurrent: (identity: ConversationIdentity) => boolean;
   loadSessions: () => Promise<void>;
-  onAccepted: () => void;
+  onAccepted: (clientMessageId: string) => void;
   onRunning: () => void;
   onSettled: () => void;
   pollAgentRunInBackground: (
     runId: string,
-    options?: { summarizeDelegatedRun?: boolean; ignoreInitialApprovalRequired?: boolean },
+    options: {
+      identity: ConversationIdentity;
+      summarizeDelegatedRun?: boolean;
+      ignoreInitialApprovalRequired?: boolean;
+    },
   ) => void;
   refreshMessages: () => Promise<unknown>;
   rememberYachiyoTasks: (tasks: Array<AgentTaskSnapshot | null | undefined>) => void;
@@ -33,6 +38,7 @@ type UseYachiyoTaskSubmitOptions = {
 
 export function useYachiyoTaskSubmit({
   expectPendingAssistantReply,
+  isConversationCurrent,
   loadSessions,
   onAccepted,
   onRunning,
@@ -45,12 +51,17 @@ export function useYachiyoTaskSubmit({
   const startPublicYachiyoTask = useCallback(async ({
     attachments,
     clientMessageId,
-    conversationId,
+    identity,
     metadata,
     prompt,
     runnableId,
     runnableKind,
   }: StartPublicYachiyoTaskRequest) => {
+    let accepted = false;
+    const conversationStillCurrent = () => (
+      Boolean(identity.sessionId) && isConversationCurrent(identity)
+    );
+    if (!conversationStillCurrent()) return false;
     try {
       const runnableLabel = runnableKind === 'workflow'
         ? 'Workflow'
@@ -62,7 +73,7 @@ export function useYachiyoTaskSubmit({
       const cleanRunnableId = String(runnableId || (runnableKind === 'main' ? MAIN_CHAT_AGENT_ID : '')).trim();
       const task = await startYachiyoTask({
         prompt,
-        conversation_id: conversationId,
+        conversation_id: identity.sessionId,
         ...(attachments?.length ? { attachments } : {}),
         ...(runnableKind === 'workflow' && cleanRunnableId
           ? { workflow_id: cleanRunnableId }
@@ -81,15 +92,20 @@ export function useYachiyoTaskSubmit({
           ...metadata,
         },
       });
+      accepted = true;
+      if (!conversationStillCurrent()) return true;
       rememberYachiyoTasks([task]);
-      onAccepted();
+      onAccepted(clientMessageId);
       const taskId = String(task.task_id || '').trim();
       if (taskId) expectPendingAssistantReply(taskId);
       if (task.status === 'running' && taskId) {
         setStatus(chatRunnableRunningStatusText(runnableLabel));
         onRunning();
-        await refreshMessages();
-        pollAgentRunInBackground(taskId);
+        pollAgentRunInBackground(taskId, {
+          identity,
+        });
+        const refreshed = await refreshMessages();
+        if (conversationStillCurrent() && !refreshed) setStatus('任务已接收，消息正在同步…');
         return true;
       }
       onSettled();
@@ -98,16 +114,22 @@ export function useYachiyoTaskSubmit({
         label: runnableLabel,
         status: task.status,
       }));
-      await refreshMessages();
+      const refreshed = await refreshMessages();
       await loadSessions();
+      if (conversationStillCurrent() && !refreshed) setStatus('任务已接收，消息正在同步…');
       return true;
     } catch {
+      if (accepted) {
+        if (conversationStillCurrent()) setStatus('任务已接收，消息正在同步…');
+        return true;
+      }
       // Fall through to the legacy Chat API with the same idempotency key.
       return false;
     }
   }, [
     loadSessions,
     expectPendingAssistantReply,
+    isConversationCurrent,
     onAccepted,
     onRunning,
     onSettled,

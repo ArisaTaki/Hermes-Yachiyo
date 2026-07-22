@@ -29,6 +29,7 @@ type ChatComposerProps = {
   composerHeight: number;
   composerMaxHeight: number;
   composerMinHeight: number;
+  conversationTransitionLocked: boolean;
   fileInputRef: RefObject<HTMLInputElement | null>;
   imageAttachDisabled: boolean;
   input: string;
@@ -38,7 +39,6 @@ type ChatComposerProps = {
   mentionActiveIndex: number;
   mentionSuggestions: MentionOption[];
   processingCount: number;
-  onApproveComposerApproval: () => void;
   onCancelProcessing: () => void;
   onComposerCompositionEnd: () => void;
   onComposerCompositionStart: () => void;
@@ -53,7 +53,6 @@ type ChatComposerProps = {
   onOpenComposerApprovalDetails: () => void;
   onOpenImageAttachmentPicker: () => void;
   onPreviousComposerApproval: () => void;
-  onRejectComposerApproval: () => void;
   onRemoveAttachment: (attachmentId: string) => void;
   onRevealComposerApproval: () => void;
   onNextComposerApproval: () => void;
@@ -73,6 +72,7 @@ export function ChatComposer({
   composerHeight,
   composerMaxHeight,
   composerMinHeight,
+  conversationTransitionLocked,
   fileInputRef,
   imageAttachDisabled,
   input,
@@ -82,7 +82,6 @@ export function ChatComposer({
   mentionActiveIndex,
   mentionSuggestions,
   processingCount,
-  onApproveComposerApproval,
   onCancelProcessing,
   onComposerCompositionEnd,
   onComposerCompositionStart,
@@ -97,17 +96,22 @@ export function ChatComposer({
   onOpenComposerApprovalDetails,
   onOpenImageAttachmentPicker,
   onPreviousComposerApproval,
-  onRejectComposerApproval,
   onRemoveAttachment,
   onRevealComposerApproval,
   onNextComposerApproval,
   onSubmit,
 }: ChatComposerProps) {
   const composerInputStyle = { height: `${composerHeight}px` } as CSSProperties;
-  const sendDisabled = isSending || (!input.trim() && attachments.length === 0);
+  const sendDisabled = conversationTransitionLocked
+    || isSending
+    || (!input.trim() && attachments.length === 0);
 
   return (
-    <form className="chat-input-area composer refined-composer" onSubmit={onSubmit}>
+    <form
+      className="chat-input-area composer refined-composer"
+      data-conversation-transition-locked={String(conversationTransitionLocked)}
+      onSubmit={onSubmit}
+    >
       {composerApprovalItem && composerApprovalDetails ? (
         <ComposerApprovalNotice
           approvalId={composerApprovalItem.approvalId}
@@ -115,8 +119,6 @@ export function ChatComposer({
           currentIndex={composerApprovalIndex}
           details={composerApprovalDetails}
           itemId={composerApprovalItem.id}
-          onApprove={onApproveComposerApproval}
-          onReject={onRejectComposerApproval}
           onOpenDetails={onOpenComposerApprovalDetails}
           onPrevious={onPreviousComposerApproval}
           onReveal={onRevealComposerApproval}
@@ -147,6 +149,7 @@ export function ChatComposer({
                   <figcaption>{attachment.name}</figcaption>
                   <button
                     type="button"
+                    disabled={conversationTransitionLocked}
                     aria-label={`移除 ${attachment.name}`}
                     data-testid="chat-composer-attachment-remove"
                     onClick={() => onRemoveAttachment(attachment.id)}
@@ -171,6 +174,7 @@ export function ChatComposer({
               {mentionSuggestions.map((option, index) => (
                 <button
                   type="button"
+                  disabled={conversationTransitionLocked}
                   className={`composer-mention-option ${option.kind}${index === mentionActiveIndex ? ' active' : ''}`}
                   id={`composer-mention-option-${index}`}
                   key={`${option.kind}-${option.id}`}
@@ -206,11 +210,12 @@ export function ChatComposer({
             onPaste={onComposerPaste}
             placeholder="输入消息..."
             aria-activedescendant={activeMentionOptionId}
-            aria-disabled={isSending}
+            aria-disabled={isSending || conversationTransitionLocked}
             aria-controls={mentionSuggestions.length ? 'composer-mention-menu' : undefined}
             aria-expanded={mentionSuggestions.length > 0}
             aria-haspopup="listbox"
-            readOnly={isSending}
+            disabled={conversationTransitionLocked}
+            readOnly={isSending || conversationTransitionLocked}
             rows={1}
             style={composerInputStyle}
           />

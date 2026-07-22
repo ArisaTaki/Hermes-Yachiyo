@@ -40,6 +40,10 @@ logger = logging.getLogger(__name__)
 class ModelProfileError(RuntimeError):
     """Raised when a model profile operation cannot be completed."""
 
+    def __init__(self, message: str, *, code: str = "") -> None:
+        super().__init__(message)
+        self.code = code
+
 
 _OPENAI_COMPATIBLE_CHAT_TIMEOUT_ENV = "OHA_YACHIYO_MODEL_TIMEOUT_SECONDS"
 OPENAI_COMPATIBLE_CHAT_TIMEOUT_SECONDS = 180
@@ -625,6 +629,9 @@ class ModelProfileService:
         kind = "model_source" if table == "model_sources" else "model_profile"
         return f"{kind}:{row_id}:api_key"
 
+    def _replacement_credential_ref(self, table: str, row_id: str) -> str:
+        return f"{self._credential_ref(table, row_id)}:{uuid4().hex}"
+
     def _store_credential(self, ref: str, secret: str) -> None:
         secret = str(secret or "").strip()
         if not secret:
@@ -632,7 +639,15 @@ class ModelProfileService:
         try:
             self._credential_store.set(ref, secret)
         except CredentialStoreError as exc:
-            raise ModelProfileError(redact_api_error_text(exc)) from exc
+            code = (
+                "credential_reentry_required"
+                if getattr(exc, "os_status", None) == -25293
+                else "credential_store_error"
+            )
+            raise ModelProfileError(
+                redact_api_error_text(exc),
+                code=code,
+            ) from None
 
     def _read_credential(self, ref: str) -> str:
         ref = str(ref or "").strip()
@@ -641,7 +656,15 @@ class ModelProfileService:
         try:
             return self._credential_store.get(ref)
         except CredentialStoreError as exc:
-            raise ModelProfileError(redact_api_error_text(exc)) from exc
+            code = (
+                "credential_reentry_required"
+                if getattr(exc, "os_status", None) == -25293
+                else "credential_store_error"
+            )
+            raise ModelProfileError(
+                redact_api_error_text(exc),
+                code=code,
+            ) from None
 
     def _delete_credential(self, ref: str) -> None:
         ref = str(ref or "").strip()
@@ -649,8 +672,45 @@ class ModelProfileService:
             return
         try:
             self._credential_store.delete(ref)
-        except CredentialStoreError:
-            pass
+        except Exception:
+            # Cleanup is compensating/best-effort. Never let an obsolete or
+            # inaccessible Keychain item hide the operation's real outcome,
+            # and do not attach the native exception (it may contain secrets).
+            logger.debug("Credential cleanup could not remove an obsolete reference")
+
+    def _rollback_quietly(self) -> None:
+        try:
+            self._conn.rollback()
+        except Exception:
+            logger.debug("Model profile transaction rollback did not complete")
+
+    def _cleanup_staged_credential_if_unreferenced(
+        self,
+        *,
+        table: str,
+        id_column: str,
+        row_id: str,
+        staged_ref: str,
+    ) -> None:
+        """Delete a staged secret only after proving the DB does not reference it.
+
+        A SQLite commit may report an error after the transaction was durably
+        committed. In that outcome-unknown case, retaining a possible orphan is
+        safer than deleting the credential now referenced by the database.
+        """
+
+        if not staged_ref:
+            return
+        try:
+            row = self._conn.execute(
+                f"SELECT credential_ref FROM {table} WHERE {id_column}=?",
+                (row_id,),
+            ).fetchone()
+        except Exception:
+            return
+        current_ref = str(row["credential_ref"] or "").strip() if row else ""
+        if current_ref != staged_ref:
+            self._delete_credential(staged_ref)
 
     def _row_secret_configured(self, row: sqlite3.Row) -> bool:
         return bool(str(row["credential_ref"] or "").strip() or str(row["api_key"] or "").strip())
@@ -800,6 +860,12 @@ class ModelProfileService:
             raise ModelProfileError("提供商源 ID 在当前类型下必须唯一")
 
     def create_source(self, payload: dict[str, Any]) -> dict[str, Any]:
+        with self._lock:
+            return self._create_source_locked(payload)
+
+    def _create_source_locked(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Create a source while the caller holds ``self._lock``."""
+
         name = str(payload.get("name") or "").strip()
         capability = _normalize_capability(str(payload.get("capability") or "chat"))
         self._ensure_source_id_available(name, capability)
@@ -838,7 +904,7 @@ class ModelProfileService:
             self._delete_credential(credential_ref)
             raise
         self._conn.commit()
-        return self.get_source(source_id)
+        return self._get_source_locked(source_id)
 
     def get_source(self, source_id: str) -> dict[str, Any]:
         with self._lock:
@@ -854,18 +920,57 @@ class ModelProfileService:
         return source
 
     def get_source_private(self, source_id: str) -> dict[str, Any]:
-        with self._lock:
-            row = self._conn.execute("SELECT * FROM model_sources WHERE source_id=?", (source_id,)).fetchone()
-            if row is None:
-                raise KeyError(source_id)
-            source = self._row_to_source(row)
-            source["models"] = self._list_source_profiles_locked(source_id)["profiles"]
-            credential_ref = str(row["credential_ref"] or "").strip()
-            legacy_api_key = str(row["api_key"] or "").strip()
+        for _attempt in range(3):
+            with self._lock:
+                row = self._conn.execute(
+                    "SELECT * FROM model_sources WHERE source_id=?",
+                    (source_id,),
+                ).fetchone()
+                if row is None:
+                    raise KeyError(source_id)
+                source = self._row_to_source(row)
+                source["models"] = self._list_source_profiles_locked(source_id)["profiles"]
+                credential_ref = str(row["credential_ref"] or "").strip()
+                legacy_api_key = str(row["api_key"] or "").strip()
 
-        source["credential_ref"] = credential_ref
-        source["api_key"] = self._read_credential(credential_ref) or legacy_api_key
-        return source
+            try:
+                api_key = self._read_credential(credential_ref) or legacy_api_key
+            except ModelProfileError:
+                with self._lock:
+                    latest = self._conn.execute(
+                        "SELECT credential_ref FROM model_sources WHERE source_id=?",
+                        (source_id,),
+                    ).fetchone()
+                    latest_ref = (
+                        str(latest["credential_ref"] or "").strip()
+                        if latest is not None
+                        else ""
+                    )
+                if latest_ref != credential_ref:
+                    continue
+                raise
+
+            with self._lock:
+                latest = self._conn.execute(
+                    "SELECT credential_ref FROM model_sources WHERE source_id=?",
+                    (source_id,),
+                ).fetchone()
+                latest_ref = (
+                    str(latest["credential_ref"] or "").strip()
+                    if latest is not None
+                    else ""
+                )
+            if latest_ref != credential_ref:
+                continue
+
+            source["credential_ref"] = credential_ref
+            source["api_key"] = api_key
+            return source
+
+        raise ModelProfileError(
+            "模型凭据正在更新，请稍后重试。",
+            code="credential_update_in_progress",
+        )
 
     def update_source(self, source_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         with self._lock:
@@ -874,7 +979,10 @@ class ModelProfileService:
                 "SELECT credential_ref FROM model_sources WHERE source_id=?",
                 (source_id,),
             ).fetchone()
-            credential_ref = str(row["credential_ref"] or "").strip() if row else ""
+            previous_credential_ref = (
+                str(row["credential_ref"] or "").strip() if row else ""
+            )
+            credential_ref = previous_credential_ref
             next_source = {**current, **{key: value for key, value in payload.items() if key != "api_key"}}
             if "capability" in payload:
                 next_source["capability"] = _normalize_capability(str(payload.get("capability") or "chat"))
@@ -887,29 +995,79 @@ class ModelProfileService:
             ).fetchone()
             if mismatched is not None:
                 raise ModelProfileError("提供商源类型不能与已登记模型类型不一致")
-            if "api_key" in payload and str(payload.get("api_key") or "").strip():
-                credential_ref = credential_ref or self._credential_ref("model_sources", source_id)
-                self._store_credential(credential_ref, str(payload.get("api_key") or "").strip())
+            next_api_key = str(payload.get("api_key") or "").strip()
+            staged_credential_ref = ""
+            if next_api_key:
+                credential_ref = (
+                    self._replacement_credential_ref("model_sources", source_id)
+                    if previous_credential_ref
+                    else self._credential_ref("model_sources", source_id)
+                )
+                staged_credential_ref = credential_ref
+                try:
+                    self._store_credential(credential_ref, next_api_key)
+                except Exception:
+                    if credential_ref != previous_credential_ref:
+                        self._delete_credential(credential_ref)
+                    raise
             now = _now()
-            self._conn.execute(
-                """
-                UPDATE model_sources
-                   SET name=?, capability=?, provider=?, base_url=?, api_key='', credential_ref=?, options_json=?, enabled=?, updated_at=?
-                WHERE source_id=?
-                """,
-                (
-                    next_name,
-                    next_capability,
-                    str(next_source.get("provider") or "openai_compatible"),
-                    str(next_source.get("base_url") or ""),
-                    credential_ref,
-                    _json_dump(next_source.get("options") or {}),
-                    1 if next_source.get("enabled", True) else 0,
-                    now,
-                    source_id,
-                ),
-            )
-            self._conn.commit()
+            try:
+                self._conn.execute(
+                    """
+                    UPDATE model_sources
+                       SET name=?, capability=?, provider=?, base_url=?, api_key='', credential_ref=?, options_json=?, enabled=?,
+                           status=?, last_tested_at=?, last_error=?, updated_at=?
+                    WHERE source_id=?
+                    """,
+                    (
+                        next_name,
+                        next_capability,
+                        str(next_source.get("provider") or "openai_compatible"),
+                        str(next_source.get("base_url") or ""),
+                        credential_ref,
+                        _json_dump(next_source.get("options") or {}),
+                        1 if next_source.get("enabled", True) else 0,
+                        "untested" if next_api_key else str(current.get("status") or "untested"),
+                        "" if next_api_key else str(current.get("last_tested_at") or ""),
+                        "" if next_api_key else str(current.get("last_error") or ""),
+                        now,
+                        source_id,
+                    ),
+                )
+                if next_api_key:
+                    self._conn.execute(
+                        """
+                        UPDATE model_profiles
+                           SET status='untested', last_tested_at='', last_error='', updated_at=?
+                         WHERE source_id=?
+                        """,
+                        (now, source_id),
+                    )
+            except Exception:
+                self._rollback_quietly()
+                self._cleanup_staged_credential_if_unreferenced(
+                    table="model_sources",
+                    id_column="source_id",
+                    row_id=source_id,
+                    staged_ref=staged_credential_ref,
+                )
+                raise
+            try:
+                self._conn.commit()
+            except Exception:
+                self._rollback_quietly()
+                self._cleanup_staged_credential_if_unreferenced(
+                    table="model_sources",
+                    id_column="source_id",
+                    row_id=source_id,
+                    staged_ref=staged_credential_ref,
+                )
+                raise
+            if (
+                previous_credential_ref
+                and previous_credential_ref != credential_ref
+            ):
+                self._delete_credential(previous_credential_ref)
             return self._get_source_locked(source_id)
 
     def delete_source(self, source_id: str) -> dict[str, Any]:
@@ -953,26 +1111,33 @@ class ModelProfileService:
 
     def test_source(self, source_id: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         source = self.get_source_private(source_id)
+        generation = {
+            "expected_credential_ref": str(source.get("credential_ref") or ""),
+            "expected_updated_at": str(source.get("updated_at") or ""),
+        }
         source_capability = str(source.get("capability") or "chat")
         if source_capability == "tts":
             return self._record_source_test_result(
                 source_id,
                 ok=False,
                 message="TTS 提供商源使用语音专用链路测试，不走 OpenAI-compatible 模型测试。",
+                **generation,
             )
         provider = str(source.get("provider") or "openai_compatible")
         model = str((payload or {}).get("model") or "").strip()
         if not model:
-            first = self._conn.execute(
-                "SELECT model FROM model_profiles WHERE source_id=? AND capability=? ORDER BY name LIMIT 1",
-                (source_id, source_capability),
-            ).fetchone()
+            with self._lock:
+                first = self._conn.execute(
+                    "SELECT model FROM model_profiles WHERE source_id=? AND capability=? ORDER BY name LIMIT 1",
+                    (source_id, source_capability),
+                ).fetchone()
             model = str(first["model"]) if first is not None else ""
         if not _supports_openai_compatible_api(provider):
             return self._record_source_test_result(
                 source_id,
                 ok=False,
                 message="首版仅支持 OpenAI-compatible 提供商源的自动测试。",
+                **generation,
             )
         missing = [
             key
@@ -989,6 +1154,7 @@ class ModelProfileService:
                 ok=False,
                 message="提供商源测试配置不完整。",
                 extra={"missing": missing},
+                **generation,
             )
         started = time.time()
         try:
@@ -999,12 +1165,18 @@ class ModelProfileService:
                 [{"role": "user", "content": "Reply with OK."}],
             )
         except ModelProfileError as exc:
-            return self._record_source_test_result(source_id, ok=False, message=redact_api_error_text(exc))
+            return self._record_source_test_result(
+                source_id,
+                ok=False,
+                message=redact_api_error_text(exc),
+                **generation,
+            )
         return self._record_source_test_result(
             source_id,
             ok=True,
             message=result[:500] or "OK",
             extra={"latency_ms": int((time.time() - started) * 1000)},
+            **generation,
         )
 
     def _record_source_test_result(
@@ -1014,21 +1186,73 @@ class ModelProfileService:
         ok: bool,
         message: str,
         extra: dict[str, Any] | None = None,
+        expected_credential_ref: str | None = None,
+        expected_updated_at: str | None = None,
     ) -> dict[str, Any]:
-        tested_at = _now()
-        self._conn.execute(
-            """
-            UPDATE model_sources
-               SET status=?, last_tested_at=?, last_error=?, updated_at=?
-             WHERE source_id=?
-            """,
-            ("available" if ok else "failed", tested_at, "" if ok else message, tested_at, source_id),
+        with self._lock:
+            if self._source_generation_changed_locked(
+                source_id,
+                expected_credential_ref=expected_credential_ref,
+                expected_updated_at=expected_updated_at,
+            ):
+                return self._stale_source_test_result_locked(source_id)
+
+            tested_at = _now()
+            self._conn.execute(
+                """
+                UPDATE model_sources
+                   SET status=?, last_tested_at=?, last_error=?, updated_at=?
+                 WHERE source_id=?
+                """,
+                (
+                    "available" if ok else "failed",
+                    tested_at,
+                    "" if ok else message,
+                    tested_at,
+                    source_id,
+                ),
+            )
+            self._conn.commit()
+            result = {
+                "ok": ok,
+                "success": ok,
+                "message": message,
+                "source": self._get_source_locked(source_id),
+            }
+            if extra:
+                result.update(extra)
+            return result
+
+    def _source_generation_changed_locked(
+        self,
+        source_id: str,
+        *,
+        expected_credential_ref: str | None,
+        expected_updated_at: str | None,
+    ) -> bool:
+        row = self._conn.execute(
+            "SELECT credential_ref, updated_at FROM model_sources WHERE source_id=?",
+            (source_id,),
+        ).fetchone()
+        if row is None:
+            raise KeyError(source_id)
+        return (
+            expected_credential_ref is not None
+            and str(row["credential_ref"] or "").strip()
+            != str(expected_credential_ref or "").strip()
+        ) or (
+            expected_updated_at is not None
+            and str(row["updated_at"] or "") != str(expected_updated_at or "")
         )
-        self._conn.commit()
-        payload = {"ok": ok, "success": ok, "message": message, "source": self.get_source(source_id)}
-        if extra:
-            payload.update(extra)
-        return payload
+
+    def _stale_source_test_result_locked(self, source_id: str) -> dict[str, Any]:
+        return {
+            "ok": False,
+            "success": False,
+            "message": "模型配置已变化，请重新测试连接。",
+            "stale_result": True,
+            "source": self._get_source_locked(source_id),
+        }
 
     def fetch_source_models(self, source_id: str) -> dict[str, Any]:
         source = self.get_source_private(source_id)
@@ -1184,12 +1408,16 @@ class ModelProfileService:
         return str(rows[0]["profile_id"] or "")
 
     def set_defaults(self, payload: dict[str, Any]) -> dict[str, Any]:
+        with self._lock:
+            return self._set_defaults_locked(payload)
+
+    def _set_defaults_locked(self, payload: dict[str, Any]) -> dict[str, Any]:
         for capability in ("chat", "vision", "tts"):
             if capability not in payload:
                 continue
             profile_id = str(payload.get(capability) or "").strip()
             if profile_id:
-                profile = self.get_profile(profile_id)
+                profile = self._get_profile_locked(profile_id)
                 if profile["capability"] != capability:
                     raise ModelProfileError(f"{capability} 默认 Profile 类型不匹配")
                 if not profile.get("enabled", True):
@@ -1203,19 +1431,23 @@ class ModelProfileService:
                 (capability, profile_id),
             )
         self._conn.commit()
-        return {"ok": True, "defaults": self.get_defaults()}
+        return {"ok": True, "defaults": self._get_defaults_locked()}
 
     def _set_default_if_missing(self, profile_id: str) -> dict[str, str]:
-        profile = self.get_profile(profile_id)
+        with self._lock:
+            return self._set_default_if_missing_locked(profile_id)
+
+    def _set_default_if_missing_locked(self, profile_id: str) -> dict[str, str]:
+        profile = self._get_profile_locked(profile_id)
         capability = str(profile.get("capability") or "").strip()
         if capability not in {"chat", "vision", "tts"}:
-            return self.get_defaults()
+            return self._get_defaults_locked()
         current = self._conn.execute(
             "SELECT profile_id FROM model_profile_defaults WHERE capability=?",
             (capability,),
         ).fetchone()
         if current is not None and str(current["profile_id"] or "").strip():
-            return self.get_defaults()
+            return self._get_defaults_locked()
         self._conn.execute(
             """
             INSERT INTO model_profile_defaults (capability, profile_id)
@@ -1225,7 +1457,7 @@ class ModelProfileService:
             (capability, profile_id),
         )
         self._conn.commit()
-        return self.get_defaults()
+        return self._get_defaults_locked()
 
     def sync_tts_provider(self, payload: dict[str, Any]) -> dict[str, Any]:
         """Register a TTS provider that already passed the dedicated TTS test."""
@@ -1351,13 +1583,19 @@ class ModelProfileService:
         return self.update_profile(str(row["profile_id"]), payload)
 
     def create_profile(self, payload: dict[str, Any]) -> dict[str, Any]:
+        with self._lock:
+            return self._create_profile_locked(payload)
+
+    def _create_profile_locked(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Create a profile while the caller holds ``self._lock``."""
+
         name = str(payload.get("name") or "").strip()
         if not name:
             raise ModelProfileError("Profile 名称不能为空")
         capability = _normalize_capability(str(payload.get("capability") or "chat"))
         source_id = str(payload.get("source_id") or "").strip()
         if source_id:
-            source = self.get_source(source_id)
+            source = self._get_source_locked(source_id)
             if str(source.get("capability") or "chat") != capability:
                 raise ModelProfileError("模型类型必须与提供商源类型一致")
         now = _now()
@@ -1397,10 +1635,14 @@ class ModelProfileService:
             self._delete_credential(credential_ref)
             raise
         self._conn.commit()
-        return self.get_profile(profile_id)
+        return self._get_profile_locked(profile_id)
 
     def test_and_save_profile(self, source_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         source = self.get_source_private(source_id)
+        source_generation = {
+            "expected_credential_ref": str(source.get("credential_ref") or ""),
+            "expected_updated_at": str(source.get("updated_at") or ""),
+        }
         capability = _normalize_capability(str(payload.get("capability") or source.get("capability") or "chat"))
         if str(source.get("capability") or "chat") != capability:
             raise ModelProfileError("模型类型必须与提供商源类型一致")
@@ -1416,6 +1658,7 @@ class ModelProfileService:
                     for key, value in test_result.items()
                     if key not in {"ok", "success", "message"}
                 },
+                **source_generation,
             )
 
         profile_payload = {
@@ -1424,21 +1667,32 @@ class ModelProfileService:
             "provider": source.get("provider") or payload.get("provider") or "openai_compatible",
             "base_url": source.get("base_url") or payload.get("base_url") or "",
         }
-        try:
-            if str(payload.get("profile_id") or "").strip():
-                profile = self.update_profile(str(payload["profile_id"]), profile_payload)
-            else:
-                profile = self.create_profile(profile_payload)
-        except sqlite3.IntegrityError as exc:
-            raise ModelProfileError("Profile 名称必须唯一") from exc
-        result = self._record_test_result(
-            profile["profile_id"],
-            ok=True,
-            message=str(test_result.get("message") or "OK"),
-            extra={"latency_ms": test_result.get("latency_ms")},
-        )
-        result["created"] = not bool(str(payload.get("profile_id") or "").strip())
-        return result
+        with self._lock:
+            if self._source_generation_changed_locked(
+                source_id,
+                **source_generation,
+            ):
+                return self._stale_source_test_result_locked(source_id)
+            try:
+                if str(payload.get("profile_id") or "").strip():
+                    profile = self.update_profile(
+                        str(payload["profile_id"]),
+                        profile_payload,
+                    )
+                else:
+                    profile = self.create_profile(profile_payload)
+            except sqlite3.IntegrityError as exc:
+                raise ModelProfileError("Profile 名称必须唯一") from exc
+            result = self._record_test_result(
+                profile["profile_id"],
+                ok=True,
+                message=str(test_result.get("message") or "OK"),
+                extra={"latency_ms": test_result.get("latency_ms")},
+            )
+            result["created"] = not bool(
+                str(payload.get("profile_id") or "").strip()
+            )
+            return result
 
     def get_profile(self, profile_id: str) -> dict[str, Any]:
         with self._lock:
@@ -1452,34 +1706,92 @@ class ModelProfileService:
         return self._row_to_profile(row)
 
     def get_profile_private(self, profile_id: str) -> dict[str, Any]:
-        with self._lock:
-            row = self._conn.execute(
-                "SELECT * FROM model_profiles WHERE profile_id=?",
-                (profile_id,),
-            ).fetchone()
-            if row is None:
-                raise KeyError(profile_id)
-            profile = self._row_to_profile(row)
-            credential_ref = str(row["credential_ref"] or "").strip()
-            legacy_api_key = str(row["api_key"] or "").strip()
-            source_credential_ref = ""
-            if row["source_id"]:
-                source_row = self._conn.execute(
-                    "SELECT credential_ref, api_key FROM model_sources WHERE source_id=?",
-                    (row["source_id"],),
-                ).fetchone()
-                if source_row is not None:
-                    source_credential_ref = str(
-                        source_row["credential_ref"] or ""
-                    ).strip()
-                    legacy_api_key = str(source_row["api_key"] or "").strip()
+        for _attempt in range(3):
+            with self._lock:
+                (
+                    profile,
+                    credential_ref,
+                    source_credential_ref,
+                    legacy_api_key,
+                ) = self._profile_private_snapshot_locked(profile_id)
 
-        profile["credential_ref"] = credential_ref
-        if source_credential_ref:
-            profile["source_credential_ref"] = source_credential_ref
-        secret_ref = source_credential_ref or credential_ref
-        profile["api_key"] = self._read_credential(secret_ref) or legacy_api_key
-        return profile
+            secret_ref = source_credential_ref or credential_ref
+            try:
+                api_key = self._read_credential(secret_ref) or legacy_api_key
+            except ModelProfileError:
+                with self._lock:
+                    latest_secret_ref = self._profile_secret_ref_locked(profile_id)
+                if latest_secret_ref != secret_ref:
+                    continue
+                raise
+
+            with self._lock:
+                latest_secret_ref = self._profile_secret_ref_locked(profile_id)
+            if latest_secret_ref != secret_ref:
+                continue
+
+            profile["credential_ref"] = credential_ref
+            if source_credential_ref:
+                profile["source_credential_ref"] = source_credential_ref
+            profile["api_key"] = api_key
+            return profile
+
+        raise ModelProfileError(
+            "模型凭据正在更新，请稍后重试。",
+            code="credential_update_in_progress",
+        )
+
+    def _profile_private_snapshot_locked(
+        self,
+        profile_id: str,
+    ) -> tuple[dict[str, Any], str, str, str]:
+        row = self._conn.execute(
+            "SELECT * FROM model_profiles WHERE profile_id=?",
+            (profile_id,),
+        ).fetchone()
+        if row is None:
+            raise KeyError(profile_id)
+        profile = self._row_to_profile(row)
+        credential_ref = str(row["credential_ref"] or "").strip()
+        legacy_api_key = str(row["api_key"] or "").strip()
+        source_credential_ref = ""
+        source_updated_at = ""
+        if row["source_id"]:
+            source_row = self._conn.execute(
+                "SELECT credential_ref, api_key, updated_at FROM model_sources WHERE source_id=?",
+                (row["source_id"],),
+            ).fetchone()
+            if source_row is not None:
+                source_credential_ref = str(
+                    source_row["credential_ref"] or ""
+                ).strip()
+                legacy_api_key = str(source_row["api_key"] or "").strip()
+                source_updated_at = str(source_row["updated_at"] or "")
+        if source_updated_at:
+            profile["source_updated_at"] = source_updated_at
+        return profile, credential_ref, source_credential_ref, legacy_api_key
+
+    def _profile_secret_ref_locked(self, profile_id: str) -> str:
+        row = self._conn.execute(
+            "SELECT source_id, credential_ref FROM model_profiles WHERE profile_id=?",
+            (profile_id,),
+        ).fetchone()
+        if row is None:
+            raise KeyError(profile_id)
+        credential_ref = str(row["credential_ref"] or "").strip()
+        source_id = str(row["source_id"] or "").strip()
+        if not source_id:
+            return credential_ref
+        source_row = self._conn.execute(
+            "SELECT credential_ref FROM model_sources WHERE source_id=?",
+            (source_id,),
+        ).fetchone()
+        source_ref = (
+            str(source_row["credential_ref"] or "").strip()
+            if source_row is not None
+            else ""
+        )
+        return source_ref or credential_ref
 
     def update_profile(self, profile_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         with self._lock:
@@ -1503,52 +1815,114 @@ class ModelProfileService:
                     raise ModelProfileError("模型类型必须与提供商源类型一致")
             credential_ref = "" if next_source_id else current_credential_ref
             next_api_key = str(payload.get("api_key") or "").strip()
+            staged_credential_ref = ""
             if not next_source_id and next_api_key:
-                credential_ref = credential_ref or self._credential_ref("model_profiles", profile_id)
-                self._store_credential(credential_ref, next_api_key)
-            if next_source_id and current_credential_ref:
-                self._delete_credential(current_credential_ref)
+                credential_ref = (
+                    self._replacement_credential_ref("model_profiles", profile_id)
+                    if current_credential_ref
+                    else self._credential_ref("model_profiles", profile_id)
+                )
+                staged_credential_ref = credential_ref
+                try:
+                    self._store_credential(credential_ref, next_api_key)
+                except Exception:
+                    if credential_ref != current_credential_ref:
+                        self._delete_credential(credential_ref)
+                    raise
             profile_enabled = next_profile.get("enabled", True)
             if "enabled" not in payload and "profile_enabled" in current:
                 profile_enabled = current.get("profile_enabled", True)
+            credential_changed = bool(not next_source_id and next_api_key)
             now = _now()
-            self._conn.execute(
-                """
-                UPDATE model_profiles
-                   SET source_id=?, name=?, capability=?, provider=?, base_url=?, model=?, api_key='', credential_ref=?,
-                       options_json=?, enabled=?, updated_at=?
-                 WHERE profile_id=?
-                """,
-                (
-                    str(next_profile.get("source_id") or ""),
-                    str(next_profile.get("name") or "").strip(),
-                    str(next_profile.get("capability") or "chat"),
-                    str(next_profile.get("provider") or "openai_compatible"),
-                    str(next_profile.get("base_url") or ""),
-                    str(next_profile.get("model") or ""),
-                    credential_ref,
-                    _json_dump(next_profile.get("options") or {}),
-                    1 if profile_enabled else 0,
-                    now,
-                    profile_id,
-                ),
-            )
-            self._conn.commit()
+            try:
+                self._conn.execute(
+                    """
+                    UPDATE model_profiles
+                       SET source_id=?, name=?, capability=?, provider=?, base_url=?, model=?, api_key='', credential_ref=?,
+                           options_json=?, enabled=?, status=?, last_tested_at=?, last_error=?, updated_at=?
+                     WHERE profile_id=?
+                    """,
+                    (
+                        str(next_profile.get("source_id") or ""),
+                        str(next_profile.get("name") or "").strip(),
+                        str(next_profile.get("capability") or "chat"),
+                        str(next_profile.get("provider") or "openai_compatible"),
+                        str(next_profile.get("base_url") or ""),
+                        str(next_profile.get("model") or ""),
+                        credential_ref,
+                        _json_dump(next_profile.get("options") or {}),
+                        1 if profile_enabled else 0,
+                        "untested" if credential_changed else str(current.get("status") or "untested"),
+                        "" if credential_changed else str(current.get("last_tested_at") or ""),
+                        "" if credential_changed else str(current.get("last_error") or ""),
+                        now,
+                        profile_id,
+                    ),
+                )
+            except Exception:
+                self._rollback_quietly()
+                self._cleanup_staged_credential_if_unreferenced(
+                    table="model_profiles",
+                    id_column="profile_id",
+                    row_id=profile_id,
+                    staged_ref=staged_credential_ref,
+                )
+                raise
+            try:
+                self._conn.commit()
+            except Exception:
+                self._rollback_quietly()
+                self._cleanup_staged_credential_if_unreferenced(
+                    table="model_profiles",
+                    id_column="profile_id",
+                    row_id=profile_id,
+                    staged_ref=staged_credential_ref,
+                )
+                raise
+            if current_credential_ref and current_credential_ref != credential_ref:
+                self._delete_credential(current_credential_ref)
             return self._get_profile_locked(profile_id)
 
     def delete_profile(self, profile_id: str) -> dict[str, Any]:
-        row = self._conn.execute("SELECT credential_ref FROM model_profiles WHERE profile_id=?", (profile_id,)).fetchone()
-        self._conn.execute("DELETE FROM model_profiles WHERE profile_id=?", (profile_id,))
-        self._conn.execute(
-            "UPDATE model_profile_defaults SET profile_id='' WHERE profile_id=?",
-            (profile_id,),
-        )
-        self._conn.commit()
-        if row is not None:
-            self._delete_credential(str(row["credential_ref"] or ""))
-        return {"ok": True}
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT credential_ref FROM model_profiles WHERE profile_id=?",
+                (profile_id,),
+            ).fetchone()
+            self._conn.execute(
+                "DELETE FROM model_profiles WHERE profile_id=?",
+                (profile_id,),
+            )
+            self._conn.execute(
+                "UPDATE model_profile_defaults SET profile_id='' WHERE profile_id=?",
+                (profile_id,),
+            )
+            self._conn.commit()
+            if row is not None:
+                self._delete_credential(str(row["credential_ref"] or ""))
+            return {"ok": True}
 
     def test_profile(self, profile_id: str) -> dict[str, Any]:
+        with self._lock:
+            (
+                generation_profile,
+                generation_credential_ref,
+                generation_source_ref,
+                _legacy_api_key,
+            ) = self._profile_private_snapshot_locked(profile_id)
+        failure_generation = {
+            "expected_secret_ref": str(
+                generation_source_ref or generation_credential_ref or ""
+            ),
+            "expected_profile_updated_at": str(
+                generation_profile.get("updated_at") or ""
+            ),
+            "expected_source_updated_at": (
+                str(generation_profile.get("source_updated_at") or "")
+                if generation_profile.get("source_id")
+                else None
+            ),
+        }
         try:
             profile = self.get_profile_private(profile_id)
         except ModelProfileError as exc:
@@ -1562,6 +1936,7 @@ class ModelProfileService:
                 ok=False,
                 message=message,
                 extra={"failure_stage": "credential_access"},
+                **failure_generation,
             )
         result = self._test_profile_payload(
             {
@@ -1580,6 +1955,17 @@ class ModelProfileService:
                 for key, value in result.items()
                 if key not in {"ok", "success", "message"}
             },
+            expected_secret_ref=str(
+                profile.get("source_credential_ref")
+                or profile.get("credential_ref")
+                or ""
+            ),
+            expected_profile_updated_at=str(profile.get("updated_at") or ""),
+            expected_source_updated_at=(
+                str(profile.get("source_updated_at") or "")
+                if profile.get("source_id")
+                else None
+            ),
         )
 
     def _test_profile_payload(self, source: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
@@ -1650,34 +2036,94 @@ class ModelProfileService:
         ok: bool,
         message: str,
         extra: dict[str, Any] | None = None,
+        expected_secret_ref: str | None = None,
+        expected_profile_updated_at: str | None = None,
+        expected_source_updated_at: str | None = None,
     ) -> dict[str, Any]:
-        tested_at = _now()
-        profile = self.get_profile(profile_id)
-        self._conn.execute(
-            """
-            UPDATE model_profiles
-               SET status=?, last_tested_at=?, last_error=?, updated_at=?
-             WHERE profile_id=?
-            """,
-            ("available" if ok else "failed", tested_at, "" if ok else message, tested_at, profile_id),
-        )
-        source_id = str(profile.get("source_id") or "")
-        if source_id:
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM model_profiles WHERE profile_id=?",
+                (profile_id,),
+            ).fetchone()
+            if row is None:
+                raise KeyError(profile_id)
+            source_id = str(row["source_id"] or "").strip()
+            source_ref = ""
+            source_updated_at = ""
+            if source_id:
+                source_row = self._conn.execute(
+                    "SELECT credential_ref, updated_at FROM model_sources WHERE source_id=?",
+                    (source_id,),
+                ).fetchone()
+                if source_row is not None:
+                    source_ref = str(source_row["credential_ref"] or "").strip()
+                    source_updated_at = str(source_row["updated_at"] or "")
+            secret_ref = source_ref or str(row["credential_ref"] or "").strip()
+            generation_changed = (
+                expected_secret_ref is not None
+                and secret_ref != str(expected_secret_ref or "").strip()
+            ) or (
+                expected_profile_updated_at is not None
+                and str(row["updated_at"] or "")
+                != str(expected_profile_updated_at or "")
+            ) or (
+                expected_source_updated_at is not None
+                and source_updated_at != str(expected_source_updated_at or "")
+            )
+            if generation_changed:
+                return {
+                    "ok": False,
+                    "success": False,
+                    "message": "模型配置已变化，请重新测试连接。",
+                    "stale_result": True,
+                    "profile": self._row_to_profile(row),
+                }
+
+            tested_at = _now()
+            profile = self._row_to_profile(row)
             self._conn.execute(
                 """
-                UPDATE model_sources
+                UPDATE model_profiles
                    SET status=?, last_tested_at=?, last_error=?, updated_at=?
-                 WHERE source_id=?
+                 WHERE profile_id=?
                 """,
-                ("available" if ok else "failed", tested_at, "" if ok else message, tested_at, source_id),
+                (
+                    "available" if ok else "failed",
+                    tested_at,
+                    "" if ok else message,
+                    tested_at,
+                    profile_id,
+                ),
             )
-        self._conn.commit()
-        payload = {"ok": ok, "success": ok, "message": message, "profile": self.get_profile(profile_id)}
-        if ok:
-            payload["defaults"] = self._set_default_if_missing(profile_id)
-        if extra:
-            payload.update(extra)
-        return payload
+            if source_id:
+                self._conn.execute(
+                    """
+                    UPDATE model_sources
+                       SET status=?, last_tested_at=?, last_error=?, updated_at=?
+                     WHERE source_id=?
+                    """,
+                    (
+                        "available" if ok else "failed",
+                        tested_at,
+                        "" if ok else message,
+                        tested_at,
+                        source_id,
+                    ),
+                )
+            self._conn.commit()
+            result = {
+                "ok": ok,
+                "success": ok,
+                "message": message,
+                "profile": self._get_profile_locked(profile_id),
+            }
+            if ok:
+                result["defaults"] = self._set_default_if_missing_locked(
+                    profile_id
+                )
+            if extra:
+                result.update(extra)
+            return result
 
 
 def _openai_compatible_auth_headers(base_url: str, api_key: str) -> dict[str, str]:

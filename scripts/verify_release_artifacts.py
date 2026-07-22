@@ -8,17 +8,44 @@ import json
 import os
 import plistlib
 import re
+import shutil
+import stat
+import struct
 import subprocess
 import sys
 import tempfile
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Sequence
+from typing import Iterable, Mapping, Sequence
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+
+from scripts.release_integrity import (
+    OFFICIAL_RELEASE_REPOSITORY,
+    SOURCE_TREE_FINGERPRINT_RE,
+    SourceTreeProvenance,
+    capture_source_tree_provenance,
+    inspect_macos_app_identity,
+    inspect_macos_dmg_signing,
+    validate_latest_release_candidate_metadata,
+)
+
+_LC_CODE_SIGNATURE = 0x1D
+_MACHO_THIN_MAGICS: dict[bytes, tuple[str, int]] = {
+    b"\xcf\xfa\xed\xfe": ("<", 32),
+    b"\xfe\xed\xfa\xcf": (">", 32),
+    b"\xce\xfa\xed\xfe": ("<", 28),
+    b"\xfe\xed\xfa\xce": (">", 28),
+}
+_MACHO_FAT_MAGICS: dict[bytes, tuple[str, int]] = {
+    b"\xca\xfe\xba\xbe": (">", 20),
+    b"\xbe\xba\xfe\xca": ("<", 20),
+    b"\xca\xfe\xba\xbf": (">", 32),
+    b"\xbf\xba\xfe\xca": ("<", 32),
+}
 
 _OLD_CAPITALIZED = "Her" "mes-Yachiyo"
 _OLD_LOWER = "her" "mes-yachiyo"
@@ -97,6 +124,8 @@ FORBIDDEN_TOKENS: tuple[str, ...] = (
     *_LEGACY_KERNEL_TOKENS,
     *_LEGACY_PROTOCOL_TOKENS,
 )
+_OFFICIAL_REPOSITORY_IDENTITY_BYTES = OFFICIAL_RELEASE_REPOSITORY.encode("utf-8")
+_OFFICIAL_REPOSITORY_IDENTITY_PLACEHOLDER = b"official-release-repository"
 
 DEFAULT_SCAN_PATHS: tuple[Path, ...] = (
     Path(".github/workflows/release-macos.yml"),
@@ -108,6 +137,7 @@ DEFAULT_SCAN_PATHS: tuple[Path, ...] = (
     Path("scripts/install_virtual_desktop_guest.py"),
     Path("scripts/run_ssh_virtual_desktop_provider.py"),
     Path("scripts/prepare_app_build_metadata.py"),
+    Path("scripts/release_integrity.py"),
     Path("scripts/build_release_candidate_artifacts.py"),
     Path("scripts/refresh_local_rc_signoff.py"),
     Path("scripts/run_provider_smoke_with_prompt.py"),
@@ -272,7 +302,45 @@ PACKAGING_CONFIG_FILE = Path("apps/frontend/electron-builder.yml")
 PACKAGED_APP_OUTPUT_DIR = Path("dist/electron")
 PACKAGED_APP_NAME = "Oha-Yachiyo.app"
 PACKAGED_APP_IDENTIFIER = "io.github.arisataki.oha-yachiyo"
+PACKAGED_BACKEND_IDENTIFIER = "io.github.arisataki.oha-yachiyo.backend"
+CUA_DRIVER_LOCK_FILE = Path("packaging/cua-driver.lock.json")
+CUA_DRIVER_ENTITLEMENTS_FILE = Path("packaging/entitlements.cua-driver.plist")
+CUA_DRIVER_HELPER_INFO_FILE = Path(
+    "packaging/cua-driver-background-helper.Info.plist"
+)
+PACKAGED_CUA_DRIVER_RELATIVE_DIR = Path("Contents/Resources/computer-use/macos")
+PACKAGED_CUA_DRIVER_HELPER_NAME = "OhaCuaDriver.app"
+PACKAGED_CUA_DRIVER_BINARY_RELATIVE_PATH = Path(
+    "OhaCuaDriver.app/Contents/MacOS/cua-driver"
+)
+PACKAGED_CUA_DRIVER_INFO_RELATIVE_PATH = Path(
+    "OhaCuaDriver.app/Contents/Info.plist"
+)
+PACKAGED_CUA_DRIVER_BINARY_NAME = "cua-driver"
+PACKAGED_CUA_DRIVER_LICENSE_NAME = "LICENSE.md"
+PACKAGED_CUA_DRIVER_MANIFEST_NAME = "manifest.json"
+PACKAGED_CUA_DRIVER_ARCHITECTURES = {"arm64", "x86_64"}
+PACKAGED_CUA_DRIVER_MANIFEST_SCHEMA_VERSION = "1"
+PACKAGED_CUA_DRIVER_CONTENT_HASH_ALGORITHM = "mach-o-without-code-signature-v1"
+PACKAGED_CUA_DRIVER_EXPECTED_ENTITLEMENTS: dict[str, bool] = {
+    "com.apple.security.automation.apple-events": True,
+    "com.apple.security.device.screen-capture": True,
+}
+PACKAGED_BACKEND_EXPECTED_ENTITLEMENTS: dict[str, bool] = {
+    "com.apple.security.cs.disable-library-validation": True,
+}
+PACKAGED_CUA_DRIVER_HELPER_BUNDLE_ID = (
+    "io.github.arisataki.oha-yachiyo.cua-driver"
+)
+PACKAGED_CUA_DRIVER_SIGN_IGNORE_PATTERN = (
+    "/Contents/Resources/computer-use/macos/"
+    r"OhaCuaDriver\.app/Contents/MacOS/cua-driver$"
+)
+PACKAGED_CODESIGN_TIMEOUT_SECONDS = 30
 PACKAGED_BACKEND_RELATIVE_PATH = Path("Contents/Resources/backend/oha-yachiyo-backend")
+PACKAGED_BACKEND_BUILD_METADATA_RELATIVE_PATH = Path(
+    "Contents/Resources/backend/runtime/apps/frontend/public/oha-yachiyo-build.json"
+)
 PACKAGED_DESKTOP_PROVIDER_RELATIVE_PATH = Path(
     "Contents/Resources/desktop-provider/oha-yachiyo-desktop-provider"
 )
@@ -293,6 +361,7 @@ PACKAGED_ASAR_RELATIVE_PATH = Path("Contents/Resources/app.asar")
 CHAT_IMAGE_ATTACHMENT_SMOKE_SCRIPT = Path("scripts/smoke_chat_image_attachment_ui.mjs")
 PACKAGED_UI_SAMPLING_SMOKE_SCRIPT = Path("scripts/smoke_packaged_ui_sampling.mjs")
 PACKAGED_CHAT_NATIVE_FILE_SMOKE_SCRIPT = Path("scripts/smoke_packaged_chat_native_file_upload.mjs")
+RELEASE_SMOKE_SUMMARY_SCRIPT = Path("scripts/summarize_release_smoke.py")
 CHAT_IMAGE_ATTACHMENT_SMOKE_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         "DOM.setFileInputFiles",
@@ -359,6 +428,16 @@ PACKAGED_CHAT_NATIVE_FILE_SMOKE_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "packaged Chat native file smoke must drive the desktop picker IPC with smoke file paths",
     ),
     (
+        "url.pathname === '/ui/settings'",
+        "packaged Chat native file smoke must provide stable UI settings to prevent "
+        "packaged-window reloads",
+    ),
+    (
+        "OHA_YACHIYO_ELECTRON_SMOKE_ROOT",
+        "packaged Chat native file smoke must isolate Electron user data and "
+        "single-instance state",
+    ),
+    (
         "chat-composer-image-attach-button",
         "packaged Chat native file smoke must click the Chat attach button",
     ),
@@ -376,7 +455,73 @@ PACKAGED_CHAT_NATIVE_FILE_SMOKE_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     ),
     (
         "agent-run-detail",
-        "packaged Chat native file smoke must verify Run Detail handoff",
+        "packaged Chat native file smoke must verify Agent Studio replay",
+    ),
+    (
+        "&& !openRun;",
+        "packaged Chat native file smoke must prove the technical run action stays hidden "
+        "in Chat",
+    ),
+    (
+        "run_detail_navigation_source: 'direct_agent_studio_route'",
+        "packaged Chat native file smoke must record direct Agent Studio replay "
+        "navigation",
+    ),
+    (
+        "const deadline = Date.now() + args.timeoutMs",
+        "packaged Chat native file smoke must use one global execution deadline",
+    ),
+    (
+        "waitForPageTarget(debugPort, deadline)",
+        "packaged Chat native file smoke must apply the global deadline to app startup",
+    ),
+    (
+        "runPackagedChatSmoke(client, deadline)",
+        "packaged Chat native file smoke must apply the global deadline to the full UI flow",
+    ),
+    (
+        "--process-ledger-json",
+        "packaged Chat native file smoke must expose a strict process cleanup ledger",
+    ),
+    (
+        "writeProcessLedger(",
+        "packaged Chat native file smoke must record detached process cleanup state",
+    ),
+    (
+        "internal_execution_hidden: true",
+        "packaged Chat native file smoke must attest internal activity, tool, and recovery hiding",
+    ),
+    (
+        "PACKAGED_CHAT_INTERNAL_RECOVERY_SENTINEL",
+        "packaged Chat native file smoke must inject internal recovery evidence",
+    ),
+    (
+        "await terminateProcess(appProcess)",
+        "packaged Chat native file smoke must await packaged Electron process-tree "
+        "cleanup",
+    ),
+    (
+        "signalProcessTree(child, 'SIGKILL')",
+        "packaged Chat native file smoke must escalate cleanup when graceful "
+        "termination times out",
+    ),
+    (
+        "fs.rmSync(tempDir, { recursive: true, force: true })",
+        "packaged Chat native file smoke must remove isolated state after process cleanup",
+    ),
+)
+RELEASE_SMOKE_SUMMARY_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
+    (
+        '"id": "chat_desktop_task"',
+        "release-smoke summary must retain the packaged Chat desktop-task item",
+    ),
+    (
+        '"dmg_chat_native_file_smoke",',
+        "release-smoke summary must require passed packaged Chat native file evidence",
+    ),
+    (
+        "--run-dmg-chat-native-file-smoke",
+        "release-smoke summary must direct missing packaged Chat evidence to its RC smoke",
     ),
 )
 ELECTRON_MAIN_CHAT_NATIVE_FILE_SMOKE_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
@@ -427,13 +572,22 @@ RELEASE_LATEST_BRANCH_CHANNELS: dict[str, str] = {
     "main": "stable",
     "alpha": "alpha",
     "develop": "experimental",
+    "oha-develop": "experimental",
 }
-RELEASE_LATEST_JSON_RE = re.compile(r"^Oha-Yachiyo-(?P<branch>main|alpha|develop)-latest\.json$")
+RELEASE_LATEST_JSON_RE = re.compile(
+    r"^Oha-Yachiyo-(?P<branch>main|alpha|develop|oha-develop)-latest\.json$"
+)
 RELEASE_LATEST_SIGNING_MODES = {
     "unsigned",
     "self-signed-app-unsigned-dmg",
     "developer-id-app-notarized-dmg",
 }
+RELEASE_LATEST_SIGNATURE_KINDS_BY_MODE: dict[str, set[str]] = {
+    "unsigned": {"unsigned", "adhoc"},
+    "self-signed-app-unsigned-dmg": {"self-signed"},
+    "developer-id-app-notarized-dmg": {"developer-id"},
+}
+RELEASE_MACOS_ARCHITECTURES = {"arm64", "x64"}
 RELEASE_SEMVER_RE = re.compile(r"^\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?$")
 RELEASE_SHA_RE = re.compile(r"^[0-9a-f]{40}$", re.IGNORECASE)
 RELEASE_SHORT_SHA_RE = re.compile(r"^[0-9a-f]{7}$", re.IGNORECASE)
@@ -474,8 +628,6 @@ PACKAGED_UI_E2E_REQUIRED_SELECTORS: tuple[str, ...] = (
     "chat-code-copy",
     "chat-message-summary-status",
     "chat-message-followup-status",
-    "chat-message-activity-row",
-    "chat-message-activity-open-run-detail",
     "activity-feed",
     "activity-search-input",
     "activity-list",
@@ -550,16 +702,16 @@ PACKAGED_UI_E2E_REQUIRED_SELECTORS: tuple[str, ...] = (
     "chat-message-approval-approve",
     "chat-message-approval-reject",
     "chat-message-approval-open-run-detail",
-    "chat-message-open-run-detail",
     "chat-agent-run-progress-card",
     "chat-agent-run-progress-open-run-detail",
     "chat-composer-approval-notice",
-    "chat-composer-approval-approve",
-    "chat-composer-approval-reject",
+    "chat-composer-approval-canonical-hint",
     "chat-composer-approval-open-run-detail",
     "chat-composer-approval-reveal",
     "chat-composer-approval-previous",
     "chat-composer-approval-next",
+    "yachiyo-task-approval-approve",
+    "yachiyo-task-approval-reject",
     "agent-studio-agents",
     "agent-new",
     "agent-list",
@@ -679,6 +831,26 @@ PACKAGED_UI_E2E_REQUIRED_DATA_ATTRIBUTES: tuple[str, ...] = (
 PACKAGED_UI_E2E_FORBIDDEN_TEXT: tuple[str, ...] = (
     "oha-chat-e2e-add-image",
 )
+PACKAGED_UI_E2E_FORBIDDEN_SELECTORS: tuple[str, ...] = (
+    "bubble-launcher-agent-task-open-studio",
+    "bubble-launcher-agent-task-planner-summary",
+    "bubble-launcher-agent-task-progress",
+    "bubble-launcher-agent-task-runtime-debug",
+    "chat-composer-approval-approve",
+    "chat-composer-approval-reject",
+    "chat-message-activity-list",
+    "chat-message-activity-row",
+    "chat-message-activity-open-run-detail",
+    "chat-message-open-run-detail",
+    "live2d-launcher-agent-task-open-studio",
+    "live2d-launcher-agent-task-planner-summary",
+    "live2d-launcher-agent-task-progress",
+    "live2d-launcher-agent-task-runtime-debug",
+)
+PACKAGED_UI_E2E_FORBIDDEN_DATA_ATTRIBUTES: tuple[str, ...] = (
+    "data-activity-status",
+    "data-activity-tool",
+)
 DATA_TESTID_SELECTOR_RE = re.compile(
     r"""data-testid=(?:\\)?(?P<quote>["'])(?P<selector>[^"'\\]+)(?:\\)?(?P=quote)"""
 )
@@ -703,6 +875,10 @@ TRACKED_GENERATED_PATHS: tuple[str, ...] = (
     "apps/frontend/dist-electron",
 )
 PACKAGING_CONFIG_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
+    (
+        "  - from: ../../dist/backend/runtime\n    to: backend/runtime\n",
+        "macOS release packaging must include the packaged backend runtime",
+    ),
     (
         "../../dist/desktop-provider/oha-yachiyo-desktop-provider",
         "macOS release packaging must include the virtual desktop guest provider",
@@ -736,6 +912,18 @@ PACKAGING_CONFIG_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release packaging must use the checked-in inherited entitlements",
     ),
     (
+        "signIgnore:",
+        "macOS release packaging must define a separate Cua Driver signing policy",
+    ),
+    (
+        "- '/Contents/Resources/computer-use/macos/OhaCuaDriver\\.app/Contents/MacOS/cua-driver$'",
+        "macOS release packaging must skip only the exact Cua Driver path during Electron signing",
+    ),
+    (
+        "../../packaging/cua-driver-background-helper.Info.plist",
+        "macOS release packaging must include the background-only Cua Driver helper identity",
+    ),
+    (
         "NSAppleEventsUsageDescription",
         "macOS release packaging must include Apple Events permission copy",
     ),
@@ -760,6 +948,7 @@ RELEASE_WORKFLOW_FILE = Path(".github/workflows/release-macos.yml")
 MACOS_SIGNING_SCRIPT_FILE = Path("scripts/build_macos_self_signed_dmg.sh")
 MACOS_NOTARIZATION_SCRIPT_FILE = Path("scripts/notarize_macos_dmg.sh")
 MACOS_ENTITLEMENTS_FILE = Path("packaging/entitlements.mac.plist")
+BACKEND_ENTITLEMENTS_FILE = Path("packaging/entitlements.backend.plist")
 MACOS_SIGNING_SCRIPT_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         "CSC_IDENTITY_AUTO_DISCOVERY=false npx electron-builder --config electron-builder.yml --mac dir",
@@ -776,6 +965,62 @@ MACOS_SIGNING_SCRIPT_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         '--entitlements "${ENTITLEMENTS}"',
         "macOS signing script must apply the checked-in entitlements",
+    ),
+    (
+        '--entitlements "${CUA_ENTITLEMENTS}"',
+        "macOS signing script must apply the dedicated Cua Driver entitlements",
+    ),
+    (
+        '--identifier "${BACKEND_SIGNING_IDENTIFIER}"',
+        "macOS signing script must sign backend binaries with the stable backend identifier",
+    ),
+    (
+        '--entitlements "${BACKEND_ENTITLEMENTS}"',
+        "macOS signing script must apply the dedicated backend entitlements",
+    ),
+    (
+        'codesign "${backend_codesign_args[@]}" "${STANDALONE_BACKEND_PATH}"',
+        "macOS signing script must explicitly sign the standalone backend binary",
+    ),
+    (
+        'codesign "${backend_codesign_args[@]}" "${PACKAGED_BACKEND_PATH}"',
+        "macOS signing script must explicitly sign the embedded backend binary",
+    ),
+    (
+        'codesign --verify --strict --verbose=2 "${backend_path}"',
+        "macOS signing script must verify backend binaries after signing",
+    ),
+    (
+        'codesign -d --verbose=4 "${backend_path}"',
+        "macOS signing script must inspect backend signature metadata after signing",
+    ),
+    (
+        'codesign -dr - "${backend_path}"',
+        "macOS signing script must inspect backend designated requirements after signing",
+    ),
+    (
+        'actual_identifier="$(printf \'%s\\n\' "${signature_details}" | sed -n \'s/^Identifier=//p\')"',
+        "macOS signing script must reject backend signatures with unstable identifiers",
+    ),
+    (
+        'if [[ "${designated_requirement}" == cdhash* ]]; then',
+        "macOS signing script must reject cdhash-only backend designated requirements",
+    ),
+    (
+        'identifier \"${BACKEND_SIGNING_IDENTIFIER}\"',
+        "macOS signing script must require the stable backend identifier in designated requirements",
+    ),
+    (
+        'codesign --verify --strict --verbose=2 "${CUA_DRIVER_PATH}"',
+        "macOS signing script must verify the nested Cua Driver signature",
+    ),
+    (
+        'codesign --verify --strict --verbose=2 "${CUA_HELPER_PATH}"',
+        "macOS signing script must verify the background-only Cua Driver helper bundle",
+    ),
+    (
+        'codesign -d --entitlements - --xml "${CUA_DRIVER_PATH}"',
+        "macOS signing script must verify the final Cua Driver entitlements",
     ),
     (
         'codesign --verify --deep --strict --verbose=2 "${APP_PATH}"',
@@ -844,6 +1089,14 @@ MACOS_ENTITLEMENTS_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
 )
 RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
+        "packaging/entitlements.cua-driver.plist",
+        "release packaging docs must document the dedicated Cua Driver entitlement policy",
+    ),
+    (
+        "不会因没有 Developer ID 而跳过",
+        "release packaging docs must require signing verification for certificate-free builds",
+    ),
+    (
         "Developer ID 与 notarization",
         "release packaging docs must document the Developer ID notarization path",
     ),
@@ -900,12 +1153,24 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release packaging docs must document final release artifact binary scanning",
     ),
     (
-        "latest JSON 的 `dmg_name` / `sha256`",
-        "release packaging docs must document latest JSON checksum consistency checks",
+        "latest JSON 的 DMG / ZIP 文件名、SHA",
+        "release packaging docs must document latest JSON DMG/ZIP checksum consistency checks",
     ),
     (
-        "latest JSON 的 `name` / `channel` / `branch` / `source_branch` / `version` / `commit` / `short_commit` / `build_number` / `run_number` / `run_id` / `tag` / `signing` / `published_at` / `changelog`",
+        "latest JSON 的 `name` / `channel` / `branch` / `source_branch` / `version` / `commit` / `short_commit` / `build_number` / `run_number` / `run_id` / `tag` / `signing` / `signature_kind` / `architecture` / `published_at` / `changelog`",
         "release packaging docs must document latest JSON metadata format validation",
+    ),
+    (
+        "`dirty` / `source_tree_fingerprint` / `release_publishable`",
+        "release packaging docs must document source provenance and publishability metadata",
+    ),
+    (
+        "--allow-dirty-local-rc",
+        "release packaging docs must document the explicit dirty local RC build mode",
+    ),
+    (
+        "--allow-nonpublishable-local-rc",
+        "release packaging docs must document explicit non-publishable local inspection",
     ),
     (
         "python scripts/prepare_app_build_metadata.py",
@@ -1004,8 +1269,8 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release packaging docs must document placeholder OS evidence rejection",
     ),
     (
-        "每个 DMG 的 `.sha256` 文件",
-        "release packaging docs must document per-DMG checksum file validation",
+        "每个 DMG / Oha ZIP 的 `.sha256` 文件",
+        "release packaging docs must document per-DMG/ZIP checksum file validation",
     ),
     (
         "python scripts/verify_release_candidate.py --require-artifacts",
@@ -1188,7 +1453,7 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release packaging docs must document the source-only RC dry run",
     ),
     (
-        "上传 DMG 前运行 `python scripts/verify_release_candidate.py --require-artifacts --check-dmg-mount --check-gatekeeper-readiness --run-packaged-backend-bridge-smoke --run-dmg-app-smoke --report-json release/rc-verification.json`",
+        "上传 DMG 前运行 `python scripts/verify_release_candidate.py --require-artifacts --check-dmg-mount --check-gatekeeper-readiness --run-packaged-backend-bridge-smoke --run-dmg-app-smoke --run-dmg-chat-native-file-smoke --report-json release/rc-verification.json`",
         "release packaging docs must document the CI release-candidate gate and packaged app startup smoke before upload",
     ),
     (
@@ -1310,8 +1575,60 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
 )
 RELEASE_WORKFLOW_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
+        "group: release-macos-${{ github.ref }}",
+        "macOS release workflow must serialize publication per source ref",
+    ),
+    (
+        "publish_release:",
+        "macOS release workflow dispatch must make GitHub Release publication explicit",
+    ),
+    (
+        "Validate GitHub Release publication target",
+        "macOS release workflow must validate publication channel against source branch",
+    ),
+    (
+        'if: github.event_name == \'push\' || inputs.publish_release == true',
+        "macOS release workflow must gate GitHub Release mutation behind push or explicit dispatch publication",
+    ),
+    (
         "Verify release-facing product identity and security guards",
         "macOS release workflow must run the release verifier before dependency installation",
+    ),
+    (
+        "Prepare embedded Cua Driver",
+        "macOS release workflow must explicitly prepare the embedded Cua Driver",
+    ),
+    (
+        "python scripts/prepare_cua_driver.py --clean",
+        "macOS release workflow must prepare the pinned Cua Driver after dependency installation",
+    ),
+    (
+        "tests/test_prepare_cua_driver.py",
+        "macOS release workflow focused tests must cover Cua Driver preparation",
+    ),
+    (
+        "tests/test_cua_embedded_distribution.py",
+        "macOS release workflow focused tests must cover embedded Cua distribution",
+    ),
+    (
+        "Test Electron-owned Cua MCP bridge",
+        "macOS release workflow must run the Electron-owned Cua bridge regression test",
+    ),
+    (
+        "npm --prefix apps/frontend run test:cua-mcp-bridge",
+        "macOS release workflow must exercise the Electron-owned Cua bridge",
+    ),
+    (
+        "tests/test_cua_socket_transport.py",
+        "macOS release workflow focused tests must cover the backend Cua socket transport",
+    ),
+    (
+        "tests/test_agent_runtime_desktop_execution_providers.py",
+        "macOS release workflow focused tests must cover Cua bridge adapter reuse",
+    ),
+    (
+        "tests/test_release_artifact_verifier.py",
+        "macOS release workflow focused tests must cover packaged Cua release verification",
     ),
     (
         "      - oha-develop",
@@ -1338,6 +1655,14 @@ RELEASE_WORKFLOW_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow must import the signing certificate before building the DMG",
     ),
     (
+        'if [[ -z "${MACOS_CODESIGN_CERTIFICATE_BASE64}" ]]; then',
+        "macOS release workflow must keep a no-certificate unsigned release path",
+    ),
+    (
+        'echo "signing_mode=unsigned" >> "$GITHUB_OUTPUT"',
+        "macOS release workflow must label the no-certificate path as unsigned",
+    ),
+    (
         "MACOS_SIGNING_ENABLED",
         "macOS release workflow must pass signing state into the Electron DMG build",
     ),
@@ -1348,6 +1673,30 @@ RELEASE_WORKFLOW_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         "scripts/notarize_macos_dmg.sh",
         "macOS release workflow must notarize and staple Developer ID DMGs",
+    ),
+    (
+        "Inspect final macOS signing evidence",
+        "macOS release workflow must inspect actual final DMG signing evidence",
+    ),
+    (
+        "python scripts/release_integrity.py",
+        "macOS release workflow must derive signing metadata from the final DMG",
+    ),
+    (
+        "--stage-existing \\",
+        "macOS release workflow must create a macOS-safe app ZIP through the canonical release candidate builder",
+    ),
+    (
+        'APP_ARCHITECTURES="$(lipo -archs',
+        "macOS release workflow must verify the packaged app architecture",
+    ),
+    (
+        "normalize_macos_lipo_architecture",
+        "macOS release workflow must normalize lipo x86_64 to Electron x64 architecture",
+    ),
+    (
+        "release/*.zip",
+        "macOS release workflow must upload the app ZIP",
     ),
     (
         "developer-id-app-notarized-dmg",
@@ -1430,6 +1779,74 @@ RELEASE_WORKFLOW_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow must verify the final packaged app code signature when signing is enabled",
     ),
     (
+        'cua_parent_dir="${resources_dir}/computer-use"',
+        "macOS release workflow must locate the packaged Cua Driver parent resource directory",
+    ),
+    (
+        'test ! -L "${packaged_cua_dir}"',
+        "macOS release workflow must reject symlinked packaged Cua resource directories",
+    ),
+    (
+        'test -d "${packaged_cua_dir}"',
+        "macOS release workflow must require real packaged Cua resource directories",
+    ),
+    (
+        'test ! -L "${packaged_cua_file}"',
+        "macOS release workflow must reject symlinked packaged Cua resources",
+    ),
+    (
+        'test -f "${packaged_cua_file}"',
+        "macOS release workflow must require packaged Cua resource files",
+    ),
+    (
+        'test -x "${cua_driver}"',
+        "macOS release workflow must require an executable packaged Cua Driver",
+    ),
+    (
+        '"${cua_driver}" --version',
+        "macOS release workflow must verify the packaged Cua Driver version",
+    ),
+    (
+        '"${cua_driver}" manifest',
+        "macOS release workflow must inspect the packaged Cua Driver manifest",
+    ),
+    (
+        '{"--embedded", "--host-bundle-id"}',
+        "macOS release workflow must require the embedded host manifest contract",
+    ),
+    (
+        'lipo -archs "${cua_driver}"',
+        "macOS release workflow must verify both packaged Cua Driver architectures",
+    ),
+    (
+        'codesign --verify --strict --verbose=2 "${cua_driver}"',
+        "macOS release workflow must verify the nested Cua Driver signature",
+    ),
+    (
+        'codesign -d --entitlements - --xml "${cua_driver}"',
+        "macOS release workflow must inspect the final Cua Driver entitlements",
+    ),
+    (
+        '"com.apple.security.automation.apple-events": True',
+        "macOS release workflow must require Apple Events for the Cua Driver",
+    ),
+    (
+        '"com.apple.security.device.screen-capture": True',
+        "macOS release workflow must require Screen Capture for the Cua Driver",
+    ),
+    (
+        "MACOS_SIGNING_MODE=self-signed-app-unsigned-dmg",
+        "macOS release workflow must ad-hoc sign no-certificate builds before verification",
+    ),
+    (
+        "tests/test_cua_background_provider.py",
+        "macOS release workflow must run the Cua background provider contract tests",
+    ),
+    (
+        "tests/test_background_desktop_safety.py",
+        "macOS release workflow must run background desktop safety tests",
+    ),
+    (
         "python scripts/verify_release_artifacts.py --allow-binary release",
         "macOS release workflow must binary-scan final release artifacts",
     ),
@@ -1502,6 +1919,14 @@ RELEASE_WORKFLOW_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow must launch the app inside DMG artifacts during RC verification",
     ),
     (
+        "--run-dmg-chat-native-file-smoke",
+        "macOS release workflow final RC must run the packaged Chat native file smoke",
+    ),
+    (
+        "--run-electron-native-bridge-smoke",
+        "macOS release workflow must verify a real foreground focus through the Electron native bridge",
+    ),
+    (
         "provider_smoke_status_args+=(--mark-provider-smoke-not-applicable-if-missing)",
         "macOS release workflow must mark provider smoke not_applicable in archived signoff artifacts when secrets are missing",
     ),
@@ -1514,12 +1939,20 @@ RELEASE_WORKFLOW_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow must summarize release-smoke evidence after RC verification",
     ),
     (
+        "id: release_smoke",
+        "macOS release workflow must expose the final RC release-smoke step outputs",
+    ),
+    (
         "release/public-release-gate/public-demo.json",
         "macOS release workflow release-smoke summary must include public demo evidence",
     ),
     (
         "release/public-release-gate/oha-desktop-agent-release-smoke.json",
         "macOS release workflow release-smoke summary must include Oha product smoke evidence",
+    ),
+    (
+        "            release/electron-ui-smoke.json \\",
+        "macOS release workflow release-smoke summary must include Electron UI evidence",
     ),
     (
         "--diagnostics-zip release/public-release-gate/diagnostics.zip",
@@ -1546,6 +1979,26 @@ RELEASE_WORKFLOW_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow must surface incomplete release-smoke evidence without hiding the report",
     ),
     (
+        'echo "release_smoke_status=${release_smoke_status}" >> "$GITHUB_OUTPUT"',
+        "macOS release workflow must publish the release-smoke summary status",
+    ),
+    (
+        "Enforce release smoke readiness",
+        "macOS release workflow must enforce release-smoke readiness after evidence upload",
+    ),
+    (
+        "if: always() && (github.event_name == 'push' || inputs.publish_release == true)",
+        "macOS release workflow must enforce release-smoke readiness only for publication runs",
+    ),
+    (
+        "RELEASE_SMOKE_STATUS: ${{ steps.release_smoke.outputs.release_smoke_status }}",
+        "macOS release workflow readiness gate must consume the RC summary status output",
+    ),
+    (
+        "if: success() && (github.event_name == 'push' || inputs.publish_release == true)",
+        "macOS release workflow must require successful readiness enforcement before GitHub Release mutation",
+    ),
+    (
         "--write-manual-checks-template release/manual-rc-checks.template.json",
         "macOS release workflow must archive a manual RC check evidence template",
     ),
@@ -1562,8 +2015,8 @@ RELEASE_WORKFLOW_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow must stage the versioned DMG for final artifact scanning",
     ),
     (
-        'cp "${dmg_files[0]}" "release/${LATEST_DMG}"',
-        "macOS release workflow must stage the latest DMG for final artifact scanning",
+        "--stage-existing \\",
+        "macOS release workflow must stage latest assets through the canonical release candidate builder",
     ),
     (
         'VERSIONED_SHA256="$(shasum -a 256 "release/${VERSIONED_DMG}"',
@@ -2202,6 +2655,18 @@ RELEASE_CANDIDATE_VERIFIER_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release candidate verifier must expose packaged Chat native file verification",
     ),
     (
+        "_cleanup_packaged_chat_process_from_ledger",
+        "release candidate verifier must clean detached packaged Chat processes from a strict ledger",
+    ),
+    (
+        "DMG_CHAT_NATIVE_FILE_SMOKE_CLEANUP_GRACE_SECONDS",
+        "release candidate verifier must leave parent timeout budget for Chat smoke cleanup",
+    ),
+    (
+        'upload_report.get("internal_execution_hidden") is not True',
+        "release candidate verifier must reject missing internal-execution hiding evidence",
+    ),
+    (
         '"--run-dmg-screen-smoke"',
         "release candidate verifier CLI must expose packaged screen recording smoke",
     ),
@@ -2783,35 +3248,43 @@ RELEASE_WORKFLOW_FORBIDDEN_TEXT: tuple[tuple[str, str], ...] = (
         "Oha-Yachiyo-develop-latest",
         "macOS release workflow must not publish Oha experimental DMGs as develop-latest",
     ),
+    (
+        'cat > "release/${LATEST_JSON}"',
+        "macOS release workflow must not hand-write latest JSON outside the canonical release candidate builder",
+    ),
 )
 RELEASE_WORKFLOW_METADATA_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
-        'LATEST_SHA256="$(shasum -a 256 "release/${LATEST_DMG}"',
-        "macOS release workflow must compute a SHA256 checksum for the latest DMG",
+        "python scripts/build_release_candidate_artifacts.py \\",
+        "macOS release workflow must delegate latest artifacts to the canonical release candidate builder",
     ),
     (
-        '"version": "${RELEASE_VERSION}"',
-        "macOS release workflow latest JSON must include the release version",
+        "--stage-existing \\",
+        "macOS release workflow must use the builder's explicit existing-artifact staging mode",
     ),
     (
-        '"commit": "${GITHUB_SHA}"',
-        "macOS release workflow latest JSON must include the source commit",
+        "--dmg \"${dmg_files[0]}\" \\",
+        "macOS release workflow must bind the inspected DMG to canonical latest metadata",
     ),
     (
-        '"build_number": ${BUILD_NUMBER}',
-        "macOS release workflow latest JSON must include the build number",
+        "--app \"${app_paths[0]}\" \\",
+        "macOS release workflow must bind the packaged App to canonical latest metadata",
     ),
     (
-        '"dmg_name": "${LATEST_DMG}"',
-        "macOS release workflow latest JSON must include the DMG filename",
+        "--build-metadata apps/frontend/public/oha-yachiyo-build.json \\",
+        "macOS release workflow must pass embedded source/build provenance to the canonical builder",
     ),
     (
-        '"sha256": "${LATEST_SHA256}"',
-        "macOS release workflow latest JSON must include the latest DMG SHA256",
+        "--signing-inspection-json release/macos-signing-inspection.json \\",
+        "macOS release workflow must bind content-bound signing evidence to the release candidate",
     ),
     (
-        '"download_url": "https://github.com/${GITHUB_REPOSITORY}/releases/download/${LATEST_TAG}/${LATEST_DMG}"',
-        "macOS release workflow latest JSON must include the DMG download URL",
+        "--architecture \"${ARCHITECTURE}\" \\",
+        "macOS release workflow must pass the verified packaged architecture to the canonical builder",
+    ),
+    (
+        '--signing-mode "${SIGNING_MODE}"',
+        "macOS release workflow must pass detected signing mode to the canonical builder",
     ),
 )
 RELEASE_WORKFLOW_SMOKE_TEST_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
@@ -3837,6 +4310,26 @@ def _iter_files(root: Path, paths: Iterable[Path | str]) -> Iterable[Path]:
             yield resolved
 
 
+def _is_exact_packaged_cua_driver_path(path: Path) -> bool:
+    """Match the one lock-verified third-party binary without resolving symlinks."""
+
+    resource_suffix = (
+        "Contents",
+        "Resources",
+        "computer-use",
+        "macos",
+        *PACKAGED_CUA_DRIVER_BINARY_RELATIVE_PATH.parts,
+    )
+    parts = path.parts
+    if len(parts) < len(resource_suffix) + 1:
+        return False
+    app_directory = parts[-len(resource_suffix) - 1]
+    return (
+        app_directory == PACKAGED_APP_NAME
+        and tuple(parts[-len(resource_suffix) :]) == resource_suffix
+    )
+
+
 def _release_electron_ui_smoke_scripts(root: Path) -> tuple[str, ...]:
     scripts_dir = _resolve(root, "scripts")
     if not scripts_dir.is_dir():
@@ -3936,11 +4429,12 @@ def _release_electron_ui_smoke_data_attributes(root: Path) -> tuple[str, ...]:
 def _packaged_ui_e2e_required_selectors(root: Path) -> tuple[str, ...]:
     selectors: list[str] = []
     seen: set[str] = set()
+    forbidden = set(PACKAGED_UI_E2E_FORBIDDEN_SELECTORS)
     for selector in (
         *PACKAGED_UI_E2E_REQUIRED_SELECTORS,
         *_release_electron_ui_smoke_selectors(root),
     ):
-        if selector in seen:
+        if selector in forbidden or selector in seen:
             continue
         seen.add(selector)
         selectors.append(selector)
@@ -3950,15 +4444,128 @@ def _packaged_ui_e2e_required_selectors(root: Path) -> tuple[str, ...]:
 def _packaged_ui_e2e_required_data_attributes(root: Path) -> tuple[str, ...]:
     attributes: list[str] = []
     seen: set[str] = set()
+    forbidden = set(PACKAGED_UI_E2E_FORBIDDEN_DATA_ATTRIBUTES)
     for attribute in (
         *PACKAGED_UI_E2E_REQUIRED_DATA_ATTRIBUTES,
         *_release_electron_ui_smoke_data_attributes(root),
     ):
-        if attribute in seen:
+        if attribute in forbidden or attribute in seen:
             continue
         seen.add(attribute)
         attributes.append(attribute)
     return tuple(attributes)
+
+
+def _thin_macho_code_signature_ranges(
+    content: bytes,
+    *,
+    slice_offset: int = 0,
+    slice_size: int | None = None,
+) -> tuple[tuple[int, int], ...]:
+    """Return validated LC_CODE_SIGNATURE byte ranges for one Mach-O slice."""
+
+    slice_end = len(content) if slice_size is None else slice_offset + slice_size
+    if (
+        slice_offset < 0
+        or slice_end > len(content)
+        or slice_end - slice_offset < 28
+    ):
+        return ()
+    format_info = _MACHO_THIN_MAGICS.get(content[slice_offset : slice_offset + 4])
+    if format_info is None:
+        return ()
+    endian, header_size = format_info
+    try:
+        (command_count,) = struct.unpack_from(f"{endian}I", content, slice_offset + 16)
+    except struct.error:
+        return ()
+    if command_count > 4096:
+        return ()
+    command_offset = slice_offset + header_size
+    ranges: list[tuple[int, int]] = []
+    for _ in range(command_count):
+        if command_offset + 8 > slice_end:
+            return ()
+        try:
+            command, command_size = struct.unpack_from(
+                f"{endian}II",
+                content,
+                command_offset,
+            )
+        except struct.error:
+            return ()
+        if command_size < 8 or command_offset + command_size > slice_end:
+            return ()
+        if command == _LC_CODE_SIGNATURE:
+            if command_size < 16:
+                return ()
+            data_offset, data_size = struct.unpack_from(
+                f"{endian}II",
+                content,
+                command_offset + 8,
+            )
+            start = slice_offset + data_offset
+            end = start + data_size
+            if data_size and slice_offset <= start < end <= slice_end:
+                ranges.append((start, end))
+        command_offset += command_size
+    return tuple(ranges)
+
+
+def _macho_code_signature_ranges(content: bytes) -> tuple[tuple[int, int], ...]:
+    """Return code-signature ranges for thin or universal Mach-O content."""
+
+    if len(content) < 4:
+        return ()
+    if content[:4] in _MACHO_THIN_MAGICS:
+        return _thin_macho_code_signature_ranges(content)
+    fat_info = _MACHO_FAT_MAGICS.get(content[:4])
+    if fat_info is None or len(content) < 8:
+        return ()
+    endian, entry_size = fat_info
+    try:
+        (slice_count,) = struct.unpack_from(f"{endian}I", content, 4)
+    except struct.error:
+        return ()
+    if slice_count > 128 or 8 + slice_count * entry_size > len(content):
+        return ()
+    ranges: list[tuple[int, int]] = []
+    for index in range(slice_count):
+        entry_offset = 8 + index * entry_size
+        try:
+            if entry_size == 20:
+                slice_offset, slice_size = struct.unpack_from(
+                    f"{endian}II",
+                    content,
+                    entry_offset + 8,
+                )
+            else:
+                slice_offset, slice_size = struct.unpack_from(
+                    f"{endian}QQ",
+                    content,
+                    entry_offset + 8,
+                )
+        except struct.error:
+            return ()
+        slice_ranges = _thin_macho_code_signature_ranges(
+            content,
+            slice_offset=slice_offset,
+            slice_size=slice_size,
+        )
+        ranges.extend(slice_ranges)
+    return tuple(ranges)
+
+
+def _content_without_macho_code_signatures(content: bytes) -> bytes:
+    """Exclude signing certificates from product-token content inspection."""
+
+    ranges = _macho_code_signature_ranges(content)
+    if not ranges:
+        return content
+    unsigned_view = bytearray(content)
+    for start, end in ranges:
+        unsigned_view[start:end] = b"\0" * (end - start)
+    return bytes(unsigned_view)
 
 
 def verify_release_artifacts(
@@ -3969,6 +4576,8 @@ def verify_release_artifacts(
     check_release_security_guards: bool = True,
     check_packaged_app_bundle: bool = False,
     allow_binary_targets: bool = False,
+    allow_nonpublishable_local_rc: bool = False,
+    require_bound_release_candidate: bool = False,
 ) -> list[Finding]:
     root_path = Path(root)
     findings: list[Finding] = []
@@ -4000,16 +4609,34 @@ def verify_release_artifacts(
         except OSError as exc:
             findings.append(Finding(path, f"release verification target could not be read: {exc}"))
             continue
-        for token in FORBIDDEN_TOKENS:
-            if token.encode("utf-8") in content_bytes:
-                findings.append(Finding(path, f"contains legacy product token {token!r}"))
+        identity_safe_content = _content_without_macho_code_signatures(
+            content_bytes
+        ).replace(
+            _OFFICIAL_REPOSITORY_IDENTITY_BYTES,
+            _OFFICIAL_REPOSITORY_IDENTITY_PLACEHOLDER,
+        )
+        skip_legacy_content_scan = (
+            check_packaged_app_bundle and _is_exact_packaged_cua_driver_path(path)
+        )
+        if not skip_legacy_content_scan:
+            for token in FORBIDDEN_TOKENS:
+                if token.encode("utf-8") in identity_safe_content:
+                    findings.append(Finding(path, f"contains legacy product token {token!r}"))
         if not allow_binary_targets:
             try:
                 content_bytes.decode("utf-8")
             except UnicodeDecodeError:
                 findings.append(Finding(path, "release verification target is not UTF-8 text"))
 
-    findings.extend(_verify_release_directory_artifacts(root_path, scan_paths))
+    findings.extend(
+        _verify_release_directory_artifacts(
+            root_path,
+            scan_paths,
+            allow_nonpublishable_local_rc=allow_nonpublishable_local_rc,
+            inspect_macos_signing=check_release_security_guards,
+            require_bound_release_candidate=require_bound_release_candidate,
+        )
+    )
 
     if check_release_security_guards:
         findings.extend(_verify_release_security_guards(root_path))
@@ -4022,12 +4649,25 @@ def verify_release_artifacts(
         findings.extend(_verify_release_workflow_guards(root_path))
 
     if check_packaged_app_bundle:
-        findings.extend(_verify_packaged_app_bundle(root_path, scan_paths))
+        # Keep ``None`` distinct from an explicitly scoped path list.  ``None``
+        # means "discover the packaged app under dist/electron"; passing the
+        # default source scan paths here incorrectly turns that into an
+        # unrelated explicit scope and rejects an otherwise valid package.
+        findings.extend(_verify_packaged_app_bundle(root_path, paths))
+    elif allow_binary_targets:
+        findings.extend(_verify_standalone_backend_distribution(root_path, scan_paths))
 
     return findings
 
 
-def _verify_release_directory_artifacts(root: Path, scan_paths: Sequence[Path | str]) -> list[Finding]:
+def _verify_release_directory_artifacts(
+    root: Path,
+    scan_paths: Sequence[Path | str],
+    *,
+    allow_nonpublishable_local_rc: bool,
+    inspect_macos_signing: bool,
+    require_bound_release_candidate: bool = False,
+) -> list[Finding]:
     findings: list[Finding] = []
     release_dirs: set[Path] = set()
     for path in scan_paths:
@@ -4037,8 +4677,33 @@ def _verify_release_directory_artifacts(root: Path, scan_paths: Sequence[Path | 
         elif resolved.is_file() and resolved.parent.name == "release":
             release_dirs.add(resolved.parent)
 
+    if require_bound_release_candidate and not release_dirs:
+        return [
+            Finding(
+                root / "release",
+                "final signoff requires release metadata bound to "
+                "oha-yachiyo.release-candidate.v1",
+            )
+        ]
+
+    source_provenance: SourceTreeProvenance | None = None
+    if require_bound_release_candidate:
+        try:
+            source_provenance = capture_source_tree_provenance(root)
+        except RuntimeError as exc:
+            findings.append(
+                Finding(
+                    root,
+                    "final signoff could not verify current source provenance: "
+                    f"{exc}",
+                )
+            )
+
+    app_dirs = _packaged_app_dirs_from_paths(root, scan_paths)
+
     for release_dir in sorted(release_dirs):
         findings.extend(_verify_release_dmg_checksum_files(release_dir))
+        findings.extend(_verify_release_zip_checksum_files(release_dir))
         latest_json_files = sorted(release_dir.glob("Oha-Yachiyo-*-latest.json"))
         if not latest_json_files:
             findings.append(Finding(release_dir, "release directory must include latest channel JSON metadata"))
@@ -4052,7 +4717,23 @@ def _verify_release_directory_artifacts(root: Path, scan_paths: Sequence[Path | 
             if not isinstance(metadata, dict):
                 findings.append(Finding(metadata_path, "release latest JSON must be an object"))
                 continue
-            findings.extend(_verify_release_latest_json_metadata(metadata_path, metadata))
+            findings.extend(
+                _verify_release_latest_json_metadata(
+                    metadata_path,
+                    metadata,
+                    allow_nonpublishable_local_rc=allow_nonpublishable_local_rc,
+                )
+            )
+            findings.extend(
+                _verify_release_candidate_binding(
+                    release_dir,
+                    metadata_path,
+                    metadata,
+                    app_dirs=app_dirs,
+                    require_bound_release_candidate=require_bound_release_candidate,
+                    source_provenance=source_provenance,
+                )
+            )
             findings.extend(
                 _verify_release_notarization_evidence(
                     release_dir,
@@ -4087,9 +4768,13 @@ def _verify_release_directory_artifacts(root: Path, scan_paths: Sequence[Path | 
                 findings.append(Finding(sha_path, "release latest DMG checksum file is missing"))
                 continue
             try:
-                sha_file_value = sha_path.read_text(encoding="utf-8").split()[0].strip().lower()
+                sha_parts = sha_path.read_text(encoding="utf-8").split()
+                sha_file_value = sha_parts[0].strip().lower()
             except (OSError, IndexError) as exc:
                 findings.append(Finding(sha_path, f"release latest DMG checksum could not be read: {exc.__class__.__name__}"))
+                continue
+            if len(sha_parts) != 2 or sha_parts[1] != dmg_name:
+                findings.append(Finding(sha_path, "release latest DMG checksum must reference its exact filename"))
                 continue
             if sha_file_value != expected_sha:
                 findings.append(Finding(sha_path, "release latest DMG checksum does not match latest JSON sha256"))
@@ -4101,6 +4786,266 @@ def _verify_release_directory_artifacts(root: Path, scan_paths: Sequence[Path | 
                 continue
             if actual_sha != expected_sha:
                 findings.append(Finding(dmg_path, "release latest DMG content does not match latest JSON sha256"))
+                continue
+            if inspect_macos_signing:
+                try:
+                    signing_inspection = inspect_macos_dmg_signing(dmg_path)
+                except RuntimeError as exc:
+                    findings.append(
+                        Finding(
+                            dmg_path,
+                            f"release latest DMG signing evidence could not be verified: {exc}",
+                        )
+                    )
+                else:
+                    claimed_signing = str(metadata.get("signing") or "")
+                    if signing_inspection.mode != claimed_signing:
+                        findings.append(
+                            Finding(
+                                metadata_path,
+                                "release latest JSON signing does not match the packaged App "
+                                f"inside its DMG: claimed {claimed_signing or 'missing'}, "
+                                f"detected {signing_inspection.mode}",
+                            )
+                        )
+                    manifest = metadata.get("release_candidate_manifest")
+                    manifest_app = (
+                        manifest.get("app") if isinstance(manifest, Mapping) else None
+                    )
+                    if isinstance(manifest_app, Mapping):
+                        if (
+                            manifest_app.get("signature_kind")
+                            != signing_inspection.signature_kind
+                        ):
+                            findings.append(
+                                Finding(
+                                    metadata_path,
+                                    "release candidate App signature_kind does not match "
+                                    "the packaged App inside its DMG",
+                                )
+                            )
+                        if (
+                            manifest_app.get("team_identifier")
+                            != signing_inspection.team_identifier
+                        ):
+                            findings.append(
+                                Finding(
+                                    metadata_path,
+                                    "release candidate App team_identifier does not match "
+                                    "the packaged App inside its DMG",
+                                )
+                            )
+            zip_name = str(metadata.get("zip_name") or "").strip()
+            zip_sha = str(metadata.get("zip_sha256") or "").strip().lower()
+            zip_download_url = str(metadata.get("zip_download_url") or "")
+            if Path(zip_name).name != zip_name:
+                findings.append(Finding(metadata_path, "release latest JSON zip_name must be a filename"))
+                continue
+            if not re.fullmatch(r"[0-9a-f]{64}", zip_sha):
+                findings.append(Finding(metadata_path, "release latest JSON must include a 64-character zip_sha256"))
+                continue
+            if zip_name not in zip_download_url:
+                findings.append(Finding(metadata_path, "release latest JSON zip_download_url must reference zip_name"))
+            zip_path = release_dir / zip_name
+            zip_checksum_path = release_dir / f"{zip_name}.sha256"
+            if not zip_path.is_file():
+                findings.append(Finding(zip_path, "release latest JSON zip_name does not exist"))
+                continue
+            if not zip_checksum_path.is_file():
+                findings.append(Finding(zip_checksum_path, "release latest ZIP checksum file is missing"))
+                continue
+            try:
+                zip_checksum_parts = zip_checksum_path.read_text(encoding="utf-8").split()
+                zip_checksum = zip_checksum_parts[0].strip().lower()
+            except (OSError, IndexError) as exc:
+                findings.append(Finding(zip_checksum_path, f"release latest ZIP checksum could not be read: {exc.__class__.__name__}"))
+                continue
+            if len(zip_checksum_parts) != 2 or zip_checksum_parts[1] != zip_name:
+                findings.append(Finding(zip_checksum_path, "release latest ZIP checksum must reference its exact filename"))
+                continue
+            if zip_checksum != zip_sha:
+                findings.append(Finding(zip_checksum_path, "release latest ZIP checksum does not match latest JSON zip_sha256"))
+                continue
+            try:
+                actual_zip_sha = _sha256_file(zip_path)
+            except OSError as exc:
+                findings.append(Finding(zip_path, f"release latest ZIP could not be hashed: {exc}"))
+                continue
+            if actual_zip_sha != zip_sha:
+                findings.append(Finding(zip_path, "release latest ZIP content does not match latest JSON zip_sha256"))
+                continue
+    return findings
+
+
+def _verify_release_candidate_binding(
+    release_dir: Path,
+    metadata_path: Path,
+    metadata: dict[str, object],
+    *,
+    app_dirs: Sequence[Path],
+    require_bound_release_candidate: bool,
+    source_provenance: SourceTreeProvenance | None,
+) -> list[Finding]:
+    """Verify the content-derived RC identity without breaking legacy local RCs."""
+
+    findings: list[Finding] = []
+    has_candidate_id = "candidate_id" in metadata
+    has_manifest = "release_candidate_manifest" in metadata
+    if not has_candidate_id and not has_manifest:
+        if require_bound_release_candidate:
+            findings.append(
+                Finding(
+                    metadata_path,
+                    "final signoff rejects legacy_unbound release metadata; rebuild "
+                    "with oha-yachiyo.release-candidate.v1",
+                )
+            )
+        return findings
+    if not has_candidate_id or not has_manifest:
+        findings.append(
+            Finding(
+                metadata_path,
+                "release candidate metadata must include both candidate_id and "
+                "release_candidate_manifest",
+            )
+        )
+        return findings
+
+    try:
+        validate_latest_release_candidate_metadata(metadata)
+    except RuntimeError as exc:
+        findings.append(Finding(metadata_path, str(exc)))
+        return findings
+
+    manifest = metadata["release_candidate_manifest"]
+    assert isinstance(manifest, Mapping)
+    source = manifest["source"]
+    artifacts = manifest["artifacts"]
+    app = manifest["app"]
+    assert isinstance(source, Mapping)
+    assert isinstance(artifacts, Mapping)
+    assert isinstance(app, Mapping)
+
+    top_level_source = {
+        "commit": str(metadata.get("commit") or "").lower(),
+        "dirty": metadata.get("dirty"),
+        "fingerprint": metadata.get("source_tree_fingerprint"),
+        "release_publishable": metadata.get("release_publishable"),
+    }
+    for field, expected in top_level_source.items():
+        if source.get(field) != expected:
+            findings.append(
+                Finding(
+                    metadata_path,
+                    f"release candidate source.{field} does not match latest JSON provenance",
+                )
+            )
+
+    if source_provenance is not None:
+        current_source = {
+            "commit": source_provenance.commit,
+            "dirty": source_provenance.dirty,
+            "fingerprint": source_provenance.source_tree_fingerprint,
+            "release_publishable": source_provenance.release_publishable,
+        }
+        for field, actual in current_source.items():
+            if source.get(field) != actual:
+                findings.append(
+                    Finding(
+                        metadata_path,
+                        f"release candidate source.{field} does not match current source provenance",
+                    )
+                )
+
+    artifact_contracts = {
+        "dmg": ("dmg_name", "sha256"),
+        "zip": ("zip_name", "zip_sha256"),
+    }
+    for artifact_kind, (name_field, digest_field) in artifact_contracts.items():
+        manifest_artifact = artifacts[artifact_kind]
+        assert isinstance(manifest_artifact, Mapping)
+        filename = str(manifest_artifact.get("name") or "")
+        digest = str(manifest_artifact.get("sha256") or "")
+        if filename != metadata.get(name_field):
+            findings.append(
+                Finding(
+                    metadata_path,
+                    f"release candidate artifacts.{artifact_kind}.name does not match latest JSON {name_field}",
+                )
+            )
+        if digest != metadata.get(digest_field):
+            findings.append(
+                Finding(
+                    metadata_path,
+                    f"release candidate artifacts.{artifact_kind}.sha256 does not match latest JSON {digest_field}",
+                )
+            )
+        artifact_path = release_dir / filename
+        try:
+            actual_digest = _sha256_file(artifact_path)
+        except OSError as exc:
+            findings.append(
+                Finding(
+                    artifact_path,
+                    f"release candidate {artifact_kind.upper()} could not be hashed: {exc}",
+                )
+            )
+        else:
+            if actual_digest != digest:
+                findings.append(
+                    Finding(
+                        artifact_path,
+                        f"release candidate {artifact_kind.upper()} content does not match its manifest sha256",
+                    )
+                )
+
+    if app.get("short_version") != metadata.get("version"):
+        findings.append(
+            Finding(
+                metadata_path,
+                "release candidate App short_version does not match latest JSON version",
+            )
+        )
+    if app.get("signature_kind") != metadata.get("signature_kind"):
+        findings.append(
+            Finding(
+                metadata_path,
+                "release candidate App signature_kind does not match latest JSON signature_kind",
+            )
+        )
+
+    if len(app_dirs) != 1:
+        if require_bound_release_candidate or app_dirs:
+            findings.append(
+                Finding(
+                    metadata_path,
+                    "release candidate App identity requires exactly one selected "
+                    f"Oha-Yachiyo.app; found {len(app_dirs)}",
+                )
+            )
+        return findings
+
+    try:
+        actual_app = inspect_macos_app_identity(
+            app_dirs[0],
+            signature_kind=str(app.get("signature_kind") or ""),
+            team_identifier=str(app.get("team_identifier") or ""),
+        )
+    except RuntimeError as exc:
+        findings.append(
+            Finding(app_dirs[0], f"release candidate App identity could not be verified: {exc}")
+        )
+        return findings
+
+    actual_identity = actual_app.metadata()
+    for field in ("bundle_id", "version", "short_version", "executable"):
+        if app.get(field) != actual_identity[field]:
+            findings.append(
+                Finding(
+                    app_dirs[0],
+                    f"release candidate App {field} does not match selected packaged App identity",
+                )
+            )
     return findings
 
 
@@ -4259,7 +5204,12 @@ def _is_safe_release_source_branch(value: str) -> bool:
     return True
 
 
-def _verify_release_latest_json_metadata(metadata_path: Path, metadata: dict[str, object]) -> list[Finding]:
+def _verify_release_latest_json_metadata(
+    metadata_path: Path,
+    metadata: dict[str, object],
+    *,
+    allow_nonpublishable_local_rc: bool = False,
+) -> list[Finding]:
     findings: list[Finding] = []
     required_fields = (
         "name",
@@ -4275,12 +5225,20 @@ def _verify_release_latest_json_metadata(metadata_path: Path, metadata: dict[str
         "run_id",
         "tag",
         "signing",
+        "signature_kind",
+        "architecture",
         "dmg_name",
         "sha256",
         "download_url",
+        "zip_name",
+        "zip_sha256",
+        "zip_download_url",
         "latest_json_url",
         "published_at",
         "changelog",
+        "dirty",
+        "source_tree_fingerprint",
+        "release_publishable",
     )
     for field_name in required_fields:
         value = metadata.get(field_name)
@@ -4288,6 +5246,43 @@ def _verify_release_latest_json_metadata(metadata_path: Path, metadata: dict[str
             findings.append(Finding(metadata_path, f"release latest JSON must include {field_name}"))
     if metadata.get("name") != "Oha-Yachiyo":
         findings.append(Finding(metadata_path, "release latest JSON name must be Oha-Yachiyo"))
+
+    dirty = metadata.get("dirty")
+    release_publishable = metadata.get("release_publishable")
+    source_tree_fingerprint = str(metadata.get("source_tree_fingerprint") or "")
+    if not isinstance(dirty, bool):
+        findings.append(Finding(metadata_path, "release latest JSON dirty must be a boolean"))
+    if not isinstance(release_publishable, bool):
+        findings.append(
+            Finding(
+                metadata_path,
+                "release latest JSON release_publishable must be a boolean",
+            )
+        )
+    if not SOURCE_TREE_FINGERPRINT_RE.fullmatch(source_tree_fingerprint):
+        findings.append(
+            Finding(
+                metadata_path,
+                "release latest JSON source_tree_fingerprint must be sha256 plus 64 lowercase hex digits",
+            )
+        )
+    if isinstance(dirty, bool) and isinstance(release_publishable, bool):
+        if release_publishable == dirty:
+            findings.append(
+                Finding(
+                    metadata_path,
+                    "release latest JSON release_publishable must be the inverse of dirty",
+                )
+            )
+        if not allow_nonpublishable_local_rc and (
+            dirty is not False or release_publishable is not True
+        ):
+            findings.append(
+                Finding(
+                    metadata_path,
+                    "public/latest/final release verification requires clean, publishable source provenance",
+                )
+            )
 
     match = RELEASE_LATEST_JSON_RE.fullmatch(metadata_path.name)
     if not match:
@@ -4312,6 +5307,43 @@ def _verify_release_latest_json_metadata(metadata_path: Path, metadata: dict[str
     latest_json_url = str(metadata.get("latest_json_url") or "")
     if f"/releases/download/{expected_latest_tag}/" not in latest_json_url:
         findings.append(Finding(metadata_path, "release latest JSON latest_json_url must reference its latest channel tag"))
+    architecture = str(metadata.get("architecture") or "")
+    if architecture not in RELEASE_MACOS_ARCHITECTURES:
+        findings.append(Finding(metadata_path, "release latest JSON architecture must be arm64 or x64"))
+    expected_zip = f"Oha-Yachiyo-{expected_branch}-latest-{architecture}.zip"
+    if metadata.get("zip_name") != expected_zip:
+        findings.append(Finding(metadata_path, "release latest JSON zip_name must match its branch and architecture"))
+    zip_download_url = str(metadata.get("zip_download_url") or "")
+    if f"/releases/download/{expected_latest_tag}/" not in zip_download_url:
+        findings.append(Finding(metadata_path, "release latest JSON zip_download_url must reference its latest channel tag"))
+    if not re.fullmatch(r"[0-9a-f]{64}", str(metadata.get("zip_sha256") or "")):
+        findings.append(Finding(metadata_path, "release latest JSON zip_sha256 must be 64 lowercase hex digits"))
+    if release_publishable is True:
+        official_base = (
+            f"https://github.com/{OFFICIAL_RELEASE_REPOSITORY}/releases/download/"
+            f"{expected_latest_tag}/"
+        )
+        if download_url != f"{official_base}{expected_dmg}":
+            findings.append(
+                Finding(
+                    metadata_path,
+                    "publishable release latest JSON download_url must use the exact official HTTPS release URL",
+                )
+            )
+        if latest_json_url != f"{official_base}{metadata_path.name}":
+            findings.append(
+                Finding(
+                    metadata_path,
+                    "publishable release latest JSON latest_json_url must use the exact official HTTPS release URL",
+                )
+            )
+        if zip_download_url != f"{official_base}{expected_zip}":
+            findings.append(
+                Finding(
+                    metadata_path,
+                    "publishable release latest JSON zip_download_url must use the exact official HTTPS release URL",
+                )
+            )
     version = str(metadata.get("version") or "")
     base_version = str(metadata.get("base_version") or "")
     if not RELEASE_SEMVER_RE.fullmatch(version):
@@ -4335,6 +5367,14 @@ def _verify_release_latest_json_metadata(metadata_path: Path, metadata: dict[str
     signing = str(metadata.get("signing") or "")
     if signing not in RELEASE_LATEST_SIGNING_MODES:
         findings.append(Finding(metadata_path, "release latest JSON signing must be a known signing mode"))
+    signature_kind = str(metadata.get("signature_kind") or "")
+    if signature_kind not in RELEASE_LATEST_SIGNATURE_KINDS_BY_MODE.get(signing, set()):
+        findings.append(
+            Finding(
+                metadata_path,
+                "release latest JSON signature_kind must match its signing mode",
+            )
+        )
     published_at = str(metadata.get("published_at") or "")
     if not RELEASE_PUBLISHED_AT_RE.fullmatch(published_at):
         findings.append(Finding(metadata_path, "release latest JSON published_at must be UTC ISO-8601"))
@@ -4355,12 +5395,16 @@ def _verify_release_dmg_checksum_files(release_dir: Path) -> list[Finding]:
             findings.append(Finding(sha_path, "release DMG checksum file is missing"))
             continue
         try:
-            sha_file_value = sha_path.read_text(encoding="utf-8").split()[0].strip().lower()
+            sha_parts = sha_path.read_text(encoding="utf-8").split()
+            sha_file_value = sha_parts[0].strip().lower()
         except (OSError, IndexError) as exc:
             findings.append(Finding(sha_path, f"release DMG checksum could not be read: {exc.__class__.__name__}"))
             continue
         if not re.fullmatch(r"[0-9a-f]{64}", sha_file_value):
             findings.append(Finding(sha_path, "release DMG checksum file must start with a 64-character sha256"))
+            continue
+        if len(sha_parts) != 2 or sha_parts[1] != dmg_path.name:
+            findings.append(Finding(sha_path, "release DMG checksum file must reference its exact filename"))
             continue
         try:
             actual_sha = _sha256_file(dmg_path)
@@ -4372,12 +5416,75 @@ def _verify_release_dmg_checksum_files(release_dir: Path) -> list[Finding]:
     return findings
 
 
+def _verify_release_zip_checksum_files(release_dir: Path) -> list[Finding]:
+    findings: list[Finding] = []
+    for zip_path in sorted(release_dir.glob("Oha-Yachiyo-*.zip")):
+        sha_path = release_dir / f"{zip_path.name}.sha256"
+        if not sha_path.is_file():
+            findings.append(Finding(sha_path, "release ZIP checksum file is missing"))
+            continue
+        try:
+            sha_parts = sha_path.read_text(encoding="utf-8").split()
+            sha_file_value = sha_parts[0].strip().lower()
+        except (OSError, IndexError) as exc:
+            findings.append(Finding(sha_path, f"release ZIP checksum could not be read: {exc.__class__.__name__}"))
+            continue
+        if not re.fullmatch(r"[0-9a-f]{64}", sha_file_value):
+            findings.append(Finding(sha_path, "release ZIP checksum file must start with a 64-character sha256"))
+            continue
+        if len(sha_parts) != 2 or sha_parts[1] != zip_path.name:
+            findings.append(Finding(sha_path, "release ZIP checksum file must reference its exact filename"))
+            continue
+        try:
+            actual_sha = _sha256_file(zip_path)
+        except OSError as exc:
+            findings.append(Finding(zip_path, f"release ZIP could not be hashed: {exc}"))
+            continue
+        if actual_sha != sha_file_value:
+            findings.append(Finding(zip_path, "release ZIP content does not match checksum file"))
+    return findings
+
+
 def _sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _sha256_macho_without_code_signature(path: Path) -> str:
+    """Hash a disposable copy after removing only its Mach-O code signature."""
+
+    with tempfile.TemporaryDirectory(prefix="oha-cua-driver-digest-") as temporary:
+        unsigned_path = Path(temporary) / PACKAGED_CUA_DRIVER_BINARY_NAME
+        open_flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        source_fd = os.open(path, open_flags)
+        with (
+            os.fdopen(source_fd, "rb") as source,
+            unsigned_path.open("xb") as destination,
+        ):
+            if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
+                raise OSError("packaged Cua Driver binary is not a regular file")
+            shutil.copyfileobj(source, destination, length=1024 * 1024)
+
+        result = subprocess.run(
+            ["/usr/bin/codesign", "--remove-signature", str(unsigned_path)],
+            capture_output=True,
+            check=False,
+            cwd=temporary,
+            env={
+                "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+                "LANG": "C",
+                "LC_ALL": "C",
+            },
+            stdin=subprocess.DEVNULL,
+            text=True,
+            timeout=PACKAGED_EXECUTABLE_SMOKE_TIMEOUT_SECONDS,
+        )
+        if result.returncode != 0:
+            raise RuntimeError("codesign --remove-signature failed")
+        return _sha256_file(unsigned_path)
 
 
 @contextmanager
@@ -4623,6 +5730,10 @@ def _verify_streaming_provider_smoke_contract_guards(root: Path) -> list[Finding
             PACKAGED_CHAT_NATIVE_FILE_SMOKE_REQUIRED_TEXT,
         ),
         (
+            RELEASE_SMOKE_SUMMARY_SCRIPT,
+            RELEASE_SMOKE_SUMMARY_REQUIRED_TEXT,
+        ),
+        (
             Path("apps/frontend/electron/main.ts"),
             ELECTRON_MAIN_CHAT_NATIVE_FILE_SMOKE_REQUIRED_TEXT,
         ),
@@ -4681,6 +5792,33 @@ def _verify_release_packaging_guards(root: Path) -> list[Finding]:
     for required_text, message in PACKAGING_CONFIG_REQUIRED_TEXT:
         if required_text not in config:
             findings.append(Finding(config_path, message))
+    sign_ignore_values: list[str] = []
+    sign_ignore_blocks = 0
+    lines = config.splitlines()
+    for index, line in enumerate(lines):
+        if line.rstrip() != "  signIgnore:":
+            continue
+        sign_ignore_blocks += 1
+        for child in lines[index + 1 :]:
+            stripped = child.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            indentation = len(child) - len(child.lstrip(" "))
+            if indentation <= 2:
+                break
+            if indentation != 4 or not stripped.startswith("- "):
+                sign_ignore_values.append("<invalid>")
+                continue
+            sign_ignore_values.append(stripped[2:].strip().strip("'\""))
+    if sign_ignore_blocks != 1 or sign_ignore_values != [
+        PACKAGED_CUA_DRIVER_SIGN_IGNORE_PATTERN
+    ]:
+        findings.append(
+            Finding(
+                config_path,
+                "macOS release packaging signIgnore must contain only the exact Cua Driver path",
+            )
+        )
     return findings
 
 
@@ -4695,6 +5833,38 @@ def _verify_macos_signing_guards(root: Path) -> list[Finding]:
         for required_text, message in MACOS_SIGNING_SCRIPT_REQUIRED_TEXT:
             if required_text not in script:
                 findings.append(Finding(script_path, message))
+        if re.search(r"codesign_args=\(\s*--deep\b", script):
+            findings.append(
+                Finding(
+                    script_path,
+                    "macOS signing script must not deep-resign the outer app after "
+                    "applying dedicated Cua Driver entitlements",
+                )
+            )
+        outer_app_sign = 'codesign "${codesign_args[@]}" "${APP_PATH}"'
+        backend_signs = (
+            'codesign "${backend_codesign_args[@]}" "${STANDALONE_BACKEND_PATH}"',
+            'codesign "${backend_codesign_args[@]}" "${PACKAGED_BACKEND_PATH}"',
+        )
+        cua_sign = 'codesign "${cua_codesign_args[@]}" "${CUA_HELPER_PATH}"'
+        if outer_app_sign in script:
+            outer_index = script.index(outer_app_sign)
+            if cua_sign not in script or script.index(cua_sign) > outer_index:
+                findings.append(
+                    Finding(
+                        script_path,
+                        "macOS signing script must sign the Cua helper before signing the outer app bundle",
+                    )
+                )
+            for backend_sign in backend_signs:
+                if backend_sign not in script or script.index(backend_sign) > outer_index:
+                    findings.append(
+                        Finding(
+                            script_path,
+                            "macOS signing script must sign standalone and embedded backend binaries before signing the outer app bundle",
+                        )
+                    )
+                    break
 
     notarization_script_path = _resolve(root, MACOS_NOTARIZATION_SCRIPT_FILE)
     try:
@@ -4720,6 +5890,72 @@ def _verify_macos_signing_guards(root: Path) -> list[Finding]:
         for required_text, message in MACOS_ENTITLEMENTS_REQUIRED_TEXT:
             if required_text not in entitlements:
                 findings.append(Finding(entitlements_path, message))
+
+    backend_entitlements_path = _resolve(root, BACKEND_ENTITLEMENTS_FILE)
+    try:
+        backend_entitlements = plistlib.loads(backend_entitlements_path.read_bytes())
+    except (OSError, plistlib.InvalidFileException, ValueError) as exc:
+        findings.append(
+            Finding(
+                backend_entitlements_path,
+                f"could not read backend entitlements: {exc.__class__.__name__}",
+            )
+        )
+    else:
+        if backend_entitlements != PACKAGED_BACKEND_EXPECTED_ENTITLEMENTS:
+            findings.append(
+                Finding(
+                    backend_entitlements_path,
+                    "backend entitlements must contain exactly disable-library-validation=true",
+                )
+            )
+
+    cua_entitlements_path = _resolve(root, CUA_DRIVER_ENTITLEMENTS_FILE)
+    try:
+        cua_entitlements = plistlib.loads(cua_entitlements_path.read_bytes())
+    except (OSError, plistlib.InvalidFileException, ValueError) as exc:
+        findings.append(
+            Finding(
+                cua_entitlements_path,
+                f"could not read Cua Driver entitlements: {exc.__class__.__name__}",
+            )
+        )
+    else:
+        if cua_entitlements != PACKAGED_CUA_DRIVER_EXPECTED_ENTITLEMENTS:
+            findings.append(
+                Finding(
+                    cua_entitlements_path,
+                    "Cua Driver entitlements must contain exactly Apple Events and Screen Capture",
+                )
+            )
+    cua_helper_info_path = _resolve(root, CUA_DRIVER_HELPER_INFO_FILE)
+    try:
+        cua_helper_info = plistlib.loads(cua_helper_info_path.read_bytes())
+    except (OSError, plistlib.InvalidFileException, ValueError) as exc:
+        findings.append(
+            Finding(
+                cua_helper_info_path,
+                "could not read Cua Driver helper Info.plist: "
+                f"{exc.__class__.__name__}",
+            )
+        )
+    else:
+        expected_helper_info = {
+            "CFBundleExecutable": PACKAGED_CUA_DRIVER_BINARY_NAME,
+            "CFBundleIdentifier": PACKAGED_CUA_DRIVER_HELPER_BUNDLE_ID,
+            "CFBundlePackageType": "APPL",
+            "LSBackgroundOnly": True,
+        }
+        if not isinstance(cua_helper_info, dict) or any(
+            cua_helper_info.get(key) != value
+            for key, value in expected_helper_info.items()
+        ):
+            findings.append(
+                Finding(
+                    cua_helper_info_path,
+                    "Cua Driver helper must be an LSBackgroundOnly app bundle",
+                )
+            )
     return findings
 
 
@@ -4747,12 +5983,668 @@ def _packaged_app_dirs_from_paths(root: Path, paths: Sequence[Path | str]) -> li
     return app_dirs
 
 
+def _is_regular_packaged_file(path: Path, *, label: str) -> tuple[bool, list[Finding]]:
+    try:
+        metadata = path.lstat()
+    except OSError:
+        return False, [Finding(path, f"{label} is missing from app resources")]
+    if stat.S_ISLNK(metadata.st_mode):
+        return False, [Finding(path, f"{label} must not be a symlink")]
+    if not stat.S_ISREG(metadata.st_mode):
+        return False, [Finding(path, f"{label} must be a regular file")]
+    return True, []
+
+
+def _read_json_object(path: Path, *, label: str) -> tuple[dict[str, object] | None, list[Finding]]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        return None, [Finding(path, f"{label} is not valid JSON: {exc.__class__.__name__}")]
+    if not isinstance(payload, dict):
+        return None, [Finding(path, f"{label} must contain one JSON object")]
+    return payload, []
+
+
+def _sha256_value(value: object) -> str:
+    text = str(value or "").strip().lower()
+    return text if re.fullmatch(r"[0-9a-f]{64}", text) else ""
+
+
+def _matches_packaged_cua_architectures(value: object) -> bool:
+    return (
+        isinstance(value, list)
+        and all(isinstance(item, str) for item in value)
+        and len(value) == len(PACKAGED_CUA_DRIVER_ARCHITECTURES)
+        and set(value) == PACKAGED_CUA_DRIVER_ARCHITECTURES
+    )
+
+
+def _run_codesign_verify(path: Path, *, deep: bool = False) -> None:
+    command = ["/usr/bin/codesign", "--verify"]
+    if deep:
+        command.append("--deep")
+    command.extend(("--strict", "--verbose=2", str(path)))
+    completed = subprocess.run(
+        command,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=PACKAGED_CODESIGN_TIMEOUT_SECONDS,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError("codesign verification failed")
+
+
+def _read_codesign_display(path: Path) -> str:
+    completed = subprocess.run(
+        ["/usr/bin/codesign", "-d", "--verbose=4", str(path)],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=PACKAGED_CODESIGN_TIMEOUT_SECONDS,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError("codesign display inspection failed")
+    return "\n".join(part for part in (completed.stdout, completed.stderr) if part)
+
+
+def _read_codesign_designated_requirement(path: Path) -> str:
+    completed = subprocess.run(
+        ["/usr/bin/codesign", "-dr", "-", str(path)],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=PACKAGED_CODESIGN_TIMEOUT_SECONDS,
+    )
+    if completed.returncode != 0:
+        raise RuntimeError("codesign designated requirement inspection failed")
+    return "\n".join(part for part in (completed.stdout, completed.stderr) if part)
+
+
+def _read_codesign_entitlements(path: Path) -> dict[str, object]:
+    completed = subprocess.run(
+        [
+            "/usr/bin/codesign",
+            "-d",
+            "--entitlements",
+            "-",
+            "--xml",
+            str(path),
+        ],
+        check=False,
+        capture_output=True,
+        timeout=PACKAGED_CODESIGN_TIMEOUT_SECONDS,
+    )
+    if completed.returncode != 0 or not completed.stdout:
+        raise RuntimeError("codesign entitlement inspection failed")
+    try:
+        payload = plistlib.loads(completed.stdout)
+    except (plistlib.InvalidFileException, ValueError) as exc:
+        raise RuntimeError("codesign returned invalid entitlements") from exc
+    if not isinstance(payload, dict):
+        raise RuntimeError("codesign returned non-dictionary entitlements")
+    return payload
+
+
+def _codesign_display_field(display: str, name: str) -> str:
+    prefix = f"{name}="
+    for line in display.splitlines():
+        if line.startswith(prefix):
+            return line[len(prefix) :].strip()
+    return ""
+
+
+def _verify_backend_code_signature(
+    binary_path: Path,
+    *,
+    label: str,
+    require_non_adhoc: bool = False,
+) -> list[Finding]:
+    findings: list[Finding] = []
+    try:
+        _run_codesign_verify(binary_path)
+    except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+        findings.append(
+            Finding(
+                binary_path,
+                f"{label} code signature verification failed: {exc.__class__.__name__}",
+            )
+        )
+
+    try:
+        display = _read_codesign_display(binary_path)
+    except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+        findings.append(
+            Finding(
+                binary_path,
+                f"{label} code signature metadata inspection failed: {exc.__class__.__name__}",
+            )
+        )
+    else:
+        signature = _codesign_display_field(display, "Signature")
+        authorities = [
+            line.removeprefix("Authority=").strip()
+            for line in display.splitlines()
+            if line.startswith("Authority=")
+        ]
+        is_adhoc = not authorities and signature.casefold() == "adhoc"
+        if require_non_adhoc and (not authorities or is_adhoc):
+            findings.append(Finding(binary_path, f"{label} must not use an ad-hoc signature"))
+
+        identifier = _codesign_display_field(display, "Identifier")
+        if identifier != PACKAGED_BACKEND_IDENTIFIER:
+            findings.append(
+                Finding(
+                    binary_path,
+                    f"{label} must use the stable identifier {PACKAGED_BACKEND_IDENTIFIER}",
+                )
+            )
+
+    try:
+        requirement_output = _read_codesign_designated_requirement(binary_path)
+    except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+        findings.append(
+            Finding(
+                binary_path,
+                f"{label} designated requirement inspection failed: {exc.__class__.__name__}",
+            )
+        )
+    else:
+        requirement = next(
+            (
+                line.split("designated => ", 1)[1].strip()
+                for line in requirement_output.splitlines()
+                if "designated => " in line
+            ),
+            "",
+        )
+        if not requirement:
+            findings.append(Finding(binary_path, f"{label} must declare a designated requirement"))
+        elif require_non_adhoc:
+            if re.fullmatch(r'cdhash\s+H"[^"]+"', requirement):
+                findings.append(
+                    Finding(
+                        binary_path,
+                        f"{label} designated requirement must not be cdhash-only",
+                    )
+                )
+            if f'identifier "{PACKAGED_BACKEND_IDENTIFIER}"' not in requirement:
+                findings.append(
+                    Finding(
+                        binary_path,
+                        f"{label} designated requirement must contain the stable identifier",
+                    )
+                )
+
+    try:
+        entitlements = _read_codesign_entitlements(binary_path)
+    except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+        findings.append(
+            Finding(
+                binary_path,
+                f"{label} entitlement inspection failed: {exc.__class__.__name__}",
+            )
+        )
+    else:
+        if entitlements != PACKAGED_BACKEND_EXPECTED_ENTITLEMENTS:
+            findings.append(
+                Finding(
+                    binary_path,
+                    f"{label} entitlements must contain exactly disable-library-validation=true",
+                )
+            )
+
+    return findings
+
+
+def _verify_packaged_cua_code_signature(binary_path: Path) -> list[Finding]:
+    findings: list[Finding] = []
+    try:
+        _run_codesign_verify(binary_path)
+    except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+        findings.append(
+            Finding(
+                binary_path,
+                "packaged Cua Driver code signature verification failed: "
+                f"{exc.__class__.__name__}",
+            )
+        )
+    try:
+        entitlements = _read_codesign_entitlements(binary_path)
+    except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+        findings.append(
+            Finding(
+                binary_path,
+                "packaged Cua Driver entitlement inspection failed: "
+                f"{exc.__class__.__name__}",
+            )
+        )
+    else:
+        if entitlements != PACKAGED_CUA_DRIVER_EXPECTED_ENTITLEMENTS:
+            findings.append(
+                Finding(
+                    binary_path,
+                    "packaged Cua Driver entitlements must contain exactly Apple Events and Screen Capture",
+                )
+            )
+    return findings
+
+
+def _verify_packaged_cua_helper_info(info_path: Path) -> list[Finding]:
+    try:
+        payload = plistlib.loads(info_path.read_bytes())
+    except (OSError, plistlib.InvalidFileException, ValueError) as exc:
+        return [
+            Finding(
+                info_path,
+                "packaged Cua Driver helper Info.plist is invalid: "
+                f"{exc.__class__.__name__}",
+            )
+        ]
+    expected = {
+        "CFBundleExecutable": PACKAGED_CUA_DRIVER_BINARY_NAME,
+        "CFBundleIdentifier": PACKAGED_CUA_DRIVER_HELPER_BUNDLE_ID,
+        "CFBundlePackageType": "APPL",
+        "LSBackgroundOnly": True,
+    }
+    if not isinstance(payload, dict) or any(
+        payload.get(key) != value for key, value in expected.items()
+    ):
+        return [
+            Finding(
+                info_path,
+                "packaged Cua Driver helper must be an LSBackgroundOnly app bundle",
+            )
+        ]
+    return []
+
+
+def _verify_packaged_app_code_signature(app_dir: Path) -> list[Finding]:
+    try:
+        _run_codesign_verify(app_dir, deep=True)
+    except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+        return [
+            Finding(
+                app_dir,
+                "packaged app code signature failed deep strict verification: "
+                f"{exc.__class__.__name__}",
+            )
+        ]
+    return []
+
+
+def _verify_standalone_backend_distribution(
+    root: Path,
+    paths: Sequence[Path | str],
+) -> list[Finding]:
+    findings: list[Finding] = []
+    standalone_backend_path = (root / "dist" / "backend" / "oha-yachiyo-backend").resolve(
+        strict=False
+    )
+    for path in _iter_files(root, paths):
+        if path.resolve(strict=False) != standalone_backend_path:
+            continue
+        if path.is_file() and os.access(path, os.X_OK):
+            findings.extend(
+                _verify_backend_code_signature(
+                    path,
+                    label="standalone backend executable",
+                )
+            )
+        break
+    return findings
+
+
+def _app_signature_requires_signed_nested_code(app_dir: Path) -> bool:
+    try:
+        display = _read_codesign_display(app_dir)
+    except (OSError, RuntimeError, subprocess.SubprocessError):
+        return False
+    signature = _codesign_display_field(display, "Signature")
+    if signature.casefold() == "adhoc":
+        return False
+    return any(line.startswith("Authority=") for line in display.splitlines())
+
+
+def _run_packaged_cua_driver(path: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
+    # These two CLI surfaces are local metadata reads. Never use a shell or invoke an MCP server.
+    return subprocess.run(
+        [str(path), *arguments],
+        capture_output=True,
+        check=False,
+        stdin=subprocess.DEVNULL,
+        text=True,
+        timeout=PACKAGED_EXECUTABLE_SMOKE_TIMEOUT_SECONDS,
+        env={
+            "PATH": "/usr/bin:/bin:/usr/sbin:/sbin",
+            "LANG": "C",
+            "LC_ALL": "C",
+        },
+    )
+
+
+def _verify_packaged_cua_runtime_manifest(
+    binary_path: Path,
+    *,
+    expected_version: str,
+) -> list[Finding]:
+    try:
+        version_result = _run_packaged_cua_driver(binary_path, "--version")
+    except (OSError, subprocess.SubprocessError) as exc:
+        return [
+            Finding(
+                binary_path,
+                f"packaged Cua Driver --version check failed: {exc.__class__.__name__}",
+            )
+        ]
+    if (
+        version_result.returncode != 0
+        or version_result.stdout.strip() != f"cua-driver {expected_version}"
+    ):
+        return [Finding(binary_path, "packaged Cua Driver version does not match the lock")]
+
+    try:
+        manifest_result = _run_packaged_cua_driver(binary_path, "manifest")
+    except (OSError, subprocess.SubprocessError) as exc:
+        return [
+            Finding(
+                binary_path,
+                f"packaged Cua Driver manifest check failed: {exc.__class__.__name__}",
+            )
+        ]
+    if manifest_result.returncode != 0:
+        return [Finding(binary_path, "packaged Cua Driver manifest command failed")]
+    try:
+        payload = json.loads(manifest_result.stdout)
+    except (TypeError, json.JSONDecodeError):
+        return [Finding(binary_path, "packaged Cua Driver returned invalid manifest JSON")]
+    if not isinstance(payload, dict):
+        return [Finding(binary_path, "packaged Cua Driver runtime manifest must be an object")]
+
+    findings: list[Finding] = []
+    if str(payload.get("schema_version") or "") != PACKAGED_CUA_DRIVER_MANIFEST_SCHEMA_VERSION:
+        findings.append(
+            Finding(binary_path, "packaged Cua Driver runtime manifest schema is unsupported")
+        )
+    if str(payload.get("binary_version") or "") != expected_version:
+        findings.append(
+            Finding(binary_path, "packaged Cua Driver runtime manifest version does not match the lock")
+        )
+    invocation = payload.get("mcp_invocation")
+    if not isinstance(invocation, dict) or invocation.get("args") != ["mcp"]:
+        findings.append(
+            Finding(binary_path, "packaged Cua Driver runtime manifest has an invalid MCP invocation")
+        )
+    subcommands = payload.get("subcommands")
+    mcp_command = next(
+        (
+            item
+            for item in subcommands
+            if isinstance(item, dict) and item.get("name") == "mcp"
+        ),
+        None,
+    ) if isinstance(subcommands, list) else None
+    argument_names = {
+        item.get("name")
+        for item in (mcp_command or {}).get("args", [])
+        if isinstance(item, dict)
+    }
+    if not {"--embedded", "--host-bundle-id"}.issubset(argument_names):
+        findings.append(
+            Finding(
+                binary_path,
+                "packaged Cua Driver runtime manifest lacks the embedded host contract",
+            )
+        )
+    return findings
+
+
+def _verify_packaged_cua_driver(root: Path, app_dir: Path) -> list[Finding]:
+    findings: list[Finding] = []
+    resources_dir = app_dir / "Contents" / "Resources"
+    cua_parent_dir = resources_dir / "computer-use"
+    sidecar_dir = cua_parent_dir / "macos"
+    helper_dir = sidecar_dir / PACKAGED_CUA_DRIVER_HELPER_NAME
+    helper_contents_dir = helper_dir / "Contents"
+    helper_macos_dir = helper_contents_dir / "MacOS"
+    directory_contracts = (
+        (app_dir / "Contents", "packaged app Contents directory"),
+        (resources_dir, "packaged app Resources directory"),
+        (cua_parent_dir, "packaged Cua Driver parent resource directory"),
+        (sidecar_dir, "packaged Cua Driver resource directory"),
+        (helper_dir, "packaged Cua Driver helper app"),
+        (helper_contents_dir, "packaged Cua Driver helper Contents directory"),
+        (helper_macos_dir, "packaged Cua Driver helper MacOS directory"),
+    )
+    for directory_path, label in directory_contracts:
+        try:
+            metadata = directory_path.lstat()
+        except OSError:
+            continue
+        if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISDIR(metadata.st_mode):
+            return [
+                Finding(
+                    directory_path,
+                    f"{label} must be a real directory, not a symlink",
+                )
+            ]
+    binary_path = sidecar_dir / PACKAGED_CUA_DRIVER_BINARY_RELATIVE_PATH
+    helper_info_path = sidecar_dir / PACKAGED_CUA_DRIVER_INFO_RELATIVE_PATH
+    license_path = sidecar_dir / PACKAGED_CUA_DRIVER_LICENSE_NAME
+    manifest_path = sidecar_dir / PACKAGED_CUA_DRIVER_MANIFEST_NAME
+    binary_regular, binary_findings = _is_regular_packaged_file(
+        binary_path,
+        label="packaged Cua Driver binary",
+    )
+    license_regular, license_findings = _is_regular_packaged_file(
+        license_path,
+        label="packaged Cua Driver license",
+    )
+    manifest_regular, manifest_findings = _is_regular_packaged_file(
+        manifest_path,
+        label="packaged Cua Driver manifest",
+    )
+    findings.extend(binary_findings)
+    findings.extend(license_findings)
+    findings.extend(manifest_findings)
+    helper_info_regular, helper_info_findings = _is_regular_packaged_file(
+        helper_info_path,
+        label="packaged Cua Driver helper Info.plist",
+    )
+    findings.extend(helper_info_findings)
+    if helper_info_regular:
+        findings.extend(_verify_packaged_cua_helper_info(helper_info_path))
+    if binary_regular and not os.access(binary_path, os.X_OK):
+        findings.append(Finding(binary_path, "packaged Cua Driver binary is not executable"))
+
+    lock_path = _resolve(root, CUA_DRIVER_LOCK_FILE)
+    lock_regular, lock_findings = _is_regular_packaged_file(
+        lock_path,
+        label="Cua Driver dependency lock",
+    )
+    findings.extend(lock_findings)
+    if not lock_regular:
+        return findings
+    lock, lock_json_findings = _read_json_object(
+        lock_path,
+        label="Cua Driver dependency lock",
+    )
+    findings.extend(lock_json_findings)
+    if lock is None:
+        return findings
+
+    archive = lock.get("archive")
+    license_record = lock.get("license")
+    expected_version = str(lock.get("version") or "").strip()
+    expected_tag = str(lock.get("tag") or "").strip()
+    expected_archive_sha = (
+        _sha256_value(archive.get("sha256")) if isinstance(archive, dict) else ""
+    )
+    expected_archive_url = (
+        str(archive.get("url") or "").strip() if isinstance(archive, dict) else ""
+    )
+    expected_binary_content_hash_algorithm = (
+        str(archive.get("binary_content_hash_algorithm") or "").strip()
+        if isinstance(archive, dict)
+        else ""
+    )
+    expected_binary_content_sha = (
+        _sha256_value(archive.get("binary_content_sha256"))
+        if isinstance(archive, dict)
+        else ""
+    )
+    expected_license_sha = (
+        _sha256_value(license_record.get("sha256"))
+        if isinstance(license_record, dict)
+        else ""
+    )
+    expected_license_url = (
+        str(license_record.get("url") or "").strip()
+        if isinstance(license_record, dict)
+        else ""
+    )
+    lock_architectures = lock.get("architectures")
+    if (
+        lock.get("schema_version") != 1
+        or lock.get("name") != PACKAGED_CUA_DRIVER_BINARY_NAME
+        or not expected_version
+        or not expected_tag
+        or not expected_archive_sha
+        or f"/releases/download/{expected_tag}/" not in expected_archive_url
+        or expected_binary_content_hash_algorithm
+        != PACKAGED_CUA_DRIVER_CONTENT_HASH_ALGORITHM
+        or not expected_binary_content_sha
+        or not expected_license_sha
+        or f"/trycua/cua/{expected_tag}/" not in expected_license_url
+        or not _matches_packaged_cua_architectures(lock_architectures)
+    ):
+        findings.append(Finding(lock_path, "Cua Driver dependency lock is incomplete or invalid"))
+        return findings
+
+    if license_regular:
+        try:
+            actual_license_sha = _sha256_file(license_path)
+        except OSError as exc:
+            findings.append(Finding(license_path, f"packaged Cua Driver license could not be hashed: {exc}"))
+        else:
+            if actual_license_sha != expected_license_sha:
+                findings.append(
+                    Finding(license_path, "packaged Cua Driver license SHA256 does not match the lock")
+                )
+
+    manifest: dict[str, object] | None = None
+    if manifest_regular:
+        manifest, manifest_json_findings = _read_json_object(
+            manifest_path,
+            label="packaged Cua Driver manifest",
+        )
+        findings.extend(manifest_json_findings)
+    if manifest is not None:
+        source = manifest.get("source")
+        manifest_license = manifest.get("license")
+        validation = manifest.get("validation")
+        binary = manifest.get("binary")
+        lock_reference = manifest.get("lock")
+        manifest_architectures = manifest.get("architectures")
+        validation_architectures = (
+            validation.get("architectures") if isinstance(validation, dict) else None
+        )
+        mismatches = (
+            manifest.get("schema_version") != 1,
+            manifest.get("component") != PACKAGED_CUA_DRIVER_BINARY_NAME,
+            manifest.get("version") != expected_version,
+            manifest.get("tag") != expected_tag,
+            not _matches_packaged_cua_architectures(manifest_architectures),
+            not isinstance(source, dict)
+            or _sha256_value(source.get("archive_sha256")) != expected_archive_sha
+            or source.get("archive_url") != expected_archive_url,
+            not isinstance(binary, dict)
+            or binary.get("content_hash_algorithm")
+            != expected_binary_content_hash_algorithm
+            or _sha256_value(binary.get("content_sha256"))
+            != expected_binary_content_sha,
+            not isinstance(manifest_license, dict)
+            or _sha256_value(manifest_license.get("sha256")) != expected_license_sha
+            or manifest_license.get("source_url") != expected_license_url,
+            not isinstance(validation, dict)
+            or validation.get("binary_version") != expected_version
+            or validation.get("embedded_mcp") is not True
+            or str(validation.get("manifest_schema_version") or "")
+            != PACKAGED_CUA_DRIVER_MANIFEST_SCHEMA_VERSION
+            or not _matches_packaged_cua_architectures(validation_architectures),
+            not isinstance(lock_reference, dict)
+            or _sha256_value(lock_reference.get("sha256")) != _sha256_file(lock_path),
+        )
+        if any(mismatches):
+            findings.append(
+                Finding(
+                    manifest_path,
+                    "packaged Cua Driver manifest does not match the dependency lock",
+                )
+            )
+        # The raw hash records the signed upstream input. Nested codesign legitimately rewrites
+        # those bytes, so retain it for auditability but compare only the canonical content hash.
+        if not isinstance(binary, dict) or not _sha256_value(binary.get("sha256")):
+            findings.append(
+                Finding(manifest_path, "packaged Cua Driver manifest binary SHA256 is invalid")
+            )
+
+    if binary_regular:
+        try:
+            _run_codesign_verify(helper_dir)
+        except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+            findings.append(
+                Finding(
+                    helper_dir,
+                    "packaged Cua Driver helper signature verification failed: "
+                    f"{exc.__class__.__name__}",
+                )
+            )
+        findings.extend(_verify_packaged_cua_code_signature(binary_path))
+        try:
+            actual_binary_content_sha = _sha256_macho_without_code_signature(binary_path)
+        except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
+            findings.append(
+                Finding(
+                    binary_path,
+                    "packaged Cua Driver canonical content hash check failed: "
+                    f"{exc.__class__.__name__}",
+                )
+            )
+        else:
+            if actual_binary_content_sha != expected_binary_content_sha:
+                findings.append(
+                    Finding(
+                        binary_path,
+                        "packaged Cua Driver canonical content SHA256 does not match the lock",
+                    )
+                )
+
+    if binary_regular and os.access(binary_path, os.X_OK):
+        findings.extend(
+            _verify_packaged_cua_runtime_manifest(
+                binary_path,
+                expected_version=expected_version,
+            )
+        )
+    return findings
+
+
 def _verify_packaged_app_bundle(
     root: Path, paths: Sequence[Path | str] | None = None
 ) -> list[Finding]:
     findings: list[Finding] = []
     output_dir = _resolve(root, PACKAGED_APP_OUTPUT_DIR)
     app_dirs = _packaged_app_dirs_from_paths(root, paths) if paths is not None else []
+    if paths and not app_dirs:
+        explicit_scope = _resolve(root, paths[0])
+        return [
+            Finding(
+                explicit_scope,
+                "explicit release verification paths must contain Oha-Yachiyo.app; "
+                "refusing to verify an unrelated dist/electron app bundle",
+            )
+        ]
     if not app_dirs:
         app_dirs = sorted(output_dir.rglob(PACKAGED_APP_NAME)) if output_dir.exists() else []
     if not app_dirs:
@@ -4808,12 +6700,62 @@ def _verify_packaged_app_bundle(
             elif not os.access(executable_path, os.X_OK):
                 findings.append(Finding(executable_path, "packaged app main executable is not executable"))
 
+        findings.extend(_verify_packaged_cua_driver(root, app_dir))
+        findings.extend(_verify_packaged_app_code_signature(app_dir))
+
         backend_path = app_dir / PACKAGED_BACKEND_RELATIVE_PATH
+        backend_executable_ready = False
         if not backend_path.is_file():
             findings.append(Finding(backend_path, "packaged backend executable is missing from app resources"))
         elif not os.access(backend_path, os.X_OK):
             findings.append(Finding(backend_path, "packaged backend executable is not executable"))
         else:
+            backend_executable_ready = True
+            findings.extend(
+                _verify_backend_code_signature(
+                    backend_path,
+                    label="packaged backend executable",
+                    require_non_adhoc=_app_signature_requires_signed_nested_code(app_dir),
+                )
+            )
+
+        backend_metadata_path = app_dir / PACKAGED_BACKEND_BUILD_METADATA_RELATIVE_PATH
+        try:
+            backend_metadata_path.lstat()
+        except FileNotFoundError:
+            backend_metadata_exists = False
+        except OSError as exc:
+            backend_metadata_exists = True
+            findings.append(
+                Finding(
+                    backend_metadata_path,
+                    "packaged backend app build metadata could not be inspected: "
+                    f"{exc.__class__.__name__}",
+                )
+            )
+        else:
+            backend_metadata_exists = True
+            metadata_regular, metadata_findings = _is_regular_packaged_file(
+                backend_metadata_path,
+                label="packaged backend app build metadata",
+            )
+            findings.extend(metadata_findings)
+            if metadata_regular:
+                if not os.access(backend_metadata_path, os.R_OK):
+                    findings.append(
+                        Finding(
+                            backend_metadata_path,
+                            "packaged backend app build metadata is not readable",
+                        )
+                    )
+                else:
+                    _metadata, metadata_json_findings = _read_json_object(
+                        backend_metadata_path,
+                        label="packaged backend app build metadata",
+                    )
+                    findings.extend(metadata_json_findings)
+
+        if backend_executable_ready and not backend_metadata_exists:
             try:
                 backend_bytes = backend_path.read_bytes()
             except OSError as exc:
@@ -4896,6 +6838,22 @@ def _verify_packaged_app_bundle(
                             Finding(
                                 asar_path,
                                 f"packaged Electron app.asar must not include development-only UI E2E hook {forbidden!r}",
+                            )
+                        )
+                for selector in PACKAGED_UI_E2E_FORBIDDEN_SELECTORS:
+                    if selector.encode("utf-8") in asar_bytes:
+                        findings.append(
+                            Finding(
+                                asar_path,
+                                f"packaged Electron app.asar must not include deprecated UI E2E selector {selector!r}",
+                            )
+                        )
+                for attribute in PACKAGED_UI_E2E_FORBIDDEN_DATA_ATTRIBUTES:
+                    if attribute.encode("utf-8") in asar_bytes:
+                        findings.append(
+                            Finding(
+                                asar_path,
+                                f"packaged Electron app.asar must not include deprecated UI E2E data attribute {attribute!r}",
                             )
                         )
 
@@ -5008,6 +6966,23 @@ def _verify_packaged_desktop_bridge_cli(path: Path) -> list[Finding]:
     return []
 
 
+def _release_workflow_step_block(workflow: str, step_name: str) -> str:
+    marker = f"      - name: {step_name}"
+    start = workflow.find(marker)
+    if start < 0:
+        return ""
+    end = workflow.find("\n      - name:", start + len(marker))
+    return workflow[start:] if end < 0 else workflow[start:end]
+
+
+def _workflow_shell_condition_exits(step_block: str, condition: str) -> bool:
+    start = step_block.find(condition)
+    if start < 0:
+        return False
+    end = step_block.find("\n          fi", start + len(condition))
+    return end >= 0 and "exit 1" in step_block[start:end]
+
+
 def _verify_release_workflow_guards(root: Path) -> list[Finding]:
     findings: list[Finding] = []
     workflow_path = _resolve(root, RELEASE_WORKFLOW_FILE)
@@ -5019,6 +6994,136 @@ def _verify_release_workflow_guards(root: Path) -> list[Finding]:
     for required_text, message in RELEASE_WORKFLOW_REQUIRED_TEXT:
         if required_text not in workflow:
             findings.append(Finding(workflow_path, message))
+    publication_validation_condition = (
+        "if: github.event_name == 'push' || inputs.publish_release == true"
+    )
+    publication_mutation_condition = (
+        "if: success() && (github.event_name == 'push' || inputs.publish_release == true)"
+    )
+    if workflow.count(publication_validation_condition) < 1:
+        findings.append(
+            Finding(
+                workflow_path,
+                "macOS release workflow must gate publication validation behind push or explicit dispatch publication",
+            )
+        )
+    if workflow.count(publication_mutation_condition) < 2:
+        findings.append(
+            Finding(
+                workflow_path,
+                "macOS release workflow must success-gate both GitHub Release mutations after readiness enforcement",
+            )
+        )
+    rc_step_block = _release_workflow_step_block(
+        workflow,
+        "Verify release candidate artifacts",
+    )
+    enforce_step_block = _release_workflow_step_block(
+        workflow,
+        "Enforce release smoke readiness",
+    )
+    if "--run-dmg-chat-native-file-smoke" not in rc_step_block:
+        findings.append(
+            Finding(
+                workflow_path,
+                "macOS release workflow final RC must run the packaged Chat native file smoke",
+            )
+        )
+    if "release_smoke_status=0" not in rc_step_block:
+        findings.append(
+            Finding(
+                workflow_path,
+                "macOS release workflow RC step must initialize release_smoke_status to zero",
+            )
+        )
+    if (
+        "--output-markdown release/release-smoke.md || release_smoke_status=$?"
+        not in rc_step_block
+    ):
+        findings.append(
+            Finding(
+                workflow_path,
+                "macOS release workflow RC step must capture release-smoke summary failures",
+            )
+        )
+    missing_json_condition = "if [[ ! -s release/release-smoke.json ]]; then"
+    missing_json_index = rc_step_block.find(missing_json_condition)
+    missing_json_end = rc_step_block.find("\n          fi", missing_json_index)
+    if (
+        missing_json_index < 0
+        or missing_json_end < 0
+        or "release_smoke_status=1"
+        not in rc_step_block[missing_json_index:missing_json_end]
+    ):
+        findings.append(
+            Finding(
+                workflow_path,
+                "macOS release workflow RC step must mark missing release-smoke JSON as failed",
+            )
+        )
+    summary_index_in_step = rc_step_block.find(
+        "python scripts/summarize_release_smoke.py"
+    )
+    electron_ui_input_index = rc_step_block.find(
+        "release/electron-ui-smoke.json \\"
+    )
+    summary_output_index = rc_step_block.find("--output-json release/release-smoke.json")
+    if (
+        summary_index_in_step < 0
+        or electron_ui_input_index < summary_index_in_step
+        or summary_output_index < electron_ui_input_index
+    ):
+        findings.append(
+            Finding(
+                workflow_path,
+                "macOS release workflow final summary must consume Electron UI evidence before writing release-smoke outputs",
+            )
+        )
+    electron_ui_source = workflow.find(
+        "python scripts/run_electron_ui_smokes.py --report-json release/electron-ui-smoke.json"
+    )
+    final_summary = workflow.find("python scripts/summarize_release_smoke.py")
+    if (
+        electron_ui_source < 0
+        or final_summary < 0
+        or electron_ui_source > final_summary
+    ):
+        findings.append(
+            Finding(
+                workflow_path,
+                "macOS release workflow must generate Electron UI evidence before final release-smoke summary",
+            )
+        )
+    enforce_status_source = (
+        "RELEASE_SMOKE_STATUS: ${{ steps.release_smoke.outputs.release_smoke_status }}"
+    )
+    if enforce_status_source not in enforce_step_block:
+        findings.append(
+            Finding(
+                workflow_path,
+                "macOS release workflow readiness step must read release_smoke_status from the RC step",
+            )
+        )
+    if not _workflow_shell_condition_exits(
+        enforce_step_block,
+        'if [[ ! "${RELEASE_SMOKE_STATUS}" =~ ^[0-9]+$ ]]; then',
+    ):
+        findings.append(
+            Finding(
+                workflow_path,
+                "macOS release workflow readiness gate must exit 1 for missing or invalid status",
+            )
+        )
+    if not _workflow_shell_condition_exits(
+        enforce_step_block,
+        'if [[ "${RELEASE_SMOKE_STATUS}" -ne 0 ]]; then',
+    ):
+        findings.append(
+            Finding(
+                workflow_path,
+                "macOS release workflow readiness gate must exit 1 for nonzero status",
+            )
+        )
     for forbidden_text, message in RELEASE_WORKFLOW_FORBIDDEN_TEXT:
         if forbidden_text in workflow:
             findings.append(Finding(workflow_path, message))
@@ -5062,6 +7167,8 @@ def _verify_release_workflow_guards(root: Path) -> list[Finding]:
     public_release_gate = workflow.find("Run public release preflight gate")
     smoke_tests = workflow.find("Run smoke tests")
     frontend_deps = workflow.find("Install frontend dependencies")
+    prepare_cua_driver = workflow.find("Prepare embedded Cua Driver")
+    prepare_cua_driver_script = workflow.find("python scripts/prepare_cua_driver.py --clean")
     if (
         install_deps < 0
         or public_release_gate < 0
@@ -5080,6 +7187,23 @@ def _verify_release_workflow_guards(root: Path) -> list[Finding]:
             Finding(
                 workflow_path,
                 "macOS release workflow must install frontend dependencies before public release preflight for full demo UI smokes",
+            )
+        )
+    if (
+        install_deps < 0
+        or frontend_deps < 0
+        or prepare_cua_driver < 0
+        or prepare_cua_driver_script < 0
+        or smoke_tests < 0
+        or prepare_cua_driver < install_deps
+        or prepare_cua_driver < frontend_deps
+        or prepare_cua_driver_script < prepare_cua_driver
+        or prepare_cua_driver > smoke_tests
+    ):
+        findings.append(
+            Finding(
+                workflow_path,
+                "macOS release workflow must prepare the embedded Cua Driver after dependencies before focused tests",
             )
         )
     signing_import = workflow.find("Import macOS signing certificate")
@@ -5242,6 +7366,77 @@ def _verify_release_workflow_guards(root: Path) -> list[Finding]:
         "--manual-checks-json release/manual-rc-checks.draft.json --write-manual-checks-markdown release/manual-rc-checks.md"
     )
     upload_artifact = workflow.find("Upload DMG artifact")
+    verify_rc_step = workflow.find("- name: Verify release candidate artifacts")
+    release_smoke_step_id = (
+        workflow.find("id: release_smoke", verify_rc_step, upload_artifact)
+        if verify_rc_step >= 0 and upload_artifact >= 0
+        else -1
+    )
+    release_smoke_status_output = workflow.find(
+        'echo "release_smoke_status=${release_smoke_status}" >> "$GITHUB_OUTPUT"'
+    )
+    enforce_release_smoke = workflow.find("Enforce release smoke readiness")
+    versioned_release = workflow.find("Create or update versioned GitHub release")
+    latest_release = workflow.find("Create or update latest channel release")
+    upload_is_always = (
+        workflow.find("if: always()", upload_artifact, enforce_release_smoke)
+        if upload_artifact >= 0 and enforce_release_smoke >= 0
+        else -1
+    )
+    if release_smoke_step_id < 0:
+        findings.append(
+            Finding(
+                workflow_path,
+                "macOS release workflow must assign the release_smoke id to the final RC verification step",
+            )
+        )
+    if (
+        summarize_release_smoke < 0
+        or release_smoke_status_output < summarize_release_smoke
+        or upload_artifact < 0
+        or release_smoke_status_output > upload_artifact
+    ):
+        findings.append(
+            Finding(
+                workflow_path,
+                "macOS release workflow must expose release_smoke_status after summary and before evidence upload",
+            )
+        )
+    if upload_is_always < 0:
+        findings.append(
+            Finding(
+                workflow_path,
+                "macOS release workflow must upload release evidence even when RC verification is incomplete",
+            )
+        )
+    if (
+        upload_artifact < 0
+        or enforce_release_smoke < upload_artifact
+        or versioned_release < 0
+        or enforce_release_smoke > versioned_release
+    ):
+        findings.append(
+            Finding(
+                workflow_path,
+                "macOS release workflow must enforce release-smoke readiness after upload and before publication",
+            )
+        )
+    for release_start, release_end, release_label in (
+        (versioned_release, latest_release, "versioned"),
+        (latest_release, len(workflow), "latest-channel"),
+    ):
+        condition_index = (
+            workflow.find(publication_mutation_condition, release_start, release_end)
+            if release_start >= 0 and release_end >= 0
+            else -1
+        )
+        if condition_index < 0:
+            findings.append(
+                Finding(
+                    workflow_path,
+                    f"macOS release workflow must success-gate the {release_label} GitHub Release mutation",
+                )
+            )
     if (
         prepare_release < 0
         or verify_rc < 0
@@ -5332,12 +7527,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         action="store_true",
         help="Verify the built macOS .app bundle structure under dist/electron.",
     )
+    parser.add_argument(
+        "--allow-nonpublishable-local-rc",
+        action="store_true",
+        help=(
+            "Allow dirty/unpublishable latest metadata only for explicit local RC "
+            "inspection. Public/latest/final verification must not use this flag."
+        ),
+    )
     args = parser.parse_args(argv)
 
     findings = verify_release_artifacts(
         paths=args.paths or None,
         allow_binary_targets=args.allow_binary,
         check_packaged_app_bundle=args.check_packaged_app,
+        allow_nonpublishable_local_rc=args.allow_nonpublishable_local_rc,
     )
     if not findings:
         print("release artifact verification passed")

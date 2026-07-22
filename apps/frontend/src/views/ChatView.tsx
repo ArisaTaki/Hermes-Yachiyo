@@ -16,7 +16,14 @@ import {
   readPendingAttachment,
   withResolvedAttachmentUrls,
 } from '../features/yachiyo-chat/attachments';
-import { createClientMessageId } from '../features/yachiyo-chat/clientMessages';
+import {
+  conversationClientMessageKey,
+  conversationClientMessageSessionPrefix,
+  createClientMessageId,
+  createOptimisticUserMessage,
+  reconcileOptimisticUserMessages,
+  removeOptimisticUserMessage,
+} from '../features/yachiyo-chat/clientMessages';
 import { isImeComposing } from '../features/yachiyo-chat/composerEvents';
 import { ChatComposer } from '../features/yachiyo-chat/components/ChatComposer';
 import { ChatFullPageLoading } from '../features/yachiyo-chat/components/ChatFullPageLoading';
@@ -24,7 +31,6 @@ import { composerApprovalStatusText } from '../features/yachiyo-chat/components/
 import { ChatGroupDialog } from '../features/yachiyo-chat/components/ChatGroupDialog';
 import { ChatHeader } from '../features/yachiyo-chat/components/ChatHeader';
 import { ChatSessionSidebar } from '../features/yachiyo-chat/components/ChatSessionSidebar';
-import { SessionIdDialog } from '../features/yachiyo-chat/components/SessionIdDialog';
 import { MessageBubble } from '../features/yachiyo-chat/components/MessageBubble';
 import type { TaskPermissionRecoveryAction } from '../features/yachiyo-chat/components/AgentTaskCard';
 import type { ApprovalRequestDetails } from '../features/yachiyo-chat/components/MessageApprovalRequestCard';
@@ -42,12 +48,13 @@ import {
   compactStatusText,
   isRetryableMessage,
   latestFailedMessage,
-  latestVisibleActivity,
   messageMatchesPendingAssistantReply,
   messageErrorText,
   messageRunId,
   messageRunStatus,
   messageText,
+  retrySourceUserMessage,
+  shouldShowPendingAssistantReply,
 } from '../features/yachiyo-chat/messageState';
 import {
   COMPOSER_HEIGHT_STORAGE_KEY,
@@ -57,10 +64,8 @@ import {
   canAttachImages,
   clampComposerHeight,
   formatShortTime,
-  formatTokenCount,
   headerStatusText,
   imageInputBlockedNoticeText,
-  normalizedTokenCount,
   sessionSideLabel,
   storedComposerHeight,
 } from '../features/yachiyo-chat/displayState';
@@ -100,6 +105,7 @@ import { useYachiyoTaskSubmit } from '../features/yachiyo-chat/hooks/useYachiyoT
 import {
   createChatGroupSession,
   getYachiyoReadiness,
+  legacyChatDeliveryDisposition,
   retryLegacyChatMessage,
   sendLegacyChatMessage,
   startYachiyoTaskNextReplanContinuation,
@@ -130,6 +136,7 @@ import type {
   ChatE2EImageDetail,
   ChatMessage,
   ChatSessionContext,
+  ConversationIdentity,
   MessagesPayload,
   PendingAttachment,
   RenderState,
@@ -140,14 +147,138 @@ type ChatViewProps = {
   embedded?: boolean;
 };
 
-const ACTIVE_POLL_INTERVAL_MS = 500;
-const IDLE_POLL_INTERVAL_MS = 3000;
+type ChatMessagesRefreshResult = {
+  is_processing: boolean;
+  processing_count?: number;
+  messages: ChatMessage[];
+} | undefined;
+
+type ChatMessagesRefreshOptions = {
+  allowDuringTransition?: boolean;
+  anchorMessageId?: string;
+  poll?: boolean;
+};
+
+const PENDING_ASSISTANT_REPLY: ChatMessage = {
+  id: 'local:pending-assistant-reply',
+  role: 'assistant',
+  status: 'processing',
+};
+
+type MarkedSessionSwitchError = Error & {
+  sessionSwitchUncertain?: boolean;
+};
+
+type ActiveChatSubmission = {
+  clientMessageId: string;
+  conversationToken: number;
+  phase: 'public' | 'legacy' | 'accepted';
+  sessionId: string;
+};
+
+type OptimisticDeliveryState = 'pending' | 'accepted' | 'uncertain';
+
+type OptimisticDeliveryReconciliation = {
+  clientMessageId: string;
+  conversationToken: number;
+  deadlineAt: number;
+  messageKey: string;
+  sessionId: string;
+  timer: number | null;
+};
+
+type DeferredRouteHandoff = {
+  sessionId: string;
+  resolve: (result: ChatMessagesRefreshResult) => void;
+};
+
+type ComposerDraftSnapshot = {
+  input: string;
+  attachments: PendingAttachment[];
+};
+
+function isUncertainSessionSwitchFailure(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  return error.name === 'TimeoutError'
+    || error.name === 'AbortError'
+    || error.message.includes('无法连接本地 Bridge');
+}
+
+function markSessionSwitchFailureUncertain(error: unknown): MarkedSessionSwitchError {
+  const marked = (error instanceof Error ? error : new Error('切换会话失败')) as MarkedSessionSwitchError;
+  marked.sessionSwitchUncertain = true;
+  return marked;
+}
+
+function isMarkedSessionSwitchFailureUncertain(error: unknown): boolean {
+  return Boolean((error as MarkedSessionSwitchError | null)?.sessionSwitchUncertain);
+}
+
+function chatRequestTimeoutMs(): number {
+  if (!import.meta.env.DEV) return DEFAULT_CHAT_REQUEST_TIMEOUT_MS;
+  const requested = Number(new URLSearchParams(window.location.search).get('chatRequestTimeoutMs') || 0);
+  if (!Number.isFinite(requested) || requested <= 0) return DEFAULT_CHAT_REQUEST_TIMEOUT_MS;
+  return Math.max(50, Math.min(DEFAULT_CHAT_REQUEST_TIMEOUT_MS, Math.floor(requested)));
+}
+
+function composerDraftIsEmpty(draft: ComposerDraftSnapshot) {
+  return !draft.input.trim() && draft.attachments.length === 0;
+}
+
+function composerDraftsEqual(left: ComposerDraftSnapshot, right: ComposerDraftSnapshot) {
+  if (left.input !== right.input || left.attachments.length !== right.attachments.length) return false;
+  return left.attachments.every((attachment, index) => {
+    const candidate = right.attachments[index];
+    return Boolean(candidate)
+      && attachment.id === candidate.id
+      && attachment.name === candidate.name
+      && attachment.mime_type === candidate.mime_type
+      && attachment.size === candidate.size
+      && attachment.data_url === candidate.data_url;
+  });
+}
+
+function canonicalClientDeliveryIsTerminal(messages: ChatMessage[], clientMessageId: string) {
+  const canonicalUserMessage = messages.find((message) => (
+    message.role === 'user'
+    && message.metadata?.client_optimistic !== true
+    && String(message.metadata?.client_message_id || '').trim() === clientMessageId
+  ));
+  if (!canonicalUserMessage) return false;
+  const terminalStatuses = new Set(['completed', 'failed', 'cancelled']);
+  const taskId = String(canonicalUserMessage.task_id || '').trim();
+  if (!taskId) return terminalStatuses.has(String(canonicalUserMessage.status || '').trim());
+  const canonicalAssistantMessage = messages.find((message) => (
+    message.role === 'assistant' && String(message.task_id || '').trim() === taskId
+  ));
+  return Boolean(
+    canonicalAssistantMessage
+    && terminalStatuses.has(String(canonicalAssistantMessage.status || '').trim()),
+  );
+}
+
+const ACTIVE_POLL_INTERVAL_MS = 1000;
+const IDLE_POLL_INTERVAL_MS = 5000;
 const EXECUTOR_POLL_INTERVAL_MS = 3000;
+const DEFAULT_CHAT_REQUEST_TIMEOUT_MS = 15_000;
+const CHAT_REQUEST_TIMEOUT_MS = chatRequestTimeoutMs();
+const OPTIMISTIC_RECONCILIATION_INTERVAL_MS = 1000;
+const OPTIMISTIC_RECONCILIATION_TIMEOUT_MS = 90_000;
 const TYPE_BASE_CHARS_PER_SECOND = 85;
 const TYPE_MAX_CHARS_PER_SECOND = 360;
+const TYPEWRITER_FRAME_INTERVAL_MS = 1000 / 30;
+const MAX_OPTIMISTIC_DELIVERY_STATES = 64;
 const MAX_ATTACHMENTS = 4;
-const MIN_LOADING_MS = 1400;
+const MIN_LOADING_MS = 180;
+const MOBILE_SESSIONS_MAX_WIDTH = 760;
 const CHAT_E2E_ADD_IMAGE_EVENT = 'oha-chat-e2e-add-image';
+const CHAT_DRAWER_FOCUSABLE_SELECTOR = [
+  'button:not([disabled])',
+  'input:not([disabled])',
+  'select:not([disabled])',
+  'textarea:not([disabled])',
+  '[tabindex]:not([tabindex="-1"])',
+].join(',');
 
 export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const initialComposerDraft = retainedComposerDraftSnapshot();
@@ -159,11 +290,8 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const [isProcessing, setIsProcessing] = useState(false);
   const [processingCount, setProcessingCount] = useState(0);
   const [isSending, setIsSending] = useState(false);
-  const [conversationTokenCount, setConversationTokenCount] = useState(0);
   const { executor, refreshExecutor } = useChatExecutor(EXECUTOR_POLL_INTERVAL_MS);
   const { assistantProfile, assistantProfileLoading, refreshAssistantProfile } = useChatAssistantProfile();
-  const [sessionIdDialogOpen, setSessionIdDialogOpen] = useState(false);
-  const [sessionIdCopyError, setSessionIdCopyError] = useState('');
   const [retryingMessageId, setRetryingMessageId] = useState('');
   const [approvalActionMessageId, setApprovalActionMessageId] = useState('');
   const [composerApprovalMessageId, setComposerApprovalMessageId] = useState('');
@@ -172,9 +300,11 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const [highlightedMessageId, setHighlightedMessageId] = useState('');
   const [messagesLoaded, setMessagesLoaded] = useState(false);
   const [messagesVisible, setMessagesVisible] = useState(false);
+  const [conversationTransitionLocked, setConversationTransitionLocked] = useState(false);
   const [chatBootstrapped, setChatBootstrapped] = useState(false);
   const [sidebarMaxWidth, setSidebarMaxWidth] = useState(() => responsiveChatSidebarMaxWidth());
   const [sidebarWidth, setSidebarWidth] = useState(CHAT_SIDEBAR_BASE_MAX_WIDTH);
+  const [mobileSessionsOpen, setMobileSessionsOpen] = useState(false);
   const [composerHeight, setComposerHeight] = useState(() => storedComposerHeight());
   const runnables = useChatRunnables(!embedded);
   const [sessionTab, setSessionTab] = useState<'agents' | 'groups'>('agents');
@@ -205,25 +335,29 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const {
     copiedCodeBlockKey,
     copiedMessageId,
-    copiedSessionId,
     markCodeBlockCopied,
     markMessageCopied,
-    markSessionCopied,
   } = useChatCopyFeedback();
   const { dismissNotice, notice, showNotice } = useChatNotice();
   const listRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const sessionCloseButtonRef = useRef<HTMLButtonElement>(null);
+  const sessionToggleButtonRef = useRef<HTMLButtonElement>(null);
   const composerComposingRef = useRef(false);
   const renderStateRef = useRef<Map<string, RenderState>>(new Map());
   const animationFrameRef = useRef<number | null>(null);
   const scrollFrameRef = useRef<number | null>(null);
+  const scrollForceRef = useRef(false);
   const typewriterLastTsRef = useRef(0);
   const stickToBottomRef = useRef(true);
   const lastScrollTopRef = useRef(0);
-  const bottomAnchorRef = useRef<HTMLDivElement>(null);
   const messagesLoadedRef = useRef(false);
   const messageLoadTokenRef = useRef(0);
+  const messageExplicitRefreshEpochRef = useRef(0);
+  const messageRefreshInFlightRef = useRef<Promise<ChatMessagesRefreshResult> | null>(null);
+  const messageRequestAbortControllerRef = useRef<AbortController | null>(null);
+  const messageRequestIsPollRef = useRef(false);
   const conversationLoadTokenRef = useRef(0);
   const conversationTransitionRef = useRef(false);
   const messageTextSelectingRef = useRef(false);
@@ -237,6 +371,20 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const desktopReadinessNoticeShownRef = useRef(false);
   const autoReplanContinuationKeysRef = useRef<Set<string>>(new Set());
   const loadSessionsRef = useRef<() => Promise<void>>(async () => undefined);
+  const activeChatSubmissionRef = useRef<ActiveChatSubmission | null>(null);
+  const optimisticDeliveryStateRef = useRef<Map<string, OptimisticDeliveryState>>(new Map());
+  const optimisticOutboxRef = useRef<Map<string, ChatMessage>>(new Map());
+  const optimisticReconciliationRef = useRef<Map<string, OptimisticDeliveryReconciliation>>(new Map());
+  const submittedMessageSequenceRef = useRef(0);
+  const submittedMessageSequencesRef = useRef<Map<string, number>>(new Map());
+  const deferredRouteHandoffRef = useRef<DeferredRouteHandoff | null>(null);
+  const latestMessagesRef = useRef<ChatMessage[]>([]);
+  const latestComposerDraftRef = useRef<ComposerDraftSnapshot>({ input, attachments });
+  const chatMountedRef = useRef(true);
+  const conversationMutationTailRef = useRef<Promise<void>>(Promise.resolve());
+  const sessionSwitchAbortControllerRef = useRef<AbortController | null>(null);
+  const sessionSwitchRequestIdRef = useRef(0);
+  const latestSessionSwitchTargetRef = useRef('');
   const transientEmptySessionIdRef = useRef('');
   const latestChatSnapshotRef = useRef({
     currentSessionId: '',
@@ -244,6 +392,100 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     isProcessing: false,
     isSending: false,
   });
+  latestComposerDraftRef.current = { input, attachments };
+
+  function rememberOptimisticDeliveryState(
+    sessionId: string,
+    clientMessageId: string,
+    deliveryState: OptimisticDeliveryState,
+  ) {
+    const messageKey = conversationClientMessageKey(sessionId, clientMessageId);
+    if (!messageKey) return;
+    const deliveryStates = optimisticDeliveryStateRef.current;
+    deliveryStates.delete(messageKey);
+    deliveryStates.set(messageKey, deliveryState);
+    while (deliveryStates.size > MAX_OPTIMISTIC_DELIVERY_STATES) {
+      const oldestClientMessageId = [...deliveryStates.keys()].find((candidate) => (
+        !optimisticOutboxRef.current.has(candidate)
+      ));
+      if (!oldestClientMessageId) break;
+      deliveryStates.delete(oldestClientMessageId);
+    }
+  }
+
+  function rememberOptimisticOutboxMessage(message: ChatMessage) {
+    const clientMessageId = String(message.metadata?.client_message_id || '').trim();
+    const sessionId = String(message.metadata?.client_session_id || '').trim();
+    const messageKey = conversationClientMessageKey(sessionId, clientMessageId);
+    if (!messageKey) return;
+    optimisticOutboxRef.current.set(messageKey, message);
+  }
+
+  function optimisticOutboxMessagesForConversation(
+    conversationToken: number,
+    sessionId: string,
+  ) {
+    const messages: ChatMessage[] = [];
+    for (const [messageKey, message] of optimisticOutboxRef.current) {
+      if (String(message.metadata?.client_session_id || '').trim() !== sessionId) continue;
+      const reboundMessage = {
+        ...message,
+        metadata: {
+          ...message.metadata,
+          client_conversation_token: conversationToken,
+        },
+      };
+      optimisticOutboxRef.current.set(messageKey, reboundMessage);
+      messages.push(reboundMessage);
+    }
+    return messages;
+  }
+
+  function forgetOptimisticOutboxMessage(
+    sessionId: string,
+    clientMessageId: string,
+    preserveSubmittedSequence = false,
+  ) {
+    const messageKey = conversationClientMessageKey(sessionId, clientMessageId);
+    if (!messageKey) return;
+    optimisticOutboxRef.current.delete(messageKey);
+    optimisticDeliveryStateRef.current.delete(messageKey);
+    if (!preserveSubmittedSequence) submittedMessageSequencesRef.current.delete(messageKey);
+  }
+
+  function forgetOptimisticOutboxSession(sessionId: string) {
+    const sessionPrefix = conversationClientMessageSessionPrefix(sessionId);
+    if (!sessionPrefix) return;
+    for (const messageKey of optimisticOutboxRef.current.keys()) {
+      if (messageKey.startsWith(sessionPrefix)) optimisticOutboxRef.current.delete(messageKey);
+    }
+    for (const messageKey of optimisticDeliveryStateRef.current.keys()) {
+      if (messageKey.startsWith(sessionPrefix)) optimisticDeliveryStateRef.current.delete(messageKey);
+    }
+    for (const messageKey of submittedMessageSequencesRef.current.keys()) {
+      if (messageKey.startsWith(sessionPrefix)) submittedMessageSequencesRef.current.delete(messageKey);
+    }
+  }
+
+  function pruneSubmittedMessageSequencesForSession(sessionId: string) {
+    const sessionPrefix = conversationClientMessageSessionPrefix(sessionId);
+    if (!sessionPrefix) return;
+    const hasPendingOutbox = [...optimisticOutboxRef.current.keys()].some((messageKey) => (
+      messageKey.startsWith(sessionPrefix)
+    ));
+    if (hasPendingOutbox) return;
+    for (const messageKey of submittedMessageSequencesRef.current.keys()) {
+      if (messageKey.startsWith(sessionPrefix)) submittedMessageSequencesRef.current.delete(messageKey);
+    }
+  }
+
+  function enqueueConversationMutation<T>(mutation: () => Promise<T>): Promise<T> {
+    const pending = conversationMutationTailRef.current
+      .catch(() => undefined)
+      .then(mutation);
+    conversationMutationTailRef.current = pending.then(() => undefined, () => undefined);
+    return pending;
+  }
   const {
     agentTaskSnapshotsById,
     rememberYachiyoTasks,
@@ -254,6 +496,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const {
     debouncedSessionQuery,
     loadSessions,
+    loadSessionsSnapshot,
     sessions,
     sessionsLoaded,
     sessionQuery,
@@ -265,32 +508,80 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     refreshYachiyoTasksForSession,
   });
 
-  const refreshMessages = useCallback(async (options: { allowDuringTransition?: boolean; anchorMessageId?: string } = {}) => {
-    if (conversationTransitionRef.current && !options.allowDuringTransition) return;
+  const runMessagesRefresh = useCallback(async (
+    options: Omit<ChatMessagesRefreshOptions, 'poll'>,
+    conversationToken: number,
+    poll: boolean,
+    refreshEpoch: number,
+  ): Promise<ChatMessagesRefreshResult> => {
+    if (!chatMountedRef.current) return undefined;
+    if (poll && refreshEpoch !== messageExplicitRefreshEpochRef.current) return undefined;
+    if (conversationToken !== conversationLoadTokenRef.current) return undefined;
+    if (conversationTransitionRef.current && !options.allowDuringTransition) return undefined;
     const token = ++messageLoadTokenRef.current;
     const startedAt = Date.now();
     const shouldHoldLoading = !messagesLoadedRef.current;
     const anchorMessageId = (options.anchorMessageId || '').trim();
+    const isCurrentRequest = () => (
+      chatMountedRef.current
+      && conversationToken === conversationLoadTokenRef.current
+      && token === messageLoadTokenRef.current
+      && (!poll || refreshEpoch === messageExplicitRefreshEpochRef.current)
+    );
+    const requestController = new AbortController();
+    messageRequestAbortControllerRef.current = requestController;
+    messageRequestIsPollRef.current = poll;
     try {
       const query = new URLSearchParams();
       query.set('limit', anchorMessageId ? '220' : '0');
       if (anchorMessageId) query.set('anchor_message_id', anchorMessageId);
-      const payload = await apiGet<MessagesPayload>(`/ui/chat/messages?${query.toString()}`);
+      const payload = await apiGet<MessagesPayload>(`/ui/chat/messages?${query.toString()}`, {
+        signal: requestController.signal,
+        timeoutMs: CHAT_REQUEST_TIMEOUT_MS,
+      });
       if (payload.ok === false) throw new Error(payload.error || '读取消息失败');
+      if (!isCurrentRequest()) return undefined;
       const baseUrl = await bridgeUrl();
       const nextMessages = withResolvedAttachmentUrls(payload.messages || [], baseUrl);
+      const responseSessionId = String(
+        payload.session_id || latestChatSnapshotRef.current.currentSessionId || '',
+      ).trim();
+      settleOptimisticDeliveryReconciliations(nextMessages, responseSessionId);
+      const canonicalClientMessageIds = new Set(nextMessages.map((message) => (
+        String(message.metadata?.client_message_id || '').trim()
+      )).filter(Boolean));
+      const outboxMessages = optimisticOutboxMessagesForConversation(
+        conversationToken,
+        responseSessionId,
+      );
+      const unresolvedOptimisticMessage = outboxMessages.find((message) => {
+        const optimisticClientMessageId = String(message.metadata?.client_message_id || '').trim();
+        return Boolean(optimisticClientMessageId)
+          && !canonicalClientMessageIds.has(optimisticClientMessageId);
+      });
+      const unresolvedDeliveryState = optimisticDeliveryStateRef.current.get(
+        conversationClientMessageKey(
+          responseSessionId,
+          String(unresolvedOptimisticMessage?.metadata?.client_message_id || '').trim(),
+        ),
+      );
+      const unresolvedDeliveryStatus = unresolvedDeliveryState === 'uncertain'
+        ? '投递状态待确认，正在同步对话…'
+        : unresolvedDeliveryState === 'accepted'
+          ? '消息已发送，正在同步对话…'
+          : '';
+      if (!isCurrentRequest()) return undefined;
       setSessionContext(payload.session_context || null);
       const nextProcessingCount = Math.max(0, Number(payload.processing_count || 0));
       const processing = Boolean(payload.is_processing || nextProcessingCount > 0);
       const processingChanged = processing !== isProcessingRef.current;
       void refreshYachiyoTaskSnapshotsFromMessages(nextMessages);
-      setConversationTokenCount(normalizedTokenCount(payload.token_count));
       isProcessingRef.current = processing;
       const failed = latestFailedMessage(nextMessages);
       if (!shouldHoldLoading && isMessageSelectionPaused()) {
         setIsProcessing(processing);
         setProcessingCount(nextProcessingCount);
-        setStatus(chatStatusLabel(processing, failed, nextMessages, nextProcessingCount));
+        setStatus(unresolvedDeliveryStatus || chatStatusLabel(processing, failed, nextMessages, nextProcessingCount));
         if (processingChanged) void loadSessionsRef.current();
         return { is_processing: processing, processing_count: nextProcessingCount, messages: nextMessages };
       }
@@ -298,7 +589,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       const elapsed = Date.now() - startedAt;
       const remaining = Math.max(0, MIN_LOADING_MS - elapsed);
       if (shouldHoldLoading && remaining > 0) await new Promise((r) => setTimeout(r, remaining));
-      if (token !== messageLoadTokenRef.current) return;
+      if (!isCurrentRequest()) return undefined;
       if (anchorMessageId) {
         const anchorFound = nextMessages.some((message) => message.id === anchorMessageId);
         if (highlightClearTimerRef.current !== null) {
@@ -308,7 +599,22 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
         highlightedScrollTargetRef.current = anchorFound ? anchorMessageId : '';
         setHighlightedMessageId(anchorFound ? anchorMessageId : '');
       }
-      setMessages(nextMessages);
+      setMessages((currentMessages) => {
+        const reconciledMessages = reconcileOptimisticUserMessages(
+          nextMessages,
+          currentMessages,
+          conversationToken,
+          responseSessionId,
+          outboxMessages,
+          submittedMessageSequencesRef.current,
+        );
+        for (const clientMessageId of canonicalClientMessageIds) {
+          forgetOptimisticOutboxMessage(responseSessionId, clientMessageId, true);
+        }
+        pruneSubmittedMessageSequencesForSession(responseSessionId);
+        latestMessagesRef.current = reconciledMessages;
+        return reconciledMessages;
+      });
       setIsProcessing(processing);
       setProcessingCount(nextProcessingCount);
       if (!isMessageSelectionPaused() && shouldTriggerPendingReplyScroll(nextMessages)) {
@@ -319,12 +625,13 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       if (shouldHoldLoading) {
         await settleMessagesAtBottom(token);
       }
-      if (token === messageLoadTokenRef.current) {
-        messagesLoadedRef.current = true;
-        setMessagesVisible(true);
-        setMessagesLoaded(true);
-      }
-      if (processing) {
+      if (!isCurrentRequest()) return undefined;
+      messagesLoadedRef.current = true;
+      setMessagesVisible(true);
+      setMessagesLoaded(true);
+      if (unresolvedDeliveryStatus) {
+        setStatus(unresolvedDeliveryStatus);
+      } else if (processing) {
         setStatus(chatStatusLabel(processing, failed, nextMessages, nextProcessingCount));
       } else if (failed) {
         setStatus(`处理失败：${compactStatusText(messageErrorText(failed))}`);
@@ -337,13 +644,167 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       const elapsed = Date.now() - startedAt;
       const remaining = Math.max(0, MIN_LOADING_MS - elapsed);
       if (shouldHoldLoading && remaining > 0) await new Promise((r) => setTimeout(r, remaining));
-      if (token !== messageLoadTokenRef.current) return;
+      if (!isCurrentRequest()) return undefined;
       messagesLoadedRef.current = true;
       setMessagesLoaded(true);
       setMessagesVisible(true);
-      setStatus(error instanceof Error ? error.message : '读取消息失败');
-      return { is_processing: false, messages: [] };
+      const optimisticMessage = latestMessagesRef.current.find((message) => (
+        message.metadata?.client_optimistic === true
+        && message.metadata?.client_conversation_token === conversationToken
+      ));
+      const optimisticClientMessageId = String(optimisticMessage?.metadata?.client_message_id || '').trim();
+      const optimisticSessionId = String(optimisticMessage?.metadata?.client_session_id || '').trim();
+      const deliveryState = optimisticDeliveryStateRef.current.get(
+        conversationClientMessageKey(optimisticSessionId, optimisticClientMessageId),
+      );
+      if (deliveryState === 'pending' || deliveryState === 'uncertain') {
+        setStatus('投递状态待确认，正在同步对话…');
+      } else if (deliveryState === 'accepted') {
+        setStatus('消息已发送，正在同步对话…');
+      } else {
+        setStatus(error instanceof Error ? error.message : '读取消息失败');
+      }
+      return undefined;
+    } finally {
+      if (messageRequestAbortControllerRef.current === requestController) {
+        messageRequestAbortControllerRef.current = null;
+        messageRequestIsPollRef.current = false;
+      }
     }
+  }, []);
+
+  const refreshMessages = useCallback((
+    options: ChatMessagesRefreshOptions = {},
+  ): Promise<ChatMessagesRefreshResult> => {
+    if (conversationTransitionRef.current && !options.allowDuringTransition) {
+      return Promise.resolve(undefined);
+    }
+    const current = messageRefreshInFlightRef.current;
+    if (options.poll && current) return current;
+
+    const poll = Boolean(options.poll);
+    const refreshEpoch = poll
+      ? messageExplicitRefreshEpochRef.current
+      : ++messageExplicitRefreshEpochRef.current;
+    if (!poll && messageRequestIsPollRef.current) {
+      messageRequestAbortControllerRef.current?.abort();
+    }
+    const conversationToken = conversationLoadTokenRef.current;
+    const refreshOptions = {
+      allowDuringTransition: options.allowDuringTransition,
+      anchorMessageId: options.anchorMessageId,
+    };
+    const execute = () => runMessagesRefresh(
+      refreshOptions,
+      conversationToken,
+      poll,
+      refreshEpoch,
+    );
+    const pending = current
+      ? current.catch(() => undefined).then(execute)
+      : execute();
+    let tracked: Promise<ChatMessagesRefreshResult>;
+    tracked = pending.finally(() => {
+      if (messageRefreshInFlightRef.current === tracked) {
+        messageRefreshInFlightRef.current = null;
+      }
+    });
+    messageRefreshInFlightRef.current = tracked;
+    return tracked;
+  }, [runMessagesRefresh]);
+
+  function stopOptimisticDeliveryReconciliation(messageKey: string) {
+    const reconciliation = optimisticReconciliationRef.current.get(messageKey);
+    if (!reconciliation) return;
+    if (reconciliation.timer !== null) window.clearTimeout(reconciliation.timer);
+    optimisticReconciliationRef.current.delete(messageKey);
+  }
+
+  function cancelOptimisticDeliveryReconciliations(sessionId = '') {
+    const sessionPrefix = conversationClientMessageSessionPrefix(sessionId);
+    for (const messageKey of [...optimisticReconciliationRef.current.keys()]) {
+      if (!sessionPrefix || messageKey.startsWith(sessionPrefix)) {
+        stopOptimisticDeliveryReconciliation(messageKey);
+      }
+    }
+  }
+
+  function settleOptimisticDeliveryReconciliations(
+    messages: ChatMessage[],
+    sessionId: string,
+  ) {
+    for (const reconciliation of optimisticReconciliationRef.current.values()) {
+      if (reconciliation.sessionId !== sessionId) continue;
+      if (canonicalClientDeliveryIsTerminal(messages, reconciliation.clientMessageId)) {
+        stopOptimisticDeliveryReconciliation(reconciliation.messageKey);
+      }
+    }
+  }
+
+  function scheduleOptimisticDeliveryReconciliation(
+    reconciliation: OptimisticDeliveryReconciliation,
+    delayMs: number,
+  ) {
+    if (reconciliation.timer !== null) return;
+    if (Date.now() >= reconciliation.deadlineAt) {
+      stopOptimisticDeliveryReconciliation(reconciliation.messageKey);
+      return;
+    }
+    reconciliation.timer = window.setTimeout(() => {
+      reconciliation.timer = null;
+      void (async () => {
+        if (
+          optimisticReconciliationRef.current.get(reconciliation.messageKey) !== reconciliation
+          || !chatMountedRef.current
+          || !isSubmissionConversationCurrent({
+            conversationToken: reconciliation.conversationToken,
+            sessionId: reconciliation.sessionId,
+          })
+        ) {
+          stopOptimisticDeliveryReconciliation(reconciliation.messageKey);
+          return;
+        }
+        await refreshMessages({ allowDuringTransition: true });
+        if (optimisticReconciliationRef.current.get(reconciliation.messageKey) !== reconciliation) return;
+        scheduleOptimisticDeliveryReconciliation(
+          reconciliation,
+          OPTIMISTIC_RECONCILIATION_INTERVAL_MS,
+        );
+      })();
+    }, Math.max(0, delayMs));
+  }
+
+  function beginOptimisticDeliveryReconciliation(identity: ConversationIdentity, clientMessageId: string) {
+    const messageKey = conversationClientMessageKey(identity.sessionId, clientMessageId);
+    if (!messageKey || optimisticReconciliationRef.current.has(messageKey)) return;
+    const reconciliation: OptimisticDeliveryReconciliation = {
+      clientMessageId,
+      conversationToken: identity.conversationToken,
+      deadlineAt: Date.now() + OPTIMISTIC_RECONCILIATION_TIMEOUT_MS,
+      messageKey,
+      sessionId: identity.sessionId,
+      timer: null,
+    };
+    optimisticReconciliationRef.current.set(messageKey, reconciliation);
+    scheduleOptimisticDeliveryReconciliation(reconciliation, 0);
+  }
+
+  useEffect(() => {
+    chatMountedRef.current = true;
+    return () => {
+      chatMountedRef.current = false;
+      messageLoadTokenRef.current += 1;
+      conversationLoadTokenRef.current += 1;
+      messageExplicitRefreshEpochRef.current += 1;
+      messageRequestAbortControllerRef.current?.abort();
+      sessionSwitchAbortControllerRef.current?.abort();
+      optimisticDeliveryStateRef.current.clear();
+      optimisticOutboxRef.current.clear();
+      cancelOptimisticDeliveryReconciliations();
+      submittedMessageSequencesRef.current.clear();
+      deferredRouteHandoffRef.current?.resolve(undefined);
+      deferredRouteHandoffRef.current = null;
+    };
   }, []);
 
   useEffect(() => {
@@ -361,6 +822,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     createDelegatedRunSummaryOptions: delegatedRunSummaryOptions,
     forgetRunApprovalDetails,
     isProcessingRef,
+    isConversationCurrent: isSubmissionConversationCurrent,
     loadSessions,
     refreshMessages,
     rememberRunApprovalDetails,
@@ -377,7 +839,9 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     createDelegatedRunSummaryOptions: delegatedRunSummaryOptions,
     focusComposerSoon,
     forgetRunApprovalDetails,
+    getConversationIdentity: currentConversationIdentity,
     isProcessingRef,
+    isConversationCurrent: isSubmissionConversationCurrent,
     loadSessions,
     pollAgentRunInBackground,
     refreshMessages,
@@ -395,6 +859,8 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   } = useYachiyoTaskActions({
     approvalActionMessageId,
     focusComposerSoon,
+    getConversationIdentity: currentConversationIdentity,
+    isConversationCurrent: isSubmissionConversationCurrent,
     loadSessions,
     pollAgentRunInBackground,
     refreshMessages,
@@ -407,6 +873,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       pendingReplyTaskIdRef.current = '';
     },
     expectPendingAssistantReply,
+    isConversationCurrent: isSubmissionConversationCurrent,
     loadSessions,
     onRunning: () => {
       stickToBottomRef.current = true;
@@ -422,10 +889,20 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   });
   const { startPublicYachiyoTask } = useYachiyoTaskSubmit({
     expectPendingAssistantReply,
+    isConversationCurrent: isSubmissionConversationCurrent,
     loadSessions,
-    onAccepted: () => {
+    onAccepted: (acceptedClientMessageId) => {
       transientEmptySessionIdRef.current = '';
       pendingReplyTaskIdRef.current = '';
+      const activeSubmission = activeChatSubmissionRef.current;
+      if (activeSubmission?.clientMessageId === acceptedClientMessageId) {
+        rememberOptimisticDeliveryState(
+          activeSubmission.sessionId,
+          acceptedClientMessageId,
+          'accepted',
+        );
+        activeSubmission.phase = 'accepted';
+      }
     },
     onRunning: () => {
       stickToBottomRef.current = true;
@@ -449,14 +926,20 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     setApprovalActionMessageId(busyId);
     setStatus(`正在执行权限恢复：${action.label || prompt}...`);
     try {
-      const conversationId = sessions?.current_session_id || latestChatSnapshotRef.current.currentSessionId || null;
+      const identity = currentConversationIdentity();
+      if (!identity) {
+        setStatus('当前会话尚未准备好，请稍后再试');
+        return;
+      }
       const result = await startYachiyoTaskRecoveryAction({
         action,
-        conversationId,
-        onStartedTask: (startedTask) => rememberYachiyoTasks([startedTask]),
+        conversationId: identity.sessionId,
+        onStartedTask: (startedTask) => {
+          if (isSubmissionConversationCurrent(identity)) rememberYachiyoTasks([startedTask]);
+        },
         startFallbackTask: (recoveryStart) => startPublicYachiyoTask({
           clientMessageId: createClientMessageId(),
-          conversationId,
+          identity,
           prompt: recoveryStart.prompt,
           runnableId: null,
           runnableKind: 'main',
@@ -464,6 +947,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
         }),
         task,
       });
+      if (!isSubmissionConversationCurrent(identity)) return;
       if (result.mode === 'replan') {
         setStatus(
           result.statusMessage
@@ -542,6 +1026,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     refreshMessages,
     revealMessage,
     setStatus,
+    switchConversation: switchRouteConversation,
   });
 
   useEffect(() => {
@@ -567,8 +1052,39 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
 
   useEffect(() => {
     const interval = isProcessing ? ACTIVE_POLL_INTERVAL_MS : IDLE_POLL_INTERVAL_MS;
-    const timer = window.setInterval(refreshMessages, interval);
-    return () => window.clearInterval(timer);
+    let timer: number | null = null;
+    let disposed = false;
+
+    const clearTimer = () => {
+      if (timer === null) return;
+      window.clearTimeout(timer);
+      timer = null;
+    };
+    const scheduleNextPoll = () => {
+      clearTimer();
+      if (disposed || document.hidden) return;
+      timer = window.setTimeout(() => {
+        timer = null;
+        void refreshMessages({ poll: true })
+          .catch(() => undefined)
+          .finally(scheduleNextPoll);
+      }, interval);
+    };
+    const handleVisibilityChange = () => {
+      clearTimer();
+      if (disposed || document.hidden) return;
+      void refreshMessages()
+        .catch(() => undefined)
+        .finally(scheduleNextPoll);
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    scheduleNextPoll();
+    return () => {
+      disposed = true;
+      clearTimer();
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, [isProcessing, refreshMessages]);
 
   useEffect(() => {
@@ -586,6 +1102,13 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       setSidebarWidth((width) => {
         return clampChatSidebarWidth(width, maxWidth);
       });
+      if (window.innerWidth > MOBILE_SESSIONS_MAX_WIDTH) {
+        const shouldFocusComposer = document.activeElement === sessionCloseButtonRef.current;
+        setMobileSessionsOpen(false);
+        if (shouldFocusComposer) {
+          window.requestAnimationFrame(() => inputRef.current?.focus({ preventScroll: true }));
+        }
+      }
     };
     syncResponsiveSidebarWidth();
     window.addEventListener('resize', syncResponsiveSidebarWidth);
@@ -593,6 +1116,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   }, [embedded]);
 
   useEffect(() => {
+    latestMessagesRef.current = messages;
     syncRenderStates(messages, renderStateRef.current);
     if (shouldContinueTyping(renderStateRef.current)) startTypewriter();
   }, [messages]);
@@ -612,7 +1136,10 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       if (!node) return;
       stickToBottomRef.current = false;
       highlightedScrollTargetRef.current = '';
-      node.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      node.scrollIntoView({
+        behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth',
+        block: 'center',
+      });
       if (highlightClearTimerRef.current !== null) window.clearTimeout(highlightClearTimerRef.current);
       highlightClearTimerRef.current = window.setTimeout(() => {
         setHighlightedMessageId((current) => (current === highlightedMessageId ? '' : current));
@@ -670,6 +1197,10 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
+      if (mobileSessionsOpen && event.key === 'Tab') {
+        trapMobileSessionsFocus(event);
+        return;
+      }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'n') {
         event.preventDefault();
         void clearSession();
@@ -677,7 +1208,12 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
         event.preventDefault();
         void cancelProcessing();
       } else if (event.key === 'Escape') {
-        inputRef.current?.focus();
+        if (mobileSessionsOpen) {
+          event.preventDefault();
+          closeMobileSessions(true);
+        } else {
+          inputRef.current?.focus();
+        }
       }
     }
     window.addEventListener('keydown', handleKeyDown);
@@ -691,10 +1227,18 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   }
 
   function tickTypewriter(timestamp: number) {
-    if (!typewriterLastTsRef.current) typewriterLastTsRef.current = timestamp;
-    const elapsed = Math.max(0.016, (timestamp - typewriterLastTsRef.current) / 1000);
+    if (!typewriterLastTsRef.current) {
+      typewriterLastTsRef.current = timestamp - TYPEWRITER_FRAME_INTERVAL_MS;
+    }
+    const elapsedMs = timestamp - typewriterLastTsRef.current;
+    if (elapsedMs < TYPEWRITER_FRAME_INTERVAL_MS) {
+      animationFrameRef.current = window.requestAnimationFrame(tickTypewriter);
+      return;
+    }
+    const elapsed = elapsedMs / 1000;
     typewriterLastTsRef.current = timestamp;
     let pending = false;
+    let advanced = false;
 
     for (const state of renderStateRef.current.values()) {
       if (state.shown.length >= state.target.length) continue;
@@ -705,28 +1249,70 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       );
       const step = Math.max(1, Math.floor(speed * elapsed));
       state.shown = state.target.slice(0, state.shown.length + step);
+      advanced = true;
       if (state.shown.length < state.target.length) pending = true;
     }
 
-    setRenderTick((value) => value + 1);
-    scrollToConversationBottom();
+    if (advanced) {
+      setRenderTick((value) => value + 1);
+      scrollToConversationBottom();
+    }
     animationFrameRef.current = pending ? window.requestAnimationFrame(tickTypewriter) : null;
   }
 
   function scrollToConversationBottom(force = false) {
-    if (force) stickToBottomRef.current = true;
-    if (!force && (!stickToBottomRef.current || isMessageSelectionPaused())) return;
-    if (scrollFrameRef.current !== null) window.cancelAnimationFrame(scrollFrameRef.current);
+    if (force) {
+      stickToBottomRef.current = true;
+      scrollForceRef.current = true;
+    }
+    if (!scrollForceRef.current && (!stickToBottomRef.current || isMessageSelectionPaused())) return;
+    if (scrollFrameRef.current !== null) return;
     scrollFrameRef.current = window.requestAnimationFrame(() => {
-      scrollFrameRef.current = window.requestAnimationFrame(() => {
-        scrollFrameRef.current = null;
-        const list = listRef.current;
-        if (!list || (!force && (!stickToBottomRef.current || isMessageSelectionPaused()))) return;
-        list.scrollTop = list.scrollHeight;
-        bottomAnchorRef.current?.scrollIntoView({ block: 'end' });
-        lastScrollTopRef.current = list.scrollTop;
-      });
+      scrollFrameRef.current = null;
+      const shouldForce = scrollForceRef.current;
+      scrollForceRef.current = false;
+      const list = listRef.current;
+      if (!list || (!shouldForce && (!stickToBottomRef.current || isMessageSelectionPaused()))) return;
+      list.scrollTop = list.scrollHeight;
+      lastScrollTopRef.current = list.scrollTop;
     });
+  }
+
+  function closeMobileSessions(restoreFocus = false) {
+    setMobileSessionsOpen(false);
+    if (restoreFocus) {
+      window.requestAnimationFrame(() => sessionToggleButtonRef.current?.focus({ preventScroll: true }));
+    }
+  }
+
+  function openMobileSessions() {
+    setMobileSessionsOpen(true);
+    window.requestAnimationFrame(() => sessionCloseButtonRef.current?.focus({ preventScroll: true }));
+  }
+
+  function toggleMobileSessions() {
+    if (mobileSessionsOpen) closeMobileSessions();
+    else openMobileSessions();
+  }
+
+  function trapMobileSessionsFocus(event: KeyboardEvent) {
+    const sidebar = document.getElementById('chat-session-sidebar');
+    if (!sidebar) return;
+    const focusable = Array.from(
+      sidebar.querySelectorAll<HTMLElement>(CHAT_DRAWER_FOCUSABLE_SELECTOR),
+    ).filter((element) => element.tabIndex >= 0 && element.getClientRects().length > 0);
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (!first || !last) return;
+
+    const active = document.activeElement;
+    if (event.shiftKey && (active === first || !sidebar.contains(active))) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && (active === last || !sidebar.contains(active))) {
+      event.preventDefault();
+      first.focus();
+    }
   }
 
   function isMessageSelectionPaused() {
@@ -747,12 +1333,53 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   async function submit(event: FormEvent) {
     event.preventDefault();
     const text = input.trim();
-    if ((!text && attachments.length === 0) || isSending) return;
+    if (
+      (!text && attachments.length === 0)
+      || isSending
+      || Boolean(activeChatSubmissionRef.current)
+      || Boolean(retryingMessageId)
+      || conversationTransitionLocked
+      || conversationTransitionRef.current
+    ) return;
     if (attachments.length > 0 && !canAttachImages(executor)) {
       showImageInputBlocked();
       return;
     }
+    const submissionSessionId = sessions?.current_session_id
+      || latestChatSnapshotRef.current.currentSessionId
+      || '';
+    if (!submissionSessionId) {
+      retainComposerDraft(text, attachments);
+      setStatus('正在准备会话，请稍后再发送');
+      void loadSessions();
+      return;
+    }
     const outgoingAttachments = attachments;
+    const clientMessageId = createClientMessageId();
+    const submittedSequence = ++submittedMessageSequenceRef.current;
+    submittedMessageSequencesRef.current.set(
+      conversationClientMessageKey(submissionSessionId, clientMessageId),
+      submittedSequence,
+    );
+    const submissionConversationToken = conversationLoadTokenRef.current;
+    const optimisticMessage = createOptimisticUserMessage({
+      attachments: outgoingAttachments,
+      clientMessageId,
+      content: text,
+      conversationToken: submissionConversationToken,
+      sessionId: submissionSessionId,
+      submittedSequence,
+    });
+    rememberOptimisticOutboxMessage(optimisticMessage);
+    rememberOptimisticDeliveryState(submissionSessionId, clientMessageId, 'pending');
+    setMessages((currentMessages) => {
+      const nextMessages = [
+        ...removeOptimisticUserMessage(currentMessages, submissionSessionId, clientMessageId),
+        optimisticMessage,
+      ];
+      latestMessagesRef.current = nextMessages;
+      return nextMessages;
+    });
     clearRetainedComposerDraft();
     setInput('');
     setAttachments([]);
@@ -765,7 +1392,8 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     setStatus(outgoingAttachments.length ? '发送图片中...' : '发送中...');
     stickToBottomRef.current = true;
     focusComposerSoon();
-    const clientMessageId = createClientMessageId();
+    let submissionAccepted = false;
+    let submissionRejected = false;
     try {
       const isGroupConversation = String(activeSessionContext?.conversation_kind || '') === 'group';
       const publicTaskCandidate = !isGroupConversation
@@ -780,11 +1408,20 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
         && outgoingAttachments.length === 0
         ? yachiyoDailyDesktopTaskPrompt(text)
         : null;
+      activeChatSubmissionRef.current = {
+        clientMessageId,
+        conversationToken: submissionConversationToken,
+        phase: shouldTryPublicTask ? 'public' : 'legacy',
+        sessionId: submissionSessionId,
+      };
       if (shouldTryPublicTask) {
         const handled = await startPublicYachiyoTask({
           attachments: outgoingAttachments,
           clientMessageId,
-          conversationId: sessions?.current_session_id || latestChatSnapshotRef.current.currentSessionId || null,
+          identity: {
+            conversationToken: submissionConversationToken,
+            sessionId: submissionSessionId,
+          },
           prompt: publicTaskTarget ? yachiyoPublicTaskPrompt(text, publicTaskTarget) : dailyDesktopTaskPrompt || text,
           runnableId: publicTaskTarget?.id || null,
           runnableKind: publicTaskTarget?.kind || 'main',
@@ -801,33 +1438,106 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
           return;
         }
       }
+      if (!isSubmissionConversationCurrent(submissionConversationToken, submissionSessionId)) {
+        setMessages((currentMessages) => {
+          const nextMessages = removeOptimisticUserMessage(
+            currentMessages,
+            submissionSessionId,
+            clientMessageId,
+          );
+          latestMessagesRef.current = nextMessages;
+          return nextMessages;
+        });
+        return;
+      }
+      if (activeChatSubmissionRef.current?.clientMessageId === clientMessageId) {
+        activeChatSubmissionRef.current.phase = 'legacy';
+      }
       const result = await sendLegacyChatMessage({
         text,
         attachments: outgoingAttachments,
         client_message_id: clientMessageId,
-      });
-      if (result.ok === false) throw new Error(result.error || '发送失败');
+      }, { timeoutMs: CHAT_REQUEST_TIMEOUT_MS });
+      const deliveryDisposition = legacyChatDeliveryDisposition(result);
+      if (deliveryDisposition === 'rejected') {
+        submissionRejected = true;
+        throw new Error(result.error || '消息未发送');
+      }
+      submissionAccepted = deliveryDisposition === 'accepted';
+      rememberOptimisticDeliveryState(submissionSessionId, clientMessageId, deliveryDisposition);
+      if (activeChatSubmissionRef.current?.clientMessageId === clientMessageId) {
+        activeChatSubmissionRef.current.phase = 'accepted';
+      }
       transientEmptySessionIdRef.current = '';
-      if (await handleLegacyChatRunnableResult(result, { refreshTaskSnapshot: true })) return;
+      if (deliveryDisposition === 'uncertain') {
+        setStatus('投递状态待确认，正在同步对话…');
+        void loadSessions();
+        beginOptimisticDeliveryReconciliation({
+          conversationToken: submissionConversationToken,
+          sessionId: submissionSessionId,
+        }, clientMessageId);
+        return;
+      }
+      if (await handleLegacyChatRunnableResult(result, {
+        identity: {
+          conversationToken: submissionConversationToken,
+          sessionId: submissionSessionId,
+        },
+        refreshTaskSnapshot: true,
+      })) {
+        return;
+      }
       const taskId = String(result.task_id || '');
       pendingReplyTaskIdRef.current = taskId;
       if (!taskId) pendingReplyScrollRef.current = false;
       setStatus('等待回复...');
       void loadSessions();
-      await refreshMessages();
+      const refreshed = await refreshMessages();
       await loadSessions();
+      if (!refreshed) setStatus('消息已发送，正在同步对话…');
     } catch (error) {
+      if (!isSubmissionConversationCurrent(submissionConversationToken, submissionSessionId)) return;
+      if (!submissionRejected) {
+        rememberOptimisticDeliveryState(
+          submissionSessionId,
+          clientMessageId,
+          submissionAccepted ? 'accepted' : 'uncertain',
+        );
+        setStatus(submissionAccepted ? '消息已发送，正在同步对话…' : '投递状态待确认，正在同步对话…');
+        beginOptimisticDeliveryReconciliation({
+          conversationToken: submissionConversationToken,
+          sessionId: submissionSessionId,
+        }, clientMessageId);
+        return;
+      }
       pendingReplyScrollRef.current = false;
       pendingReplyTaskIdRef.current = '';
-      retainComposerDraft(text, outgoingAttachments);
-      setInput(text);
-      setAttachments(outgoingAttachments);
+      setMessages((currentMessages) => {
+        const nextMessages = removeOptimisticUserMessage(
+          currentMessages,
+          submissionSessionId,
+          clientMessageId,
+        );
+        latestMessagesRef.current = nextMessages;
+        return nextMessages;
+      });
+      forgetOptimisticOutboxMessage(submissionSessionId, clientMessageId);
+      pruneSubmittedMessageSequencesForSession(submissionSessionId);
+      if (submissionConversationToken === conversationLoadTokenRef.current) {
+        retainComposerDraft(text, outgoingAttachments);
+        setInput(text);
+        setAttachments(outgoingAttachments);
+      }
       setStatus(error instanceof Error ? error.message : '发送失败');
       isProcessingRef.current = false;
       setIsProcessing(false);
       setProcessingCount(0);
     } finally {
+      if (activeChatSubmissionRef.current?.clientMessageId === clientMessageId) {
+        activeChatSubmissionRef.current = null;
+      }
       setIsSending(false);
+      replayDeferredRouteHandoff();
       focusComposerSoon();
     }
   }
@@ -1006,6 +1716,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   }
 
   function handleSessionTabCreate() {
+    if (conversationTransitionRef.current) return;
     if (sessionTab === 'groups') {
       openGroupDialog();
       return;
@@ -1016,6 +1727,13 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   async function submitGroupDialog(event: FormEvent) {
     event.preventDefault();
     if (isCreatingGroup || selectedGroupAgentIds.length === 0) return;
+    if (
+      groupDialogMode === 'create'
+      && (conversationTransitionRef.current || blockConversationTransitionDuringSubmission())
+    ) return;
+    const conversationToken = groupDialogMode === 'create'
+      ? beginConversationLoading()
+      : conversationLoadTokenRef.current;
     setIsCreatingGroup(true);
     setGroupDialogError('');
     try {
@@ -1039,12 +1757,13 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
         await refreshMessages({ allowDuringTransition: true });
         return;
       }
-      const result = await createChatGroupSession({
+      const result = await enqueueConversationMutation(() => createChatGroupSession({
         avatarUrl: groupAvatarUrl,
         defaultName: defaultGroupName,
         name: groupName,
         participantIds: selectedGroupAgentIds,
-      });
+      }));
+      if (conversationToken !== conversationLoadTokenRef.current) return;
       const nextSessionId = String(result.session_id || '');
       transientEmptySessionIdRef.current = '';
       latestChatSnapshotRef.current = {
@@ -1053,6 +1772,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
         messageCount: 0,
       };
       renderStateRef.current.clear();
+      latestMessagesRef.current = [];
       setMessages([]);
       setSessionContext(result.session_context || null);
       setSessionTab('groups');
@@ -1063,7 +1783,14 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       setStatus('群组已创建');
       await loadSessions();
       await refreshMessages({ allowDuringTransition: true });
+      if (conversationToken === conversationLoadTokenRef.current) unlockConversationTransition();
     } catch (error) {
+      if (groupDialogMode === 'create' && conversationToken === conversationLoadTokenRef.current) {
+        unlockConversationTransition();
+        messagesLoadedRef.current = true;
+        setMessagesLoaded(true);
+        setMessagesVisible(true);
+      }
       const message = error instanceof Error ? error.message : (groupDialogMode === 'edit' ? '保存群组失败' : '创建群组失败');
       setGroupDialogError(message);
       setStatus(message);
@@ -1073,12 +1800,19 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   }
 
   async function clearSession() {
+    if (conversationTransitionRef.current) return;
+    if (blockConversationTransitionDuringSubmission()) return;
+    const conversationToken = beginConversationLoading();
     try {
       pendingReplyScrollRef.current = false;
       pendingReplyTaskIdRef.current = '';
-      const result = await apiPost<{ ok?: boolean; error?: string; session_id?: string }>('/ui/chat/session/clear');
+      const result = await enqueueConversationMutation(() => (
+        apiPost<{ ok?: boolean; error?: string; session_id?: string }>('/ui/chat/session/clear')
+      ));
       if (result.ok === false) throw new Error(result.error || '新建对话失败');
+      if (conversationToken !== conversationLoadTokenRef.current) return;
       const nextSessionId = String(result.session_id || '');
+      forgetOptimisticOutboxSession(nextSessionId);
       transientEmptySessionIdRef.current = nextSessionId;
       latestChatSnapshotRef.current = {
         ...latestChatSnapshotRef.current,
@@ -1086,15 +1820,26 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
         messageCount: 0,
       };
       renderStateRef.current.clear();
+      latestMessagesRef.current = [];
       setMessages([]);
       setSessionContext(null);
-      setConversationTokenCount(0);
       isProcessingRef.current = false;
       setIsProcessing(false);
       setProcessingCount(0);
       setStatus('新对话已创建');
       await loadSessions();
+      if (conversationToken === conversationLoadTokenRef.current) {
+        messagesLoadedRef.current = true;
+        setMessagesLoaded(true);
+        setMessagesVisible(true);
+        unlockConversationTransition();
+      }
     } catch (error) {
+      if (conversationToken !== conversationLoadTokenRef.current) return;
+      unlockConversationTransition();
+      messagesLoadedRef.current = true;
+      setMessagesLoaded(true);
+      setMessagesVisible(true);
       setStatus(error instanceof Error ? error.message : '新建对话失败');
     }
   }
@@ -1109,7 +1854,6 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       setMessages(result.messages || []);
       const nextProcessingCount = Math.max(0, Number(result.processing_count || 0));
       const nextProcessing = Boolean(result.is_processing || nextProcessingCount > 0);
-      setConversationTokenCount(normalizedTokenCount(result.token_count));
       isProcessingRef.current = nextProcessing;
       setIsProcessing(nextProcessing);
       setProcessingCount(nextProcessingCount);
@@ -1120,20 +1864,27 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     }
   }
 
-  async function deleteSession(targetLabel = '对话') {
+  async function deleteSession(targetLabel: string, targetSessionId: string) {
+    if (!targetSessionId) return;
+    if (conversationTransitionRef.current) return;
+    if (blockDangerousConversationMutationDuringSubmission()) return;
     const conversationToken = beginConversationLoading();
     try {
-      await apiPost('/ui/chat/session/delete');
+      await enqueueConversationMutation(() => apiPost('/ui/chat/session/delete', {
+        session_id: targetSessionId,
+      }));
       if (conversationToken !== conversationLoadTokenRef.current) return;
       renderStateRef.current.clear();
+      forgetOptimisticOutboxSession(targetSessionId);
+      latestMessagesRef.current = [];
       stickToBottomRef.current = true;
       await loadSessions();
       await refreshMessages({ allowDuringTransition: true });
-      if (conversationToken === conversationLoadTokenRef.current) conversationTransitionRef.current = false;
+      if (conversationToken === conversationLoadTokenRef.current) unlockConversationTransition();
       setStatus(`已删除此${targetLabel}`);
     } catch (error) {
       if (conversationToken !== conversationLoadTokenRef.current) return;
-      conversationTransitionRef.current = false;
+      unlockConversationTransition();
       messagesLoadedRef.current = true;
       setMessagesLoaded(true);
       setMessagesVisible(true);
@@ -1143,42 +1894,144 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
 
   function requestDeleteSession() {
     const targetLabel = deleteTarget;
+    const targetSessionId = currentSessionId;
+    if (!targetSessionId) return;
     requestConfirm({
       title: `删除此${targetLabel}？`,
       description: `当前${targetLabel}记录会从本机删除，此操作不可恢复。`,
       confirmLabel: `删除${targetLabel}`,
       variant: 'danger',
-      onConfirm: () => void deleteSession(targetLabel),
+      onConfirm: () => void deleteSession(targetLabel, targetSessionId),
     });
+  }
+
+  function switchRouteConversation(sessionId: string): Promise<ChatMessagesRefreshResult> {
+    const submissionPhase = activeChatSubmissionRef.current?.phase;
+    if (!submissionPhase || submissionPhase === 'accepted') {
+      return switchSession(sessionId);
+    }
+    return new Promise((resolve) => {
+      deferredRouteHandoffRef.current?.resolve(undefined);
+      deferredRouteHandoffRef.current = { sessionId, resolve };
+      setStatus('消息发送完成后将打开目标会话');
+    });
+  }
+
+  function replayDeferredRouteHandoff() {
+    const deferredHandoff = deferredRouteHandoffRef.current;
+    if (!deferredHandoff) return;
+    deferredRouteHandoffRef.current = null;
+    void switchSession(deferredHandoff.sessionId).then(
+      deferredHandoff.resolve,
+      () => deferredHandoff.resolve(undefined),
+    );
   }
 
   async function switchSession(sessionId: string, anchorMessageId = '') {
     if (!sessionId) return;
-    if (sessionId === sessions?.current_session_id) {
-      if (anchorMessageId) {
-        await refreshMessages({ allowDuringTransition: true, anchorMessageId });
-        setStatus('已定位到匹配消息');
-      }
-      return;
+    if (blockConversationTransitionDuringSubmission()) return;
+    if (
+      sessionId === sessions?.current_session_id
+      && !latestSessionSwitchTargetRef.current
+      && !conversationTransitionRef.current
+    ) {
+      const refreshed = await refreshMessages({ allowDuringTransition: true, anchorMessageId });
+      if (anchorMessageId) setStatus('已定位到匹配消息');
+      return refreshed;
     }
+    const switchRequestId = ++sessionSwitchRequestIdRef.current;
+    latestSessionSwitchTargetRef.current = sessionId;
     const conversationToken = beginConversationLoading();
     setStatus('正在切换会话...');
+    const mutation = enqueueConversationMutation(async () => {
+      if (!chatMountedRef.current) return;
+      const executeMutation = async () => {
+        const requestController = new AbortController();
+        sessionSwitchAbortControllerRef.current = requestController;
+        try {
+          const result = await apiPost<{ ok?: boolean; error?: string }>('/ui/chat/sessions/load', {
+            session_id: sessionId,
+          }, {
+            signal: requestController.signal,
+            timeoutMs: CHAT_REQUEST_TIMEOUT_MS,
+          });
+          if (result.ok === false) throw new Error(result.error || '切换会话失败');
+        } finally {
+          if (sessionSwitchAbortControllerRef.current === requestController) {
+            sessionSwitchAbortControllerRef.current = null;
+          }
+        }
+      };
+      try {
+        await executeMutation();
+      } catch (error) {
+        if (!chatMountedRef.current || !isUncertainSessionSwitchFailure(error)) throw error;
+        try {
+          await executeMutation();
+        } catch (retryError) {
+          throw markSessionSwitchFailureUncertain(retryError);
+        }
+      }
+    });
     try {
-      await apiPost('/ui/chat/sessions/load', { session_id: sessionId });
-      if (conversationToken !== conversationLoadTokenRef.current) return;
+      await mutation;
+      if (
+        switchRequestId !== sessionSwitchRequestIdRef.current
+        || conversationToken !== conversationLoadTokenRef.current
+      ) return;
       renderStateRef.current.clear();
       stickToBottomRef.current = true;
       await loadSessions();
-      await refreshMessages({ allowDuringTransition: true, anchorMessageId });
-      if (conversationToken === conversationLoadTokenRef.current) conversationTransitionRef.current = false;
+      if (
+        switchRequestId !== sessionSwitchRequestIdRef.current
+        || conversationToken !== conversationLoadTokenRef.current
+      ) return;
+      const refreshed = await refreshMessages({ allowDuringTransition: true, anchorMessageId });
+      if (conversationToken === conversationLoadTokenRef.current) unlockConversationTransition();
       setStatus(anchorMessageId ? '已定位到匹配消息' : '已切换会话');
+      return refreshed;
     } catch (error) {
-      if (conversationToken !== conversationLoadTokenRef.current) return;
-      conversationTransitionRef.current = false;
-      messagesLoadedRef.current = true;
-      setMessagesLoaded(true);
-      setMessagesVisible(true);
-      setStatus(error instanceof Error ? error.message : '切换失败');
+      if (
+        switchRequestId !== sessionSwitchRequestIdRef.current
+        || conversationToken !== conversationLoadTokenRef.current
+      ) return;
+      const failureMessage = error instanceof Error ? error.message : '切换失败';
+      if (isMarkedSessionSwitchFailureUncertain(error)) {
+        messagesLoadedRef.current = false;
+        setMessagesLoaded(false);
+        setMessagesVisible(false);
+        setStatus(`${failureMessage}；服务端最终会话尚无法确认，请重试切换`);
+        return;
+      }
+
+      setStatus(`${failureMessage}；正在恢复服务端当前会话...`);
+      const authoritativeSessions = await loadSessionsSnapshot();
+      const authoritativeSessionId = String(authoritativeSessions?.current_session_id || '').trim();
+      const refreshed = authoritativeSessionId
+        ? await refreshMessages({ allowDuringTransition: true })
+        : undefined;
+      if (
+        switchRequestId !== sessionSwitchRequestIdRef.current
+        || conversationToken !== conversationLoadTokenRef.current
+      ) return;
+      if (authoritativeSessionId && refreshed) {
+        latestChatSnapshotRef.current = {
+          ...latestChatSnapshotRef.current,
+          currentSessionId: authoritativeSessionId,
+        };
+        unlockConversationTransition();
+        setStatus(`${failureMessage}；已恢复到服务端当前会话`);
+        return refreshed;
+      } else {
+        messagesLoadedRef.current = false;
+        setMessagesLoaded(false);
+        setMessagesVisible(false);
+        setStatus(`${failureMessage}；无法确认服务端当前会话，请重试切换`);
+      }
+    } finally {
+      if (switchRequestId === sessionSwitchRequestIdRef.current) {
+        latestSessionSwitchTargetRef.current = '';
+      }
     }
   }
 
@@ -1198,8 +2051,51 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   }
 
   async function retryMessage(message: ChatMessage) {
-    if (!message.id || isSending || isProcessing || retryingMessageId) return;
+    if (isUncertainOptimisticMessage(message)) {
+      await retryUncertainOptimisticMessage(message);
+      return;
+    }
+    if (
+      !message.id
+      || isSending
+      || isProcessing
+      || retryingMessageId
+      || activeChatSubmissionRef.current
+      || conversationTransitionLocked
+      || conversationTransitionRef.current
+    ) return;
+    const retrySessionId = sessions?.current_session_id
+      || latestChatSnapshotRef.current.currentSessionId
+      || '';
+    if (!retrySessionId) {
+      setStatus('正在准备会话，请稍后再重试');
+      void loadSessions();
+      return;
+    }
+    const retryConversationToken = conversationLoadTokenRef.current;
+    const retrySourceMessage = retrySourceUserMessage(message, messages) || message;
+    const retryClientMessageId = createClientMessageId();
+    const retryText = messageText(retrySourceMessage);
+    const retryAttachments = retrySourceMessage.attachments || message.attachments || [];
+    const shouldTryPublicTask = (
+      retryAttachments.length === 0
+      && String(activeSessionContext?.conversation_kind || '') !== 'group'
+    );
+    const publicTaskTarget = shouldTryPublicTask
+      ? yachiyoPublicTaskTarget(retryText, runnables, assistantProfile)
+      : null;
+    const retryDailyDesktopTaskPrompt = shouldTryPublicTask && !publicTaskTarget
+      ? yachiyoDailyDesktopTaskPrompt(retryText)
+      : null;
+    rememberOptimisticDeliveryState(retrySessionId, retryClientMessageId, 'pending');
+    activeChatSubmissionRef.current = {
+      clientMessageId: retryClientMessageId,
+      conversationToken: retryConversationToken,
+      phase: shouldTryPublicTask ? 'public' : 'legacy',
+      sessionId: retrySessionId,
+    };
     setRetryingMessageId(message.id);
+    setIsSending(true);
     setStatus('正在重试...');
     isProcessingRef.current = true;
     pendingReplyScrollRef.current = true;
@@ -1207,22 +2103,16 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     setIsProcessing(true);
     setProcessingCount((current) => Math.max(1, current || 1));
     stickToBottomRef.current = true;
+    let retryAccepted = false;
+    let retryRejected = false;
     try {
-      const retryText = messageText(message);
-      const shouldTryPublicTask = (
-        !message.attachments?.length
-        && String(activeSessionContext?.conversation_kind || '') !== 'group'
-      );
-      const publicTaskTarget = shouldTryPublicTask
-        ? yachiyoPublicTaskTarget(retryText, runnables, assistantProfile)
-        : null;
-      const retryDailyDesktopTaskPrompt = shouldTryPublicTask && !publicTaskTarget
-        ? yachiyoDailyDesktopTaskPrompt(retryText)
-        : null;
       if (shouldTryPublicTask) {
         const handled = await startPublicYachiyoTask({
-          clientMessageId: createClientMessageId(),
-          conversationId: sessions?.current_session_id || latestChatSnapshotRef.current.currentSessionId || null,
+          clientMessageId: retryClientMessageId,
+          identity: {
+            conversationToken: retryConversationToken,
+            sessionId: retrySessionId,
+          },
           prompt: publicTaskTarget
             ? yachiyoPublicTaskPrompt(retryText, publicTaskTarget)
             : retryDailyDesktopTaskPrompt || retryText,
@@ -1240,9 +2130,39 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
         });
         if (handled) return;
       }
-      const result = await retryLegacyChatMessage(message.id);
-      if (result.ok === false) throw new Error(result.error || '重试失败');
-      if (await handleLegacyChatRunnableResult(result)) return;
+      if (!isSubmissionConversationCurrent(retryConversationToken, retrySessionId)) return;
+      if (activeChatSubmissionRef.current?.clientMessageId === retryClientMessageId) {
+        activeChatSubmissionRef.current.phase = 'legacy';
+      }
+      const result = await retryLegacyChatMessage(
+        message.id,
+        retryClientMessageId,
+        { timeoutMs: CHAT_REQUEST_TIMEOUT_MS },
+      );
+      const deliveryDisposition = legacyChatDeliveryDisposition(result);
+      if (deliveryDisposition === 'rejected') {
+        retryRejected = true;
+        throw new Error(result.error || '消息未重新发送');
+      }
+      retryAccepted = deliveryDisposition === 'accepted';
+      rememberOptimisticDeliveryState(retrySessionId, retryClientMessageId, deliveryDisposition);
+      if (activeChatSubmissionRef.current?.clientMessageId === retryClientMessageId) {
+        activeChatSubmissionRef.current.phase = 'accepted';
+      }
+      if (deliveryDisposition === 'uncertain') {
+        setStatus('重试投递状态待确认，正在同步对话…');
+        beginOptimisticDeliveryReconciliation({
+          conversationToken: retryConversationToken,
+          sessionId: retrySessionId,
+        }, retryClientMessageId);
+        return;
+      }
+      if (await handleLegacyChatRunnableResult(result, {
+        identity: {
+          conversationToken: retryConversationToken,
+          sessionId: retrySessionId,
+        },
+      })) return;
       const taskId = String(result.task_id || '');
       pendingReplyTaskIdRef.current = taskId;
       if (!taskId) pendingReplyScrollRef.current = false;
@@ -1251,6 +2171,23 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       await refreshMessages();
       await loadSessions();
     } catch (error) {
+      if (!isSubmissionConversationCurrent(retryConversationToken, retrySessionId)) return;
+      if (!retryRejected) {
+        rememberOptimisticDeliveryState(
+          retrySessionId,
+          retryClientMessageId,
+          retryAccepted ? 'accepted' : 'uncertain',
+        );
+        setStatus(retryAccepted ? '重试已接收，正在同步对话…' : '重试投递状态待确认，正在同步对话…');
+        beginOptimisticDeliveryReconciliation({
+          conversationToken: retryConversationToken,
+          sessionId: retrySessionId,
+        }, retryClientMessageId);
+        return;
+      }
+      optimisticDeliveryStateRef.current.delete(
+        conversationClientMessageKey(retrySessionId, retryClientMessageId),
+      );
       pendingReplyScrollRef.current = false;
       pendingReplyTaskIdRef.current = '';
       isProcessingRef.current = false;
@@ -1258,7 +2195,150 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       setProcessingCount(0);
       setStatus(error instanceof Error ? error.message : '重试失败');
     } finally {
+      if (activeChatSubmissionRef.current?.clientMessageId === retryClientMessageId) {
+        activeChatSubmissionRef.current = null;
+      }
       setRetryingMessageId('');
+      setIsSending(false);
+      replayDeferredRouteHandoff();
+      focusComposerSoon();
+    }
+  }
+
+  function isUncertainOptimisticMessage(message: ChatMessage) {
+    const clientMessageId = String(message.metadata?.client_message_id || '').trim();
+    const sessionId = String(message.metadata?.client_session_id || '').trim();
+    return message.role === 'user'
+      && message.metadata?.client_optimistic === true
+      && Boolean(clientMessageId)
+      && optimisticDeliveryStateRef.current.get(
+        conversationClientMessageKey(sessionId, clientMessageId),
+      ) === 'uncertain';
+  }
+
+  function pendingAttachmentsFromOptimisticMessage(message: ChatMessage): PendingAttachment[] {
+    return (message.attachments || []).flatMap((attachment, index) => {
+      const dataUrl = String(attachment.url || '').trim();
+      if (!dataUrl.startsWith('data:')) return [];
+      return [{
+        id: String(attachment.id || `retry-attachment-${index}`),
+        name: String(attachment.name || `image-${index + 1}`),
+        mime_type: String(attachment.mime_type || 'image/png'),
+        size: Math.max(0, Number(attachment.size || 0)),
+        data_url: dataUrl,
+      }];
+    });
+  }
+
+  async function retryUncertainOptimisticMessage(message: ChatMessage) {
+    if (
+      !message.id
+      || isSending
+      || retryingMessageId
+      || activeChatSubmissionRef.current
+      || conversationTransitionRef.current
+    ) return;
+    const clientMessageId = String(message.metadata?.client_message_id || '').trim();
+    const identity: ConversationIdentity = {
+      conversationToken: Number(message.metadata?.client_conversation_token),
+      sessionId: String(message.metadata?.client_session_id || '').trim(),
+    };
+    if (!clientMessageId || !isSubmissionConversationCurrent(identity)) {
+      setStatus('这条消息已不属于当前会话，无法重新确认投递');
+      return;
+    }
+    const text = messageText(message);
+    const outgoingAttachments = pendingAttachmentsFromOptimisticMessage(message);
+    const composerDraftAtRetry = latestComposerDraftRef.current;
+    activeChatSubmissionRef.current = {
+      clientMessageId,
+      conversationToken: identity.conversationToken,
+      phase: 'legacy',
+      sessionId: identity.sessionId,
+    };
+    rememberOptimisticDeliveryState(identity.sessionId, clientMessageId, 'pending');
+    setRetryingMessageId(message.id);
+    setIsSending(true);
+    setStatus('正在确认消息投递...');
+    let rejected = false;
+    try {
+      const result = await sendLegacyChatMessage({
+        text,
+        attachments: outgoingAttachments,
+        client_message_id: clientMessageId,
+      }, { timeoutMs: CHAT_REQUEST_TIMEOUT_MS });
+      const deliveryDisposition = legacyChatDeliveryDisposition(result);
+      if (deliveryDisposition === 'rejected') {
+        rejected = true;
+        throw new Error(result.error || '消息未发送');
+      }
+      rememberOptimisticDeliveryState(identity.sessionId, clientMessageId, deliveryDisposition);
+      if (activeChatSubmissionRef.current?.clientMessageId === clientMessageId) {
+        activeChatSubmissionRef.current.phase = 'accepted';
+      }
+      if (!isSubmissionConversationCurrent(identity)) return;
+      if (deliveryDisposition === 'uncertain') {
+        setStatus('投递状态仍待确认，正在同步对话…');
+        beginOptimisticDeliveryReconciliation(identity, clientMessageId);
+        return;
+      }
+      if (await handleLegacyChatRunnableResult(result, { identity })) return;
+      const refreshed = await refreshMessages();
+      if (!isSubmissionConversationCurrent(identity)) return;
+      await loadSessions();
+      if (!refreshed) setStatus('消息已发送，正在同步对话…');
+    } catch (error) {
+      if (!isSubmissionConversationCurrent(identity)) return;
+      if (!rejected) {
+        rememberOptimisticDeliveryState(identity.sessionId, clientMessageId, 'uncertain');
+        setStatus('投递状态待确认，正在同步对话…');
+        beginOptimisticDeliveryReconciliation(identity, clientMessageId);
+        return;
+      }
+      forgetOptimisticOutboxMessage(identity.sessionId, clientMessageId);
+      pruneSubmittedMessageSequencesForSession(identity.sessionId);
+      pendingReplyScrollRef.current = false;
+      pendingReplyTaskIdRef.current = '';
+      setMessages((currentMessages) => {
+        const nextMessages = removeOptimisticUserMessage(
+          currentMessages,
+          identity.sessionId,
+          clientMessageId,
+        );
+        latestMessagesRef.current = nextMessages;
+        return nextMessages;
+      });
+      const currentComposerDraft = latestComposerDraftRef.current;
+      const composerUnchangedSinceRetry = composerDraftsEqual(
+        currentComposerDraft,
+        composerDraftAtRetry,
+      );
+      const composerAlreadyContainsRetry = composerDraftsEqual(currentComposerDraft, {
+        input: text,
+        attachments: outgoingAttachments,
+      });
+      if (
+        composerAlreadyContainsRetry
+        || (composerDraftIsEmpty(composerDraftAtRetry) && composerUnchangedSinceRetry)
+      ) {
+        retainComposerDraft(text, outgoingAttachments);
+        setInput(text);
+        setAttachments(outgoingAttachments);
+        setStatus(error instanceof Error ? error.message : '消息未发送');
+      } else {
+        retainComposerDraft(currentComposerDraft.input, currentComposerDraft.attachments);
+        setStatus(`${error instanceof Error ? error.message : '消息未发送'}；当前草稿已保留`);
+      }
+      isProcessingRef.current = false;
+      setIsProcessing(false);
+      setProcessingCount(0);
+    } finally {
+      if (activeChatSubmissionRef.current?.clientMessageId === clientMessageId) {
+        activeChatSubmissionRef.current = null;
+      }
+      setRetryingMessageId('');
+      setIsSending(false);
+      replayDeferredRouteHandoff();
       focusComposerSoon();
     }
   }
@@ -1281,33 +2361,6 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     } catch {
       setStatus('复制代码失败');
     }
-  }
-
-  async function copySessionId(sessionId: string, event?: ReactMouseEvent<HTMLElement>) {
-    event?.stopPropagation();
-    if (!sessionId) {
-      setStatus('没有可复制的 Session ID');
-      return;
-    }
-    setSessionIdCopyError('');
-    try {
-      await copyText(sessionId);
-      markSessionCopied(sessionId);
-      setStatus('已复制会话调试 ID');
-    } catch (error) {
-      setSessionIdDialogOpen(true);
-      setSessionIdCopyError(error instanceof Error ? error.message : '复制失败');
-      setStatus('复制会话调试 ID 失败');
-    }
-  }
-
-  function openSessionIdDialog() {
-    if (!currentSessionId) {
-      setStatus('没有可查看的 Session ID');
-      return;
-    }
-    setSessionIdCopyError('');
-    setSessionIdDialogOpen(true);
   }
 
   function registerMessageNode(messageId: string | undefined, node: HTMLElement | null) {
@@ -1443,9 +2496,11 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     if (normalizedTaskId) stickToBottomRef.current = true;
   }
 
-  function delegatedRunSummaryOptions() {
+  function delegatedRunSummaryOptions(identity: ConversationIdentity) {
     return {
       expectPendingAssistantReply,
+      identity,
+      isConversationCurrent: isSubmissionConversationCurrent,
       loadSessions,
       refreshMessages,
     };
@@ -1466,8 +2521,64 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     return nextMessages.some((message) => messageMatchesPendingAssistantReply(message, taskId));
   }
 
+  function currentConversationIdentity(): ConversationIdentity | null {
+    const currentSessionId = latestChatSnapshotRef.current.currentSessionId
+      || sessions?.current_session_id
+      || '';
+    if (!currentSessionId) return null;
+    return {
+      conversationToken: conversationLoadTokenRef.current,
+      sessionId: currentSessionId,
+    };
+  }
+
+  function isSubmissionConversationCurrent(
+    identityOrConversationToken: ConversationIdentity | number,
+    requestedSessionId = '',
+  ) {
+    const identity = typeof identityOrConversationToken === 'number'
+      ? {
+        conversationToken: identityOrConversationToken,
+        sessionId: requestedSessionId,
+      }
+      : identityOrConversationToken;
+    if (!identity.sessionId || identity.conversationToken !== conversationLoadTokenRef.current) return false;
+    const currentSessionId = latestChatSnapshotRef.current.currentSessionId
+      || sessions?.current_session_id
+      || '';
+    return Boolean(currentSessionId) && identity.sessionId === currentSessionId;
+  }
+
+  function blockConversationTransitionDuringSubmission() {
+    const phase = activeChatSubmissionRef.current?.phase;
+    if (!phase || phase === 'accepted') return false;
+    setStatus(phase === 'public'
+      ? '消息正在提交，请稍候再切换会话'
+      : '消息正在发送，请稍候再切换会话');
+    return true;
+  }
+
+  function blockDangerousConversationMutationDuringSubmission() {
+    const phase = activeChatSubmissionRef.current?.phase;
+    if (!phase || phase === 'accepted') return false;
+    setStatus('消息投递尚未确认，请稍候再删除会话');
+    return true;
+  }
+
+  function lockConversationTransition() {
+    conversationTransitionRef.current = true;
+    setConversationTransitionLocked(true);
+  }
+
+  function unlockConversationTransition() {
+    conversationTransitionRef.current = false;
+    setConversationTransitionLocked(false);
+  }
+
   function beginConversationLoading() {
     const conversationToken = ++conversationLoadTokenRef.current;
+    cancelOptimisticDeliveryReconciliations();
+    messageRequestAbortControllerRef.current?.abort();
     pendingReplyScrollRef.current = false;
     pendingReplyTaskIdRef.current = '';
     highlightedScrollTargetRef.current = '';
@@ -1475,7 +2586,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       window.clearTimeout(highlightClearTimerRef.current);
       highlightClearTimerRef.current = null;
     }
-    conversationTransitionRef.current = true;
+    lockConversationTransition();
     messageLoadTokenRef.current += 1;
     messagesLoadedRef.current = false;
     setMessagesLoaded(false);
@@ -1488,9 +2599,9 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       let frames = 0;
       let stableFrames = 0;
       let previousHeight = -1;
-      const minFrames = 4;
-      const maxFrames = 24;
-      const requiredStableFrames = 4;
+      const minFrames = 2;
+      const maxFrames = 10;
+      const requiredStableFrames = 2;
 
       const settle = () => {
         if (token !== messageLoadTokenRef.current) {
@@ -1569,11 +2680,18 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     () => activeMentions(input, runnables, assistantProfile),
     [assistantProfile, input, runnables],
   );
-  const headerActivity = latestVisibleActivity(messages);
   const composerApprovalItems = useMemo(
     () => approvalRequiredItems(messages, resolvedComposerApprovalIds, runApprovalDetailOverrides),
     [messages, resolvedComposerApprovalIds, runApprovalDetailOverrides],
   );
+  const fallbackApprovalItemsByMessageId = useMemo(() => {
+    const byMessageId = new Map<string, (typeof composerApprovalItems)[number]>();
+    composerApprovalItems.forEach((item) => {
+      if (!item.messageId || item.source === 'message') return;
+      byMessageId.set(item.messageId, item);
+    });
+    return byMessageId;
+  }, [composerApprovalItems]);
   const composerApprovalItem = useMemo(() => {
     if (!composerApprovalItems.length) return null;
     const selected = composerApprovalItems.find((item) => item.id === composerApprovalMessageId);
@@ -1587,15 +2705,28 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   const footerStatus = composerApprovalDetails
     ? composerApprovalStatusText(composerApprovalDetails, composerApprovalIndex, composerApprovalCount)
     : status;
-  const currentTokenCount = conversationTokenCount || normalizedTokenCount(currentSession?.token_count);
-  const currentTokenLabel = currentTokenCount ? ` · ${formatTokenCount(currentTokenCount)}` : '';
-  const computedHeaderStatusText = `${headerStatusText(isProcessing, headerActivity, status, executor, activeSessionContext)}${currentTokenLabel}`;
-  const imageAttachDisabled = isSending || !canAttachImages(executor) || attachments.length >= MAX_ATTACHMENTS;
+  const computedHeaderStatusText = headerStatusText(
+    isProcessing,
+    null,
+    status,
+    executor,
+    activeSessionContext,
+  );
+  const imageAttachDisabled = conversationTransitionLocked
+    || isSending
+    || !canAttachImages(executor)
+    || attachments.length >= MAX_ATTACHMENTS;
   const chatWorkspaceStyle = embedded
     ? undefined
     : ({ '--chat-sidebar-width': `${sidebarWidth}px` } as CSSProperties);
   const initialChatLoading = !embedded && !chatBootstrapped;
   const conversationLoading = !messagesLoaded;
+  const visibleMessages = shouldShowPendingAssistantReply(
+    messages,
+    messagesLoaded && (isSending || isProcessing),
+  )
+    ? [...messages, PENDING_ASSISTANT_REPLY]
+    : messages;
 
   useEffect(() => {
     setMentionActiveIndex(0);
@@ -1655,22 +2786,41 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
       ) : null}
 
       <div
-        className={`chat-layout hy-chat-workspace${embedded ? '' : ' resizable-chat-workspace'}`}
+        className={`chat-layout hy-chat-workspace${embedded ? '' : ' resizable-chat-workspace'}${mobileSessionsOpen ? ' sessions-open' : ''}`}
         style={chatWorkspaceStyle}
       >
+        <button
+          type="button"
+          className={`chat-session-backdrop${mobileSessionsOpen ? ' is-visible' : ''}`}
+          aria-hidden={!mobileSessionsOpen}
+          aria-label="关闭会话列表"
+          tabIndex={-1}
+          onClick={() => closeMobileSessions(true)}
+        />
         <ChatSessionSidebar
           agentGroups={agentGroups}
           assistantProfile={assistantProfile}
           assistantProfileLoading={assistantProfileLoading}
           currentSessionId={sessions?.current_session_id || ''}
+          conversationMutationLocked={conversationTransitionLocked}
+          closeButtonRef={sessionCloseButtonRef}
           expandedAgentIds={expandedAgents}
           formatSessionSideLabel={sessionSideLabel}
-          formatTokenCount={formatTokenCount}
           groupSessions={groupSessions}
+          mobileOpen={mobileSessionsOpen}
           normalizedSessionQuery={normalizedSessionQuery}
-          onCreate={handleSessionTabCreate}
+          onClose={() => closeMobileSessions(true)}
+          onCreate={() => {
+            closeMobileSessions();
+            handleSessionTabCreate();
+          }}
           onSearchChange={setSessionQuery}
-          onSwitchSession={switchSession}
+          onSwitchSession={(sessionId, anchorMessageId) => {
+            closeMobileSessions();
+            const switching = switchSession(sessionId, anchorMessageId);
+            window.requestAnimationFrame(() => inputRef.current?.focus({ preventScroll: true }));
+            return switching.then(() => undefined);
+          }}
           onTabChange={setSessionTab}
           onToggleAgentGroup={toggleAgentGroup}
           runnables={runnables}
@@ -1698,12 +2848,12 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
           />
         )}
 
-        <section className="chat-main hy-chat-mainpane">
+        <section className="chat-main hy-chat-mainpane" inert={mobileSessionsOpen}>
           <ChatHeader
             assistantProfile={assistantProfile}
             assistantProfileLoading={assistantProfileLoading}
             attachmentHelpText={attachmentHelpText(executor)}
-            copiedSessionId={copiedSessionId}
+            conversationTransitionLocked={conversationTransitionLocked}
             currentSessionId={currentSessionId}
             currentTitle={currentTitle}
             deleteTarget={deleteTarget}
@@ -1714,10 +2864,12 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
             onClearSession={() => void clearSession()}
             onOpenGroupSettings={openGroupSettings}
             onOpenImageAttachmentPicker={() => void openImageAttachmentPicker()}
-            onOpenSessionIdDialog={openSessionIdDialog}
             onRequestDeleteSession={requestDeleteSession}
+            onToggleSessions={toggleMobileSessions}
             runnables={runnables}
             sessionContext={activeSessionContext}
+            sessionsPanelOpen={mobileSessionsOpen}
+            sessionsToggleRef={sessionToggleButtonRef}
             statusText={computedHeaderStatusText}
           />
 
@@ -1739,33 +2891,61 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
               <div className="empty-state">发送消息开始对话</div>
             ) : null}
             <div className={`chat-messages-content${messagesVisible ? '' : ' is-hidden'}`}>
-              {messages.map((message, index) => {
+              {visibleMessages.map((message, index) => {
                 const publicTaskSnapshot = publicTaskSnapshotForMessage(message, agentTaskSnapshotsById);
+                const uncertainOptimisticDelivery = isUncertainOptimisticMessage(message);
+                const fallbackApprovalItem = message.id
+                  ? fallbackApprovalItemsByMessageId.get(message.id) || null
+                  : null;
                 return (
                   <MessageBubble
                     assistantProfile={assistantProfile}
                     assistantProfileLoading={assistantProfileLoading}
                     copied={copiedMessageId === message.id}
                     displayContent={displayMessageText(message, renderStateRef.current)}
+                    fallbackApprovalItem={fallbackApprovalItem}
                     formatTime={formatShortTime}
                     key={message.id || index}
                     highlighted={message.id === highlightedMessageId}
                     message={message}
                     copiedCodeBlockKey={copiedCodeBlockKey}
                     publicTaskSnapshot={publicTaskSnapshot}
-                    retryDisabled={isSending || isProcessing || Boolean(retryingMessageId)}
+                    retryDisabled={Boolean(
+                      isSending
+                      || retryingMessageId
+                      || conversationTransitionLocked
+                      || (isProcessing && !uncertainOptimisticDelivery)
+                    )}
                     retrying={retryingMessageId === message.id}
-                    showRetry={isRetryableMessage(message, messages)}
+                    showRetry={uncertainOptimisticDelivery || isRetryableMessage(message, messages)}
                     approvalBusy={Boolean(
-                      message.id
-                      && (approvalActionMessageId === message.id || approvalActionMessageId.startsWith(`message:${message.id}:`)),
+                      (
+                        message.id
+                        && (
+                          approvalActionMessageId === message.id
+                          || approvalActionMessageId.startsWith(`message:${message.id}:`)
+                        )
+                      )
+                      || (
+                        publicTaskSnapshot?.task_id
+                        && approvalActionMessageId.startsWith(`task:${publicTaskSnapshot.task_id}:`)
+                      )
+                      || (fallbackApprovalItem && approvalActionMessageId === fallbackApprovalItem.id),
                     )}
                     onCopy={() => void copyMessage(message)}
                     onRetry={() => void retryMessage(message)}
-                    onApprove={() => void resolveApprovalMessage(message, 'approve')}
+                    onApprove={() => void (
+                      fallbackApprovalItem
+                        ? resolveApprovalItem(fallbackApprovalItem, 'approve')
+                        : resolveApprovalMessage(message, 'approve')
+                    )}
                     onApproveTaskApproval={(task, approval) => void resolveYachiyoTaskApproval(task, approval, 'approve')}
                     onCancelTask={cancelYachiyoTaskFromCard}
-                    onReject={() => void resolveApprovalMessage(message, 'reject')}
+                    onReject={() => void (
+                      fallbackApprovalItem
+                        ? resolveApprovalItem(fallbackApprovalItem, 'reject')
+                        : resolveApprovalMessage(message, 'reject')
+                    )}
                     onRejectTaskApproval={(task, approval) => void resolveYachiyoTaskApproval(task, approval, 'reject')}
                     onOpenRunDetails={openRunDetails}
                     onOpenWorkflowStudio={openWorkflowStudio}
@@ -1775,7 +2955,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
                   />
                 );
               })}
-              <div className="chat-bottom-anchor" ref={bottomAnchorRef} aria-hidden="true" />
+              <div className="chat-bottom-anchor" aria-hidden="true" />
             </div>
           </section>
 
@@ -1792,6 +2972,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
             composerHeight={composerHeight}
             composerMaxHeight={COMPOSER_MAX_HEIGHT}
             composerMinHeight={COMPOSER_MIN_HEIGHT}
+            conversationTransitionLocked={conversationTransitionLocked}
             fileInputRef={fileInputRef}
             imageAttachDisabled={imageAttachDisabled}
             input={input}
@@ -1801,9 +2982,6 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
             mentionActiveIndex={mentionActiveIndex}
             mentionSuggestions={mentionSuggestions}
             processingCount={processingCount}
-            onApproveComposerApproval={() => {
-              if (composerApprovalItem) void resolveApprovalItem(composerApprovalItem, 'approve');
-            }}
             onCancelProcessing={() => void cancelProcessing()}
             onComposerCompositionEnd={() => {
               composerComposingRef.current = false;
@@ -1833,9 +3011,6 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
             }}
             onOpenImageAttachmentPicker={() => void openImageAttachmentPicker()}
             onPreviousComposerApproval={() => selectComposerApproval(-1)}
-            onRejectComposerApproval={() => {
-              if (composerApprovalItem) void resolveApprovalItem(composerApprovalItem, 'reject');
-            }}
             onRemoveAttachment={removeAttachment}
             onRevealComposerApproval={() => {
               if (composerApprovalItem) revealMessage(composerApprovalItem.messageId);
@@ -1867,16 +3042,6 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
           onNameChange={changeGroupName}
           onSubmit={submitGroupDialog}
           onToggleAgent={toggleGroupAgent}
-        />
-      ) : null}
-
-      {sessionIdDialogOpen ? (
-        <SessionIdDialog
-          copied={copiedSessionId === currentSessionId}
-          error={sessionIdCopyError}
-          sessionId={currentSessionId}
-          onClose={() => setSessionIdDialogOpen(false)}
-          onCopy={() => void copySessionId(currentSessionId)}
         />
       ) : null}
 

@@ -137,7 +137,11 @@ def _run_advanced_workflow(
                 {
                     "id": "child-agent",
                     "type": "agent",
-                    "data": {"label": "Child Agent", "agent_id": subflow_agent["agent_id"]},
+                    "data": {
+                        "label": "Child Agent",
+                        "agent_id": subflow_agent["agent_id"],
+                        "task": "Return exactly SUBFLOW_READY.",
+                    },
                 },
                 {
                     "id": "child-report",
@@ -159,7 +163,11 @@ def _run_advanced_workflow(
                 {
                     "id": "classify",
                     "type": "agent",
-                    "data": {"label": "Classify", "agent_id": classifier["agent_id"]},
+                    "data": {
+                        "label": "Classify",
+                        "agent_id": classifier["agent_id"],
+                        "task": "Return exactly decision: ship.",
+                    },
                 },
                 {
                     "id": "route",
@@ -186,12 +194,20 @@ def _run_advanced_workflow(
                 {
                     "id": "design",
                     "type": "agent",
-                    "data": {"label": "Design", "agent_id": design["agent_id"]},
+                    "data": {
+                        "label": "Design",
+                        "agent_id": design["agent_id"],
+                        "task": "Return exactly DESIGN_READY.",
+                    },
                 },
                 {
                     "id": "code",
                     "type": "agent",
-                    "data": {"label": "Code", "agent_id": code["agent_id"]},
+                    "data": {
+                        "label": "Code",
+                        "agent_id": code["agent_id"],
+                        "task": "Return exactly CODE_READY.",
+                    },
                 },
                 {
                     "id": "repeat",
@@ -201,7 +217,11 @@ def _run_advanced_workflow(
                 {
                     "id": "skip",
                     "type": "agent",
-                    "data": {"label": "Skip", "agent_id": skip["agent_id"]},
+                    "data": {
+                        "label": "Skip",
+                        "agent_id": skip["agent_id"],
+                        "task": "Return exactly SKIPPED.",
+                    },
                 },
                 {
                     "id": "report",

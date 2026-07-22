@@ -4,7 +4,13 @@ import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
 
 import { useConfirmDialog } from '../components/ConfirmDialog';
+import { SettingsDisclosure } from '../components/SettingsDisclosure';
 import { UiIcon } from '../components/UiIcon';
+import { getYachiyoReadiness } from '../features/yachiyo-chat/api';
+import {
+  backgroundControlReadiness,
+  type BackgroundControlReadiness,
+} from '../features/yachiyo-chat/readiness';
 import {
   apiGet,
   apiPost,
@@ -242,10 +248,10 @@ const NATIVE_TOOL_CATALOG: NativeToolCatalogItem[] = [
   },
   {
     id: 'browser-cdp',
-    label: '浏览器 CDP 高级控制',
+    label: 'Yachiyo 独立浏览器',
     category: '信息检索',
-    description: '连接本机 Chrome 调试端口，启用 CDP 级高级浏览器操作。',
-    requirement: '需要 browser.cdp_url 或本机 Chrome 调试端口',
+    description: '使用专属 Chrome 会话操作网页，不接管你当前的浏览器标签页。',
+    requirement: '首次使用时启动独立浏览器；本机来源不明的调试端口不会被连接',
   },
   {
     id: 'image_gen',
@@ -301,10 +307,10 @@ const NATIVE_TOOL_CATALOG: NativeToolCatalogItem[] = [
   },
   {
     id: 'computer_use',
-    label: 'Computer Use',
+    label: '后台操作',
     category: '本地工作',
-    description: '让 Native 控制本机桌面应用和窗口交互。',
-    requirement: '需要 Native computer_use 工具集与 macOS 权限',
+    description: '在后台操作指定应用，尽量不移动你的鼠标、不切换当前窗口。',
+    requirement: '需要安装后台操作组件并授予 macOS 辅助功能权限；默认不移动真实鼠标，无法保持后台时会暂停，不会自动改用前台控制',
     aliases: ['computer-use', 'computer'],
   },
   {
@@ -455,6 +461,9 @@ export function ToolCenterView() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [diagnosticCache, setDiagnosticCache] = useState<DiagnosticCache | null>(null);
   const [toolConfig, setToolConfig] = useState<ToolConfigPayload | null>(null);
+  const [backgroundControl, setBackgroundControl] = useState<BackgroundControlReadiness>(
+    () => backgroundControlReadiness(null),
+  );
   const [toolConfigLoaded, setToolConfigLoaded] = useState(false);
   const [draftToolId, setDraftToolId] = useState('');
   const [configDraft, setConfigDraft] = useState<Record<string, ConfigFieldValue>>({});
@@ -483,25 +492,33 @@ export function ToolCenterView() {
 
   useEffect(() => {
     let disposed = false;
+    let refreshing = false;
     async function refresh() {
+      if (disposed || refreshing) return;
+      refreshing = true;
       try {
-        const [payload, cache, config] = await Promise.all([
+        const [payload, cache, config, readiness] = await Promise.all([
           apiGet<DashboardData>('/ui/dashboard'),
           apiGet<DiagnosticCache>('/ui/native-agent/diagnostics/cache').catch(() => null),
           apiGet<ToolConfigPayload>('/ui/native-agent/tools/config').catch(() => null),
+          getYachiyoReadiness().catch(() => null),
         ]);
         if (!disposed) {
           setData(payload);
           setDiagnosticCache(cache);
           setToolConfig(config);
+          setBackgroundControl(backgroundControlReadiness(readiness));
           setToolConfigLoaded(true);
           setError('');
         }
       } catch (err) {
         if (!disposed) {
+          setBackgroundControl(backgroundControlReadiness(null));
           setToolConfigLoaded(true);
           setError(err instanceof Error ? err.message : '读取工具中心失败');
         }
+      } finally {
+        refreshing = false;
       }
     }
     refresh();
@@ -1122,10 +1139,14 @@ export function ToolCenterView() {
               <button type="button" className="primary-action" onClick={() => navigateTo('proactive-tts')}>
                 打开主动关怀语音
               </button>
-              <button type="button" onClick={() => void openAppView('diagnostics', { command: 'native doctor', return_to: 'tools' })}>
-                运行 Doctor
-              </button>
             </div>
+            <SettingsDisclosure summary="诊断" description="仅在语音工具不可用时检查底层运行环境。">
+              <div className="tool-config-actions">
+                <button type="button" onClick={() => void openAppView('diagnostics', { command: 'native doctor', return_to: 'tools' })}>
+                  运行 Doctor
+                </button>
+              </div>
+            </SettingsDisclosure>
           </section>
         ) : (
           <section className="tool-config-panel empty">
@@ -1147,22 +1168,6 @@ export function ToolCenterView() {
         </div>
         <div className="topbar-actions">
           <button type="button" onClick={() => requestNavigation({ type: 'main' })}>主控台</button>
-          <button
-            type="button"
-            className="primary-action"
-            disabled={!commandExists}
-            onClick={() => void openAppView('diagnostics', { command: 'native doctor', return_to: 'tools' })}
-          >
-            运行 Doctor
-          </button>
-          <button
-            type="button"
-            className={busy ? 'attention-action' : undefined}
-            disabled={busy}
-            onClick={() => void recheckNative()}
-          >
-            {busy ? '检测中...' : '重新检测'}
-          </button>
         </div>
       </header>
 
@@ -1179,6 +1184,8 @@ export function ToolCenterView() {
         cacheStale={cacheStale}
         checked={checked}
       />
+
+      <BackgroundControlCard readiness={backgroundControl} />
 
       <section className="tool-center-panel">
         <div className="section-heading-row">
@@ -1202,42 +1209,22 @@ export function ToolCenterView() {
           <ToolSummaryCard label="可配置项" value={`${visibleConfigCount}`} detail="高级连接不在普通视图显示" muted />
         </div>
 
-        {nativeUpdate || updateBusy ? (
-          <NativeUpdatePanel
-            version={nativeAgent?.version}
-            releaseDate={nativeAgent?.release_date}
-            result={nativeUpdate}
-            busy={updateBusy}
-            mode={updateMode}
-            elapsedSeconds={updateElapsedSeconds}
-            fullBackup={updateWithFullBackup}
-            terminalSupported={hasEmbeddedTerminal()}
-            commandExists={commandExists}
-            onFullBackupChange={setUpdateWithFullBackup}
-            onCheck={() => void checkNativeUpdate()}
-            onUpdate={() => void updateNativeAgent()}
-          />
-        ) : null}
-
-        {(updateTerminalStatus !== 'idle' || updateTerminalSession) ? (
-          <NativeUpdateTerminalPanel
-            panelRef={updateTerminalPanelRef}
-            hostRef={updateTerminalHostRef}
-            message={updateTerminalMessage}
-            session={updateTerminalSession}
-            status={updateTerminalStatus}
-            supported={hasEmbeddedTerminal()}
-            onStop={() => stopNativeUpdateTerminal()}
-          />
-        ) : null}
-
         {cacheStale ? (
           <div className="tool-limited-banner">
             <strong>诊断缓存已过期</strong>
             <div>
               <span>配置文件或密钥状态已变化</span>
-              <span>请手动运行 Doctor 刷新工具状态</span>
+              <span>请重新检测工具状态</span>
             </div>
+            <button
+              type="button"
+              className="hy-btn hy-btn-primary"
+              data-testid="tool-center-recheck-primary"
+              disabled={busy}
+              onClick={() => void recheckNative()}
+            >
+              {busy ? '检测中...' : '重新检测'}
+            </button>
           </div>
         ) : attentionCount ? (
           <div className="tool-limited-banner">
@@ -1252,20 +1239,6 @@ export function ToolCenterView() {
           </div>
         ) : null}
 
-        <div className="tool-action-row">
-          <button
-            type="button"
-            className="primary-action"
-            disabled={!commandExists}
-            onClick={() => void openAppView('diagnostics', { command: 'native doctor', return_to: 'tools' })}
-          >
-            诊断
-          </button>
-          <button type="button" disabled={busy} onClick={() => void recheckNative()}>
-            {busy ? '检测中...' : '刷新'}
-          </button>
-        </div>
-
         <ToolCategoryList
           catalog={visibleToolCatalog}
           nativeToolsets={nativeToolsets}
@@ -1279,6 +1252,52 @@ export function ToolCenterView() {
           selectedToolId={selectedToolId}
           onSelectConfig={selectToolConfig}
         />
+        <SettingsDisclosure
+          summary="诊断与运行环境"
+          description="用于排查连接问题、检查内置运行环境和查看底层更新状态。"
+          testId="tool-center-advanced-runtime"
+        >
+          <div className="tool-action-row">
+            <button
+              type="button"
+              className="primary-action"
+              disabled={!commandExists}
+              onClick={() => void openAppView('diagnostics', { command: 'native doctor', return_to: 'tools' })}
+            >
+              运行 Doctor
+            </button>
+            <button type="button" disabled={busy} onClick={() => void recheckNative()}>
+              {busy ? '检测中...' : '重新检测'}
+            </button>
+          </div>
+          {nativeUpdate || updateBusy ? (
+            <NativeUpdatePanel
+              version={nativeAgent?.version}
+              releaseDate={nativeAgent?.release_date}
+              result={nativeUpdate}
+              busy={updateBusy}
+              mode={updateMode}
+              elapsedSeconds={updateElapsedSeconds}
+              fullBackup={updateWithFullBackup}
+              terminalSupported={hasEmbeddedTerminal()}
+              commandExists={commandExists}
+              onFullBackupChange={setUpdateWithFullBackup}
+              onCheck={() => void checkNativeUpdate()}
+              onUpdate={() => void updateNativeAgent()}
+            />
+          ) : null}
+          {(updateTerminalStatus !== 'idle' || updateTerminalSession) ? (
+            <NativeUpdateTerminalPanel
+              panelRef={updateTerminalPanelRef}
+              hostRef={updateTerminalHostRef}
+              message={updateTerminalMessage}
+              session={updateTerminalSession}
+              status={updateTerminalStatus}
+              supported={hasEmbeddedTerminal()}
+              onStop={() => stopNativeUpdateTerminal()}
+            />
+          ) : null}
+        </SettingsDisclosure>
       </section>
       {unsavedDialog}
       {confirmDialog}
@@ -1534,6 +1553,22 @@ function ToolConfigPanel({
       {testResult ? <ToolConfigTestResultPanel result={testResult} /> : null}
 
       <div className="tool-config-footer">
+        <div className="tool-config-actions">
+          {visibleFields.length ? (
+            <button type="button" className="primary-action" disabled={busy || !dirty} onClick={onSave}>
+              {busy ? '保存中...' : dirty ? '保存配置' : '已保存'}
+            </button>
+          ) : null}
+          <button type="button" disabled={busy} onClick={onSaveAndTest}>
+            {busy ? '测试中...' : dirty ? '保存并测试' : '测试配置'}
+          </button>
+        </div>
+      </div>
+      <SettingsDisclosure
+        summary="连接详情与诊断"
+        description="查看底层配置键、浏览器调试连接和原生诊断入口。"
+        testId={`tool-config-advanced-${tool.id}`}
+      >
         <div className="tool-config-meta">
           {visibleFields.map((field) => (
             <span key={field.key}>{field.env_key || field.config_key || field.key}</span>
@@ -1550,17 +1585,9 @@ function ToolConfigPanel({
               打开 Native 向导
             </button>
           ) : null}
-          {visibleFields.length ? (
-            <button type="button" className="primary-action" disabled={busy || !dirty} onClick={onSave}>
-              {busy ? '保存中...' : dirty ? '保存配置' : '已保存'}
-            </button>
-          ) : null}
-          <button type="button" disabled={busy} onClick={onSaveAndTest}>
-            {busy ? '测试中...' : dirty ? '保存并测试' : '测试配置'}
-          </button>
           <button type="button" disabled={busy} onClick={onRunDoctor}>运行 Doctor</button>
         </div>
-      </div>
+      </SettingsDisclosure>
     </section>
   );
 }
@@ -1599,6 +1626,8 @@ function ToolConfigFieldControl({
   draft: Record<string, ConfigFieldValue>;
   onChange: (value: ConfigFieldValue) => void;
 }) {
+  const configuredHelp = [field.configured ? '已配置' : '', field.help || ''].filter(Boolean).join(' · ');
+  const connectionHelp = [field.configured ? '已配置' : '未配置', field.help || ''].filter(Boolean).join(' · ');
   if (field.kind === 'checkbox') {
     return (
       <label className="settings-field checkbox-field tool-config-field">
@@ -1635,11 +1664,7 @@ function ToolConfigFieldControl({
             ))}
           </datalist>
         ) : null}
-        <small>
-          {field.config_key || field.env_key}
-          {field.configured ? ' · 已配置' : ''}
-          {field.help ? ` · ${field.help}` : ''}
-        </small>
+        {configuredHelp ? <small>{configuredHelp}</small> : null}
       </label>
     );
   }
@@ -1654,10 +1679,7 @@ function ToolConfigFieldControl({
             <option key={option.value} value={option.value}>{option.label}</option>
           ))}
         </select>
-        <small>
-          {field.config_key || field.env_key}
-          {field.help ? ` · ${field.help}` : ''}
-        </small>
+        {field.help ? <small>{field.help}</small> : null}
       </label>
     );
   }
@@ -1671,11 +1693,7 @@ function ToolConfigFieldControl({
         placeholder={field.kind === 'password' && field.configured ? '已配置，留空则不修改' : field.placeholder || ''}
         onChange={(event) => onChange(event.currentTarget.value)}
       />
-      <small>
-        {field.env_key || field.config_key}
-        {field.configured ? ' · 已配置' : ' · 未配置'}
-        {field.help ? ` · ${field.help}` : ''}
-      </small>
+      <small>{connectionHelp}</small>
     </label>
   );
 }
@@ -1727,6 +1745,121 @@ function ToolSummaryCard({
       <strong>{value}</strong>
       <small>{detail}</small>
     </article>
+  );
+}
+
+function BackgroundControlCard({ readiness }: { readiness: BackgroundControlReadiness }) {
+  const needsAttention = readiness.status !== 'ready';
+  const installedLabel = readiness.configured === true
+    ? '已检测到安装配置'
+    : readiness.configured === false
+      ? '未完成设置'
+      : '未知';
+  const healthLabel = readiness.healthChecked === true
+    ? readiness.healthOk === true
+      ? '运行检查通过'
+      : readiness.healthOk === false
+        ? '运行检查未通过'
+        : '已检查，结果未知'
+    : readiness.healthChecked === false
+      ? '尚未运行检查'
+      : '检查状态未知';
+  const adapterLabel = readiness.adapterReady === true
+    ? '执行通道已就绪'
+    : readiness.adapterReady === false
+      ? '执行通道未就绪'
+      : '执行通道状态未知';
+  const isolationLabel = readiness.desktopSessionIsolated === true
+    ? '独立桌面会话'
+    : readiness.desktopSessionIsolated === false
+      ? '与当前桌面同一会话，不是虚拟机隔离'
+      : '桌面会话隔离状态未知，不能视为虚拟机';
+  const foregroundLabel = readiness.foregroundTakeoverRequired === true
+    ? '需要切换前台（当前安全策略会暂停）'
+    : readiness.foregroundTakeoverRequired === false
+      ? '不要求切换前台'
+      : '未知';
+
+  return (
+    <section className="tool-center-panel" data-testid="background-control-card">
+      <div className="section-heading-row">
+        <div>
+          <h2>后台操控</h2>
+        </div>
+        <StatusPill active={!needsAttention} label={readiness.statusLabel} />
+      </div>
+      <div className="tool-center-summary" aria-label="后台操控状态">
+        <ToolSummaryCard
+          label="当前状态"
+          value={readiness.statusLabel}
+          detail={readiness.summary}
+          warn={needsAttention}
+        />
+        <ToolSummaryCard
+          label="安全承诺"
+          value="后台优先"
+          detail={readiness.safetyPromise}
+        />
+      </div>
+      <SettingsDisclosure
+        summary="技术详情"
+        description="用于排查安装、运行检查和桌面隔离状态。"
+        testId="background-control-advanced"
+      >
+        <div className="tool-config-test-list" data-testid="background-control-technical-details">
+          <div className="tool-config-test-row">
+            <span>安装配置</span>
+            <strong>{installedLabel}</strong>
+          </div>
+          <div className="tool-config-test-row">
+            <span>运行检查</span>
+            <strong>{healthLabel}</strong>
+          </div>
+          <div className="tool-config-test-row">
+            <span>执行通道</span>
+            <strong>{adapterLabel}</strong>
+          </div>
+          <div className="tool-config-test-row">
+            <span>macOS 权限</span>
+            <strong>
+              {readiness.healthChecked === true
+                ? '已执行运行检查；具体授权以 macOS 系统设置为准'
+                : '未由被动状态确认（不能视为已授权）'}
+            </strong>
+          </div>
+          <div className="tool-config-test-row">
+            <span>桌面会话</span>
+            <strong>{isolationLabel}</strong>
+          </div>
+          <div className="tool-config-test-row">
+            <span>前台接管</span>
+            <strong>{foregroundLabel}</strong>
+          </div>
+          <div className="tool-config-test-row">
+            <span>组件 ID</span>
+            <strong>{readiness.providerId || '未知'}</strong>
+          </div>
+          <div className="tool-config-test-row">
+            <span>执行类型</span>
+            <strong>{readiness.kind || '未知'}</strong>
+          </div>
+          <div className="tool-config-test-row">
+            <span>支持的操作</span>
+            <strong>{readiness.supportedTools.join('、') || '未报告'}</strong>
+          </div>
+          <div className="tool-config-test-row">
+            <span>阻塞项</span>
+            <strong>
+              {readiness.blockers.length
+                ? readiness.blockers.join('、')
+                : readiness.healthChecked === true
+                  ? '无'
+                  : '尚未检查'}
+            </strong>
+          </div>
+        </div>
+      </SettingsDisclosure>
+    </section>
   );
 }
 

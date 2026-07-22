@@ -264,9 +264,15 @@ def _brightness_payload(text: str) -> dict[str, Any]:
     if _contains_any(text, ["设置", "设为", "设成", "%", "百分之"]):
         return {}
     has_brightness_context = _contains_any(text, ["亮度", "屏幕亮度", "brightness"])
-    if has_brightness_context and _contains_any(text, ["调高", "提高", "高一点", "高点", "调大"]):
+    if has_brightness_context and _contains_any(
+        text,
+        ["调高", "提高", "高一点", "高点", "大一点", "大点", "调大"],
+    ):
         return {"action": "up", "step": _brightness_step(text)}
-    if has_brightness_context and _contains_any(text, ["调低", "降低", "低一点", "低点", "调小"]):
+    if has_brightness_context and _contains_any(
+        text,
+        ["调低", "降低", "低一点", "低点", "小一点", "小点", "调小"],
+    ):
         return {"action": "down", "step": _brightness_step(text)}
     if _contains_any(text, ["调亮", "亮一点", "亮点", "太暗", "brightness up", "brighter"]):
         return {"action": "up", "step": _brightness_step(text)}

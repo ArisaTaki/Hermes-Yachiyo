@@ -6,7 +6,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-from apps.core.chat_session import MessageStatus
+from apps.core.chat_session import ChatSession, MessageStatus
+from apps.core.chat_store import ChatStore
 from apps.shell.yachiyo_agent import ChatTaskLifecycleProjector
 from packages.protocol.enums import TaskStatus
 
@@ -94,6 +95,38 @@ def test_chat_task_lifecycle_projector_ignores_non_terminal_task() -> None:
 
     assert state.calls == []
     assert session.calls == []
+
+
+def test_chat_task_lifecycle_projector_does_not_fall_back_or_recreate_deleted_target(
+    tmp_path,
+) -> None:
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    current = ChatSession(session_id="current-chat")
+    current.attach_store(store, load_existing=False)
+    target = ChatSession(session_id="deleted-chat")
+    target.attach_store(store, load_existing=False)
+    store.delete_session(target.session_id)
+    state = _RecordingState()
+    projector = ChatTaskLifecycleProjector(
+        SimpleNamespace(state=state, chat_session=current, store=store)
+    )
+
+    try:
+        projector.project_terminal_task(
+            "task-deleted-chat",
+            SimpleNamespace(
+                status="completed",
+                summary="late result",
+                conversation_id=target.session_id,
+            ),
+        )
+
+        assert state.calls != []
+        assert store.get_session(target.session_id) is None
+        assert store.load_messages(target.session_id, limit=0) == []
+        assert store.load_messages(current.session_id, limit=0) == []
+    finally:
+        store.close()
 
 
 def test_chat_task_routes_do_not_own_lifecycle_projection() -> None:

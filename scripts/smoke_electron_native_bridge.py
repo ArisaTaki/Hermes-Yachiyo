@@ -189,10 +189,13 @@ def run_smoke(
                 "electron_process_ok": process.returncode == 0,
                 "smoke_output_found": _parse_smoke_output(process.stdout) is not None,
                 "focus_cleanup_ok": cleanup.get("ok") is True,
+                # Cleanup is hygiene, not bridge/focus evidence.  Hosted macOS
+                # runners may allow AppKit focus while denying Automation for
+                # the best-effort quit request.
+                "focus_cleanup_advisory": True,
             },
         }
     )
-    payload["ok"] = payload.get("ok") is True and cleanup.get("ok") is True
     return payload
 
 

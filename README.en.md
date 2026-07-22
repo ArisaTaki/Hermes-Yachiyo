@@ -130,7 +130,7 @@ Live2D assets are optional and not stored in the main repository.
 
 Download resource releases from:
 
-<https://github.com/kuguya-AI-app-develop/oha-yachiyo/releases>
+<https://github.com/kuguya-AI-app-develop/Hermes-Yachiyo/releases>
 
 Recommended path:
 
@@ -144,7 +144,7 @@ The dashboard can import a resource ZIP or select a model directory. See [docs/l
 
 The Yachiyo GPT-SoVITS voice package is published separately from the app DMG:
 
-<https://github.com/kuguya-AI-app-develop/oha-yachiyo/releases/tag/tts-assets-yachiyo-gpt-sovits-v4>
+<https://github.com/kuguya-AI-app-develop/Hermes-Yachiyo/releases/tag/tts-assets-yachiyo-gpt-sovits-v4>
 
 Import `Oha-Yachiyo-yachiyo-gpt-sovits-v4.zip` from the proactive care / desktop observation page. The package contains voice weights and reference audio only; users still run their own local GPT-SoVITS API service. See [docs/tts-voice-assets.md](docs/tts-voice-assets.md).
 

@@ -1040,6 +1040,7 @@ function toolStatusFromRunEventPayload(
   if (runtimeEventIsDesktopIntent(eventType, 'approval_required')) return 'waiting_approval';
   if (runtimeEventIsDesktopPermissionRecovery(eventType)) return 'blocked';
   if (runtimeEventIsDesktopIntent(eventType, 'unavailable')) return 'blocked';
+  if (runtimeEventIsDesktopIntent(eventType, 'unverified')) return 'failed';
   if (runtimeEventIsDesktopIntent(eventType, 'completed')) {
     if (toolCallForegroundLockBusy(outputPreview) || outputPreview.foreground_lock_busy === true) return 'blocked';
     if (outputPreview.approval_required === true) return 'waiting_approval';
@@ -1065,6 +1066,13 @@ function dailyDesktopIntentOutputPreview(
       'blocked_summary',
       'recovery_actions',
       'allowed_tools',
+    ]);
+  }
+  if (runtimeEventIsDesktopIntent(eventType, 'unverified')) {
+    return pickPresentRecord(payload, [
+      'reason',
+      'error',
+      'status',
     ]);
   }
   if (runtimeEventIsDesktopPermissionRecovery(eventType)) {

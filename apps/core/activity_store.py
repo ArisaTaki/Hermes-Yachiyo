@@ -14,7 +14,7 @@ import sqlite3
 import threading
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Mapping
 from uuid import uuid4
 
 from packages.security import redact_sensitive_text, sanitize_sensitive_value
@@ -105,6 +105,7 @@ class StoredActivity:
     status: str
     duration_seconds: float | None
     created_at: str
+    visibility: str = "user"
     metadata_json: str = "{}"
 
     def to_dict(self) -> dict[str, Any]:
@@ -123,6 +124,7 @@ class StoredActivity:
             "status": self.status,
             "duration_seconds": self.duration_seconds,
             "created_at": self.created_at,
+            "visibility": self.visibility,
             "metadata": metadata,
         }
 
@@ -219,6 +221,7 @@ class ActivityStore:
                     status TEXT NOT NULL DEFAULT '',
                     duration_seconds REAL,
                     created_at TEXT NOT NULL,
+                    visibility TEXT NOT NULL DEFAULT 'user',
                     metadata_json TEXT NOT NULL DEFAULT '{}'
                 );
                 CREATE INDEX IF NOT EXISTS idx_activity_created_at
@@ -231,6 +234,15 @@ class ActivityStore:
                     ON activity_events(phase, status, created_at DESC);
                 """
             )
+            columns = {
+                str(row["name"])
+                for row in conn.execute("PRAGMA table_info(activity_events)").fetchall()
+            }
+            if "visibility" not in columns:
+                conn.execute(
+                    "ALTER TABLE activity_events "
+                    "ADD COLUMN visibility TEXT NOT NULL DEFAULT 'user'"
+                )
             conn.commit()
         logger.info("ActivityStore 初始化完成: %s", self._db_path)
 
@@ -245,6 +257,7 @@ class ActivityStore:
         detail: str = "",
         status: str = "running",
         duration_seconds: float | None = None,
+        visibility: str = "user",
         metadata: dict[str, Any] | None = None,
         created_at: str | None = None,
         event_id: str | None = None,
@@ -260,6 +273,7 @@ class ActivityStore:
             status=redact_sensitive_text(status or "running", limit=40),
             duration_seconds=duration_seconds if isinstance(duration_seconds, (int, float)) else None,
             created_at=created_at or _now(),
+            visibility=_normalize_visibility(visibility),
             metadata_json=_metadata_json(metadata or {}),
         )
         with self._lock:
@@ -268,8 +282,8 @@ class ActivityStore:
                 """
                 INSERT OR REPLACE INTO activity_events
                     (event_id, session_id, task_id, tool_name, phase, title, detail, status,
-                     duration_seconds, created_at, metadata_json)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     duration_seconds, created_at, visibility, metadata_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     event.event_id,
@@ -282,6 +296,7 @@ class ActivityStore:
                     event.status,
                     event.duration_seconds,
                     event.created_at,
+                    event.visibility,
                     event.metadata_json,
                 ),
             )
@@ -354,7 +369,7 @@ class ActivityStore:
             rows = self._get_conn().execute(
                 f"""
                 SELECT event_id, session_id, task_id, tool_name, phase, title, detail, status,
-                       duration_seconds, created_at, metadata_json
+                       duration_seconds, created_at, visibility, metadata_json
                 FROM activity_events
                 {where}
                 ORDER BY created_at DESC, rowid DESC
@@ -375,7 +390,7 @@ class ActivityStore:
             row = self._get_conn().execute(
                 """
                 SELECT event_id, session_id, task_id, tool_name, phase, title, detail, status,
-                       duration_seconds, created_at, metadata_json
+                       duration_seconds, created_at, visibility, metadata_json
                 FROM activity_events
                 WHERE event_id = ?
                 LIMIT 1
@@ -493,6 +508,115 @@ class ActivityStore:
             self._get_conn().commit()
             return int(cursor.rowcount or 0)
 
+    def list_interrupted_task_ids(self, cutoff: str) -> list[str]:
+        """List task ids with non-terminal activity created before startup."""
+        clean_cutoff = str(cutoff or "").strip()
+        if not clean_cutoff:
+            return []
+        with self._lock:
+            rows = self._get_conn().execute(
+                """
+                SELECT DISTINCT task_id
+                  FROM activity_events
+                 WHERE status NOT IN ('completed', 'success', 'failed', 'error', 'cancelled')
+                   AND julianday(created_at) <= julianday(?)
+                 ORDER BY task_id
+                """,
+                (clean_cutoff,),
+            ).fetchall()
+        return [str(row["task_id"] or "") for row in rows]
+
+    def reconcile_interrupted_tasks(
+        self,
+        cutoff: str,
+        *,
+        terminal_status_by_task: Mapping[str, str],
+        orphan_task_ids: set[str] | frozenset[str],
+    ) -> int:
+        """Project authoritative terminal Run states onto interrupted activity.
+
+        Linked active/approval Runs are deliberately absent from both inputs and
+        remain untouched. Unlinked rows are failed only when explicitly classified
+        as startup orphans by the caller.
+        """
+        clean_cutoff = str(cutoff or "").strip()
+        if not clean_cutoff:
+            return 0
+        normalized_statuses: dict[str, str] = {}
+        for raw_task_id, raw_status in terminal_status_by_task.items():
+            task_id = redact_sensitive_text(raw_task_id, limit=80)
+            status = str(raw_status or "").strip().lower()
+            terminal_status = (
+                "completed"
+                if status in {"completed", "success"}
+                else "cancelled"
+                if status in {"cancelled", "canceled"}
+                else "failed"
+                if status in {"failed", "error"}
+                else ""
+            )
+            if task_id and terminal_status:
+                normalized_statuses[task_id] = terminal_status
+        normalized_orphans = {
+            redact_sensitive_text(task_id, limit=80)
+            for task_id in orphan_task_ids
+        }
+        normalized_orphans.difference_update(normalized_statuses)
+        with self._lock:
+            conn = self._get_conn()
+            updated = 0
+            try:
+                for task_id, terminal_status in normalized_statuses.items():
+                    cursor = conn.execute(
+                        """
+                        UPDATE activity_events
+                           SET status = ?,
+                               metadata_json = json_set(
+                                   CASE
+                                       WHEN json_valid(metadata_json) THEN metadata_json
+                                       ELSE '{}'
+                                   END,
+                                   '$.recovered_after_restart', 1,
+                                   '$.recovery_reason', 'runtime_status_reconciled',
+                                   '$.reconciled_run_status', ?
+                               )
+                         WHERE task_id = ?
+                           AND status NOT IN (
+                               'completed', 'success', 'failed', 'error', 'cancelled'
+                           )
+                           AND julianday(created_at) <= julianday(?)
+                        """,
+                        (terminal_status, terminal_status, task_id, clean_cutoff),
+                    )
+                    updated += int(cursor.rowcount or 0)
+                for task_id in sorted(normalized_orphans):
+                    cursor = conn.execute(
+                        """
+                        UPDATE activity_events
+                           SET status = 'failed',
+                               metadata_json = json_set(
+                                   CASE
+                                       WHEN json_valid(metadata_json) THEN metadata_json
+                                       ELSE '{}'
+                                   END,
+                                   '$.recovered_after_restart', 1,
+                                   '$.recovery_reason', 'runtime_restarted'
+                               )
+                         WHERE task_id = ?
+                           AND status NOT IN (
+                               'completed', 'success', 'failed', 'error', 'cancelled'
+                           )
+                           AND julianday(created_at) <= julianday(?)
+                        """,
+                        (task_id, clean_cutoff),
+                    )
+                    updated += int(cursor.rowcount or 0)
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+            return updated
+
     def close(self) -> None:
         with self._lock:
             if self._conn is not None:
@@ -602,6 +726,11 @@ def _count_events(conn: sqlite3.Connection) -> int:
         return 0
 
 
+def _normalize_visibility(value: Any) -> str:
+    """Keep the public/internal boundary explicit and fail closed on unknown values."""
+    return "user" if str(value or "").strip().lower() == "user" else "internal"
+
+
 def _activity_from_row(row: sqlite3.Row) -> StoredActivity:
     return StoredActivity(
         event_id=row["event_id"],
@@ -614,6 +743,7 @@ def _activity_from_row(row: sqlite3.Row) -> StoredActivity:
         status=row["status"],
         duration_seconds=row["duration_seconds"],
         created_at=row["created_at"],
+        visibility=row["visibility"] or "user",
         metadata_json=row["metadata_json"] or "{}",
     )
 

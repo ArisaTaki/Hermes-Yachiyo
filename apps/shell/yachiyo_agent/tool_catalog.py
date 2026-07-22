@@ -211,6 +211,11 @@ def _catalog_item_from_descriptor(
             tool_name,
             provider_supported=provider_supported,
             provider_ready=provider_ready,
+            provider_kind=(
+                str(sandbox_provider.provider_kind)
+                if provider_supported and sandbox_provider
+                else ""
+            ),
         ),
         diagnostic_route=_diagnostic_route_for_tool(capability_id),
         source=_source_for_tool(tool_name),
@@ -466,6 +471,7 @@ def _fallback_notes_for_tool(
     *,
     provider_supported: bool = False,
     provider_ready: bool = False,
+    provider_kind: str = "",
 ) -> list[str]:
     notes_by_tool = {
         "media.apple_music_play": [
@@ -523,16 +529,16 @@ def _fallback_notes_for_tool(
             "Portable alias that opens a web search through the browser.open_url path.",
         ],
         "browser.open": [
-            "Portable alias for browser.open_url; falls back to the system browser when Chrome CDP is unavailable.",
+            "Portable alias for browser.open_url; pauses safely when Chrome CDP is unavailable instead of taking over the system browser.",
         ],
         "browser.open_url": [
-            "Falls back to the system browser when Chrome CDP is unavailable.",
+            "Requires Chrome CDP and pauses safely when unavailable; it never activates the system browser implicitly.",
         ],
         "browser.open_url_and_extract_text": [
-            "Opens the URL first; text extraction requires a reachable Chrome CDP endpoint.",
+            "Opening and text extraction both require a reachable Chrome CDP endpoint.",
         ],
         "browser.open_url_and_screenshot": [
-            "Opens the URL first, then captures the page through the browser screenshot path.",
+            "Opens through Chrome CDP first, then captures the page from that controlled browser target.",
         ],
         "fs.find_files": [
             "Portable fs alias for workspace.list; uses the same allowed workspace scope checks.",
@@ -547,13 +553,16 @@ def _fallback_notes_for_tool(
             "Portable alias for browser.extract_text; text extraction requires a reachable Chrome CDP endpoint.",
         ],
         "browser.click": [
-            "Can fall back to foreground desktop clicking when fallback_x/fallback_y are provided.",
+            "Requires Chrome CDP and never falls back implicitly to real desktop coordinates.",
         ],
         "screen.capture": [
             "Requires Screen Recording permission; denial is reported in readiness diagnostics.",
         ],
         "desktop.permissions": [
-            "Reports missing desktop permission targets and the tools affected by them.",
+            "Reads cached permission state only and reports any missing desktop permission; unknown or expired state is reported as not checked without prompting or activating apps.",
+        ],
+        "desktop.permissions.verify": [
+            "Runs interactive macOS permission verification only after explicit approval and may contact Finder, Music, or System Events.",
         ],
         "desktop.active_window": [
             "Requires Automation or Accessibility permission to read the foreground window.",
@@ -583,7 +592,7 @@ def _fallback_notes_for_tool(
             "Requires Automation or Accessibility permission to read foreground or named-app UI controls.",
         ],
         "desktop.inspect_app": [
-            "Combines app discovery, optional open/focus, windows, and named-app UI inspection into one observable readiness snapshot.",
+            "Passively combines app discovery, windows, and named-app UI inspection; opening or focusing happens only when explicitly requested and authorized.",
         ],
         "desktop.verify": [
             "Read-only post-operation verification; with app_name it inspects without opening or focusing the app.",
@@ -756,14 +765,24 @@ def _fallback_notes_for_tool(
         if plugin_tool.skill_docs:
             notes.append(f"Plugin skill docs: {_truncate_note(plugin_tool.skill_docs)}")
     if provider_supported and provider_ready:
+        provider_label = (
+            "Background desktop provider"
+            if str(provider_kind or "").strip() == "background_desktop"
+            else "Sandbox desktop provider"
+        )
         notes.append(
-            "Sandbox desktop provider can execute this tool without using the user's "
+            f"{provider_label} can execute this tool without using the user's "
             "foreground session."
         )
     elif provider_supported:
+        provider_label = (
+            "Background desktop provider"
+            if str(provider_kind or "").strip() == "background_desktop"
+            else "Sandbox desktop provider"
+        )
         notes.append(
-            "Sandbox desktop provider supports this tool but is not ready; check "
-            "provider health in Agent Studio."
+            f"{provider_label} supports this tool but is not ready; check provider "
+            "health in Agent Studio."
         )
     return notes
 

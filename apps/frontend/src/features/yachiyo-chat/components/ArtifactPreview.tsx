@@ -3,6 +3,7 @@ import {
   type RuntimeImageArtifactPointSelection,
   type RuntimeImageArtifactSelectedPoint,
 } from '../../runtime-shared/components/RuntimeReadableArtifactPreview';
+import type { RuntimeArtifactPresentationMode } from '../../runtime-shared/artifactPresentation';
 import { readYachiyoChatRunArtifact, readYachiyoTaskArtifact } from '../api';
 import { yachiyoTaskArtifactReadTarget } from '../taskSnapshots';
 import type { ArtifactSnapshot } from '../types';
@@ -11,12 +12,14 @@ export function ArtifactPreview({
   artifact,
   enableImagePointSelection = false,
   onSelectImagePoint,
+  presentationMode = 'diagnostic',
   selectedImagePoint,
   taskId = '',
 }: {
   artifact: ArtifactSnapshot;
   enableImagePointSelection?: boolean;
   onSelectImagePoint?: (selection: RuntimeImageArtifactPointSelection) => void;
+  presentationMode?: RuntimeArtifactPresentationMode;
   selectedImagePoint?: RuntimeImageArtifactSelectedPoint | null;
   taskId?: string;
 }) {
@@ -36,6 +39,7 @@ export function ArtifactPreview({
       previewClassName="yachiyo-task-artifact"
       previewTestId="yachiyo-task-artifact-preview"
       previewVariant="compact"
+      presentationMode={presentationMode}
       imagePointLabel="点击截图补齐坐标"
       onSelectImagePoint={enableImagePointSelection ? onSelectImagePoint : undefined}
       readArtifact={

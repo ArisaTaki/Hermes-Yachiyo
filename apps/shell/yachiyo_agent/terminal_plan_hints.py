@@ -73,9 +73,9 @@ def _looks_like_shell_command(command: str) -> bool:
     value = str(command or "").strip()
     if not value:
         return False
-    if re.search(r"(?:^|\s)(?:&&|\|\||[|;<>])(?:\s|$)", value):
+    if re.search(r"(?:&&|\|\||[|;<>])", value):
         return True
-    first = value.split()[0].strip()
+    first = re.split(r"[\s;&|<>]", value, maxsplit=1)[0].strip()
     if first.startswith(("./", "../", "/", "~/")):
         return True
     return first.lower() in {

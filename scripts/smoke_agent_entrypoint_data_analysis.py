@@ -115,6 +115,27 @@ def _payload(event: dict[str, Any]) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+def _completed_steps(completed_event: dict[str, Any]) -> list[dict[str, Any]]:
+    steps = _payload(completed_event).get("steps")
+    if not isinstance(steps, list):
+        return []
+    return [dict(step) for step in steps if isinstance(step, dict)]
+
+
+def _completed_tool_step(
+    completed_event: dict[str, Any],
+    tool_name: str,
+) -> dict[str, Any]:
+    return next(
+        (
+            step
+            for step in _completed_steps(completed_event)
+            if step.get("tool") == tool_name
+        ),
+        {},
+    )
+
+
 def _model_event_free(events: Sequence[dict[str, Any]]) -> bool:
     return not any(
         event_type in {"model.request.started", "model.requested"}
@@ -287,16 +308,16 @@ def _data_analysis_case(
     events = service.list_run_events(run_id)["events"]
     planned_event = _first_tool_event(events, "agent.desktop.intent_planned", "data.analyze")
     read_planned_event = _first_tool_event(events, "agent.desktop.intent_planned", "workspace.read")
-    tool_event = _first_tool_event(events, "agent.tool.call", "data.analyze")
-    read_tool_event = _first_tool_event(events, "agent.tool.call", "workspace.read")
     completed_event = _first_event(events, "agent.desktop.intent_completed")
+    tool_step = _completed_tool_step(completed_event, "data.analyze")
+    read_tool_step = _completed_tool_step(completed_event, "workspace.read")
     selection_event = _first_event(events, "agent.plan.selection")
     artifact_events = [
         event
         for event in _events_of_type(events, "artifact.created")
         if _payload(event).get("path") == ARTIFACT_PATH
     ]
-    tool_result = _payload(tool_event).get("result")
+    tool_result = tool_step.get("result")
     tool_result = tool_result if isinstance(tool_result, dict) else {}
     completed_result = _payload(completed_event).get("result")
     completed_result = completed_result if isinstance(completed_result, dict) else {}
@@ -317,8 +338,8 @@ def _data_analysis_case(
         "planned_data_analyze": _payload(planned_event).get("tool") == "data.analyze",
         "planned_input_path": (_payload(planned_event).get("input_preview") or {}).get("path")
         == SAMPLE_PATH,
-        "tool_call_workspace_read": _payload(read_tool_event).get("tool") == "workspace.read",
-        "tool_call_data_analyze": _payload(tool_event).get("tool") == "data.analyze",
+        "tool_call_workspace_read": read_tool_step.get("tool") == "workspace.read",
+        "tool_call_data_analyze": tool_step.get("tool") == "data.analyze",
         "tool_result_ok": tool_result.get("ok") is True,
         "tool_result_rows": tool_result.get("rows") == 3,
         "artifact_event_recorded": bool(artifact_events),
@@ -353,8 +374,7 @@ def _data_analysis_case(
         "selection_event": selection_event,
         "planned_event": planned_event,
         "read_planned_event": read_planned_event,
-        "tool_event": tool_event,
-        "read_tool_event": read_tool_event,
+        "completed_steps": _completed_steps(completed_event),
         "artifact_events": artifact_events,
         "completed_event": completed_event,
         "task_core_summary": task_core_summary,

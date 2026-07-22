@@ -13,6 +13,9 @@ const RUN_GROUP_ID = 'group-packaged-chat-native-file-smoke';
 const RUN_GOAL = 'packaged native file upload smoke';
 const RUN_RESULT = 'Packaged native file upload smoke reply saw the selected image.';
 const MESSAGE_TEXT = 'packaged native file upload smoke';
+const INTERNAL_ACTIVITY_TEXT = 'PACKAGED_CHAT_INTERNAL_ACTIVITY_SENTINEL';
+const INTERNAL_TOOL_NAME = 'internal.packaged_chat_tool_sentinel';
+const INTERNAL_RECOVERY_TEXT = 'PACKAGED_CHAT_INTERNAL_RECOVERY_SENTINEL';
 const IMAGE_NAME = 'packaged-native-picker-smoke.svg';
 const IMAGE_DATA = Buffer.from(
   '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24"><rect width="24" height="24" fill="#0f766e"/><circle cx="12" cy="12" r="7" fill="#ffffff"/></svg>',
@@ -30,6 +33,8 @@ function parseArgs(argv) {
     appCwd: '',
     timeoutMs: DEFAULT_TIMEOUT_MS,
     reportJson: '',
+    processLedgerJson: '',
+    smokeRoot: '',
   };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -37,6 +42,8 @@ function parseArgs(argv) {
     else if (arg === '--app-cwd') args.appCwd = argv[++index] || '';
     else if (arg === '--timeout-ms') args.timeoutMs = Number(argv[++index] || DEFAULT_TIMEOUT_MS);
     else if (arg === '--report-json') args.reportJson = argv[++index] || '';
+    else if (arg === '--process-ledger-json') args.processLedgerJson = argv[++index] || '';
+    else if (arg === '--smoke-root') args.smokeRoot = argv[++index] || '';
     else throw new Error(`unknown argument: ${arg}`);
   }
   if (!args.appExecutable) throw new Error('--app-executable is required');
@@ -53,6 +60,42 @@ function log(message) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function remainingDeadlineMs(deadline, label) {
+  const remaining = deadline - Date.now();
+  if (remaining <= 0) throw new Error(`global timeout waiting for ${label}`);
+  return remaining;
+}
+
+async function withinDeadline(promise, deadline, label) {
+  const remaining = remainingDeadlineMs(deadline, label);
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`global timeout waiting for ${label}`)), remaining);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function writeProcessLedger(ledgerPath, appProcess, executable, smokeRoot, cleaned) {
+  if (!ledgerPath || !appProcess?.pid) return;
+  const payload = {
+    pid: appProcess.pid,
+    pgid: process.platform === 'win32' ? null : appProcess.pid,
+    executable: path.resolve(executable),
+    smoke_root: path.resolve(smokeRoot),
+    cleaned: Boolean(cleaned),
+  };
+  fs.mkdirSync(path.dirname(ledgerPath), { recursive: true });
+  const temporaryPath = `${ledgerPath}.${process.pid}.tmp`;
+  fs.writeFileSync(temporaryPath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
+  fs.renameSync(temporaryPath, ledgerPath);
 }
 
 function pickPort() {
@@ -111,6 +154,25 @@ function messagePayload() {
   };
 }
 
+function settingsPayload() {
+  return {
+    app: {
+      start_minimized: false,
+      tray_enabled: false,
+    },
+    display: {
+      current_mode: 'none',
+    },
+    mode_settings: {
+      bubble: { id: 'bubble', title: 'Bubble', config: {} },
+      live2d: { id: 'live2d', title: 'Live2D', config: {} },
+    },
+    window_mode: {
+      open_chat_on_start: false,
+    },
+  };
+}
+
 const now = new Date().toISOString();
 const smokeRun = {
   run_id: RUN_ID,
@@ -119,7 +181,7 @@ const smokeRun = {
   task_id: TASK_ID,
   session_id: SESSION_ID,
   task_run_link_run_status: 'completed',
-  task_run_link_last_event_sequence: 2,
+  task_run_link_last_event_sequence: 5,
   kind: 'main_chat_run',
   runnable_id: 'builtin:yachiyo-main',
   runnable_name: 'Oha-Yachiyo',
@@ -127,6 +189,9 @@ const smokeRun = {
   user_goal: RUN_GOAL,
   result: RUN_RESULT,
   timeline: [
+    { event: 'agent.activity.internal', status: 'completed', detail: INTERNAL_ACTIVITY_TEXT },
+    { event: 'agent.tool.call', status: 'completed', tool_name: INTERNAL_TOOL_NAME },
+    { event: 'agent.replan.recovery.updated', status: 'blocked', detail: INTERNAL_RECOVERY_TEXT },
     { event: 'model.output.completed', status: 'completed', output: RUN_RESULT },
     { event: 'run.completed', status: 'completed', result: RUN_RESULT },
   ],
@@ -152,6 +217,53 @@ const runEvents = [
     run_id: RUN_ID,
     sequence: 1,
     schema_version: 1,
+    event_type: 'agent.activity.internal',
+    actor: 'runtime',
+    visibility: 'internal',
+    sensitivity: 'normal',
+    title: INTERNAL_ACTIVITY_TEXT,
+    detail: INTERNAL_ACTIVITY_TEXT,
+    payload: { activity: INTERNAL_ACTIVITY_TEXT },
+    created_at: now,
+  },
+  {
+    event_id: 'event-packaged-chat-native-file-2',
+    run_id: RUN_ID,
+    sequence: 2,
+    schema_version: 1,
+    event_type: 'agent.tool.call',
+    actor: 'tool',
+    visibility: 'internal',
+    sensitivity: 'normal',
+    title: INTERNAL_TOOL_NAME,
+    detail: INTERNAL_TOOL_NAME,
+    payload: { tool_name: INTERNAL_TOOL_NAME, tool_call_id: 'internal-tool-call-smoke' },
+    created_at: now,
+  },
+  {
+    event_id: 'event-packaged-chat-native-file-3',
+    run_id: RUN_ID,
+    sequence: 3,
+    schema_version: 1,
+    event_type: 'agent.replan.recovery.updated',
+    actor: 'runtime',
+    visibility: 'internal',
+    sensitivity: 'normal',
+    title: INTERNAL_RECOVERY_TEXT,
+    detail: INTERNAL_RECOVERY_TEXT,
+    payload: {
+      request_id: 'internal-recovery-smoke',
+      status: 'blocked',
+      selected_tool_name: INTERNAL_TOOL_NAME,
+      failure_detail: INTERNAL_RECOVERY_TEXT,
+    },
+    created_at: now,
+  },
+  {
+    event_id: 'event-packaged-chat-native-file-4',
+    run_id: RUN_ID,
+    sequence: 4,
+    schema_version: 1,
     event_type: 'model.output.completed',
     actor: 'model',
     visibility: 'user',
@@ -160,9 +272,9 @@ const runEvents = [
     created_at: now,
   },
   {
-    event_id: 'event-packaged-chat-native-file-2',
+    event_id: 'event-packaged-chat-native-file-5',
     run_id: RUN_ID,
-    sequence: 2,
+    sequence: 5,
     schema_version: 1,
     event_type: 'run.completed',
     actor: 'runtime',
@@ -216,6 +328,10 @@ async function startMockBridge() {
           activities: [],
           recent_tasks: [],
         });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/ui/settings') {
+        sendJson(response, 200, settingsPayload());
         return;
       }
       if (request.method === 'GET' && url.pathname === '/ui/chat/executor') {
@@ -320,6 +436,28 @@ async function startMockBridge() {
             status: 'completed',
             task_id: TASK_ID,
             created_at: new Date().toISOString(),
+            activity_events: [
+              {
+                event_id: 'chat-internal-activity-smoke',
+                tool_name: INTERNAL_TOOL_NAME,
+                phase: 'agent.tool.call',
+                title: INTERNAL_ACTIVITY_TEXT,
+                detail: INTERNAL_TOOL_NAME,
+                status: 'completed',
+                visibility: 'internal',
+                metadata: {
+                  run_id: RUN_ID,
+                  tool_call_id: 'internal-tool-call-smoke',
+                  recovery_actions: [
+                    {
+                      action_kind: 'runtime_observation_retry',
+                      tool: INTERNAL_TOOL_NAME,
+                      label: INTERNAL_RECOVERY_TEXT,
+                    },
+                  ],
+                },
+              },
+            ],
             metadata: {
               task_id: TASK_ID,
               run_id: RUN_ID,
@@ -328,6 +466,18 @@ async function startMockBridge() {
               runnable_kind: 'agent',
               run_group_id: RUN_GROUP_ID,
               source: 'main_chat',
+              replan_recoveries: [
+                {
+                  request_id: 'internal-recovery-smoke',
+                  trigger: 'tool_failure',
+                  status: 'blocked',
+                  run_id: RUN_ID,
+                  task_id: TASK_ID,
+                  selected_tool_name: INTERNAL_TOOL_NAME,
+                  failure_detail: INTERNAL_RECOVERY_TEXT,
+                  recovery_actions: [],
+                },
+              ],
             },
           },
         ];
@@ -347,12 +497,15 @@ async function startMockBridge() {
   return { server, url: `http://127.0.0.1:${port}` };
 }
 
-async function waitForPageTarget(debugPort, timeoutMs) {
-  const deadline = Date.now() + timeoutMs;
+async function waitForPageTarget(debugPort, deadline) {
   let lastError = '';
   while (Date.now() < deadline) {
     try {
-      const response = await fetch(`http://127.0.0.1:${debugPort}/json/list`);
+      const response = await withinDeadline(
+        fetch(`http://127.0.0.1:${debugPort}/json/list`),
+        deadline,
+        'packaged DevTools page target',
+      );
       if (!response.ok) throw new Error(`DevTools /json/list returned ${response.status}`);
       const targets = await response.json();
       const page = targets.find((target) => (
@@ -366,7 +519,7 @@ async function waitForPageTarget(debugPort, timeoutMs) {
     } catch (error) {
       lastError = error instanceof Error ? error.message : String(error);
     }
-    await sleep(250);
+    await sleep(Math.min(250, Math.max(1, deadline - Date.now())));
   }
   throw new Error(`packaged app did not expose a DevTools page target: ${lastError}`);
 }
@@ -420,12 +573,12 @@ class CdpClient {
   }
 }
 
-async function evaluate(client, expression) {
-  const result = await client.send('Runtime.evaluate', {
+async function evaluate(client, expression, deadline, label = 'DevTools evaluation') {
+  const result = await withinDeadline(client.send('Runtime.evaluate', {
     expression,
     awaitPromise: true,
     returnByValue: true,
-  });
+  }), deadline, label);
   if (result.exceptionDetails) {
     const detail = result.exceptionDetails.text || result.exceptionDetails.exception?.description || 'unknown exception';
     throw new Error(`Runtime.evaluate failed: ${detail}`);
@@ -433,17 +586,17 @@ async function evaluate(client, expression) {
   return result.result?.value;
 }
 
-async function waitForDocumentReady(client, timeoutMs) {
+async function waitForDocumentReady(client, deadline) {
   await evaluate(client, `
     new Promise((resolve) => {
       if (document.readyState !== 'loading') resolve(document.readyState);
       else window.addEventListener('DOMContentLoaded', () => resolve(document.readyState), { once: true });
-      setTimeout(() => resolve(document.readyState), ${Math.max(1000, timeoutMs)});
+      setTimeout(() => resolve(document.readyState), ${Math.max(1, deadline - Date.now())});
     })
-  `);
+  `, deadline, 'packaged document readiness');
 }
 
-async function navigateToChat(client, timeoutMs) {
+async function navigateToChat(client, deadline) {
   await waitFor(client, `
     (() => {
       if (document.querySelector('textarea.chat-input')) return true;
@@ -462,20 +615,19 @@ async function navigateToChat(client, timeoutMs) {
       }
       return Boolean(document.querySelector('textarea.chat-input'));
     })()
-  `, 'packaged chat route navigation', timeoutMs);
+  `, 'packaged chat route navigation', deadline);
 }
 
-async function waitFor(client, predicateExpression, label, timeoutMs) {
-  const deadline = Date.now() + timeoutMs;
+async function waitFor(client, predicateExpression, label, deadline) {
   let debug = '';
   while (Date.now() < deadline) {
     try {
-      const result = await evaluate(client, predicateExpression);
+      const result = await evaluate(client, predicateExpression, deadline, label);
       if (result) return result;
     } catch (error) {
       debug = error instanceof Error ? error.message : String(error);
     }
-    await sleep(150);
+    await sleep(Math.min(150, Math.max(1, deadline - Date.now())));
   }
   try {
     debug = await evaluate(client, `
@@ -487,22 +639,54 @@ async function waitFor(client, predicateExpression, label, timeoutMs) {
         navButtons: Array.from(document.querySelectorAll('.hy-nav button')).map((button) => button.textContent.trim()).filter(Boolean).slice(0, 12),
         bodyText: document.body.textContent.slice(-1000),
       })
-    `);
+    `, deadline, `${label} diagnostics`);
   } catch {}
   throw new Error(`timeout waiting for ${label}${debug ? `: ${debug}` : ''}`);
 }
 
-function terminateProcess(child) {
-  if (!child || child.killed) return;
+function processTreeAlive(child) {
+  if (!child) return false;
+  if (process.platform !== 'win32' && child.pid) {
+    try {
+      process.kill(-child.pid, 0);
+      return true;
+    } catch (error) {
+      if (error && error.code === 'EPERM') return true;
+      return false;
+    }
+  }
+  return child.exitCode === null && child.signalCode === null;
+}
+
+async function waitForProcessTreeExit(child, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!processTreeAlive(child)) return true;
+    await sleep(50);
+  }
+  return !processTreeAlive(child);
+}
+
+function signalProcessTree(child, signal) {
+  if (!child || !processTreeAlive(child)) return;
   try {
-    if (process.platform !== 'win32' && child.pid) process.kill(-child.pid, 'SIGTERM');
-    else child.kill('SIGTERM');
+    if (process.platform !== 'win32' && child.pid) process.kill(-child.pid, signal);
+    else child.kill(signal);
   } catch {}
 }
 
-async function runPackagedChatSmoke(client, timeoutMs) {
-  await waitForDocumentReady(client, timeoutMs);
-  await navigateToChat(client, timeoutMs);
+async function terminateProcess(child) {
+  if (!child || !processTreeAlive(child)) return;
+  signalProcessTree(child, 'SIGTERM');
+  if (await waitForProcessTreeExit(child, 3000)) return;
+  signalProcessTree(child, 'SIGKILL');
+  if (await waitForProcessTreeExit(child, 3000)) return;
+  throw new Error(`packaged app process tree ${child.pid || 'unknown'} did not exit after SIGKILL`);
+}
+
+async function runPackagedChatSmoke(client, deadline) {
+  await waitForDocumentReady(client, deadline);
+  await navigateToChat(client, deadline);
   await waitFor(client, `
     (() => (
       document.querySelector('textarea.chat-input')
@@ -510,7 +694,7 @@ async function runPackagedChatSmoke(client, timeoutMs) {
       && typeof window.ohaDesktop?.chooseChatImages === 'function'
       && !document.querySelector('[data-testid="chat-composer-image-attach-button"]')?.disabled
     ))()
-  `, 'packaged chat composer readiness', timeoutMs);
+  `, 'packaged chat composer readiness', deadline);
   log('packaged chat composer ready');
 
   await evaluate(client, `
@@ -528,7 +712,7 @@ async function runPackagedChatSmoke(client, timeoutMs) {
         if (hadOwnClick) Object.defineProperty(input, 'click', { configurable: true, value: ownClick });
       }, 2500);
     })()
-  `);
+  `, deadline, 'open packaged native file picker');
   await waitFor(client, `
     (() => {
       const preview = document.querySelector('[data-testid="chat-composer-attachment-preview"]');
@@ -540,7 +724,7 @@ async function runPackagedChatSmoke(client, timeoutMs) {
         && preview.getAttribute('data-attachment-width') === '24'
         && preview.getAttribute('data-attachment-height') === '24';
     })()
-  `, 'packaged native file preview', timeoutMs);
+  `, 'packaged native file preview', deadline);
   log('packaged native file preview rendered');
 
   await evaluate(client, `
@@ -550,13 +734,13 @@ async function runPackagedChatSmoke(client, timeoutMs) {
       setter.call(input, ${JSON.stringify(MESSAGE_TEXT)});
       input.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: ${JSON.stringify(MESSAGE_TEXT)} }));
     })()
-  `);
+  `, deadline, 'fill packaged Chat composer');
   await waitFor(client, `
     (() => !document.querySelector('button[aria-label="发送消息"]')?.disabled)()
-  `, 'enabled send button', timeoutMs);
+  `, 'enabled send button', deadline);
   await evaluate(client, `
     document.querySelector('button[aria-label="发送消息"]').closest('form').requestSubmit()
-  `);
+  `, deadline, 'submit packaged Chat message');
   await waitFor(client, `
     (() => {
       const item = document.querySelector('[data-testid="chat-message-attachment-item"]');
@@ -568,10 +752,15 @@ async function runPackagedChatSmoke(client, timeoutMs) {
         && !document.querySelector('[data-testid="chat-composer-attachment-preview"]')
         && document.querySelector('textarea.chat-input')?.value === '';
     })()
-  `, 'packaged message attachment render', timeoutMs);
+  `, 'packaged message attachment render', deadline);
   log('packaged message attachment rendered');
 
-  await evaluate(client, `document.querySelector('[data-testid="chat-message-attachment-item"]').click()`);
+  await evaluate(
+    client,
+    `document.querySelector('[data-testid="chat-message-attachment-item"]').click()`,
+    deadline,
+    'open packaged image viewer',
+  );
   await waitFor(client, `
     (() => {
       const modal = document.querySelector('[data-testid="chat-image-viewer-modal"]');
@@ -580,31 +769,58 @@ async function runPackagedChatSmoke(client, timeoutMs) {
         && image?.getAttribute('alt') === ${JSON.stringify(IMAGE_NAME)}
         && image?.getAttribute('src')?.startsWith('data:image/svg+xml');
     })()
-  `, 'packaged image viewer modal', timeoutMs);
+  `, 'packaged image viewer modal', deadline);
   log('packaged image viewer opened');
-  await evaluate(client, `document.querySelector('[data-testid="chat-image-viewer-close"]').click()`);
+  await evaluate(
+    client,
+    `document.querySelector('[data-testid="chat-image-viewer-close"]').click()`,
+    deadline,
+    'close packaged image viewer',
+  );
   await waitFor(client, `
     (() => (
       !document.querySelector('[data-testid="chat-image-viewer-backdrop"]')
       && !document.querySelector('[data-testid="chat-image-viewer-modal"]')
       && !document.querySelector('[data-testid="chat-image-viewer-stage"]')
     ))()
-  `, 'closed packaged image viewer modal', timeoutMs);
+  `, 'closed packaged image viewer modal', deadline);
 
   await waitFor(client, `
     (() => {
       const reply = document.querySelector('[data-message-id="assistant-packaged-native-file-smoke-reply"]');
       const openRun = reply?.querySelector('[data-testid="chat-message-open-run-detail"]');
+      const forbiddenSelectors = [
+        '[data-testid="chat-message-activity-list"]',
+        '[data-testid="chat-message-activity-row"]',
+        '[data-testid="yachiyo-agent-task-card"]',
+        '[data-testid="yachiyo-agent-task-runtime-details"]',
+        '[data-testid="yachiyo-agent-task-canonical-recovery"]',
+        '[data-testid="yachiyo-agent-task-recovery-statuses"]',
+        '.message-activity-row.failed',
+        '.yachiyo-agent-task-planner-chip.missing',
+        '[data-summary-tone="warning"]',
+      ];
+      const pageText = document.body.textContent || '';
       return reply?.textContent.includes(${JSON.stringify(RUN_RESULT)})
-        && openRun
-        && openRun.getAttribute('data-run-id') === ${JSON.stringify(RUN_ID)}
-        && openRun.getAttribute('data-run-status') === 'completed'
-        && openRun.textContent.includes('Agent Studio');
+        && !reply.textContent.includes(${JSON.stringify(INTERNAL_ACTIVITY_TEXT)})
+        && !reply.textContent.includes(${JSON.stringify(INTERNAL_TOOL_NAME)})
+        && !reply.textContent.includes(${JSON.stringify(INTERNAL_RECOVERY_TEXT)})
+        && !pageText.includes(${JSON.stringify(INTERNAL_ACTIVITY_TEXT)})
+        && !pageText.includes(${JSON.stringify(INTERNAL_TOOL_NAME)})
+        && !pageText.includes(${JSON.stringify(INTERNAL_RECOVERY_TEXT)})
+        && forbiddenSelectors.every((selector) => !document.querySelector(selector))
+        && !openRun;
     })()
-  `, 'packaged native file assistant reply Run Detail action', timeoutMs);
+  `, 'packaged native file assistant reply with hidden internal execution', deadline);
+  log('packaged native file assistant reply verified without Chat internal execution');
   await evaluate(client, `
-    document.querySelector('[data-message-id="assistant-packaged-native-file-smoke-reply"] [data-testid="chat-message-open-run-detail"]').click()
-  `);
+    (() => {
+      const route = ${JSON.stringify(`#/agents/${RUN_ID}`)};
+      window.history.pushState(null, '', route);
+      window.dispatchEvent(new Event('oha-route-change'));
+      return window.location.hash;
+    })()
+  `, deadline, 'navigate directly to packaged Agent Studio replay');
   await waitFor(client, `
     (() => {
       const detail = document.querySelector('[data-testid="agent-run-detail"]');
@@ -620,26 +836,46 @@ async function runPackagedChatSmoke(client, timeoutMs) {
         && detail?.getAttribute('data-session-id') === ${JSON.stringify(SESSION_ID)}
         && task?.textContent.includes(${JSON.stringify(RUN_GOAL)})
         && result?.textContent.includes(${JSON.stringify(RUN_RESULT)})
-        && events.length === 2
+        && events.length === 5
+        && eventTypes.includes('agent.activity.internal')
+        && eventTypes.includes('agent.tool.call')
+        && eventTypes.includes('agent.replan.recovery.updated')
         && eventTypes.includes('model.output.completed')
         && eventTypes.includes('run.completed')
         && events.every((node) => node.getAttribute('data-run-event-run-id') === ${JSON.stringify(RUN_ID)});
     })()
-  `, 'packaged native file Run Detail replay handoff', timeoutMs);
-  log('packaged native file Run Detail replay verified');
+  `, 'packaged native file Agent Studio replay through direct route', deadline);
+  log('packaged native file Agent Studio replay verified through direct route');
 }
 
 async function run() {
   const args = parseArgs(process.argv.slice(2));
-  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oha-packaged-chat-native-file-'));
+  const systemTempRoot = path.resolve(os.tmpdir());
+  const requestedSmokeRoot = args.smokeRoot ? path.resolve(args.smokeRoot) : '';
+  if (
+    requestedSmokeRoot
+    && (
+      requestedSmokeRoot === systemTempRoot
+      || !requestedSmokeRoot.startsWith(`${systemTempRoot}${path.sep}`)
+    )
+  ) {
+    throw new Error('--smoke-root must be a child of the system temporary directory');
+  }
+  const tempDir = args.smokeRoot
+    ? requestedSmokeRoot
+    : fs.mkdtempSync(path.join(os.tmpdir(), 'oha-packaged-chat-native-file-'));
   const homeDir = path.join(tempDir, 'home');
   const ohaHome = path.join(homeDir, '.oha-yachiyo');
+  const electronSmokeRoot = path.join(tempDir, 'electron-smoke-root');
   const imagePath = path.join(tempDir, IMAGE_NAME);
+  fs.mkdirSync(tempDir, { recursive: true });
   fs.mkdirSync(homeDir, { recursive: true });
+  fs.mkdirSync(electronSmokeRoot, { recursive: true });
   fs.writeFileSync(imagePath, IMAGE_DATA);
 
   const bridge = await startMockBridge();
   const debugPort = await pickPort();
+  const deadline = Date.now() + args.timeoutMs;
   let appProcess;
   let client;
   try {
@@ -657,23 +893,31 @@ async function run() {
           OHA_YACHIYO_BRIDGE_URL: bridge.url,
           OHA_YACHIYO_SKIP_BACKEND: '1',
           OHA_YACHIYO_DESKTOP_SMOKE_MODE: '1',
+          OHA_YACHIYO_ELECTRON_SMOKE_ROOT: electronSmokeRoot,
           OHA_YACHIYO_CHAT_IMAGE_PICKER_SMOKE_PATHS: JSON.stringify([imagePath]),
         },
       },
     );
+    writeProcessLedger(
+      args.processLedgerJson,
+      appProcess,
+      args.appExecutable,
+      tempDir,
+      false,
+    );
     appProcess.stdout.on('data', (chunk) => process.stdout.write(chunk));
     appProcess.stderr.on('data', (chunk) => process.stderr.write(chunk));
-    const target = await waitForPageTarget(debugPort, args.timeoutMs);
+    const target = await waitForPageTarget(debugPort, deadline);
     client = new CdpClient(target.webSocketDebuggerUrl);
-    await client.send('Page.enable');
-    await client.send('Runtime.enable');
-    await runPackagedChatSmoke(client, args.timeoutMs);
+    await withinDeadline(client.send('Page.enable'), deadline, 'enable packaged page domain');
+    await withinDeadline(client.send('Runtime.enable'), deadline, 'enable packaged runtime domain');
+    await runPackagedChatSmoke(client, deadline);
     const appBuildMetadata = await evaluate(client, `
       (async () => {
         const info = await window.ohaDesktop?.getAppUpdateInfo?.();
         return info?.current || null;
       })()
-    `);
+    `, deadline, 'read packaged app build metadata');
     if (!appBuildMetadata || typeof appBuildMetadata !== 'object') {
       throw new Error('packaged app build metadata is unavailable');
     }
@@ -709,6 +953,9 @@ async function run() {
       task_id: TASK_ID,
       image_viewer_verified: true,
       run_detail_verified: true,
+      chat_technical_action_hidden: true,
+      internal_execution_hidden: true,
+      run_detail_navigation_source: 'direct_agent_studio_route',
       desktop_picker_ipc_verified: true,
       hidden_file_input_click_count: 0,
       app_build_metadata: appBuildMetadata,
@@ -720,9 +967,19 @@ async function run() {
     log('passed');
   } finally {
     if (client) client.close();
-    terminateProcess(appProcess);
-    await new Promise((resolve) => bridge.server.close(resolve));
-    fs.rmSync(tempDir, { recursive: true, force: true });
+    try {
+      await terminateProcess(appProcess);
+      writeProcessLedger(
+        args.processLedgerJson,
+        appProcess,
+        args.appExecutable,
+        tempDir,
+        true,
+      );
+    } finally {
+      await new Promise((resolve) => bridge.server.close(resolve));
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
   }
 }
 

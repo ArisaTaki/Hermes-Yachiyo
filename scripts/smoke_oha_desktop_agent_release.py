@@ -4,11 +4,15 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import hmac
 import json
+import plistlib
 import sys
 import tempfile
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Callable, Sequence
+from typing import Any, Callable, Mapping, Sequence
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -57,12 +61,49 @@ from scripts import smoke_agent_studio_planner_orchestration
 from scripts import smoke_approval_policy_gate
 from scripts import smoke_data_analysis_artifacts
 from scripts import smoke_desktop_provider_execution_loop
+from scripts import smoke_generic_agent_release
 from scripts import smoke_group_run_timeline
 from scripts import smoke_isolated_desktop_provider
 from scripts import smoke_planner_runtime_tool_parity
 from scripts import smoke_workflow_run_timeline
 
 SmokeRunner = Callable[[], dict[str, Any]]
+
+DAILY_PROVIDER_ACCEPTANCE_SCHEMA_VERSION = (
+    "oha-yachiyo.daily-provider-acceptance.v2"
+)
+DAILY_PROVIDER_ACCEPTANCE_SOURCE = "local_packaged_tcc_acceptance"
+DAILY_PROVIDER_ACCEPTANCE_PROVIDER_KIND = "background_desktop"
+DAILY_PROVIDER_ACCEPTANCE_PROVIDER_ID = "cua-driver"
+DAILY_PROVIDER_ACCEPTANCE_TRANSPORT = "cua_mcp_electron_bridge"
+DAILY_PROVIDER_ACCEPTANCE_PROVIDER_TRANSPORT = "electron_bridge"
+DAILY_PROVIDER_ACCEPTANCE_HOST_BUNDLE_ID = "io.github.arisataki.oha-yachiyo"
+DAILY_PROVIDER_ACCEPTANCE_MAX_AGE = timedelta(hours=24)
+DAILY_PROVIDER_ACCEPTANCE_TRUSTED_VERIFICATION_METHODS = frozenset(
+    {
+        "background_target_bound_observation",
+        "cua_target_bound_observation",
+        "target_bound_accessibility",
+        "target_bound_accessibility_observation",
+        "target_bound_observation",
+        "target_bound_screen_capture",
+        "target_bound_screen_observation",
+        "trusted_target_bound_observation",
+        "trusted_app_window_present_receipt",
+        "trusted_exact_typed_content_receipt",
+    }
+)
+DAILY_PROVIDER_ACCEPTANCE_REQUIRED_CHECKS = (
+    "packaged_bridge_ready",
+    "background_launch_verified",
+    "target_bound_observation_verified",
+    "background_input_verified",
+    "postcondition_verified",
+    "foreground_app_unchanged",
+    "pointer_not_taken_over",
+    "keyboard_not_taken_over",
+    "permission_denial_fails_closed",
+)
 
 
 def _tools(requests: Sequence[dict[str, Any]]) -> list[str]:
@@ -187,15 +228,16 @@ def _shared_surface_case() -> dict[str, Any]:
         and isinstance(direct_recovery_request.get("desktop_execution_policy"), dict)
         else {}
     )
-    checks["direct_recovery_keeps_daily_direct_policy"] = (
+    checks["direct_recovery_keeps_daily_background_policy"] = (
         bool(direct_recovery_request)
-        and direct_policy.get("mode") == "supervised_live"
-        and direct_policy.get("allow_live_foreground") is True
+        and direct_policy.get("mode") == "preview_input"
+        and direct_policy.get("allow_live_foreground") is False
+        and direct_policy.get("prefer_background_desktop") is True
         and direct_policy.get("prefer_isolated_desktop") is False
-        and direct_policy.get("avoid_user_foreground_takeover") is False
+        and direct_policy.get("avoid_user_foreground_takeover") is True
         and direct_policy.get("require_sandbox_for_keyboard_mouse") is False
     )
-    checks["direct_recovery_does_not_require_provider_session"] = (
+    checks["direct_recovery_avoids_isolated_session_autostart"] = (
         bool(direct_recovery_request)
         and desktop_provider_session_auto_start_recommended_for_requests(
             [direct_recovery_request]
@@ -227,10 +269,17 @@ def _direct_desktop_runtime_case() -> dict[str, Any]:
         "desktop.safe_type_text": {"text": "hello"},
         "desktop.click_ui_element": {"label": "Export"},
     }
+    explicit_foreground_policy = {
+        **daily_policy,
+        "mode": "allow",
+        "allow_live_foreground": True,
+        "prefer_background_desktop": False,
+        "avoid_user_foreground_takeover": False,
+    }
     routes = {
         tool_name: desktop_execution_route_decision(
             tool_name,
-            policy=daily_policy,
+            policy=explicit_foreground_policy,
             execution_mode=desktop_tool_execution_mode_for_input(
                 tool_name,
                 input_preview,
@@ -277,6 +326,8 @@ def _direct_desktop_runtime_case() -> dict[str, Any]:
         tool_request={
             "tool": "desktop.safe_type_text",
             "input": {"text": "hello"},
+            "allow_user_foreground_takeover": True,
+            "desktop_execution_policy": explicit_foreground_policy,
             "desktop_execution_route": routes["desktop.safe_type_text"],
             "sandbox_provider": provider,
         },
@@ -285,17 +336,20 @@ def _direct_desktop_runtime_case() -> dict[str, Any]:
     catalog = runtime_tool_catalog_snapshot(sandbox_provider=provider)
     catalog_tools = {tool.tool_name: tool for tool in catalog.tools}
     checks = {
-        "daily_policy_defaults_to_direct_desktop": (
-            daily_policy.get("mode") == "supervised_live"
-            and daily_policy.get("allow_live_foreground") is True
+        "daily_policy_defaults_to_background_desktop": (
+            daily_policy.get("mode") == "preview_input"
+            and daily_policy.get("allow_live_foreground") is False
+            and daily_policy.get("prefer_background_desktop") is True
             and daily_policy.get("prefer_isolated_desktop") is False
+            and daily_policy.get("avoid_user_foreground_takeover") is True
             and daily_policy.get("require_sandbox_for_keyboard_mouse") is False
         ),
-        "studio_policy_defaults_to_direct_desktop": (
+        "studio_policy_preserves_isolated_execution_boundary": (
             studio_policy.get("mode") == "supervised_live"
-            and studio_policy.get("allow_live_foreground") is True
-            and studio_policy.get("prefer_isolated_desktop") is False
-            and studio_policy.get("require_sandbox_for_keyboard_mouse") is False
+            and studio_policy.get("allow_live_foreground") is False
+            and studio_policy.get("prefer_isolated_desktop") is True
+            and studio_policy.get("avoid_user_foreground_takeover") is True
+            and studio_policy.get("require_sandbox_for_keyboard_mouse") is True
         ),
         "local_provider_is_release_capable": (
             provider.get("available") is True
@@ -313,7 +367,7 @@ def _direct_desktop_runtime_case() -> dict[str, Any]:
             and runtime_probe.get("permission_probe_checked") is True
             and runtime_probe.get("discovery_verified") is True
         ),
-        "direct_routes_cover_discover_operate_input": all(
+        "explicit_foreground_routes_cover_discover_operate_input": all(
             route.get("status") == "provider_ready"
             and route.get("can_execute") is True
             and route.get("selected_provider_kind") == LOCAL_DESKTOP_PROVIDER_KIND
@@ -624,11 +678,6 @@ def _legacy_facade_planner_ownership_case() -> dict[str, Any]:
             "expected": [
                 {
                     "protocol": "json_fallback",
-                    "tool": "app.focus",
-                    "input": {"app_name": "Google Chrome"},
-                },
-                {
-                    "protocol": "json_fallback",
                     "tool": "browser.open_url",
                     "input": {"url": "https://www.google.com/search?q=OpenAI"},
                 },
@@ -638,11 +687,6 @@ def _legacy_facade_planner_ownership_case() -> dict[str, Any]:
             "id": "browser_app_new_tab_search",
             "prompt": "Chrome 新建标签页搜索 OpenAI",
             "expected": [
-                {
-                    "protocol": "json_fallback",
-                    "tool": "app.focus_and_safe_shortcut",
-                    "input": {"app_name": "Google Chrome", "action": "new_tab"},
-                },
                 {
                     "protocol": "json_fallback",
                     "tool": "browser.open_url",
@@ -856,13 +900,18 @@ def _build_sections(
             _deepagent_core_case,
         ),
         _run_section(
+            "generic_agent_behaviors",
+            "Generic recovery, research, permission, background, and visibility behaviors pass focused release tests.",
+            smoke_generic_agent_release.run_smoke,
+        ),
+        _run_section(
             "shared_daily_surfaces",
             "Chat, Bubble, and Live2D share the runtime planner entrypoint.",
             _shared_surface_case,
         ),
         _run_section(
             "direct_desktop_runtime",
-            "Direct local desktop execution is the default while isolated desktop remains optional.",
+            "Explicitly authorized supervised local execution remains available as a fallback.",
             _direct_desktop_runtime_case,
         ),
         _run_section(
@@ -946,6 +995,7 @@ def run_smoke(
     run_isolated_provider_smoke: bool = True,
     use_configured_virtual_desktop_provider: bool = False,
     provider_manifest: Path | None = None,
+    daily_provider_acceptance_json: Path | None = None,
     public_release_required: bool = False,
     require_public_release_backend: bool = False,
 ) -> dict[str, Any]:
@@ -985,6 +1035,10 @@ def run_smoke(
     checks = {
         "all_sections_passed": not failed,
         "covers_deepagent_core": any(section["id"] == "deepagent_core" for section in sections),
+        "covers_generic_agent_behaviors": any(
+            section["id"] == "generic_agent_behaviors" and section.get("ok") is True
+            for section in sections
+        ),
         "covers_desktop_executor": any(
             section["id"] == "desktop_executor_before_model" for section in sections
         ),
@@ -1039,9 +1093,52 @@ def run_smoke(
         and configured_virtual_desktop_provider_requested
         and not isolated_provider_release_blockers
     )
+    daily_provider_acceptance = _daily_provider_acceptance_evidence(
+        daily_provider_acceptance_json
+    )
+    packaged_background_provider_release_ready = (
+        daily_provider_acceptance.get("ok") is True
+    )
+    default_daily_provider_release_ready = bool(
+        packaged_background_provider_release_ready
+        or isolated_provider_release_ready
+    )
+    default_daily_provider_release_source = (
+        DAILY_PROVIDER_ACCEPTANCE_SOURCE
+        if packaged_background_provider_release_ready
+        else "configured_virtual_desktop_provider"
+        if isolated_provider_release_ready
+        else ""
+    )
+    default_daily_provider_release_blockers: list[str] = []
+    if not default_daily_provider_release_ready:
+        default_daily_provider_release_blockers.extend(
+            str(item)
+            for item in daily_provider_acceptance.get("blocking_conditions") or []
+            if str(item or "").strip()
+        )
+        if configured_virtual_desktop_provider_requested:
+            default_daily_provider_release_blockers.extend(
+                isolated_provider_release_blockers
+            )
+        if not default_daily_provider_release_blockers:
+            default_daily_provider_release_blockers.append(
+                "default_daily_provider_release_evidence_required"
+            )
+    default_daily_provider_release_blockers = _unique_strings(
+        default_daily_provider_release_blockers
+    )
+    public_release_blockers = (
+        list(isolated_provider_release_blockers)
+        if require_public_release_backend and not isolated_provider_release_ready
+        else list(default_daily_provider_release_blockers)
+    )
+    if not all(checks.values()) and not public_release_blockers:
+        public_release_blockers.append("oha_desktop_agent_product_smoke_failed")
+    public_release_blockers = _unique_strings(public_release_blockers)
     public_release_ready = bool(
         all(checks.values())
-        and direct_desktop_release_ready
+        and default_daily_provider_release_ready
         and (
             isolated_provider_release_ready
             if require_public_release_backend
@@ -1055,22 +1152,35 @@ def run_smoke(
         ),
         provider_manifest=provider_manifest,
         release_ready=public_release_ready,
-        release_blockers=(
-            isolated_provider_release_blockers
-            if require_public_release_backend
-            else (
-                []
-                if direct_desktop_release_ready
-                else ["direct_desktop_runtime_not_ready"]
-            )
-        ),
+        release_blockers=public_release_blockers,
         backend=(
             isolated_provider_backend
             if require_public_release_backend
-            else direct_desktop_backend
+            or default_daily_provider_release_source
+            == "configured_virtual_desktop_provider"
+            else daily_provider_acceptance
         ),
         isolated_desktop_required=require_public_release_backend,
     )
+    if not public_release_ready and not require_public_release_backend:
+        public_release_readiness["next_actions"] = [
+            {
+                "id": "collect_default_daily_provider_release_evidence",
+                "title": "Collect packaged daily-provider acceptance evidence",
+                "reason": (
+                    "Public release requires a packaged background CUA or real "
+                    "isolated-provider end-to-end acceptance; a local foreground "
+                    "broker probe is diagnostic only."
+                ),
+                "command": (
+                    "python scripts/smoke_oha_desktop_agent_release.py "
+                    "--public-release --skip-isolated-provider-smoke "
+                    "--daily-provider-acceptance-json "
+                    "tmp/oha-daily-provider-acceptance.json "
+                    "--report-json tmp/oha-desktop-agent-release-smoke.json"
+                ),
+            }
+        ]
     return {
         "ok": all(checks.values()),
         "mode": "oha_desktop_agent_release_smoke",
@@ -1079,6 +1189,19 @@ def run_smoke(
         ),
         "public_release_ready": public_release_ready,
         "public_release_readiness": public_release_readiness,
+        "default_daily_provider_release_ready": (
+            default_daily_provider_release_ready
+        ),
+        "default_daily_provider_release_source": (
+            default_daily_provider_release_source
+        ),
+        "default_daily_provider_release_blockers": (
+            default_daily_provider_release_blockers
+        ),
+        "daily_provider_acceptance_requested": (
+            daily_provider_acceptance_json is not None
+        ),
+        "daily_provider_acceptance": daily_provider_acceptance,
         "direct_desktop_release_ready": direct_desktop_release_ready,
         "direct_desktop_backend": direct_desktop_backend,
         "section_count": len(sections),
@@ -1309,6 +1432,745 @@ def _write_report(path: Path, payload: dict[str, Any]) -> None:
     )
 
 
+def _daily_provider_acceptance_digest(payload: Mapping[str, Any]) -> str:
+    """Return the v2 evidence digest over canonical JSON.
+
+    The digest makes accidental or post-collection mutation visible. It is not a
+    signature and therefore is not treated as proof of who collected the file.
+    """
+
+    digest_payload = dict(payload)
+    digest_payload.pop("evidence_digest", None)
+    canonical = json.dumps(
+        digest_payload,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return hashlib.sha256(canonical).hexdigest()
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _packaged_app_identity_from_disk(app_path: Path) -> dict[str, Any]:
+    """Read the identity that macOS actually launches from /Applications."""
+
+    location_valid = (
+        app_path.is_absolute()
+        and len(app_path.parts) >= 3
+        and app_path.parts[:2] == ("/", "Applications")
+        and app_path.suffix == ".app"
+    )
+    if not location_valid:
+        return {
+            "ok": False,
+            "location_valid": False,
+            "error": "packaged_app_must_be_installed_under_applications",
+        }
+    if not app_path.is_dir():
+        return {
+            "ok": False,
+            "location_valid": True,
+            "error": "packaged_app_not_found",
+        }
+
+    info_path = app_path / "Contents" / "Info.plist"
+    asar_path = app_path / "Contents" / "Resources" / "app.asar"
+    try:
+        with info_path.open("rb") as stream:
+            info = plistlib.load(stream)
+        if not isinstance(info, Mapping):
+            raise ValueError("Info.plist is not a mapping")
+        app_asar_sha256 = _sha256_file(asar_path)
+    except (OSError, plistlib.InvalidFileException, ValueError) as exc:
+        return {
+            "ok": False,
+            "location_valid": True,
+            "error": str(exc),
+        }
+
+    bundle_id = str(info.get("CFBundleIdentifier") or "").strip()
+    version = str(
+        info.get("CFBundleShortVersionString")
+        or info.get("CFBundleVersion")
+        or ""
+    ).strip()
+    return {
+        "ok": bool(bundle_id and version and app_asar_sha256),
+        "location_valid": True,
+        "bundle_id": bundle_id,
+        "version": version,
+        "app_asar_sha256": app_asar_sha256,
+    }
+
+
+def _mapping(value: Any) -> Mapping[str, Any]:
+    return value if isinstance(value, Mapping) else {}
+
+
+def _nested_evidence_field(receipt: Mapping[str, Any], key: str) -> Any:
+    candidates: list[Mapping[str, Any]] = [receipt]
+    for _depth in range(3):
+        next_candidates: list[Mapping[str, Any]] = []
+        for candidate in candidates:
+            if key in candidate:
+                return candidate.get(key)
+            for wrapper in (
+                "data",
+                "desktop_execution_provider_evidence",
+                "desktop_execution_provider_transport",
+                "grounded_element",
+                "output",
+                "output_preview",
+                "result",
+                "receipt",
+                "target",
+                "observed_target",
+                "verification_evidence",
+            ):
+                nested = candidate.get(wrapper)
+                if isinstance(nested, Mapping):
+                    next_candidates.append(nested)
+        candidates = next_candidates
+    return None
+
+
+def _evidence_identifier(value: Any) -> str:
+    if isinstance(value, bool) or value is None:
+        return ""
+    text = str(value).strip()
+    return text if text and text != "0" else ""
+
+
+def _receipt_target_identity(receipt: Mapping[str, Any]) -> tuple[str, str]:
+    pid = _nested_evidence_field(receipt, "target_pid")
+    if pid is None:
+        pid = _nested_evidence_field(receipt, "pid")
+    window_id = _nested_evidence_field(receipt, "target_window_id")
+    if window_id is None:
+        window_id = _nested_evidence_field(receipt, "window_id")
+    return _evidence_identifier(pid), _evidence_identifier(window_id)
+
+
+def _background_transport_verified(receipt: Mapping[str, Any]) -> bool:
+    transport = _mapping(
+        _nested_evidence_field(
+            receipt,
+            "desktop_execution_provider_transport",
+        )
+    )
+    return (
+        transport.get("provider_id") == DAILY_PROVIDER_ACCEPTANCE_PROVIDER_ID
+        and transport.get("provider_kind")
+        == DAILY_PROVIDER_ACCEPTANCE_PROVIDER_KIND
+        and transport.get("transport")
+        == DAILY_PROVIDER_ACCEPTANCE_PROVIDER_TRANSPORT
+        and transport.get("delivery_mode") == "background"
+        and transport.get("foreground_takeover_required") is False
+    )
+
+
+def _foreground_fallback_absent(receipt: Mapping[str, Any]) -> bool:
+    pending: list[Any] = [receipt]
+    while pending:
+        value = pending.pop()
+        if isinstance(value, Mapping):
+            if any(
+                value.get(key) is True
+                for key in (
+                    "fallback_used",
+                    "foreground_fallback_used",
+                    "foreground_takeover_detected",
+                    "foreground_takeover_required",
+                )
+            ):
+                return False
+            if str(value.get("delivery_mode") or "").strip() in {
+                "foreground",
+                "user_foreground",
+            }:
+                return False
+            if str(value.get("desktop_scope") or "").strip() == "user_foreground":
+                return False
+            pending.extend(value.values())
+        elif isinstance(value, list):
+            pending.extend(value)
+    return _background_transport_verified(receipt)
+
+
+def _grounded_input_matches_target(
+    receipt: Mapping[str, Any],
+    target: tuple[str, str],
+) -> bool:
+    grounded = _mapping(_nested_evidence_field(receipt, "grounded_element"))
+    selector_type = str(grounded.get("selector_type") or "").strip()
+    return (
+        bool(grounded)
+        and _receipt_target_identity(grounded) == target
+        and selector_type in {"element_index", "element_token"}
+        and "x" not in grounded
+        and "y" not in grounded
+    )
+
+
+def _recorded_at_validation(value: Any) -> tuple[bool, bool]:
+    text = str(value or "").strip()
+    if not text:
+        return False, False
+    try:
+        recorded_at = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return False, False
+    timezone_aware = (
+        recorded_at.tzinfo is not None
+        and recorded_at.utcoffset() is not None
+    )
+    if not timezone_aware:
+        return False, False
+    age = datetime.now(timezone.utc) - recorded_at.astimezone(timezone.utc)
+    fresh = -timedelta(minutes=5) <= age <= DAILY_PROVIDER_ACCEPTANCE_MAX_AGE
+    return True, fresh
+
+
+def _frontmost_observer_verified(
+    observer: Mapping[str, Any],
+    *,
+    target_pid: str,
+) -> bool:
+    raw_samples = observer.get("samples")
+    samples = observer.get("frontmost_samples")
+    if not isinstance(samples, list) and isinstance(raw_samples, list):
+        samples = [
+            sample.get("frontmost")
+            for sample in raw_samples
+            if isinstance(sample, Mapping)
+            and isinstance(sample.get("frontmost"), Mapping)
+        ]
+    if not isinstance(samples, list) or len(samples) < 2:
+        return False
+    before = observer.get("frontmost_before", samples[0])
+    after = observer.get("frontmost_after", samples[-1])
+    if before in (None, "") or after in (None, ""):
+        return False
+
+    def stable(value: Any) -> str:
+        if isinstance(value, (Mapping, list)):
+            return json.dumps(
+                value,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+        return str(value).strip()
+
+    def identity(value: Any) -> str:
+        if isinstance(value, Mapping):
+            pid = _evidence_identifier(value.get("pid"))
+            bundle_or_name = str(
+                value.get("bundle_id") or value.get("app_name") or ""
+            ).strip()
+            if not pid or not bundle_or_name or value.get("ok") is False:
+                return ""
+            return f"{pid}:{bundle_or_name}"
+        return stable(value)
+
+    expected = identity(before)
+    sample_identities = [identity(sample) for sample in samples]
+    target_never_frontmost = all(
+        not isinstance(sample, Mapping)
+        or _evidence_identifier(sample.get("pid")) != target_pid
+        for sample in samples
+    )
+    return (
+        observer.get("frontmost_unchanged") is True
+        and bool(expected)
+        and identity(after) == expected
+        and all(sample_identity == expected for sample_identity in sample_identities)
+        and target_never_frontmost
+    )
+
+
+def _pointer_observer_verified(observer: Mapping[str, Any]) -> bool:
+    value = observer.get("pointer_max_delta")
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    declared_delta = float(value)
+    if value != value or not 0 <= declared_delta <= 1.0:
+        return False
+    raw_samples = observer.get("samples")
+    if not isinstance(raw_samples, list):
+        return True
+    cursor_points: list[tuple[float, float]] = []
+    for sample in raw_samples:
+        cursor = sample.get("cursor") if isinstance(sample, Mapping) else None
+        if (
+            not isinstance(cursor, Mapping)
+            or cursor.get("ok") is False
+            or isinstance(cursor.get("x"), bool)
+            or isinstance(cursor.get("y"), bool)
+            or not isinstance(cursor.get("x"), (int, float))
+            or not isinstance(cursor.get("y"), (int, float))
+        ):
+            return False
+        cursor_points.append((float(cursor["x"]), float(cursor["y"])))
+    if len(cursor_points) < 2:
+        return False
+    start_x, start_y = cursor_points[0]
+    measured_delta = max(
+        ((x - start_x) ** 2 + (y - start_y) ** 2) ** 0.5
+        for x, y in cursor_points
+    )
+    return measured_delta <= 1.0 and declared_delta + 1e-6 >= measured_delta
+
+
+def _denied_provider_health_verified(
+    provider_health_root: Mapping[str, Any],
+) -> bool:
+    denied = _mapping(provider_health_root.get("denied"))
+    snapshot = _mapping(denied.get("snapshot") or denied)
+    health = _mapping(snapshot.get("health") or denied)
+    blockers = denied.get("blocking_conditions")
+    runtime_blockers = health.get("blocking_conditions")
+    permission_blockers = denied.get("permission_blockers")
+    combined = [
+        str(item or "")
+        for values in (blockers, runtime_blockers, permission_blockers)
+        if isinstance(values, list)
+        for item in values
+    ]
+    return (
+        denied.get("ok") is False
+        and health.get("checked") is True
+        and health.get("ok") is False
+        and health.get("status") == "not_ready"
+        and any(
+            item.startswith("desktop_permission_")
+            and item.endswith("_required")
+            for item in combined
+        )
+    )
+
+
+def _permission_denial_verified(
+    permission_denial: Mapping[str, Any],
+    *,
+    provider_health_root: Mapping[str, Any],
+) -> bool:
+    blockers = permission_denial.get("blocking_conditions")
+    tool_calls = permission_denial.get("tool_calls")
+    tool_call_count = permission_denial.get("tool_call_count")
+    permission_blocker = (
+        isinstance(blockers, list)
+        and any(
+            str(item or "").startswith("desktop_permission_")
+            and str(item or "").endswith("_required")
+            for item in blockers
+        )
+    )
+    normalized_verified = (
+        permission_denial.get("checked") is True
+        and permission_denial.get("ok") is False
+        and permission_denial.get("status") == "not_ready"
+        and permission_blocker
+        and permission_denial.get("action_dispatched") is False
+        and isinstance(tool_call_count, int)
+        and not isinstance(tool_call_count, bool)
+        and tool_call_count == 0
+        and isinstance(tool_calls, list)
+        and not tool_calls
+        and permission_denial.get("launch_attempted") is False
+        and permission_denial.get("input_attempted") is False
+        and permission_denial.get("foreground_fallback_used") is False
+    )
+    if normalized_verified:
+        return True
+
+    effectful_receipts = permission_denial.get("effectful_receipts")
+    receipt_count = permission_denial.get("receipt_count")
+    task_status = str(permission_denial.get("task_status") or "").strip()
+    task_start_status_code = permission_denial.get("task_start_status_code")
+    terminal_fail_closed = (
+        isinstance(task_start_status_code, int)
+        and not isinstance(task_start_status_code, bool)
+        and task_start_status_code >= 400
+    ) or task_status in {"blocked", "denied", "failed", "rejected"}
+    return (
+        _denied_provider_health_verified(provider_health_root)
+        and isinstance(effectful_receipts, list)
+        and not effectful_receipts
+        and isinstance(receipt_count, int)
+        and not isinstance(receipt_count, bool)
+        and receipt_count == 0
+        and permission_denial.get("no_launch_or_input_dispatched") is True
+        and permission_denial.get("no_foreground_fallback") is True
+        and terminal_fail_closed
+    )
+
+
+def _daily_provider_acceptance_evidence(
+    path: Path | None,
+) -> dict[str, Any]:
+    if path is None:
+        return {
+            "ok": False,
+            "collected": False,
+            "mode": DAILY_PROVIDER_ACCEPTANCE_SCHEMA_VERSION,
+            "source_path": "",
+            "blocking_conditions": [
+                "default_daily_provider_release_evidence_required"
+            ],
+        }
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        return {
+            "ok": False,
+            "collected": False,
+            "mode": DAILY_PROVIDER_ACCEPTANCE_SCHEMA_VERSION,
+            "source_path": str(path),
+            "blocking_conditions": ["daily_provider_acceptance_unreadable"],
+            "error": str(exc),
+        }
+    if not isinstance(payload, Mapping):
+        return {
+            "ok": False,
+            "collected": True,
+            "mode": DAILY_PROVIDER_ACCEPTANCE_SCHEMA_VERSION,
+            "source_path": str(path),
+            "blocking_conditions": ["daily_provider_acceptance_not_object"],
+        }
+
+    tcc = _mapping(payload.get("tcc"))
+    declared_checks = (
+        payload.get("checks")
+        if isinstance(payload.get("checks"), Mapping)
+        else {}
+    )
+    build_revision = str(payload.get("build_revision") or "").strip().lower()
+    packaged_app_path = str(payload.get("packaged_app_path") or "").strip()
+    app_identity = _mapping(payload.get("app_identity"))
+    observations = _mapping(payload.get("observations"))
+    bridge_status = _mapping(
+        observations.get("bridge_status") or payload.get("bridge_status")
+    )
+    build_metadata = _mapping(bridge_status.get("build_metadata"))
+    provider_health_root = _mapping(
+        observations.get("provider_health") or payload.get("provider_health")
+    )
+    provider_health = _mapping(
+        provider_health_root.get("authorized") or provider_health_root
+    )
+    provider_snapshot = _mapping(
+        provider_health.get("snapshot") or provider_health
+    )
+    provider_runtime_health = _mapping(
+        provider_snapshot.get("health") or provider_health
+    )
+    authorized_task = _mapping(
+        observations.get("authorized_task") or payload.get("authorized_task")
+    )
+    receipts = _mapping(authorized_task.get("receipts") or authorized_task)
+    launch_receipt = _mapping(receipts.get("launch"))
+    observation_receipt = _mapping(receipts.get("observation"))
+    input_receipt = _mapping(receipts.get("input"))
+    verify_receipt = _mapping(receipts.get("verify"))
+    observer = _mapping(
+        observations.get("observer")
+        or authorized_task.get("observer")
+        or payload.get("observer")
+    )
+    permission_denial = _mapping(
+        observations.get("permission_denial")
+        or payload.get("permission_denial")
+    )
+
+    app_path = Path(packaged_app_path) if packaged_app_path else Path(".")
+    disk_identity = _packaged_app_identity_from_disk(app_path)
+    app_bundle_id = str(app_identity.get("bundle_id") or "").strip()
+    app_version = str(app_identity.get("version") or "").strip()
+    app_asar_sha256 = str(
+        app_identity.get("app_asar_sha256") or ""
+    ).strip().lower()
+    app_build_revision = str(
+        app_identity.get("build_revision") or ""
+    ).strip().lower()
+    source_tree_fingerprint = str(
+        app_identity.get("source_tree_fingerprint") or ""
+    ).strip().lower()
+    bridge_commit = str(
+        build_metadata.get("commit")
+        or build_metadata.get("git_commit")
+        or build_metadata.get("build_revision")
+        or ""
+    ).strip().lower()
+    bridge_fingerprint = str(
+        build_metadata.get("source_tree_fingerprint") or ""
+    ).strip().lower()
+    declared_digest = str(payload.get("evidence_digest") or "").strip().lower()
+    expected_digest = _daily_provider_acceptance_digest(payload)
+    recorded_at_timezone_aware, recorded_at_fresh = _recorded_at_validation(
+        payload.get("recorded_at")
+    )
+
+    provider_blockers = provider_health.get("blocking_conditions")
+    runtime_provider_blockers = provider_runtime_health.get(
+        "blocking_conditions"
+    )
+    provider_health_verified = (
+        provider_health.get("ok") is True
+        and provider_runtime_health.get("checked") is True
+        and provider_runtime_health.get("ok") is True
+        and provider_runtime_health.get("status") in {"healthy", "ready"}
+        and provider_snapshot.get("provider_id")
+        == DAILY_PROVIDER_ACCEPTANCE_PROVIDER_ID
+        and provider_snapshot.get("provider_kind")
+        == DAILY_PROVIDER_ACCEPTANCE_PROVIDER_KIND
+        and provider_snapshot.get("source")
+        == DAILY_PROVIDER_ACCEPTANCE_TRANSPORT
+        and (
+            provider_snapshot.get("transport")
+            or provider_runtime_health.get("transport")
+        )
+        == DAILY_PROVIDER_ACCEPTANCE_PROVIDER_TRANSPORT
+        and isinstance(provider_blockers, list)
+        and not provider_blockers
+        and isinstance(runtime_provider_blockers, list)
+        and not runtime_provider_blockers
+    )
+
+    launch_target = _receipt_target_identity(launch_receipt)
+    observation_target = _receipt_target_identity(observation_receipt)
+    input_target = _receipt_target_identity(input_receipt)
+    verify_target = _receipt_target_identity(verify_receipt)
+    receipts_share_target = (
+        bool(launch_target[0] and launch_target[1])
+        and observation_target == launch_target
+        and input_target == launch_target
+        and verify_target == launch_target
+    )
+    launch_verified = (
+        receipts_share_target
+        and _nested_evidence_field(launch_receipt, "agent_owned_target") is True
+        and _nested_evidence_field(
+            launch_receipt,
+            "self_activation_suppressed",
+        )
+        is True
+        and _background_transport_verified(launch_receipt)
+        and _foreground_fallback_absent(launch_receipt)
+    )
+    observation_verified = (
+        receipts_share_target
+        and _nested_evidence_field(observation_receipt, "target_bound") is True
+        and _nested_evidence_field(
+            observation_receipt,
+            "observation_verified",
+        )
+        is True
+        and _nested_evidence_field(observation_receipt, "frontmost") is False
+        and _nested_evidence_field(observation_receipt, "desktop_scope")
+        == "agent_owned_background"
+    )
+    no_foreground_fallback = _foreground_fallback_absent(input_receipt)
+    dispatch_success = bool(
+        _nested_evidence_field(input_receipt, "dispatch_success") is True
+        or _nested_evidence_field(input_receipt, "action_dispatched") is True
+    )
+    input_verified = (
+        receipts_share_target
+        and _nested_evidence_field(input_receipt, "target_bound") is True
+        and _background_transport_verified(input_receipt)
+        and dispatch_success
+        and _grounded_input_matches_target(input_receipt, launch_target)
+        and no_foreground_fallback
+    )
+    verification_method = str(
+        _nested_evidence_field(verify_receipt, "verification_method") or ""
+    ).strip()
+    verify_verified = (
+        receipts_share_target
+        and _nested_evidence_field(verify_receipt, "target_bound") is True
+        and _nested_evidence_field(verify_receipt, "postcondition_verified")
+        is True
+        and _nested_evidence_field(
+            verify_receipt,
+            "verification_context_trusted",
+        )
+        is True
+        and verification_method
+        in DAILY_PROVIDER_ACCEPTANCE_TRUSTED_VERIFICATION_METHODS
+    )
+    frontmost_verified = _frontmost_observer_verified(
+        observer,
+        target_pid=launch_target[0],
+    )
+    pointer_verified = _pointer_observer_verified(observer)
+    keyboard_verified = (
+        input_verified
+        and frontmost_verified
+        and no_foreground_fallback
+        and _nested_evidence_field(input_receipt, "target_bound") is True
+    )
+    permission_denial_verified = _permission_denial_verified(
+        permission_denial,
+        provider_health_root=provider_health_root,
+    )
+
+    app_identity_fields_present = (
+        app_bundle_id == DAILY_PROVIDER_ACCEPTANCE_HOST_BUNDLE_ID
+        and bool(app_version)
+        and len(app_asar_sha256) == 64
+        and all(character in "0123456789abcdef" for character in app_asar_sha256)
+        and len(app_build_revision) == 40
+        and all(
+            character in "0123456789abcdef"
+            for character in app_build_revision
+        )
+        and source_tree_fingerprint.startswith("sha256:")
+        and len(source_tree_fingerprint) == len("sha256:") + 64
+        and all(
+            character in "0123456789abcdef"
+            for character in source_tree_fingerprint.removeprefix("sha256:")
+        )
+    )
+    app_identity_matches_disk = (
+        disk_identity.get("ok") is True
+        and disk_identity.get("bundle_id") == app_bundle_id
+        and str(disk_identity.get("version") or "") == app_version
+        and str(disk_identity.get("app_asar_sha256") or "").lower()
+        == app_asar_sha256
+    )
+    bridge_build_matches_app = (
+        bridge_commit == app_build_revision == build_revision
+        and bridge_fingerprint == source_tree_fingerprint
+    )
+    packaged_bridge_verified = (
+        app_identity_fields_present
+        and app_identity_matches_disk
+        and bridge_build_matches_app
+        and provider_health_verified
+    )
+    derived_checks = {
+        "packaged_bridge_ready": packaged_bridge_verified,
+        "background_launch_verified": launch_verified,
+        "target_bound_observation_verified": observation_verified,
+        "background_input_verified": input_verified,
+        "postcondition_verified": verify_verified,
+        "foreground_app_unchanged": frontmost_verified,
+        "pointer_not_taken_over": pointer_verified,
+        "keyboard_not_taken_over": keyboard_verified,
+        "permission_denial_fails_closed": permission_denial_verified,
+    }
+    validation = {
+        "schema_version_matches": payload.get("schema_version")
+        == DAILY_PROVIDER_ACCEPTANCE_SCHEMA_VERSION,
+        "status_passed": payload.get("status") == "passed",
+        "source_is_explicit_local_tcc_acceptance": payload.get("evidence_source")
+        == DAILY_PROVIDER_ACCEPTANCE_SOURCE,
+        "recorded_at_timezone_aware": recorded_at_timezone_aware,
+        "recorded_at_fresh": recorded_at_fresh,
+        "evidence_digest_valid": (
+            len(declared_digest) == 64
+            and hmac.compare_digest(declared_digest, expected_digest)
+        ),
+        "background_provider_matches": (
+            payload.get("provider_kind")
+            == DAILY_PROVIDER_ACCEPTANCE_PROVIDER_KIND
+            and payload.get("provider_id") == DAILY_PROVIDER_ACCEPTANCE_PROVIDER_ID
+            and payload.get("desktop_session_kind")
+            == DAILY_PROVIDER_ACCEPTANCE_PROVIDER_KIND
+        ),
+        "packaged_app_verified": (
+            payload.get("packaged_app") is True
+            and disk_identity.get("location_valid") is True
+            and disk_identity.get("ok") is True
+        ),
+        "build_revision_present": (
+            len(build_revision) == 40
+            and all(character in "0123456789abcdef" for character in build_revision)
+        ),
+        "electron_bridge_transport_verified": payload.get("transport")
+        == DAILY_PROVIDER_ACCEPTANCE_TRANSPORT,
+        "host_attribution_verified": (
+            payload.get("host_bundle_id")
+            == DAILY_PROVIDER_ACCEPTANCE_HOST_BUNDLE_ID
+            and payload.get("host_attribution_verified") is True
+        ),
+        "tcc_accessibility_authorized": tcc.get("accessibility") == "authorized",
+        "tcc_screen_recording_authorized": (
+            tcc.get("screen_recording") == "authorized"
+        ),
+        "foreground_takeover_forbidden": payload.get(
+            "foreground_takeover_required"
+        )
+        is False,
+        "app_identity_fields_present": app_identity_fields_present,
+        "app_identity_matches_installed_app": app_identity_matches_disk,
+        "bridge_build_metadata_matches_app": bridge_build_matches_app,
+        "provider_health_verified": provider_health_verified,
+        "authorized_receipts_share_target": receipts_share_target,
+        **{
+            f"{check_name}_accepted": declared_checks.get(check_name) is True
+            for check_name in DAILY_PROVIDER_ACCEPTANCE_REQUIRED_CHECKS
+        },
+        **{
+            f"{check_name}_derived": derived_checks.get(check_name) is True
+            for check_name in DAILY_PROVIDER_ACCEPTANCE_REQUIRED_CHECKS
+        },
+    }
+    blockers = [
+        f"daily_provider_acceptance_{check_name}_failed"
+        for check_name, passed in validation.items()
+        if not passed
+    ]
+    return {
+        "ok": not blockers,
+        "collected": True,
+        "mode": DAILY_PROVIDER_ACCEPTANCE_SCHEMA_VERSION,
+        "source_path": str(path),
+        "evidence_source": str(payload.get("evidence_source") or ""),
+        "recorded_at": str(payload.get("recorded_at") or ""),
+        "provider_kind": str(payload.get("provider_kind") or ""),
+        "provider_id": str(payload.get("provider_id") or ""),
+        "desktop_session_kind": str(payload.get("desktop_session_kind") or ""),
+        "transport": str(payload.get("transport") or ""),
+        "packaged_app_path": packaged_app_path,
+        "build_revision": build_revision,
+        "host_bundle_id": str(payload.get("host_bundle_id") or ""),
+        "foreground_takeover_required": payload.get(
+            "foreground_takeover_required"
+        ),
+        "tcc": {
+            "accessibility": str(tcc.get("accessibility") or ""),
+            "screen_recording": str(tcc.get("screen_recording") or ""),
+        },
+        "declared_checks": {
+            check_name: declared_checks.get(check_name) is True
+            for check_name in DAILY_PROVIDER_ACCEPTANCE_REQUIRED_CHECKS
+        },
+        "derived_checks": derived_checks,
+        "app_identity": dict(app_identity),
+        "installed_app_identity": dict(disk_identity),
+        "bridge_status": dict(bridge_status),
+        "provider_health": dict(provider_health),
+        "authorized_target": {
+            "pid": launch_target[0],
+            "window_id": launch_target[1],
+        },
+        "verification_method": verification_method,
+        "observer": dict(observer),
+        "permission_denial": dict(permission_denial),
+        "validation": validation,
+        "blocking_conditions": blockers,
+    }
+
+
 def _provider_manifest_validation_evidence(path: Path) -> dict[str, Any]:
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
@@ -1352,6 +2214,23 @@ def _compact_stdout_summary(payload: dict[str, Any]) -> dict[str, Any]:
         "public_release_ready": bool(payload.get("public_release_ready") is True),
         "public_release_readiness": dict(
             payload.get("public_release_readiness") or {}
+        ),
+        "default_daily_provider_release_ready": bool(
+            payload.get("default_daily_provider_release_ready") is True
+        ),
+        "default_daily_provider_release_source": str(
+            payload.get("default_daily_provider_release_source") or ""
+        ),
+        "default_daily_provider_release_blockers": [
+            str(item)
+            for item in payload.get("default_daily_provider_release_blockers") or []
+            if str(item or "").strip()
+        ],
+        "daily_provider_acceptance_requested": bool(
+            payload.get("daily_provider_acceptance_requested") is True
+        ),
+        "daily_provider_acceptance": dict(
+            payload.get("daily_provider_acceptance") or {}
         ),
         "direct_desktop_release_ready": bool(
             payload.get("direct_desktop_release_ready") is True
@@ -1445,7 +2324,17 @@ def _parser() -> argparse.ArgumentParser:
         dest="public_release_required",
         action="store_true",
         help=(
-            "Require the default Direct Desktop product path to be release-ready."
+            "Require the default daily background or isolated provider path to "
+            "have release-grade end-to-end evidence."
+        ),
+    )
+    parser.add_argument(
+        "--daily-provider-acceptance-json",
+        type=Path,
+        help=(
+            "Explicit acceptance evidence from the packaged CUA background path "
+            "after local macOS TCC authorization. A foreground broker probe does "
+            "not satisfy this public-release gate."
         ),
     )
     parser.add_argument(
@@ -1530,6 +2419,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.use_configured_virtual_desktop_provider
         ),
         provider_manifest=args.provider_manifest,
+        daily_provider_acceptance_json=args.daily_provider_acceptance_json,
         public_release_required=bool(args.public_release_required),
         require_public_release_backend=bool(args.require_public_release_backend),
     )
@@ -1542,6 +2432,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         else _compact_stdout_summary(evidence)
     )
     print(json.dumps(stdout_payload, ensure_ascii=False, indent=2, sort_keys=True))
+    if args.public_release_required or args.require_public_release_backend:
+        return 0 if evidence.get("public_release_ready") is True else 1
     return 0 if evidence.get("ok") is True else 1
 
 

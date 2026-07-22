@@ -19,6 +19,8 @@ class RuntimeShutdownService:
         cancel_terminal_process_groups: Callable[[], Any],
         ensure_row_factory: Callable[[], Any],
         cancel_run: Callable[[str], dict[str, Any]],
+        release_desktop_provider_session_owner: Callable[[], Any] | None = None,
+        close_desktop_execution_providers: Callable[[], Any] | None = None,
     ) -> None:
         self._conn = conn
         self._credential_store = credential_store
@@ -28,6 +30,12 @@ class RuntimeShutdownService:
         self._cancel_terminal_process_groups = cancel_terminal_process_groups
         self._ensure_row_factory = ensure_row_factory
         self._cancel_run = cancel_run
+        self._release_desktop_provider_session_owner = (
+            release_desktop_provider_session_owner or (lambda: None)
+        )
+        self._close_desktop_execution_providers = (
+            close_desktop_execution_providers or (lambda: None)
+        )
 
     def shutdown(self, *, close_db: bool = True) -> None:
         if self._is_closed():
@@ -44,9 +52,22 @@ class RuntimeShutdownService:
             self._conn.commit()
         finally:
             if close_db:
-                self._conn.close()
-                self._credential_store.close()
-                self._mark_closed()
+                try:
+                    self._release_desktop_provider_session_owner()
+                except Exception:
+                    # Shutdown remains best-effort; database and credential
+                    # resources must still close if provider cleanup fails.
+                    pass
+                try:
+                    self._close_desktop_execution_providers()
+                except Exception:
+                    # Provider cleanup must not prevent durable runtime resources
+                    # from closing. Cua MCP proxies normally terminate on EOF.
+                    pass
+                finally:
+                    self._conn.close()
+                    self._credential_store.close()
+                    self._mark_closed()
 
     def _active_run_ids(self) -> list[str]:
         rows = self._conn.execute(

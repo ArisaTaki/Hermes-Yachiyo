@@ -678,6 +678,7 @@ def test_tool_call_snapshots_from_payloads_prefers_payload_list_over_event_fallb
                 payload={"tool_call_id": "event-call", "tool_name": "terminal.run"},
             )
         ],
+        include_unmatched_event_calls=False,
     )
 
     assert len(snapshots) == 1

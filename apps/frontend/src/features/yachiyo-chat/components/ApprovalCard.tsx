@@ -18,6 +18,8 @@ export function ApprovalCard({
   onApprove?: () => void;
   onReject?: () => void;
 }) {
+  const stalePendingApproval = (approval.status || 'pending') === 'pending'
+    && !String(approval.approval_id || '').trim();
   if (onApprove || onReject) {
     return (
       <RuntimeApprovalGate
@@ -39,6 +41,23 @@ export function ApprovalCard({
       >
         {actions}
       </RuntimeApprovalGate>
+    );
+  }
+
+  if (stalePendingApproval) {
+    return (
+      <div className="yachiyo-task-approval-stale" data-testid="yachiyo-task-approval-stale">
+        <RuntimeApprovalCard
+          actions={actions}
+          actionsClassName="yachiyo-agent-task-approval-actions"
+          actionsTestId="yachiyo-task-approval-actions"
+          approval={approval}
+          className="yachiyo-task-approval"
+          testId="yachiyo-task-approval-card"
+          variant="compact"
+        />
+        <p className="message-error">审批信息已过期，请刷新后重试。</p>
+      </div>
     );
   }
 

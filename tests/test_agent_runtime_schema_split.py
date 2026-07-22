@@ -56,6 +56,7 @@ def test_runtime_schema_initializer_creates_runtime_tables_indexes_and_metadata(
         row["key"]: row["value"]
         for row in conn.execute("SELECT key, value FROM runtime_schema_metadata").fetchall()
     }
+    run_columns = {row["name"] for row in conn.execute("PRAGMA table_info(runs)").fetchall()}
 
     assert calls == ["ensure", "vacuum"]
     assert {
@@ -76,6 +77,7 @@ def test_runtime_schema_initializer_creates_runtime_tables_indexes_and_metadata(
         "idx_memory_items_scope_kind_updated",
         "idx_future_tasks_status_due",
     }.issubset(indexes)
+    assert "project_root_group" in run_columns
     assert metadata["schema_version"] == "1"
 
 
@@ -249,7 +251,12 @@ def test_runtime_schema_migrator_updates_legacy_columns_projections_and_secrets(
 
     assert {"nickname", "persona_prompt", "model_credential_ref"}.issubset(agent_columns)
     assert {"local_path", "folder_id", "source_type", "sync_status"}.issubset(skill_columns)
-    assert {"run_group_id", "client_request_id", "pending_approval_json"}.issubset(run_columns)
+    assert {
+        "run_group_id",
+        "client_request_id",
+        "project_root_group",
+        "pending_approval_json",
+    }.issubset(run_columns)
     assert link["run_status"] == "completed"
     assert link["last_event_sequence"] == 2
     assert link["updated_at"] == "2026-06-15T00:00:00+00:00"

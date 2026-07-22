@@ -9,11 +9,9 @@ export function ComposerApprovalNotice({
   currentIndex,
   details,
   itemId,
-  onApprove,
   onNext,
   onOpenDetails,
   onPrevious,
-  onReject,
   onReveal,
   runId,
   runStatus,
@@ -25,11 +23,9 @@ export function ComposerApprovalNotice({
   currentIndex: number;
   details: ApprovalRequestDetails;
   itemId?: string;
-  onApprove: () => void;
   onNext: () => void;
   onOpenDetails: () => void;
   onPrevious: () => void;
-  onReject: () => void;
   onReveal: () => void;
   runId?: string;
   runStatus?: string;
@@ -39,6 +35,7 @@ export function ComposerApprovalNotice({
   const preview = details.codeText || details.summary.map((item) => item.value).join(' ');
   const hasMultiple = total > 1 && currentIndex >= 0;
   const workflowApproval = details.tool === 'workflow.approval';
+  const actionable = Boolean(runId && String(approvalId || '').trim());
   const toolLabel = runtimeToolDisplayLabel(details.tool);
   const subtitle = workflowApproval
     ? workflowApprovalNoticeSubtitle(details, preview)
@@ -61,6 +58,9 @@ export function ComposerApprovalNotice({
         <div>
           <strong>{workflowApproval ? `${details.requester} 等待人工确认` : `${details.requester} 请求${toolLabel}`}</strong>
           <span>{subtitle}</span>
+          <small className="composer-approval-canonical-hint" data-testid="chat-composer-approval-canonical-hint">
+            {actionable ? '请在对应任务卡或消息中批准或拒绝。' : '审批信息已过期，请刷新后重试。'}
+          </small>
         </div>
       </div>
       <div className="composer-approval-actions">
@@ -82,9 +82,12 @@ export function ComposerApprovalNotice({
             Agent Studio
           </button>
         ) : null}
-        <button type="button" className="approve" data-testid="chat-composer-approval-approve" disabled={busy} onClick={onApprove}>{busy ? '处理中...' : '批准'}</button>
-        <button type="button" className="reject" data-testid="chat-composer-approval-reject" disabled={busy} onClick={onReject}>拒绝</button>
       </div>
+      {!actionable ? (
+        <p className="message-error" data-testid="chat-composer-approval-stale">
+          审批信息已过期，请刷新后重试。
+        </p>
+      ) : null}
     </div>
   );
 }

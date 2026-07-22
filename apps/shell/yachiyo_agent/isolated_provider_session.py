@@ -10,8 +10,10 @@ import subprocess
 import sys
 import threading
 import time
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 from urllib.parse import urlparse
 
 from apps.shell.agent.runtime.controlled_desktop_provider import (
@@ -113,6 +115,31 @@ _REAL_VIRTUAL_BACKEND_BLOCKERS = {
     "real_virtual_desktop_backend_required",
 }
 
+_SESSION_OWNER_TOKEN: ContextVar[str] = ContextVar(
+    "yachiyo_desktop_provider_session_owner",
+    default="",
+)
+
+
+@contextmanager
+def desktop_provider_session_owner(owner_token: str) -> Iterator[None]:
+    """Scope provider auto-starts to an in-process runtime owner.
+
+    The token never enters Runtime envelopes or public event payloads.  It is
+    used only to release a provider process when the Runtime instance that
+    started (or shares) it closes.
+    """
+
+    clean_token = str(owner_token or "").strip()
+    if not clean_token:
+        yield
+        return
+    reset_token = _SESSION_OWNER_TOKEN.set(clean_token)
+    try:
+        yield
+    finally:
+        _SESSION_OWNER_TOKEN.reset(reset_token)
+
 
 class IsolatedDesktopProviderSessionManager:
     """Starts, stops, and probes a local isolated desktop provider process."""
@@ -126,6 +153,8 @@ class IsolatedDesktopProviderSessionManager:
         self._provider_manifest_evidence: dict[str, Any] = {}
         self._source = "isolated_provider_session_manager"
         self._started_at = 0.0
+        self._owner_tokens: set[str] = set()
+        self._unowned_lease = False
         self._lock = threading.RLock()
 
     def status(self, *, probe_health: bool = True) -> dict[str, Any]:
@@ -145,6 +174,8 @@ class IsolatedDesktopProviderSessionManager:
                 self._provider_manifest_evidence = {}
                 self._source = "isolated_provider_session_manager"
                 self._started_at = 0.0
+                self._owner_tokens.clear()
+                self._unowned_lease = False
             provider_status = (
                 desktop_execution_provider_status_from_env(
                     self._env,
@@ -223,10 +254,12 @@ class IsolatedDesktopProviderSessionManager:
         provider_id: str = DEFAULT_ISOLATED_PROVIDER_ID,
         tools: list[str] | None = None,
         timeout_seconds: float = 5.0,
+        owner_token: str = "",
     ) -> dict[str, Any]:
         with self._lock:
             current = self.status(probe_health=True)
             if current["running"]:
+                self._claim_start_owner(owner_token)
                 return {**current, "started": False}
             command = [
                 sys.executable,
@@ -264,6 +297,7 @@ class IsolatedDesktopProviderSessionManager:
             self._started_at = time.time()
             self._previous_env = {}
             _apply_runtime_env(env, previous_env=self._previous_env)
+            self._claim_start_owner(owner_token)
             return {
                 **self.status(probe_health=True),
                 "started": True,
@@ -277,10 +311,12 @@ class IsolatedDesktopProviderSessionManager:
         timeout_seconds: float = 10.0,
         requires_real_virtual_desktop_backend: bool = False,
         provider_manifest: str | Path | None = None,
+        owner_token: str = "",
     ) -> dict[str, Any]:
         with self._lock:
             current = self.status(probe_health=True)
             if current["running"]:
+                self._claim_start_owner(owner_token)
                 return {**current, "started": False}
             manifest: dict[str, Any] = {}
             command: list[str] = []
@@ -409,6 +445,7 @@ class IsolatedDesktopProviderSessionManager:
             self._started_at = time.time()
             self._previous_env = {}
             _apply_runtime_env(env, previous_env=self._previous_env)
+            self._claim_start_owner(owner_token)
             return {
                 **self.status(probe_health=True),
                 "started": True,
@@ -432,6 +469,8 @@ class IsolatedDesktopProviderSessionManager:
             self._provider_manifest_evidence = {}
             self._source = "isolated_provider_session_manager"
             self._started_at = 0.0
+            self._owner_tokens.clear()
+            self._unowned_lease = False
             return {
                 "ok": True,
                 "status": "stopped",
@@ -439,6 +478,49 @@ class IsolatedDesktopProviderSessionManager:
                 "stopped": was_running,
                 "source": "isolated_provider_session_manager",
             }
+
+    def claim_owner(self, owner_token: str) -> dict[str, Any]:
+        """Attach a Runtime owner to this manager's local process only."""
+
+        with self._lock:
+            current = self.status(probe_health=True)
+            if current.get("running"):
+                self._claim_start_owner(owner_token)
+            return {**current, "started": False}
+
+    def release_owner(self, owner_token: str) -> dict[str, Any]:
+        """Release one Runtime lease without touching external providers."""
+
+        clean_token = str(owner_token or "").strip()
+        with self._lock:
+            # Reap an already-exited local process and restore its environment
+            # before evaluating lease ownership.
+            self.status(probe_health=False)
+            if not clean_token or clean_token not in self._owner_tokens:
+                return {"ok": True, "released": False, "stopped": False}
+            self._owner_tokens.discard(clean_token)
+            process = self._process
+            running = process is not None and process.poll() is None
+            should_stop = (
+                running
+                and not self._owner_tokens
+                and not self._unowned_lease
+            )
+            if not should_stop:
+                return {"ok": True, "released": True, "stopped": False}
+            stopped = self.stop()
+            return {
+                "ok": True,
+                "released": True,
+                "stopped": bool(stopped.get("stopped")),
+            }
+
+    def _claim_start_owner(self, owner_token: str) -> None:
+        clean_token = str(owner_token or "").strip()
+        if clean_token:
+            self._owner_tokens.add(clean_token)
+            return
+        self._unowned_lease = True
 
 
 def isolated_desktop_provider_session_manager() -> IsolatedDesktopProviderSessionManager:
@@ -459,6 +541,7 @@ def start_isolated_desktop_provider_session(
     request: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     payload = dict(request or {})
+    owner_token = _SESSION_OWNER_TOKEN.get()
     tools = payload.get("tools")
     clean_tools = [str(item) for item in tools] if isinstance(tools, list) else None
     requires_real_backend = _optional_bool(
@@ -466,6 +549,19 @@ def start_isolated_desktop_provider_session(
         payload.get("require_real_virtual_desktop_backend"),
         payload.get("real_virtual_desktop_backend_required"),
     ) is True
+    local_status = _SESSION_MANAGER.status(probe_health=True)
+    if bool(local_status.get("running")) and _session_status_supports_targets(
+        local_status,
+        [{"request_id": "", "tool_name": tool} for tool in clean_tools or []],
+    ):
+        if requires_real_backend and not _session_status_uses_real_virtual_backend(
+            local_status
+        ):
+            return _real_virtual_desktop_provider_required_status(
+                payload,
+                current_status=local_status,
+            )
+        return _SESSION_MANAGER.claim_owner(owner_token)
     external_status = _external_isolated_desktop_provider_session_status()
     if bool(external_status.get("running")) and _session_status_supports_targets(
         external_status,
@@ -485,6 +581,7 @@ def start_isolated_desktop_provider_session(
             tools=clean_tools,
             requires_real_virtual_desktop_backend=requires_real_backend,
             provider_manifest=provider_manifest or None,
+            owner_token=owner_token,
         )
         if bool(started.get("ok")) is False:
             return started
@@ -508,6 +605,7 @@ def start_isolated_desktop_provider_session(
             payload.get("provider_id") or DEFAULT_ISOLATED_PROVIDER_ID
         ),
         tools=clean_tools,
+        owner_token=owner_token,
     )
 
 
@@ -545,6 +643,14 @@ def _envelope_provider_manifest_path(envelope: Any) -> str:
 
 def stop_isolated_desktop_provider_session() -> dict[str, Any]:
     return _SESSION_MANAGER.stop()
+
+
+def release_isolated_desktop_provider_session_owner(
+    owner_token: str,
+) -> dict[str, Any]:
+    """Release only a local provider lease owned by one Runtime instance."""
+
+    return _SESSION_MANAGER.release_owner(owner_token)
 
 
 def ensure_isolated_desktop_provider_session_for_envelope(
@@ -1450,9 +1556,11 @@ def _isolated_session_scope_targets(
 
 def _request_needs_isolated_session(tool_name: str, request: dict[str, Any]) -> bool:
     route = _mapping(request.get("desktop_execution_route"))
-    provider = _mapping(request.get("sandbox_provider"))
+    provider = _request_desktop_provider(request)
     mode = _mapping(request.get("execution_mode"))
     if _request_allows_user_foreground_session(request):
+        return False
+    if _route_or_provider_uses_background_desktop(route, provider):
         return False
     if _route_or_provider_already_supplies_isolated_session(route, provider):
         return False
@@ -1475,6 +1583,33 @@ def _request_needs_isolated_session(tool_name: str, request: dict[str, Any]) -> 
     if _optional_bool(route.get("desktop_session_isolated")) is True:
         return False
     return True
+
+
+def _request_desktop_provider(request: dict[str, Any]) -> dict[str, Any]:
+    for key in (
+        "sandbox_provider",
+        "desktop_execution_provider",
+        "sandbox_desktop_provider",
+        "desktop_sandbox_provider",
+    ):
+        provider = _mapping(request.get(key))
+        if provider:
+            return provider
+    return {}
+
+
+def _route_or_provider_uses_background_desktop(
+    route: dict[str, Any],
+    provider: dict[str, Any],
+) -> bool:
+    provider_kind = _route_provider_kind(route, provider)
+    if provider_kind == "background_desktop":
+        return True
+    if _optional_bool(route.get("background_desktop_preferred")) is True:
+        return True
+    return str(provider.get("desktop_session_kind") or "").strip() == (
+        "background_desktop"
+    )
 
 
 def _request_allows_user_foreground_session(request: dict[str, Any]) -> bool:
@@ -1593,14 +1728,15 @@ def _route_provider_kind(route: dict[str, Any], provider: dict[str, Any]) -> str
 
 
 def _policy_prefers_isolated_foreground(policy: dict[str, Any]) -> bool:
-    return any(
+    explicitly_isolated = any(
         _optional_bool(policy.get(key)) is True
-        for key in (
-            "prefer_isolated_desktop",
-            "avoid_user_foreground_takeover",
-            "require_sandbox_for_keyboard_mouse",
-        )
+        for key in ("prefer_isolated_desktop", "require_sandbox_for_keyboard_mouse")
     )
+    if explicitly_isolated:
+        return True
+    if _optional_bool(policy.get("prefer_background_desktop")) is True:
+        return False
+    return _optional_bool(policy.get("avoid_user_foreground_takeover")) is True
 
 
 def _route_or_provider_already_supplies_isolated_session(
@@ -1634,6 +1770,8 @@ def _route_or_provider_requires_isolated_session(
     route: dict[str, Any],
     provider: dict[str, Any],
 ) -> bool:
+    if _route_or_provider_uses_background_desktop(route, provider):
+        return False
     route_status = str(route.get("status") or "").strip()
     route_blockers = set(_string_list(route.get("blocking_conditions")))
     provider_blockers = set(_string_list(provider.get("blocking_conditions")))
@@ -1666,6 +1804,8 @@ def _request_should_replace_route_with_ready_isolated_provider(
     session: dict[str, Any],
 ) -> bool:
     tool_name = _request_tool_name(request)
+    if _route_or_provider_uses_background_desktop(route, provider):
+        return False
     if _session_requires_real_virtual_backend(session) and (
         _request_uses_ready_local_readonly_route(
             tool_name,
@@ -1744,7 +1884,7 @@ def _request_with_ready_desktop_provider_route(
     if not tool_name:
         return request
     route = _mapping(request.get("desktop_execution_route"))
-    provider = _mapping(request.get("sandbox_provider"))
+    provider = _request_desktop_provider(request)
     if route and not _request_should_replace_route_with_ready_isolated_provider(
         request,
         route=route,

@@ -36,6 +36,7 @@ const bridgeState = {
   live2dClickAction: 'toggle_reply',
   modeRequests: [],
   publicTaskDecision: '',
+  readinessBlocked: false,
   taskRequests: [],
   taskStartPayloads: [],
   quickMessagePayload: null,
@@ -83,6 +84,7 @@ function launcherPayload(mode) {
       status_label: STATUS_LABEL,
       latest_reply: live2d ? LIVE2D_REPLY : '',
       latest_reply_full: live2d ? LIVE2D_REPLY : '',
+      agent_task: publicAgentTasks()[0],
       recent_sessions: recentSessions,
     },
     notification: {
@@ -135,6 +137,8 @@ function launcherPayload(mode) {
 }
 
 function publicAgentTasks() {
+  const running = bridgeState.publicTaskDecision === 'running';
+  const staleCompleted = bridgeState.publicTaskDecision === 'approved';
   const resolved = bridgeState.publicTaskDecision === 'approved'
     || bridgeState.publicTaskDecision === 'rejected'
     || bridgeState.publicTaskDecision === 'cancelled';
@@ -145,12 +149,21 @@ function publicAgentTasks() {
       title: PUBLIC_TASK_TITLE,
       status: bridgeState.publicTaskDecision === 'cancelled'
         ? 'cancelled'
-        : bridgeState.publicTaskDecision === 'rejected' ? 'failed' : resolved ? 'completed' : 'waiting_approval',
+        : bridgeState.publicTaskDecision === 'rejected' ? 'failed' : running ? 'running' : resolved ? 'completed' : 'waiting_approval',
       summary: resolved ? `Launcher task ${bridgeState.publicTaskDecision}` : 'Launcher can observe public Yachiyo task snapshots.',
-      current_step: resolved ? 'Launcher smoke approval resolved' : 'Awaiting launcher smoke approval',
-      progress_text: resolved ? 'Approval resolved' : 'Waiting for approval',
-      needs_user_action: !resolved,
-      pending_approvals: resolved ? [] : [
+      current_step: running ? 'tool_loop_internal_step' : resolved ? 'Launcher smoke approval resolved' : 'Awaiting launcher smoke approval',
+      progress_text: running ? 'planner replan verification loop' : resolved ? 'Approval resolved' : 'Waiting for approval',
+      needs_user_action: staleCompleted || (!resolved && !running),
+      pending_approvals: staleCompleted ? [
+        {
+          approval_id: 'launcher-stale-completed-approval',
+          run_id: PUBLIC_RUN_ID,
+          title: 'Stale completed approval must stay hidden',
+          tool_name: 'workspace.write_patch',
+          risk_level: 'high',
+          status: 'pending',
+        },
+      ] : resolved || running ? [] : [
         {
           approval_id: 'launcher-public-approval',
           run_id: PUBLIC_RUN_ID,
@@ -160,7 +173,14 @@ function publicAgentTasks() {
           status: 'pending',
         },
       ],
-      recent_events: [
+      recent_events: running ? [{
+        event_id: 'launcher-running-internal-event',
+        run_id: PUBLIC_RUN_ID,
+        sequence: 1,
+        event_type: 'tool.started',
+        title: 'media.apple_music_play running',
+        detail: 'internal planner verification loop',
+      }] : [
         {
           event_id: 'launcher-public-event',
           run_id: PUBLIC_RUN_ID,
@@ -197,6 +217,33 @@ function publicAgentTasks() {
           },
         },
       ],
+      runtime_debug: running ? {
+        blocked_tool_call_count: 2,
+        failed_verification_count: 1,
+        needs_replan: true,
+      } : null,
+      runtime_execution_envelope: running ? {
+        requests: [{
+          request_id: 'launcher-running-secret-request',
+          tool_name: 'media.apple_music_play',
+          risk_level: 'high',
+        }],
+      } : null,
+      task_progress: running ? {
+        blocked_todos: 2,
+        failed_verification_count: 1,
+        needs_replan: true,
+        status: 'running',
+      } : null,
+      replan_recoveries: running ? [{
+        request_id: 'launcher-running-secret-replan',
+        status: 'pending',
+        recovery_actions: [{
+          action_id: 'launcher-running-secret-action',
+          prompt: 'Retry Apple Music with resolved title',
+          tool: 'browser.search',
+        }],
+      }] : [],
       artifacts: [],
       open_in_studio_url: `#/agents?run_id=${PUBLIC_RUN_ID}`,
       created_at: now,
@@ -260,6 +307,15 @@ async function startMockBridge() {
         const mode = url.searchParams.get('mode') === 'live2d' ? 'live2d' : 'bubble';
         bridgeState.modeRequests.push(mode);
         sendJson(response, 200, launcherPayload(mode));
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/yachiyo/readiness') {
+        sendJson(response, 200, {
+          ok: true,
+          capabilities: bridgeState.readinessBlocked
+            ? { desktop_execution: { missing_permissions: ['accessibility'] } }
+            : {},
+        });
         return;
       }
       if (request.method === 'GET' && url.pathname === '/yachiyo/tasks') {
@@ -358,7 +414,40 @@ async function startMockBridge() {
       }
       if (request.method === 'GET' && url.pathname === '/__smoke/reset-public-task') {
         bridgeState.publicTaskDecision = '';
-        sendJson(response, 200, { ok: true, publicTaskDecision: bridgeState.publicTaskDecision });
+        bridgeState.readinessBlocked = false;
+        sendJson(response, 200, {
+          ok: true,
+          publicTaskDecision: bridgeState.publicTaskDecision,
+          readinessBlocked: bridgeState.readinessBlocked,
+        });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/__smoke/running-public-task') {
+        bridgeState.publicTaskDecision = 'running';
+        bridgeState.readinessBlocked = false;
+        sendJson(response, 200, {
+          ok: true,
+          publicTaskDecision: bridgeState.publicTaskDecision,
+        });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/__smoke/completed-public-task') {
+        bridgeState.publicTaskDecision = 'approved';
+        bridgeState.readinessBlocked = false;
+        sendJson(response, 200, {
+          ok: true,
+          publicTaskDecision: bridgeState.publicTaskDecision,
+        });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/__smoke/completed-readiness') {
+        bridgeState.publicTaskDecision = 'approved';
+        bridgeState.readinessBlocked = true;
+        sendJson(response, 200, {
+          ok: true,
+          publicTaskDecision: bridgeState.publicTaskDecision,
+          readinessBlocked: bridgeState.readinessBlocked,
+        });
         return;
       }
       sendJson(response, 404, { ok: false, error: `not found: ${request.method} ${url.pathname}` });
@@ -513,18 +602,212 @@ function waitFor(win, predicate, label, timeout = 15000) {
 async function installOpenViewProbe(win) {
   await win.webContents.executeJavaScript(\`
     window.__ohaLauncherOpenViewCalls = [];
+    window.__ohaLauncherHitRegionCalls = [];
+    window.__ohaLauncherTaskRegionRegistered = (testId) => {
+      const task = document.querySelector('[data-testid="' + testId + '"]');
+      if (!task) return false;
+      const bounds = task.getBoundingClientRect();
+      return window.__ohaLauncherHitRegionCalls.some((call) => (
+        call?.mode === 'live2d'
+        && Array.isArray(call?.payload?.regions)
+        && call.payload.regions.some((region) => (
+          Number(region?.x) <= bounds.left
+          && Number(region?.y) <= bounds.top
+          && Number(region?.x) + Number(region?.width) >= bounds.right
+          && Number(region?.y) + Number(region?.height) >= bounds.bottom
+        ))
+      ));
+    };
     window.ohaDesktop = {
       ...(window.ohaDesktop || {}),
       openView: async (view, params) => {
         window.__ohaLauncherOpenViewCalls.push({ view, params: params || {} });
       },
+      setLauncherHitRegions: async (mode, payload) => {
+        window.__ohaLauncherHitRegionCalls.push({ mode, payload });
+        return true;
+      },
     };
     true;
   \`, true);
 }
+async function assertCompactBubbleLayout(win, size) {
+  win.setSize(size, size, false);
+  const [contentWidth, contentHeight] = win.getContentSize();
+  if (contentWidth > size + 2 || contentHeight > size + 2) {
+    throw new Error('compact Bubble viewport size mismatch: ' + JSON.stringify({ contentWidth, contentHeight, size }));
+  }
+  await waitFor(win, () => Boolean(document.querySelector('[data-testid="bubble-launcher-shell"]')), 'compact bubble viewport ' + size);
+  const layout = await win.webContents.executeJavaScript(\`
+    (() => {
+      const visible = (node) => Boolean(node && node.getClientRects().length && getComputedStyle(node).display !== 'none');
+      const inside = (rect) => rect.left >= -0.5 && rect.top >= -0.5 && rect.right <= innerWidth + 0.5 && rect.bottom <= innerHeight + 0.5;
+      const button = document.querySelector('[data-testid="bubble-launcher-button"]');
+      const indicator = document.querySelector('[data-testid="bubble-launcher-task-status"]');
+      const task = document.querySelector('[data-testid="bubble-launcher-agent-task-light"]');
+      const readiness = document.querySelector('[data-testid="bubble-launcher-readiness-notice"]');
+      const quickInput = document.querySelector('[data-testid="bubble-launcher-quick-input"]');
+      const summary = document.querySelector('[data-testid="bubble-launcher-summary"]');
+      return {
+        buttonInside: Boolean(button && inside(button.getBoundingClientRect())),
+        buttonLabel: button?.getAttribute('aria-label') || '',
+        indicatorInside: Boolean(indicator && visible(indicator) && inside(indicator.getBoundingClientRect())),
+        indicatorText: indicator?.textContent || '',
+        quickInputVisible: visible(quickInput),
+        readinessVisible: visible(readiness),
+        summaryVisible: visible(summary),
+        taskText: visible(task) ? task.textContent || '' : '',
+        taskVisible: visible(task),
+      };
+    })()
+  \`, true);
+  if (!layout.buttonInside || !layout.indicatorInside || layout.taskVisible || layout.readinessVisible || layout.quickInputVisible || layout.summaryVisible) {
+    throw new Error('compact Bubble leaked full launcher UI at ' + size + 'px: ' + JSON.stringify(layout));
+  }
+  if (!/需要你确认|处理中|需要授权|已完成|需要查看|已取消/.test(layout.indicatorText)) {
+    throw new Error('compact Bubble missing consumer task status at ' + size + 'px: ' + JSON.stringify(layout));
+  }
+  if (!layout.buttonLabel.includes(layout.indicatorText)) {
+    throw new Error('compact Bubble accessible label missed visible task status at ' + size + 'px: ' + JSON.stringify(layout));
+  }
+  if (/exec|todo|desktop\.|Agent Studio|runtime/i.test(layout.taskText)) {
+    throw new Error('compact Bubble exposed technical runtime text at ' + size + 'px: ' + JSON.stringify(layout));
+  }
+}
 async function main() {
   await app.whenReady();
   console.log('[electron-smoke] app ready');
+  const compactWin = new BrowserWindow({
+    width: 112,
+    height: 112,
+    frame: false,
+    transparent: true,
+    show: true,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      backgroundThrottling: false,
+    },
+  });
+  await compactWin.loadURL(devUrl + '?bridge=' + encodeURIComponent(bridgeUrl) + '&surface=desktop#/bubble');
+  await installOpenViewProbe(compactWin);
+  await waitFor(compactWin, () => document.querySelector('[data-testid="bubble-launcher-shell"]'), 'compact bubble shell');
+  await waitFor(compactWin, () => document.querySelector('[data-testid="bubble-launcher-agent-task-light"]'), 'compact bubble task fixture');
+  await assertCompactBubbleLayout(compactWin, 112);
+  await assertCompactBubbleLayout(compactWin, 192);
+  await compactWin.webContents.executeJavaScript(
+    \`document.querySelector('[data-testid="bubble-launcher-button"]').click()\`,
+    true,
+  );
+  await waitFor(compactWin, () => (
+    Array.isArray(window.__ohaLauncherOpenViewCalls)
+    && window.__ohaLauncherOpenViewCalls.some((call) => (
+      call?.view === 'chat'
+      && call?.params?.session_id === ${JSON.stringify(DELEGATED_SESSION_ID)}
+      && call?.params?.task_id === ${JSON.stringify(PUBLIC_TASK_ID)}
+    ))
+  ), 'compact bubble opened matching task chat');
+  console.log('[electron-smoke] compact Bubble layout and task-specific Chat handoff verified');
+  await requestBridgeJson('/__smoke/completed-readiness');
+  const readinessWin = new BrowserWindow({
+    width: 112,
+    height: 112,
+    frame: false,
+    transparent: true,
+    show: true,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      backgroundThrottling: false,
+    },
+  });
+  await readinessWin.loadURL(devUrl + '?bridge=' + encodeURIComponent(bridgeUrl) + '&surface=desktop#/bubble');
+  await compactWin.close();
+  await installOpenViewProbe(readinessWin);
+  await waitFor(readinessWin, () => (
+    document.querySelector('[data-testid="bubble-launcher-task-status"]')?.textContent?.includes('需要授权')
+  ), 'compact bubble completed task with readiness blocker');
+  await assertCompactBubbleLayout(readinessWin, 112);
+  const readinessLabel = await readinessWin.webContents.executeJavaScript(
+    \`document.querySelector('[data-testid="bubble-launcher-button"]')?.getAttribute('aria-label') || ''\`,
+    true,
+  );
+  if (!readinessLabel.includes('需要授权') || !readinessLabel.includes('打开诊断')) {
+    throw new Error('compact Bubble readiness label missed status or action: ' + JSON.stringify(readinessLabel));
+  }
+  await readinessWin.webContents.executeJavaScript(
+    \`document.querySelector('[data-testid="bubble-launcher-button"]').click()\`,
+    true,
+  );
+  await waitFor(readinessWin, () => (
+    Array.isArray(window.__ohaLauncherOpenViewCalls)
+    && window.__ohaLauncherOpenViewCalls.some((call) => (
+      call?.view === 'diagnostics'
+      && call?.params?.permission_targets === 'accessibility'
+    ))
+  ), 'compact bubble readiness opened diagnostics');
+  await requestBridgeJson('/__smoke/reset-public-task');
+  console.log('[electron-smoke] compact Bubble readiness precedence and diagnostics handoff verified');
+  await requestBridgeJson('/__smoke/running-public-task');
+  const consumerStateWin = new BrowserWindow({
+    width: 520,
+    height: 420,
+    show: true,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      backgroundThrottling: false,
+    },
+  });
+  await consumerStateWin.loadURL(devUrl + '?bridge=' + encodeURIComponent(bridgeUrl) + '&surface=desktop&smokeReload=consumer-running-bubble#/bubble');
+  await readinessWin.close();
+  await waitFor(consumerStateWin, () => {
+    const summary = document.querySelector('[data-testid="bubble-launcher-summary"]');
+    const fullTask = document.querySelector('[data-testid="bubble-launcher-agent-task-light"]');
+    const compactTask = document.querySelector('[data-testid="bubble-launcher-agent-task-compact"]');
+    const text = document.body.textContent || '';
+    return summary?.textContent?.trim() === '处理中'
+      && !fullTask
+      && !compactTask
+      && !/Runtime Debug|Agent Studio|exec|todo|replan|verify|risk|apple_music|browser\.search/i.test(text);
+  }, 'bubble running task stays compact and diagnostic-free');
+  await consumerStateWin.loadURL(devUrl + '?bridge=' + encodeURIComponent(bridgeUrl) + '&surface=desktop&smokeReload=consumer-running-live2d#/live2d');
+  await installOpenViewProbe(consumerStateWin);
+  await waitFor(consumerStateWin, () => {
+    const compactTask = document.querySelector('[data-testid="live2d-launcher-agent-task-compact"]');
+    const fullTask = document.querySelector('[data-testid="live2d-launcher-agent-task-light"]');
+    const dots = compactTask?.querySelectorAll('.launcher-agent-task-compact-dots i') || [];
+    const text = document.body.textContent || '';
+    return compactTask?.textContent?.includes('处理中')
+      && dots.length === 3
+      && !fullTask
+      && !/Runtime Debug|Agent Studio|exec|todo|replan|verify|risk|apple_music|browser\.search/i.test(text);
+  }, 'live2d running task uses compact loading cue');
+  await waitFor(consumerStateWin, () => (
+    window.__ohaLauncherTaskRegionRegistered?.('live2d-launcher-agent-task-compact')
+  ), 'live2d compact task registered its desktop hit region');
+  await requestBridgeJson('/__smoke/completed-public-task');
+  await consumerStateWin.loadURL(devUrl + '?bridge=' + encodeURIComponent(bridgeUrl) + '&surface=desktop&smokeReload=consumer-completed-bubble#/bubble');
+  await waitFor(consumerStateWin, () => {
+    const taskStatus = document.querySelector('[data-testid="bubble-launcher-task-status"]');
+    const summary = document.querySelector('[data-testid="bubble-launcher-summary"]');
+    return taskStatus?.textContent?.trim() === '已完成'
+      && !document.querySelector('[data-testid="bubble-launcher-agent-task-light"]')
+      && !document.querySelector('[data-testid="bubble-launcher-agent-task-compact"]')
+      && !summary?.textContent?.includes('需要你确认');
+  }, 'completed bubble ignores stale approval flags');
+  await consumerStateWin.loadURL(devUrl + '?bridge=' + encodeURIComponent(bridgeUrl) + '&surface=desktop&smokeReload=consumer-completed-live2d#/live2d');
+  await waitFor(consumerStateWin, () => (
+    !document.querySelector('[data-testid="live2d-launcher-agent-task-light"]')
+    && !document.querySelector('[data-testid="live2d-launcher-agent-task-compact"]')
+    && document.querySelector('[data-testid="live2d-launcher-latest-reply"]')?.textContent?.includes(${JSON.stringify(LIVE2D_REPLY)})
+  ), 'completed launcher task leaves latest reply without task chrome');
+  await consumerStateWin.close();
+  await requestBridgeJson('/__smoke/reset-public-task');
+  console.log('[electron-smoke] consumer running/completed Launcher presentation verified');
   const win = new BrowserWindow({
     width: 900,
     height: 700,
@@ -550,35 +833,37 @@ async function main() {
     const probe = document.querySelector('[data-testid="bubble-launcher-session-summary-probe"]');
     const status = document.querySelector('[data-testid="bubble-launcher-status-label"]');
     const taskLight = document.querySelector('[data-testid="bubble-launcher-agent-task-light"]');
-    const taskStudio = document.querySelector('[data-testid="bubble-launcher-agent-task-open-studio"]');
     const taskDiagnostics = document.querySelector('[data-testid="bubble-launcher-agent-task-open-diagnostics"]');
     const taskRecovery = document.querySelector('[data-testid="bubble-launcher-agent-task-run-recovery-action"]');
+    const taskRuntimeDebug = document.querySelector('[data-testid="bubble-launcher-agent-task-runtime-debug"]');
+    const taskPlanner = document.querySelector('[data-testid="bubble-launcher-agent-task-planner-summary"]');
+    const taskProgress = document.querySelector('[data-testid="bubble-launcher-agent-task-progress"]');
     const taskApprove = document.querySelector('[data-testid="bubble-launcher-agent-task-approve"]');
     const taskReject = document.querySelector('[data-testid="bubble-launcher-agent-task-reject"]');
     const taskCancel = document.querySelector('[data-testid="bubble-launcher-agent-task-cancel"]');
     const sessions = Array.from(document.querySelectorAll('[data-testid="bubble-launcher-recent-session"]'));
     const bodyText = document.body.textContent || '';
     return summary
-      && summary.textContent.includes(${JSON.stringify(PUBLIC_TASK_TITLE)})
+      && summary.textContent.includes('需要你确认')
       && probe
       && status?.textContent.includes('2 recent sessions')
       && taskLight
       && taskLight.getAttribute('data-task-id') === ${JSON.stringify(PUBLIC_TASK_ID)}
       && taskLight.getAttribute('data-run-id') === ${JSON.stringify(PUBLIC_RUN_ID)}
-      && taskLight.textContent.includes(${JSON.stringify(PUBLIC_TASK_TITLE)})
-      && taskLight.textContent.includes('待处理')
-      && taskLight.textContent.includes('需要处理')
-      && taskLight.textContent.includes('桌面会话已锁定')
-      && taskStudio?.getAttribute('data-run-id') === ${JSON.stringify(PUBLIC_RUN_ID)}
-      && taskStudio?.getAttribute('data-studio-url')?.includes(${JSON.stringify(PUBLIC_RUN_ID)})
-      && taskStudio.textContent.includes('Agent Studio')
+      && taskLight.getAttribute('data-presentation-state') === 'approval'
+      && taskLight.textContent.includes('需要你的确认')
+      && taskLight.textContent.includes('确认后会继续当前任务')
+      && !document.querySelector('[data-testid="bubble-launcher-agent-task-open-studio"]')
+      && !taskRuntimeDebug
+      && !taskPlanner
+      && !taskProgress
       && taskDiagnostics?.getAttribute('data-permission-targets') === 'music_app,automation'
       && taskDiagnostics?.getAttribute('data-blocking-conditions') === 'desktop_session_locked'
       && taskDiagnostics?.getAttribute('data-recovery-kind') === 'mixed'
-      && taskDiagnostics.textContent.includes('诊断')
+      && taskDiagnostics.textContent.includes('授权')
       && taskRecovery?.getAttribute('data-permission-target') === 'desktop_session_unlocked'
       && taskRecovery?.getAttribute('data-recovery-tool') === 'desktop.active_window'
-      && taskRecovery.textContent.includes('恢复')
+      && taskRecovery.textContent.includes('重试')
       && !taskRecovery.disabled
       && taskApprove
       && !taskApprove.disabled
@@ -598,24 +883,15 @@ async function main() {
       && !bodyText.includes('oha.group_dispatch')
       && !bodyText.includes('<oha_group_dispatch>')
       && !bodyText.includes('run_oha_agent')
-      && !bodyText.includes('<oha_delegation>');
+      && !bodyText.includes('<oha_delegation>')
+      && !bodyText.includes('Runtime Debug')
+      && !bodyText.includes('Agent Studio')
+      && !bodyText.includes('workspace.write_patch')
+      && !bodyText.includes('media.apple_music_play')
+      && !bodyText.includes('desktop.active_window');
   }, 'bubble summary and recent sessions');
   console.log('[electron-smoke] bubble summary rendered');
-  await win.webContents.executeJavaScript(\`
-    (() => {
-      const studio = document.querySelector('[data-testid="bubble-launcher-agent-task-open-studio"]');
-      if (!studio) throw new Error('missing bubble launcher task Agent Studio handoff');
-      studio.click();
-    })();
-  \`, true);
-  await waitFor(win, () => (
-    Array.isArray(window.__ohaLauncherOpenViewCalls)
-    && window.__ohaLauncherOpenViewCalls.some((call) => (
-      call?.view === 'agents'
-      && call?.params?.run === ${JSON.stringify(PUBLIC_RUN_ID)}
-    ))
-  ), 'bubble launcher task opened Agent Studio');
-  console.log('[electron-smoke] bubble launcher task Agent Studio handoff verified');
+  console.log('[electron-smoke] bubble consumer task action stays free of runtime diagnostics');
   await win.webContents.executeJavaScript(\`
     (() => {
       const diagnostics = document.querySelector('[data-testid="bubble-launcher-agent-task-open-diagnostics"]');
@@ -653,7 +929,7 @@ async function main() {
     const taskCancel = document.querySelector('[data-testid="bubble-launcher-agent-task-cancel"]');
     return taskLight
       && taskLight.getAttribute('data-task-id') === ${JSON.stringify(PUBLIC_TASK_ID)}
-      && taskLight.textContent.includes(${JSON.stringify(PUBLIC_TASK_TITLE)})
+      && taskLight.textContent.includes('需要你的确认')
       && taskApprove
       && !taskApprove.disabled
       && taskCancel
@@ -685,11 +961,10 @@ async function main() {
     Array.isArray(window.__ohaLauncherOpenViewCalls)
     && window.__ohaLauncherOpenViewCalls.some((call) => (
       call?.view === 'chat'
-      && call?.params?.session_id === ${JSON.stringify(GROUP_SESSION_ID)}
-      && call?.params?.conversation_kind === 'group'
-      && call?.params?.task_id === ${JSON.stringify(GROUP_TASK_ID)}
+      && call?.params?.session_id === ${JSON.stringify(DELEGATED_SESSION_ID)}
+      && call?.params?.task_id === ${JSON.stringify(PUBLIC_TASK_ID)}
     ))
-  ), 'bubble launcher opened chat session');
+  ), 'bubble launcher opened matching task chat');
   console.log('[electron-smoke] bubble launcher ack verified');
 
   await requestBridgeJson('/__smoke/bubble-chat-input');
@@ -788,9 +1063,11 @@ async function main() {
     const probe = document.querySelector('[data-testid="live2d-launcher-session-summary-probe"]');
     const preview = document.querySelector('[data-testid="live2d-launcher-preview-fallback"]');
     const taskLight = document.querySelector('[data-testid="live2d-launcher-agent-task-light"]');
-    const taskStudio = document.querySelector('[data-testid="live2d-launcher-agent-task-open-studio"]');
     const taskDiagnostics = document.querySelector('[data-testid="live2d-launcher-agent-task-open-diagnostics"]');
     const taskRecovery = document.querySelector('[data-testid="live2d-launcher-agent-task-run-recovery-action"]');
+    const taskRuntimeDebug = document.querySelector('[data-testid="live2d-launcher-agent-task-runtime-debug"]');
+    const taskPlanner = document.querySelector('[data-testid="live2d-launcher-agent-task-planner-summary"]');
+    const taskProgress = document.querySelector('[data-testid="live2d-launcher-agent-task-progress"]');
     const taskApprove = document.querySelector('[data-testid="live2d-launcher-agent-task-approve"]');
     const taskReject = document.querySelector('[data-testid="live2d-launcher-agent-task-reject"]');
     const taskCancel = document.querySelector('[data-testid="live2d-launcher-agent-task-cancel"]');
@@ -805,20 +1082,20 @@ async function main() {
       && taskLight
       && taskLight.getAttribute('data-task-id') === ${JSON.stringify(PUBLIC_TASK_ID)}
       && taskLight.getAttribute('data-run-id') === ${JSON.stringify(PUBLIC_RUN_ID)}
-      && taskLight.textContent.includes(${JSON.stringify(PUBLIC_TASK_TITLE)})
-      && taskLight.textContent.includes('待处理')
-      && taskLight.textContent.includes('需要处理')
-      && taskLight.textContent.includes('桌面会话已锁定')
-      && taskStudio?.getAttribute('data-run-id') === ${JSON.stringify(PUBLIC_RUN_ID)}
-      && taskStudio?.getAttribute('data-studio-url')?.includes(${JSON.stringify(PUBLIC_RUN_ID)})
-      && taskStudio.textContent.includes('Agent Studio')
+      && taskLight.getAttribute('data-presentation-state') === 'approval'
+      && taskLight.textContent.includes('需要你的确认')
+      && taskLight.textContent.includes('确认后会继续当前任务')
+      && !document.querySelector('[data-testid="live2d-launcher-agent-task-open-studio"]')
+      && !taskRuntimeDebug
+      && !taskPlanner
+      && !taskProgress
       && taskDiagnostics?.getAttribute('data-permission-targets') === 'music_app,automation'
       && taskDiagnostics?.getAttribute('data-blocking-conditions') === 'desktop_session_locked'
       && taskDiagnostics?.getAttribute('data-recovery-kind') === 'mixed'
-      && taskDiagnostics.textContent.includes('诊断')
+      && taskDiagnostics.textContent.includes('授权')
       && taskRecovery?.getAttribute('data-permission-target') === 'desktop_session_unlocked'
       && taskRecovery?.getAttribute('data-recovery-tool') === 'desktop.active_window'
-      && taskRecovery.textContent.includes('恢复')
+      && taskRecovery.textContent.includes('重试')
       && !taskRecovery.disabled
       && taskApprove
       && !taskApprove.disabled
@@ -838,24 +1115,18 @@ async function main() {
       && !bodyText.includes('oha.group_dispatch')
       && !bodyText.includes('<oha_group_dispatch>')
       && !bodyText.includes('run_oha_agent')
-      && !bodyText.includes('<oha_delegation>');
+      && !bodyText.includes('<oha_delegation>')
+      && !bodyText.includes('Runtime Debug')
+      && !bodyText.includes('Agent Studio')
+      && !bodyText.includes('workspace.write_patch')
+      && !bodyText.includes('media.apple_music_play')
+      && !bodyText.includes('desktop.active_window');
   }, 'live2d quick input and recent sessions');
   console.log('[electron-smoke] live2d summary rendered');
-  await win.webContents.executeJavaScript(\`
-    (() => {
-      const studio = document.querySelector('[data-testid="live2d-launcher-agent-task-open-studio"]');
-      if (!studio) throw new Error('missing live2d launcher task Agent Studio handoff');
-      studio.click();
-    })();
-  \`, true);
+  console.log('[electron-smoke] live2d consumer task action stays free of runtime diagnostics');
   await waitFor(win, () => (
-    Array.isArray(window.__ohaLauncherOpenViewCalls)
-    && window.__ohaLauncherOpenViewCalls.some((call) => (
-      call?.view === 'agents'
-      && call?.params?.run === ${JSON.stringify(PUBLIC_RUN_ID)}
-    ))
-  ), 'live2d launcher task opened Agent Studio');
-  console.log('[electron-smoke] live2d launcher task Agent Studio handoff verified');
+    window.__ohaLauncherTaskRegionRegistered?.('live2d-launcher-agent-task-light')
+  ), 'live2d action task registered its desktop hit region');
   await win.webContents.executeJavaScript(\`
     const reject = document.querySelector('[data-testid="live2d-launcher-agent-task-reject"]');
     if (!reject) throw new Error('missing live2d launcher task reject');
@@ -1035,8 +1306,8 @@ function assertMockBridgeContract() {
   if (!bridgeState.modeRequests.includes('live2d')) {
     throw new Error('live2d launcher payload was not requested');
   }
-  if (!bridgeState.taskRequests.length) {
-    throw new Error('launcher public Yachiyo task snapshots were not requested');
+  if (bridgeState.taskRequests.length) {
+    throw new Error(`launcher idle refresh must not list all Yachiyo tasks: ${JSON.stringify(bridgeState.taskRequests)}`);
   }
   const taskStartPayloads = bridgeState.taskStartPayloads;
   const bubbleTaskPayload = taskStartPayloads.find((payload) => (

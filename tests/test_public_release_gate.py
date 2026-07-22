@@ -305,6 +305,7 @@ def test_public_release_gate_defaults_to_safe_preflight_with_demo_blockers(
     release_pytest_command = next(command for command in commands if "pytest" in command)
     assert "tests/test_public_release_gate.py" in release_pytest_command
     assert "tests/test_oha_desktop_agent_release_smoke.py" in release_pytest_command
+    assert "tests/test_generic_agent_release_smoke.py" in release_pytest_command
     assert "tests/test_virtual_desktop_guest_provider.py" in release_pytest_command
     assert "tests/test_virtual_desktop_ssh_bridge.py" in release_pytest_command
     assert "tests/test_build_virtual_desktop_guest.py" in release_pytest_command
@@ -1021,6 +1022,71 @@ def test_public_release_gate_forwards_provider_manifest_to_oha_smoke(tmp_path):
     assert oha_product_command[
         oha_product_command.index("--provider-manifest") + 1
     ] == str(provider_manifest)
+
+
+def test_public_release_gate_requires_public_daily_provider_evidence(tmp_path):
+    acceptance_path = tmp_path / "daily-provider-acceptance.json"
+
+    checks = gate.public_release_gate_checks(
+        tmp_dir=tmp_path / "gate",
+        include_public_demo=False,
+        daily_provider_acceptance_json=acceptance_path,
+    )
+
+    oha_product_command = next(
+        check.command
+        for check in checks
+        if check.id == "oha_desktop_agent_release_smoke"
+    )
+    assert "--public-release" in oha_product_command
+    assert oha_product_command[
+        oha_product_command.index("--daily-provider-acceptance-json") + 1
+    ] == str(acceptance_path)
+
+
+def test_public_release_gate_classifies_missing_daily_provider_evidence(
+    tmp_path,
+    monkeypatch,
+):
+    report_path = tmp_path / "oha-desktop-agent-release-smoke.json"
+    report_path.write_text(
+        json.dumps(
+            {
+                "ok": True,
+                "mode": "oha_desktop_agent_release_smoke",
+                "public_release_required": True,
+                "public_release_ready": False,
+                "default_daily_provider_release_ready": False,
+                "default_daily_provider_release_blockers": [
+                    "default_daily_provider_release_evidence_required"
+                ],
+                "daily_provider_acceptance": {
+                    "ok": False,
+                    "collected": False,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    check = gate.GateCheck(
+        id="oha_desktop_agent_release_smoke",
+        label="Oha desktop-agent release smoke",
+        command=("python", "scripts/smoke_oha_desktop_agent_release.py"),
+        report_json=report_path,
+    )
+    monkeypatch.setattr(
+        gate,
+        "_run_command",
+        lambda command: _completed(list(command), returncode=1),
+    )
+
+    result = gate._check_result(check, plan_only=False)
+
+    assert result["status"] == "blocked"
+    assert result["failure_category"] == "default_daily_provider_evidence"
+    assert result["release_blockers"][0]["id"] == (
+        "oha_default_daily_provider_release_ready"
+    )
 
 
 def test_public_release_gate_can_reuse_public_demo_evidence(tmp_path):

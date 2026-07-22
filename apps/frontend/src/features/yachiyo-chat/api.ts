@@ -1,4 +1,11 @@
-import { apiGet, apiPatch, apiPost, restartDesktopBridge } from '../../lib/bridge';
+import {
+  apiGet,
+  apiPatch,
+  apiPost,
+  restartDesktopBridge,
+  shouldFallbackToLegacyRoute,
+  type ApiRequestOptions,
+} from '../../lib/bridge';
 import { isMissingGroupEditRouteError } from './messageGroups';
 import type {
   AgentTaskSnapshot,
@@ -17,6 +24,9 @@ import type {
 export type LegacyChatMessageResult = {
   agent_task?: AgentTaskSnapshot | null;
   ok?: boolean;
+  committed?: boolean;
+  client_message_id?: string;
+  delivery_state?: string;
   error?: string;
   task_id?: string;
   runnable_command?: boolean;
@@ -26,6 +36,23 @@ export type LegacyChatMessageResult = {
   run_status?: string;
   status?: string;
 };
+
+export type ChatDeliveryDisposition = 'accepted' | 'uncertain' | 'rejected';
+
+export function legacyChatDeliveryDisposition(
+  result: LegacyChatMessageResult,
+): ChatDeliveryDisposition {
+  const deliveryState = String(result.delivery_state || '').trim().toLowerCase();
+  if (deliveryState === 'not_committed' || deliveryState === 'rejected') return 'rejected';
+  if (deliveryState === 'accepted_uncertain' || deliveryState === 'uncertain') return 'uncertain';
+  if (deliveryState === 'accepted') return 'accepted';
+  if (result.committed === false) return 'rejected';
+  if (result.committed === true) return result.ok === false ? 'uncertain' : 'accepted';
+  // A legacy HTTP 200 response can report projection/runtime failure after the
+  // message commit. Without an explicit rejection signal, keep the optimistic
+  // message and reconcile it instead of risking a duplicate user retry.
+  return result.ok === false ? 'uncertain' : 'accepted';
+}
 
 export type LegacyChatRunnableResultSnapshot = {
   runnableCommand: boolean;
@@ -96,14 +123,20 @@ export async function startYachiyoDesktopProviderSession(
 
 export async function sendLegacyChatMessage(
   request: SendLegacyChatMessageRequest,
+  options: ApiRequestOptions = {},
 ): Promise<LegacyChatMessageResult> {
-  return apiPost('/ui/chat/messages', request);
+  return apiPost('/ui/chat/messages', request, options);
 }
 
-export async function retryLegacyChatMessage(messageId: string): Promise<LegacyChatMessageResult> {
+export async function retryLegacyChatMessage(
+  messageId: string,
+  clientMessageId: string,
+  options: ApiRequestOptions = {},
+): Promise<LegacyChatMessageResult> {
   return apiPost('/ui/chat/messages/retry', {
     message_id: messageId,
-  });
+    client_message_id: clientMessageId,
+  }, options);
 }
 
 export async function createChatGroupSession(
@@ -168,9 +201,12 @@ function normalizeLegacyRunStatus(status?: unknown) {
   return value === 'running' ? 'processing' : value;
 }
 
-export async function listYachiyoTasks(conversationId?: string): Promise<AgentTaskSnapshot[]> {
+export async function listYachiyoTasks(
+  conversationId?: string,
+  options: ApiRequestOptions = {},
+): Promise<AgentTaskSnapshot[]> {
   const query = conversationId ? `?conversation_id=${encodeURIComponent(conversationId)}` : '';
-  const payload = await apiGet<{ tasks?: AgentTaskSnapshot[] }>(`/yachiyo/tasks${query}`);
+  const payload = await apiGet<{ tasks?: AgentTaskSnapshot[] }>(`/yachiyo/tasks${query}`, options);
   return payload.tasks || [];
 }
 
@@ -244,8 +280,11 @@ export async function planYachiyoTaskExecution(
   return apiPost('/yachiyo/tasks/plan', request);
 }
 
-export async function getYachiyoTask(taskId: string): Promise<AgentTaskSnapshot> {
-  return apiGet(`/yachiyo/tasks/${encodeURIComponent(taskId)}`);
+export async function getYachiyoTask(
+  taskId: string,
+  options: ApiRequestOptions = {},
+): Promise<AgentTaskSnapshot> {
+  return apiGet(`/yachiyo/tasks/${encodeURIComponent(taskId)}`, options);
 }
 
 export async function getYachiyoTaskTimeline(taskId: string): Promise<RunTimelineSnapshot> {
@@ -297,27 +336,42 @@ export async function getLegacyChatRunSnapshot(runId: string): Promise<RunTimeli
   return apiGet(`/ui/runs/${encodeURIComponent(runId)}`);
 }
 
-export async function approveYachiyoChatRunApproval(runId: string): Promise<AgentTaskSnapshot> {
-  return approveYachiyoTask(runId);
+export async function approveYachiyoChatRunApproval(
+  runId: string,
+  approvalId: string,
+): Promise<AgentTaskSnapshot> {
+  return approveYachiyoTask(runId, approvalId);
 }
 
 export async function rejectYachiyoChatRunApproval(
   runId: string,
+  approvalId: string,
   reason = '',
 ): Promise<AgentTaskSnapshot> {
-  return rejectYachiyoTask(runId, undefined, reason);
+  return rejectYachiyoTask(runId, approvalId, reason);
 }
 
-export async function approveLegacyChatRunApproval(runId: string): Promise<RunTimelineSnapshot> {
-  return apiPost(`/ui/runs/${encodeURIComponent(runId)}/approval/approve`, {});
+export async function approveLegacyChatRunApproval(
+  runId: string,
+  approvalId: string,
+): Promise<RunTimelineSnapshot> {
+  return apiPost(`/ui/runs/${encodeURIComponent(runId)}/approval/approve`, {
+    approval_id: approvalId,
+  });
 }
 
 export async function rejectLegacyChatRunApproval(
   runId: string,
+  approvalId: string,
   reason = '',
 ): Promise<RunTimelineSnapshot> {
-  return apiPost(`/ui/runs/${encodeURIComponent(runId)}/approval/reject`, reason ? { reason } : {});
+  return apiPost(`/ui/runs/${encodeURIComponent(runId)}/approval/reject`, {
+    approval_id: approvalId,
+    reason: reason || undefined,
+  });
 }
+
+export { shouldFallbackToLegacyRoute };
 
 export async function approveYachiyoTask(
   taskId: string,

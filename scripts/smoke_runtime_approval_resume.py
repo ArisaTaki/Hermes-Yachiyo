@@ -338,7 +338,14 @@ def _execution_gate_evidence() -> dict[str, Any]:
     calls: list[dict[str, Any]] = []
     execution_in_progress: set[str] = set()
     lock = threading.RLock()
-    state = {"run": {"run_id": RUN_ID, "kind": "agent_run", "status": "approval_required"}}
+    state = {
+        "run": {
+            "run_id": RUN_ID,
+            "kind": "agent_run",
+            "status": "approval_required",
+            "pending_approval": {"approval_id": APPROVAL_ID},
+        }
+    }
 
     def get_run(run_id: str) -> dict[str, Any]:
         calls.append({"name": "get_run", "run_id": run_id, "status": state["run"]["status"]})
@@ -354,12 +361,17 @@ def _execution_gate_evidence() -> dict[str, Any]:
         get_run=get_run,
         approve_once=approve_once,
     )
-    completed = service.approve_run_approval(RUN_ID)
+    completed = service.approve_run_approval(RUN_ID, APPROVAL_ID)
     state["run"] = {"run_id": RUN_ID, "kind": "agent_run", "status": "completed"}
-    already_completed = service.approve_run_approval(RUN_ID)
-    state["run"] = {"run_id": RUN_ID, "kind": "agent_run", "status": "approval_required"}
+    already_completed = service.approve_run_approval(RUN_ID, APPROVAL_ID)
+    state["run"] = {
+        "run_id": RUN_ID,
+        "kind": "agent_run",
+        "status": "approval_required",
+        "pending_approval": {"approval_id": APPROVAL_ID},
+    }
     execution_in_progress.add(RUN_ID)
-    duplicate = service.approve_run_approval(RUN_ID)
+    duplicate = service.approve_run_approval(RUN_ID, APPROVAL_ID)
     execution_in_progress.discard(RUN_ID)
     call_order = [call["name"] for call in calls]
     return {

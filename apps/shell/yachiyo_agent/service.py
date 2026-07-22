@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterable, Mapping
 from inspect import Parameter, signature
 from typing import Any
@@ -20,30 +21,145 @@ from .contracts import (
     PublicRunEvent,
     ReadinessSnapshot,
     ReplanContinuationSnapshot,
-    RuntimeExecutionEnvelopeSnapshot,
     RunEventPageSnapshot,
+    RuntimeExecutionEnvelopeSnapshot,
     RunTimelineSnapshot,
     StartChatTaskRequest,
 )
-from .events import public_run_event_page_from_payload
+from .desktop_execution_policy import with_daily_entrypoint_desktop_execution_policy
 from .event_page_windows import (
     FIRST_PAGE_TASK_KEY_EVENT_TYPES,
     events_with_first_page_key_event_window,
     run_event_page_with_projected_events,
 )
-from .desktop_execution_policy import with_daily_entrypoint_desktop_execution_policy
+from .events import public_run_event_page_from_payload
 from .planner_projection import planner_enriched_chat_request
 from .ports import ChatTaskStarter, RuntimePort, TaskLifecycleProjector
 from .replan_continuation_results import ReplanContinuationStartResult
+from .run_snapshots import run_timeline_snapshot_from_payload
 from .runtime_execution import runtime_execution_envelope_from_decision
 from .runtime_planner import RuntimePlanner
 from .runtime_progress import ProgressEventScope, public_runtime_tool_result_events
-from .run_snapshots import run_timeline_snapshot_from_payload
 from .start_event_enrichment import start_payload_with_planner_events
 from .task_cards import agent_task_snapshot_from_payload, agent_task_snapshots_from_payloads
 from .task_core_snapshots import task_core_snapshot_from_payload
-from .task_snapshots import _chat_task_tool_calls, run_events_from_payload
+from .task_snapshots import (
+    _chat_task_tool_calls,
+    _chat_visible_events as _chat_visible_task_events,
+    run_events_from_payload,
+)
 from .tool_call_snapshots import tool_call_snapshots_from_payloads
+
+_MAIN_CHAT_AGENT_ID = "builtin:yachiyo-main"
+_RUNTIME_MANAGED_MAIN_CHAT_SOURCES = frozenset(
+    {
+        "chat",
+        "launcher",
+        "live2d",
+        "packaged_daily_provider_acceptance_v2",
+    }
+)
+
+_LOGGER = logging.getLogger(__name__)
+
+_PUBLIC_CHAT_RUNTIME_AUTHORITY_METADATA_KEYS = frozenset(
+    {
+        "action_target",
+        "allow_live_foreground",
+        "allow_nonisolated_desktop_provider",
+        "allow_user_foreground_takeover",
+        "allowed_tools",
+        "approval_id",
+        "approval_required",
+        "approval_status",
+        "blocked_direct_tool_request",
+        "blocked_direct_tool_requests",
+        "blocking_conditions",
+        "completion_authority",
+        "decision_id",
+        "desktop_allow_user_foreground_takeover",
+        "desktop_execution_policy",
+        "desktop_execution_route",
+        "desktop_blocking_conditions",
+        "desktop_blocking_conditions_by_capability",
+        "desktop_interaction_policy",
+        "desktop_permission_recovery",
+        "desktop_provider_health_probe",
+        "desktop_provider_id",
+        "desktop_provider_kind",
+        "desktop_provider_session_auto_start",
+        "desktop_provider_session_id",
+        "desktop_missing_permissions",
+        "desktop_missing_permissions_by_capability",
+        "desktop_runtime_blocking_conditions",
+        "desktop_runtime_blocking_conditions_by_capability",
+        "desktop_tool_readiness_by_tool",
+        "direct_tool_request",
+        "direct_tool_requests",
+        "execution_authority",
+        "execution_mode",
+        "execution_envelope",
+        "execution_request",
+        "execution_requests",
+        "goal_completion_authority",
+        "goal_contract",
+        "goal_contract_id",
+        "goal_criterion_id",
+        "missing_permissions",
+        "plan_id",
+        "planner_goal_contract",
+        "planner_step_id",
+        "policy_reason",
+        "postcondition_verified",
+        "prefer_background_desktop",
+        "prefer_isolated_desktop",
+        "provider_id",
+        "provider_kind",
+        "provider_readiness",
+        "provider_tool_readiness",
+        "readiness",
+        "recovery_scope_id",
+        "replan_request_id",
+        "request_id",
+        "risk_level",
+        "run_id",
+        "runtime_execution_envelope",
+        "runtime_execution_metadata",
+        "runtime_execution_request",
+        "runtime_execution_requests",
+        "runtime_tool_readiness_by_tool",
+        "sandbox_id",
+        "step_id",
+        "task_core",
+        "tool_readiness_by_tool",
+        "tool_policy",
+        "tool_call_id",
+        "tool_plan_id",
+        "verification_contract",
+        "verification_passed",
+        "workspace_policy",
+        "yachiyo_desktop_execution_policy",
+        "yachiyo_execution_envelope",
+        "yachiyo_execution_request",
+        "yachiyo_execution_requests",
+        "yachiyo_goal_contract",
+        "yachiyo_task_core",
+    }
+)
+_PUBLIC_CHAT_RUNTIME_AUTHORITY_METADATA_PREFIXES = (
+    "_runtime",
+    "planner_execution_",
+    "recovery_",
+    "replan_",
+    "runtime_execution_",
+    "runtime_private_",
+    "runtime_recovery_",
+    "runtime_replan_",
+    "yachiyo_execution_",
+    "yachiyo_recovery_",
+    "yachiyo_replan_",
+    "yachiyo_runtime_",
+)
 
 
 class YachiyoAgentService:
@@ -174,24 +290,77 @@ class YachiyoAgentService:
     ) -> AgentTaskSnapshot:
         payload = planner_enriched_chat_request(_request_payload(request))
         metadata = payload.get("metadata") if isinstance(payload.get("metadata"), Mapping) else {}
-        if self._chat_task_starter is not None:
+        runtime_managed_main_chat = _runtime_managed_main_chat_request(payload)
+        task: AgentTaskSnapshot | None = None
+        if runtime_managed_main_chat and self._chat_task_starter is not None:
+            runtime_managed_starter = getattr(
+                self._chat_task_starter,
+                "start_runtime_managed_main_chat_task",
+                None,
+            )
+            if callable(runtime_managed_starter):
+                chat_payload = runtime_managed_starter(payload)
+                if chat_payload is not None:
+                    task = _task_with_request_metadata(
+                        agent_task_snapshot_from_payload(
+                            self._start_payload_with_planner_events(chat_payload, payload)
+                        ),
+                        metadata,
+                    )
+        if task is None and self._chat_task_starter is not None and not runtime_managed_main_chat:
             chat_payload = self._chat_task_starter.start_chat_task(payload)
             if chat_payload is not None:
-                return _task_with_request_metadata(
+                task = _task_with_request_metadata(
                     agent_task_snapshot_from_payload(
                         self._start_payload_with_planner_events(chat_payload, payload)
                     ),
                     metadata,
                 )
-        return _task_with_request_metadata(
-            agent_task_snapshot_from_payload(
-                self._start_payload_with_planner_events(
-                    self._runtime_port.start_chat_task(payload),
-                    payload,
-                )
-            ),
-            metadata,
+        if task is None:
+            task = _task_with_request_metadata(
+                agent_task_snapshot_from_payload(
+                    self._start_payload_with_planner_events(
+                        self._runtime_port.start_chat_task(payload),
+                        payload,
+                    )
+                ),
+                metadata,
+            )
+        external_chat_run = bool(
+            runtime_managed_main_chat
+            or str(payload.get("workflow_id") or "").strip()
+            or str(payload.get("group_id") or payload.get("agent_group_id") or "").strip()
         )
+        if external_chat_run and self._chat_task_starter is not None:
+            record_user_message = getattr(
+                self._chat_task_starter,
+                "record_started_chat_user_message",
+                None,
+            )
+            if callable(record_user_message):
+                try:
+                    record_user_message(payload, task.model_dump(mode="json"))
+                except Exception:
+                    remember_pending = getattr(
+                        self._chat_task_starter,
+                        "remember_pending_chat_user_message",
+                        None,
+                    )
+                    pending_metadata = (
+                        remember_pending(payload, task.model_dump(mode="json"))
+                        if callable(remember_pending)
+                        else {}
+                    )
+                    if pending_metadata:
+                        task = task.model_copy(
+                            update={
+                                "metadata": {
+                                    **dict(task.metadata or {}),
+                                    **dict(pending_metadata),
+                                }
+                            }
+                        )
+        return task
 
     def start_replan_recovery_action(
         self,
@@ -263,6 +432,7 @@ class YachiyoAgentService:
             conversation_id=str(
                 payload.get("conversation_id") or source_task.task_id or task_id
             ).strip(),
+            client_run_id=_chat_replan_client_id(payload),
             auto_start_only=not _payload_allows_manual_replan_continuation(payload),
         )
 
@@ -299,11 +469,20 @@ class YachiyoAgentService:
             conversation_id=(
                 str(payload.get("conversation_id") or source_task.task_id or task_id).strip()
             ),
-            extra_metadata=payload.get("metadata") if isinstance(payload.get("metadata"), Mapping) else {},
+            client_run_id=_chat_replan_client_id(payload),
+            extra_metadata=(
+                payload.get("metadata")
+                if isinstance(payload.get("metadata"), Mapping)
+                else {}
+            ),
         )
 
     def get_task_snapshot(self, task_id: str) -> AgentTaskSnapshot:
-        return agent_task_snapshot_from_payload(self._runtime_port.get_task_snapshot(task_id))
+        task = agent_task_snapshot_from_payload(
+            self._runtime_port.get_task_snapshot(task_id)
+        )
+        task = self._repair_pending_chat_projection(task)
+        return self._project_terminal_task(task_id, task)
 
     def get_task_timeline(self, task_id: str) -> RunTimelineSnapshot:
         return _chat_timeline_snapshot_from_payload(
@@ -316,7 +495,9 @@ class YachiyoAgentService:
             task_id,
         )
         run_id = _payload_run_id(raw_events) or task_id
-        yield from run_events_from_payload(raw_events, run_id=run_id, keys=("events",))
+        yield from _chat_visible_events(
+            run_events_from_payload(raw_events, run_id=run_id, keys=("events",))
+        )
 
     def get_task_event_page(
         self,
@@ -345,9 +526,16 @@ class YachiyoAgentService:
             events = _chat_visible_events(page.events)
             port_event_stream = getattr(self._runtime_port, "get_task_event_stream", None)
             if clean_after_sequence == 0 and page.has_more and callable(port_event_stream):
+                full_stream = list(self.get_task_event_stream(task_id))
+                if not events:
+                    events = [
+                        event
+                        for event in full_stream
+                        if int(event.sequence or 0) > int(page.next_after_sequence or 0)
+                    ][:clean_limit]
                 events = events_with_first_page_key_event_window(
                     events,
-                    _chat_visible_events(list(self.get_task_event_stream(task_id))),
+                    full_stream,
                     page=page,
                     event_types=FIRST_PAGE_TASK_KEY_EVENT_TYPES,
                 )
@@ -389,8 +577,44 @@ class YachiyoAgentService:
         )
 
     def list_recent_tasks(self, conversation_id: str | None = None) -> list[AgentTaskSnapshot]:
-        return agent_task_snapshots_from_payloads(
+        tasks = agent_task_snapshots_from_payloads(
             self._runtime_port.list_recent_tasks(conversation_id)
+        )
+        return [self._repair_pending_chat_projection(task) for task in tasks]
+
+    def _repair_pending_chat_projection(
+        self,
+        task: AgentTaskSnapshot,
+    ) -> AgentTaskSnapshot:
+        if self._chat_task_starter is None:
+            return task
+        retry_pending = getattr(
+            self._chat_task_starter,
+            "retry_pending_chat_user_message",
+            None,
+        )
+        task_payload = task.model_dump(mode="json")
+        if callable(retry_pending):
+            retry_pending(task.task_id, task_payload)
+        pending_metadata_reader = getattr(
+            self._chat_task_starter,
+            "pending_chat_user_message_metadata",
+            None,
+        )
+        pending_metadata = (
+            pending_metadata_reader(task.task_id, task_payload)
+            if callable(pending_metadata_reader)
+            else {}
+        )
+        if not pending_metadata:
+            return task
+        return task.model_copy(
+            update={
+                "metadata": {
+                    **dict(task.metadata or {}),
+                    **dict(pending_metadata),
+                }
+            }
         )
 
     def approve(
@@ -448,8 +672,141 @@ class YachiyoAgentService:
 
 def _request_payload(request: StartChatTaskRequest | Mapping[str, Any]) -> dict[str, Any]:
     if isinstance(request, StartChatTaskRequest):
-        return request.model_dump(exclude_none=True)
+        metadata, ignored_metadata_paths = (
+            _public_chat_metadata_without_runtime_authority(request.metadata)
+        )
+        ignored_top_level = sorted(
+            str(key)
+            for key in (request.model_extra or {})
+            if str(key).strip()
+        )
+        ignored = [*ignored_top_level, *ignored_metadata_paths]
+        if ignored:
+            _LOGGER.warning(
+                "Ignored Runtime authority fields from public chat task request: %s",
+                ", ".join(sorted(set(ignored))),
+            )
+        payload: dict[str, Any] = {
+            "prompt": request.prompt,
+            "metadata": metadata,
+        }
+        for key in (
+            "conversation_id",
+            "title",
+            "agent_id",
+            "workflow_id",
+            "group_id",
+        ):
+            value = getattr(request, key)
+            if value is not None:
+                payload[key] = value
+        if request.attachments is not None:
+            payload["attachments"] = [
+                dict(item)
+                for item in request.attachments
+                if isinstance(item, Mapping)
+            ]
+        return payload
     return dict(request)
+
+
+def _public_chat_metadata_without_runtime_authority(
+    metadata: Mapping[str, Any],
+) -> tuple[dict[str, Any], list[str]]:
+    ignored_paths: list[str] = []
+
+    def sanitize(value: Any, *, path: str) -> Any:
+        if isinstance(value, Mapping):
+            clean: dict[str, Any] = {}
+            for raw_key, raw_value in value.items():
+                key = str(raw_key or "").strip()
+                normalized = key.casefold().replace("-", "_")
+                child_path = f"{path}.{key}" if path else key
+                if _public_chat_metadata_key_is_runtime_authority(normalized):
+                    ignored_paths.append(child_path)
+                    continue
+                clean[key] = sanitize(raw_value, path=child_path)
+            return clean
+        if isinstance(value, list):
+            return [
+                sanitize(item, path=f"{path}[{index}]")
+                for index, item in enumerate(value)
+            ]
+        if isinstance(value, tuple):
+            return [
+                sanitize(item, path=f"{path}[{index}]")
+                for index, item in enumerate(value)
+            ]
+        return value
+
+    return sanitize(metadata, path="metadata"), ignored_paths
+
+
+def _public_chat_metadata_key_is_runtime_authority(key: str) -> bool:
+    normalized = str(key or "").strip().casefold().replace("-", "_")
+    return bool(
+        normalized in _PUBLIC_CHAT_RUNTIME_AUTHORITY_METADATA_KEYS
+        or normalized.startswith(
+            _PUBLIC_CHAT_RUNTIME_AUTHORITY_METADATA_PREFIXES
+        )
+    )
+
+
+def _runtime_managed_main_chat_request(payload: Mapping[str, Any]) -> bool:
+    """Keep consumer main-agent tool runs on the asynchronous runtime path."""
+
+    metadata = payload.get("metadata")
+    if not isinstance(metadata, Mapping):
+        return False
+    source = str(metadata.get("source") or "").strip().lower()
+    if source not in _RUNTIME_MANAGED_MAIN_CHAT_SOURCES:
+        return False
+
+    if _chat_request_has_target(payload, "workflow_id") or _chat_request_has_target(
+        payload,
+        "group_id",
+        "agent_group_id",
+    ):
+        return False
+    if _chat_request_has_mapping_items(payload, "attachments"):
+        return False
+    runnable_id = str(
+        payload.get("agent_id") or payload.get("runnable_id") or ""
+    ).strip()
+    if runnable_id and runnable_id != _MAIN_CHAT_AGENT_ID:
+        return False
+    direct_request = payload.get("direct_tool_request")
+    return bool(
+        (isinstance(direct_request, Mapping) and direct_request)
+        or _chat_request_has_mapping_items(payload, "direct_tool_requests")
+        or _chat_request_has_mapping_items(payload, "blocked_direct_tool_requests")
+    )
+
+
+def _chat_request_has_target(payload: Mapping[str, Any], *keys: str) -> bool:
+    return any(str(payload.get(key) or "").strip() for key in keys)
+
+
+def _chat_request_has_mapping_items(payload: Mapping[str, Any], key: str) -> bool:
+    value = payload.get(key)
+    if not isinstance(value, Iterable) or isinstance(value, (str, bytes, Mapping)):
+        return False
+    return any(isinstance(item, Mapping) for item in value)
+
+
+def _chat_replan_client_id(payload: Mapping[str, Any]) -> str:
+    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), Mapping) else {}
+    return str(
+        payload.get("client_run_id")
+        or payload.get("client_message_id")
+        or payload.get("client_task_id")
+        or payload.get("idempotency_key")
+        or metadata.get("client_run_id")
+        or metadata.get("client_message_id")
+        or metadata.get("client_task_id")
+        or metadata.get("idempotency_key")
+        or ""
+    ).strip()
 
 
 def _optional_request_payload(
@@ -585,12 +942,20 @@ def _chat_timeline_snapshot_from_payload(payload: Mapping[str, Any]) -> RunTimel
     clean_payload["tool_calls"] = [
         tool_call.model_dump(mode="python") for tool_call in visible_tool_calls
     ]
-    return run_timeline_snapshot_from_payload(clean_payload)
+    projected = run_timeline_snapshot_from_payload(clean_payload)
+    # The generic timeline projector intentionally merges unmatched event tool
+    # calls back into explicit payload tool calls. Chat has a narrower public
+    # boundary: once internal verifier calls have been removed above, do not
+    # let the generic merge re-introduce them into the project conversation.
+    return projected.model_copy(
+        update={
+            "events": visible_events,
+            "tool_calls": visible_tool_calls,
+        }
+    )
 
 
 def _chat_visible_events(events: list[PublicRunEvent]) -> list[PublicRunEvent]:
-    return [
-        event
-        for event in events
-        if event.visibility == "user" and event.sensitivity == "public"
-    ]
+    # Reuse the task-card boundary as the single visibility classifier, while
+    # preserving the richer public payloads needed by timeline projections.
+    return [event for event in events if _chat_visible_task_events([event])]

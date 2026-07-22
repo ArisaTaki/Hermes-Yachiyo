@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from types import SimpleNamespace
 
 from apps.shell import agent_runtime
 from apps.shell.agent.runtime.agent_chat_entrypoints import (
@@ -41,6 +41,7 @@ def test_build_runtime_agent_chat_entrypoint_setup_wires_collaborators(tmp_path:
         agent_run_starter=object(),
         execute_agent_run=lambda *_args, **_kwargs: {"ok": True},
         project_agent_run_group_if_root=lambda result: result,
+        project_agent_run_failure=lambda *_args, **_kwargs: {"status": "failed"},
         resolve_runnable=lambda **_kwargs: None,
         update_run=lambda *_args, **_kwargs: {"ok": True},
         runtime_agent_timeline=object(),
@@ -48,7 +49,7 @@ def test_build_runtime_agent_chat_entrypoint_setup_wires_collaborators(tmp_path:
         call_custom_api=lambda *_args, **_kwargs: "ok",
         runs=object(),
         run_groups=object(),
-        runtime_events=object(),
+        runtime_events=SimpleNamespace(append=lambda *_args, **_kwargs: {}),
         run_artifacts=object(),
         agent_workspaces_dir=tmp_path / "workspaces",
         agent_artifacts_dir=tmp_path / "artifacts",
@@ -69,6 +70,7 @@ def test_build_runtime_agent_chat_entrypoint_setup_wires_collaborators(tmp_path:
         trust_workspace_from_policy=lambda *_args, **_kwargs: None,
         profile_service_factory=_FakeProfileService,
         workspace_status=lambda: {"initialized": False, "dirs": {}},
+        transaction_scope=lambda: None,
     )
 
     assert isinstance(setup, RuntimeAgentChatEntrypointSetup)
@@ -79,4 +81,5 @@ def test_build_runtime_agent_chat_entrypoint_setup_wires_collaborators(tmp_path:
     assert isinstance(setup.main_chat_virtual_agent_projector, MainChatVirtualAgentProjector)
     assert isinstance(setup.tool_brokers, RuntimeToolBrokerFactory)
     assert isinstance(setup.main_chat_runs, MainChatRunLifecycle)
+    assert setup.main_chat_runs._transaction_scope is not None
     assert setup.main_chat_virtual_agent_projector.virtual_agent()["model_profile_id"] == "profile-chat"

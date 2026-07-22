@@ -53,3 +53,50 @@ def test_desktop_execution_smoke_extracts_studio_task_core() -> None:
     )
 
     assert extracted["core_id"] == "task-core-studio"
+
+
+def test_desktop_execution_smoke_accepts_completed_action_without_replan_signal() -> None:
+    summary = {
+        "core_id": "task-core-media",
+        "workspace_id": "task-workspace-media",
+        "workspace_item_count": 1,
+        "todo_step_ids": ["control-media-playback"],
+        "todo_tool_names": ["media.music_app_open_and_play"],
+        "checkpoint_step_ids": ["control-media-playback"],
+        "replan_triggers": [],
+    }
+
+    checks = smoke._task_core_checks(
+        summary,
+        expected_step_ids=["control-media-playback"],
+        expected_tools=["media.music_app_open_and_play"],
+        expect_replan_signal=False,
+    )
+
+    assert all(checks.values())
+
+
+def test_desktop_execution_smoke_reads_public_completed_tool_steps() -> None:
+    completed_event = {
+        "payload": {
+            "steps": [
+                {"tool": "desktop.list_apps", "result": {"ok": True}},
+                {"tool": "app.open", "result": {"ok": True}},
+            ]
+        }
+    }
+
+    assert [
+        step["tool"] for step in smoke._completed_steps(completed_event)
+    ] == ["desktop.list_apps", "app.open"]
+
+
+def test_desktop_execution_smoke_accepts_single_public_completed_action() -> None:
+    completed_event = {
+        "payload": {
+            "tool": "media.music_app_open_and_play",
+            "result": {"ok": True, "action": "media.apple_music_open_and_play"},
+        }
+    }
+
+    assert smoke._completed_steps(completed_event) == [completed_event["payload"]]

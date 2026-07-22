@@ -1,20 +1,17 @@
-import { Suspense, createContext, lazy, FormEvent, ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState, type CSSProperties, type FocusEvent as ReactFocusEvent, type PointerEvent as ReactPointerEvent } from 'react';
+import { Suspense, createContext, lazy, FormEvent, ReactNode, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FocusEvent as ReactFocusEvent, type PointerEvent as ReactPointerEvent } from 'react';
 
 import logoUrl from '../../../../docs/open-design/logo.png';
 import { useConfirmDialog } from '../components/ConfirmDialog';
 import { UiIcon, type UiIconName } from '../components/UiIcon';
-import { LauncherAgentTaskLight } from '../features/yachiyo-chat/components/LauncherAgentTaskLight';
 import {
   approveYachiyoTask,
   cancelYachiyoTask,
   getYachiyoTask,
-  listYachiyoTasks,
   rejectYachiyoTask,
   startYachiyoTask,
 } from '../features/yachiyo-chat/api';
 import {
   LAUNCHER_MAIN_AGENT_ID,
-  launcherAgentTaskFromPublicTasks,
   launcherAgentTaskIsActive,
   refreshLauncherAgentTaskAfterAction,
   launcherTaskConversationId,
@@ -27,11 +24,34 @@ import { studioRunClearParams, studioRunRouteParams } from '../features/runtime-
 import { AssistantProfileSeedContext, type AssistantProfileSeed } from '../lib/assistantProfileSeed';
 import { apiDelete, apiGet, apiPost, checkAppUpdate, openDesktopMode, openExternalUrl, openPath, quitApp } from '../lib/bridge';
 import { type AppView, currentParam, navigateTo } from '../lib/view';
+import { preloadView } from '../lib/viewPreload';
 import type { LauncherPayload } from './launcherTypes';
+import { startLauncherPolling } from './launcherPolling';
 
 const Live2DPreviewStage = lazy(() =>
   import('./Live2DPreviewStage').then((module) => ({ default: module.Live2DPreviewStage })),
 );
+const LauncherAgentTaskLight = lazy(() =>
+  import('../features/yachiyo-chat/components/LauncherAgentTaskLight').then((module) => ({
+    default: module.LauncherAgentTaskLight,
+  })),
+);
+
+function LauncherAgentTaskLightFallback({ mode }: { mode: 'bubble' | 'live2d' }) {
+  return (
+    <div
+      aria-hidden="true"
+      className="launcher-agent-task-light is-panel is-loading"
+      data-testid={`${mode}-mode-agent-task-loading`}
+    >
+      <div className="launcher-agent-task-main">
+        <span className="launcher-agent-task-loading-line status" />
+        <strong className="launcher-agent-task-loading-line title" />
+        <small className="launcher-agent-task-loading-line detail" />
+      </div>
+    </div>
+  );
+}
 
 type NativeRuntimeStatus = {
   status?: string;
@@ -256,9 +276,9 @@ const NAV_GROUPS: Array<{
       items: [
         { view: 'chat', label: '对话', icon: 'chat' },
         { view: 'tasks', label: '任务', icon: 'activity' },
-        { view: 'agents', label: 'Agent Studio', icon: 'model' },
+        { view: 'agents', label: '代理工作台', icon: 'model' },
         { view: 'memories', label: '记忆', icon: 'sparkle' },
-        { view: 'skills', label: 'Skills', icon: 'resources' },
+        { view: 'skills', label: '技能库', icon: 'resources' },
         { view: 'bubble', label: '气泡模式', icon: 'bubble' },
         { view: 'live2d', label: 'Live2D 模式', icon: 'live2d' },
         { view: 'proactive-tts', label: '主动关怀', icon: 'voice' },
@@ -342,6 +362,8 @@ let bootDashboardReady = false;
 const DASHBOARD_ACTIVITY_POLL_INTERVAL_MS = 1500;
 
 const PageLoadingContext = createContext<((loading: boolean) => void) | null>(null);
+const PAGE_LOADING_REVEAL_DELAY_MS = 120;
+const PAGE_LOADING_MIN_VISIBLE_MS = 220;
 
 export function usePageLoading(loading: boolean) {
   const setPageLoading = useContext(PageLoadingContext);
@@ -381,8 +403,8 @@ export function OpenDesignShell({ activeView, children }: { activeView: AppView;
   const [toasts, setToasts] = useState<Array<{ id: number; message: string; type: 'info' | 'success' | 'warning' | 'error' }>>([]);
   const [bootPhase, setBootPhase] = useState<'loading' | 'ready'>(() => (bridgeBootReady ? 'ready' : 'loading'));
   const [bootSlow, setBootSlow] = useState(false);
-  const [routeSettling, setRouteSettling] = useState(true);
   const settingsMode = activeView === 'settings' ? currentParam('mode') : '';
+  const routeKey = typeof window === 'undefined' ? activeView : window.location.hash || activeView;
   const activeLabel = routeTitle(activeView, settingsMode);
   const agentName = dashboard?.assistant?.agent_name?.trim() || '月見八千代';
   const agentNickname = dashboard?.assistant?.agent_nickname?.trim() || agentName;
@@ -397,24 +419,13 @@ export function OpenDesignShell({ activeView, children }: { activeView: AppView;
   const loadingHidden = bootPhase !== 'loading';
   const accentLabel = TWEAK_ACCENTS.find((item) => item.value === accent)?.label || '八千代粉';
   const [shimmerActive, setShimmerActive] = useState(false);
-  const shimmerActiveRef = useRef(false);
   const shimmerKey = useRef(0);
+  const shimmerShownAtRef = useRef(0);
+  const contentRef = useRef<HTMLElement>(null);
   const sidebarSwitchTimerRef = useRef<number | null>(null);
 
   const handlePageLoading = useCallback((loading: boolean) => {
-    setPageLoadingCount((prev) => {
-      const next = loading ? prev + 1 : Math.max(0, prev - 1);
-      if (loading && !shimmerActiveRef.current) {
-        shimmerKey.current += 1;
-        shimmerActiveRef.current = true;
-        setShimmerActive(true);
-      }
-      if (next === 0 && shimmerActiveRef.current) {
-        shimmerActiveRef.current = false;
-        setShimmerActive(false);
-      }
-      return next;
-    });
+    setPageLoadingCount((prev) => loading ? prev + 1 : Math.max(0, prev - 1));
   }, []);
   const shellClasses = [
     'hy-shell',
@@ -435,10 +446,28 @@ export function OpenDesignShell({ activeView, children }: { activeView: AppView;
   } as CSSProperties;
 
   useEffect(() => {
-    setRouteSettling(true);
-    const timer = window.setTimeout(() => setRouteSettling(false), 560);
-    return () => window.clearTimeout(timer);
-  }, [activeView, settingsMode]);
+    let timer = 0;
+    if (pageLoadingCount > 0 && !shimmerActive) {
+      timer = window.setTimeout(() => {
+        shimmerKey.current += 1;
+        shimmerShownAtRef.current = performance.now();
+        setShimmerActive(true);
+      }, PAGE_LOADING_REVEAL_DELAY_MS);
+    } else if (pageLoadingCount === 0 && shimmerActive) {
+      const elapsed = performance.now() - shimmerShownAtRef.current;
+      timer = window.setTimeout(
+        () => setShimmerActive(false),
+        Math.max(0, PAGE_LOADING_MIN_VISIBLE_MS - elapsed),
+      );
+    }
+    return () => {
+      if (timer) window.clearTimeout(timer);
+    };
+  }, [pageLoadingCount, shimmerActive]);
+
+  useLayoutEffect(() => {
+    if (contentRef.current) contentRef.current.scrollTop = 0;
+  }, [routeKey]);
 
   useEffect(() => {
     window.localStorage.setItem(SIDEBAR_COLLAPSED_STORAGE_KEY, sidebarCollapsed ? '1' : '0');
@@ -624,7 +653,7 @@ export function OpenDesignShell({ activeView, children }: { activeView: AppView;
               <span className="hy-brand-mark" aria-hidden="true">
                 <img src={logoUrl} alt="" className="hy-brand-logo" />
               </span>
-              <span>Oha Yachiyo</span>
+              <span>Oha-Yachiyo</span>
             </button>
             <button
               type="button"
@@ -662,6 +691,8 @@ export function OpenDesignShell({ activeView, children }: { activeView: AppView;
                     className={active ? 'hy-nav-item active' : 'hy-nav-item'}
                     aria-current={active ? 'page' : undefined}
                     key={`${group.label}-${item.view}`}
+                    onFocusCapture={() => void preloadView(item.view)}
+                    onMouseEnter={() => void preloadView(item.view)}
                     onClick={() => navigateTo(item.view)}
                     title={item.label}
                     {...sidebarTooltipProps(item.label)}
@@ -737,10 +768,9 @@ export function OpenDesignShell({ activeView, children }: { activeView: AppView;
         </aside>
       ) : null}
 
-      <main className={[
+      <main ref={contentRef} className={[
         'hy-content',
         pageLoadingCount > 0 ? 'is-loading-page' : '',
-        routeSettling ? 'is-route-settling' : '',
       ].filter(Boolean).join(' ')}>
         <AssistantProfileSeedContext.Provider value={assistantProfileSeed}>
           <PageLoadingContext.Provider value={handlePageLoading}>
@@ -757,9 +787,9 @@ function BootLoadingOverlay({ hidden, slow }: { hidden: boolean; slow: boolean }
     <div className={hidden ? 'hy-loading-overlay hidden' : 'hy-loading-overlay'} aria-hidden={hidden}>
       <img src={logoUrl} alt="" className="hy-loading-logo" />
       <div className="hy-loading-copy">
-        <div className="hy-loading-text">OHA YACHIYO</div>
+        <div className="hy-loading-text">Oha-Yachiyo</div>
         <div className="hy-loading-subtext">
-          {slow ? 'Bridge 启动时间较长，仍在等待本机服务。' : '正在唤醒 Native Bridge'}
+          {slow ? '本机服务启动较慢，正在继续连接。' : '正在连接本机服务'}
         </div>
       </div>
       <div className="hy-loading-bar">
@@ -875,7 +905,7 @@ export function DashboardPage() {
           <h1>月見八千代<br />正在守望你的世界</h1>
           <p>8000 岁的 AI 歌姬，虚拟空间「月夜見」的管理员。她用歌声跨越了八千年的孤独，只为与你相遇在这个月夜。</p>
           <div className="hy-kv-meta">
-            <span><i />Bridge {bridge} · {data?.bridge?.url || '127.0.0.1 本机桥接'}</span>
+            <span><i />本机服务 {bridge} · {data?.bridge?.url || '127.0.0.1 本机桥接'}</span>
             <span><i />✨ {modelLabel}</span>
           </div>
         </div>
@@ -889,7 +919,7 @@ export function DashboardPage() {
       </header>
 
       <section className="hy-status-grid hy-stagger">
-        <StatusCard tone="success" label="Bridge 状态" value={bridge} detail={data?.bridge?.url || '127.0.0.1 本机桥接'} icon="activity" />
+        <StatusCard tone="success" label="本机服务" value={bridge} detail={data?.bridge?.url || '127.0.0.1 本机桥接'} icon="activity" />
         <StatusCard tone={!dataLoaded ? 'info' : modelReady ? 'info' : 'warning'} label="模型连接" value={!dataLoaded ? '加载中' : modelReady ? '已连接' : '待配置'} detail={!dataLoaded ? '正在读取状态' : nativeReadinessLabel(nativeAgent?.readiness_level)} icon="model" />
         <StatusCard tone={!dataLoaded ? 'info' : workspaceReady ? 'success' : 'warning'} label="工作区" value={!dataLoaded ? '加载中' : workspaceReady ? '已初始化' : '待初始化'} detail={data?.workspace?.path || '~/Oha-Yachiyo/workspace'} icon="folder" />
       </section>
@@ -922,8 +952,8 @@ export function DashboardPage() {
           <button type="button" onClick={() => navigateTo('activity-all')}>查看全部 →</button>
         </div>
         <div className="hy-activity-list">
-          {activities.length ? activities.map((activity) => (
-            <ActivityRow key={`${activity.title}-${activity.time}`} {...activity} />
+          {activities.length ? activities.map((activity, index) => (
+            <ActivityRow key={activity.eventId || `${activity.title}-${activity.time}-${index}`} {...activity} />
           )) : (
             <div className="inline-empty">暂无活动记录</div>
           )}
@@ -1287,14 +1317,7 @@ function useLauncherModePayload(mode: 'bubble' | 'live2d', active = true) {
       launcherPayloadCache[mode] = payload;
       if (!canUpdateRef.current) return;
       setData(payload);
-      try {
-        const tasks = await listYachiyoTasks();
-        if (!canUpdateRef.current) return;
-        setPublicAgentTask(launcherAgentTaskFromPublicTasks(tasks, payload.chat?.agent_task || null));
-      } catch {
-        if (!canUpdateRef.current) return;
-        setPublicAgentTask((current) => payload.chat?.agent_task || current || null);
-      }
+      setPublicAgentTask(payload.chat?.agent_task || null);
     } catch {
       if (!canUpdateRef.current) return;
       if (!launcherPayloadCache[mode]) setData(null);
@@ -1305,25 +1328,23 @@ function useLauncherModePayload(mode: 'bubble' | 'live2d', active = true) {
     }
   }, [mode]);
 
-  useEffect(() => {
-    if (!active) return undefined;
-    void refresh();
-    return undefined;
-  }, [active, refresh]);
+  const processing = Boolean(
+    data?.chat?.is_processing
+    || launcherAgentTaskIsActive(publicAgentTask || data?.chat?.agent_task)
+    || launcherPayloadHasActiveTask(data),
+  );
+  const pollIntervalRef = useRef(LAUNCHER_PAGE_IDLE_POLL_INTERVAL_MS);
+  pollIntervalRef.current = processing
+    ? LAUNCHER_PAGE_ACTIVE_POLL_INTERVAL_MS
+    : LAUNCHER_PAGE_IDLE_POLL_INTERVAL_MS;
 
   useEffect(() => {
     if (!active) return undefined;
-    const processing = Boolean(
-      data?.chat?.is_processing
-      || launcherAgentTaskIsActive(publicAgentTask || data?.chat?.agent_task)
-      || launcherPayloadHasActiveTask(data),
-    );
-    const timer = window.setInterval(
-      () => void refresh(),
-      processing ? LAUNCHER_PAGE_ACTIVE_POLL_INTERVAL_MS : LAUNCHER_PAGE_IDLE_POLL_INTERVAL_MS,
-    );
-    return () => window.clearInterval(timer);
-  }, [active, data?.chat?.agent_task, data?.chat?.is_processing, publicAgentTask, refresh]);
+    return startLauncherPolling({
+      intervalMs: () => pollIntervalRef.current,
+      refresh,
+    });
+  }, [active, refresh]);
 
   const resolveAgentTaskApproval = useCallback(async (
     task: AgentTaskSnapshot,
@@ -1480,23 +1501,27 @@ export function BubbleModePage() {
         <div className="hy-mode-info hy-stagger">
           <h3>气泡模式</h3>
           <p>桌面悬浮气泡，随时与八千代对话。支持拖拽、双击展开聊天、边缘吸附等功能。</p>
-          <LauncherAgentTaskLight
-            mode="bubble"
-            onApproveApproval={approveAgentTaskApproval}
-            onCancelTask={cancelAgentTask}
-            onRejectApproval={rejectAgentTaskApproval}
-            onRunRecoveryAction={(task, action) => void runLauncherModeRecoveryAction(
-              startAgentTask,
-              task,
-              action,
-              'bubble-mode-page',
-              rememberAgentTask,
-              refresh,
-            )}
-            task={agentTask}
-            testIdPrefix="bubble-mode"
-            variant="panel"
-          />
+          {agentTask ? (
+            <Suspense fallback={<LauncherAgentTaskLightFallback mode="bubble" />}>
+              <LauncherAgentTaskLight
+                mode="bubble"
+                onApproveApproval={approveAgentTaskApproval}
+                onCancelTask={cancelAgentTask}
+                onRejectApproval={rejectAgentTaskApproval}
+                onRunRecoveryAction={(task, action) => void runLauncherModeRecoveryAction(
+                  startAgentTask,
+                  task,
+                  action,
+                  'bubble-mode-page',
+                  rememberAgentTask,
+                  refresh,
+                )}
+                task={agentTask}
+                testIdPrefix="bubble-mode"
+                variant="panel"
+              />
+            </Suspense>
+          ) : null}
           <LauncherModeTaskComposer mode="bubble" startAgentTask={startAgentTask} />
           <div className="hy-feature-pills">
             {[
@@ -1570,23 +1595,27 @@ export function Live2DModePage({ active = true }: { active?: boolean } = {}) {
         <div className="hy-mode-info hy-stagger">
           <h3>Live2D 模式</h3>
           <p>虚拟形象互动，让八千代在你的桌面上活起来。支持口型同步、表情动作、语音合成等功能。</p>
-          <LauncherAgentTaskLight
-            mode="live2d"
-            onApproveApproval={approveAgentTaskApproval}
-            onCancelTask={cancelAgentTask}
-            onRejectApproval={rejectAgentTaskApproval}
-            onRunRecoveryAction={(task, action) => void runLauncherModeRecoveryAction(
-              startAgentTask,
-              task,
-              action,
-              'live2d-mode-page',
-              rememberAgentTask,
-              refresh,
-            )}
-            task={agentTask}
-            testIdPrefix="live2d-mode"
-            variant="panel"
-          />
+          {agentTask ? (
+            <Suspense fallback={<LauncherAgentTaskLightFallback mode="live2d" />}>
+              <LauncherAgentTaskLight
+                mode="live2d"
+                onApproveApproval={approveAgentTaskApproval}
+                onCancelTask={cancelAgentTask}
+                onRejectApproval={rejectAgentTaskApproval}
+                onRunRecoveryAction={(task, action) => void runLauncherModeRecoveryAction(
+                  startAgentTask,
+                  task,
+                  action,
+                  'live2d-mode-page',
+                  rememberAgentTask,
+                  refresh,
+                )}
+                task={agentTask}
+                testIdPrefix="live2d-mode"
+                variant="panel"
+              />
+            </Suspense>
+          ) : null}
           <LauncherModeTaskComposer mode="live2d" startAgentTask={startAgentTask} />
           <div className="hy-feature-pills">
             {[
@@ -1732,7 +1761,7 @@ export function ResourcesPage() {
     },
     {
       icon: '🖼',
-      name: 'Oha Yachiyo Logo',
+      name: 'Oha-Yachiyo Logo',
       meta: '壁纸 · docs/open-design/logo.png',
       badge: '已加载',
       tone: 'info',
@@ -3062,25 +3091,25 @@ function groupActivitiesByDay(rows: ActivityRowData[]): Array<{ label: string; i
 }
 
 function routeTitle(view: AppView, settingsMode = ''): string {
-  if (view === 'main') return 'Oha Yachiyo — 主控台';
-  if (view === 'chat') return 'Oha Yachiyo — 对话';
-  if (view === 'tasks') return 'Oha Yachiyo — 任务';
-  if (view === 'memories') return 'Oha Yachiyo — 记忆';
-  if (view === 'skills') return 'Oha Yachiyo — Skills';
-  if (view === 'agents') return 'Oha Yachiyo — Agent Studio';
-  if (view === 'provider') return 'Oha Yachiyo — 模型配置';
-  if (view === 'bubble') return 'Oha Yachiyo — 气泡模式';
-  if (view === 'live2d') return 'Oha Yachiyo — Live2D 模式';
-  if (view === 'resources') return 'Oha Yachiyo — 资源管理';
-  if (view === 'workspace') return 'Oha Yachiyo — 工作区';
-  if (view === 'tools-all') return 'Oha Yachiyo — 桌面工具';
-  if (view === 'activity-all') return 'Oha Yachiyo — 活动日志';
-  if (view === 'activity-detail') return 'Oha Yachiyo — 活动详情';
-  if (view === 'app-update') return 'Oha Yachiyo — 应用更新';
-  if (view === 'proactive-tts') return 'Oha Yachiyo — 主动关怀';
-  if (view === 'settings' && settingsMode === 'live2d') return 'Oha Yachiyo — Live2D 设置';
-  if (view === 'settings' && settingsMode === 'bubble') return 'Oha Yachiyo — 气泡设置';
-  return 'Oha Yachiyo';
+  if (view === 'main') return 'Oha-Yachiyo — 主控台';
+  if (view === 'chat') return 'Oha-Yachiyo — 对话';
+  if (view === 'tasks') return 'Oha-Yachiyo — 任务';
+  if (view === 'memories') return 'Oha-Yachiyo — 记忆';
+  if (view === 'skills') return 'Oha-Yachiyo — 技能库';
+  if (view === 'agents') return 'Oha-Yachiyo — 代理工作台';
+  if (view === 'provider') return 'Oha-Yachiyo — 模型配置';
+  if (view === 'bubble') return 'Oha-Yachiyo — 气泡模式';
+  if (view === 'live2d') return 'Oha-Yachiyo — Live2D 模式';
+  if (view === 'resources') return 'Oha-Yachiyo — 资源管理';
+  if (view === 'workspace') return 'Oha-Yachiyo — 工作区';
+  if (view === 'tools-all') return 'Oha-Yachiyo — 桌面工具';
+  if (view === 'activity-all') return 'Oha-Yachiyo — 活动日志';
+  if (view === 'activity-detail') return 'Oha-Yachiyo — 活动详情';
+  if (view === 'app-update') return 'Oha-Yachiyo — 应用更新';
+  if (view === 'proactive-tts') return 'Oha-Yachiyo — 主动关怀';
+  if (view === 'settings' && settingsMode === 'live2d') return 'Oha-Yachiyo — Live2D 设置';
+  if (view === 'settings' && settingsMode === 'bubble') return 'Oha-Yachiyo — 气泡设置';
+  return 'Oha-Yachiyo';
 }
 
 function isNavActive(activeView: AppView, settingsMode: string, itemView: AppView): boolean {

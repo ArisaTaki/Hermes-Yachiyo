@@ -101,6 +101,11 @@ CREATE TABLE IF NOT EXISTS runs (
     run_id TEXT PRIMARY KEY,
     run_group_id TEXT NOT NULL DEFAULT '',
     client_request_id TEXT NOT NULL DEFAULT '',
+    project_root_group INTEGER NOT NULL DEFAULT 0,
+    async_lease_generation INTEGER NOT NULL DEFAULT 0,
+    async_lease_owner_token TEXT NOT NULL DEFAULT '',
+    async_lease_expires_at TEXT NOT NULL DEFAULT '',
+    async_lease_heartbeat_at TEXT NOT NULL DEFAULT '',
     kind TEXT NOT NULL,
     runnable_id TEXT NOT NULL,
     status TEXT NOT NULL,
@@ -179,6 +184,8 @@ CREATE TABLE IF NOT EXISTS memory_items (
     confidence REAL NOT NULL DEFAULT 1.0,
     pinned INTEGER NOT NULL DEFAULT 0,
     user_confirmed INTEGER NOT NULL DEFAULT 0,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    actor TEXT NOT NULL DEFAULT 'agent_tool',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     deleted_at TEXT NOT NULL DEFAULT ''
@@ -205,6 +212,22 @@ CREATE TABLE IF NOT EXISTS memory_events (
     payload_json TEXT NOT NULL DEFAULT '{}',
     source_run_id TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS memory_consent_capabilities (
+    capability_id TEXT PRIMARY KEY,
+    memory_id TEXT NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,
+    memory_version TEXT NOT NULL,
+    run_id TEXT NOT NULL,
+    source_message_id TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    scope TEXT NOT NULL,
+    project_id TEXT NOT NULL DEFAULT '',
+    source_session_id TEXT NOT NULL DEFAULT '',
+    issued_at TEXT NOT NULL,
+    expires_at_epoch REAL NOT NULL,
+    consumed_at TEXT NOT NULL DEFAULT '',
+    FOREIGN KEY (memory_id) REFERENCES memory_items(memory_id) ON DELETE CASCADE
 );
 CREATE TABLE IF NOT EXISTS future_tasks (
     future_task_id TEXT PRIMARY KEY,
@@ -259,6 +282,7 @@ CREATE INDEX IF NOT EXISTS idx_memory_items_scope_kind_updated ON memory_items (
 CREATE INDEX IF NOT EXISTS idx_memory_items_source_run ON memory_items (source_run_id);
 CREATE INDEX IF NOT EXISTS idx_memory_project_sessions_project ON memory_project_sessions (project_id);
 CREATE INDEX IF NOT EXISTS idx_memory_events_memory_created ON memory_events (memory_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_memory_consent_memory_active ON memory_consent_capabilities (memory_id, consumed_at, expires_at_epoch);
 CREATE INDEX IF NOT EXISTS idx_future_tasks_status_due ON future_tasks (status, scheduled_at_epoch);
 CREATE INDEX IF NOT EXISTS idx_future_tasks_runnable_updated ON future_tasks (runnable_id, updated_at);
 CREATE INDEX IF NOT EXISTS idx_future_task_events_task_created ON future_task_events (future_task_id, created_at);
@@ -319,8 +343,48 @@ class RuntimeSchemaMigrator:
             self._conn.execute("ALTER TABLE runs ADD COLUMN run_group_id TEXT NOT NULL DEFAULT ''")
         if "client_request_id" not in run_columns:
             self._conn.execute("ALTER TABLE runs ADD COLUMN client_request_id TEXT NOT NULL DEFAULT ''")
+        if "project_root_group" not in run_columns:
+            self._conn.execute(
+                "ALTER TABLE runs ADD COLUMN project_root_group INTEGER NOT NULL DEFAULT 0"
+            )
+        if "async_lease_generation" not in run_columns:
+            self._conn.execute(
+                "ALTER TABLE runs ADD COLUMN async_lease_generation INTEGER NOT NULL DEFAULT 0"
+            )
+        if "async_lease_owner_token" not in run_columns:
+            self._conn.execute(
+                "ALTER TABLE runs ADD COLUMN async_lease_owner_token TEXT NOT NULL DEFAULT ''"
+            )
+        if "async_lease_expires_at" not in run_columns:
+            self._conn.execute(
+                "ALTER TABLE runs ADD COLUMN async_lease_expires_at TEXT NOT NULL DEFAULT ''"
+            )
+        if "async_lease_heartbeat_at" not in run_columns:
+            self._conn.execute(
+                "ALTER TABLE runs ADD COLUMN async_lease_heartbeat_at TEXT NOT NULL DEFAULT ''"
+            )
         if "pending_approval_json" not in run_columns:
             self._conn.execute("ALTER TABLE runs ADD COLUMN pending_approval_json TEXT NOT NULL DEFAULT '{}'")
+        memory_columns = {
+            str(row["name"])
+            for row in self._conn.execute("PRAGMA table_info(memory_items)").fetchall()
+        }
+        if memory_columns and "enabled" not in memory_columns:
+            self._conn.execute(
+                "ALTER TABLE memory_items ADD COLUMN enabled INTEGER NOT NULL DEFAULT 1"
+            )
+        if memory_columns and "actor" not in memory_columns:
+            self._conn.execute(
+                "ALTER TABLE memory_items ADD COLUMN actor TEXT NOT NULL DEFAULT 'agent_tool'"
+            )
+        if memory_columns:
+            self._conn.execute(
+                """
+                UPDATE memory_items
+                   SET actor='user', user_confirmed=1
+                 WHERE source_run_id='manual'
+                """
+            )
         task_run_link_columns = {
             str(row["name"]) for row in self._conn.execute("PRAGMA table_info(task_run_links)").fetchall()
         }

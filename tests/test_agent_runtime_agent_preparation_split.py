@@ -40,10 +40,10 @@ class FakeTraceEvents:
 class FakeMemoryStore:
     def __init__(self, memories: list[dict[str, Any]]) -> None:
         self.memories = memories
-        self.list_calls: list[dict[str, Any]] = []
+        self.query_calls: list[Any] = []
 
-    def list_items(self, **kwargs: Any) -> list[dict[str, Any]]:
-        self.list_calls.append(kwargs)
+    def query(self, query: Any) -> list[dict[str, Any]]:
+        self.query_calls.append(query)
         return self.memories
 
 

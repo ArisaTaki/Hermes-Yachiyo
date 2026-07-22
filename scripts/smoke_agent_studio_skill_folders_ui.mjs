@@ -301,12 +301,20 @@ async function main() {
   document.querySelector('[data-testid="skill-folder-row"][data-folder-id="${FOLDER_ID}"] [data-testid="skill-folder-open"]').click();
   \`, true);
   await waitFor(win, () => (
-    document.querySelector('[data-testid="skill-library"]')
+    window.location.hash === '#/agents/skills'
+    && document.querySelector('[data-testid="skill-library"]')
     && document.querySelector('[data-testid="skill-import-folder-select"]')?.value === ${JSON.stringify(FOLDER_ID)}
     && document.querySelector('[data-testid="skill-library-folder-filter"]')?.value === ${JSON.stringify(FOLDER_ID)}
   ), 'opened skill library folder filter');
   console.log('[electron-smoke] folder opened in skill library');
-  await win.loadURL(devUrl + '?bridge=' + encodeURIComponent(bridgeUrl) + '#/agents/skill-groups');
+  win.webContents.reload();
+  await waitFor(win, () => (
+    window.location.hash === '#/agents/skills'
+    && document.querySelector('[data-testid="skill-library"]')
+  ), 'skill library after reload');
+  await win.webContents.executeJavaScript(\`
+  document.querySelector('[data-testid="agent-studio-tab-skill-groups"]').click();
+  \`, true);
   await waitFor(win, () => document.querySelector('[data-testid="skill-folder-row"][data-folder-id="${FOLDER_ID}"]')?.getAttribute('data-folder-name') === ${JSON.stringify(RENAMED_FOLDER_NAME)}, 'folder row after reload');
   await win.webContents.executeJavaScript(\`
   document.querySelector('[data-testid="skill-folder-row"][data-folder-id="${FOLDER_ID}"] [data-testid="skill-folder-delete"]').click();

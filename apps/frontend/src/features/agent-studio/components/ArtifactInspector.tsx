@@ -53,7 +53,7 @@ export function ArtifactInspector({
       <RuntimeArtifactList
         artifacts={selectedRunArtifacts}
         className="run-detail-fold-body run-artifacts"
-        emptyLabel="No artifacts"
+        emptyLabel="暂无 Artifacts"
         fallbackRunId={selectedRun.run_id}
         itemTestId="agent-run-detail-artifact"
         onOpenArtifact={onOpenArtifact}

@@ -543,6 +543,17 @@ async def update_studio_memory(
     return await yachiyo_studio_handlers.update_memory(memory_id, request, http_request)
 
 
+@router.post("/studio/memories/{memory_id}/consent-capability")
+async def issue_studio_memory_consent_capability(
+    memory_id: str,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
+    return await yachiyo_studio_handlers.issue_memory_consent_capability(
+        memory_id,
+        http_request,
+    )
+
+
 @router.delete("/studio/memories/{memory_id}")
 async def delete_studio_memory(
     memory_id: str,

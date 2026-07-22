@@ -56,6 +56,7 @@ FIRST_PAGE_RUN_KEY_EVENT_TYPES = {
     "agent.run.cancelled",
     "agent.tool.approval_required",
     "agent.desktop.intent_approval_required",
+    "agent.desktop.intent_unverified",
     "agent.replan.requested",
     "agent.replan.recovery.updated",
     "agent.task_core.created",

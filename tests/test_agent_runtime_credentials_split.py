@@ -53,6 +53,37 @@ def test_runtime_credential_service_redacts_store_and_read_errors() -> None:
     assert "sk-read-secret123456" not in str(read_error.value)
     assert "[redacted]" in str(store_error.value)
     assert "[redacted]" in str(read_error.value)
+    assert store_error.value.__cause__ is None
+    assert read_error.value.__cause__ is None
+
+
+def test_runtime_credential_cleanup_never_surfaces_native_delete_errors() -> None:
+    class UnexpectedDeleteFailure:
+        def delete(self, _ref: str) -> None:
+            raise RuntimeError("native cleanup failed sk-delete-secret123456")
+
+    RuntimeCredentialService(UnexpectedDeleteFailure()).delete(
+        "agent:agent-1:model_api_key"
+    )
+
+
+def test_runtime_credential_auth_failure_points_to_agent_studio_recovery() -> None:
+    class InaccessibleAgentCredential:
+        def get(self, _ref: str) -> str:
+            raise CredentialStoreError(
+                "应用更新后无法读取原有钥匙串凭据，请前往模型配置。",
+                operation="find",
+                os_status=-25293,
+            )
+
+    service = RuntimeCredentialService(InaccessibleAgentCredential())
+
+    with pytest.raises(AgentRuntimeError) as error:
+        service.read("agent:agent-1:model_api_key")
+
+    assert "Agent Studio" in str(error.value)
+    assert "重新保存 API Key" in str(error.value)
+    assert "模型配置" not in str(error.value)
 
 
 def test_runtime_credentials_remain_available_from_legacy_runtime_module() -> None:

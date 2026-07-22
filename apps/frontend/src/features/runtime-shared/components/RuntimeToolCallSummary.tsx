@@ -1,5 +1,9 @@
 import type { PublicRunEvent, ToolCallSnapshot } from '../types';
-import { runtimeToolDisplayLabelOrName, runtimeToolFamily } from '../approval';
+import {
+  runtimeToolDisplayLabel,
+  runtimeToolDisplayLabelOrName,
+  runtimeToolFamily,
+} from '../approval';
 import {
   runtimeEventIsDesktopForegroundSessionNotice,
   runtimeEventIsDesktopIntent,
@@ -9,6 +13,7 @@ import { publicRunEventIsSecret } from '../runEvents';
 
 export type RuntimeToolCallSummaryItem = {
   count: number;
+  executionRoute?: Record<string, unknown>;
   name: string;
   policyReason?: string;
   riskLevel?: string;
@@ -47,6 +52,7 @@ const TOOL_EVENT_TYPES = new Set([
   'agent.desktop.intent_completed',
   'agent.desktop.permission_recovery',
   'agent.desktop.intent_unavailable',
+  'agent.desktop.intent_unverified',
   'skill.selected',
   'skill.dispatch.read',
   'memory.retrieved',
@@ -94,7 +100,7 @@ export function RuntimeToolCallSummary({
             data-tool-status={tool.status}
             key={tool.name}
           >
-            <strong>{runtimeToolSummaryDisplayName(tool.name, tool.status)}</strong>
+            <strong>{runtimeToolSummaryDisplayName(tool.name, tool.status, tool.executionRoute)}</strong>
             {tool.count > 1 ? <em>x{tool.count}</em> : null}
             {tool.riskLevel ? <em title={tool.policyReason || undefined}>{tool.riskLevel}</em> : null}
             <small>{runtimeToolStatusLabel(tool.status)}</small>
@@ -117,6 +123,7 @@ export function summarizeRuntimeToolCallSnapshots(
     const status = normalizeRuntimeToolStatus(String(toolCall.status || '').trim());
     const riskLevel = String(toolCall.risk_level || '').trim();
     const policyReason = String(toolCall.policy_reason || '').trim();
+    const executionRoute = runtimeToolExecutionRouteFromSnapshot(toolCall);
     const previous = byName.get(name);
     if (previous) {
       previous.count += 1;
@@ -125,11 +132,13 @@ export function summarizeRuntimeToolCallSnapshots(
         previous.status = status;
         previous.riskLevel = riskLevel || previous.riskLevel;
         previous.policyReason = policyReason || previous.policyReason;
+        previous.executionRoute = executionRoute;
       }
       return;
     }
     byName.set(name, {
       count: 1,
+      executionRoute,
       name,
       policyReason,
       riskLevel,
@@ -158,6 +167,7 @@ export function summarizeRuntimeToolCalls(
     const status = runtimeToolStatusFromEvent(event);
     const riskLevel = runtimeToolRiskLevelFromEvent(event);
     const policyReason = runtimeToolPolicyReasonFromEvent(event);
+    const executionRoute = runtimeToolExecutionRouteFromEvent(event, name);
     const previous = byName.get(name);
     if (previous) {
       previous.count += 1;
@@ -166,16 +176,96 @@ export function summarizeRuntimeToolCalls(
         previous.status = status;
         previous.riskLevel = riskLevel || previous.riskLevel;
         previous.policyReason = policyReason || previous.policyReason;
+        previous.executionRoute = executionRoute;
       }
       continue;
     }
 
-    byName.set(name, { count: 1, name, policyReason, riskLevel, sequence, status });
+    byName.set(name, {
+      count: 1,
+      executionRoute,
+      name,
+      policyReason,
+      riskLevel,
+      sequence,
+      status,
+    });
   }
 
   return Array.from(byName.values())
     .sort((left, right) => right.sequence - left.sequence)
     .slice(0, Math.max(1, limit));
+}
+
+function runtimeToolExecutionRouteFromSnapshot(
+  toolCall: ToolCallSnapshot,
+): Record<string, unknown> | undefined {
+  const runtimeMetadata = recordPayload(toolCall.runtime_execution_metadata);
+  const metadata = recordPayload(toolCall.metadata);
+  const input = recordPayload(toolCall.input_preview);
+  const output = recordPayload(toolCall.output_preview);
+  const deferredContext = recordPayload(toolCall.deferred_context);
+  const envelope = recordPayload(toolCall.runtime_execution_envelope);
+  return firstRuntimeToolExecutionRoute(
+    objectPayload(runtimeMetadata, 'desktop_execution_route'),
+    objectPayload(metadata, 'desktop_execution_route'),
+    objectPayload(input, 'desktop_execution_route'),
+    objectPayload(output, 'desktop_execution_route'),
+    objectPayload(deferredContext, 'desktop_execution_route'),
+    objectPayload(envelope, 'desktop_execution_route'),
+    runtimeToolExecutionRequestRoute(envelope, toolCall.tool_name),
+  );
+}
+
+function runtimeToolExecutionRouteFromEvent(
+  event: PublicRunEvent,
+  toolName: string,
+): Record<string, unknown> | undefined {
+  const payload = recordPayload(event.payload);
+  const result = objectPayload(payload, 'result');
+  const metadata = objectPayload(payload, 'metadata');
+  const resultMetadata = objectPayload(result, 'metadata');
+  const runtimeMetadata = objectPayload(payload, 'runtime_execution_metadata');
+  const input = objectPayload(payload, 'input') || objectPayload(payload, 'input_preview');
+  const envelope = objectPayload(payload, 'runtime_execution_envelope')
+    || objectPayload(runtimeMetadata, 'runtime_execution_envelope')
+    || objectPayload(metadata, 'runtime_execution_envelope');
+  return firstRuntimeToolExecutionRoute(
+    objectPayload(payload, 'desktop_execution_route'),
+    objectPayload(result, 'desktop_execution_route'),
+    objectPayload(runtimeMetadata, 'desktop_execution_route'),
+    objectPayload(metadata, 'desktop_execution_route'),
+    objectPayload(resultMetadata, 'desktop_execution_route'),
+    objectPayload(input, 'desktop_execution_route'),
+    objectPayload(envelope, 'desktop_execution_route'),
+    runtimeToolExecutionRequestRoute(envelope, toolName),
+  );
+}
+
+function runtimeToolExecutionRequestRoute(
+  envelope: Record<string, unknown> | undefined,
+  toolName: string,
+): Record<string, unknown> | undefined {
+  const requests = envelope?.requests;
+  if (!Array.isArray(requests)) return undefined;
+  const requestRecords = requests.map(recordPayload).filter(Boolean) as Record<string, unknown>[];
+  const matchingRequest = requestRecords.find((request) => (
+    (stringPayload(request, 'tool_name') || stringPayload(request, 'tool')) === toolName
+    && Boolean(objectPayload(request, 'desktop_execution_route'))
+  ));
+  return objectPayload(matchingRequest, 'desktop_execution_route');
+}
+
+function firstRuntimeToolExecutionRoute(
+  ...routes: Array<Record<string, unknown> | undefined>
+): Record<string, unknown> | undefined {
+  return routes.find((route) => Boolean(route && Object.keys(route).length));
+}
+
+function recordPayload(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
 }
 
 function runtimeToolRiskLevelFromEvent(event: PublicRunEvent): string {
@@ -212,6 +302,7 @@ function runtimeToolEventIsVisible(eventType: string): boolean {
     || runtimeEventIsDesktopIntent(eventType, 'completed')
     || runtimeEventIsDesktopPermissionRecovery(eventType)
     || runtimeEventIsDesktopIntent(eventType, 'unavailable')
+    || runtimeEventIsDesktopIntent(eventType, 'unverified')
     || eventType.startsWith('skill.dispatch.')
     || eventType.startsWith('memory.write.')
   );
@@ -293,6 +384,7 @@ function runtimeToolStatusFromEvent(event: PublicRunEvent): string {
   if (runtimeEventIsDesktopPermissionRecovery(eventType)) return 'waiting_approval';
   if (runtimeEventIsDesktopIntent(eventType, 'completed')) return 'completed';
   if (runtimeEventIsDesktopIntent(eventType, 'unavailable')) return 'unavailable';
+  if (runtimeEventIsDesktopIntent(eventType, 'unverified')) return 'failed';
   return 'running';
 }
 
@@ -362,13 +454,21 @@ function runtimeToolStatusLabel(status: string): string {
   return status || '工具';
 }
 
-function runtimeToolSummaryDisplayName(name: string, status: string): string {
-  const activeLabel = runtimeToolActiveSummaryLabel(name, status);
+function runtimeToolSummaryDisplayName(
+  name: string,
+  status: string,
+  executionRoute?: Record<string, unknown>,
+): string {
+  const activeLabel = runtimeToolActiveSummaryLabel(name, status, executionRoute);
   if (activeLabel) return activeLabel;
-  return runtimeToolDisplayLabelOrName(name);
+  return runtimeToolDisplayLabelOrName(name, executionRoute);
 }
 
-function runtimeToolActiveSummaryLabel(name: string, status: string): string {
+function runtimeToolActiveSummaryLabel(
+  name: string,
+  status: string,
+  executionRoute?: Record<string, unknown>,
+): string {
   if (!['queued', 'planned', 'running'].includes(status)) return '';
   const tool = String(name || '').trim();
   if (tool === 'screen.capture') return '正在截图';
@@ -382,8 +482,9 @@ function runtimeToolActiveSummaryLabel(name: string, status: string): string {
   if (tool === 'media.apple_music_play') return '正在打开 Music';
   if (tool === 'media.apple_music_control') return '正在控制 Music';
   if (tool === 'desktop.safe_shortcut') return '正在执行快捷动作';
-  if (tool === 'desktop.safe_type_text') return '正在输入前台文字';
-  if (tool === 'desktop.safe_click') return '正在点击前台界面';
+  if (tool === 'desktop.safe_type_text' || tool === 'desktop.safe_click') {
+    return `正在${runtimeToolDisplayLabel(tool, executionRoute)}`;
+  }
   if (tool === 'desktop.hotkey') return '正在发送快捷键';
   if (tool === 'desktop.type_text') return '正在输入前台文字';
   if (tool === 'browser.open_url') return '正在打开网页';

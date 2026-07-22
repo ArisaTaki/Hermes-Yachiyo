@@ -21,6 +21,7 @@ _DAILY_DESKTOP_INTENT_TOOL_EVENTS = {
     "agent.desktop.intent_completed",
     "agent.desktop.permission_recovery",
     "agent.desktop.intent_unavailable",
+    "agent.desktop.intent_unverified",
 }
 _TOOL_INPUT_RESOLUTION_EVENT_TYPE = "agent.tool.input_resolved"
 _PLANNER_TRACE_KEYS = (
@@ -71,6 +72,7 @@ def tool_call_snapshots_from_events(events: list[PublicRunEvent]) -> list[ToolCa
             continue
         for payload in tool_call_payloads_from_event(event):
             call = tool_call_snapshot_from_payload(payload, run_id=event.run_id)
+            explicit_id = _text(payload.get("tool_call_id") or payload.get("id"))
             key = tool_call_correlation_key(payload, call)
             active_index = active_by_key.get(key) if key else None
             if active_index is None and is_daily_desktop_intent_tool_event(
@@ -83,7 +85,7 @@ def tool_call_snapshots_from_events(events: list[PublicRunEvent]) -> list[ToolCa
             else:
                 calls[active_index] = merge_tool_call_snapshots(calls[active_index], call)
             if key:
-                if tool_call_status_is_terminal(call.status):
+                if tool_call_status_is_terminal(call.status) and not explicit_id:
                     active_by_key.pop(key, None)
                 else:
                     active_by_key[key] = active_index
@@ -420,7 +422,7 @@ def merge_tool_call_snapshots(
             next_call.task_verification_targets,
         ),
         tool_name=current.tool_name or next_call.tool_name,
-        status=next_call.status or current.status,
+        status=_merged_tool_call_status(current.status, next_call.status),
         risk_level=current.risk_level or next_call.risk_level,
         policy_reason=current.policy_reason or next_call.policy_reason,
         input_preview=_merge_input_previews(current.input_preview, next_call.input_preview),
@@ -432,6 +434,14 @@ def merge_tool_call_snapshots(
         started_at=current.started_at or next_call.started_at,
         completed_at=completed_at,
     )
+
+
+def _merged_tool_call_status(current: str, next_status: str) -> str:
+    if tool_call_status_is_terminal(current) and not tool_call_status_is_terminal(
+        next_status
+    ):
+        return current
+    return next_status or current
 
 
 def tool_call_correlation_key(
@@ -551,6 +561,8 @@ def tool_status_from_event_payload(event_type: str, payload: Mapping[str, Any]) 
         return "waiting_approval"
     if is_desktop_intent_event(event_type, "unavailable"):
         return "blocked"
+    if is_desktop_intent_event(event_type, "unverified"):
+        return "failed"
     if is_desktop_permission_recovery_event(event_type):
         return "failed"
     if is_desktop_intent_event(event_type, "completed"):
@@ -623,6 +635,12 @@ def daily_desktop_intent_output_preview(
             )
             if payload.get(key)
         }
+    if is_desktop_intent_event(event_type, "unverified"):
+        return {
+            key: payload[key]
+            for key in ("reason", "error", "status")
+            if payload.get(key)
+        }
     if is_desktop_intent_event(event_type, "approval_required"):
         return {
             key: payload[key]
@@ -650,7 +668,12 @@ def is_daily_desktop_intent_tool_event(event_type: str) -> bool:
         or is_desktop_permission_recovery_event(event_type)
         or any(
             is_desktop_intent_event(event_type, suffix)
-            for suffix in ("approval_required", "completed", "unavailable")
+            for suffix in (
+                "approval_required",
+                "completed",
+                "unavailable",
+                "unverified",
+            )
         )
     )
 
@@ -688,6 +711,7 @@ def _tool_call_correlation_preview(preview: Mapping[str, Any]) -> dict[str, Any]
         "agent_id",
         "agent_name",
         "approval_id",
+        "core_id",
         "group_id",
         "group_run_id",
         "member_agent_id",
@@ -709,6 +733,7 @@ def _tool_call_correlation_preview(preview: Mapping[str, Any]) -> dict[str, Any]
         "source_runnable_id",
         "source_runnable_name",
         "source_tool",
+        "task_id",
         "tool_call_id",
         "workflow_id",
         "workflow_node_id",
@@ -716,8 +741,10 @@ def _tool_call_correlation_preview(preview: Mapping[str, Any]) -> dict[str, Any]
         "workflow_node_label",
         "workflow_run_id",
         "workflow_step_label",
+        "workspace_id",
         *_PLANNER_TRACE_KEYS,
         *_RUNTIME_TRACE_KEYS,
+        *_RUNTIME_CONTEXT_KEYS,
     }
     return {
         key: _canonical_preview_value(value)

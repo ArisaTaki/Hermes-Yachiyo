@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import fnmatch
+import inspect
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from apps.shell.agent.runtime.errors import AgentRuntimeError
+from apps.shell.agent.runtime.errors import AgentRuntimeError, AgentWorkspaceBoundaryError
 from apps.shell.agent.tools import browser, desktop
 from apps.shell.agent.tools.data_analysis import analyze_data_file, analyze_data_files, analyze_data_text
 from apps.shell.agent.tools.registry import dispatch_tool_call
@@ -23,7 +24,6 @@ from apps.shell.agent.tools.workspace import (
     _apply_single_file_unified_diff,
     _atomic_write_text,
     _is_within,
-    _read_text,
     _safe_rel_path,
     _sha256_bytes,
     _sha256_file,
@@ -36,6 +36,8 @@ __all__ = [
     "_TERMINAL_PROCESS_LOCK",
     "cancel_terminal_process_groups",
 ]
+
+_WORKSPACE_READ_MAX_BYTES = 200_000
 
 
 def _redact_secrets(value: Any) -> str:
@@ -51,6 +53,55 @@ def _clean_string_list(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
     return [str(item or "").strip() for item in value if str(item or "").strip()]
+
+
+def _with_native_postcondition_receipt(
+    result: dict[str, Any],
+    *,
+    verified: bool,
+) -> dict[str, Any]:
+    """Expose an existing native read-back as a strict Runtime receipt."""
+
+    if result.get("ok") is not True or not verified:
+        return result
+    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    return {
+        **result,
+        "postcondition_verified": True,
+        "data": {**data, "postcondition_verified": True},
+    }
+
+
+def _app_lifecycle_status_verified(
+    result: dict[str, Any],
+    *,
+    expected_tool: str,
+    expected_app_name: str,
+    status_key: str,
+    accepted_statuses: frozenset[str],
+) -> bool:
+    """Validate the exact app/status read-back before minting a receipt."""
+
+    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    observed_app_name = str(
+        data.get("resolved_app_name")
+        or data.get("app_name")
+        or result.get("resolved_app_name")
+        or result.get("app_name")
+        or ""
+    ).strip()
+    observed_status = str(
+        data.get(status_key) or result.get(status_key) or ""
+    ).strip().casefold()
+    return bool(
+        result.get("ok") is True
+        and str(result.get("action") or result.get("tool") or "").strip()
+        == expected_tool
+        and str(expected_app_name or "").strip()
+        and observed_app_name
+        and _app_names_match(expected_app_name, observed_app_name)
+        and observed_status in accepted_statuses
+    )
 
 
 _WORKSPACE_LIST_FILE_TYPE_PATTERNS: dict[str, tuple[str, ...]] = {
@@ -71,6 +122,15 @@ _WORKSPACE_LIST_FILE_TYPE_PATTERNS: dict[str, tuple[str, ...]] = {
     "archive": ("*.zip", "*.rar", "*.7z", "*.tar", "*.gz"),
     "audio": ("*.mp3", "*.wav", "*.aac", "*.m4a", "*.flac"),
     "video": ("*.mp4", "*.mov", "*.m4v", "*.avi", "*.mkv"),
+}
+
+_BROWSER_OWNED_TARGET_REQUIRED_TOOLS = {
+    "browser.click",
+    "browser.current_page",
+    "browser.extract",
+    "browser.extract_text",
+    "browser.screenshot",
+    "browser.type_text",
 }
 
 _FILE_ORGANIZE_GENERIC_DESTINATIONS = {
@@ -249,6 +309,53 @@ def _foreground_expected_app_name(
     return str(fallback_app_name or "").strip()
 
 
+def _call_foreground_bound_action(
+    action: Any,
+    *args: Any,
+    expected_app_name: str,
+    **kwargs: Any,
+) -> dict[str, Any]:
+    """Call a foreground action without weakening the broker's app binding.
+
+    Current desktop actions accept ``expected_app_name`` and independently
+    re-observe the foreground app.  Older injected adapters may not expose the
+    keyword.  They are safe to call here only because ``_app_foreground_action``
+    has just completed an exact, Runtime-owned active-window observation under
+    the same foreground lock.  Unknown signatures keep the stricter call and
+    therefore fail closed if they cannot honor the binding.
+    """
+
+    try:
+        parameters = inspect.signature(action).parameters.values()
+    except (TypeError, ValueError):
+        parameters = ()
+    supports_expected_app = any(
+        parameter.kind is inspect.Parameter.VAR_KEYWORD
+        or (
+            parameter.name == "expected_app_name"
+            and parameter.kind
+            in {
+                inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                inspect.Parameter.KEYWORD_ONLY,
+            }
+        )
+        for parameter in parameters
+    )
+    if supports_expected_app:
+        return action(
+            *args,
+            expected_app_name=expected_app_name,
+            **kwargs,
+        )
+    if parameters:
+        return action(*args, **kwargs)
+    return action(
+        *args,
+        expected_app_name=expected_app_name,
+        **kwargs,
+    )
+
+
 def _artifact_manifest_by_path(value: Any) -> dict[str, dict[str, str]]:
     if not isinstance(value, list):
         return {}
@@ -304,6 +411,22 @@ def _data_analysis_artifact_manifest(artifacts: list[dict[str, Any]]) -> list[di
     return manifest
 
 
+def _requested_data_analysis_artifact_paths(
+    artifact_path: str,
+    artifact_paths: list[str] | None,
+) -> list[str]:
+    candidates = [str(artifact_path or "analysis-report.md").strip() or "analysis-report.md"]
+    candidates.extend(str(path or "").strip() for path in artifact_paths or [])
+    paths: list[str] = []
+    for candidate in candidates:
+        if not candidate:
+            continue
+        rel = _safe_rel_path(candidate)
+        if rel not in paths:
+            paths.append(rel)
+    return paths or ["analysis-report.md"]
+
+
 @dataclass
 class ToolBroker:
     """Controlled tools exposed to custom API agents."""
@@ -321,6 +444,7 @@ class ToolBroker:
         self.artifact_root.mkdir(parents=True, exist_ok=True)
         self.approvals = self.approvals or {}
         self.skills = self.skills or []
+        self._owned_browser_target_id = ""
 
     @property
     def workdir(self) -> Path:
@@ -343,7 +467,7 @@ class ToolBroker:
         key = "writable_scopes" if write else "readable_scopes"
         roots = self._scope_roots(key)
         if not any(_is_within(target, root) for root in roots):
-            raise AgentRuntimeError("路径不在 Agent 允许的工作区范围内")
+            raise AgentWorkspaceBoundaryError("路径不在 Agent 允许的工作区范围内")
         return target
 
     def workspace_list(
@@ -454,6 +578,7 @@ class ToolBroker:
         old_content: str = "",
         kind: str = "",
         scope: str = "",
+        approved: bool = False,
     ) -> dict[str, Any]:
         if self.memory_store is None:
             return {"ok": False, "error": "当前运行未启用长期记忆存储"}
@@ -463,6 +588,7 @@ class ToolBroker:
             content=content,
             kind=kind,
             scope=scope,
+            approved=approved,
         )
 
     def memory_remove(
@@ -471,10 +597,16 @@ class ToolBroker:
         memory_id: str = "",
         content: str = "",
         reason: str = "",
+        approved: bool = False,
     ) -> dict[str, Any]:
         if self.memory_store is None:
             return {"ok": False, "error": "当前运行未启用长期记忆存储"}
-        return self.memory_store.remove(memory_id=memory_id, content=content, reason=reason)
+        return self.memory_store.remove(
+            memory_id=memory_id,
+            content=content,
+            reason=reason,
+            approved=approved,
+        )
 
     def future_task_schedule(
         self,
@@ -563,7 +695,31 @@ class ToolBroker:
                 "error": "workspace.read 只能读取文件",
                 "hint": "请选择普通文本文件路径。",
             }
-        return {"ok": True, "path": display_path, "content": _read_text(target)}
+        # Read only the existing bounded prefix.  ``seek`` obtains the size
+        # from the same open file handle without loading the rest of a large
+        # file into memory, unlike ``Path.read_bytes()[:limit]``.
+        with target.open("rb") as stream:
+            stream.seek(0, 2)
+            size_bytes = stream.tell()
+            stream.seek(0)
+            raw_content = stream.read(_WORKSPACE_READ_MAX_BYTES)
+        try:
+            content = raw_content.decode("utf-8", errors="strict")
+            decoding_lossy = False
+        except UnicodeDecodeError:
+            # Preserve the historical replacement-character preview while
+            # exposing that it is ineligible for exact-content verification.
+            content = raw_content.decode("utf-8", errors="replace")
+            decoding_lossy = True
+        return {
+            "ok": True,
+            "path": display_path,
+            "content": content,
+            "truncated": size_bytes > len(raw_content),
+            "size_bytes": size_bytes,
+            "content_bytes": len(raw_content),
+            "decoding_lossy": decoding_lossy,
+        }
 
     def workspace_write_patch(
         self,
@@ -613,6 +769,21 @@ class ToolBroker:
         target.parent.mkdir(parents=True, exist_ok=True)
         _atomic_write_text(target, content)
         after_sha256 = _sha256_file(target)
+        postcondition_verified = bool(
+            target.is_file()
+            and after_sha256 == _sha256_bytes(content.encode("utf-8"))
+        )
+        if not postcondition_verified:
+            return {
+                "ok": False,
+                "path": path,
+                "mode": mode,
+                "sha256_before": before_sha256,
+                "sha256_after": after_sha256,
+                "verification_failed": True,
+                "retryable": True,
+                "error": "workspace_patch_readback_unverified",
+            }
         return {
             "ok": True,
             "path": path,
@@ -620,6 +791,7 @@ class ToolBroker:
             "bytes": len(content.encode("utf-8")),
             "sha256_before": before_sha256,
             "sha256_after": after_sha256,
+            "postcondition_verified": True,
         }
 
     def file_organize(
@@ -813,7 +985,22 @@ class ToolBroker:
         target.parent.mkdir(parents=True, exist_ok=True)
         safe_content = _redact_secrets(content)
         target.write_text(safe_content, encoding="utf-8")
-        return {"ok": True, "path": rel, "bytes": len(safe_content.encode("utf-8"))}
+        expected = safe_content.encode("utf-8")
+        postcondition_verified = bool(target.is_file() and target.read_bytes() == expected)
+        if not postcondition_verified:
+            return {
+                "ok": False,
+                "path": rel,
+                "verification_failed": True,
+                "retryable": True,
+                "error": "artifact_write_readback_unverified",
+            }
+        return {
+            "ok": True,
+            "path": rel,
+            "bytes": len(expected),
+            "postcondition_verified": True,
+        }
 
     def artifact_write_bytes(self, path: str, content: bytes) -> dict[str, Any]:
         rel = _safe_rel_path(path)
@@ -821,8 +1008,23 @@ class ToolBroker:
         if not _is_within(target, self.artifact_root):
             raise AgentRuntimeError("artifact 路径越界")
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(bytes(content or b""))
-        return {"ok": True, "path": rel, "bytes": target.stat().st_size}
+        expected = bytes(content or b"")
+        target.write_bytes(expected)
+        postcondition_verified = bool(target.is_file() and target.read_bytes() == expected)
+        if not postcondition_verified:
+            return {
+                "ok": False,
+                "path": rel,
+                "verification_failed": True,
+                "retryable": True,
+                "error": "artifact_write_readback_unverified",
+            }
+        return {
+            "ok": True,
+            "path": rel,
+            "bytes": target.stat().st_size,
+            "postcondition_verified": True,
+        }
 
     def data_analyze(
         self,
@@ -978,7 +1180,15 @@ class ToolBroker:
                     index=extra_index,
                 )
             )
-        return {
+        expected_artifact_paths = _requested_data_analysis_artifact_paths(
+            artifact_path,
+            artifact_paths,
+        )
+        postcondition_verified = self._data_analysis_artifacts_stat_verified(
+            artifacts,
+            expected_paths=expected_artifact_paths,
+        )
+        response = {
             **{
                 key: value
                 for key, value in result.items()
@@ -987,7 +1197,50 @@ class ToolBroker:
             "artifact_manifest": _data_analysis_artifact_manifest(artifacts),
             "artifact": artifacts[0],
             "artifacts": artifacts,
+            "postcondition_verified": postcondition_verified,
         }
+        if postcondition_verified:
+            return response
+        return {
+            **response,
+            "ok": False,
+            "verification_failed": True,
+            "retryable": True,
+            "error": "data_analysis_artifact_unverified",
+            "hint": "The requested analysis artifacts were not verified at their exact paths.",
+        }
+
+    def _data_analysis_artifacts_stat_verified(
+        self,
+        artifacts: list[dict[str, Any]],
+        *,
+        expected_paths: list[str],
+    ) -> bool:
+        observed_paths: list[str] = []
+        for artifact in artifacts:
+            try:
+                rel = _safe_rel_path(str(artifact.get("path") or ""))
+            except AgentRuntimeError:
+                return False
+            target = (self.artifact_root / rel).resolve()
+            if not _is_within(target, self.artifact_root):
+                return False
+            try:
+                stat = target.stat()
+            except OSError:
+                return False
+            if not target.is_file():
+                return False
+            size_bytes = artifact.get("size_bytes")
+            if (
+                not isinstance(size_bytes, int)
+                or isinstance(size_bytes, bool)
+                or size_bytes < 0
+                or stat.st_size != size_bytes
+            ):
+                return False
+            observed_paths.append(rel)
+        return bool(observed_paths and observed_paths == expected_paths)
 
     def screen_capture(self, *, reason: str = "") -> dict[str, Any]:
         rel = Path("screenshots") / "current-screen.png"
@@ -1021,6 +1274,12 @@ class ToolBroker:
     def desktop_permissions(self) -> dict[str, Any]:
         return desktop.permissions()
 
+    def desktop_permissions_verify(self) -> dict[str, Any]:
+        return {
+            **desktop.permissions(active_verification=True),
+            "action": "desktop.permissions.verify",
+        }
+
     def desktop_permission_preflight(self) -> dict[str, Any]:
         return desktop.permission_preflight()
 
@@ -1049,8 +1308,8 @@ class ToolBroker:
         self,
         app_name: str,
         *,
-        open_if_needed: Any = True,
-        focus: Any = True,
+        open_if_needed: Any = False,
+        focus: Any = False,
         role_filter: str = "",
         limit: Any = 80,
     ) -> dict[str, Any]:
@@ -1102,13 +1361,34 @@ class ToolBroker:
         return desktop.app_status(app_name)
 
     def app_open(self, app_name: str) -> dict[str, Any]:
-        return desktop.app_open(app_name)
+        result = desktop.app_open(app_name)
+        data = result.get("data") if isinstance(result.get("data"), dict) else {}
+        return _with_native_postcondition_receipt(
+            result,
+            verified=data.get("launch_verified") is True,
+        )
 
     def app_focus(self, app_name: str) -> dict[str, Any]:
-        return desktop.app_focus(app_name)
+        result = desktop.app_focus(app_name)
+        data = result.get("data") if isinstance(result.get("data"), dict) else {}
+        return _with_native_postcondition_receipt(
+            result,
+            verified=data.get("focus_verified") is True,
+        )
 
     def app_focus_window(self, app_name: str, title_contains: str) -> dict[str, Any]:
-        return desktop.app_focus_window(app_name, title_contains)
+        result = desktop.app_focus_window(app_name, title_contains)
+        data = result.get("data") if isinstance(result.get("data"), dict) else {}
+        expected_title = str(title_contains or "").strip().casefold()
+        observed_title = str(data.get("window_title") or "").strip().casefold()
+        return _with_native_postcondition_receipt(
+            result,
+            verified=bool(
+                str(data.get("focus_status") or "").strip() == "focused"
+                and expected_title
+                and expected_title in observed_title
+            ),
+        )
 
     def app_open_and_safe_type_text(self, app_name: str, text: str) -> dict[str, Any]:
         return self._with_foreground_lock(
@@ -1350,7 +1630,8 @@ class ToolBroker:
                 ),
                 action_step=(
                     "click_ui_element",
-                    lambda expected_app_name: desktop.click_ui_element(
+                    lambda expected_app_name: _call_foreground_bound_action(
+                        desktop.click_ui_element,
                         target,
                         role_filter=role_filter,
                         limit=limit,
@@ -1379,7 +1660,8 @@ class ToolBroker:
                 setup_steps=(("focus", lambda: desktop.app_focus(app_name)),),
                 action_step=(
                     "click_ui_element",
-                    lambda expected_app_name: desktop.click_ui_element(
+                    lambda expected_app_name: _call_foreground_bound_action(
+                        desktop.click_ui_element,
                         target,
                         role_filter=role_filter,
                         limit=limit,
@@ -1411,7 +1693,8 @@ class ToolBroker:
                 ),
                 action_step=(
                     "type_into_ui_element",
-                    lambda expected_app_name: desktop.type_into_ui_element(
+                    lambda expected_app_name: _call_foreground_bound_action(
+                        desktop.type_into_ui_element,
                         target,
                         text,
                         role_filter=role_filter,
@@ -1440,7 +1723,8 @@ class ToolBroker:
                 setup_steps=(("focus", lambda: desktop.app_focus(app_name)),),
                 action_step=(
                     "type_into_ui_element",
-                    lambda expected_app_name: desktop.type_into_ui_element(
+                    lambda expected_app_name: _call_foreground_bound_action(
+                        desktop.type_into_ui_element,
                         target,
                         text,
                         role_filter=role_filter,
@@ -1453,13 +1737,43 @@ class ToolBroker:
         )
 
     def app_show(self, app_name: str) -> dict[str, Any]:
-        return desktop.app_show(app_name)
+        result = desktop.app_show(app_name)
+        return _with_native_postcondition_receipt(
+            result,
+            verified=_app_lifecycle_status_verified(
+                result,
+                expected_tool="app.show",
+                expected_app_name=app_name,
+                status_key="show_status",
+                accepted_statuses=frozenset({"launched", "shown"}),
+            ),
+        )
 
     def app_hide(self, app_name: str) -> dict[str, Any]:
-        return desktop.app_hide(app_name)
+        result = desktop.app_hide(app_name)
+        return _with_native_postcondition_receipt(
+            result,
+            verified=_app_lifecycle_status_verified(
+                result,
+                expected_tool="app.hide",
+                expected_app_name=app_name,
+                status_key="hide_status",
+                accepted_statuses=frozenset({"hidden"}),
+            ),
+        )
 
     def app_minimize(self, app_name: str) -> dict[str, Any]:
-        return desktop.app_minimize(app_name)
+        result = desktop.app_minimize(app_name)
+        return _with_native_postcondition_receipt(
+            result,
+            verified=_app_lifecycle_status_verified(
+                result,
+                expected_tool="app.minimize",
+                expected_app_name=app_name,
+                status_key="minimize_status",
+                accepted_statuses=frozenset({"minimized"}),
+            ),
+        )
 
     def app_quit(self, app_name: str) -> dict[str, Any]:
         return desktop.app_quit(app_name)
@@ -1625,6 +1939,46 @@ class ToolBroker:
             lambda: desktop.desktop_submit_foreground(action),
         )
 
+    def runtime_exact_submit_foreground(
+        self,
+        action: str,
+        *,
+        validate_pre: Any,
+        observe_post: Any,
+    ) -> dict[str, Any]:
+        """Atomically revalidate a Runtime-bound draft and dispatch Return.
+
+        The callbacks close over process-private Runtime authority.  Neither
+        the expected text nor its target identity is serialized through the
+        public tool payload or trusted from provider output.
+        """
+
+        def submit_under_one_foreground_lock() -> dict[str, Any]:
+            pre_snapshot = desktop.ui_elements()
+            if not bool(validate_pre(pre_snapshot)):
+                return {
+                    "ok": False,
+                    "action": "desktop.submit_foreground",
+                    "status": "blocked",
+                    "reason": "prepared_submit_target_revalidation_failed",
+                    "error": "prepared_submit_target_revalidation_failed",
+                    "summary": (
+                        "Submit was not dispatched because the prepared app, "
+                        "window, editable target, or exact content changed."
+                    ),
+                    "retryable": False,
+                }
+            dispatched = desktop.desktop_submit_foreground(action)
+            if dispatched.get("ok") is not True:
+                return dispatched
+            observe_post(desktop.ui_elements())
+            return dispatched
+
+        return self._with_foreground_lock(
+            "desktop.submit_foreground",
+            submit_under_one_foreground_lock,
+        )
+
     def desktop_type_text(self, text: str) -> dict[str, Any]:
         return self._with_foreground_lock(
             "desktop.type_text",
@@ -1775,11 +2129,103 @@ class ToolBroker:
             "fallback_result": fallback_result,
         }
 
-    def browser_open_url(self, url: str) -> dict[str, Any]:
-        return browser.open_url(url)
+    def browser_open_url(
+        self,
+        url: str,
+        *,
+        allow_system_browser_fallback: bool = False,
+    ) -> dict[str, Any]:
+        # Opening a new target starts a new ownership chain.  Close only the
+        # exact prior run-owned target, then clear ownership before creating a
+        # replacement so no failure can fall back to stale user state.
+        previous_target_id = str(self._owned_browser_target_id or "").strip()
+        self._owned_browser_target_id = ""
+        previous_target_cleanup = (
+            browser.close_target(previous_target_id)
+            if browser.is_valid_target_id(previous_target_id)
+            else None
+        )
+        if allow_system_browser_fallback:
+            result = browser.open_url(
+                url,
+                allow_system_browser_fallback=True,
+            )
+        else:
+            result = browser.open_url(url)
+        if not result.get("ok") or result.get("fallback_used"):
+            return {
+                **result,
+                "browser_target_ownership_cleared": True,
+            }
+        data = result.get("data") if isinstance(result.get("data"), dict) else {}
+        target_id = str(data.get("target_id") or "").strip()
+        target_websocket_available = data.get("target_websocket_available") is True
+        if not browser.is_valid_target_id(target_id) or not target_websocket_available:
+            return {
+                "ok": False,
+                "status": "blocked",
+                "action": "browser.open_url",
+                "summary": "Browser target ownership could not be verified",
+                "error": "browser_owned_target_unverified",
+                "permission_error": False,
+                "fallback_used": False,
+                "blocking_conditions": ["browser_owned_target_required"],
+                "user_handoff_required": True,
+                "replan_allowed": False,
+                "fallback_result": {"open": result},
+            }
+        self._owned_browser_target_id = target_id
+        return {
+            **result,
+            # The broker has just validated both the run-owned target identity
+            # and its page websocket.  Project that read-after-open receipt so
+            # the generic GoalContract can prove the browser.open_url effect
+            # without asking the model to restate an already completed action.
+            "postcondition_verified": True,
+            "data": {
+                **data,
+                "target_id": target_id,
+                "target_owned_by_run": True,
+                "postcondition_verified": True,
+                "browser_profile_isolated": True,
+                "browser_profile_isolated_from_user": True,
+                **(
+                    {"previous_target_cleanup": previous_target_cleanup}
+                    if previous_target_cleanup is not None
+                    else {}
+                ),
+            },
+        }
+
+    def close_owned_browser_target(self) -> dict[str, Any]:
+        """Release this broker's exact CDP target while preserving user tabs."""
+
+        target_id = str(self._owned_browser_target_id or "").strip()
+        self._owned_browser_target_id = ""
+        if not browser.is_valid_target_id(target_id):
+            return {
+                "ok": True,
+                "action": "browser.close_target",
+                "summary": "No run-owned browser target to close",
+                "data": {"already_closed": True},
+                "fallback_used": False,
+            }
+        return browser.close_target(target_id)
+
+    def restore_owned_browser_target(self, target_id: str) -> None:
+        """Restore a target only from trusted run history during approval resume."""
+
+        clean_target_id = str(target_id or "").strip()
+        if not browser.is_valid_target_id(clean_target_id):
+            self._owned_browser_target_id = ""
+            return
+        self._owned_browser_target_id = clean_target_id
 
     def browser_current_page(self) -> dict[str, Any]:
-        return browser.current_page()
+        return self._with_owned_browser_target(
+            "browser.current_page",
+            browser.current_page,
+        )
 
     def browser_click(
         self,
@@ -1788,17 +2234,24 @@ class ToolBroker:
         fallback_x: Any = None,
         fallback_y: Any = None,
         click_count: Any = 1,
+        allow_foreground_fallback: bool = False,
     ) -> dict[str, Any]:
-        return browser.click(
+        foreground_fallback = None
+        if allow_foreground_fallback:
+            foreground_fallback = lambda x, y, count: self._with_foreground_lock(
+                "browser.click",
+                lambda: desktop.desktop_click(x, y, click_count=count),
+            )
+        action = lambda: browser.click(
             selector,
             fallback_x=fallback_x,
             fallback_y=fallback_y,
             click_count=click_count,
-            foreground_fallback=lambda x, y, count: self._with_foreground_lock(
-                "browser.click",
-                lambda: desktop.desktop_click(x, y, click_count=count),
-            ),
+            foreground_fallback=foreground_fallback,
         )
+        if allow_foreground_fallback and not self._owned_browser_target_id:
+            return action()
+        return self._with_owned_browser_target("browser.click", action)
 
     def browser_type_text(
         self,
@@ -1807,6 +2260,7 @@ class ToolBroker:
         *,
         fallback_x: Any = None,
         fallback_y: Any = None,
+        allow_foreground_fallback: bool = False,
     ) -> dict[str, Any]:
         def foreground_fallback(*args: Any) -> dict[str, Any]:
             return self._with_foreground_lock(
@@ -1814,16 +2268,24 @@ class ToolBroker:
                 lambda: browser._type_text_foreground_fallback(*args),
             )
 
-        return browser.type_text(
+        action = lambda: browser.type_text(
             selector,
             text,
             fallback_x=fallback_x,
             fallback_y=fallback_y,
-            foreground_fallback=foreground_fallback,
+            foreground_fallback=(
+                foreground_fallback if allow_foreground_fallback else None
+            ),
         )
+        if allow_foreground_fallback and not self._owned_browser_target_id:
+            return action()
+        return self._with_owned_browser_target("browser.type_text", action)
 
     def browser_extract_text(self, selector: str = "") -> dict[str, Any]:
-        return browser.extract_text(selector)
+        return self._with_owned_browser_target(
+            "browser.extract_text",
+            lambda: browser.extract_text(selector),
+        )
 
     def browser_open_url_and_extract_text(
         self,
@@ -1873,13 +2335,31 @@ class ToolBroker:
             "fallback_result": {"open": open_result, "extract_text": extract_result},
         }
 
-    def browser_screenshot(self, *, reason: str = "") -> dict[str, Any]:
+    def browser_screenshot(
+        self,
+        *,
+        reason: str = "",
+        allow_screen_fallback: bool = False,
+    ) -> dict[str, Any]:
         rel = Path("browser") / "current-page.png"
         target = (self.artifact_root / rel).resolve()
         if not _is_within(target, self.artifact_root):
             raise AgentRuntimeError("browser artifact 路径越界")
         target.parent.mkdir(parents=True, exist_ok=True)
-        result = browser.screenshot(target)
+        if allow_screen_fallback:
+            action = lambda: browser.screenshot(
+                target,
+                allow_screen_fallback=True,
+            )
+        else:
+            action = lambda: browser.screenshot(target)
+        if allow_screen_fallback and not self._owned_browser_target_id:
+            result = action()
+        else:
+            result = self._with_owned_browser_target(
+                "browser.screenshot",
+                action,
+            )
         if not result.get("ok"):
             return result
         data = dict(result.get("data") or {})
@@ -1942,6 +2422,9 @@ class ToolBroker:
         }
 
     def call(self, name: str, payload: dict[str, Any], *, approved: bool = False) -> dict[str, Any]:
+        precondition_failure = self.tool_precondition_failure(name)
+        if precondition_failure is not None:
+            return precondition_failure
         if not approved and self.approvals.get(name) and name not in {
             "file.organize",
             "terminal.run",
@@ -1954,6 +2437,85 @@ class ToolBroker:
                 "policy_reason": "当前工具策略要求人工确认后再执行。",
             }
         return dispatch_tool_call(self, name, payload, approved=approved)
+
+    def tool_precondition_failure(self, name: str) -> dict[str, Any] | None:
+        """Return a safe blocker before policy asks for an impossible approval."""
+
+        clean_name = str(name or "").strip()
+        if clean_name not in _BROWSER_OWNED_TARGET_REQUIRED_TOOLS:
+            return None
+        if browser.is_valid_target_id(self._owned_browser_target_id):
+            return None
+        self._owned_browser_target_id = ""
+        return self._browser_owned_target_required_result(clean_name)
+
+    @staticmethod
+    def _browser_owned_target_required_result(action_name: str) -> dict[str, Any]:
+        return {
+            "ok": False,
+            "status": "blocked",
+            "action": action_name,
+            "summary": "Open a run-owned browser page before using this browser tool",
+            "error": "browser_owned_target_required",
+            "permission_error": False,
+            "fallback_used": False,
+            "blocking_conditions": ["browser_owned_target_required"],
+            "user_handoff_required": True,
+            "replan_allowed": False,
+            "recovery_hints": [
+                "请先让 Yachiyo 打开目标网页，再继续读取或操作；它不会接管你当前正在使用的浏览器标签页。"
+            ],
+        }
+
+    def _with_owned_browser_target(
+        self,
+        action_name: str,
+        action: Any,
+    ) -> dict[str, Any]:
+        target_id = str(self._owned_browser_target_id or "").strip()
+        if not browser.is_valid_target_id(target_id):
+            self._owned_browser_target_id = ""
+            return self._browser_owned_target_required_result(action_name)
+        try:
+            with browser.owned_browser_target(target_id):
+                result = action()
+        except Exception as exc:
+            self._owned_browser_target_id = ""
+            return {
+                "ok": False,
+                "status": "blocked",
+                "action": action_name,
+                "summary": "Run-owned browser target is unavailable",
+                "error": "browser_owned_target_unavailable",
+                "detail": str(exc),
+                "permission_error": False,
+                "fallback_used": False,
+                "blocking_conditions": ["browser_owned_target_required"],
+                "user_handoff_required": True,
+                "replan_allowed": False,
+            }
+        payload = dict(result) if isinstance(result, dict) else {
+            "ok": False,
+            "action": action_name,
+            "error": "browser_target_result_invalid",
+        }
+        data = payload.get("data") if isinstance(payload.get("data"), dict) else {}
+        payload["data"] = {
+            **data,
+            "target_id": target_id,
+            "target_owned_by_run": True,
+            "browser_profile_isolated": True,
+            "browser_profile_isolated_from_user": True,
+        }
+        detail = str(payload.get("detail") or "")
+        if "Run-owned browser target is unavailable" in detail:
+            self._owned_browser_target_id = ""
+            payload["browser_target_ownership_cleared"] = True
+            payload["data"] = {
+                **payload["data"],
+                "target_owned_by_run": False,
+            }
+        return payload
 
     def _with_foreground_lock(self, tool_name: str, action: Any) -> dict[str, Any]:
         if self.foreground_lock is None:

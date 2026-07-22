@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import pytest
+
 from apps.shell import agent_runtime
 from apps.shell.agent_runtime import AgentRuntimeService
+from apps.shell.agent.runtime.errors import AgentRuntimeError
 from apps.shell.agent.runtime.run_projections import (
     AgentRunGroupProjectionCoordinator,
     ApprovalResumeProjectionCoordinator,
@@ -73,13 +76,20 @@ def test_agent_run_group_projection_updates_only_root_agent_groups() -> None:
         ),
     )
 
-    coordinator.update_if_root({"run_id": "no-group-run", "status": "completed"})
+    coordinator.update_if_root(
+        {
+            "run_id": "no-group-run",
+            "status": "completed",
+            "project_root_group": True,
+        }
+    )
     coordinator.update_if_root(
         {
             "run_id": "missing-group-run",
             "run_group_id": "missing-group",
             "status": "failed",
             "result": "missing",
+            "project_root_group": True,
         }
     )
     coordinator.update_if_root(
@@ -88,6 +98,7 @@ def test_agent_run_group_projection_updates_only_root_agent_groups() -> None:
             "run_group_id": "agent-group",
             "status": "completed",
             "result": "agent done",
+            "project_root_group": True,
         }
     )
     coordinator.update_if_root(
@@ -96,6 +107,7 @@ def test_agent_run_group_projection_updates_only_root_agent_groups() -> None:
             "run_group_id": "delegation-group",
             "status": "failed",
             "result": "delegation failed",
+            "project_root_group": True,
         }
     )
     coordinator.update_if_root(
@@ -104,6 +116,7 @@ def test_agent_run_group_projection_updates_only_root_agent_groups() -> None:
             "run_group_id": "workflow-root-group",
             "status": "cancelled",
             "result": "workflow cancelled",
+            "project_root_group": True,
         }
     )
     coordinator.update_if_root(
@@ -112,6 +125,7 @@ def test_agent_run_group_projection_updates_only_root_agent_groups() -> None:
             "run_group_id": "workflow-child-group",
             "status": "completed",
             "result": "child done",
+            "project_root_group": False,
         }
     )
 
@@ -132,3 +146,92 @@ def test_agent_run_group_projection_updates_only_root_agent_groups() -> None:
             "summary": "workflow cancelled",
         },
     ]
+
+
+def test_agent_run_group_projection_is_idempotent_for_same_terminal_winner() -> None:
+    updates: list[dict[str, object]] = []
+    group = {
+        "run_group_id": "agent-group",
+        "source": "agent",
+        "child_run_ids": ["agent-run"],
+        "status": "completed",
+        "summary": "done",
+        "updated_at": "version-2",
+    }
+    coordinator = AgentRunGroupProjectionCoordinator(
+        get_run_group=lambda _run_group_id: dict(group),
+        update_run_group=lambda run_group_id, **kwargs: updates.append(
+            {"run_group_id": run_group_id, **kwargs}
+        ),
+    )
+
+    coordinator.update_if_root(
+        {
+            "run_id": "agent-run",
+            "run_group_id": "agent-group",
+            "status": "completed",
+            "result": "done",
+            "project_root_group": True,
+        }
+    )
+
+    assert updates == []
+
+
+def test_agent_run_group_projection_rejects_different_terminal_winner() -> None:
+    coordinator = AgentRunGroupProjectionCoordinator(
+        get_run_group=lambda _run_group_id: {
+            "run_group_id": "agent-group",
+            "source": "agent",
+            "child_run_ids": ["agent-run"],
+            "status": "failed",
+            "summary": "other winner",
+            "updated_at": "version-2",
+        },
+        update_run_group=lambda _run_group_id, **_kwargs: pytest.fail(
+            "terminal winner must not be overwritten"
+        ),
+    )
+
+    with pytest.raises(AgentRuntimeError, match="run_group_terminal_outcome_conflict"):
+        coordinator.update_if_root(
+            {
+                "run_id": "agent-run",
+                "run_group_id": "agent-group",
+                "status": "completed",
+                "result": "done",
+                "project_root_group": True,
+            }
+        )
+
+
+def test_agent_run_group_projection_fails_closed_when_group_cas_is_lost() -> None:
+    reads = 0
+
+    def get_run_group(_run_group_id: str) -> dict[str, object]:
+        nonlocal reads
+        reads += 1
+        return {
+            "run_group_id": "agent-group",
+            "source": "agent",
+            "child_run_ids": ["agent-run"],
+            "status": "running" if reads == 1 else "failed",
+            "summary": "" if reads == 1 else "other winner",
+            "updated_at": f"version-{reads}",
+        }
+
+    coordinator = AgentRunGroupProjectionCoordinator(
+        get_run_group=get_run_group,
+        update_run_group=lambda _run_group_id, **_kwargs: None,
+    )
+
+    with pytest.raises(AgentRuntimeError, match="run_group_terminal_outcome_conflict"):
+        coordinator.update_if_root(
+            {
+                "run_id": "agent-run",
+                "run_group_id": "agent-group",
+                "status": "completed",
+                "result": "done",
+                "project_root_group": True,
+            }
+        )

@@ -114,11 +114,22 @@ def test_model_profile_chat_adapter_uses_current_provider() -> None:
         "sk-test",
         [],
         tools=[{"type": "function"}],
+        tool_choice={"type": "function", "function": {"name": "verify"}},
         stream=True,
     ) == {"content": "second"}
     assert calls == [
         {"chat": "first", "kwargs": {}},
-        {"chat": "second", "kwargs": {"tools": [{"type": "function"}], "stream": True}},
+        {
+            "chat": "second",
+            "kwargs": {
+                "tools": [{"type": "function"}],
+                "tool_choice": {
+                    "type": "function",
+                    "function": {"name": "verify"},
+                },
+                "stream": True,
+            },
+        },
     ]
 
 

@@ -2,11 +2,31 @@
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Callable, Iterable, Mapping
 from datetime import date, datetime, timedelta
 from typing import Any
 
+import pytest
+
+import apps.shell.yachiyo_agent.planner_execution as planner_execution_module
 import apps.shell.yachiyo_agent.runtime_execution as runtime_execution_module
+from apps.shell.agent.runtime.events import (
+    RUNTIME_EXECUTION_PROVENANCE_KEY,
+    RUNTIME_EXECUTION_PROVENANCE_VERSION,
+    RUNTIME_LOCAL_TOOL_BROKER_PROVENANCE_SOURCE,
+)
+from apps.shell.agent.runtime.goal_runtime import (
+    runtime_goal_assessment,
+    runtime_goal_contract,
+)
+from apps.shell.agent.runtime.model_intent_planning import (
+    planner_selection_needs_model_assistance,
+)
+from apps.shell.agent.runtime.verification_receipts import (
+    EXACT_FILE_CONTENT_PRESENT_PREDICATE,
+    SEMANTIC_ARTIFACT_ADEQUACY_PREDICATE,
+)
 from apps.shell.yachiyo_agent import (
     AgentStudioService,
     PlannerDecisionSnapshot,
@@ -26,6 +46,7 @@ from apps.shell.yachiyo_agent.app_name_hints import (
 from apps.shell.yachiyo_agent.policy import DESKTOP_CAPABILITY_TOOLS
 from apps.shell.yachiyo_agent.tool_catalog import runtime_tool_catalog_snapshot
 from apps.shell.yachiyo_agent.planner_execution import (
+    _execution_prefix_through_model_followup,
     planner_execution_tool_requests,
     planner_full_plan_execution_tool_requests,
     planner_orchestration_requests,
@@ -75,10 +96,21 @@ from apps.shell.yachiyo_agent.web_destination_hints import (
     legacy_known_web_destination_search_url,
     legacy_known_web_destination_url_hint,
 )
+from apps.shell.yachiyo_agent.runtime_planner import (
+    text_has_authorized_action_request,
+)
 
 
 def _step_by_id(decision: PlannerDecisionSnapshot, step_id: str):
     return {step.step_id: step for step in decision.plan.tool_plan.steps}[step_id]
+
+
+def _without_runtime_goal_targets(inputs: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        str(key): value
+        for key, value in inputs.items()
+        if str(key) != "runtime_goal_targets"
+    }
 
 
 def test_runtime_execution_projects_blocked_desktop_requests_for_chat_debug() -> None:
@@ -149,9 +181,14 @@ def test_planner_enriched_chat_request_keeps_partial_blocked_desktop_requests(
 
     enriched = planner_enriched_chat_request(
         {
-            "prompt": "帮我打开 Apple Music 播放超时空辉夜姬",
+            "prompt": "帮我用 Spotify 搜索超时空辉夜姬并播放",
             "agent_id": "builtin:yachiyo-main",
-            "metadata": {},
+            "metadata": {
+                "desktop_execution_policy": {
+                    "mode": "preview_input",
+                    "source": "partial_blocked_contract_test",
+                }
+            },
         }
     )
 
@@ -170,13 +207,98 @@ def test_planner_enriched_chat_request_keeps_partial_blocked_desktop_requests(
         "local_desktop"
     )
     assert blocked_routes["media.music_app_open_and_play"]["selected_provider_kind"] == (
-        "local_desktop"
+        "sandbox_desktop"
+    )
+    assert blocked_routes["media.music_app_open_and_play"]["selected_provider_id"] == (
+        "local-isolated-desktop"
     )
     assert "desktop.safe_type_text" in blocked_tools
     assert enriched["metadata"]["yachiyo_runtime_blocked"] is True
     assert "desktop.safe_type_text" in enriched["metadata"][
         "yachiyo_blocked_execution_requests"
     ]
+
+
+def test_planner_enriched_chat_request_preserves_existing_execution_envelope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prompt = "Open TextEdit and type the exact marker"
+    goal_contract = {
+        "contract_id": "goal-contract-existing-envelope",
+        "original_goal": prompt,
+        "intent_kind": "desktop_operation",
+        "criteria": [
+            {
+                "criterion_id": "criterion-existing-envelope",
+                "description": "Type and verify the exact marker",
+                "effectful": True,
+                "required": True,
+                "response_satisfiable": False,
+                "required_capabilities": ["desktop.ui_operation"],
+                "required_effects": [],
+                "expected": {},
+                "source_step_ids": ["type-marker"],
+                "verifier_step_ids": ["verify-marker"],
+            }
+        ],
+        "max_total_attempts": 12,
+        "max_subgoal_attempts": 2,
+    }
+    envelope = {
+        "envelope_id": "existing-envelope",
+        "decision_id": "existing-decision",
+        "plan_id": "existing-plan",
+        "task_core": {"goal_contract": goal_contract},
+        "requests": [
+            {
+                "request_id": "request-type-marker",
+                "step_id": "type-marker",
+                "tool_name": "desktop.type_into_ui_element",
+                "input": {"target": "text", "text": "marker"},
+                "status": "planned",
+                "source": "runtime_planner",
+                "planning_reason": "explicit_full_plan",
+            },
+            {
+                "request_id": "request-verify-marker",
+                "step_id": "verify-marker",
+                "tool_name": "desktop.verify",
+                "input": {"app_name": "TextEdit"},
+                "depends_on": ["type-marker"],
+                "status": "planned",
+                "source": "runtime_planner",
+                "planning_reason": "explicit_full_plan",
+            },
+        ],
+    }
+    monkeypatch.setattr(
+        "apps.shell.yachiyo_agent.planner_projection.runtime_planner_decision",
+        lambda *_args, **_kwargs: pytest.fail(
+            "an existing execution envelope must not be replanned"
+        ),
+    )
+
+    enriched = planner_enriched_chat_request(
+        {
+            "prompt": prompt,
+            "agent_id": "builtin:yachiyo-main",
+            "allowed_tools": [
+                "desktop.type_into_ui_element",
+                "desktop.verify",
+            ],
+            "runtime_execution_envelope": envelope,
+            "metadata": {"source": "packaged_acceptance"},
+        }
+    )
+
+    assert enriched["runtime_execution_envelope"] == envelope
+    assert enriched["metadata"]["yachiyo_execution_envelope"] == envelope
+    assert enriched["metadata"]["yachiyo_execution_envelope"]["task_core"][
+        "goal_contract"
+    ] == goal_contract
+    assert [
+        request["tool"] for request in enriched["direct_tool_requests"]
+    ] == ["desktop.type_into_ui_element", "desktop.verify"]
 
 
 def _capability_by_id(decision: PlannerDecisionSnapshot, capability_id: str):
@@ -259,12 +381,17 @@ def _selected_discovered_app_open_chain(query: str) -> list[dict[str, Any]]:
 def test_runtime_planner_does_not_route_unscoped_content_generation_as_desktop_typing() -> None:
     allowed_tools = ["desktop.safe_type_text", "desktop.ui_elements"]
 
-    selection = planner_first_direct_tool_selection("写一首诗", allowed_tools)
-    english_selection = planner_first_direct_tool_selection("write a poem", allowed_tools)
+    creative_prompts = (
+        "写一首诗",
+        "写一封道歉信",
+        "写一篇关于 AI 的文章",
+        "write a poem",
+        "draft an apology letter",
+    )
     foreground_selection = planner_first_direct_tool_selection("前台输入 hello", allowed_tools)
 
-    assert selection.requests == []
-    assert english_selection.requests == []
+    for prompt in creative_prompts:
+        assert planner_first_direct_tool_selection(prompt, allowed_tools).requests == []
     assert [request["tool"] for request in foreground_selection.requests] == [
         "desktop.safe_type_text",
         "desktop.ui_elements",
@@ -338,6 +465,8 @@ def test_runtime_planner_generic_app_aliases_are_not_legacy_app_names() -> None:
 def test_runtime_planner_routes_polite_unknown_app_open_phrases_to_discovery_chain() -> None:
     allowed_tools = ["desktop.list_apps", "app.open", "desktop.verify"]
     cases = (
+        ("帮我打开 PixelForge", "PixelForge"),
+        ("帮我打开一下 PixelForge", "PixelForge"),
         ("帮我开一下 PixelForge", "PixelForge"),
         ("帮我开了 PixelForge", "PixelForge"),
         ("帮我开起来 PixelForge", "PixelForge"),
@@ -367,7 +496,52 @@ def test_runtime_planner_routes_polite_unknown_app_open_phrases_to_discovery_cha
         }
         assert _step_by_id(decision, "verify-desktop-result").input_preview == {
             "app_name": expected_app,
+            "verification_goal": "app_running",
         }
+
+
+def test_runtime_planner_binds_user_clarification_reply_into_original_action() -> None:
+    decision = RuntimePlanner().decision(
+        "帮我打开一个软件\nTerminal",
+        allowed_tools=["desktop.list_apps", "app.open", "desktop.verify"],
+    )
+
+    assert decision.selected_intent.kind == "desktop_operation"
+    assert decision.selected_intent.inputs == {
+        "app_name_hint": "Terminal",
+        "operation_hint": "open",
+    }
+    assert [
+        step.tool_name for step in decision.plan.tool_plan.steps
+    ] == ["desktop.list_apps", "app.open", "desktop.verify"]
+    assert _step_by_id(decision, "open-or-focus-app").input_preview == {
+        "app_name": "Terminal"
+    }
+
+
+@pytest.mark.parametrize("open_tool", ("app.open", "desktop.open_app"))
+def test_runtime_planner_verifies_app_open_by_running_state(open_tool: str) -> None:
+    allowed_tools = ["desktop.list_apps", open_tool, "desktop.verify"]
+    decision = RuntimePlanner().decision(
+        "打开 PixelForge",
+        allowed_tools=allowed_tools,
+    )
+
+    assert _step_by_id(decision, "open-or-focus-app").tool_name == open_tool
+    assert _step_by_id(decision, "verify-desktop-result").input_preview == {
+        "app_name": "PixelForge",
+        "verification_goal": "app_running",
+    }
+    requests = planner_tool_requests_for_decision(
+        decision,
+        allowed_tools,
+        direct=True,
+        execution_normalized=True,
+    )
+    verify_request = next(
+        request for request in requests if request["tool"] == "desktop.verify"
+    )
+    assert verify_request["input"]["verification_goal"] == "app_running"
 
 
 def test_runtime_planner_routes_colloquial_unknown_app_focus_to_discovery_chain() -> None:
@@ -384,6 +558,9 @@ def test_runtime_planner_routes_colloquial_unknown_app_focus_to_discovery_chain(
     assert [
         step.tool_name for step in decision.plan.tool_plan.steps
     ] == ["desktop.list_apps", "app.focus", "desktop.verify"]
+    assert _step_by_id(decision, "verify-desktop-result").input_preview == {
+        "app_name": "PixelForge",
+    }
 
     compound = RuntimePlanner().decision(
         "bring PixelForge up and click export",
@@ -509,7 +686,7 @@ def test_task_intent_router_covers_agent_work_domains() -> None:
         ),
         ("根据当前剪贴板写一份周报报告", "report_generation", ["artifact.write"]),
         ("创建一份竞品分析报告，保存成 markdown", "report_generation", ["artifact.write"]),
-        ("Summarize launch risk.", "report_generation", ["artifact.write"]),
+        ("Write a launch risk report.", "report_generation", ["artifact.write"]),
         ("调研 https://example.com 的最新信息", "web_research", ["browser.research"]),
         ("整理 Downloads 里的 PDF 文件", "file_organization", ["file.organization"]),
         ("删除 Downloads 里的重复文件", "file_organization", ["file.organization"]),
@@ -546,6 +723,67 @@ def test_task_intent_router_covers_agent_work_domains() -> None:
 
         assert decision.selected_intent.kind == expected_kind
         assert decision.selected_intent.required_capabilities == expected_capabilities
+
+
+def test_runtime_planner_keeps_reasoning_summary_discussion_out_of_report_generation() -> None:
+    planner = RuntimePlanner()
+
+    for prompt in (
+        "Use Responses reasoning summary",
+        "What is a reasoning summary?",
+        "推理摘要是什么？",
+    ):
+        decision = planner.decision(prompt, allowed_tools=["artifact.write"])
+
+        assert decision.selected_intent.kind == "general"
+        assert all(
+            intent.kind != "report_generation"
+            for intent in decision.candidate_intents
+        )
+        assert all(
+            step.tool_name != "artifact.write"
+            for step in decision.plan.tool_plan.steps
+        )
+
+
+def test_runtime_planner_keeps_data_analysis_concept_questions_model_facing() -> None:
+    planner = RuntimePlanner()
+    allowed_tools = [
+        "workspace.list",
+        "workspace.read",
+        "data.analyze",
+        "python.run",
+        "artifact.write",
+    ]
+
+    for prompt in (
+        "What is data analysis?",
+        "什么是数据分析？",
+        "数据分析有哪些方法？",
+    ):
+        decision = planner.decision(prompt, allowed_tools=allowed_tools)
+
+        assert decision.selected_intent.kind == "general"
+        assert all(intent.kind != "data_analysis" for intent in decision.candidate_intents)
+        assert decision.plan.tool_plan.steps == []
+        assert planner_tool_requests(prompt, allowed_tools) == []
+
+
+def test_runtime_planner_routes_explicit_report_action_after_terminology_question() -> None:
+    planner = RuntimePlanner()
+
+    for prompt in (
+        "What is a summary? Please write a summary.",
+        "报告是什么？请写一份报告。",
+        "简报是什么？请生成简报。",
+    ):
+        decision = planner.decision(prompt, allowed_tools=["artifact.write"])
+
+        assert decision.selected_intent.kind == "report_generation"
+        assert any(
+            step.tool_name == "artifact.write"
+            for step in decision.plan.tool_plan.steps
+        )
 
 
 def test_runtime_planner_routes_data_analysis_to_file_terminal_artifact_plan() -> None:
@@ -594,6 +832,7 @@ def test_runtime_planner_routes_invoice_pdf_table_output_to_data_analysis() -> N
         "inspect-data-source",
         "run-analysis",
         "write-analysis-artifact",
+        "verify-analysis-artifact",
     ]
     assert _step_by_id(decision, "inspect-data-source").input_preview == {
         "path": "Desktop",
@@ -622,7 +861,10 @@ def test_runtime_planner_exposes_capability_plan_between_intent_and_tools() -> N
     items = {item.capability_id: item for item in capability_plan.items}
     assert items["file.workspace_read"].required is True
     assert items["file.workspace_read"].selected_tools == ["workspace.read"]
-    assert items["file.workspace_read"].planned_step_ids == ["inspect-data-source"]
+    assert items["file.workspace_read"].planned_step_ids == [
+        "inspect-data-source",
+        "verify-analysis-artifact",
+    ]
     assert items["data.analysis"].selected_tools == ["terminal.run"]
     assert items["data.analysis"].status in {"available", "degraded"}
     assert items["data.analysis"].approval_required is True
@@ -659,6 +901,7 @@ def test_runtime_planner_outputs_data_analysis_presentation_artifact() -> None:
         "inspect-data-source",
         "run-analysis",
         "write-analysis-artifact",
+        "verify-analysis-artifact",
     ]
     assert _step_by_id(decision, "inspect-data-source").input_preview == {
         "path": "Desktop"
@@ -687,6 +930,10 @@ def test_runtime_planner_accepts_portable_capability_tool_aliases() -> None:
             "write-analysis-artifact",
         ]
     ] == ["fs.find_files", "python.run", "artifact.write"]
+    assert (
+        _step_by_id(data_decision, "verify-analysis-artifact").tool_name
+        == "fs.read_file"
+    )
     assert planner_tool_requests(data_prompt, data_allowed) == [
         {
             "protocol": "json_fallback",
@@ -713,6 +960,13 @@ def test_runtime_planner_accepts_portable_capability_tool_aliases() -> None:
     assert file_namespace_data_decision.plan.tool_plan.missing_capabilities == []
     assert _step_by_id(file_namespace_data_decision, "inspect-data-source").tool_name == (
         "file.search"
+    )
+    assert (
+        _step_by_id(
+            file_namespace_data_decision,
+            "verify-analysis-artifact",
+        ).tool_name
+        == "file.read"
     )
     assert planner_tool_requests(data_prompt, file_namespace_data_allowed) == [
         {
@@ -826,6 +1080,7 @@ def test_runtime_planner_observes_ui_without_app_mutation_tools() -> None:
             "input": {"app_name": "Linear"},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
+            "continue_to_model": True,
         }
     ]
 
@@ -865,6 +1120,61 @@ def test_runtime_planner_plans_builtin_analysis_after_scoped_data_discovery() ->
         "analysis-report.md",
         "analysis-chart.png",
     ]
+    [criterion] = decision.plan.task_core.goal_contract.criteria
+    expected_target = {
+        "kind": "data_analysis",
+        "action": "analyze",
+        "selection_source": "workspace.list",
+        "source_scope": "Downloads",
+        "pattern": "*.csv",
+        "source_kind": "csv",
+        "artifact_path": "analysis-report.md",
+        "expected_path": "<selected file from workspace.list>",
+        "resolution_required": True,
+    }
+    assert criterion.expected["target"] == expected_target
+    envelope = runtime_execution_envelope_from_decision(
+        decision,
+        allowed_tools=allowed_tools,
+        full_plan=True,
+    )
+    assert envelope is not None
+    source_request = next(
+        request
+        for request in envelope.requests
+        if request.step_id == "analyze-discovered-data"
+    )
+    assert source_request.action_target == {
+        **expected_target,
+        "step_id": "analyze-discovered-data",
+    }
+
+    fallback_allowed = [
+        "workspace.list",
+        "workspace.read",
+        "terminal.run",
+        "artifact.write",
+    ]
+    fallback = RuntimePlanner().decision(prompt, allowed_tools=fallback_allowed)
+    [fallback_criterion] = fallback.plan.task_core.goal_contract.criteria
+    assert fallback_criterion.expected["target"] == expected_target
+    fallback_envelope = runtime_execution_envelope_from_decision(
+        fallback,
+        allowed_tools=fallback_allowed,
+        full_plan=True,
+    )
+    assert fallback_envelope is not None
+    fallback_source = next(
+        request
+        for request in fallback_envelope.requests
+        if request.step_id == "run-analysis"
+    )
+    assert fallback_source.action_target == {
+        **expected_target,
+        "step_id": "run-analysis",
+    }
+    assert fallback_source.input["command"]
+    assert "command" not in fallback_source.action_target
     assert planner_tool_requests(prompt, allowed_tools) == [
         {
             "protocol": "json_fallback",
@@ -897,6 +1207,40 @@ def test_runtime_planner_plans_builtin_analysis_after_scoped_data_discovery() ->
             "planning_reason": "planner_builtin_data_analysis",
         },
     ]
+
+
+def test_runtime_planner_plans_builtin_analysis_after_generic_data_discovery() -> None:
+    prompt = "分析数据并输出报告"
+    allowed_tools = [
+        "workspace.list",
+        "data.analyze",
+        "python.run",
+        "artifact.write",
+    ]
+
+    decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+
+    assert decision.selected_intent.kind == "data_analysis"
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "inspect-data-source",
+        "analyze-discovered-data",
+    ]
+    assert _step_by_id(decision, "inspect-data-source").input_preview == {
+        "pattern": "*.{csv,tsv,xlsx,json,jsonl}",
+    }
+    analyze_step = _step_by_id(decision, "analyze-discovered-data")
+    assert analyze_step.tool_name == "data.analyze"
+    assert analyze_step.input_preview["path"] == "<selected file from workspace.list>"
+    assert analyze_step.input_preview["selection_source"] == "workspace.list"
+    assert "source_kind" not in analyze_step.input_preview
+    assert [request["tool"] for request in planner_tool_requests(prompt, allowed_tools)] == [
+        "workspace.list",
+        "data.analyze",
+    ]
+    assert all(
+        request.get("continue_to_model") is not True
+        for request in planner_tool_requests(prompt, allowed_tools)
+    )
 
 
 def test_runtime_planner_preserves_multi_file_analysis_selection() -> None:
@@ -1184,9 +1528,10 @@ def test_runtime_planner_opens_generated_analysis_result_with_requested_app() ->
     )
 
     assert decision.selected_intent.kind == "data_analysis"
-    assert decision.selected_intent.inputs == {
+    assert _without_runtime_goal_targets(decision.selected_intent.inputs) == {
         "data_source_hint": "Downloads/sales.csv",
         "data_source_kind": "csv",
+        "runtime_goal_capabilities": ["data.analysis"],
         "analysis_result_open_app_hint": "Numbers",
     }
     assert decision.selected_intent.expected_outputs == ["chart", "report", "table"]
@@ -1224,9 +1569,10 @@ def test_runtime_planner_opens_generated_analysis_result_with_requested_app() ->
         "app_name": "Numbers",
     }
     assert visible_decision.selected_intent.kind == "data_analysis"
-    assert visible_decision.selected_intent.inputs == {
+    assert _without_runtime_goal_targets(visible_decision.selected_intent.inputs) == {
         "data_source_hint": "",
         "data_source_kind": "text_table",
+        "runtime_goal_capabilities": ["data.analysis"],
         "context_source": "visible_text",
         "analysis_result_open_app_hint": "Excel",
     }
@@ -1384,6 +1730,7 @@ def test_runtime_planner_opens_requested_data_file_before_model_followup_without
         "open-data-file",
         "run-analysis",
         "write-analysis-artifact",
+        "verify-analysis-artifact",
     ]
     assert _step_by_id(decision, "open-data-file").depends_on == [
         "inspect-data-source",
@@ -1527,12 +1874,14 @@ def test_runtime_planner_prefetches_selected_data_for_analysis() -> None:
         "clipboard.read_write",
         "data.analysis",
         "artifact.write",
+        "file.workspace_read",
     ]
     assert [step.step_id for step in decision.plan.tool_plan.steps] == [
         "copy-selected-data-context",
         "read-data-context",
         "run-analysis",
         "write-analysis-artifact",
+        "verify-analysis-artifact",
     ]
     assert _step_by_id(decision, "copy-selected-data-context").capability_id == (
         "clipboard.read_write"
@@ -1577,9 +1926,10 @@ def test_runtime_planner_infers_context_data_source_kind_for_analysis() -> None:
     )
 
     assert clipboard_csv.selected_intent.kind == "data_analysis"
-    assert clipboard_csv.selected_intent.inputs == {
+    assert _without_runtime_goal_targets(clipboard_csv.selected_intent.inputs) == {
         "data_source_hint": "",
         "data_source_kind": "csv",
+        "runtime_goal_capabilities": ["data.analysis"],
         "context_source": "clipboard",
     }
     assert clipboard_csv.selected_intent.expected_outputs == ["chart", "report"]
@@ -1588,9 +1938,10 @@ def test_runtime_planner_infers_context_data_source_kind_for_analysis() -> None:
         "body_source": "clipboard",
     }
     assert selected_json.selected_intent.kind == "data_analysis"
-    assert selected_json.selected_intent.inputs == {
+    assert _without_runtime_goal_targets(selected_json.selected_intent.inputs) == {
         "data_source_hint": "",
         "data_source_kind": "json",
+        "runtime_goal_capabilities": ["data.analysis"],
         "context_source": "selection",
     }
     assert [step.step_id for step in selected_json.plan.tool_plan.steps][:2] == [
@@ -1598,9 +1949,12 @@ def test_runtime_planner_infers_context_data_source_kind_for_analysis() -> None:
         "read-data-context",
     ]
     assert clipboard_table_csv_output.selected_intent.kind == "data_analysis"
-    assert clipboard_table_csv_output.selected_intent.inputs == {
+    assert _without_runtime_goal_targets(
+        clipboard_table_csv_output.selected_intent.inputs
+    ) == {
         "data_source_hint": "",
         "data_source_kind": "text_table",
+        "runtime_goal_capabilities": ["data.analysis"],
         "context_source": "clipboard",
     }
     assert clipboard_table_csv_output.selected_intent.expected_outputs == ["table"]
@@ -1631,9 +1985,10 @@ def test_runtime_planner_treats_app_search_results_as_data_analysis_context() ->
     )
 
     assert app_result_analysis.selected_intent.kind == "data_analysis"
-    assert app_result_analysis.selected_intent.inputs == {
+    assert _without_runtime_goal_targets(app_result_analysis.selected_intent.inputs) == {
         "data_source_hint": "",
         "data_source_kind": "text_table",
+        "runtime_goal_capabilities": ["data.analysis"],
         "context_source": "app_search_result",
         "app_search_result_hint": {
             "source_app_name": "Slack",
@@ -1650,6 +2005,7 @@ def test_runtime_planner_treats_app_search_results_as_data_analysis_context() ->
         "read-data-context",
         "run-analysis",
         "write-analysis-artifact",
+        "verify-analysis-artifact",
     ]
     assert _step_by_id(app_result_analysis, "focus-app-search-field").input_preview == {
         "app_name": "Slack",
@@ -1697,6 +2053,7 @@ def test_runtime_planner_treats_app_search_results_as_data_analysis_context() ->
         "read-data-context",
         "run-analysis",
         "write-analysis-artifact",
+        "verify-analysis-artifact",
     ]
     assert _step_by_id(chart_result_analysis, "discover-app-search-source").tool_name == (
         "desktop.active_window"
@@ -1841,6 +2198,7 @@ def test_runtime_planner_prefetches_current_window_table_for_analysis() -> None:
         "clipboard.read_write",
         "data.analysis",
         "artifact.write",
+        "file.workspace_read",
     ]
     assert [step.step_id for step in decision.plan.tool_plan.steps] == [
         "select-current-data-context",
@@ -1848,6 +2206,7 @@ def test_runtime_planner_prefetches_current_window_table_for_analysis() -> None:
         "read-data-context",
         "run-analysis",
         "write-analysis-artifact",
+        "verify-analysis-artifact",
     ]
     assert _step_by_id(decision, "select-current-data-context").input_preview == {
         "action": "select_all"
@@ -1866,9 +2225,12 @@ def test_runtime_planner_prefetches_current_window_table_for_analysis() -> None:
         "body_source": "visible_text",
     }
     assert current_window_ui_table.selected_intent.kind == "data_analysis"
-    assert current_window_ui_table.selected_intent.inputs == {
+    assert _without_runtime_goal_targets(
+        current_window_ui_table.selected_intent.inputs
+    ) == {
         "data_source_hint": "",
         "data_source_kind": "text_table",
+        "runtime_goal_capabilities": ["data.analysis"],
         "context_source": "visible_text",
     }
     assert current_window_ui_table.selected_intent.expected_outputs == ["chart", "table"]
@@ -1876,6 +2238,7 @@ def test_runtime_planner_prefetches_current_window_table_for_analysis() -> None:
         "read-data-context",
         "run-analysis",
         "write-analysis-artifact",
+        "verify-analysis-artifact",
     ]
     assert _step_by_id(current_window_ui_table, "read-data-context").tool_name == (
         "desktop.ui_elements"
@@ -1898,6 +2261,7 @@ def test_runtime_planner_prefetches_current_window_table_for_analysis() -> None:
             "read-data-context",
             "run-analysis",
             "write-analysis-artifact",
+            "verify-analysis-artifact",
         ]
         assert _step_by_id(visible_table, "read-data-context").tool_name == (
             "desktop.ui_elements"
@@ -1906,9 +2270,12 @@ def test_runtime_planner_prefetches_current_window_table_for_analysis() -> None:
             "read-data-context"
         ]
     assert desktop_visible_builtin.selected_intent.kind == "data_analysis"
-    assert desktop_visible_builtin.selected_intent.inputs == {
+    assert _without_runtime_goal_targets(
+        desktop_visible_builtin.selected_intent.inputs
+    ) == {
         "data_source_hint": "",
         "data_source_kind": "text_table",
+        "runtime_goal_capabilities": ["data.analysis"],
         "context_source": "visible_text",
     }
     assert [step.step_id for step in desktop_visible_builtin.plan.tool_plan.steps] == [
@@ -1948,14 +2315,18 @@ def test_runtime_planner_prefetches_current_window_table_for_analysis() -> None:
         "read-data-context",
         "run-analysis",
         "write-analysis-artifact",
+        "verify-analysis-artifact",
     ]
     assert _step_by_id(current_page_table, "read-data-context").tool_name == (
         "browser.extract_text"
     )
     assert natural_current_page_table.selected_intent.kind == "data_analysis"
-    assert natural_current_page_table.selected_intent.inputs == {
+    assert _without_runtime_goal_targets(
+        natural_current_page_table.selected_intent.inputs
+    ) == {
         "data_source_hint": "",
         "data_source_kind": "text_table",
+        "runtime_goal_capabilities": ["data.analysis"],
         "context_source": "current_page_content",
     }
     assert natural_current_page_table.selected_intent.missing_inputs == []
@@ -1963,6 +2334,7 @@ def test_runtime_planner_prefetches_current_window_table_for_analysis() -> None:
         "read-data-context",
         "run-analysis",
         "write-analysis-artifact",
+        "verify-analysis-artifact",
     ]
     assert _step_by_id(natural_current_page_table, "read-data-context").tool_name == (
         "browser.extract_text"
@@ -1971,6 +2343,7 @@ def test_runtime_planner_prefetches_current_window_table_for_analysis() -> None:
         "read-data-context",
         "run-analysis",
         "write-analysis-artifact",
+        "verify-analysis-artifact",
     ]
     assert _step_by_id(current_page_table_with_clipboard, "read-data-context").tool_name == (
         "browser.extract_text"
@@ -1979,6 +2352,7 @@ def test_runtime_planner_prefetches_current_window_table_for_analysis() -> None:
         "browser.research",
         "data.analysis",
         "artifact.write",
+        "file.workspace_read",
     ]
     assert current_page_csv_chart.selected_intent.kind == "data_analysis"
     assert current_page_csv_chart.selected_intent.expected_outputs == ["chart", "table"]
@@ -2027,6 +2401,7 @@ def test_runtime_planner_handles_natural_data_analysis_contexts() -> None:
         "read-data-context",
         "run-analysis",
         "write-analysis-artifact",
+        "verify-analysis-artifact",
     ]
     assert _step_by_id(generic_data, "read-data-context").tool_name == "desktop.ui_elements"
 
@@ -2042,9 +2417,12 @@ def test_runtime_planner_handles_natural_data_analysis_contexts() -> None:
     }
 
     assert current_page_price_table.selected_intent.kind == "data_analysis"
-    assert current_page_price_table.selected_intent.inputs == {
+    assert _without_runtime_goal_targets(
+        current_page_price_table.selected_intent.inputs
+    ) == {
         "data_source_hint": "",
         "data_source_kind": "text_table",
+        "runtime_goal_capabilities": ["data.analysis"],
         "context_source": "current_page_content",
     }
     assert _step_by_id(current_page_price_table, "read-data-context").tool_name == (
@@ -2085,9 +2463,10 @@ def test_runtime_planner_opens_spreadsheet_app_before_reading_visible_table() ->
     )
 
     assert decision.selected_intent.kind == "data_analysis"
-    assert decision.selected_intent.inputs == {
+    assert _without_runtime_goal_targets(decision.selected_intent.inputs) == {
         "data_source_hint": "",
         "data_source_kind": "text_table",
+        "runtime_goal_capabilities": ["data.analysis"],
         "spreadsheet_app_hint": "Numbers",
         "context_source": "visible_text",
     }
@@ -2145,9 +2524,10 @@ def test_runtime_planner_focuses_running_spreadsheet_app_before_analysis() -> No
 
     assert decision.selected_intent.kind == "data_analysis"
     assert decision.selected_intent.missing_inputs == []
-    assert decision.selected_intent.inputs == {
+    assert _without_runtime_goal_targets(decision.selected_intent.inputs) == {
         "data_source_hint": "",
         "data_source_kind": "text_table",
+        "runtime_goal_capabilities": ["data.analysis"],
         "running_spreadsheet_app_hint": {
             "query": "Excel",
             "description": "spreadsheet",
@@ -2202,9 +2582,14 @@ def test_runtime_planner_focuses_running_spreadsheet_app_before_analysis() -> No
         "step_id": "read-data-context",
     }
     assert envelope.requests[2].observation_retry == {
-        "from_tool": "desktop.running_apps",
-        "tool": "desktop.running_apps",
-        "reason": "resolve_desktop_app",
+        "from_tool": "desktop.ui_elements",
+        "tool": "desktop.ui_elements",
+        "input": {
+            "app_name": "<selected app from desktop.running_apps>",
+            "role_filter": "text",
+            "limit": 120,
+        },
+        "reason": "observe_foreground_ui",
     }
 
     generic = RuntimePlanner().decision(
@@ -2434,10 +2819,14 @@ def test_runtime_planner_routes_context_data_analysis_to_communication() -> None
         "mode": "focus",
         "send_action": "send",
     }
+    assert current_page.selected_intent.inputs[
+        "runtime_goal_terminal_effect_capabilities"
+    ] == ["communication.compose"]
     assert [step.step_id for step in current_page.plan.tool_plan.steps] == [
         "read-data-context",
         "run-analysis",
         "write-analysis-artifact",
+        "verify-analysis-artifact",
         "open-or-focus-app",
         "focus-communication-recipient-search",
         "type-communication-recipient",
@@ -2450,6 +2839,15 @@ def test_runtime_planner_routes_context_data_analysis_to_communication() -> None
         "artifact_path": "analysis-summary.csv",
     }
     assert _step_by_id(current_page, "send-analysis-communication-message").approval_required is True
+    communication_contract = current_page.plan.task_core.goal_contract
+    assert communication_contract is not None
+    assert [
+        criterion.required_capabilities
+        for criterion in communication_contract.criteria
+    ] == [["data.analysis"], ["communication.compose"]]
+    assert communication_contract.criteria[1].source_step_ids == [
+        "send-analysis-communication-message"
+    ]
 
     assert clipboard.selected_intent.kind == "data_analysis"
     assert clipboard.selected_intent.inputs["context_source"] == "clipboard"
@@ -2527,6 +2925,7 @@ def test_runtime_planner_keeps_parquet_on_approved_python_path() -> None:
         "inspect-data-source",
         "run-analysis",
         "write-analysis-artifact",
+        "verify-analysis-artifact",
     ]
     assert _step_by_id(decision, "run-analysis").tool_name == "terminal.run"
     assert _step_by_id(decision, "run-analysis").approval_required is True
@@ -2544,6 +2943,7 @@ def test_runtime_planner_keeps_legacy_xls_on_approved_python_path() -> None:
         "inspect-data-source",
         "run-analysis",
         "write-analysis-artifact",
+        "verify-analysis-artifact",
     ]
     assert _step_by_id(decision, "run-analysis").tool_name == "terminal.run"
     assert _step_by_id(decision, "run-analysis").approval_required is True
@@ -2563,6 +2963,8 @@ def test_runtime_planner_timeline_preview_includes_created_plan_event() -> None:
         "agent.plan.step",
         "agent.plan.step",
         "agent.plan.step",
+        "agent.plan.step",
+        "agent.task.workspace_item.updated",
         "agent.task.workspace_item.updated",
         "agent.task.workspace_item.updated",
         "agent.task.workspace_item.updated",
@@ -2573,6 +2975,8 @@ def test_runtime_planner_timeline_preview_includes_created_plan_event() -> None:
         "agent.task.todo.updated",
         "agent.task.todo.updated",
         "agent.task.todo.updated",
+        "agent.task.todo.updated",
+        "agent.task.checkpoint.updated",
         "agent.task.checkpoint.updated",
         "agent.task.checkpoint.updated",
         "agent.task.checkpoint.updated",
@@ -2586,8 +2990,8 @@ def test_runtime_planner_timeline_preview_includes_created_plan_event() -> None:
     assert created["payload"]["route_to_studio"] is True
     task_core_event = decision.plan.timeline_preview[2]
     assert task_core_event["payload"]["core_id"] == decision.plan.task_core.core_id
-    assert task_core_event["payload"]["todo_count"] == 3
-    assert task_core_event["payload"]["checkpoint_count"] == 4
+    assert task_core_event["payload"]["todo_count"] == 4
+    assert task_core_event["payload"]["checkpoint_count"] == 5
     todo_event = next(
         event
         for event in decision.plan.timeline_preview
@@ -2619,13 +3023,14 @@ def test_runtime_planner_emits_deepagent_style_task_core() -> None:
         "inspect-data-source",
         "run-analysis",
         "write-analysis-artifact",
+        "verify-analysis-artifact",
     ]
     assert task_core.todos[1].approval_required is True
     assert any(item.kind == "input" and item.path == "sales.csv" for item in task_core.workspace.items)
     assert any(
         item.kind == "artifact"
         and item.path == "analysis-report.md"
-        and item.source_step_id == "write-analysis-artifact"
+        and item.source_step_id == "run-analysis"
         for item in task_core.workspace.items
     )
     run_input = next(
@@ -2638,12 +3043,14 @@ def test_runtime_planner_emits_deepagent_style_task_core() -> None:
     assert run_input.metadata["tool_name"] == "terminal.run"
     assert run_input.metadata["approval_required"] is True
     assert run_input.metadata["input_preview"] == {
-        "command": "python - <<'PY'\n# inspect data, compute summary, generate charts\nPY"
+        "command": "python - <<'PY'\n# inspect data, compute summary, generate charts\nPY",
+        "artifact_path": "analysis-report.md",
     }
-    assert [checkpoint.after_step_id for checkpoint in task_core.checkpoints[:3]] == [
+    assert [checkpoint.after_step_id for checkpoint in task_core.checkpoints[:4]] == [
         "inspect-data-source",
         "run-analysis",
         "write-analysis-artifact",
+        "verify-analysis-artifact",
     ]
     assert any(signal.trigger == "tool_failure" for signal in task_core.replan_signals)
 
@@ -3152,10 +3559,14 @@ def test_planner_selection_payload_surfaces_discovered_app_followup_target() -> 
         request["tool_name"]
         for request in restricted_enriched["runtime_execution_envelope"]["requests"]
     ] == ["artifact.write"]
+    assert "direct_tool_requests" not in restricted_enriched
     assert [
         request["tool"]
-        for request in restricted_enriched["direct_tool_requests"]
+        for request in restricted_enriched["blocked_direct_tool_requests"]
     ] == ["artifact.write"]
+    assert restricted_enriched["blocked_direct_tool_requests"][0]["depends_on"] == [
+        "run-analysis"
+    ]
 
     daily_enriched = planner_enriched_chat_request(
         {
@@ -4058,6 +4469,154 @@ def test_runtime_planner_routes_generated_desktop_app_content_to_model_followup(
     ]
 
 
+def test_runtime_planner_keeps_literal_content_field_without_typing_generation_brief() -> None:
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.ui_elements",
+    ]
+
+    literal = RuntimePlanner().decision(
+        "打开 Notes，新建笔记，内容写本周业绩不错",
+        allowed_tools=allowed_tools,
+    )
+    generated = RuntimePlanner().decision(
+        "打开 Notes，新建笔记，内容写一份检查清单",
+        allowed_tools=allowed_tools,
+    )
+
+    assert literal.selected_intent.inputs["foreground_compose_text_hint"] == (
+        "本周业绩不错"
+    )
+    assert "model_generated_content_hint" not in literal.selected_intent.inputs
+    assert _step_by_id(
+        literal,
+        "operate-foreground-ui-followup-type",
+    ).input_preview == {"text": "本周业绩不错"}
+
+    assert generated.selected_intent.inputs["model_generated_content_hint"] == {
+        "body_source": "model_generated_content",
+        "brief": "一份检查清单",
+    }
+    assert "foreground_compose_text_hint" not in generated.selected_intent.inputs
+    assert "operate-foreground-ui-followup-type" not in {
+        step.step_id for step in generated.plan.tool_plan.steps
+    }
+
+
+@pytest.mark.parametrize(
+    ("prompt", "brief"),
+    [
+        ("打开 Notes 写一首诗", "一首诗"),
+        ("打开 Notes 写一封道歉信", "一封道歉信"),
+        ("打开 Notes 写一篇关于 AI 的文章", "一篇关于 AI 的文章"),
+        ("打开 Notes，在输入框写一首诗", "一首诗"),
+        ("打开 Notes 写一份合同", "一份合同"),
+        ("打开 Notes 写一篇新闻稿", "一篇新闻稿"),
+        ("打开 Notes 写一个产品描述", "一个产品描述"),
+        ("打开 Notes 写一篇日记", "一篇日记"),
+        ("打开 Notes 写一条推文", "一条推文"),
+        ("open Notes and draft an apology letter", "an apology letter"),
+        ("open Notes and write a contract", "a contract"),
+        ("open Notes and draft a press release", "a press release"),
+        ("open Notes and write a journal entry", "a journal entry"),
+    ],
+)
+def test_runtime_planner_routes_scoped_creative_generation_to_model_followup(
+    prompt: str,
+    brief: str,
+) -> None:
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open",
+        "app.open_and_safe_type_text",
+        "app.focus_and_safe_type_text",
+        "desktop.safe_type_text",
+        "desktop.active_window",
+        "desktop.ui_elements",
+    ]
+
+    decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+    requests = planner_tool_requests(prompt, allowed_tools)
+
+    assert decision.selected_intent.kind == "desktop_operation"
+    generated_hint = decision.selected_intent.inputs["model_generated_content_hint"]
+    assert generated_hint["body_source"] == "model_generated_content"
+    assert generated_hint["brief"] == brief
+    if "输入框" in prompt:
+        assert generated_hint["target"] == "输入框"
+        assert generated_hint["role_filter"] == "text"
+    assert "safe_type_text_hint" not in decision.selected_intent.inputs
+    assert all(
+        "text" not in (step.input_preview or {})
+        for step in decision.plan.tool_plan.steps
+    )
+    assert all("text" not in (request.get("input") or {}) for request in requests)
+    assert any(request.get("continue_to_model") is True for request in requests)
+
+
+def test_runtime_planner_keeps_literal_title_then_generates_separate_body() -> None:
+    prompt = "打开 Notes，新建笔记，标题叫周报，然后写一首诗"
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.ui_elements",
+    ]
+
+    decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+    requests = planner_tool_requests(prompt, allowed_tools)
+
+    assert decision.selected_intent.inputs["model_generated_content_hint"] == {
+        "body_source": "model_generated_content",
+        "brief": "一首诗",
+        "title": "周报",
+    }
+    assert decision.selected_intent.inputs["foreground_compose_text_hint"] == "周报"
+    assert [request["tool"] for request in requests] == [
+        "desktop.list_apps",
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.ui_elements",
+    ]
+    assert requests[2]["input"] == {"text": "周报"}
+    assert requests[-1]["continue_to_model"] is True
+
+
+@pytest.mark.parametrize(
+    ("prompt", "literal_text"),
+    [
+        ("打开 Notes，输入：“hello”", "hello"),
+        ("在 Notes 里输入：hello", "hello"),
+        ("打开 Notes 写：“一首诗”", "一首诗"),
+        ("Open Notes and type: hello", "hello"),
+    ],
+)
+def test_runtime_planner_preserves_explicit_literal_app_text(
+    prompt: str,
+    literal_text: str,
+) -> None:
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open_and_safe_type_text",
+        "app.focus_and_safe_type_text",
+        "desktop.safe_type_text",
+        "desktop.ui_elements",
+    ]
+
+    decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+
+    assert "model_generated_content_hint" not in decision.selected_intent.inputs
+    type_step = _step_by_id(decision, "operate-foreground-ui")
+    assert type_step.input_preview == {
+        "app_name": "Notes",
+        "text": literal_text,
+    }
+    assert type_step.risk_level == "low"
+    assert type_step.approval_required is False
+
+
 def test_runtime_planner_discovers_generic_browser_before_specific_search() -> None:
     allowed_tools = [
         "desktop.list_apps",
@@ -4171,7 +4730,7 @@ def test_runtime_planner_cleans_app_search_action_suffixes() -> None:
         "text": "Export preset"
     }
     assert _step_by_id(decision, "focus-app-search-field").depends_on == [
-        "focus-opened-app"
+        "discover-desktop-state"
     ]
     assert _step_by_id(decision, "submit-app-search").tool_name == "desktop.search_submit"
 
@@ -4188,7 +4747,7 @@ def test_runtime_planner_cleans_app_search_action_suffixes() -> None:
         "text": "project plan"
     }
     assert _step_by_id(english, "focus-app-search-field").depends_on == [
-        "focus-opened-app"
+        "discover-desktop-state"
     ]
 
 
@@ -4238,6 +4797,8 @@ def test_runtime_planner_clicks_selected_discovered_app_search_results() -> None
         "app_name": "<selected app from desktop.list_apps>",
         "selection_source": "desktop.list_apps",
         "query": "mail",
+        "role_filter": "text",
+        "limit": 80,
     }
     assert mail.plan.task_core is not None
     result_workspace_item = next(
@@ -4246,8 +4807,8 @@ def test_runtime_planner_clicks_selected_discovered_app_search_results() -> None
         if item.source_step_id == "select-app-search-result"
     )
     assert result_workspace_item.metadata["action_target"] == {
-        "kind": "desktop_ui",
-        "action": "click",
+        "kind": "desktop_app",
+        "action": "click_ui",
         "app_name": "<selected app from desktop.list_apps>",
         "selection_source": "desktop.list_apps",
         "query": "mail",
@@ -4261,11 +4822,13 @@ def test_runtime_planner_clicks_selected_discovered_app_search_results() -> None
         if item.source_step_id == "verify-desktop-result"
     )
     assert verify_workspace_item.metadata["action_target"] == {
-        "kind": "verification",
-        "action": "read_ui",
+        "kind": "desktop_app",
+        "action": "verify_after_action",
         "app_name": "<selected app from desktop.list_apps>",
         "selection_source": "desktop.list_apps",
         "query": "mail",
+        "role_filter": "text",
+        "limit": 80,
     }
     assert verify_workspace_item.metadata["verified_step_ids"] == [
         "select-app-search-result"
@@ -5036,9 +5599,11 @@ def test_runtime_planner_routes_data_analysis_report_to_app_write_target() -> No
     decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
 
     assert decision.selected_intent.kind == "data_analysis"
-    assert decision.selected_intent.inputs == {
+    assert _without_runtime_goal_targets(decision.selected_intent.inputs) == {
         "data_source_hint": "sales.csv",
         "data_source_kind": "csv",
+        "runtime_goal_capabilities": ["data.analysis"],
+        "runtime_goal_terminal_effect_capabilities": ["desktop.ui_operation"],
         "target_app_hint": "Obsidian",
         "target_action_hint": "app_paste",
         "target_container_action_hint": "new_note",
@@ -5066,6 +5631,27 @@ def test_runtime_planner_routes_data_analysis_report_to_app_write_target() -> No
         "artifact_path": "analysis-report.md",
         "target_action": "app_paste",
         "container_action": "new_note",
+    }
+    contract = decision.plan.task_core.goal_contract
+    assert contract is not None
+    assert [criterion.required_capabilities for criterion in contract.criteria] == [
+        ["data.analysis"],
+        ["desktop.ui_operation"],
+    ]
+    insertion_criterion = contract.criteria[1]
+    assert insertion_criterion.source_step_ids == [
+        "insert-analysis-into-target-app"
+    ]
+    assert insertion_criterion.verifier_step_ids == [
+        "verify-analysis-target-app"
+    ]
+    assert insertion_criterion.expected == {
+        "state": "fulfilled",
+        "target": {
+            "kind": "desktop_app",
+            "action": "type_ui",
+            "app_name": "Obsidian",
+        },
     }
 
     requests = planner_tool_requests(prompt, allowed_tools)
@@ -5128,9 +5714,11 @@ def test_runtime_planner_routes_data_analysis_report_to_app_write_target() -> No
         allowed_tools=allowed_tools,
     )
 
-    assert english_new_page.selected_intent.inputs == {
+    assert _without_runtime_goal_targets(english_new_page.selected_intent.inputs) == {
         "data_source_hint": "sales.csv",
         "data_source_kind": "csv",
+        "runtime_goal_capabilities": ["data.analysis"],
+        "runtime_goal_terminal_effect_capabilities": ["desktop.ui_operation"],
         "target_app_hint": "Notion",
         "target_action_hint": "app_paste",
         "target_container_action_hint": "new_document",
@@ -5151,9 +5739,11 @@ def test_runtime_planner_routes_data_analysis_to_discovered_app_write_target() -
     decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
 
     assert decision.selected_intent.kind == "data_analysis"
-    assert decision.selected_intent.inputs == {
+    assert _without_runtime_goal_targets(decision.selected_intent.inputs) == {
         "data_source_hint": "sales.csv",
         "data_source_kind": "csv",
+        "runtime_goal_capabilities": ["data.analysis"],
+        "runtime_goal_terminal_effect_capabilities": ["desktop.ui_operation"],
         "target_app_capability_hint": {
             "query": "markdown",
             "description": "markdown",
@@ -5309,9 +5899,11 @@ def test_runtime_planner_routes_data_analysis_to_discovered_app_write_target() -
         allowed_tools=allowed_tools,
     )
     assert document_decision.selected_intent.kind == "data_analysis"
-    assert document_decision.selected_intent.inputs == {
+    assert _without_runtime_goal_targets(document_decision.selected_intent.inputs) == {
         "data_source_hint": "data/sales.csv",
         "data_source_kind": "csv",
+        "runtime_goal_capabilities": ["data.analysis"],
+        "runtime_goal_terminal_effect_capabilities": ["desktop.ui_operation"],
         "target_app_capability_hint": {
             "query": "document",
             "description": "文档",
@@ -5577,9 +6169,11 @@ def test_runtime_planner_routes_current_page_table_analysis_to_discovered_spread
     decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
 
     assert decision.selected_intent.kind == "data_analysis"
-    assert decision.selected_intent.inputs == {
+    assert _without_runtime_goal_targets(decision.selected_intent.inputs) == {
         "data_source_hint": "",
         "data_source_kind": "text_table",
+        "runtime_goal_capabilities": ["data.analysis"],
+        "runtime_goal_terminal_effect_capabilities": ["desktop.ui_operation"],
         "context_source": "current_page_content",
         "target_app_capability_hint": {
             "query": "spreadsheet",
@@ -5626,8 +6220,11 @@ def test_runtime_planner_routes_web_research_report_to_app_write_target() -> Non
     prompt = "调研 https://example.com 的信息并把报告写进 Notion 新页面"
     allowed_tools = [
         "browser.open_url_and_extract_text",
+        "artifact.write",
         "app.focus",
+        "app.open_and_safe_shortcut",
         "app.focus_and_safe_shortcut",
+        "desktop.safe_type_text",
         "desktop.ui_elements",
     ]
     decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
@@ -5641,15 +6238,25 @@ def test_runtime_planner_routes_web_research_report_to_app_write_target() -> Non
     }
     assert [step.step_id for step in decision.plan.tool_plan.steps] == [
         "open-or-read-web",
+        "write-research-artifact",
         "prepare-research-target-app",
+        "insert-research-into-target-app",
+        "verify-research-target-app",
     ]
     assert _step_by_id(decision, "prepare-research-target-app").input_preview == {
         "app_name": "Notion",
+        "action": "new_document",
+    }
+    assert _step_by_id(decision, "insert-research-into-target-app").input_preview == {
+        "body_source": "research_artifact",
+        "artifact_path": "research-summary.md",
         "target_action": "app_paste",
         "container_action": "new_document",
-        "body_source": "model_generated_content",
     }
-    assert decision.plan.tool_plan.artifacts_expected == []
+    assert _step_by_id(decision, "verify-research-target-app").depends_on == [
+        "insert-research-into-target-app"
+    ]
+    assert decision.plan.tool_plan.artifacts_expected == ["research-summary.md"]
 
     requests = planner_tool_requests(prompt, allowed_tools)
     assert requests == [
@@ -5776,6 +6383,94 @@ def test_runtime_planner_routes_web_research_report_to_app_write_target() -> Non
     assert runtime_planner_metadata(discovered)["yachiyo_followup_target"] == (
         discovered_payload["followup_target"]
     )
+
+
+def test_runtime_planner_keeps_search_query_separate_from_explicit_app_delivery() -> None:
+    allowed_tools = [
+        "browser.search",
+        "browser.extract_text",
+        "artifact.write",
+        "app.open",
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.ui_elements",
+    ]
+    notes = RuntimePlanner().decision(
+        "搜索上海明天天气，并把结果写入备忘录",
+        allowed_tools=allowed_tools,
+    )
+    obsidian = RuntimePlanner().decision(
+        "搜索上海明天天气，并把结果写入 Obsidian 新笔记",
+        allowed_tools=allowed_tools,
+    )
+
+    assert notes.selected_intent.kind == "web_research"
+    assert notes.selected_intent.inputs == {
+        "url_hint": (
+            "https://www.google.com/search?"
+            "q=%E4%B8%8A%E6%B5%B7%E6%98%8E%E5%A4%A9%E5%A4%A9%E6%B0%94"
+        ),
+        "target_app_hint": "Notes",
+        "target_action_hint": "app_paste",
+        "browser_action": "open_search",
+        "query": "上海明天天气",
+    }
+    assert [step.step_id for step in notes.plan.tool_plan.steps] == [
+        "open-web-search",
+        "inspect-web-search-results",
+        "write-research-artifact",
+        "prepare-research-target-app",
+        "insert-research-into-target-app",
+        "verify-research-target-app",
+    ]
+    assert _step_by_id(notes, "open-web-search").input_preview == {
+        "query": "上海明天天气"
+    }
+    assert _step_by_id(notes, "write-research-artifact").depends_on == [
+        "inspect-web-search-results"
+    ]
+    assert _step_by_id(notes, "prepare-research-target-app").input_preview == {
+        "app_name": "Notes",
+        "target_action": "app_paste",
+        "body_source": "research_artifact",
+        "artifact_path": "research-summary.md",
+    }
+    assert _step_by_id(notes, "insert-research-into-target-app").input_preview == {
+        "body_source": "research_artifact",
+        "artifact_path": "research-summary.md",
+        "target_action": "app_paste",
+    }
+    notes_sink = _step_by_id(notes, "insert-research-into-target-app")
+    assert notes_sink.depends_on == [
+        "prepare-research-target-app",
+        "write-research-artifact",
+    ]
+    assert len(notes_sink.input_bindings) == 1
+    assert {
+        key: value
+        for key, value in notes_sink.input_bindings[0].model_dump().items()
+        if key != "binding_id"
+    } == {
+        "source_step_id": "write-research-artifact",
+        "source_tool_name": "artifact.write",
+        "source_result_path": "/path",
+        "target_input_path": "/input/artifact_path",
+        "value_type": "string",
+        "required": True,
+        "max_bytes": 1024,
+    }
+
+    assert obsidian.selected_intent.inputs["query"] == "上海明天天气"
+    assert obsidian.selected_intent.inputs["target_app_hint"] == "Obsidian"
+    assert obsidian.selected_intent.inputs["target_container_action_hint"] == "new_note"
+    assert _step_by_id(obsidian, "prepare-research-target-app").input_preview == {
+        "app_name": "Obsidian",
+        "action": "new_note",
+    }
+    assert _step_by_id(obsidian, "insert-research-into-target-app").depends_on == [
+        "prepare-research-target-app",
+        "write-research-artifact",
+    ]
 
 
 def test_runtime_planner_routes_browser_docs_lookup_to_web_research() -> None:
@@ -6134,6 +6829,7 @@ def test_runtime_planner_only_prefers_spreadsheet_apps_when_explicitly_requested
         "open-spreadsheet-app",
         "run-analysis",
         "write-analysis-artifact",
+        "verify-analysis-artifact",
     ]
     assert _step_by_id(decision, "open-spreadsheet-app").tool_name == "app.open"
     assert _step_by_id(decision, "open-spreadsheet-app").input_preview == {
@@ -6265,9 +6961,10 @@ def test_runtime_planner_discovers_data_source_scope_for_analysis() -> None:
         "csv",
     )
     assert named_xlsx_decision.selected_intent.kind == "data_analysis"
-    assert named_xlsx_decision.selected_intent.inputs == {
+    assert _without_runtime_goal_targets(named_xlsx_decision.selected_intent.inputs) == {
         "data_source_hint": "",
         "data_source_kind": "xlsx",
+        "runtime_goal_capabilities": ["data.analysis"],
         "data_source_name_hint": "budget",
     }
     assert _step_by_id(named_xlsx_decision, "inspect-data-source").input_preview == {
@@ -6275,9 +6972,12 @@ def test_runtime_planner_discovers_data_source_scope_for_analysis() -> None:
         "file_type": "xlsx",
     }
     assert named_scoped_csv_decision.selected_intent.kind == "data_analysis"
-    assert named_scoped_csv_decision.selected_intent.inputs == {
+    assert _without_runtime_goal_targets(
+        named_scoped_csv_decision.selected_intent.inputs
+    ) == {
         "data_source_hint": "",
         "data_source_kind": "csv",
+        "runtime_goal_capabilities": ["data.analysis"],
         "data_source_name_hint": "sales",
         "data_source_scope_hint": "Downloads",
     }
@@ -6287,9 +6987,12 @@ def test_runtime_planner_discovers_data_source_scope_for_analysis() -> None:
         "file_type": "csv",
     }
     assert english_named_xlsx_decision.selected_intent.kind == "data_analysis"
-    assert english_named_xlsx_decision.selected_intent.inputs == {
+    assert _without_runtime_goal_targets(
+        english_named_xlsx_decision.selected_intent.inputs
+    ) == {
         "data_source_hint": "",
         "data_source_kind": "xlsx",
+        "runtime_goal_capabilities": ["data.analysis"],
         "data_source_name_hint": "budget",
     }
     assert _step_by_id(english_named_xlsx_decision, "inspect-data-source").input_preview == {
@@ -6403,9 +7106,11 @@ def test_runtime_planner_routes_data_analysis_output_to_clipboard() -> None:
     )
 
     assert builtin.selected_intent.kind == "data_analysis"
-    assert builtin.selected_intent.inputs == {
+    assert _without_runtime_goal_targets(builtin.selected_intent.inputs) == {
         "data_source_hint": "sales.csv",
         "data_source_kind": "csv",
+        "runtime_goal_capabilities": ["data.analysis"],
+        "runtime_goal_terminal_effect_capabilities": ["clipboard.read_write"],
         "output_target_hint": "clipboard",
     }
     assert [step.step_id for step in builtin.plan.tool_plan.steps] == [
@@ -6419,6 +7124,19 @@ def test_runtime_planner_routes_data_analysis_output_to_clipboard() -> None:
     assert _step_by_id(builtin, "write-clipboard-output").depends_on == [
         "analyze-data-file"
     ]
+    builtin_contract = builtin.plan.task_core.goal_contract
+    assert builtin_contract is not None
+    assert [
+        criterion.required_capabilities
+        for criterion in builtin_contract.criteria
+    ] == [["data.analysis"], ["clipboard.read_write"]]
+    clipboard_criterion = builtin_contract.criteria[1]
+    assert clipboard_criterion.source_step_ids == ["write-clipboard-output"]
+    assert clipboard_criterion.verifier_step_ids == []
+    assert clipboard_criterion.expected == {
+        "state": "persisted",
+        "target": {"kind": "clipboard", "action": "write_clipboard"},
+    }
 
     scoped = RuntimePlanner().decision(
         "把 Downloads 最新 CSV 分析成图表并复制回剪贴板",
@@ -6426,9 +7144,11 @@ def test_runtime_planner_routes_data_analysis_output_to_clipboard() -> None:
     )
 
     assert scoped.selected_intent.kind == "data_analysis"
-    assert scoped.selected_intent.inputs == {
+    assert _without_runtime_goal_targets(scoped.selected_intent.inputs) == {
         "data_source_hint": "",
         "data_source_kind": "csv",
+        "runtime_goal_capabilities": ["data.analysis"],
+        "runtime_goal_terminal_effect_capabilities": ["clipboard.read_write"],
         "data_source_selection_hint": "latest",
         "data_source_scope_hint": "Downloads",
         "output_target_hint": "clipboard",
@@ -7688,6 +8408,182 @@ def test_runtime_planner_routes_explicit_terminal_command_to_approval_plan() -> 
     ]
 
 
+def test_runtime_planner_keeps_explicit_terminal_delegation_pending() -> None:
+    decision = RuntimePlanner().decision(
+        "Run a terminal command to count all Python files in this repository",
+        allowed_tools=["terminal.run"],
+    )
+
+    assert decision.selected_intent.inputs == {
+        "terminal_execution_request_hint": {
+            "mode": "model_selected_approved_command",
+        }
+    }
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "run-model-selected-terminal-command"
+    ]
+    step = _step_by_id(decision, "run-model-selected-terminal-command")
+    assert step.tool_name == "terminal.run"
+    assert step.input_preview == {
+        "body_source": "model_generated_content",
+        "operation": "execute_user_delegated_terminal_task",
+    }
+    assert "command" not in step.input_preview
+    assert step.approval_required is True
+    assert step.status == "planned"
+    assert decision.plan.task_core.todos[0].status == "pending"
+
+    [criterion] = decision.plan.task_core.goal_contract.criteria
+    assert criterion.effectful is False
+    assert criterion.response_satisfiable is False
+    assert criterion.required_capabilities == ["terminal.execution"]
+    assert criterion.source_step_ids == ["run-model-selected-terminal-command"]
+
+
+def test_terminal_delegation_request_waits_for_model_materialization() -> None:
+    prompt = "Run a terminal command to count all Python files in this repository"
+    allowed_tools = ["terminal.run"]
+    [request] = planner_tool_requests(prompt, allowed_tools)
+
+    assert request == {
+        "protocol": "json_fallback",
+        "tool": "terminal.run",
+        "input": {
+            "body_source": "model_generated_content",
+            "operation": "execute_user_delegated_terminal_task",
+        },
+        "source": "runtime_planner",
+        "planning_reason": "planner_terminal_command_materialization",
+        "continue_to_model": True,
+    }
+    assert "command" not in request["input"]
+
+    decision = RuntimePlanner().decision(
+        prompt,
+        allowed_tools=allowed_tools,
+    )
+    envelope = runtime_execution_envelope_from_decision(
+        decision,
+        allowed_tools=allowed_tools,
+        full_plan=True,
+    )
+    assert envelope is not None
+    [pending_request] = envelope.requests
+    assert pending_request.tool_name == "terminal.run"
+    assert pending_request.input == request["input"]
+    assert pending_request.continue_to_model is True
+    assert pending_request.approval_required is True
+    assert "command" not in pending_request.input
+
+
+def test_terminal_delegation_is_a_complete_runtime_owned_selection() -> None:
+    prompt = "Run a terminal command to count all Python files in this repository"
+    selection = planner_first_direct_tool_selection(prompt, ["terminal.run"])
+
+    assert selection.selected_source == "runtime_planner"
+    assert selection.requests
+    assert not planner_selection_needs_model_assistance(selection, prompt)
+
+
+def test_terminal_delegation_goal_waits_for_exact_approved_materialized_receipt() -> None:
+    prompt = "Run a terminal command to count all Python files in this repository"
+    allowed_tools = ["terminal.run"]
+    run_id = "run-terminal-delegation-goal"
+    decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+    envelope = runtime_execution_envelope_from_decision(
+        decision,
+        allowed_tools=allowed_tools,
+        full_plan=True,
+    )
+    assert envelope is not None
+    contract = runtime_goal_contract(
+        run_id=run_id,
+        original_goal=prompt,
+        runtime_execution_envelope=envelope.model_dump(mode="json"),
+        runtime_execution_metadata=None,
+        messages=[],
+        timeline=[],
+    )
+    assert contract is not None
+
+    placeholder_assessment = runtime_goal_assessment(contract, [])
+    assert placeholder_assessment.completed is False
+
+    command = 'find . -name "*.py" -type f | wc -l'
+    generated_content = f"```bash\n{command}\n```"
+    content_sha256 = hashlib.sha256(generated_content.encode("utf-8")).hexdigest()
+    terminal_event = {
+        "event": "agent.tool.call",
+        "run_id": run_id,
+        "actor": "native_runtime",
+        "execution_authority": "runtime_tool_executor",
+        "decision_id": decision.decision_id,
+        "plan_id": decision.plan.plan_id,
+        "tool_plan_id": decision.plan.tool_plan.plan_id,
+        "step_id": "run-model-selected-terminal-command",
+        "request_id": "materialized-terminal-request",
+        "detail": "terminal.run",
+        "tool_call_id": "call-materialized-terminal",
+        "materialization_binding_id": "materialization-binding-terminal",
+        "materialized_content_sha256": content_sha256,
+        "capability_id": "terminal.execution",
+        "input_preview": {"command": command, "shell": True},
+        "action_target": {"kind": "local_compute"},
+    }
+    approval_pause = {
+        **terminal_event,
+        "approved": False,
+        "source": "runtime_policy_gate",
+        "result": {
+            "ok": False,
+            "approval_required": True,
+            "status": "approval_required",
+        },
+    }
+    approved_success = {
+        **terminal_event,
+        "approved": True,
+        "result": {
+            "ok": True,
+            "exit_code": 0,
+            "stdout": "42\n",
+            RUNTIME_EXECUTION_PROVENANCE_KEY: {
+                "source": RUNTIME_LOCAL_TOOL_BROKER_PROVENANCE_SOURCE,
+                "version": RUNTIME_EXECUTION_PROVENANCE_VERSION,
+            },
+        },
+    }
+
+    assert runtime_goal_assessment(contract, [approval_pause]).completed is False
+    mismatched_success = {
+        **approved_success,
+        "materialized_content_sha256": "0" * 64,
+    }
+    assert runtime_goal_assessment(
+        contract,
+        [approval_pause, mismatched_success],
+    ).completed is False
+    assert runtime_goal_assessment(
+        contract,
+        [approval_pause, approved_success],
+    ).completed is True
+
+
+def test_ordinary_goal_does_not_delegate_terminal_command_selection() -> None:
+    prompt = "Count Python files"
+    decision = RuntimePlanner().decision(prompt, allowed_tools=["terminal.run"])
+
+    assert "terminal_execution_request_hint" not in decision.selected_intent.inputs
+    assert all(
+        step.tool_name != "terminal.run"
+        for step in decision.plan.tool_plan.steps
+    )
+    assert all(
+        request.get("tool") != "terminal.run"
+        for request in planner_tool_requests(prompt, ["terminal.run"])
+    )
+
+
 def test_runtime_planner_plans_code_changes_after_workspace_inspection() -> None:
     decision = RuntimePlanner().decision(
         "帮我写一个 Python 脚本处理日志",
@@ -8033,6 +8929,7 @@ def test_runtime_planner_prefers_research_deliverable_over_browser_app_hint() ->
         "browser_action": "open_search",
         "query": "Hermes agent architecture",
         "post_open_action": "extract_text",
+        "presentation": "summary",
     }
     assert [step.step_id for step in readback_summary.plan.tool_plan.steps] == [
         "open-web-search",
@@ -8058,6 +8955,7 @@ def test_runtime_planner_prefers_research_deliverable_over_browser_app_hint() ->
             "input": {},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_web_research",
+            "presentation": "summary",
             "continue_to_model": True,
         },
     ]
@@ -8083,6 +8981,7 @@ def test_runtime_planner_prefers_research_deliverable_over_browser_app_hint() ->
             "input": {"query": "Hermes agent architecture"},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_web_research",
+            "presentation": "summary",
             "continue_to_model": True,
         }
     ]
@@ -8533,6 +9432,41 @@ def test_planner_selection_payload_surfaces_observed_desktop_action_target() -> 
     }
 
 
+def test_planner_selection_payload_surfaces_app_scoped_semantic_click_target() -> None:
+    allowed_tools = [
+        "desktop.list_apps",
+        "desktop.inspect_app",
+        "app.focus_and_click_ui_element",
+        "desktop.ui_elements",
+    ]
+    decision = RuntimePlanner().decision(
+        "Chrome 点登录",
+        allowed_tools=allowed_tools,
+    )
+    payload = planner_selection_payload(
+        decision=decision,
+        planner_requests=[],
+        legacy_requests=[],
+        selected_requests=[],
+        selected_source="runtime_planner",
+        selected_reason="runtime_planner_direct",
+    )
+
+    assert payload["followup_target"] == {
+        "kind": "desktop_discovered_app_action",
+        "app_query": "Chrome",
+        "app_name_source": "desktop.list_apps",
+        "target_action": "click",
+        "target": "登录",
+        "role_filter": "button",
+        "limit": 80,
+        "click_count": 1,
+    }
+    assert runtime_planner_metadata(decision)["yachiyo_followup_target"] == payload[
+        "followup_target"
+    ]
+
+
 def test_runtime_planner_prefers_desktop_ui_for_non_browser_app_scoped_click() -> None:
     allowed_tools = [
         "desktop.list_apps",
@@ -8763,7 +9697,6 @@ def test_runtime_planner_inspects_app_before_app_scoped_ui_operation() -> None:
         "verify-desktop-result",
     ]
     assert _step_by_id(current_app_find_then_click, "read-foreground-ui").input_preview == {
-        "target": "导出",
         "role_filter": "button",
         "limit": 80,
     }
@@ -8909,6 +9842,7 @@ def test_runtime_planner_inspects_app_before_app_scoped_ui_operation() -> None:
             "input": {},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
+            "continue_to_model": True,
         },
         {
             "protocol": "json_fallback",
@@ -9779,18 +10713,9 @@ def test_runtime_planner_routes_static_web_search_to_open_url() -> None:
         ],
     )
     assert browser_scoped.selected_intent.kind == "web_research"
-    assert [step.step_id for step in browser_scoped.plan.tool_plan.steps][:3] == [
-        "discover-browser-app",
-        "open-or-focus-browser",
+    assert [step.step_id for step in browser_scoped.plan.tool_plan.steps] == [
         "open-web-search",
     ]
-    assert _step_by_id(browser_scoped, "open-or-focus-browser").tool_name == (
-        "app.focus_and_safe_shortcut"
-    )
-    assert _step_by_id(browser_scoped, "open-or-focus-browser").input_preview == {
-        "app_name": "Google Chrome",
-        "action": "new_tab",
-    }
 
     new_tab_search = RuntimePlanner().decision(
         "打开新标签并搜索 OpenAI",
@@ -9850,8 +10775,6 @@ def test_runtime_planner_routes_static_web_search_to_open_url() -> None:
         "app_mode": "focus",
     }
     assert [step.step_id for step in chrome_search_report.plan.tool_plan.steps] == [
-        "discover-browser-app",
-        "open-or-focus-browser",
         "extract-web-url-text",
         "write-research-artifact",
     ]
@@ -9876,19 +10799,15 @@ def test_runtime_planner_routes_static_web_search_to_open_url() -> None:
         "query": "OpenAI pricing",
         "app_name": "Google Chrome",
         "app_mode": "open",
+        "presentation": "summary",
     }
     assert [step.step_id for step in chrome_search_summary.plan.tool_plan.steps] == [
-        "discover-browser-app",
-        "open-or-focus-browser",
         "extract-web-url-text",
-        "write-research-artifact",
     ]
     assert _step_by_id(chrome_search_summary, "extract-web-url-text").tool_name == (
         "browser.open_url_and_extract_text"
     )
-    assert _step_by_id(chrome_search_summary, "write-research-artifact").depends_on == [
-        "extract-web-url-text"
-    ]
+    assert chrome_search_summary.plan.tool_plan.artifacts_expected == []
 
     chrome_search_screenshot = RuntimePlanner().decision(
         "在 Chrome 打开 OpenAI pricing 并截图",
@@ -9909,8 +10828,6 @@ def test_runtime_planner_routes_static_web_search_to_open_url() -> None:
         "app_mode": "focus",
     }
     assert [step.step_id for step in chrome_search_screenshot.plan.tool_plan.steps] == [
-        "discover-browser-app",
-        "open-or-focus-browser",
         "capture-web-url",
     ]
     assert _step_by_id(chrome_search_screenshot, "capture-web-url").tool_name == (
@@ -9941,17 +10858,14 @@ def test_runtime_planner_routes_static_web_search_to_open_url() -> None:
         "app_mode": "open",
     }
     assert [step.step_id for step in chrome_first_result_summary.plan.tool_plan.steps] == [
-        "discover-browser-app",
-        "open-or-focus-browser",
         "open-web-search",
         "click-web-search-result",
         "extract-clicked-web-result-text",
-        "write-research-artifact",
     ]
-    assert _step_by_id(
-        chrome_first_result_summary,
-        "write-research-artifact",
-    ).depends_on == ["extract-clicked-web-result-text"]
+    assert not any(
+        step.tool_name == "artifact.write"
+        for step in chrome_first_result_summary.plan.tool_plan.steps
+    )
     assert _step_by_id(chrome_first_result_summary, "extract-clicked-web-result-text").tool_name == (
         "browser.extract_text"
     )
@@ -10001,8 +10915,6 @@ def test_runtime_planner_routes_static_web_search_to_open_url() -> None:
     )
     assert first_result_report.selected_intent.expected_outputs == ["report"]
     assert [step.step_id for step in first_result_report.plan.tool_plan.steps] == [
-        "discover-browser-app",
-        "open-or-focus-browser",
         "open-web-search",
         "click-web-search-result",
         "extract-clicked-web-result-text",
@@ -10435,6 +11347,9 @@ def test_planner_tool_requests_continue_after_app_search_observations() -> None:
             "input": {},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
+            "requires_post_action_verification": False,
+            "observation_retry": {},
+            "replan_triggers": [],
         },
         {
             "protocol": "json_fallback",
@@ -10518,6 +11433,87 @@ def test_planner_execution_tool_requests_prepends_unknown_app_discovery() -> Non
             "verification_target": {"app_name": "PixelForge"},
         },
     ]
+
+
+def test_planner_execution_known_app_alias_does_not_claim_discovery_provenance() -> None:
+    allowed = [
+        "desktop.list_apps",
+        "desktop.ui_elements",
+        "app.focus_and_click_ui_element",
+    ]
+
+    requests = planner_execution_tool_requests(
+        [
+            {
+                "protocol": "json_fallback",
+                "tool": "app.focus_and_click_ui_element",
+                "input": {
+                    "app_name": "WeChat",
+                    "target": "Search",
+                    "role_filter": "text",
+                    "limit": 80,
+                },
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+            }
+        ],
+        allowed,
+    )
+
+    assert [request["tool"] for request in requests] == [
+        "app.focus_and_click_ui_element",
+    ]
+    assert requests[0]["input"] == {
+        "app_name": "WeChat",
+        "target": "Search",
+        "role_filter": "text",
+        "limit": 80,
+    }
+
+
+def test_planner_execution_system_surfaces_do_not_require_installed_app_resolution() -> None:
+    allowed = ["desktop.list_apps", "app.open", "desktop.verify"]
+
+    for query, app_name in (
+        ("启动台", "Launchpad"),
+        ("控制中心", "Control Center"),
+        ("通知中心", "Notification Center"),
+    ):
+        requests = planner_execution_tool_requests(
+            [
+                {
+                    "protocol": "json_fallback",
+                    "tool": "desktop.list_apps",
+                    "input": {"query": query, "limit": 20},
+                    "source": "runtime_planner",
+                    "planning_reason": "planner_desktop_operation",
+                },
+                {
+                    "protocol": "json_fallback",
+                    "tool": "app.open",
+                    "input": {"app_name": app_name},
+                    "source": "runtime_planner",
+                    "planning_reason": "planner_desktop_operation",
+                },
+                {
+                    "protocol": "json_fallback",
+                    "tool": "desktop.verify",
+                    "input": {"app_name": app_name},
+                    "source": "runtime_verification",
+                    "planning_reason": "planner_desktop_operation",
+                    "continue_to_model": True,
+                },
+            ],
+            allowed,
+        )
+
+        open_request = next(request for request in requests if request["tool"] == "app.open")
+        verify_request = next(
+            request for request in requests if request["tool"] == "desktop.verify"
+        )
+        assert open_request["input"] == {"app_name": app_name}
+        assert verify_request["input"].get("selection_source") is None
+        assert verify_request["input"].get("query") is None
 
 
 def test_planner_execution_tool_requests_uses_desktop_verify_for_unknown_app() -> None:
@@ -12333,9 +13329,12 @@ def test_runtime_planner_reveals_generated_artifacts_in_finder() -> None:
     assert current_page.plan.tool_plan.artifacts_expected == ["research-summary.md"]
 
     assert current_page_table.selected_intent.kind == "data_analysis"
-    assert current_page_table.selected_intent.inputs == {
+    assert _without_runtime_goal_targets(
+        current_page_table.selected_intent.inputs
+    ) == {
         "data_source_hint": "",
         "data_source_kind": "text_table",
+        "runtime_goal_capabilities": ["data.analysis"],
         "context_source": "current_page_content",
     }
     assert [step.step_id for step in current_page_table.plan.tool_plan.steps] == [
@@ -12844,7 +13843,11 @@ def test_runtime_planner_can_use_generic_desktop_operation_aliases() -> None:
     assert _step_by_id(type_decision, "operate-foreground-ui").tool_name == "desktop.type"
     assert _step_by_id(type_decision, "operate-foreground-ui").action == "type"
     assert _step_by_id(shortcut_decision, "operate-foreground-ui").tool_name == "desktop.shortcut"
-    assert _step_by_id(shortcut_decision, "operate-foreground-ui").action == "shortcut"
+    assert _step_by_id(shortcut_decision, "operate-foreground-ui").action == "dispatch_shortcut"
+    assert all(
+        step.step_id != "verify-desktop-result"
+        for step in shortcut_decision.plan.tool_plan.steps
+    )
 
 
 def test_runtime_planner_discovers_installed_apps_before_opening() -> None:
@@ -12863,6 +13866,109 @@ def test_runtime_planner_discovers_installed_apps_before_opening() -> None:
     assert "desktop.list_apps" in discovery_capability.tools
     assert "desktop.list_apps" in discovery_capability.available_tools
     assert _step_by_id(decision, "open-or-focus-app").depends_on == ["discover-desktop-state"]
+
+
+def test_runtime_planner_lists_installed_apps_without_negated_open_or_focus() -> None:
+    decision = RuntimePlanner().decision(
+        "使用后台桌面工具列出已安装的办公软件，只回复应用名称，不要打开或切换任何应用。",
+        allowed_tools=["desktop.list_apps", "app.open", "app.focus"],
+    )
+
+    assert decision.selected_intent.kind == "desktop_operation"
+    assert [step.tool_name for step in decision.plan.tool_plan.steps] == [
+        "desktop.list_apps"
+    ]
+
+
+def test_runtime_planner_lists_installed_apps_without_english_negated_actions() -> None:
+    decision = RuntimePlanner().decision(
+        "List installed apps, but do not open or switch to any app.",
+        allowed_tools=["desktop.list_apps", "app.open", "app.focus"],
+    )
+
+    assert decision.selected_intent.kind == "desktop_operation"
+    assert [step.tool_name for step in decision.plan.tool_plan.steps] == [
+        "desktop.list_apps"
+    ]
+
+
+def test_runtime_planner_does_not_treat_negated_open_as_an_app_action() -> None:
+    decision = RuntimePlanner().decision(
+        "不要打开 Slack",
+        allowed_tools=["desktop.list_apps", "app.open", "app.focus"],
+    )
+
+    assert not {
+        step.tool_name for step in decision.plan.tool_plan.steps
+    }.intersection({"app.open", "app.focus"})
+
+
+def test_runtime_planner_does_not_open_object_preposed_negated_app() -> None:
+    decision = RuntimePlanner().decision(
+        "别把 GitHub 打开",
+        allowed_tools=["desktop.list_apps", "app.open", "app.focus"],
+    )
+
+    assert not {
+        step.tool_name for step in decision.plan.tool_plan.steps
+    }.intersection({"app.open", "app.focus"})
+
+
+def test_runtime_planner_preserves_open_before_negated_focus_clause() -> None:
+    decision = RuntimePlanner().decision(
+        "打开 Slack，不要切换其他应用",
+        allowed_tools=["desktop.list_apps", "app.open", "app.focus"],
+    )
+
+    app_steps = [
+        step
+        for step in decision.plan.tool_plan.steps
+        if step.tool_name in {"app.open", "app.focus"}
+    ]
+    assert [(step.tool_name, step.input_preview.get("app_name")) for step in app_steps] == [
+        ("app.open", "Slack")
+    ]
+
+
+def test_runtime_planner_preserves_english_open_before_negated_focus_clause() -> None:
+    decision = RuntimePlanner().decision(
+        "Open Slack, but do not switch to any other app.",
+        allowed_tools=["desktop.list_apps", "app.open", "app.focus"],
+    )
+
+    app_steps = [
+        step
+        for step in decision.plan.tool_plan.steps
+        if step.tool_name in {"app.open", "app.focus"}
+    ]
+    assert [(step.tool_name, step.input_preview.get("app_name")) for step in app_steps] == [
+        ("app.open", "Slack")
+    ]
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    (
+        "Open Slack without switching to another app.",
+        "Open Slack without focusing another app.",
+    ),
+)
+def test_runtime_planner_preserves_open_before_without_app_action_clause(
+    prompt: str,
+) -> None:
+    decision = RuntimePlanner().decision(
+        prompt,
+        allowed_tools=["desktop.list_apps", "app.open", "app.focus"],
+    )
+
+    app_steps = [
+        step
+        for step in decision.plan.tool_plan.steps
+        if step.tool_name in {"app.open", "app.focus"}
+    ]
+    assert [(step.tool_name, step.input_preview.get("app_name")) for step in app_steps] == [
+        ("app.open", "Slack")
+    ]
 
 
 def test_runtime_planner_discovers_apps_by_capability_before_acting() -> None:
@@ -12918,10 +14024,11 @@ def test_runtime_planner_discovers_apps_by_capability_before_acting() -> None:
     assert _step_by_id(markdown, "open-selected-discovered-app").depends_on == [
         "discover_apps-desktop-state"
     ]
-    assert _step_by_id(markdown, "type-selected-discovered-app-text").input_preview == {
-        "text": "周报"
-    }
-    assert _step_by_id(markdown, "type-selected-discovered-app-text").depends_on == [
+    markdown_type = _step_by_id(markdown, "type-selected-discovered-app-text")
+    assert markdown_type.input_preview == {"text": "周报"}
+    assert markdown_type.risk_level == "low"
+    assert markdown_type.approval_required is False
+    assert markdown_type.depends_on == [
         "open-selected-discovered-app"
     ]
     assert _step_by_id(markdown, "verify-selected-discovered-app-action").depends_on == [
@@ -12945,6 +14052,17 @@ def test_runtime_planner_discovers_apps_by_capability_before_acting() -> None:
         "action": "new_document",
     }
     assert markdown_requests[2]["input"] == {"text": "周报"}
+    markdown_envelope = runtime_execution_envelope_from_decision(
+        markdown,
+        allowed_tools=allowed_tools,
+        full_plan=True,
+    )
+    open_request = next(
+        request
+        for request in markdown_envelope.requests
+        if request.step_id == "open-selected-discovered-app"
+    )
+    assert open_request.requires_post_action_verification is True
     local_markdown = RuntimePlanner().decision(
         "打开我电脑里能写 markdown 的应用，新建文档并写一段项目总结",
         allowed_tools=allowed_tools,
@@ -12957,12 +14075,19 @@ def test_runtime_planner_discovers_apps_by_capability_before_acting() -> None:
         "action": "discover_apps",
         "query": "markdown",
     }
+    assert local_markdown.selected_intent.inputs["model_generated_content_hint"] == {
+        "body_source": "model_generated_content",
+        "brief": "一段项目总结",
+    }
     assert [step.step_id for step in local_markdown.plan.tool_plan.steps] == [
         "discover_apps-desktop-state",
         "open-selected-discovered-app",
-        "type-selected-discovered-app-text",
-        "verify-selected-discovered-app-action",
+        "verify-desktop-result",
     ]
+    assert all(
+        "text" not in (step.input_preview or {})
+        for step in local_markdown.plan.tool_plan.steps
+    )
 
     document = RuntimePlanner().decision(
         "用任意可用的文档应用新建一份项目报告",
@@ -13482,7 +14607,12 @@ def test_runtime_planner_pastes_dynamic_context_into_discovered_apps() -> None:
     ]
     assert current_link_requests[0]["input"] == {"action": "copy_current_page_link"}
     assert current_link_requests[3]["input"] == {"action": "paste"}
-    assert all("continue_to_model" not in request for request in current_link_requests)
+    assert current_link_requests[1]["continue_to_model"] is True
+    assert all(
+        "continue_to_model" not in request
+        for index, request in enumerate(current_link_requests)
+        if index != 1
+    )
 
     assert selected_text.selected_intent.inputs["dynamic_context_ui_transfer_hint"] == {
         "source": "selection",
@@ -13516,7 +14646,12 @@ def test_runtime_planner_pastes_dynamic_context_into_discovered_apps() -> None:
     ]
     assert selected_text_requests[0]["input"] == {"action": "copy"}
     assert selected_text_requests[3]["input"] == {"action": "paste"}
-    assert all("continue_to_model" not in request for request in selected_text_requests)
+    assert selected_text_requests[1]["continue_to_model"] is True
+    assert all(
+        "continue_to_model" not in request
+        for index, request in enumerate(selected_text_requests)
+        if index != 1
+    )
 
 
 def test_runtime_planner_keeps_plain_document_transfer_off_report_generation() -> None:
@@ -13847,6 +14982,8 @@ def test_runtime_planner_keeps_scoped_capability_app_search_off_web_research() -
                 "app_name": "<selected app from desktop.list_apps>",
                 "selection_source": "desktop.list_apps",
                 "query": "code",
+                "role_filter": "text",
+                "limit": 80,
             },
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
@@ -13955,13 +15092,15 @@ def test_runtime_planner_discovers_generic_design_tool_before_searching() -> Non
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
-        {
-            "protocol": "json_fallback",
-            "tool": "desktop.ui_elements",
-            "input": {
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.ui_elements",
+                "input": {
                     "app_name": "<selected app from desktop.list_apps>",
                     "selection_source": "desktop.list_apps",
                     "query": "image",
+                    "role_filter": "text",
+                    "limit": 80,
                 },
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
@@ -14492,14 +15631,16 @@ def test_runtime_planner_opens_file_with_discovered_app_before_in_app_search() -
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
-        {
-            "protocol": "json_fallback",
-            "tool": "desktop.ui_elements",
-            "input": {
-                "app_name": "<selected app from desktop.list_apps>",
-                "selection_source": "desktop.list_apps",
-                "query": "pdf",
-            },
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.ui_elements",
+                "input": {
+                    "app_name": "<selected app from desktop.list_apps>",
+                    "selection_source": "desktop.list_apps",
+                    "query": "pdf",
+                    "role_filter": "text",
+                    "limit": 80,
+                },
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -14508,7 +15649,16 @@ def test_runtime_planner_opens_file_with_discovered_app_before_in_app_search() -
 
     selection = planner_first_direct_tool_selection(prompt, allowed_tools)
     assert selection.selected_source == "runtime_planner"
-    assert selection.requests == expected_requests
+    assert selection.requests == [
+        *expected_requests[:4],
+        {
+            **expected_requests[4],
+            "requires_post_action_verification": False,
+            "observation_retry": {},
+            "replan_triggers": [],
+        },
+        *expected_requests[5:],
+    ]
 
     localized_prompt = "帮我用一个 PDF 应用打开桌面的合同.pdf，然后搜索违约条款"
     localized_decision = RuntimePlanner().decision(
@@ -15285,6 +16435,8 @@ def test_runtime_planner_discovers_generic_communication_app_before_composing() 
                 "planning_reason": "planner_desktop_operation",
             },
         ]
+        if query == "mail" and compose_hint["send_action"] == "draft":
+            expected_requests[0]["continue_to_model"] = True
         if "body" in compose_hint:
             expected_requests.append(
                 {
@@ -15441,8 +16593,10 @@ def test_runtime_planner_composes_in_selected_running_mail_app() -> None:
         "selection_source": "desktop.running_apps",
         "app_name": "<selected app from desktop.running_apps>",
         "query": "mail",
+        "selection_query": "mail",
         "target": "message body",
         "role_filter": "text",
+        "limit": 80,
         "step_id": "draft-selected-communication-message",
     }
 
@@ -15689,44 +16843,30 @@ def test_runtime_planner_preserves_selected_app_resolution_for_deferred_compose_
         execution_normalized=True,
     )
 
-    assert [request["tool"] for request in requests] == [
-        "desktop.list_apps",
-        "app.open_and_safe_shortcut",
-        "app.focus_and_type_into_ui_element",
-        "desktop.search_submit",
-        "app.focus",
-        "desktop.ui_elements",
-    ]
-    assert requests[1]["input"] == {
+    assert [request["tool"] for request in requests] == ["desktop.list_apps"]
+    assert requests[0]["input"] == {"query": "mail", "limit": 20}
+    assert requests[0]["continue_to_model"] is True
+
+    assert _step_by_id(decision, "open-selected-discovered-app").input_preview == {
         "app_name": "<selected app from desktop.list_apps>",
         "selection_source": "desktop.list_apps",
         "query": "mail",
         "action": "new_message",
     }
-    assert requests[2]["input"] == {
+    assert _step_by_id(decision, "fill-selected-communication-recipient").input_preview == {
         "app_name": "<selected app from desktop.list_apps>",
         "target": "To",
         "text": "小王",
         "role_filter": "text",
         "limit": 80,
-        "selection_source": "desktop.list_apps",
-        "query": "mail",
     }
-    assert requests[4]["input"] == {
+    assert _step_by_id(decision, "draft-selected-communication-message").input_preview == {
         "app_name": "<selected app from desktop.list_apps>",
-        "selection_source": "desktop.list_apps",
-        "query": "mail",
-    }
-    assert requests[5]["input"] == {
-        "app_name": "<selected app from desktop.list_apps>",
+        "target": "message body",
+        "text": "明天上午十点开会",
         "role_filter": "text",
         "limit": 80,
-        "selection_source": "desktop.list_apps",
-        "query": "mail",
     }
-    assert requests[5]["continue_to_model"] is True
-    assert requests[5]["deferred_tool"] == "app.focus_and_type_into_ui_element"
-    assert requests[5]["deferred_input"]["query"] == "mail"
 
 
 def test_runtime_planner_discovers_unscoped_communication_app_before_direct_send() -> None:
@@ -15984,6 +17124,11 @@ def test_runtime_planner_normalizes_named_app_scope_before_foreground_operation(
             "selection_source": "desktop.list_apps",
             "query": expected_app,
         }
+        execution_verify_input = {
+            **verify_input,
+            "selection_source": "desktop.list_apps",
+            "query": expected_app,
+        }
         assert planner_execution_tool_requests(
             planner_tool_requests(prompt, allowed_tools),
             allowed_tools,
@@ -15999,7 +17144,7 @@ def test_runtime_planner_normalizes_named_app_scope_before_foreground_operation(
             {
                 "protocol": "json_fallback",
                 "tool": "desktop.ui_elements",
-                "input": verify_input,
+                "input": execution_verify_input,
                 "source": "runtime_planner",
                 "planning_reason": "planner_desktop_operation",
             },
@@ -16450,6 +17595,7 @@ def test_runtime_planner_routes_focus_window_to_focus_window_tool() -> None:
             "desktop.list_apps",
             "desktop.windows",
             "app.focus_window",
+            "app.focus",
             "desktop.active_window",
         ],
     )
@@ -16461,6 +17607,7 @@ def test_runtime_planner_routes_focus_window_to_focus_window_tool() -> None:
         "app_name": "Slack",
         "title_contains": "general",
     }
+    assert "app_management_hint" not in decision.selected_intent.inputs
     assert [step.step_id for step in decision.plan.tool_plan.steps] == [
         "discover-desktop-state",
         "list-app-windows",
@@ -16606,6 +17753,24 @@ def test_runtime_planner_searches_running_browser_window_by_capability() -> None
         )
 
 
+@pytest.mark.parametrize(
+    "prompt",
+    (
+        "在当前打开的浏览器里如果需要就搜索 yachiyo",
+        "in the currently open browser if needed search yachiyo",
+        "在当前打开的表格应用里如果需要就把 A1 改成 hello",
+        "in the currently open spreadsheet app if needed set A1 to hello",
+    ),
+)
+def test_runtime_planner_does_not_execute_conditional_action_in_descriptive_open_app_scope(
+    prompt: str,
+) -> None:
+    decision = RuntimePlanner().decision(prompt)
+
+    assert decision.selected_intent.kind == "general"
+    assert all(step.tool_name is None for step in decision.plan.tool_plan.steps)
+
+
 def test_runtime_planner_clicks_running_browser_window_by_desktop_capability() -> None:
     for prompt, target in (
         ("在一个正在运行的浏览器窗口点击下载按钮", "下载"),
@@ -16655,9 +17820,14 @@ def test_runtime_planner_clicks_running_browser_window_by_desktop_capability() -
         assert envelope.requests[3].action_target == {
             "kind": "desktop_app",
             "action": "click_ui",
-            "selection_source": "desktop.running_apps",
-            "app_name": "<selected app from desktop.running_apps>",
-            "query": "browser",
+                "selection_source": "desktop.running_apps",
+                "app_name": "<selected app from desktop.running_apps>",
+                "query": "browser",
+                "selection_query": "browser",
+                "target": target,
+            "role_filter": "button",
+            "limit": 80,
+            "click_count": 1,
             "step_id": "operate-selected-discovered-app-ui",
         }
         assert envelope.requests[4].action_target["verified_step_ids"] == [
@@ -16749,7 +17919,6 @@ def test_runtime_planner_observes_current_ui_before_followup_click() -> None:
         "verify-desktop-result",
     ]
     assert _step_by_id(decision, "read-foreground-ui").input_preview == {
-        "target": "保存",
         "limit": 80,
         "role_filter": "button",
     }
@@ -16812,6 +17981,7 @@ def test_runtime_planner_treats_control_presence_as_observation() -> None:
                 "input": {},
                 "source": "runtime_planner",
                 "planning_reason": "planner_desktop_operation",
+                "continue_to_model": True,
             },
             {
                 "protocol": "json_fallback",
@@ -17057,6 +18227,42 @@ def test_runtime_planner_focuses_app_before_app_scoped_ui_inspection() -> None:
         )
 
 
+@pytest.mark.parametrize("app_name", ["TextEdit", "Orbit Notes"])
+def test_runtime_planner_cleans_agent_owned_new_app_instance_descriptors(
+    app_name: str,
+) -> None:
+    marker = "7070802"
+    decision = RuntimePlanner().decision(
+        (
+            "仅使用后台 CUA provider："
+            f"打开一个由 Agent 单独拥有的新 {app_name} 实例，"
+            f"在文本框输入 {marker}，随后验证同一 PID/window 中存在该精确文本。"
+            "禁止切换前台、禁止 foreground/local fallback、"
+            "禁止移动鼠标或抢占键盘焦点。"
+        ),
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open",
+            "desktop.ui_elements",
+            "desktop.type_into_ui_element",
+            "desktop.verify",
+        ],
+    )
+
+    assert decision.selected_intent.kind == "desktop_operation"
+    assert decision.selected_intent.inputs["app_name_hint"] == app_name
+    assert _step_by_id(decision, "discover-desktop-state").input_preview == {
+        "query": app_name,
+        "limit": 20,
+    }
+    assert _step_by_id(decision, "open-or-focus-app").input_preview == {
+        "app_name": app_name,
+    }
+    assert _step_by_id(decision, "verify-desktop-result").input_preview == {
+        "app_name": app_name,
+    }
+
+
 def test_runtime_planner_prefers_inspect_app_for_app_scoped_ui_inspection() -> None:
     allowed_tools = [
         "desktop.inspect_app",
@@ -17204,6 +18410,34 @@ def test_runtime_planner_routes_screen_capture_to_desktop_discovery() -> None:
     assert capture.input_preview == {"reason": "user asked to capture the screen"}
     assert capture.depends_on == []
     assert capture.approval_required is False
+
+
+def test_runtime_planner_does_not_capture_screen_for_design_code_feedback() -> None:
+    prompt = (
+        '我看了一下当前桌面，class="plan-dropdown-item" 的显示有问题，'
+        "请仅调整画面元素和 UI，并生成一个新的 html 文件。"
+    )
+
+    decision = RuntimePlanner().decision(
+        prompt,
+        allowed_tools=["screen.capture", "artifact.write", "terminal.run"],
+    )
+
+    assert decision.selected_intent.inputs.get("screen_capture_hint") is None
+    assert all(
+        step.tool_name != "screen.capture"
+        for step in decision.plan.tool_plan.steps
+    )
+
+    explicit = RuntimePlanner().decision(
+        "请截图当前桌面并修改代码",
+        allowed_tools=["screen.capture", "artifact.write", "terminal.run"],
+    )
+    assert any(
+        intent.kind == "desktop_operation"
+        and intent.inputs.get("screen_capture_hint") is not None
+        for intent in explicit.candidate_intents
+    )
 
 
 def test_runtime_planner_does_not_treat_current_screen_as_app_name() -> None:
@@ -17489,7 +18723,13 @@ def test_runtime_planner_routes_named_app_status_to_app_control() -> None:
     for prompt, app_name in cases:
         decision = RuntimePlanner().decision(
             prompt,
-            allowed_tools=["desktop.list_apps", "app.status", "desktop.running_apps"],
+            allowed_tools=[
+                "desktop.list_apps",
+                "app.status",
+                "desktop.running_apps",
+                "desktop.list_windows",
+                "desktop.verify",
+            ],
         )
 
         assert decision.selected_intent.kind == "desktop_operation"
@@ -17594,16 +18834,20 @@ def test_runtime_planner_routes_foreground_window_minimize_to_desktop_tool() -> 
     assert [step.step_id for step in decision.plan.tool_plan.steps] == [
         "discover-desktop-state",
         "manage-foreground",
-        "verify-desktop-result",
     ]
     manage = _step_by_id(decision, "manage-foreground")
     assert manage.tool_name == "desktop.minimize_window"
-    assert manage.action == "minimize_window"
+    assert manage.action == "dispatch_management"
     assert manage.risk_level == "low"
     assert manage.approval_required is False
-    assert _step_by_id(decision, "verify-desktop-result").depends_on == [
-        "manage-foreground"
-    ]
+    checkpoint = next(
+        checkpoint
+        for checkpoint in decision.plan.task_core.checkpoints
+        if checkpoint.after_step_id == "manage-foreground"
+    )
+    assert checkpoint.title == "Dispatch Manage foreground"
+    assert checkpoint.verifies == []
+    assert checkpoint.payload["requires_post_action_verification"] is False
 
     for prompt in (
         "把当前应用最小化",
@@ -17657,11 +18901,10 @@ def test_runtime_planner_routes_show_all_hidden_apps_to_foreground_tool() -> Non
     assert [step.step_id for step in decision.plan.tool_plan.steps] == [
         "discover-desktop-state",
         "manage-foreground",
-        "verify-desktop-result",
     ]
     manage = _step_by_id(decision, "manage-foreground")
     assert manage.tool_name == "desktop.show_all_apps"
-    assert manage.action == "show_all_apps"
+    assert manage.action == "dispatch_management"
     assert manage.risk_level == "low"
     assert manage.approval_required is False
     assert decision.plan.tool_plan.approvals_required == []
@@ -17672,13 +18915,6 @@ def test_runtime_planner_routes_show_all_hidden_apps_to_foreground_tool() -> Non
         {
             "protocol": "json_fallback",
             "tool": "desktop.show_all_apps",
-            "input": {},
-            "source": "runtime_planner",
-            "planning_reason": "planner_desktop_operation",
-        },
-        {
-            "protocol": "json_fallback",
-            "tool": "desktop.active_window",
             "input": {},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
@@ -17700,19 +18936,35 @@ def test_runtime_planner_marks_foreground_close_and_quit_as_approval_required() 
     assert close_decision.selected_intent.inputs["operation_hint"] == "close_window"
     close_step = _step_by_id(close_decision, "manage-foreground")
     assert close_step.tool_name == "desktop.close_window"
-    assert close_step.action == "close_window"
+    assert close_step.action == "dispatch_management"
     assert close_step.risk_level == "high"
     assert close_step.approval_required is True
+    assert close_step.depends_on == []
     assert close_decision.plan.tool_plan.approvals_required == ["manage-foreground"]
 
     assert quit_decision.selected_intent.risk_level == "high"
     assert quit_decision.selected_intent.inputs["operation_hint"] == "quit_app"
     quit_step = _step_by_id(quit_decision, "manage-foreground")
     assert quit_step.tool_name == "desktop.quit_app"
-    assert quit_step.action == "quit_app"
+    assert quit_step.action == "dispatch_management"
     assert quit_step.risk_level == "high"
     assert quit_step.approval_required is True
+    assert quit_step.depends_on == []
     assert quit_decision.plan.tool_plan.approvals_required == ["manage-foreground"]
+
+    for decision in (close_decision, quit_decision):
+        assert not any(
+            step.step_id == "verify-desktop-result"
+            for step in decision.plan.tool_plan.steps
+        )
+        checkpoint = next(
+            checkpoint
+            for checkpoint in decision.plan.task_core.checkpoints
+            if checkpoint.after_step_id == "manage-foreground"
+        )
+        assert checkpoint.title == "Dispatch Manage foreground"
+        assert checkpoint.verifies == []
+        assert checkpoint.payload["requires_post_action_verification"] is False
 
 
 def test_runtime_planner_prefers_existing_app_foreground_combination_tools() -> None:
@@ -17872,6 +19124,7 @@ def test_runtime_planner_falls_back_to_safe_app_search_field_input() -> None:
         "open-or-focus-app",
         "focus-app-search-field",
         "type-app-search-query",
+        "verify-desktop-result",
     ]
     assert _step_by_id(decision, "open-or-focus-app").tool_name == "app.focus"
     assert _step_by_id(decision, "focus-app-search-field").input_preview == {
@@ -18622,9 +19875,9 @@ def test_runtime_planner_routes_app_scoped_search_to_desktop_sequence() -> None:
         )
 
         assert scoped_shortcut_search.plan.tool_plan.missing_capabilities == []
-        assert _step_by_id(scoped_shortcut_search, "open-or-focus-app").tool_name == (
-            app_control_tool
-        )
+        assert "open-or-focus-app" not in {
+            step.step_id for step in scoped_shortcut_search.plan.tool_plan.steps
+        }
         assert _step_by_id(scoped_shortcut_search, "focus-app-search-field").tool_name == (
             app_shortcut_tool
         )
@@ -18660,9 +19913,9 @@ def test_runtime_planner_routes_app_scoped_search_to_desktop_sequence() -> None:
         )
 
         assert scoped_type_search.plan.tool_plan.missing_capabilities == []
-        assert _step_by_id(scoped_type_search, "open-or-focus-app").tool_name == (
-            app_control_tool
-        )
+        assert "open-or-focus-app" not in {
+            step.step_id for step in scoped_type_search.plan.tool_plan.steps
+        }
         assert _step_by_id(scoped_type_search, "focus-app-search-field").tool_name == (
             app_shortcut_tool
         )
@@ -18691,9 +19944,9 @@ def test_runtime_planner_routes_app_scoped_search_to_desktop_sequence() -> None:
     assert search_field_fallback.plan.tool_plan.missing_capabilities == []
     assert [step.step_id for step in search_field_fallback.plan.tool_plan.steps] == [
         "discover-desktop-state",
-        "open-or-focus-app",
         "focus-app-search-field",
         "type-app-search-query",
+        "verify-desktop-result",
     ]
     assert _step_by_id(search_field_fallback, "focus-app-search-field").tool_name == (
         "app.focus_and_safe_shortcut"
@@ -19896,6 +21149,15 @@ def test_runtime_planner_routes_spotlight_search_to_safe_shortcut_sequence() -> 
     assert _step_by_id(decision, "open-spotlight-search").input_preview == {
         "action": "spotlight_search"
     }
+    assert _step_by_id(decision, "open-spotlight-search").action == "shortcut"
+    spotlight_checkpoint = next(
+        checkpoint
+        for checkpoint in decision.plan.task_core.checkpoints
+        if checkpoint.after_step_id == "open-spotlight-search"
+    )
+    assert spotlight_checkpoint.title == "Verify Open Spotlight search"
+    assert "open-spotlight-search" in spotlight_checkpoint.verifies
+    assert spotlight_checkpoint.payload["requires_post_action_verification"] is True
     assert _step_by_id(decision, "type-spotlight-search-query").input_preview == {
         "text": "yachiyo"
     }
@@ -19960,9 +21222,7 @@ def test_runtime_planner_sequences_safe_type_then_followup_shortcut() -> None:
     assert followup.tool_name == "desktop.safe_shortcut"
     assert followup.input_preview == {"action": "copy"}
     assert followup.depends_on == ["operate-foreground-ui"]
-    assert _step_by_id(decision, "verify-desktop-result").depends_on == [
-        "operate-foreground-ui-followup"
-    ]
+    assert followup.action == "shortcut"
 
 
 def test_runtime_planner_sequences_app_scoped_safe_shortcuts() -> None:
@@ -19991,9 +21251,7 @@ def test_runtime_planner_sequences_app_scoped_safe_shortcuts() -> None:
     assert followup.tool_name == "desktop.safe_shortcut"
     assert followup.input_preview == {"action": "copy"}
     assert followup.depends_on == ["operate-foreground-ui"]
-    assert _step_by_id(decision, "verify-desktop-result").depends_on == [
-        "operate-foreground-ui-followup"
-    ]
+    assert followup.action == "shortcut"
 
 
 def test_runtime_planner_focuses_opened_app_before_generic_foreground_shortcut() -> None:
@@ -20149,7 +21407,6 @@ def test_runtime_planner_routes_remaining_app_scoped_legacy_samples() -> None:
     assert close_step.tool_name == "desktop.close_window"
     assert close_step.approval_required is True
     assert planner_direct_tool_requests("微信关闭窗口", allowed) == [
-        _app_discovery_request("WeChat"),
         {
             "protocol": "json_fallback",
             "tool": "app.focus",
@@ -20160,13 +21417,6 @@ def test_runtime_planner_routes_remaining_app_scoped_legacy_samples() -> None:
         {
             "protocol": "json_fallback",
             "tool": "desktop.close_window",
-            "input": {},
-            "source": "runtime_planner",
-            "planning_reason": "planner_desktop_operation",
-        },
-        {
-            "protocol": "json_fallback",
-            "tool": "desktop.active_window",
             "input": {},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
@@ -20208,13 +21458,6 @@ def test_runtime_planner_routes_remaining_app_scoped_legacy_samples() -> None:
         _app_discovery_request("Finder"),
         {
             "protocol": "json_fallback",
-            "tool": "app.focus",
-            "input": {"app_name": "Finder"},
-            "source": "runtime_planner",
-            "planning_reason": "planner_desktop_operation",
-        },
-        {
-            "protocol": "json_fallback",
             "tool": "app.focus_and_safe_shortcut",
             "input": {"app_name": "Finder", "action": "find"},
             "source": "runtime_planner",
@@ -20237,7 +21480,11 @@ def test_runtime_planner_routes_remaining_app_scoped_legacy_samples() -> None:
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {"app_name": "Finder"},
+            "input": {
+                "app_name": "Finder",
+                "role_filter": "text",
+                "limit": 80,
+            },
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -20465,7 +21712,6 @@ def test_runtime_planner_routes_generic_app_new_document_shortcuts() -> None:
             "continue_to_model": True,
         },
     ]
-
     titled_container_variants = (
         (
             "打开 Obsidian 新建一篇标题为周报的文档",
@@ -20586,26 +21832,380 @@ def test_runtime_planner_routes_generic_app_new_document_shortcuts() -> None:
     ).input_preview == {"text": "Oha Yachiyo"}
 
 
-def test_runtime_planner_verifies_followup_ui_operations_with_ui_read_first() -> None:
+def test_system_volume_status_is_bound_to_exact_source_step_and_plan() -> None:
+    requests = planner_execution_tool_requests(
+        [
+            {
+                "protocol": "tool_calls",
+                "tool": "system.volume",
+                "input": {"action": "set", "level": 30},
+                "tool_call_id": "call-volume",
+                "run_id": "run-1",
+                "decision_id": "decision-1",
+                "plan_id": "plan-1",
+                "step_id": "control-system-state",
+                "planner_step_id": "control-system-state",
+                "core_id": "core-1",
+                "workspace_id": "workspace-1",
+                "task_todo": {
+                    "todo_id": "todo-control",
+                    "step_id": "control-system-state",
+                    "status": "pending",
+                },
+                "task_checkpoints": [
+                    {
+                        "checkpoint_id": "checkpoint-control",
+                        "after_step_id": "control-system-state",
+                        "status": "planned",
+                    }
+                ],
+            },
+            {
+                "protocol": "json_fallback",
+                "tool": "system.volume",
+                "input": {"action": "status"},
+                "source": "runtime_verification",
+                "planning_reason": "runtime_system_control_verification",
+                "continue_to_model": True,
+            },
+        ],
+        allowed_tools=["system.volume"],
+    )
+
+    verifier = requests[1]
+    assert verifier["run_id"] == "run-1"
+    assert verifier["decision_id"] == "decision-1"
+    assert verifier["plan_id"] == "plan-1"
+    assert verifier["step_id"] == "control-system-state:runtime-verify"
+    assert verifier["planner_step_id"] == "control-system-state:runtime-verify"
+    assert verifier["source_step_id"] == "control-system-state"
+    assert verifier["source_tool_call_id"] == "call-volume"
+    assert verifier["depends_on"] == ["control-system-state"]
+    assert verifier["runtime_stage"] == "verify"
+    assert verifier["runtime_role"] == "verify_result"
+    assert verifier["requires_observation"] is True
+    assert verifier["requires_post_action_verification"] is False
+    assert verifier["verification_targets"] == [
+        {
+            "step_id": "control-system-state",
+            "todo": {
+                "todo_id": "todo-control",
+                "step_id": "control-system-state",
+                "status": "pending",
+            },
+            "checkpoints": [
+                {
+                    "checkpoint_id": "checkpoint-control",
+                    "after_step_id": "control-system-state",
+                    "status": "planned",
+                }
+            ],
+        }
+    ]
+    assert verifier["task_verification_targets"] == verifier["verification_targets"]
+
+
+def test_runtime_planner_verifies_type_before_followup_dispatch_without_claiming_copy() -> None:
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open_and_safe_type_text",
+        "desktop.safe_shortcut",
+        "desktop.ui_elements",
+    ]
     decision = RuntimePlanner().decision(
         "打开 Notes，输入 hello，再复制",
+        allowed_tools=allowed_tools,
+    )
+
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "discover-desktop-state",
+        "operate-foreground-ui",
+        "verify-desktop-result",
+        "operate-foreground-ui-followup",
+        "verify-desktop-result-2",
+    ]
+    verify = _step_by_id(decision, "verify-desktop-result")
+    assert verify.tool_name == "desktop.ui_elements"
+    assert verify.depends_on == ["operate-foreground-ui"]
+    followup = _step_by_id(decision, "operate-foreground-ui-followup")
+    assert followup.action == "shortcut"
+    assert followup.depends_on == ["verify-desktop-result"]
+    followup_checkpoint = next(
+        checkpoint
+        for checkpoint in decision.plan.task_core.checkpoints
+        if checkpoint.after_step_id == followup.step_id
+    )
+    assert followup_checkpoint.title == "Verify Operate foreground UI"
+    assert followup.step_id in followup_checkpoint.verifies
+    assert followup_checkpoint.payload["requires_post_action_verification"] is True
+
+    requests = planner_tool_requests_for_decision(
+        decision,
+        allowed_tools,
+        direct=True,
+        execution_normalized=False,
+    )
+    verify_request = next(
+        request for request in requests if request["step_id"] == "verify-desktop-result"
+    )
+    assert [
+        target["step_id"]
+        for target in verify_request["verification_targets"]
+    ] == ["operate-foreground-ui"]
+    copy_request = next(
+        request
+        for request in requests
+        if request["step_id"] == "operate-foreground-ui-followup"
+    )
+    assert copy_request["requires_post_action_verification"] is True
+    assert not copy_request.get("verification_targets")
+    final_verify_request = next(
+        request for request in requests if request["step_id"] == "verify-desktop-result-2"
+    )
+    assert [
+        target["step_id"]
+        for target in final_verify_request["verification_targets"]
+    ] == ["operate-foreground-ui-followup"]
+
+
+def test_runtime_planner_keeps_pure_copy_unverified_until_clipboard_evidence() -> None:
+    decision = RuntimePlanner().decision(
+        "复制当前选中内容",
         allowed_tools=[
             "desktop.active_window",
-            "app.open_and_safe_type_text",
             "desktop.safe_shortcut",
             "desktop.ui_elements",
         ],
     )
 
-    verify = _step_by_id(decision, "verify-desktop-result")
-    assert verify.tool_name == "desktop.ui_elements"
-    assert verify.action == "read_ui"
-    assert verify.depends_on == ["operate-foreground-ui-followup"]
+    operation = _step_by_id(decision, "operate-foreground-ui")
+    assert operation.action == "shortcut"
+    assert _step_by_id(decision, "verify-desktop-result").depends_on == [
+        operation.step_id
+    ]
+    checkpoint = next(
+        checkpoint
+        for checkpoint in decision.plan.task_core.checkpoints
+        if checkpoint.after_step_id == operation.step_id
+    )
+    assert checkpoint.title == "Verify Operate foreground UI"
+    assert operation.step_id in checkpoint.verifies
+    assert checkpoint.payload["requires_post_action_verification"] is True
 
 
-def test_planner_execution_keeps_ui_verification_after_ui_operations() -> None:
+def test_runtime_planner_labels_dispatch_checkpoint_without_verification_claim() -> None:
+    decision = RuntimePlanner().decision(
+        "按下一页键",
+        allowed_tools=["desktop.active_window", "desktop.safe_key"],
+    )
+
+    dispatch_step = _step_by_id(decision, "operate-foreground-ui")
+    assert dispatch_step.action == "dispatch_shortcut"
+
+    dispatch_checkpoints = [
+        checkpoint
+        for checkpoint in decision.plan.task_core.checkpoints
+        if checkpoint.after_step_id == dispatch_step.step_id
+    ]
+    assert [checkpoint.title for checkpoint in dispatch_checkpoints] == [
+        "Dispatch Operate foreground UI"
+    ]
+    assert dispatch_checkpoints[0].verifies == []
+    assert dispatch_checkpoints[0].payload["requires_post_action_verification"] is False
+    assert not any(
+        signal.source_step_id == dispatch_step.step_id
+        and signal.trigger == "verification_failed"
+        for signal in decision.plan.task_core.replan_signals
+    )
+
+
+def test_runtime_execution_preserves_approved_hotkey_dispatch_contract() -> None:
+    allowed_tools = ["desktop.hotkey", "desktop.ui_elements"]
+    decision = RuntimePlanner().decision(
+        "按 Command+L",
+        allowed_tools=allowed_tools,
+    )
+    step = _step_by_id(decision, "operate-foreground-ui")
+    assert step.action == "dispatch_shortcut"
+    assert step.approval_required is True
+
+    traced = planner_tool_requests_for_decision(
+        decision,
+        allowed_tools,
+        direct=True,
+        execution_normalized=False,
+    )
+    assert traced[0]["task_todo"]["metadata"]["action"] == "dispatch_shortcut"
+    assert traced[0]["requires_post_action_verification"] is False
+
+    envelope = runtime_execution_envelope_from_decision(
+        decision,
+        allowed_tools=allowed_tools,
+        full_plan=True,
+    )
+    assert envelope is not None
+    request = next(
+        request
+        for request in envelope.requests
+        if request.tool_name == "desktop.hotkey"
+    )
+    assert request.approval_required is True
+    assert request.requires_post_action_verification is False
+    assert request.checkpoint_policy is not None
+    assert request.checkpoint_policy.requires_post_action_verification is False
+    assert request.desktop_loop is not None
+    assert request.desktop_loop.action == "dispatch_shortcut"
+    assert request.desktop_loop.requires_post_action_verification is False
+    assert request.desktop_loop.can_auto_retry is False
+    assert request.action_target["action"] == "dispatch_shortcut"
+    assert request.observation_retry == {}
+
+    projected = runtime_execution_requests_from_envelope_payload(
+        envelope.model_dump(mode="json"),
+        allowed_tools=allowed_tools,
+    )
+    hotkey_request = next(
+        request for request in projected if request["tool"] == "desktop.hotkey"
+    )
+    assert hotkey_request["approval_required"] is True
+    assert hotkey_request["requires_post_action_verification"] is False
+
+    stale = {
+        **hotkey_request,
+        "requires_post_action_verification": True,
+        "checkpoint_policy": {
+            **hotkey_request["checkpoint_policy"],
+            "requires_post_action_verification": True,
+        },
+    }
+    normalized = planner_execution_tool_requests([stale], allowed_tools)
+    assert normalized[0]["approval_required"] is True
+    assert normalized[0]["requires_post_action_verification"] is False
+    assert normalized[0]["checkpoint_policy"][
+        "requires_post_action_verification"
+    ] is False
+    assert normalized[0]["desktop_loop"]["action"] == "dispatch_shortcut"
+    assert normalized[0]["desktop_loop"]["can_auto_retry"] is False
+    assert normalized[0]["observation_retry"] == {}
+
+    for prompt, tool_name, dispatch_action in (
+        ("按回车提交", "desktop.submit_foreground", "dispatch_submit"),
+        ("关闭当前窗口", "desktop.close_window", "dispatch_management"),
+    ):
+        scoped_decision = RuntimePlanner().decision(
+            prompt,
+            allowed_tools=[tool_name],
+        )
+        scoped_envelope = runtime_execution_envelope_from_decision(
+            scoped_decision,
+            allowed_tools=[tool_name],
+            full_plan=True,
+        )
+        assert scoped_envelope is not None
+        scoped_request = next(
+            request
+            for request in scoped_envelope.requests
+            if request.tool_name == tool_name
+        )
+        assert scoped_request.approval_required is True
+        assert scoped_request.requires_post_action_verification is False
+        assert scoped_request.action_target["action"] == dispatch_action
+
+
+def test_runtime_execution_keeps_effect_shortcut_verification_contract() -> None:
+    allowed_tools = ["desktop.safe_shortcut", "desktop.ui_elements"]
+    decision = RuntimePlanner().decision(
+        "当前应用新建笔记",
+        allowed_tools=allowed_tools,
+    )
+    operation = _step_by_id(decision, "operate-foreground-ui")
+    assert operation.action == "shortcut"
+
+    envelope = runtime_execution_envelope_from_decision(
+        decision,
+        allowed_tools=allowed_tools,
+        full_plan=True,
+    )
+    assert envelope is not None
+    request = next(
+        request
+        for request in envelope.requests
+        if request.tool_name == "desktop.safe_shortcut"
+    )
+    assert request.requires_post_action_verification is True
+    assert request.checkpoint_policy is not None
+    assert request.checkpoint_policy.requires_post_action_verification is True
+
+
+def test_dispatch_contract_does_not_override_canonical_non_dispatch_step() -> None:
+    decision = RuntimePlanner().decision(
+        "当前应用新建笔记",
+        allowed_tools=["desktop.safe_shortcut", "desktop.ui_elements"],
+    )
+    step = _step_by_id(decision, "operate-foreground-ui")
+    assert step.action == "shortcut"
+
+    spoofed_request = {
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "new_note"},
+        "action": "dispatch_shortcut",
+        "task_todo": {"metadata": {"action": "dispatch_shortcut"}},
+    }
+
+    assert runtime_execution_module._execution_request_dispatch_action(
+        spoofed_request,
+        step,
+    ) == ""
+
+
+def test_dispatch_contract_without_step_uses_tool_input_allowlist() -> None:
+    spoofed_effect_shortcut = {
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "new_note"},
+        "action": "dispatch_shortcut",
+        "task_todo": {"metadata": {"action": "dispatch_shortcut"}},
+    }
+    hotkey = {
+        "tool": "desktop.hotkey",
+        "input": {"key": "l", "modifiers": ["command"]},
+    }
+
+    assert runtime_execution_module._execution_request_dispatch_action(
+        spoofed_effect_shortcut,
+        None,
+    ) == ""
+    assert runtime_execution_module._execution_request_dispatch_action(
+        hotkey,
+        None,
+    ) == "dispatch_shortcut"
+    assert runtime_execution_module._execution_request_dispatch_action(
+        {**hotkey, "input": {**hotkey["input"], "target": "spoof"}},
+        None,
+    ) == ""
+    assert planner_execution_module._request_with_explicit_dispatch_contract(
+        {
+            **spoofed_effect_shortcut,
+            "requires_post_action_verification": True,
+            "checkpoint_policy": {
+                "requires_post_action_verification": True,
+                "verification_target_step_ids": ["operate-foreground-ui"],
+            },
+        }
+    )["requires_post_action_verification"] is True
+    assert planner_execution_module._request_with_explicit_dispatch_contract(
+        {
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "send"},
+            "action": "dispatch_submit",
+            "requires_post_action_verification": True,
+            "task_todo": {"metadata": {"action": "send_message"}},
+        }
+    )["requires_post_action_verification"] is True
+
+
+def test_planner_execution_keeps_type_verifier_before_followup_dispatch() -> None:
     allowed_tools = [
-        "desktop.active_window",
+        "desktop.list_apps",
         "app.open_and_safe_type_text",
         "desktop.safe_shortcut",
         "desktop.ui_elements",
@@ -20616,7 +22216,9 @@ def test_planner_execution_keeps_ui_verification_after_ui_operations() -> None:
     )
 
     assert [request["tool"] for request in requests] == [
+        "desktop.list_apps",
         "app.open_and_safe_type_text",
+        "desktop.ui_elements",
         "desktop.safe_shortcut",
         "desktop.ui_elements",
     ]
@@ -20624,10 +22226,142 @@ def test_planner_execution_keeps_ui_verification_after_ui_operations() -> None:
         request["tool"]
         for request in planner_execution_tool_requests(requests, allowed_tools)
     ] == [
+        "desktop.list_apps",
         "app.open_and_safe_type_text",
+        "desktop.ui_elements",
         "desktop.safe_shortcut",
         "desktop.ui_elements",
     ]
+
+    decision = RuntimePlanner().decision(
+        "打开 Notes，输入 hello，再复制",
+        allowed_tools=allowed_tools,
+    )
+    envelope = runtime_execution_envelope_from_decision(
+        decision,
+        allowed_tools=allowed_tools,
+        full_plan=True,
+    )
+    assert envelope is not None
+    projected = runtime_execution_requests_from_envelope_payload(
+        envelope.model_dump(mode="json"),
+        allowed_tools=allowed_tools,
+    )
+    assert [request["tool"] for request in projected] == [
+        "desktop.list_apps",
+        "app.open_and_safe_type_text",
+        "desktop.ui_elements",
+        "desktop.safe_shortcut",
+        "desktop.ui_elements",
+    ]
+    assert projected[2]["continue_to_model"] is True
+    assert projected[3]["depends_on"] == ["verify-desktop-result"]
+
+    normalized = planner_execution_tool_requests(projected, allowed_tools)
+    assert [request["tool"] for request in normalized] == [
+        "desktop.list_apps",
+        "app.open_and_safe_type_text",
+        "desktop.ui_elements",
+    ]
+    assert all(request["tool"] != "desktop.safe_shortcut" for request in normalized)
+
+
+def test_execution_prefix_still_stops_at_pending_dynamic_target() -> None:
+    observation = {
+        "tool": "desktop.ui_elements",
+        "input": {"app_name": "Notes"},
+        "step_id": "observe-dynamic-target",
+        "runtime_stage": "operate",
+        "runtime_role": "inspect_ui",
+        "continue_to_model": True,
+        "deferred_tool": "desktop.click_ui_element",
+        "deferred_input": {"target": "<selected UI element>"},
+    }
+    premature_dispatch = {
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "copy"},
+        "step_id": "copy-after-dynamic-target",
+        "depends_on": ["observe-dynamic-target"],
+        "requires_post_action_verification": False,
+        "task_todo": {"metadata": {"action": "dispatch_shortcut"}},
+    }
+
+    assert _execution_prefix_through_model_followup(
+        [observation, premature_dispatch]
+    ) == [observation]
+
+    exact_verifier = {
+        "tool": "desktop.ui_elements",
+        "input": {"app_name": "Notes"},
+        "step_id": "verify-type",
+        "runtime_stage": "verify",
+        "runtime_role": "verify_result",
+        "continue_to_model": True,
+        "verification_targets": [{"step_id": "type-text"}],
+    }
+    missing_dependency_dispatch = {
+        **premature_dispatch,
+        "step_id": "copy-after-missing-step",
+        "depends_on": ["verify-type", "unexecuted-step"],
+    }
+    assert _execution_prefix_through_model_followup(
+        [exact_verifier, missing_dependency_dispatch]
+    ) == [exact_verifier]
+
+
+@pytest.mark.parametrize(
+    "spoofed_dispatch_metadata",
+    [
+        {"action": "dispatch_shortcut"},
+        {"task_todo": {"metadata": {"action": "dispatch_shortcut"}}},
+    ],
+)
+def test_verifier_boundary_recomputes_dispatch_from_tool_input(
+    spoofed_dispatch_metadata: dict[str, Any],
+) -> None:
+    source = {
+        "tool": "desktop.safe_type_text",
+        "input": {"text": "hello"},
+        "step_id": "type-text",
+        "runtime_stage": "operate",
+        "runtime_role": "execute_action",
+        "requires_post_action_verification": True,
+    }
+    verifier = {
+        "tool": "desktop.ui_elements",
+        "input": {"app_name": "Notes"},
+        "step_id": "verify-type",
+        "runtime_stage": "verify",
+        "runtime_role": "verify_result",
+        "continue_to_model": True,
+        "verification_targets": [{"step_id": "type-text"}],
+        "depends_on": ["type-text"],
+    }
+    spoofed_effect_shortcut = {
+        "tool": "desktop.safe_shortcut",
+        "input": {"action": "new_note"},
+        "step_id": "new-note-after-verifier",
+        "runtime_stage": "operate",
+        "runtime_role": "execute_action",
+        "depends_on": ["verify-type"],
+        "requires_post_action_verification": False,
+        **spoofed_dispatch_metadata,
+    }
+
+    assert _execution_prefix_through_model_followup(
+        [source, verifier, spoofed_effect_shortcut]
+    ) == [source, verifier]
+    assert [
+        request["tool"]
+        for request in planner_execution_tool_requests(
+            [source, verifier, spoofed_effect_shortcut],
+            [
+                "desktop.safe_type_text",
+                "desktop.ui_elements",
+                "desktop.safe_shortcut",
+            ],
+        )
+    ] == ["desktop.safe_type_text", "desktop.ui_elements"]
 
 
 def test_planner_execution_preserves_discovered_app_safe_shortcut_verification_chain() -> None:
@@ -21141,6 +22875,48 @@ def test_runtime_planner_verifies_desktop_open_result() -> None:
     assert _step_by_id(decision, "verify-desktop-result").depends_on == ["open-or-focus-app"]
 
 
+def test_runtime_planner_opens_control_center_without_submit_false_positive() -> None:
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.submit_foreground",
+        "desktop.active_window",
+    ]
+
+    for prompt, app_name_hint in (
+        ("open control center", "control center"),
+        ("打开控制中心", "控制中心"),
+    ):
+        decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+
+        assert decision.selected_intent.kind == "desktop_operation"
+        assert decision.selected_intent.inputs["app_name_hint"] == app_name_hint
+        assert "foreground_submit_action_hint" not in decision.selected_intent.inputs
+        assert _step_by_id(decision, "open-or-focus-app").input_preview == {
+            "app_name": app_name_hint,
+        }
+        assert all(
+            step.tool_name != "desktop.submit_foreground"
+            for step in decision.plan.tool_plan.steps
+        )
+
+
+def test_runtime_planner_preserves_explicit_click_then_submit() -> None:
+    allowed_tools = [
+        "desktop.click_ui_element",
+        "desktop.submit_foreground",
+        "desktop.ui_elements",
+    ]
+
+    for prompt in ("click Export then submit", "点击保存然后提交"):
+        decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+        submit = _step_by_id(decision, "submit-foreground-ui")
+
+        assert submit.tool_name == "desktop.submit_foreground"
+        assert submit.input_preview == {"action": "confirm"}
+        assert submit.depends_on == ["operate-foreground-ui"]
+
+
 def test_runtime_planner_cleans_polite_app_name_suffixes() -> None:
     cases = (
         ("可以帮我打开 Word 吗", "Word"),
@@ -21231,7 +23007,12 @@ def test_runtime_planner_routes_pure_foreground_submit_to_approval_gate() -> Non
         assert submit.input_preview == {"action": action}
         assert submit.risk_level == "high"
         assert submit.approval_required is True
-        assert submit.depends_on == ["discover-desktop-state"]
+        assert submit.depends_on == []
+        assert submit.action == "dispatch_submit"
+        assert all(
+            step.step_id != "verify-desktop-result"
+            for step in decision.plan.tool_plan.steps
+        )
 
 
 def test_runtime_planner_routes_foreground_search_submit_to_safe_submit() -> None:
@@ -21301,6 +23082,8 @@ def test_runtime_planner_focuses_app_before_foreground_submit() -> None:
         ("在 Slack 里发送", "Slack"),
         ("在微信里确认发送", "WeChat"),
         ("Slack send", "Slack"),
+        ("Chrome press return to send", "Google Chrome"),
+        ("WeChat press enter to send", "WeChat"),
     ):
         scoped_decision = RuntimePlanner().decision(
             prompt,
@@ -21324,6 +23107,10 @@ def test_runtime_planner_focuses_app_before_foreground_submit() -> None:
         assert submit.risk_level == "high"
         assert submit.approval_required is True
         assert submit.depends_on == ["open-or-focus-app"]
+        assert all(
+            "text" not in (step.input_preview or {})
+            for step in scoped_decision.plan.tool_plan.steps
+        )
 
 
 def test_runtime_planner_keeps_plain_current_window_enter_as_hotkey() -> None:
@@ -21387,15 +23174,21 @@ def test_runtime_planner_routes_app_scoped_compose_then_send() -> None:
             "desktop.ui_elements",
         ],
     )
+    publish_prompt = "打开 TextEdit 写一份 Oha Yachiyo 发布检查清单"
+    publish_allowed_tools = [
+        "desktop.list_apps",
+        "app.open_and_safe_type_text",
+        "desktop.safe_type_text",
+        "desktop.submit_foreground",
+        "desktop.ui_elements",
+    ]
+    publish_decision = RuntimePlanner().decision(
+        publish_prompt,
+        allowed_tools=publish_allowed_tools,
+    )
     publish_note = planner_direct_tool_requests(
-        "打开 TextEdit 写一份 Oha Yachiyo 发布检查清单",
-        [
-            "desktop.list_apps",
-            "app.open_and_safe_type_text",
-            "desktop.safe_type_text",
-            "desktop.submit_foreground",
-            "desktop.ui_elements",
-        ],
+        publish_prompt,
+        publish_allowed_tools,
     )
 
     assert focus == [
@@ -21434,22 +23227,21 @@ def test_runtime_planner_routes_app_scoped_compose_then_send() -> None:
         _app_discovery_request("TextEdit"),
         {
             "protocol": "json_fallback",
-            "tool": "app.open_and_safe_type_text",
-            "input": {
-                "app_name": "TextEdit",
-                "text": "一份 Oha Yachiyo 发布检查清单",
-            },
-            "source": "runtime_planner",
-            "planning_reason": "planner_desktop_operation",
-        },
-        {
-            "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
             "input": {"app_name": "TextEdit"},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
+            "continue_to_model": True,
         },
     ]
+    assert publish_decision.selected_intent.inputs["model_generated_content_hint"] == {
+        "body_source": "model_generated_content",
+        "brief": "一份 Oha Yachiyo 发布检查清单",
+    }
+    assert all(
+        "text" not in step.input_preview
+        for step in publish_decision.plan.tool_plan.steps
+    )
     assert open_app == [
         {
             "protocol": "json_fallback",
@@ -21751,7 +23543,7 @@ def test_runtime_planner_prefers_generic_music_app_playback_when_available() -> 
     assert step.input_preview == {"app_name": "Music"}
 
 
-def test_runtime_planner_verifies_simple_media_playback_when_available() -> None:
+def test_runtime_planner_uses_structured_result_for_dedicated_media_playback() -> None:
     decision = RuntimePlanner().decision(
         "能帮我播放 Apple Music 吗",
         allowed_tools=[
@@ -21763,20 +23555,11 @@ def test_runtime_planner_verifies_simple_media_playback_when_available() -> None
     assert decision.selected_intent.kind == "media_playback"
     assert [step.step_id for step in decision.plan.tool_plan.steps] == [
         "control-media-playback",
-        "verify-media-playback",
     ]
     assert _step_by_id(decision, "control-media-playback").tool_name == (
         "media.music_app_open_and_play"
     )
-    verify = _step_by_id(decision, "verify-media-playback")
-    assert verify.tool_name == "desktop.ui_elements"
-    assert verify.input_preview == {"role_filter": "", "limit": 80}
-    assert verify.depends_on == ["control-media-playback"]
-    assert verify.action == "read_ui"
-    assert decision.plan.tool_plan.required_capabilities == [
-        "media.playback",
-        "desktop.app_discovery",
-    ]
+    assert decision.plan.tool_plan.required_capabilities == ["media.playback"]
 
 
 def test_runtime_planner_prepares_media_app_when_playback_tool_is_missing() -> None:
@@ -22063,7 +23846,60 @@ def test_runtime_planner_routes_media_query_to_apple_music_search_play() -> None
         assert step.input_preview == {"query": query}
 
 
-def test_runtime_planner_falls_back_to_generic_music_app_for_apple_music_query() -> None:
+def test_runtime_planner_passes_quoted_media_query_through_to_apple_music() -> None:
+    prompt = (
+        "帮我打开 Apple Music，搜索“超时空辉夜姬”相关的音乐；"
+        "尽量在后台完成，不要抢占鼠标键盘。"
+        "如果只能打开搜索而不能播放，请如实说明完成到了哪一步。"
+    )
+
+    decision = RuntimePlanner().decision(
+        prompt,
+        allowed_tools=["media.apple_music_play"],
+    )
+
+    playback = _step_by_id(decision, "control-media-playback")
+    assert playback.tool_name == "media.apple_music_play"
+    assert playback.input_preview == {"query": "超时空辉夜姬"}
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        "请问如果只能在 Apple Music 搜索周杰伦而不能播放，请如实说明",
+        "请问如果只能在 Apple Music 搜索“周杰伦”而不能播放，请如实说明",
+        "If Apple Music can only search for Taylor Swift but cannot play it, "
+        "tell me honestly.",
+    ],
+)
+def test_runtime_planner_does_not_plan_media_tools_for_failure_conditions(
+    prompt: str,
+) -> None:
+    media_tools = {"media.apple_music_play", "media.apple_music_control"}
+
+    decision = RuntimePlanner().decision(
+        prompt,
+        allowed_tools=sorted(media_tools),
+    )
+
+    assert decision.selected_intent.kind != "media_playback"
+    assert all(step.tool_name not in media_tools for step in decision.plan.tool_plan.steps)
+
+
+def test_runtime_planner_routes_polite_conditional_media_command() -> None:
+    decision = RuntimePlanner().decision(
+        "如果可以的话播放周杰伦",
+        allowed_tools=["media.apple_music_play"],
+    )
+
+    assert decision.selected_intent.kind == "media_playback"
+    assert decision.selected_intent.inputs["query"] == "周杰伦"
+    playback = _step_by_id(decision, "control-media-playback")
+    assert playback.tool_name == "media.apple_music_play"
+    assert playback.input_preview == {"query": "周杰伦"}
+
+
+def test_runtime_planner_does_not_drop_apple_music_query_into_generic_play() -> None:
     decision = RuntimePlanner().decision(
         "用 Apple Music 播放 超时空净夜",
         allowed_tools=["media.music_app_open_and_play", "desktop.ui_elements"],
@@ -22081,16 +23917,16 @@ def test_runtime_planner_falls_back_to_generic_music_app_for_apple_music_query()
         "verify-media-playback",
     ]
     playback = _step_by_id(decision, "control-media-playback")
-    assert playback.tool_name == "media.music_app_open_and_play"
-    assert playback.input_preview == {"app_name": "Music"}
-    assert playback.status == "planned"
+    assert playback.tool_name is None
+    assert playback.input_preview == {}
+    assert playback.status == "unavailable"
     assert _step_by_id(decision, "verify-media-playback").depends_on == [
         "control-media-playback"
     ]
-    assert decision.plan.tool_plan.missing_capabilities == []
+    assert decision.plan.tool_plan.missing_capabilities == ["media.playback"]
 
 
-def test_runtime_planner_prefers_discovered_media_app_operation_for_apple_music_query() -> None:
+def test_runtime_planner_prefers_dedicated_apple_music_query_tool() -> None:
     decision = RuntimePlanner().decision(
         "打开 Apple Music 播放超时空辉夜姬",
         allowed_tools=[
@@ -22112,36 +23948,13 @@ def test_runtime_planner_prefers_discovered_media_app_operation_for_apple_music_
         "control_only": "",
     }
     assert [step.step_id for step in decision.plan.tool_plan.steps] == [
-        "discover-media-app",
-        "focus-media-app-search",
-        "type-media-search-query",
-        "submit-media-search",
-        "play-media-search-result",
-        "verify-media-search",
+        "control-media-playback"
     ]
-    assert [step.tool_name for step in decision.plan.tool_plan.steps] == [
-        "desktop.list_apps",
-        "app.open_and_safe_shortcut",
-        "desktop.safe_type_text",
-        "desktop.search_submit",
-        "media.music_app_open_and_play",
-        "desktop.ui_elements",
-    ]
-    assert _step_by_id(decision, "discover-media-app").input_preview == {
-        "query": "Music",
-        "limit": 20,
-    }
-    assert _step_by_id(decision, "play-media-search-result").input_preview == {
-        "app_name": "Music"
-    }
-    assert decision.plan.tool_plan.required_capabilities == [
-        "desktop.app_discovery",
-        "desktop.ui_operation",
-        "media.playback",
-    ]
-    assert "media.apple_music_play" not in [
-        step.tool_name for step in decision.plan.tool_plan.steps
-    ]
+    playback = _step_by_id(decision, "control-media-playback")
+    assert playback.tool_name == "media.apple_music_play"
+    assert playback.input_preview == {"query": "超时空辉夜姬"}
+    assert decision.plan.tool_plan.required_capabilities == ["media.playback"]
+    assert decision.plan.tool_plan.missing_capabilities == []
 
 
 def test_runtime_planner_plays_media_query_with_generic_desktop_tools() -> None:
@@ -22451,11 +24264,9 @@ def test_runtime_planner_uses_legacy_media_tool_for_plain_song_when_only_legacy_
     }
     assert [step.step_id for step in decision.plan.tool_plan.steps] == [
         "control-media-playback",
-        "verify-media-playback",
     ]
     assert [step.tool_name for step in decision.plan.tool_plan.steps] == [
         "media.apple_music_play",
-        "desktop.ui_elements",
     ]
     assert _step_by_id(decision, "control-media-playback").input_preview == {
         "query": "超时空辉夜姬"
@@ -22725,6 +24536,8 @@ def test_runtime_planner_routes_natural_media_controls_to_media_tools() -> None:
     cases = (
         ("切歌", "next"),
         ("跳过这首", "next"),
+        ("skip this song", "next"),
+        ("next media track", "next"),
         ("别放了", "pause"),
         ("prev track", "previous"),
         ("stop", "pause"),
@@ -22735,7 +24548,11 @@ def test_runtime_planner_routes_natural_media_controls_to_media_tools() -> None:
     for prompt, action in cases:
         decision = RuntimePlanner().decision(
             prompt,
-            allowed_tools=["media.system_control", "desktop.running_apps"],
+            allowed_tools=[
+                "media.system_control",
+                "desktop.running_apps",
+                "desktop.ui_elements",
+            ],
             metadata={"daily_desktop_intent": True},
         )
 
@@ -22745,12 +24562,27 @@ def test_runtime_planner_routes_natural_media_controls_to_media_tools() -> None:
         step = _step_by_id(decision, "control-media-playback")
         assert step.tool_name == "media.system_control"
         assert step.input_preview == {"action": action}
+        assert [item.step_id for item in decision.plan.tool_plan.steps] == [
+            "control-media-playback"
+        ]
 
     for prompt in ("播放列表", "播放到 30%"):
         decision = RuntimePlanner().decision(
             prompt,
             allowed_tools=["media.system_control", "desktop.running_apps"],
             metadata={"daily_desktop_intent": True},
+        )
+        assert decision.selected_intent.kind != "media_playback"
+
+    for prompt in (
+        "Use skip branch",
+        "Return decision: ship or decision: skip.\nUse ship branch",
+        "Explain the next step",
+        "跳过这个步骤",
+    ):
+        decision = RuntimePlanner().decision(
+            prompt,
+            allowed_tools=["media.system_control"],
         )
         assert decision.selected_intent.kind != "media_playback"
 
@@ -25504,7 +27336,9 @@ def test_runtime_planner_routes_generated_context_to_direct_communication() -> N
         "body_source": "current_page_content",
         "transform": "summary",
     }
-    assert _step_by_id(email_draft, "draft-communication-message").approval_required is False
+    email_draft_step = _step_by_id(email_draft, "draft-communication-message")
+    assert email_draft_step.risk_level == "medium"
+    assert email_draft_step.approval_required is True
 
     assert current_window.selected_intent.kind == "communication"
     assert current_window.selected_intent.inputs["context_source"] == "visible_text"
@@ -26124,6 +27958,9 @@ def test_runtime_planner_prefetches_non_message_app_search_result_before_deliver
             "input": {},
             "source": "runtime_planner",
             "planning_reason": "planner_prefetch_communication_context",
+            "requires_post_action_verification": False,
+            "observation_retry": {},
+            "replan_triggers": [],
         },
         {
             "protocol": "json_fallback",
@@ -26612,6 +28449,15 @@ def test_runtime_planner_routes_clipboard_write_to_clipboard_capability() -> Non
     assert step.tool_name == "clipboard.write"
     assert step.input_preview == {"text": "hello"}
 
+    verified_write = RuntimePlanner().decision(
+        "把 hello 复制到剪贴板",
+        allowed_tools=["clipboard.write", "clipboard.read"],
+    )
+    verify_step = _step_by_id(verified_write, "verify-clipboard-write")
+    assert verify_step.tool_name == "clipboard.read"
+    assert verify_step.action == "verify"
+    assert verify_step.depends_on == ["write-clipboard"]
+
     for prompt in (
         "设置剪贴板为 hello",
         "set clipboard to hello",
@@ -26757,9 +28603,14 @@ def test_runtime_planner_routes_clipboard_meeting_minutes_to_report_artifact() -
 
 
 def test_runtime_planner_routes_selected_text_read_through_clipboard() -> None:
+    allowed_tools = [
+        "desktop.safe_shortcut",
+        "clipboard.read",
+        "desktop.ui_elements",
+    ]
     decision = RuntimePlanner().decision(
         "读一下选中的内容",
-        allowed_tools=["desktop.safe_shortcut", "clipboard.read"],
+        allowed_tools=allowed_tools,
     )
 
     assert decision.selected_intent.kind == "clipboard_operation"
@@ -26767,8 +28618,35 @@ def test_runtime_planner_routes_selected_text_read_through_clipboard() -> None:
         "copy-selected-text",
         "read-clipboard",
     ]
-    assert _step_by_id(decision, "copy-selected-text").input_preview == {"action": "copy"}
+    copy_step = _step_by_id(decision, "copy-selected-text")
+    assert copy_step.input_preview == {"action": "copy"}
+    assert copy_step.action == "dispatch_shortcut"
     assert _step_by_id(decision, "read-clipboard").depends_on == ["copy-selected-text"]
+    copy_checkpoint = next(
+        checkpoint
+        for checkpoint in decision.plan.task_core.checkpoints
+        if checkpoint.after_step_id == "copy-selected-text"
+    )
+    assert copy_checkpoint.title == "Dispatch Copy selected text"
+    assert copy_checkpoint.verifies == []
+    assert copy_checkpoint.payload["requires_post_action_verification"] is False
+
+    requests = planner_tool_requests_for_decision(
+        decision,
+        allowed_tools,
+        direct=True,
+        execution_normalized=False,
+    )
+    assert [request["tool"] for request in requests] == [
+        "desktop.safe_shortcut",
+        "clipboard.read",
+    ]
+    assert requests[0]["requires_post_action_verification"] is False
+    assert requests[0]["task_todo"]["metadata"]["action"] == "dispatch_shortcut"
+    assert [
+        request["tool"]
+        for request in planner_execution_tool_requests(requests, allowed_tools)
+    ] == ["desktop.safe_shortcut", "clipboard.read"]
 
 
 def test_capability_registry_discovers_browser_namespace_tools_from_policy() -> None:
@@ -27025,6 +28903,14 @@ def test_capability_registry_covers_runtime_catalog_desktop_and_workspace_tools(
     assert required_tools - registry_tools == set()
 
 
+def test_capability_registry_exposes_active_desktop_permission_verification() -> None:
+    snapshots = capability_snapshots(
+        capability_ids=["desktop.app_discovery"],
+    )
+
+    assert "desktop.permissions.verify" in snapshots[0].tools
+
+
 def test_capability_registry_exposes_foreground_management_tools() -> None:
     snapshots = capability_snapshots(
         allowed_tools=[
@@ -27118,6 +29004,7 @@ def test_runtime_planner_routes_relative_reminder_to_schedule_capability(monkeyp
     tomorrow_0900 = f"{(date.today() + timedelta(days=1)).isoformat()}T09:00"
     tomorrow_1000 = f"{(date.today() + timedelta(days=1)).isoformat()}T10:00"
     tomorrow_1500 = f"{(date.today() + timedelta(days=1)).isoformat()}T15:00"
+    today_0130 = f"{date.today().isoformat()}T01:30"
     today_1030 = "2026-06-30T10:30"
     today_1045 = "2026-06-30T10:45"
     today_1200 = "2026-06-30T12:00"
@@ -27187,6 +29074,10 @@ def test_runtime_planner_routes_relative_reminder_to_schedule_capability(monkeyp
         "remind me tomorrow at 3pm to submit expenses",
         allowed_tools=["reminders.create"],
     )
+    alarm_like = RuntimePlanner().decision(
+        "能帮我制定一个闹钟吗？一点半叫我一下",
+        allowed_tools=["reminders.create"],
+    )
 
     assert decision.selected_intent.kind == "schedule"
     step = _step_by_id(decision, "create-schedule-item")
@@ -27197,6 +29088,13 @@ def test_runtime_planner_routes_relative_reminder_to_schedule_capability(monkeyp
         reminder_step = _step_by_id(reminder_decision, "create-schedule-item")
         assert reminder_step.tool_name == "reminders.create"
         assert reminder_step.input_preview == {"title": "买牛奶", "due_at": tomorrow_0900}
+    assert alarm_like.selected_intent.kind == "schedule"
+    alarm_step = _step_by_id(alarm_like, "create-schedule-item")
+    assert alarm_step.tool_name == "reminders.create"
+    assert alarm_step.input_preview == {
+        "title": "提醒",
+        "due_at": today_0130,
+    }
     assert create_first.selected_intent.kind == "schedule"
     create_first_step = _step_by_id(create_first, "create-schedule-item")
     assert create_first_step.tool_name == "reminders.create"
@@ -27569,7 +29467,11 @@ def test_planner_direct_tool_requests_maps_app_scoped_search_sequence() -> None:
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {"app_name": "Spotify"},
+            "input": {
+                "app_name": "Spotify",
+                "role_filter": "text",
+                "limit": 80,
+            },
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -27619,7 +29521,11 @@ def test_planner_direct_tool_requests_maps_app_scoped_search_sequence() -> None:
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {"app_name": "WeChat"},
+            "input": {
+                "app_name": "WeChat",
+                "role_filter": "text",
+                "limit": 80,
+            },
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -27677,7 +29583,11 @@ def test_planner_direct_tool_requests_maps_app_scoped_search_sequence() -> None:
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {"app_name": "Slack"},
+            "input": {
+                "app_name": "Slack",
+                "role_filter": "text",
+                "limit": 80,
+            },
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -27736,7 +29646,11 @@ def test_planner_direct_tool_requests_maps_app_scoped_search_sequence() -> None:
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {"app_name": "Raycast"},
+            "input": {
+                "app_name": "Raycast",
+                "role_filter": "text",
+                "limit": 80,
+            },
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -28270,6 +30184,7 @@ def test_runtime_planner_keeps_current_and_global_desktop_scopes_generic() -> No
             "input": {},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
+            "continue_to_model": True,
         },
         {
             "protocol": "json_fallback",
@@ -28289,6 +30204,7 @@ def test_runtime_planner_keeps_current_and_global_desktop_scopes_generic() -> No
             "input": {"role_filter": "button", "limit": 80},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
+            "continue_to_model": True,
         },
     ]
 
@@ -28359,9 +30275,11 @@ def test_runtime_planner_cleans_desktop_app_surface_qualifiers() -> None:
         allowed_tools=["data.analyze", "artifact.write", "app.focus"],
     )
     assert numbers_target.selected_intent.kind == "data_analysis"
-    assert numbers_target.selected_intent.inputs == {
+    assert _without_runtime_goal_targets(numbers_target.selected_intent.inputs) == {
         "data_source_hint": "sales.csv",
         "data_source_kind": "csv",
+        "runtime_goal_capabilities": ["data.analysis"],
+        "runtime_goal_terminal_effect_capabilities": ["desktop.ui_operation"],
         "target_app_hint": "Numbers",
         "target_action_hint": "app_paste",
         "target_container_action_hint": "new_document",
@@ -28659,6 +30577,7 @@ def test_entrypoint_selection_keeps_runtime_planner_for_current_page_find() -> N
             "input": {"action": "paste"},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_current_page_find",
+            "requires_post_action_verification": True,
         },
     ]
     assert legacy_calls == []
@@ -29141,13 +31060,6 @@ def test_entrypoint_selection_routes_web_search_first_result_sequence_to_planner
     assert selection.requests == [
         {
             "protocol": "json_fallback",
-            "tool": "app.focus",
-            "input": {"app_name": "Google Chrome"},
-            "source": "runtime_planner",
-            "planning_reason": "planner_fallback_web_research",
-        },
-        {
-            "protocol": "json_fallback",
             "tool": "browser.open_url",
             "input": {"url": "https://www.google.com/search?q=OpenAI"},
             "source": "runtime_planner",
@@ -29161,6 +31073,27 @@ def test_entrypoint_selection_routes_web_search_first_result_sequence_to_planner
             "planning_reason": "planner_fallback_web_research",
         },
     ]
+    assert all(
+        request["tool"] not in {"app.open", "app.focus"}
+        for request in selection.requests
+    )
+
+    url_then_click = planner_tool_requests(
+        "在 Chrome 打开 https://example.com 然后点击登录按钮",
+        allowed_tools=["browser.open_url", "browser.click", "app.focus"],
+    )
+    assert [request["tool"] for request in url_then_click] == [
+        "browser.open_url",
+        "browser.click",
+    ]
+    current_target_click = planner_tool_requests(
+        "Chrome 点击第一个搜索结果",
+        allowed_tools=["browser.click", "app.focus"],
+    )
+    assert all(
+        request["tool"] not in {"app.open", "app.focus"}
+        for request in current_target_click
+    )
     assert legacy_calls == []
 
 
@@ -29605,14 +31538,38 @@ def test_planner_desktop_tool_requests_maps_foreground_window_management() -> No
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
-        {
-            "protocol": "json_fallback",
-            "tool": "desktop.active_window",
-            "input": {},
-            "source": "runtime_planner",
-            "planning_reason": "planner_desktop_operation",
-        },
     ]
+
+
+def test_planner_foreground_management_dispatch_has_no_post_action_ui_probe() -> None:
+    cases = [
+        ("隐藏当前应用", "desktop.hide_app", False),
+        ("最小化当前窗口", "desktop.minimize_window", False),
+        ("关闭当前窗口", "desktop.close_window", True),
+        ("退出当前应用", "desktop.quit_app", True),
+    ]
+    for prompt, tool_name, approval_required in cases:
+        allowed_tools = [
+            "desktop.active_window",
+            "desktop.windows",
+            tool_name,
+        ]
+
+        decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+        manage = _step_by_id(decision, "manage-foreground")
+        assert manage.action == "dispatch_management"
+        assert manage.approval_required is approval_required
+        assert not any(
+            step.step_id == "verify-desktop-result"
+            for step in decision.plan.tool_plan.steps
+        )
+
+        direct_requests = planner_direct_tool_requests(prompt, allowed_tools)
+        assert [request["tool"] for request in direct_requests] == [tool_name]
+        assert [
+            request["tool"]
+            for request in planner_execution_tool_requests(direct_requests, allowed_tools)
+        ] == [tool_name]
 
 
 def test_planner_desktop_tool_requests_maps_arbitrary_app_typing_and_submit() -> None:
@@ -29813,7 +31770,11 @@ def test_planner_desktop_tool_requests_maps_app_search_content_artifact() -> Non
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {"app_name": "SuperData Studio"},
+            "input": {
+                "app_name": "SuperData Studio",
+                "role_filter": "text",
+                "limit": 80,
+            },
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -29865,7 +31826,11 @@ def test_planner_desktop_tool_requests_maps_app_search_content_artifact() -> Non
         {
             "protocol": "json_fallback",
             "tool": "desktop.read_ui",
-            "input": {"app_name": "Obsidian"},
+            "input": {
+                "app_name": "Obsidian",
+                "role_filter": "text",
+                "limit": 80,
+            },
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -29885,13 +31850,6 @@ def test_planner_desktop_tool_requests_maps_app_search_content_artifact() -> Non
 
     assert app_scoped_shortcut_requests == [
         _app_discovery_request("SuperData Studio"),
-        {
-            "protocol": "json_fallback",
-            "tool": "app.focus",
-            "input": {"app_name": "SuperData Studio"},
-            "source": "runtime_planner",
-            "planning_reason": "planner_desktop_operation",
-        },
         {
             "protocol": "json_fallback",
             "tool": "app.focus_and_safe_shortcut",
@@ -29916,7 +31874,11 @@ def test_planner_desktop_tool_requests_maps_app_search_content_artifact() -> Non
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {"app_name": "SuperData Studio"},
+            "input": {
+                "app_name": "SuperData Studio",
+                "role_filter": "text",
+                "limit": 80,
+            },
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -29936,13 +31898,6 @@ def test_planner_desktop_tool_requests_maps_app_search_content_artifact() -> Non
 
     assert app_scoped_type_requests == [
         _app_discovery_request("SuperData Studio"),
-        {
-            "protocol": "json_fallback",
-            "tool": "app.focus",
-            "input": {"app_name": "SuperData Studio"},
-            "source": "runtime_planner",
-            "planning_reason": "planner_desktop_operation",
-        },
         {
             "protocol": "json_fallback",
             "tool": "app.focus_and_safe_shortcut",
@@ -29967,7 +31922,11 @@ def test_planner_desktop_tool_requests_maps_app_search_content_artifact() -> Non
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {"app_name": "SuperData Studio"},
+            "input": {
+                "app_name": "SuperData Studio",
+                "role_filter": "text",
+                "limit": 80,
+            },
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -29989,7 +31948,6 @@ def test_planner_desktop_tool_requests_maps_app_search_content_artifact() -> Non
         for request in app_scoped_search_field_requests
     ] == [
         ("desktop.list_apps", {"query": "WeChat", "limit": 20}),
-        ("app.focus", {"app_name": "WeChat"}),
         ("app.focus_and_safe_shortcut", {"app_name": "WeChat", "action": "find"}),
         (
             "app.focus_and_safe_type_text",
@@ -30015,7 +31973,6 @@ def test_planner_desktop_tool_requests_maps_app_search_content_artifact() -> Non
         for request in app_scoped_result_click_requests
     ] == [
         ("desktop.list_apps", {"query": "Slack", "limit": 20}),
-        ("app.focus", {"app_name": "Slack"}),
         ("app.focus_and_safe_shortcut", {"app_name": "Slack", "action": "find"}),
         ("app.focus_and_safe_type_text", {"app_name": "Slack", "text": "Alice"}),
         ("desktop.search_submit", {}),
@@ -30029,7 +31986,10 @@ def test_planner_desktop_tool_requests_maps_app_search_content_artifact() -> Non
                 "click_count": 1,
             },
         ),
-        ("desktop.ui_elements", {"app_name": "Slack"}),
+        (
+            "desktop.ui_elements",
+            {"app_name": "Slack", "role_filter": "text", "limit": 80},
+        ),
     ]
 
 
@@ -30066,7 +32026,13 @@ def test_entrypoint_selection_keeps_runtime_planner_for_desktop_content_prefetch
     assert selection.requests[-1] == {
         "protocol": "json_fallback",
         "tool": "desktop.ui_elements",
-        "input": {"app_name": "Obsidian", "role_filter": "text", "limit": 120},
+        "input": {
+            "app_name": "Obsidian",
+            "role_filter": "text",
+            "limit": 120,
+            "selection_source": "desktop.list_apps",
+            "query": "Obsidian",
+        },
         "source": "runtime_planner",
         "planning_reason": "planner_prefetch_desktop_content",
         "continue_to_model": True,
@@ -30149,7 +32115,7 @@ def test_planner_desktop_tool_requests_maps_start_playing_in_music() -> None:
     ]
 
 
-def test_planner_desktop_tool_requests_verifies_simple_media_playback_when_available() -> None:
+def test_planner_desktop_tool_requests_uses_only_dedicated_media_playback() -> None:
     requests = planner_desktop_tool_requests(
         "播放 Spotify",
         allowed_tools=["media.music_app_open_and_play", "desktop.ui_elements"],
@@ -30163,41 +32129,19 @@ def test_planner_desktop_tool_requests_verifies_simple_media_playback_when_avail
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_media_playback",
         },
-        {
-            "protocol": "json_fallback",
-            "tool": "desktop.ui_elements",
-            "input": {"role_filter": "", "limit": 80},
-            "source": "runtime_planner",
-            "planning_reason": "planner_fallback_media_playback",
-        },
     ]
 
 
-def test_planner_desktop_tool_requests_falls_back_to_generic_music_app_for_apple_music_query() -> None:
+def test_planner_desktop_tool_requests_do_not_drop_apple_music_query() -> None:
     requests = planner_desktop_tool_requests(
         "用 Apple Music 播放 超时空净夜",
         allowed_tools=["media.music_app_open_and_play", "desktop.ui_elements"],
     )
 
-    assert requests == [
-        {
-            "protocol": "json_fallback",
-            "tool": "media.music_app_open_and_play",
-            "input": {"app_name": "Music"},
-            "source": "runtime_planner",
-            "planning_reason": "planner_fallback_media_playback",
-        },
-        {
-            "protocol": "json_fallback",
-            "tool": "desktop.ui_elements",
-            "input": {"role_filter": "", "limit": 80},
-            "source": "runtime_planner",
-            "planning_reason": "planner_fallback_media_playback",
-        },
-    ]
+    assert requests == []
 
 
-def test_planner_desktop_tool_requests_prefers_generic_music_app_when_legacy_is_allowed() -> None:
+def test_planner_desktop_tool_requests_prefers_query_capable_apple_music_tool() -> None:
     requests = planner_desktop_tool_requests(
         "用 Apple Music 播放 超时空净夜",
         allowed_tools=[
@@ -30210,15 +32154,8 @@ def test_planner_desktop_tool_requests_prefers_generic_music_app_when_legacy_is_
     assert requests == [
         {
             "protocol": "json_fallback",
-            "tool": "media.music_app_open_and_play",
-            "input": {"app_name": "Music"},
-            "source": "runtime_planner",
-            "planning_reason": "planner_fallback_media_playback",
-        },
-        {
-            "protocol": "json_fallback",
-            "tool": "desktop.ui_elements",
-            "input": {"role_filter": "", "limit": 80},
+            "tool": "media.apple_music_play",
+            "input": {"query": "超时空净夜"},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_media_playback",
         },
@@ -30599,7 +32536,7 @@ def test_planner_desktop_tool_requests_falls_back_to_app_search_for_apple_music_
     ]
 
 
-def test_planner_desktop_tool_requests_prefers_discovered_media_app_operation_for_apple_music_query() -> None:
+def test_planner_desktop_tool_requests_prefers_dedicated_apple_music_query_tool() -> None:
     requests = planner_desktop_tool_requests(
         "打开 Apple Music 播放超时空辉夜姬",
         allowed_tools=[
@@ -30613,18 +32550,8 @@ def test_planner_desktop_tool_requests_prefers_discovered_media_app_operation_fo
         ],
     )
 
-    assert [request["tool"] for request in requests] == [
-        "desktop.list_apps",
-        "app.open_and_safe_shortcut",
-        "desktop.safe_type_text",
-        "desktop.search_submit",
-        "media.music_app_open_and_play",
-        "desktop.ui_elements",
-    ]
-    assert requests[0]["input"] == {"query": "Music", "limit": 20}
-    assert requests[1]["input"] == {"app_name": "Music", "action": "find"}
-    assert requests[4]["input"] == {"app_name": "Music"}
-    assert all(request["tool"] != "media.apple_music_play" for request in requests)
+    assert [request["tool"] for request in requests] == ["media.apple_music_play"]
+    assert requests[0]["input"] == {"query": "超时空辉夜姬"}
 
 
 def test_runtime_planner_uses_app_scoped_typing_for_media_search_when_global_type_is_missing() -> None:
@@ -30635,7 +32562,6 @@ def test_runtime_planner_uses_app_scoped_typing_for_media_search_when_global_typ
             "app.open_and_safe_shortcut",
             "app.focus_and_safe_type_text",
             "desktop.search_submit",
-            "media.apple_music_play",
             "media.music_app_open_and_play",
             "desktop.ui_elements",
         ],
@@ -30729,6 +32655,8 @@ def test_runtime_planner_uses_observed_safe_media_search_when_shortcut_is_missin
         "text": "超时空辉夜姬",
         "role_filter": "text",
         "limit": 80,
+        "selection_source": "desktop.list_apps",
+        "query": "Music",
     }
     assert [request["tool"] for request in observation["deferred_continuation"]] == [
         "desktop.submit_foreground",
@@ -30742,6 +32670,8 @@ def test_runtime_planner_uses_observed_safe_media_search_when_shortcut_is_missin
         "role_filter": "",
         "limit": 80,
         "click_count": 1,
+        "selection_source": "desktop.list_apps",
+        "query": "Music",
     }
 
 
@@ -30940,8 +32870,8 @@ def test_planner_desktop_tool_requests_prefers_app_scoped_music_control_when_ava
     assert requests == [
         {
             "protocol": "json_fallback",
-            "tool": "media.music_app_control",
-            "input": {"app_name": "Music", "action": "next"},
+            "tool": "media.apple_music_control",
+            "input": {"action": "next"},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_media_playback",
         },
@@ -31449,6 +33379,269 @@ def test_runtime_execution_projects_plan_after_approved_request() -> None:
     assert continuation[1]["input"] == {"key": "return", "modifiers": []}
 
 
+def test_runtime_execution_approval_continuation_keeps_blocked_routes_closed() -> None:
+    envelope = {
+        "envelope_id": "blocked-after-approval",
+        "requests": [
+            {
+                "request_id": "approve-send",
+                "step_id": "approve-send",
+                "tool_name": "desktop.submit_foreground",
+                "input": {"action": "send"},
+                "status": "waiting_approval",
+            },
+            {
+                "request_id": "blocked-open",
+                "step_id": "blocked-open",
+                "tool_name": "app.open",
+                "input": {"app_name": "Notes"},
+                "status": "planned",
+                "approval_required": True,
+                "depends_on": ["approve-send"],
+                "desktop_execution_route": {
+                    "status": "real_virtual_desktop_provider_required",
+                    "can_execute": False,
+                    "blocking_conditions": [
+                        "real_virtual_desktop_provider_required"
+                    ],
+                },
+            },
+            {
+                "request_id": "blocked-dependent",
+                "step_id": "blocked-dependent",
+                "tool_name": "desktop.ui_elements",
+                "input": {"app_name": "Notes"},
+                "status": "planned",
+                "depends_on": ["blocked-open"],
+            },
+        ],
+    }
+
+    assert runtime_execution_continuation_requests_from_envelope_payload(
+        envelope,
+        after_request={
+            "request_id": "approve-send",
+            "step_id": "approve-send",
+            "tool": "desktop.submit_foreground",
+        },
+        allowed_tools=[
+            "desktop.submit_foreground",
+            "app.open",
+            "desktop.ui_elements",
+        ],
+    ) == []
+
+
+@pytest.mark.parametrize("status", ["blocked", "failed", "denied"])
+def test_runtime_execution_approval_never_overrides_terminal_status(status: str) -> None:
+    envelope = {
+        "requests": [
+            {
+                "request_id": f"terminal-approval-{status}",
+                "step_id": "terminal-approval",
+                "tool_name": "desktop.submit_foreground",
+                "input": {"action": "send"},
+                "approval_required": True,
+                "status": status,
+            }
+        ]
+    }
+
+    assert runtime_execution_requests_from_envelope_payload(
+        envelope,
+        allowed_tools=["desktop.submit_foreground"],
+    ) == []
+
+
+def test_runtime_execution_approval_never_overrides_blocked_route() -> None:
+    envelope = {
+        "requests": [
+            {
+                "request_id": "blocked-approval-route",
+                "step_id": "blocked-approval-route",
+                "tool_name": "desktop.submit_foreground",
+                "input": {"action": "send"},
+                "approval_required": True,
+                "status": "waiting_approval",
+                "desktop_execution_route": {
+                    "status": "real_virtual_desktop_provider_required",
+                    "can_execute": False,
+                    "blocking_conditions": [
+                        "real_virtual_desktop_provider_required"
+                    ],
+                },
+            }
+        ]
+    }
+
+    assert runtime_execution_requests_from_envelope_payload(
+        envelope,
+        allowed_tools=["desktop.submit_foreground"],
+    ) == []
+    blocked = runtime_execution_blocked_requests_from_envelope_payload(
+        envelope,
+        allowed_tools=["desktop.submit_foreground"],
+    )
+    assert [request["tool"] for request in blocked] == [
+        "desktop.submit_foreground"
+    ]
+    assert blocked[0]["blocked_by_runtime_readiness"] is True
+
+
+@pytest.mark.parametrize(
+    ("requests", "executable_tools", "blocked_tools"),
+    [
+        (
+            [
+                {
+                    "request_id": "step-a",
+                    "step_id": "step-a",
+                    "tool_name": "desktop.list_apps",
+                    "input": {},
+                    "status": "planned",
+                },
+                {
+                    "request_id": "missing-dependency",
+                    "step_id": "step-b",
+                    "tool_name": "app.open",
+                    "input": {"app_name": "Notes"},
+                    "status": "planned",
+                    "depends_on": ["ghost-step"],
+                },
+            ],
+            ["desktop.list_apps"],
+            ["app.open"],
+        ),
+        (
+            [
+                {
+                    "request_id": "forward-a",
+                    "step_id": "step-a",
+                    "tool_name": "app.open",
+                    "input": {"app_name": "Notes"},
+                    "status": "planned",
+                    "depends_on": ["step-b"],
+                },
+                {
+                    "request_id": "forward-b",
+                    "step_id": "step-b",
+                    "tool_name": "desktop.list_apps",
+                    "input": {},
+                    "status": "planned",
+                },
+            ],
+            [],
+            ["app.open", "desktop.list_apps"],
+        ),
+        (
+            [
+                {
+                    "request_id": "cycle-a",
+                    "step_id": "step-a",
+                    "tool_name": "app.open",
+                    "input": {"app_name": "Notes"},
+                    "status": "planned",
+                    "depends_on": ["step-b"],
+                },
+                {
+                    "request_id": "cycle-b",
+                    "step_id": "step-b",
+                    "tool_name": "desktop.ui_elements",
+                    "input": {"app_name": "Notes"},
+                    "status": "planned",
+                    "depends_on": ["step-a"],
+                },
+            ],
+            [],
+            ["app.open", "desktop.ui_elements"],
+        ),
+    ],
+)
+def test_runtime_execution_dependency_graph_fails_closed_when_corrupted(
+    requests: list[dict[str, Any]],
+    executable_tools: list[str],
+    blocked_tools: list[str],
+) -> None:
+    envelope = {"requests": requests}
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.ui_elements",
+    ]
+
+    projected = runtime_execution_requests_from_envelope_payload(
+        envelope,
+        allowed_tools=allowed_tools,
+    )
+    blocked = runtime_execution_blocked_requests_from_envelope_payload(
+        envelope,
+        allowed_tools=allowed_tools,
+    )
+
+    assert [request["tool"] for request in projected] == executable_tools
+    assert [request["tool"] for request in blocked] == blocked_tools
+    if requests[0]["step_id"] == "step-a" and len(requests) > 1:
+        continuation = runtime_execution_continuation_requests_from_envelope_payload(
+            envelope,
+            after_request={
+                "request_id": requests[0]["request_id"],
+                "step_id": requests[0]["step_id"],
+                "tool": requests[0]["tool_name"],
+            },
+            allowed_tools=allowed_tools,
+        )
+        assert all(
+            request["tool"] not in blocked_tools
+            for request in continuation
+        )
+
+
+@pytest.mark.parametrize(
+    ("prompt", "app_name"),
+    [
+        ("打开 Notes 新建笔记", "Notes"),
+        ("打开 Slack 搜索 Alice", "Slack"),
+        ("在 Obsidian 新建笔记", "Obsidian"),
+    ],
+)
+def test_runtime_execution_composite_app_tools_keep_direct_app_scope(
+    prompt: str,
+    app_name: str,
+) -> None:
+    allowed_tools = [
+        "app.open_and_safe_shortcut",
+        "app.focus_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.ui_elements",
+    ]
+    decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+    envelope = runtime_execution_envelope_from_decision(
+        decision,
+        allowed_tools=allowed_tools,
+        full_plan=True,
+    )
+
+    assert envelope is not None
+    operate = next(
+        request
+        for request in envelope.requests
+        if request.tool_name.startswith("app.")
+    )
+    assert operate.action_target["kind"] == "desktop_app"
+    assert operate.action_target["selection_source"] == "direct_app_name"
+    assert operate.action_target["app_name"] == app_name
+    verify = next(
+        request
+        for request in envelope.requests
+        if request.runtime_stage == "verify"
+    )
+    assert verify.action_target["kind"] == "desktop_app"
+    assert verify.action_target["selection_source"] == "direct_app_name"
+    assert verify.action_target["app_name"] == app_name
+    assert verify.observation_retry.get("input", {}).get("app_name") == app_name
+
+
 def test_planner_tool_requests_prefetches_context_data_source_for_analysis() -> None:
     selection_requests = planner_tool_requests(
         "分析当前选中的数据并生成报告",
@@ -31625,7 +33818,10 @@ def test_planner_tool_requests_prefetches_context_data_source_for_analysis() -> 
         "read-data-context",
         "run-analysis",
         "write-analysis-artifact",
+        "verify-analysis-artifact",
         "prepare-analysis-target-app",
+        "insert-analysis-into-target-app",
+        "verify-analysis-target-app",
     ]
     assert foreground_excel_table_requests == current_window_ui_requests
     assert current_page_table_requests == [
@@ -32265,13 +34461,6 @@ def test_planner_tool_requests_maps_safe_key_scroll_and_click() -> None:
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
-        {
-            "protocol": "json_fallback",
-            "tool": "desktop.active_window",
-            "input": {},
-            "source": "runtime_planner",
-            "planning_reason": "planner_desktop_operation",
-        },
     ]
 
     assert planner_tool_requests(
@@ -32292,13 +34481,6 @@ def test_planner_tool_requests_maps_safe_key_scroll_and_click() -> None:
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
-        {
-            "protocol": "json_fallback",
-            "tool": "desktop.active_window",
-            "input": {},
-            "source": "runtime_planner",
-            "planning_reason": "planner_desktop_operation",
-        },
     ]
 
     assert planner_tool_requests(
@@ -32316,13 +34498,6 @@ def test_planner_tool_requests_maps_safe_key_scroll_and_click() -> None:
             "protocol": "json_fallback",
             "tool": "desktop.safe_click",
             "input": {"x": 120, "y": 240},
-            "source": "runtime_planner",
-            "planning_reason": "planner_desktop_operation",
-        },
-        {
-            "protocol": "json_fallback",
-            "tool": "desktop.active_window",
-            "input": {},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -32425,13 +34600,6 @@ def test_planner_keeps_app_hotkey_discover_operate_verify_when_hotkey_is_availab
             "input": {"key": "k", "modifiers": ["command"]},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_hotkey",
-        },
-        {
-            "protocol": "json_fallback",
-            "tool": "desktop.ui_elements",
-            "input": {"app_name": "Notion"},
-            "source": "runtime_planner",
-            "planning_reason": "planner_desktop_operation",
         },
     ]
 
@@ -32773,13 +34941,6 @@ def test_planner_tool_requests_maps_static_web_search() -> None:
     ) == [
         {
             "protocol": "json_fallback",
-            "tool": "app.focus",
-            "input": {"app_name": "Google Chrome"},
-            "source": "runtime_planner",
-            "planning_reason": "planner_fallback_web_research",
-        },
-        {
-            "protocol": "json_fallback",
             "tool": "browser.open_url",
             "input": {"url": "https://www.google.com/search?q=OpenAI"},
             "source": "runtime_planner",
@@ -32792,13 +34953,6 @@ def test_planner_tool_requests_maps_static_web_search() -> None:
     ) == [
         {
             "protocol": "json_fallback",
-            "tool": "app.focus_and_safe_shortcut",
-            "input": {"app_name": "Google Chrome", "action": "new_tab"},
-            "source": "runtime_planner",
-            "planning_reason": "planner_fallback_web_research",
-        },
-        {
-            "protocol": "json_fallback",
             "tool": "browser.open_url",
             "input": {"url": "https://www.google.com/search?q=OpenAI"},
             "source": "runtime_planner",
@@ -32809,13 +34963,6 @@ def test_planner_tool_requests_maps_static_web_search() -> None:
         "在 Chrome 打开新标签页搜索 Oha Yachiyo 并输出报告",
         allowed_tools=[*allowed, "app.focus", "artifact.write"],
     ) == [
-        {
-            "protocol": "json_fallback",
-            "tool": "app.focus",
-            "input": {"app_name": "Google Chrome"},
-            "source": "runtime_planner",
-            "planning_reason": "planner_fallback_web_research",
-        },
         {
             "protocol": "json_fallback",
             "tool": "browser.open_url_and_extract_text",
@@ -32831,13 +34978,6 @@ def test_planner_tool_requests_maps_static_web_search() -> None:
     ) == [
         {
             "protocol": "json_fallback",
-            "tool": "app.open",
-            "input": {"app_name": "Safari"},
-            "source": "runtime_planner",
-            "planning_reason": "planner_fallback_web_research",
-        },
-        {
-            "protocol": "json_fallback",
             "tool": "browser.open_url_and_extract_text",
             "input": {"url": "https://www.google.com/search?q=Oha+Yachiyo"},
             "source": "runtime_planner",
@@ -32851,19 +34991,13 @@ def test_planner_tool_requests_maps_static_web_search() -> None:
     ) == [
         {
             "protocol": "json_fallback",
-            "tool": "app.open",
-            "input": {"app_name": "Safari"},
-            "source": "runtime_planner",
-            "planning_reason": "planner_fallback_web_research",
-        },
-        {
-            "protocol": "json_fallback",
             "tool": "browser.open_url_and_extract_text",
             "input": {
                 "url": "https://www.google.com/search?q=Hanako+Hermes+%E5%AF%B9%E6%AF%94"
             },
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_web_research",
+            "presentation": "summary",
             "continue_to_model": True,
         },
     ]
@@ -32871,13 +35005,6 @@ def test_planner_tool_requests_maps_static_web_search() -> None:
         "在 Chrome 打开 OpenAI pricing 并截图",
         allowed_tools=[*allowed, "browser.open_url_and_screenshot", "app.focus", "desktop.list_apps"],
     ) == [
-        {
-            "protocol": "json_fallback",
-            "tool": "app.focus",
-            "input": {"app_name": "Google Chrome"},
-            "source": "runtime_planner",
-            "planning_reason": "planner_fallback_web_research",
-        },
         {
             "protocol": "json_fallback",
             "tool": "browser.open_url_and_screenshot",
@@ -32893,13 +35020,6 @@ def test_planner_tool_requests_maps_static_web_search() -> None:
         "打开 Chrome 搜索 OpenAI pricing 并截图",
         allowed_tools=[*allowed, "browser.open_url_and_screenshot", "app.open", "desktop.list_apps"],
     ) == [
-        {
-            "protocol": "json_fallback",
-            "tool": "app.open",
-            "input": {"app_name": "Google Chrome"},
-            "source": "runtime_planner",
-            "planning_reason": "planner_fallback_web_research",
-        },
         {
             "protocol": "json_fallback",
             "tool": "browser.open_url_and_screenshot",
@@ -33014,17 +35134,11 @@ def test_planner_tool_requests_maps_static_web_search() -> None:
     ) == [
         {
             "protocol": "json_fallback",
-            "tool": "app.open",
-            "input": {"app_name": "Google Chrome"},
-            "source": "runtime_planner",
-            "planning_reason": "planner_fallback_web_research",
-        },
-        {
-            "protocol": "json_fallback",
             "tool": "browser.open_url_and_extract_text",
             "input": {"url": "https://www.google.com/search?q=OpenAI+pricing"},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_web_research",
+            "presentation": "summary",
             "continue_to_model": True,
         },
     ]
@@ -33038,13 +35152,6 @@ def test_planner_tool_requests_maps_static_web_search() -> None:
             "artifact.write",
         ],
     ) == [
-        {
-            "protocol": "json_fallback",
-            "tool": "app.open",
-            "input": {"app_name": "Google Chrome"},
-            "source": "runtime_planner",
-            "planning_reason": "planner_fallback_web_research",
-        },
         {
             "protocol": "json_fallback",
             "tool": "browser.open_url",
@@ -33110,13 +35217,13 @@ def test_planner_tool_requests_maps_static_web_search() -> None:
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_dynamic_browser_context",
         },
-        {
-            "protocol": "json_fallback",
-            "tool": "desktop.safe_shortcut",
-            "input": {"action": "paste"},
-            "source": "runtime_planner",
-            "planning_reason": "planner_fallback_dynamic_browser_context",
-        },
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.safe_shortcut",
+                    "input": {"action": "paste"},
+                    "source": "runtime_planner",
+                    "planning_reason": "planner_fallback_dynamic_browser_context",
+                },
         {
             "protocol": "json_fallback",
             "tool": "desktop.search_submit",
@@ -34738,6 +36845,7 @@ def test_planner_first_keeps_migrated_context_prefetch_over_legacy_sequence() ->
             "input": {"action": "paste"},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_dynamic_browser_context",
+            "requires_post_action_verification": True,
         },
         {
             "protocol": "json_fallback",
@@ -34745,6 +36853,9 @@ def test_planner_first_keeps_migrated_context_prefetch_over_legacy_sequence() ->
             "input": {},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_dynamic_browser_context",
+            "requires_post_action_verification": False,
+            "observation_retry": {},
+            "replan_triggers": [],
         },
     ]
 
@@ -34879,6 +36990,10 @@ def test_runtime_planner_routes_dynamic_context_ui_transfers() -> None:
         **verify_ui,
         "input": {"app_name": "Obsidian"},
     }
+    obsidian_model_verify_ui = {
+        **obsidian_verify_ui,
+        "continue_to_model": True,
+    }
 
     cases = (
         ("复制当前网页内容", [*current_content_copy]),
@@ -34917,7 +37032,7 @@ def test_runtime_planner_routes_dynamic_context_ui_transfers() -> None:
             current_page_link_copy,
             obsidian_focus,
             paste,
-            obsidian_verify_ui,
+            obsidian_model_verify_ui,
         ]),
         ("把剪贴板内容粘贴到 Slack", [
             slack_focus,
@@ -35051,16 +37166,17 @@ def test_runtime_planner_execution_context_keeps_blocked_desktop_direct_requests
 
     assert [request["tool"] for request in requests] == [
         "desktop.inspect_app",
-        "app.open_and_type_into_ui_element",
+        "app.focus_and_type_into_ui_element",
         "desktop.hotkey",
         "desktop.ui_elements",
     ]
     assert all("blocking_conditions" not in request.get("input", {}) for request in requests)
     assert selection.selected_source == "runtime_planner"
     selected_tools = [request["tool"] for request in selection.requests]
-    assert selected_tools[0:2] == ["desktop.list_apps", "desktop.inspect_app"]
-    assert "app.open_and_type_into_ui_element" in selected_tools or any(
-        request.get("deferred_tool") == "app.open_and_type_into_ui_element"
+    assert selected_tools[0] == "desktop.inspect_app"
+    assert "desktop.list_apps" not in selected_tools
+    assert "app.focus_and_type_into_ui_element" in selected_tools or any(
+        request.get("deferred_tool") == "app.focus_and_type_into_ui_element"
         for request in selection.requests
     )
     assert "desktop.hotkey" in selected_tools or any(
@@ -35422,17 +37538,17 @@ def test_planner_first_owns_app_scoped_ui_operations_over_legacy() -> None:
         (
             "Slack 回车发送",
             ["desktop.list_apps", "app.focus", "desktop.submit_foreground"],
-            ["desktop.list_apps", "app.focus", "desktop.submit_foreground"],
+            ["app.focus", "desktop.submit_foreground"],
         ),
         (
             "在 Slack 里发送",
             ["desktop.list_apps", "app.focus", "desktop.submit_foreground"],
-            ["desktop.list_apps", "app.focus", "desktop.submit_foreground"],
+            ["app.focus", "desktop.submit_foreground"],
         ),
         (
             "在微信里确认发送",
             ["desktop.list_apps", "app.focus", "desktop.submit_foreground"],
-            ["desktop.list_apps", "app.focus", "desktop.submit_foreground"],
+            ["app.focus", "desktop.submit_foreground"],
         ),
     )
 
@@ -35690,6 +37806,15 @@ def test_planner_tool_requests_maps_explicit_clipboard_write_plan() -> None:
         allowed_tools=["clipboard.write"],
     ) == requests
 
+    verified_requests = planner_tool_requests(
+        "把 hello 复制到剪贴板",
+        allowed_tools=["clipboard.write", "clipboard.read"],
+    )
+    assert [request["tool"] for request in verified_requests] == [
+        "clipboard.write",
+        "clipboard.read",
+    ]
+
 
 def test_planner_tool_requests_maps_selected_text_read_plan() -> None:
     requests = planner_tool_requests(
@@ -35831,23 +37956,30 @@ def test_runtime_planner_routes_app_scoped_meeting_minutes_to_desktop_create_flo
     assert selection.decision.selected_intent.inputs["safe_shortcut_hint"] == {
         "action": "new_document"
     }
+    assert selection.decision.selected_intent.inputs["model_generated_content_hint"] == {
+        "body_source": "model_generated_content",
+        "brief": "今天的会议纪要",
+    }
     assert [request["tool"] for request in selection.requests] == [
         "desktop.list_apps",
         "app.focus_and_safe_shortcut",
-        "desktop.safe_type_text",
         "desktop.ui_elements",
     ]
     assert [request["step_id"] for request in selection.requests] == [
         "discover-desktop-state",
         "operate-foreground-ui",
-        "operate-foreground-ui-followup-type",
         "verify-desktop-result",
     ]
     assert selection.requests[1]["input"] == _app_discovered_input(
         "Notion",
         action="new_document",
     )
-    assert selection.requests[2]["input"] == {"text": "今天的会议纪要"}
+    assert all(
+        request["tool"] != "desktop.safe_type_text"
+        and "text" not in request["input"]
+        for request in selection.requests
+    )
+    assert selection.requests[-1]["continue_to_model"] is True
     assert selection.requests[-1]["runtime_stage"] == "verify"
 
 
@@ -35884,7 +38016,7 @@ def test_runtime_planner_execution_keeps_open_and_focus_verification_steps() -> 
     assert open_envelope.requests[1].action_target == {
         "kind": "desktop_app",
         "action": "open_app",
-        "selection_source": "desktop.list_apps",
+        "selection_source": "direct_app_name",
         "app_name": "PixelForge",
         "query": "PixelForge",
         "step_id": "open-or-focus-app",
@@ -35892,7 +38024,7 @@ def test_runtime_planner_execution_keeps_open_and_focus_verification_steps() -> 
     assert open_envelope.requests[-1].action_target == {
         "kind": "desktop_app",
         "action": "verify_after_action",
-        "selection_source": "desktop.list_apps",
+        "selection_source": "direct_app_name",
         "app_name": "PixelForge",
         "query": "PixelForge",
         "step_id": "verify-desktop-result",
@@ -35977,6 +38109,7 @@ def test_runtime_planner_execution_keeps_open_and_focus_verification_steps() -> 
         "action": "list_windows",
         "selection_source": "desktop.windows",
         "app_name": "Slack",
+        "query": "Slack",
         "step_id": "list-app-windows",
     }
     assert focus_envelope.requests[1].observation_retry == {
@@ -36307,6 +38440,8 @@ def test_runtime_execution_envelope_targets_foreground_ui_actions() -> None:
         "target_scope": "foreground",
         "target": "确认",
         "role_filter": "button",
+        "limit": 80,
+        "click_count": 1,
         "step_id": "operate-foreground-ui",
     }
     assert operate.observation_retry == {
@@ -36325,6 +38460,8 @@ def test_runtime_execution_envelope_targets_foreground_ui_actions() -> None:
         "target_scope": "foreground",
         "target": "确认",
         "role_filter": "button",
+        "limit": 80,
+        "click_count": 1,
         "step_id": "verify-desktop-result",
         "verified_step_ids": ["operate-foreground-ui"],
     }
@@ -36366,16 +38503,89 @@ def test_runtime_planner_preflights_ui_before_desktop_mutation_when_requested() 
     ]
     assert envelope.requests[2].tool_name == "desktop.ui_elements"
     assert envelope.requests[2].input == {
-        "target": "导出",
         "role_filter": "button",
         "limit": 80,
         "app_name": "PixelForge",
+        "selection_source": "desktop.list_apps",
+        "query": "PixelForge",
     }
     assert envelope.requests[3].depends_on == ["read-foreground-ui"]
     assert envelope.requests[4].depends_on == ["operate-foreground-ui"]
     assert envelope.requests[4].task_verification_targets[0]["step_id"] == (
         "operate-foreground-ui"
     )
+
+
+def test_runtime_planner_grounds_unique_foreground_type_target_before_exact_verification() -> None:
+    allowed_tools = [
+        "desktop.active_window",
+        "desktop.ui_elements",
+        "desktop.type_into_ui_element",
+        "desktop.safe_type_text",
+        "desktop.verify",
+    ]
+
+    grounded = RuntimePlanner().decision(
+        "在搜索框输入 hello",
+        allowed_tools=allowed_tools,
+    )
+
+    assert [step.step_id for step in grounded.plan.tool_plan.steps] == [
+        "discover-desktop-state",
+        "read-foreground-ui",
+        "operate-foreground-ui",
+        "verify-desktop-result",
+    ]
+    assert [step.tool_name for step in grounded.plan.tool_plan.steps] == [
+        "desktop.active_window",
+        "desktop.ui_elements",
+        "desktop.type_into_ui_element",
+        "desktop.verify",
+    ]
+    assert _step_by_id(grounded, "operate-foreground-ui").depends_on == [
+        "read-foreground-ui"
+    ]
+    assert _step_by_id(grounded, "verify-desktop-result").depends_on == [
+        "operate-foreground-ui"
+    ]
+    ui_criterion = next(
+        criterion
+        for criterion in grounded.plan.task_core.goal_contract.criteria
+        if criterion.required_capabilities == ["desktop.ui_operation"]
+    )
+    assert ui_criterion.source_step_ids == ["operate-foreground-ui"]
+    assert ui_criterion.verifier_step_ids == ["verify-desktop-result"]
+
+    ungrounded = RuntimePlanner().decision(
+        "在当前应用输入 hello",
+        allowed_tools=allowed_tools,
+    )
+    assert _step_by_id(ungrounded, "operate-foreground-ui").tool_name == (
+        "desktop.safe_type_text"
+    )
+    assert _step_by_id(ungrounded, "verify-desktop-result").tool_name == (
+        "desktop.ui_elements"
+    )
+
+    named = RuntimePlanner().decision(
+        "打开 Notes 后在搜索框输入 hello",
+        allowed_tools=[
+            "desktop.list_apps",
+            "desktop.inspect_app",
+            "desktop.ui_elements",
+            "app.open_and_type_into_ui_element",
+            "app.focus_and_type_into_ui_element",
+            "desktop.verify",
+        ],
+    )
+    assert [step.tool_name for step in named.plan.tool_plan.steps] == [
+        "desktop.inspect_app",
+        "app.open_and_type_into_ui_element",
+        "desktop.verify",
+    ]
+    assert _step_by_id(named, "operate-foreground-ui").depends_on == [
+        "inspect-app"
+    ]
 
 
 def test_runtime_execution_keeps_running_app_selection_source_when_list_apps_available() -> None:
@@ -36480,10 +38690,11 @@ def test_runtime_recovery_continues_after_failed_ui_preflight() -> None:
     action = recovery.recovery_actions[0]
     assert action.tool == "desktop.ui_elements"
     assert action.input == {
-        "target": "导出",
         "role_filter": "button",
         "limit": 80,
         "app_name": "PixelForge",
+        "selection_source": "desktop.list_apps",
+        "query": "PixelForge",
     }
     assert action.observation_retry["reason"] == "observe_foreground_ui"
     assert [item["tool"] for item in action.deferred_continuation] == [
@@ -36543,10 +38754,11 @@ def test_runtime_replan_event_observes_then_retries_failed_ui_mutation() -> None
     action = payload["recovery_actions"][0]
     assert action["tool"] == "desktop.ui_elements"
     assert action["input"] == {
-        "target": "导出",
         "role_filter": "button",
         "limit": 80,
         "app_name": "PixelForge",
+        "selection_source": "desktop.list_apps",
+        "query": "PixelForge",
     }
     assert action["deferred_tool"] == "desktop.click_ui_element"
     assert action["deferred_input"] == {
@@ -36597,6 +38809,29 @@ def test_runtime_execution_envelope_keeps_selected_app_scope_for_foreground_typi
         "query": "Music",
         "step_id": "type-media-search-query",
     }
+    preparation_requests = [
+        request
+        for request in envelope.requests
+        if request.step_id
+        in {
+            "focus-media-app-search",
+            "type-media-search-query",
+            "submit-media-search",
+        }
+    ]
+    assert preparation_requests
+    assert all(
+        request.requires_post_action_verification is False
+        for request in preparation_requests
+    )
+    verify_request = next(
+        request
+        for request in envelope.requests
+        if request.step_id == "verify-media-search"
+    )
+    assert [
+        target["step_id"] for target in verify_request.task_verification_targets
+    ] == ["play-media-search-result"]
 
 
 def test_runtime_planner_keeps_running_app_scope_for_selected_app_compose() -> None:
@@ -36652,6 +38887,7 @@ def test_runtime_planner_keeps_running_app_scope_for_selected_app_compose() -> N
         "selection_source": "desktop.running_apps",
         "app_name": "<selected app from desktop.running_apps>",
         "query": "spreadsheet",
+        "selection_query": "spreadsheet",
         "step_id": "operate-foreground-ui-followup-type",
     }
     assert envelope.requests[-1].action_target["selection_source"] == (
@@ -36752,11 +38988,13 @@ def test_runtime_planner_edits_cells_in_selected_running_spreadsheet_app() -> No
         assert type_request.action_target == {
             "kind": "desktop_app",
             "action": "type_ui",
-            "selection_source": "desktop.running_apps",
-            "app_name": "<selected app from desktop.running_apps>",
-            "query": "spreadsheet",
-            "target": cell,
+                "selection_source": "desktop.running_apps",
+                "app_name": "<selected app from desktop.running_apps>",
+                "query": "spreadsheet",
+                "selection_query": "spreadsheet",
+                "target": cell,
             "role_filter": "text",
+            "limit": 80,
             "step_id": "type-selected-discovered-app-ui",
         }
         assert envelope.requests[-1].action_target["selection_source"] == (
@@ -36848,11 +39086,13 @@ def test_runtime_planner_edits_fields_in_selected_running_document_app() -> None
         assert type_request.action_target == {
             "kind": "desktop_app",
             "action": "type_ui",
-            "selection_source": "desktop.running_apps",
-            "app_name": "<selected app from desktop.running_apps>",
-            "query": "document",
-            "target": target,
+                "selection_source": "desktop.running_apps",
+                "app_name": "<selected app from desktop.running_apps>",
+                "query": "document",
+                "selection_query": "document",
+                "target": target,
             "role_filter": "text",
+            "limit": 80,
             "step_id": "type-selected-discovered-app-ui",
         }
         assert envelope.requests[-1].action_target["selection_source"] == (
@@ -36999,33 +39239,27 @@ def test_runtime_execution_envelope_preserves_app_search_prepare_chain() -> None
     assert envelope is not None
     assert [request.tool_name for request in envelope.requests] == [
         "desktop.list_apps",
-        "app.open",
-        "app.focus",
         "app.open_and_safe_shortcut",
         "desktop.safe_type_text",
         "desktop.search_submit",
         "desktop.ui_elements",
     ]
-    assert envelope.requests[3].runtime_role == "shortcut_ui"
-    assert envelope.requests[3].task_todo["metadata"]["runtime_role"] == "shortcut_ui"
-    assert [request.step_id for request in envelope.requests[:4]] == [
+    assert envelope.requests[1].runtime_role == "shortcut_ui"
+    assert envelope.requests[1].task_todo["metadata"]["runtime_role"] == "shortcut_ui"
+    assert [request.step_id for request in envelope.requests[:2]] == [
         "discover-desktop-state",
-        "open-or-focus-app",
-        "focus-opened-app",
         "focus-app-search-field",
     ]
-    assert envelope.requests[3].depends_on == ["focus-opened-app"]
+    assert envelope.requests[1].depends_on == ["discover-desktop-state"]
     projected_requests = runtime_execution_requests_from_envelope_payload(
         envelope.model_dump(mode="json"),
         allowed_tools=allowed_tools,
     )
-    assert [request["tool"] for request in projected_requests[:4]] == [
+    assert [request["tool"] for request in projected_requests[:2]] == [
         "desktop.list_apps",
-        "app.open",
-        "app.focus",
         "app.open_and_safe_shortcut",
     ]
-    assert projected_requests[3]["task_todo"]["step_id"] == "focus-app-search-field"
+    assert projected_requests[1]["task_todo"]["step_id"] == "focus-app-search-field"
 
 
 def test_runtime_execution_envelope_projects_full_desktop_plan_with_app_discovery() -> None:
@@ -37132,30 +39366,39 @@ def test_runtime_execution_envelope_can_project_full_data_analysis_plan() -> Non
         "workspace.read",
         "terminal.run",
         "artifact.write",
+        "workspace.read",
     ]
     assert full_envelope.runtime_stage_counts == {
         "discover": 1,
         "operate": 1,
         "produce": 1,
+        "verify": 1,
     }
     assert [request.step_id for request in full_envelope.requests] == [
         "inspect-data-source",
         "run-analysis",
         "write-analysis-artifact",
+        "verify-analysis-artifact",
     ]
     assert [request.runtime_stage for request in full_envelope.requests] == [
         "discover",
         "operate",
         "produce",
+        "verify",
     ]
     assert [request.runtime_role for request in full_envelope.requests] == [
         "inspect_workspace",
         "execute",
         "artifact",
+        "verify_result",
     ]
     assert full_envelope.requests[1].approval_required is True
     assert full_envelope.requests[1].depends_on == ["inspect-data-source"]
     assert full_envelope.requests[2].depends_on == ["run-analysis"]
+    assert full_envelope.requests[3].depends_on == [
+        "run-analysis",
+        "write-analysis-artifact",
+    ]
     projected_requests = runtime_execution_requests_from_envelope_payload(
         full_envelope.model_dump(mode="json"),
         allowed_tools=allowed_tools,
@@ -37173,6 +39416,10 @@ def test_runtime_execution_envelope_can_project_full_data_analysis_plan() -> Non
     ]
     assert projected_requests[1]["depends_on"] == ["inspect-data-source"]
     assert projected_requests[2]["depends_on"] == ["run-analysis"]
+    assert projected_requests[3]["depends_on"] == [
+        "run-analysis",
+        "write-analysis-artifact",
+    ]
 
 
 def test_runtime_execution_envelope_verifies_generic_communication_send() -> None:
@@ -37196,7 +39443,6 @@ def test_runtime_execution_envelope_verifies_generic_communication_send() -> Non
 
     assert full_envelope is not None
     assert [request.tool_name for request in full_envelope.requests] == [
-        "desktop.list_apps",
         "app.open",
         "desktop.shortcut",
         "desktop.type",
@@ -37206,25 +39452,33 @@ def test_runtime_execution_envelope_verifies_generic_communication_send() -> Non
         "desktop.ui_elements",
     ]
     assert full_envelope.runtime_stage_counts == {
-        "discover": 1,
         "operate": 6,
         "verify": 1,
     }
-    assert full_envelope.requests[4].approval_required is True
-    assert full_envelope.requests[6].approval_required is True
-    assert full_envelope.requests[7].runtime_stage == "verify"
-    assert full_envelope.requests[7].runtime_role == "verify_result"
-    assert full_envelope.requests[7].task_verification_targets[0]["step_id"] == (
+    assert full_envelope.requests[3].approval_required is True
+    assert full_envelope.requests[5].approval_required is True
+    assert full_envelope.requests[6].runtime_stage == "verify"
+    assert full_envelope.requests[6].runtime_role == "verify_result"
+    assert [
+        target["step_id"]
+        for target in full_envelope.requests[6].task_verification_targets
+    ] == ["send-communication-message"]
+    assert full_envelope.requests[6].desktop_loop is not None
+    assert full_envelope.requests[6].desktop_loop.verification_target_step_ids == [
         "send-communication-message"
-    )
+    ]
 
     projected_requests = runtime_execution_requests_from_envelope_payload(
         full_envelope.model_dump(mode="json"),
         allowed_tools=allowed_tools,
     )
-    assert projected_requests[6]["approval_required"] is True
-    assert projected_requests[7]["runtime_stage"] == "verify"
-    assert projected_requests[7]["task_verification_targets"][0]["todo"]["step_id"] == (
+    assert projected_requests[5]["approval_required"] is True
+    assert projected_requests[6]["runtime_stage"] == "verify"
+    assert [
+        target["step_id"]
+        for target in projected_requests[6]["task_verification_targets"]
+    ] == ["send-communication-message"]
+    assert projected_requests[6]["task_verification_targets"][0]["todo"]["step_id"] == (
         "send-communication-message"
     )
 
@@ -37308,6 +39562,372 @@ def test_runtime_execution_envelope_can_project_full_code_task_plan() -> None:
     ] == "apply_patch"
 
 
+@pytest.mark.parametrize(
+    ("prompt", "target_path"),
+    (
+        ("Read facts.txt.", "facts.txt"),
+        ("读取 notes/facts.txt 的内容", "notes/facts.txt"),
+        (
+            "Read facts.txt. Do not create a file or artifact.",
+            "facts.txt",
+        ),
+        ("读取 facts.txt 的内容；不要创建文件或产物。", "facts.txt"),
+    ),
+)
+def test_explicit_workspace_file_read_is_a_read_only_goal(
+    prompt: str,
+    target_path: str,
+) -> None:
+    allowed_tools = [
+        "workspace.list",
+        "workspace.read",
+        "workspace.write_patch",
+        "terminal.run",
+        "artifact.write",
+    ]
+    decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+    envelope = runtime_execution_envelope_from_decision(
+        decision,
+        allowed_tools=allowed_tools,
+        full_plan=True,
+    )
+
+    assert decision.selected_intent.kind == "code_task"
+    assert decision.selected_intent.inputs["code_file_context_hint"] == {
+        "path": target_path
+    }
+    assert decision.selected_intent.required_capabilities == ["file.workspace_read"]
+    assert decision.selected_intent.preferred_capabilities == []
+    assert envelope is not None
+    assert [request.tool_name for request in envelope.requests] == ["workspace.read"]
+    [request] = envelope.requests
+    assert request.step_id == "read-code-target-file"
+    assert request.input == {"path": target_path}
+    assert request.capability_id == "file.workspace_read"
+    assert request.approval_required is False
+    assert request.runtime_stage == "discover"
+    assert not {
+        "workspace.write_patch",
+        "terminal.run",
+        "artifact.write",
+    }.intersection(request.tool_name for request in envelope.requests)
+
+    snapshot = decision.plan.task_core.goal_contract
+    assert snapshot is not None
+    [criterion] = snapshot.criteria
+    assert criterion.response_satisfiable is False
+    assert criterion.effectful is False
+    assert criterion.required_capabilities == ["file.workspace_read"]
+    assert criterion.source_step_ids == ["read-code-target-file"]
+    assert criterion.verifier_step_ids == []
+    assert criterion.expected == {
+        "state": "fulfilled",
+        "target": {
+            "kind": "workspace_file",
+            "action": "read_file",
+            "path": target_path,
+        },
+    }
+
+    contract = runtime_goal_contract(
+        run_id="run-explicit-workspace-file-read",
+        original_goal=prompt,
+        runtime_execution_envelope=envelope.model_dump(mode="json"),
+        runtime_execution_metadata=None,
+        messages=[],
+        timeline=[],
+    )
+    assert contract is not None
+    [runtime_criterion] = contract.criteria
+    assert runtime_criterion.response_satisfiable is False
+    assert runtime_criterion.required_capabilities == ("file.workspace_read",)
+    assert runtime_criterion.source_step_ids == ("read-code-target-file",)
+    read_event = {
+        "event": "agent.tool.call",
+        "run_id": contract.run_id,
+        "actor": "native_runtime",
+        "execution_authority": "runtime_tool_executor",
+        "decision_id": decision.decision_id,
+        "plan_id": decision.plan.plan_id,
+        "tool_plan_id": decision.plan.tool_plan.plan_id,
+        "step_id": request.step_id,
+        "request_id": request.request_id,
+        "detail": request.tool_name,
+        "tool_call_id": "call-explicit-workspace-file-read",
+        "capability_id": request.capability_id,
+        "input_preview": dict(request.input),
+        "action_target": dict(request.action_target),
+        "result": {
+            "ok": True,
+            "path": target_path,
+            "content": "trusted workspace content\n",
+            "truncated": False,
+            RUNTIME_EXECUTION_PROVENANCE_KEY: {
+                "source": RUNTIME_LOCAL_TOOL_BROKER_PROVENANCE_SOURCE,
+                "version": RUNTIME_EXECUTION_PROVENANCE_VERSION,
+            },
+        },
+    }
+    assert runtime_goal_assessment(contract, [read_event]).completed is True
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    (
+        "Create facts.txt in this workspace.",
+        "在工作区创建 facts.txt",
+    ),
+)
+def test_affirmative_workspace_file_creation_keeps_write_authority(
+    prompt: str,
+) -> None:
+    decision = RuntimePlanner().decision(
+        prompt,
+        allowed_tools=["workspace.read", "workspace.write_patch"],
+    )
+
+    assert decision.selected_intent.kind == "code_task"
+    assert decision.selected_intent.required_capabilities == [
+        "file.workspace_read",
+        "file.workspace_write",
+    ]
+    assert decision.selected_intent.inputs["code_change_hint"] == {"mode": "create"}
+    assert [step.tool_name for step in decision.plan.tool_plan.steps] == [
+        "workspace.read",
+        "workspace.write_patch",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("prompt", "output_path"),
+    (
+        (
+            "Create live-chain-report.md containing a short readiness report.",
+            "live-chain-report.md",
+        ),
+        (
+            "创建 reports/readiness-note.md，内容是一份简短的就绪报告。",
+            "reports/readiness-note.md",
+        ),
+    ),
+)
+def test_explicit_report_artifact_path_is_an_output_not_an_input(
+    prompt: str,
+    output_path: str,
+) -> None:
+    allowed_tools = ["workspace.list", "workspace.read", "artifact.write"]
+    decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+    envelope = runtime_execution_envelope_from_decision(
+        decision,
+        allowed_tools=allowed_tools,
+        full_plan=True,
+    )
+
+    assert decision.selected_intent.kind == "report_generation"
+    assert "file_context_hint" not in decision.selected_intent.inputs
+    assert decision.selected_intent.inputs["artifact_output_path_hint"] == output_path
+    assert decision.selected_intent.required_capabilities == ["artifact.write"]
+    assert envelope is not None
+    assert [request.tool_name for request in envelope.requests] == ["artifact.write"]
+    [request] = envelope.requests
+    assert request.input == {
+        "path": output_path,
+        "body_source": "model_generated_content",
+    }
+    assert request.continue_to_model is True
+    assert request.action_target == {
+        "kind": "workspace_file",
+        "action": "write_artifact",
+        "path": output_path,
+        "step_id": "write-report-artifact",
+    }
+
+    [criterion] = decision.plan.task_core.goal_contract.criteria
+    assert criterion.response_satisfiable is False
+    assert criterion.required_capabilities == ["artifact.write"]
+    assert criterion.source_step_ids == ["write-report-artifact"]
+    assert criterion.expected == {
+        "state": "persisted",
+        "target": {
+            "kind": "workspace_file",
+            "action": "write_artifact",
+            "path": output_path,
+        },
+    }
+    contract = runtime_goal_contract(
+        run_id="run-explicit-report-artifact-output",
+        original_goal=prompt,
+        runtime_execution_envelope=envelope.model_dump(mode="json"),
+        runtime_execution_metadata=None,
+        messages=[],
+        timeline=[],
+    )
+    assert contract is not None
+    generated_content = "# Readiness\n\nThe runtime is ready.\n"
+    materialized_write_event = {
+        "event": "agent.tool.call",
+        "run_id": contract.run_id,
+        "actor": "native_runtime",
+        "execution_authority": "runtime_tool_executor",
+        "decision_id": decision.decision_id,
+        "plan_id": decision.plan.plan_id,
+        "tool_plan_id": decision.plan.tool_plan.plan_id,
+        "step_id": request.step_id,
+        "request_id": request.request_id,
+        "detail": request.tool_name,
+        "tool_call_id": "call-materialized-report-artifact",
+        "materialization_binding_id": "binding-materialized-report-artifact",
+        "materialized_content_sha256": hashlib.sha256(
+            generated_content.encode("utf-8")
+        ).hexdigest(),
+        "capability_id": request.capability_id,
+        "input_preview": {
+            "path": output_path,
+            "content": generated_content,
+        },
+        "action_target": dict(request.action_target),
+        "result": {
+            "ok": True,
+            "path": output_path,
+            "bytes": len(generated_content.encode("utf-8")),
+            "postcondition_verified": True,
+            RUNTIME_EXECUTION_PROVENANCE_KEY: {
+                "source": RUNTIME_LOCAL_TOOL_BROKER_PROVENANCE_SOURCE,
+                "version": RUNTIME_EXECUTION_PROVENANCE_VERSION,
+            },
+        },
+    }
+    assert runtime_goal_assessment(contract, []).completed is False
+    assert runtime_goal_assessment(
+        contract,
+        [materialized_write_event],
+    ).completed is True
+
+
+@pytest.mark.parametrize(
+    ("prompt", "input_path"),
+    (
+        ("Read existing.md and summarize it.", "existing.md"),
+        ("读取 docs/existing.md 并总结。", "docs/existing.md"),
+        ("Write a summary based on existing.md.", "existing.md"),
+        ("根据 docs/existing.md 写一份摘要。", "docs/existing.md"),
+    ),
+)
+def test_existing_report_source_path_remains_an_input(
+    prompt: str,
+    input_path: str,
+) -> None:
+    decision = RuntimePlanner().decision(
+        prompt,
+        allowed_tools=["workspace.read", "artifact.write"],
+    )
+
+    assert decision.selected_intent.kind == "report_generation"
+    assert decision.selected_intent.inputs["file_context_hint"] == {
+        "path": input_path
+    }
+    assert "artifact_output_path_hint" not in decision.selected_intent.inputs
+    assert [step.tool_name for step in decision.plan.tool_plan.steps] == [
+        "workspace.read",
+        "artifact.write",
+    ]
+    assert _step_by_id(decision, "read-report-file-context").input_preview == {
+        "path": input_path
+    }
+    assert _step_by_id(decision, "write-report-artifact").input_preview == {
+        "path": "summary.md",
+        "body_source": "local_file_context",
+    }
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    (
+        "Return exactly CODE_READY.",
+        "Return exactly CODE_REPORT.",
+        "Please respond with only WRITE_READY.",
+        "请只回复 CODE_REPORT",
+    ),
+)
+def test_exact_response_framing_outranks_payload_domain_keywords(
+    prompt: str,
+) -> None:
+    decision = RuntimePlanner().decision(
+        prompt,
+        allowed_tools=["artifact.write", "workspace.read", "terminal.run"],
+    )
+
+    assert decision.selected_intent.kind == "general"
+    assert decision.candidate_intents == []
+    assert decision.plan.tool_plan.steps == []
+    [criterion] = decision.plan.task_core.goal_contract.criteria
+    assert criterion.response_satisfiable is True
+    assert criterion.required_capabilities == []
+    assert criterion.source_step_ids == []
+
+
+@pytest.mark.parametrize(
+    ("prompt", "allowed_tools", "expected_kind"),
+    (
+        (
+            "Return exactly CODE_READY and open Safari.",
+            ["app.open"],
+            "desktop_operation",
+        ),
+        (
+            "Return exactly CODE_READY and send a message to Alex saying hi.",
+            ["app.open", "desktop.type", "desktop.shortcut"],
+            "communication",
+        ),
+        (
+            "Fix the bug in app.py.",
+            ["workspace.read", "workspace.write_patch"],
+            "code_task",
+        ),
+    ),
+)
+def test_exact_response_framing_does_not_hide_authorized_actions(
+    prompt: str,
+    allowed_tools: list[str],
+    expected_kind: str,
+) -> None:
+    decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+
+    assert decision.selected_intent.kind == expected_kind
+    assert decision.plan.tool_plan.steps
+    assert any(
+        criterion.response_satisfiable is False
+        for criterion in decision.plan.task_core.goal_contract.criteria
+    )
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    (
+        "Do not read facts.txt.",
+        "不要读取 facts.txt 的内容",
+        'The documentation says "Read facts.txt."',
+        "例如：读取 facts.txt 的内容",
+        "Read https://example.com/facts.txt",
+        "Inspect /tmp/facts.txt",
+        "查看 ../facts.txt 的内容",
+    ),
+)
+def test_workspace_file_read_route_rejects_unowned_or_external_examples(
+    prompt: str,
+) -> None:
+    decision = RuntimePlanner().decision(
+        prompt,
+        allowed_tools=["workspace.read", "browser.open_url_and_extract_text"],
+    )
+
+    assert decision.selected_intent.kind != "code_task"
+    assert all(
+        step.capability_id != "file.workspace_read"
+        for step in decision.plan.tool_plan.steps
+    )
+
+
 def test_runtime_execution_requests_preserve_replan_fallback_tools() -> None:
     allowed_tools = ["workspace.read", "data.analyze", "terminal.run", "artifact.write"]
     decision = RuntimePlanner().decision(
@@ -37322,6 +39942,7 @@ def test_runtime_execution_requests_preserve_replan_fallback_tools() -> None:
 
     assert envelope is not None
     assert envelope.requests[0].tool_name == "data.analyze"
+    assert envelope.requests[0].depends_on == []
     assert envelope.runtime_stage_counts == {"operate": 1}
     assert envelope.requests[0].runtime_stage == "operate"
     assert envelope.requests[0].runtime_role == "analyze_data"
@@ -37395,16 +40016,13 @@ def test_runtime_execution_envelope_can_project_full_web_research_plan() -> None
     assert open_research_envelope is not None
     assert [request.tool_name for request in open_research_envelope.requests] == [
         "browser.open_url_and_extract_text",
-        "artifact.write",
     ]
     assert [request.runtime_stage for request in open_research_envelope.requests] == [
         "discover",
-        "produce",
     ]
-    assert open_research_envelope.requests[1].continue_to_model is True
-    assert open_research_envelope.requests[1].input == {
-        "path": "research-summary.md",
-    }
+    assert open_research_envelope.requests[0].presentation == "summary"
+    assert open_research_envelope.requests[0].continue_to_model is True
+    assert open_research_envelope.artifacts_expected == []
 
     market_research_envelope = runtime_execution_envelope_from_decision(
         market_research_decision,
@@ -37505,6 +40123,23 @@ def test_runtime_execution_envelope_can_project_full_report_app_write_plan() -> 
     }
     assert full_envelope.requests[3].approval_required is True
     assert full_envelope.requests[4].depends_on == ["insert-report-into-target-app"]
+    assert [
+        target["step_id"]
+        for target in full_envelope.requests[4].task_verification_targets
+    ] == [
+        "prepare-report-target-app",
+        "insert-report-into-target-app",
+    ]
+    assert full_envelope.requests[4].desktop_loop is not None
+    assert full_envelope.requests[4].desktop_loop.verification_target_step_ids == [
+        "prepare-report-target-app",
+        "insert-report-into-target-app",
+    ]
+    assert full_envelope.requests[4].checkpoint_policy is not None
+    assert full_envelope.requests[4].checkpoint_policy.verification_target_step_ids == [
+        "prepare-report-target-app",
+        "insert-report-into-target-app",
+    ]
     projected_requests = runtime_execution_requests_from_envelope_payload(
         full_envelope.model_dump(mode="json"),
         allowed_tools=allowed_tools,
@@ -37520,6 +40155,13 @@ def test_runtime_execution_envelope_can_project_full_report_app_write_plan() -> 
     assert projected_requests[3]["task_todo"]["step_id"] == (
         "insert-report-into-target-app"
     )
+    assert [
+        target["step_id"]
+        for target in projected_requests[4]["task_verification_targets"]
+    ] == [
+        "prepare-report-target-app",
+        "insert-report-into-target-app",
+    ]
     assert (
         projected_requests[3]["workspace_id"]
         == decision.plan.task_core.workspace.workspace_id
@@ -37928,11 +40570,13 @@ def test_agent_studio_service_projects_full_data_analysis_execution_plan() -> No
         "workspace.read",
         "terminal.run",
         "artifact.write",
+        "workspace.read",
     ]
     assert envelope.runtime_stage_counts == {
         "discover": 1,
         "operate": 1,
         "produce": 1,
+        "verify": 1,
     }
     assert envelope.requests[1].approval_required is True
     assert envelope.requests[1].task_todo["step_id"] == "run-analysis"
@@ -38036,15 +40680,16 @@ def test_runtime_planner_keeps_app_search_as_desktop_operation_when_analysis_is_
     envelope = runtime_execution_envelope_from_decision(decision, full_plan=True)
 
     assert decision.selected_intent.kind == "desktop_operation"
-    assert _step_by_id(decision, "open-or-focus-app").input_preview == {"app_name": "Obsidian"}
+    assert _step_by_id(decision, "focus-app-search-field").input_preview == {
+        "app_name": "Obsidian",
+        "action": "find",
+    }
     assert _step_by_id(decision, "type-app-search-query").input_preview == {
         "text": "昨天的数据分析笔记"
     }
     assert envelope is not None
     assert [request.tool_name for request in envelope.requests] == [
         "desktop.list_apps",
-        "app.open",
-        "app.focus",
         "app.open_and_safe_shortcut",
         "desktop.safe_type_text",
         "desktop.search_submit",
@@ -38246,3 +40891,1303 @@ def test_runtime_planner_does_not_type_button_tail_after_click_target() -> None:
         "click_count": 1,
         "limit": 80,
     }
+
+
+def test_runtime_planner_limits_standalone_safe_typing_to_literal_user_text() -> None:
+    allowed_tools = [
+        "desktop.active_window",
+        "desktop.safe_type_text",
+        "desktop.ui_elements",
+    ]
+    for prompt in ("帮我打 hello", "打字 hello"):
+        decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+        type_step = _step_by_id(decision, "operate-foreground-ui")
+
+        assert decision.selected_intent.kind == "desktop_operation"
+        assert decision.selected_intent.inputs["safe_type_text_hint"] == "hello"
+        assert type_step.tool_name == "desktop.safe_type_text"
+        assert type_step.input_preview == {"text": "hello"}
+        assert type_step.risk_level == "low"
+        assert type_step.approval_required is False
+
+    routed_kinds = {
+        "帮我打一个代码报告": "code_task",
+        "输入数据生成报告": "data_analysis",
+        "把当前网页整理成报告": "web_research",
+        "把这段内容发给 Alice": "communication",
+    }
+    for prompt, expected_kind in routed_kinds.items():
+        decision = RuntimePlanner().decision(prompt)
+        assert decision.selected_intent.kind == expected_kind
+
+    click = RuntimePlanner().decision(
+        "点击输入按钮",
+        allowed_tools=[
+            "desktop.active_window",
+            "desktop.click_ui_element",
+            "desktop.safe_type_text",
+            "desktop.ui_elements",
+        ],
+    )
+    assert "safe_type_text_hint" not in click.selected_intent.inputs
+    assert _step_by_id(click, "operate-foreground-ui").tool_name == (
+        "desktop.click_ui_element"
+    )
+
+
+def test_runtime_planner_distinguishes_literal_and_nonliteral_safe_typing() -> None:
+    durable = RuntimePlanner().decision(
+        "创建文档并写入周报",
+        allowed_tools=[
+            "desktop.active_window",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.ui_elements",
+        ],
+    )
+    durable_type = _step_by_id(durable, "operate-foreground-ui-followup-type")
+    assert durable_type.input_preview == {"text": "周报"}
+    assert durable_type.risk_level == "low"
+    assert durable_type.approval_required is False
+
+    communication = RuntimePlanner().decision(
+        "打开 Slack 发消息给 yachiyo：hello",
+        allowed_tools=[
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.submit_foreground",
+        ],
+    )
+    for step_id in ("type-communication-recipient", "draft-communication-message"):
+        step = _step_by_id(communication, step_id)
+        assert step.tool_name == "desktop.safe_type_text"
+        assert step.risk_level == "low"
+        assert step.approval_required is False
+    assert [
+        step.step_id
+        for step in communication.plan.tool_plan.steps
+        if step.approval_required
+    ] == ["send-communication-message"]
+
+    model_generated = RuntimePlanner().decision(
+        "打开一个笔记应用，记录当前网页总结",
+        allowed_tools=[
+            "browser.extract_text",
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.ui_elements",
+        ],
+    )
+    generated_type = _step_by_id(model_generated, "insert-note-into-target-app")
+    assert generated_type.input_preview["body_source"] == "model_generated_content"
+    assert generated_type.risk_level == "medium"
+    assert generated_type.approval_required is True
+
+
+def test_runtime_planner_preserves_capability_app_discovery_for_explicit_file_open() -> None:
+    pure_path = RuntimePlanner().decision(
+        "打开 ./README.md",
+        allowed_tools=["desktop.open_path"],
+    )
+    assert pure_path.selected_intent.kind == "file_access"
+    assert _step_by_id(pure_path, "open-local-path").input_preview == {
+        "path": "./README.md"
+    }
+
+    capability_open = RuntimePlanner().decision(
+        "找一个代码编辑器打开 README.md",
+        allowed_tools=[
+            "desktop.list_apps",
+            "desktop.open_path_with_app",
+            "desktop.ui_elements",
+        ],
+    )
+    assert capability_open.selected_intent.kind == "desktop_operation"
+    assert capability_open.selected_intent.inputs["desktop_discovery_hint"] == {
+        "action": "discover_apps",
+        "query": "code",
+    }
+    assert [step.step_id for step in capability_open.plan.tool_plan.steps][:2] == [
+        "discover_apps-desktop-state",
+        "open-selected-discovered-app",
+    ]
+    assert _step_by_id(
+        capability_open,
+        "open-selected-discovered-app",
+    ).input_preview["target_path"] == "README.md"
+
+
+def test_runtime_planner_only_downgrades_open_composite_after_real_app_prepare() -> None:
+    base_tools = [
+        "desktop.list_apps",
+        "desktop.ui_elements",
+        "app.open_and_click_ui_element",
+        "app.focus_and_click_ui_element",
+        "app.open_and_safe_type_text",
+        "app.focus_and_safe_type_text",
+    ]
+    metadata = {"runtime_planner_preflight_ui_before_action": True}
+    click = RuntimePlanner().decision(
+        "打开 Linear 并点击导出按钮",
+        allowed_tools=base_tools,
+        metadata=metadata,
+    )
+    typed = RuntimePlanner().decision(
+        "打开 Obsidian 写 hello",
+        allowed_tools=base_tools,
+        metadata=metadata,
+    )
+    assert _step_by_id(click, "operate-foreground-ui").tool_name == (
+        "app.open_and_click_ui_element"
+    )
+    assert _step_by_id(typed, "operate-foreground-ui").tool_name == (
+        "app.open_and_safe_type_text"
+    )
+
+    prepared = RuntimePlanner().decision(
+        "打开 Linear 并点击导出按钮",
+        allowed_tools=[*base_tools, "desktop.inspect_app"],
+        metadata=metadata,
+    )
+    prepared_typed = RuntimePlanner().decision(
+        "打开 Obsidian 写 hello",
+        allowed_tools=[*base_tools, "desktop.inspect_app"],
+        metadata=metadata,
+    )
+    inspect = _step_by_id(prepared, "inspect-app")
+    assert inspect.input_preview["open_if_needed"] is True
+    assert inspect.input_preview["focus"] is True
+    assert _step_by_id(prepared, "operate-foreground-ui").tool_name == (
+        "app.focus_and_click_ui_element"
+    )
+    assert all(
+        step.step_id not in {"inspect-app", "read-foreground-ui"}
+        for step in prepared_typed.plan.tool_plan.steps
+    )
+    assert _step_by_id(prepared_typed, "operate-foreground-ui").tool_name == (
+        "app.open_and_safe_type_text"
+    )
+
+
+def test_runtime_planner_treats_url_and_search_operands_as_data_not_output_requests() -> None:
+    allowed_tools = [
+        "browser.search",
+        "browser.open_url",
+        "browser.extract_text",
+        "browser.open_url_and_extract_text",
+        "artifact.write",
+    ]
+    navigation_cases = (
+        ("打开 https://example.com/research", "https://example.com/research"),
+        ("打开 https://example.com/document", "https://example.com/document"),
+    )
+    for prompt, url in navigation_cases:
+        decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+
+        assert decision.selected_intent.kind == "web_research"
+        assert decision.selected_intent.inputs["browser_action"] == "open_url"
+        assert decision.selected_intent.expected_outputs == ["opened_page"]
+        assert decision.plan.tool_plan.artifacts_expected == []
+        assert [step.tool_name for step in decision.plan.tool_plan.steps] == [
+            "browser.open_url"
+        ]
+        assert decision.plan.tool_plan.steps[0].input_preview == {"url": url}
+
+    plain_search = RuntimePlanner().decision(
+        "搜索 OpenAI annual report",
+        allowed_tools=allowed_tools,
+    )
+    assert plain_search.selected_intent.kind == "web_research"
+    assert plain_search.selected_intent.inputs["query"] == "OpenAI annual report"
+    assert plain_search.selected_intent.expected_outputs == ["search_results"]
+    assert plain_search.plan.tool_plan.artifacts_expected == []
+    assert all(
+        step.tool_name != "artifact.write"
+        for step in plain_search.plan.tool_plan.steps
+    )
+
+
+def test_runtime_planner_keeps_explicit_web_delivery_clauses_after_operand_stripping() -> None:
+    allowed_tools = [
+        "browser.open_url",
+        "browser.open_url_and_extract_text",
+        "artifact.write",
+    ]
+    summary = RuntimePlanner().decision(
+        "打开 https://example.com/report 并总结",
+        allowed_tools=allowed_tools,
+    )
+    report = RuntimePlanner().decision(
+        "打开 https://example.com/document 并保存成报告",
+        allowed_tools=allowed_tools,
+    )
+
+    assert summary.selected_intent.kind == "web_research"
+    assert summary.selected_intent.inputs["browser_action"] == "open_url_extract"
+    assert summary.selected_intent.inputs["presentation"] == "summary"
+    assert summary.selected_intent.expected_outputs == ["summary"]
+    assert summary.plan.tool_plan.artifacts_expected == []
+    assert [step.tool_name for step in summary.plan.tool_plan.steps] == [
+        "browser.open_url_and_extract_text"
+    ]
+
+    assert report.selected_intent.kind == "web_research"
+    assert report.selected_intent.expected_outputs == ["report"]
+    assert report.plan.tool_plan.artifacts_expected == ["research-summary.md"]
+    assert [step.tool_name for step in report.plan.tool_plan.steps] == [
+        "browser.open_url",
+        "artifact.write",
+    ]
+
+
+def test_runtime_planner_foreground_approvals_do_not_depend_on_missing_discovery() -> None:
+    submit_cases = (
+        ("按回车提交", "submit"),
+        ("前台发送", "send"),
+        ("send current message", "send"),
+    )
+    for prompt, action in submit_cases:
+        decision = RuntimePlanner().decision(
+            prompt,
+            allowed_tools=["desktop.submit_foreground"],
+        )
+        step = _step_by_id(decision, "submit-foreground-ui")
+        assert step.input_preview == {"action": action}
+        assert step.approval_required is True
+        assert step.depends_on == []
+    named_submit = RuntimePlanner().decision(
+        "微信按回车发送",
+        allowed_tools=["app.focus", "desktop.submit_foreground"],
+    )
+    assert [step.tool_name for step in named_submit.plan.tool_plan.steps] == [
+        "app.focus",
+        "desktop.submit_foreground",
+    ]
+    assert _step_by_id(named_submit, "open-or-focus-app").depends_on == []
+    assert _step_by_id(named_submit, "submit-foreground-ui").depends_on == [
+        "open-or-focus-app"
+    ]
+
+    destructive_cases = (
+        ("关闭当前窗口", "desktop.close_window"),
+        ("退出当前应用", "desktop.quit_app"),
+    )
+    for prompt, tool_name in destructive_cases:
+        decision = RuntimePlanner().decision(prompt, allowed_tools=[tool_name])
+        step = _step_by_id(decision, "manage-foreground")
+        assert step.tool_name == tool_name
+        assert step.approval_required is True
+        assert step.depends_on == []
+
+    named_quit = RuntimePlanner().decision("退出微信", allowed_tools=["app.quit"])
+    named_quit_step = _step_by_id(named_quit, "manage-app")
+    assert named_quit_step.tool_name == "app.quit"
+    assert named_quit_step.approval_required is True
+    assert named_quit_step.depends_on == []
+
+    mutation_cases = (
+        (
+            "点击登录按钮",
+            ["desktop.click_ui_element"],
+            "desktop.click_ui_element",
+            {"target": "登录", "role_filter": "button", "click_count": 1, "limit": 80},
+        ),
+        (
+            "在搜索框输入 hello",
+            ["desktop.type_into_ui_element"],
+            "desktop.type_into_ui_element",
+            {"target": "搜索", "text": "hello", "role_filter": "text", "limit": 80},
+        ),
+    )
+    for prompt, allowed_tools, tool_name, input_preview in mutation_cases:
+        decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+        step = _step_by_id(decision, "operate-foreground-ui")
+        assert step.tool_name == tool_name
+        assert step.input_preview == input_preview
+        assert step.approval_required is True
+        assert step.depends_on == []
+
+
+def test_data_analysis_goal_contract_uses_only_planned_terminal_capability() -> None:
+    allowed_tools = ["workspace.read", "data.analyze", "artifact.write"]
+    decision = RuntimePlanner().decision(
+        "请分析 inputs/sales.csv 并输出报告",
+        allowed_tools=allowed_tools,
+    )
+
+    assert decision.selected_intent.inputs["runtime_goal_capabilities"] == [
+        "data.analysis"
+    ]
+    assert decision.plan.tool_plan.required_capabilities == [
+        "data.analysis",
+        "file.workspace_read",
+    ]
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "read-data-source",
+        "analyze-data-file",
+    ]
+    contract = decision.plan.task_core.goal_contract
+    assert contract is not None
+    assert [criterion.required_capabilities for criterion in contract.criteria] == [
+        ["data.analysis"]
+    ]
+    assert contract.criteria[0].source_step_ids == ["analyze-data-file"]
+    assert contract.criteria[0].verifier_step_ids == []
+    assert contract.criteria[0].required_verification_predicates == []
+    assert contract.criteria[0].expected == {
+        "state": "fulfilled",
+        "target": {
+            "kind": "data_analysis",
+            "action": "analyze",
+            "path": "inputs/sales.csv",
+            "source_kind": "csv",
+            "artifact_path": "analysis-report.md",
+        },
+    }
+
+
+def test_data_analysis_declared_target_is_method_invariant() -> None:
+    prompt = "请分析 inputs/sales.csv 并输出报告"
+    tool_sets = (
+        ["workspace.read", "data.analyze", "artifact.write"],
+        ["workspace.read", "terminal.run", "artifact.write"],
+        ["workspace.read", "python.run", "artifact.write"],
+    )
+    expected_target = {
+        "kind": "data_analysis",
+        "action": "analyze",
+        "path": "inputs/sales.csv",
+        "source_kind": "csv",
+        "artifact_path": "analysis-report.md",
+    }
+
+    decisions = [
+        RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+        for allowed_tools in tool_sets
+    ]
+
+    for decision, allowed_tools in zip(decisions, tool_sets, strict=True):
+        assert decision.selected_intent.inputs["runtime_goal_targets"] == {
+            "data.analysis": expected_target
+        }
+        [criterion] = decision.plan.task_core.goal_contract.criteria
+        assert criterion.expected["target"] == expected_target
+        envelope = runtime_execution_envelope_from_decision(
+            decision,
+            allowed_tools=allowed_tools,
+            full_plan=True,
+        )
+        assert envelope is not None
+        source_request = next(
+            request
+            for request in envelope.requests
+            if request.step_id in criterion.source_step_ids
+        )
+        assert source_request.action_target == {
+            **expected_target,
+            "step_id": source_request.step_id,
+        }
+        assert not {
+            "command",
+            "tool",
+            "tool_name",
+            "app_name",
+        } & criterion.expected["target"].keys()
+
+    assert decisions[0].plan.task_core.goal_contract.criteria[
+        0
+    ].required_verification_predicates == []
+    for support_decision in decisions[1:]:
+        assert support_decision.plan.task_core.goal_contract.criteria[
+            0
+        ].required_verification_predicates == [
+            EXACT_FILE_CONTENT_PRESENT_PREDICATE,
+            SEMANTIC_ARTIFACT_ADEQUACY_PREDICATE,
+        ]
+
+    terminal_source = next(
+        request
+        for request in runtime_execution_envelope_from_decision(
+            decisions[1],
+            allowed_tools=tool_sets[1],
+            full_plan=True,
+        ).requests
+        if request.step_id == "run-analysis"
+    )
+    python_source = next(
+        request
+        for request in runtime_execution_envelope_from_decision(
+            decisions[2],
+            allowed_tools=tool_sets[2],
+            full_plan=True,
+        ).requests
+        if request.step_id == "run-analysis"
+    )
+    assert terminal_source.input["command"]
+    assert python_source.input["command"]
+    assert terminal_source.action_target == python_source.action_target
+
+
+def test_data_analysis_support_method_fallback_reads_back_the_report() -> None:
+    decision = RuntimePlanner().decision(
+        "请分析 inputs/sales.csv 并输出报告",
+        allowed_tools=["workspace.read", "terminal.run", "artifact.write"],
+    )
+
+    steps = decision.plan.tool_plan.steps
+    assert [step.step_id for step in steps] == [
+        "inspect-data-source",
+        "run-analysis",
+        "write-analysis-artifact",
+        "verify-analysis-artifact",
+    ]
+    assert [step.tool_name for step in steps] == [
+        "workspace.read",
+        "terminal.run",
+        "artifact.write",
+        "workspace.read",
+    ]
+    assert [step.depends_on for step in steps] == [
+        [],
+        ["inspect-data-source"],
+        ["run-analysis"],
+        ["run-analysis", "write-analysis-artifact"],
+    ]
+    assert steps[-1].input_preview == {"path": "analysis-report.md"}
+    assert steps[1].input_preview["artifact_path"] == steps[-1].input_preview["path"]
+    envelope = runtime_execution_envelope_from_decision(
+        decision,
+        allowed_tools=["workspace.read", "terminal.run", "artifact.write"],
+        full_plan=True,
+    )
+    assert envelope is not None
+    run_request = next(
+        request for request in envelope.requests if request.step_id == "run-analysis"
+    )
+    verify_request = next(
+        request
+        for request in envelope.requests
+        if request.step_id == "verify-analysis-artifact"
+    )
+    assert run_request.action_target["artifact_path"] == verify_request.input["path"]
+
+
+def test_context_data_analysis_support_method_also_reads_back_the_report() -> None:
+    decision = RuntimePlanner().decision(
+        "分析当前剪贴板数据并输出报告",
+        allowed_tools=[
+            "clipboard.read",
+            "terminal.run",
+            "artifact.write",
+            "workspace.read",
+        ],
+    )
+
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "read-data-context",
+        "run-analysis",
+        "write-analysis-artifact",
+        "verify-analysis-artifact",
+    ]
+    verifier = _step_by_id(decision, "verify-analysis-artifact")
+    assert verifier.tool_name == "workspace.read"
+    assert verifier.input_preview == {"path": "analysis-report.md"}
+    assert verifier.depends_on == ["run-analysis", "write-analysis-artifact"]
+    [criterion] = decision.plan.task_core.goal_contract.criteria
+    assert criterion.required_capabilities == ["data.analysis"]
+    assert criterion.source_step_ids == ["run-analysis"]
+    assert criterion.verifier_step_ids == ["verify-analysis-artifact"]
+
+
+def test_data_analysis_support_method_contract_keeps_semantic_goal_and_verifier() -> None:
+    decision = RuntimePlanner().decision(
+        "请分析 inputs/sales.csv 并输出报告",
+        allowed_tools=["workspace.read", "terminal.run", "artifact.write"],
+    )
+
+    contract = decision.plan.task_core.goal_contract
+    assert contract is not None
+    assert [criterion.required_capabilities for criterion in contract.criteria] == [
+        ["data.analysis"]
+    ]
+    criterion = next(
+        criterion
+        for criterion in contract.criteria
+        if criterion.required_capabilities == ["data.analysis"]
+    )
+    assert criterion.source_step_ids == ["run-analysis"]
+    assert criterion.verifier_step_ids == ["verify-analysis-artifact"]
+    assert criterion.required_verification_predicates == [
+        EXACT_FILE_CONTENT_PRESENT_PREDICATE,
+        SEMANTIC_ARTIFACT_ADEQUACY_PREDICATE,
+    ]
+
+
+def test_explicit_subgoal_support_method_keeps_the_same_artifact_gate() -> None:
+    prompt = "请分析 inputs/sales.csv 并输出报告"
+    allowed_tools = ["workspace.read", "terminal.run", "artifact.write"]
+    planner = RuntimePlanner()
+    decision = planner.decision(prompt, allowed_tools=allowed_tools)
+    source_step = _step_by_id(decision, "run-analysis")
+    inputs = dict(decision.selected_intent.inputs)
+    inputs["runtime_explicit_goal_subgoals"] = [
+        {
+            "step_id": source_step.step_id,
+            "capability_id": source_step.capability_id,
+            "action_id": source_step.action,
+        }
+    ]
+
+    plan = planner.plan_intent(
+        decision.selected_intent.model_copy(update={"inputs": inputs}),
+        allowed_tools=allowed_tools,
+        original_goal=prompt,
+    )
+
+    [criterion] = plan.task_core.goal_contract.criteria
+    assert criterion.source_step_ids == ["run-analysis"]
+    assert criterion.verifier_step_ids == ["verify-analysis-artifact"]
+    assert criterion.required_verification_predicates == [
+        EXACT_FILE_CONTENT_PRESENT_PREDICATE,
+        SEMANTIC_ARTIFACT_ADEQUACY_PREDICATE,
+    ]
+
+
+@pytest.mark.parametrize(
+    "readback_tool",
+    ("workspace.read", "fs.read_file", "file.read"),
+)
+def test_data_analysis_support_method_declares_same_gate_for_readback_aliases(
+    readback_tool: str,
+) -> None:
+    decision = RuntimePlanner().decision(
+        "请分析 inputs/sales.csv 并输出报告",
+        allowed_tools=[readback_tool, "terminal.run", "artifact.write"],
+    )
+
+    verifier = _step_by_id(decision, "verify-analysis-artifact")
+    [criterion] = decision.plan.task_core.goal_contract.criteria
+    assert verifier.tool_name == readback_tool
+    assert verifier.status == "planned"
+    assert criterion.required_verification_predicates == [
+        EXACT_FILE_CONTENT_PRESENT_PREDICATE,
+        SEMANTIC_ARTIFACT_ADEQUACY_PREDICATE,
+    ]
+
+
+def test_data_analysis_support_method_cannot_complete_from_execution_and_persistence() -> None:
+    prompt = "请分析 inputs/sales.csv 并输出报告"
+    allowed_tools = ["workspace.read", "terminal.run", "artifact.write"]
+    run_id = "run-data-analysis-support-method"
+    decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+    envelope = runtime_execution_envelope_from_decision(
+        decision,
+        allowed_tools=allowed_tools,
+        full_plan=True,
+    )
+    assert envelope is not None
+    contract = runtime_goal_contract(
+        run_id=run_id,
+        original_goal=prompt,
+        runtime_execution_envelope=envelope.model_dump(mode="json"),
+        runtime_execution_metadata=None,
+        messages=[],
+        timeline=[],
+    )
+    assert contract is not None
+    assert contract.criteria[0].required_verification_predicates == (
+        EXACT_FILE_CONTENT_PRESENT_PREDICATE,
+        SEMANTIC_ARTIFACT_ADEQUACY_PREDICATE,
+    )
+    requests = {request.step_id: request for request in envelope.requests}
+
+    def successful_event(step_id: str, tool_call_id: str) -> dict[str, Any]:
+        request = requests[step_id]
+        result: dict[str, Any] = {
+            "ok": True,
+            RUNTIME_EXECUTION_PROVENANCE_KEY: {
+                "source": RUNTIME_LOCAL_TOOL_BROKER_PROVENANCE_SOURCE,
+                "version": RUNTIME_EXECUTION_PROVENANCE_VERSION,
+            },
+        }
+        if request.tool_name == "terminal.run":
+            result.update({"exit_code": 0, "stdout": "analysis complete\n"})
+        elif request.tool_name == "artifact.write":
+            result.update(
+                {
+                    "path": "analysis-report.md",
+                    "bytes": 128,
+                    "postcondition_verified": True,
+                }
+            )
+        return {
+            "event": "agent.tool.call",
+            "run_id": run_id,
+            "actor": "native_runtime",
+            "execution_authority": "runtime_tool_executor",
+            "decision_id": decision.decision_id,
+            "plan_id": decision.plan.plan_id,
+            "tool_plan_id": decision.plan.tool_plan.plan_id,
+            "step_id": step_id,
+            "request_id": request.request_id,
+            "detail": request.tool_name,
+            "tool_call_id": tool_call_id,
+            "capability_id": request.capability_id,
+            "input_preview": dict(request.input),
+            "action_target": dict(request.action_target),
+            "result": result,
+        }
+
+    analysis_success = successful_event("run-analysis", "call-run-analysis")
+    artifact_success = successful_event(
+        "write-analysis-artifact",
+        "call-write-analysis-artifact",
+    )
+
+    assert runtime_goal_assessment(contract, [artifact_success]).completed is False
+    assessment = runtime_goal_assessment(
+        contract,
+        [analysis_success, artifact_success],
+    )
+    assert assessment.completed is False
+    assert assessment.unsatisfied_criterion_ids == (
+        contract.criteria[0].criterion_id,
+    )
+
+
+def test_data_analysis_support_method_fails_closed_without_readback_tool() -> None:
+    decision = RuntimePlanner().decision(
+        "请分析 inputs/sales.csv 并输出报告",
+        allowed_tools=["terminal.run", "artifact.write"],
+    )
+
+    verifier = _step_by_id(decision, "verify-analysis-artifact")
+    assert verifier.tool_name is None
+    assert verifier.status == "unavailable"
+    data_criterion = next(
+        criterion
+        for criterion in decision.plan.task_core.goal_contract.criteria
+        if criterion.required_capabilities == ["data.analysis"]
+    )
+    assert data_criterion.source_step_ids == ["run-analysis"]
+    assert data_criterion.verifier_step_ids == ["verify-analysis-artifact"]
+    assert data_criterion.required_verification_predicates == []
+    assert any(
+        signal.source_step_id == "verify-analysis-artifact"
+        and signal.trigger == "tool_unavailable"
+        for signal in decision.plan.task_core.replan_signals
+    )
+
+
+@pytest.mark.parametrize(
+    "declared_capabilities",
+    (
+        "data.analysis",
+        [],
+        [""],
+        ["data.analysis", "data.analysis"],
+        ["missing.semantic_capability"],
+    ),
+)
+def test_runtime_goal_capability_marker_fails_closed(
+    declared_capabilities: Any,
+) -> None:
+    prompt = "请分析 inputs/sales.csv 并输出报告"
+    allowed_tools = ["workspace.read", "terminal.run", "artifact.write"]
+    planner = RuntimePlanner()
+    decision = planner.decision(prompt, allowed_tools=allowed_tools)
+    inputs = dict(decision.selected_intent.inputs)
+    inputs["runtime_goal_capabilities"] = declared_capabilities
+
+    with pytest.raises(ValueError, match="runtime_goal_capabilities"):
+        planner.plan_intent(
+            decision.selected_intent.model_copy(update={"inputs": inputs}),
+            allowed_tools=allowed_tools,
+            original_goal=prompt,
+        )
+
+
+@pytest.mark.parametrize(
+    "declared_targets",
+    (
+        "data.analysis",
+        {},
+        {"data.analysis": {}},
+        {"missing.semantic_capability": {"kind": "data_analysis"}},
+        {
+            "data.analysis": {"kind": "data_analysis"},
+            "artifact.write": {"kind": "artifact"},
+        },
+    ),
+)
+def test_runtime_goal_target_declaration_fails_closed(
+    declared_targets: Any,
+) -> None:
+    prompt = "请分析 inputs/sales.csv 并输出报告"
+    allowed_tools = ["workspace.read", "terminal.run", "artifact.write"]
+    planner = RuntimePlanner()
+    decision = planner.decision(prompt, allowed_tools=allowed_tools)
+    inputs = dict(decision.selected_intent.inputs)
+    inputs["runtime_goal_targets"] = declared_targets
+
+    with pytest.raises(ValueError, match="runtime_goal_targets"):
+        planner.plan_intent(
+            decision.selected_intent.model_copy(update={"inputs": inputs}),
+            allowed_tools=allowed_tools,
+            original_goal=prompt,
+        )
+
+
+def test_runtime_goal_target_without_capability_declaration_fails_closed() -> None:
+    prompt = "请分析 inputs/sales.csv 并输出报告"
+    allowed_tools = ["workspace.read", "terminal.run", "artifact.write"]
+    planner = RuntimePlanner()
+    decision = planner.decision(prompt, allowed_tools=allowed_tools)
+    inputs = dict(decision.selected_intent.inputs)
+    inputs.pop("runtime_goal_capabilities")
+    inputs["runtime_goal_targets"] = {
+        "data.analysis": {"kind": "data_analysis"}
+    }
+
+    with pytest.raises(ValueError, match="runtime_goal_targets"):
+        planner.plan_intent(
+            decision.selected_intent.model_copy(update={"inputs": inputs}),
+            allowed_tools=allowed_tools,
+            original_goal=prompt,
+        )
+
+
+def test_data_analysis_execution_request_carries_canonical_target_and_plan_lineage() -> None:
+    allowed_tools = ["workspace.read", "data.analyze", "artifact.write"]
+    decision = RuntimePlanner().decision(
+        "请分析 inputs/sales.csv 并输出报告",
+        allowed_tools=allowed_tools,
+    )
+    envelope = runtime_execution_envelope_from_decision(
+        decision,
+        allowed_tools=allowed_tools,
+        full_plan=True,
+    )
+
+    assert envelope is not None
+    analyze_request = next(
+        request for request in envelope.requests if request.tool_name == "data.analyze"
+    )
+    assert analyze_request.action_target == {
+        "kind": "data_analysis",
+        "action": "analyze",
+        "path": "inputs/sales.csv",
+        "source_kind": "csv",
+        "artifact_path": "analysis-report.md",
+        "step_id": "analyze-data-file",
+    }
+    projected = runtime_execution_requests_from_envelope_payload(
+        envelope.model_dump(mode="json"),
+        allowed_tools=allowed_tools,
+    )
+    analyze_tool_request = next(
+        request for request in projected if request["tool"] == "data.analyze"
+    )
+    assert analyze_tool_request["action_target"] == analyze_request.action_target
+    assert analyze_tool_request["step_id"] == "analyze-data-file"
+    assert analyze_tool_request["decision_id"] == decision.decision_id
+    assert analyze_tool_request["plan_id"] == decision.plan.plan_id
+    assert analyze_tool_request["tool_plan_id"] == decision.plan.tool_plan.plan_id
+    assert analyze_tool_request["core_id"] == decision.plan.task_core.core_id
+
+
+def test_low_confidence_language_must_not_be_invented_as_a_generic_ui_click() -> None:
+    """Ambiguous intent may fall back to the model, but must not fabricate a target."""
+
+    decision = RuntimePlanner().decision(
+        "能帮我制定一个闹钟吗？一点半叫我一下",
+        allowed_tools=[
+            "reminders.create",
+            "calendar.create_event",
+            "future_task.schedule",
+            "desktop.click_ui_element",
+            "desktop.ui_elements",
+        ],
+    )
+
+    assert all(
+        step.tool_name != "desktop.click_ui_element"
+        for step in decision.plan.tool_plan.steps
+    )
+
+
+def test_explicit_ui_click_language_still_keeps_click_plan() -> None:
+    decision = RuntimePlanner().decision(
+        "点击保存按钮",
+        allowed_tools=[
+            "desktop.click_ui_element",
+            "desktop.ui_elements",
+        ],
+    )
+
+    assert any(
+        step.tool_name == "desktop.click_ui_element"
+        for step in decision.plan.tool_plan.steps
+    )
+
+
+@pytest.mark.parametrize(
+    ("prompt", "expected"),
+    (
+        ("What is a summary? Please write a summary.", True),
+        ("分析数据并输出报告，不要打开 Excel", True),
+        ('run the command "echo don\'t panic"', True),
+        ("如果可以的话播放周杰伦", True),
+        ("安排下周一上午十点和团队复盘", True),
+        ("把当前网页链接加入日历", True),
+        ("让设计团队和开发团队分别评审方案并汇总", True),
+        ("为什么运行 pwd 会失败？", False),
+        ('He said "run pwd" yesterday', False),
+        ("If needed, run pwd", False),
+        ("If needed, please run pwd", False),
+        ("如果需要的话请运行 pwd", False),
+        ("He said please run pwd yesterday", False),
+        ("Do not, under any circumstances, run pwd", False),
+        ("please search cats and if needed run pwd", True),
+        ("please search cats. do not run pwd", True),
+        ("Do not hesitate, run pwd", True),
+        ("Don't wait, run pwd", True),
+        ("不要犹豫，运行 pwd", True),
+        ("刚刚下载的 PDF 在哪里？", False),
+        ("研究团队的报告是什么？", False),
+        ("提醒事项列表", False),
+    ),
+)
+def test_action_authority_is_scoped_to_the_matching_clause(
+    prompt: str,
+    expected: bool,
+) -> None:
+    assert text_has_authorized_action_request(prompt) is expected
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    (
+        "Do not run pwd",
+        "Do not, under any circumstances, run pwd",
+        "How do I run pwd?",
+        "If needed, run pwd",
+        "If needed, please run pwd",
+        "如果需要的话请运行 pwd",
+        "He said please run pwd yesterday",
+    ),
+)
+def test_nonexecuting_terminal_mentions_do_not_survive_the_final_step_gate(
+    prompt: str,
+) -> None:
+    decision = RuntimePlanner().decision(prompt, allowed_tools=["terminal.run"])
+
+    assert decision.selected_intent.kind == "general"
+    assert all(step.tool_name != "terminal.run" for step in decision.plan.tool_plan.steps)
+
+
+def test_nonexecuting_clipboard_question_cannot_trigger_a_low_risk_read() -> None:
+    decision = RuntimePlanner().decision(
+        "为什么读取剪贴板？",
+        allowed_tools=["clipboard.read"],
+    )
+
+    assert decision.selected_intent.kind == "general"
+    assert all(step.tool_name != "clipboard.read" for step in decision.plan.tool_plan.steps)
+
+
+def test_mixed_goal_cannot_lend_report_authority_to_a_negated_terminal_step() -> None:
+    decision = RuntimePlanner().decision(
+        "please write a summary; do not run pwd",
+        allowed_tools=["artifact.write", "terminal.run"],
+    )
+
+    assert decision.selected_intent.kind == "report_generation"
+    assert any(step.tool_name == "artifact.write" for step in decision.plan.tool_plan.steps)
+    assert all(step.tool_name != "terminal.run" for step in decision.plan.tool_plan.steps)
+
+
+def test_mixed_goal_binds_desktop_open_to_the_affirmative_target() -> None:
+    decision = RuntimePlanner().decision(
+        "Open Safari, do not open Terminal",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open",
+            "desktop.active_window",
+        ],
+    )
+
+    serialized_steps = [
+        (step.tool_name, dict(step.input_preview))
+        for step in decision.plan.tool_plan.steps
+        if step.tool_name
+    ]
+    assert any(
+        tool_name == "app.open" and inputs.get("app_name") == "Safari"
+        for tool_name, inputs in serialized_steps
+    )
+    assert all("terminal" not in str(inputs).casefold() for _, inputs in serialized_steps)
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    (
+        "Do not check desktop permissions",
+        "不要检查桌面权限",
+        "If needed, check desktop permissions",
+        "He said check desktop permissions",
+    ),
+)
+def test_nonexecuting_permission_mentions_do_not_run_cached_diagnostics(
+    prompt: str,
+) -> None:
+    decision = RuntimePlanner().decision(
+        prompt,
+        allowed_tools=["desktop.permissions"],
+    )
+
+    assert decision.selected_intent.kind == "general"
+    assert all(
+        step.tool_name != "desktop.permissions"
+        for step in decision.plan.tool_plan.steps
+    )
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    (
+        "Do not hesitate, run pwd",
+        "Don't wait, run pwd",
+        "不要犹豫，运行 pwd",
+    ),
+)
+def test_nonnegating_idiom_before_comma_keeps_the_explicit_command(
+    prompt: str,
+) -> None:
+    decision = RuntimePlanner().decision(prompt, allowed_tools=["terminal.run"])
+
+    step = next(
+        step for step in decision.plan.tool_plan.steps if step.tool_name == "terminal.run"
+    )
+    assert step.input_preview == {"command": "pwd"}
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    (
+        "please search cats and if needed run pwd",
+        "please search cats and he said run pwd",
+        "please search cats and please do not run pwd",
+        "please search cats. do not run pwd",
+        "do not run rm -rf / && run pwd",
+        "Send Alice a message saying run pwd",
+    ),
+)
+def test_authorized_sibling_action_cannot_lend_authority_to_terminal(
+    prompt: str,
+) -> None:
+    decision = RuntimePlanner().decision(
+        prompt,
+        allowed_tools=["browser.search", "terminal.run"],
+    )
+
+    assert all(step.tool_name != "terminal.run" for step in decision.plan.tool_plan.steps)
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    (
+        "please search cats and please do not run pwd",
+        "please search cats. do not run pwd",
+        "please search cats and if needed run pwd",
+        "please search cats and he said run pwd",
+    ),
+)
+def test_nonexecuting_sibling_does_not_leak_into_search_query(prompt: str) -> None:
+    decision = RuntimePlanner().decision(
+        prompt,
+        allowed_tools=["browser.search", "terminal.run"],
+    )
+
+    search_step = next(
+        step for step in decision.plan.tool_plan.steps if step.tool_name == "browser.search"
+    )
+    assert search_step.input_preview == {"query": "cats"}
+    assert all(step.tool_name != "terminal.run" for step in decision.plan.tool_plan.steps)
+
+
+def test_quoted_app_action_cannot_borrow_translation_authority() -> None:
+    decision = RuntimePlanner().decision(
+        "Translate 'open Safari'",
+        allowed_tools=["desktop.list_apps", "app.open", "desktop.active_window"],
+    )
+
+    assert decision.selected_intent.kind == "general"
+    assert all(step.tool_name is None for step in decision.plan.tool_plan.steps)
+
+
+@pytest.mark.parametrize(
+    ("prompt", "command"),
+    (
+        ("run pwd; echo ok", "pwd; echo ok"),
+        ("run pwd;echo ok", "pwd;echo ok"),
+        ("run pwd||echo failed", "pwd||echo failed"),
+        ("run pwd|wc -l", "pwd|wc -l"),
+    ),
+)
+def test_shell_operators_do_not_require_surrounding_spaces(
+    prompt: str,
+    command: str,
+) -> None:
+    decision = RuntimePlanner().decision(prompt, allowed_tools=["terminal.run"])
+
+    step = next(
+        step for step in decision.plan.tool_plan.steps if step.tool_name == "terminal.run"
+    )
+    assert step.input_preview == {"command": command}
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    (
+        "播放《晴天》，如果需要就运行 pwd",
+        "播放《晴天》，他说运行 pwd",
+    ),
+)
+def test_nonexecuting_terminal_tail_cannot_replace_media_target(prompt: str) -> None:
+    decision = RuntimePlanner().decision(
+        prompt,
+        allowed_tools=[
+            "media.music_app_open_and_play",
+            "desktop.list_apps",
+            "app.open",
+            "terminal.run",
+        ],
+    )
+
+    assert decision.selected_intent.kind == "media_playback"
+    assert decision.selected_intent.inputs["query"] == "晴天"
+    assert all(
+        "pwd" not in str(step.input_preview).casefold()
+        for step in decision.plan.tool_plan.steps
+    )
+    assert all(step.tool_name != "terminal.run" for step in decision.plan.tool_plan.steps)
+
+
+def test_runtime_tool_selector_switches_blocked_primary_to_ready_app_adapter() -> None:
+    allowed = [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.open_app",
+        "desktop.active_window",
+    ]
+    baseline = RuntimePlanner().decision("打开 PixelForge", allowed_tools=allowed)
+    baseline_step = _step_by_id(baseline, "open-or-focus-app")
+    alternate = (
+        "desktop.open_app"
+        if baseline_step.tool_name == "app.open"
+        else "app.open"
+    )
+
+    decision = RuntimePlanner().decision(
+        "打开 PixelForge",
+        allowed_tools=allowed,
+        metadata={
+            "tool_readiness_by_tool": {
+                baseline_step.tool_name: {"status": "blocked"},
+                alternate: {"status": "ready"},
+            }
+        },
+    )
+
+    selected = _step_by_id(decision, "open-or-focus-app")
+    assert selected.tool_name == alternate
+    assert selected.status == "planned"
+
+
+def test_runtime_tool_selector_keeps_old_order_when_routes_are_unchecked() -> None:
+    allowed = [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.open_app",
+        "desktop.active_window",
+    ]
+    baseline = RuntimePlanner().decision("打开 PixelForge", allowed_tools=allowed)
+    baseline_step = _step_by_id(baseline, "open-or-focus-app")
+    alternate = (
+        "desktop.open_app"
+        if baseline_step.tool_name == "app.open"
+        else "app.open"
+    )
+
+    decision = RuntimePlanner().decision(
+        "打开 PixelForge",
+        allowed_tools=allowed,
+        metadata={
+            "tool_readiness_by_tool": {
+                baseline_step.tool_name: {"status": "not_checked"},
+                alternate: {"status": "unknown"},
+            }
+        },
+    )
+
+    selected = _step_by_id(decision, "open-or-focus-app")
+    assert selected.tool_name == baseline_step.tool_name
+    assert selected.status == "planned"
+
+
+def test_runtime_tool_selector_discovers_only_exact_schema_compatible_plugin(
+    monkeypatch: Any,
+) -> None:
+    from apps.shell.agent.runtime.tool_capabilities import (
+        register_tool_capability_binding,
+        unregister_tool_capability_binding,
+    )
+    from apps.shell.agent.tools.policy import TOOL_DESCRIPTORS, ToolDescriptor
+    from apps.shell.agent.tools.registry import TOOL_DISPATCH_REGISTRY
+
+    exact_tool = "plugin.desktop.pixel_open"
+    wrong_action_tool = "plugin.desktop.pixel_focus"
+    incompatible_tool = "plugin.desktop.pixel_open_url"
+    descriptors = {
+        exact_tool: ToolDescriptor(
+            name=exact_tool,
+            description="Open an app through a test adapter.",
+            properties={"app_name": {"type": "string"}},
+            required=("app_name",),
+        ),
+        wrong_action_tool: ToolDescriptor(
+            name=wrong_action_tool,
+            description="Focus an app through a test adapter.",
+            properties={"app_name": {"type": "string"}},
+            required=("app_name",),
+        ),
+        incompatible_tool: ToolDescriptor(
+            name=incompatible_tool,
+            description="Open a URL through an incompatible test adapter.",
+            properties={"url": {"type": "string"}},
+            required=("url",),
+        ),
+    }
+    for tool_name, descriptor in descriptors.items():
+        monkeypatch.setitem(TOOL_DESCRIPTORS, tool_name, descriptor)
+        monkeypatch.setitem(
+            TOOL_DISPATCH_REGISTRY,
+            tool_name,
+            lambda _broker, _payload, _approved: {"ok": True},
+        )
+    register_tool_capability_binding(
+        exact_tool,
+        capability_ids=("desktop.app_control",),
+        action_ids=("open_app",),
+    )
+    register_tool_capability_binding(
+        wrong_action_tool,
+        capability_ids=("desktop.app_control",),
+        action_ids=("focus_app",),
+    )
+    register_tool_capability_binding(
+        incompatible_tool,
+        capability_ids=("desktop.app_control",),
+        action_ids=("open_app",),
+    )
+    try:
+        decision = RuntimePlanner().decision(
+            "打开 PixelForge",
+            allowed_tools=[
+                "desktop.list_apps",
+                "app.open",
+                "desktop.active_window",
+                exact_tool,
+                wrong_action_tool,
+                incompatible_tool,
+            ],
+            metadata={
+                "tool_readiness_by_tool": {
+                    "app.open": {"status": "blocked"},
+                    exact_tool: {"status": "ready"},
+                    wrong_action_tool: {"status": "ready"},
+                    incompatible_tool: {"status": "ready"},
+                }
+            },
+        )
+    finally:
+        unregister_tool_capability_binding(exact_tool)
+        unregister_tool_capability_binding(wrong_action_tool)
+        unregister_tool_capability_binding(incompatible_tool)
+
+    selected = _step_by_id(decision, "open-or-focus-app")
+    assert selected.tool_name == exact_tool
+    assert selected.fallback_tools == ["app.open"]
+    capability = next(
+        item
+        for item in decision.plan.capability_plan.items
+        if item.capability_id == "desktop.app_control"
+    )
+    assert capability.selected_tools == [exact_tool]
+    assert exact_tool in capability.available_tools
+    assert wrong_action_tool not in capability.selected_tools
+    assert incompatible_tool not in capability.selected_tools
+
+
+def test_runtime_tool_selector_prefers_exact_dynamic_action_without_route_failure(
+    monkeypatch: Any,
+) -> None:
+    from apps.shell.agent.runtime.tool_capabilities import (
+        register_tool_capability_binding,
+        unregister_tool_capability_binding,
+    )
+    from apps.shell.agent.tools.policy import TOOL_DESCRIPTORS, ToolDescriptor
+    from apps.shell.agent.tools.registry import TOOL_DISPATCH_REGISTRY
+
+    exact_tool = "plugin.desktop.precise_open_adapter"
+    monkeypatch.setitem(
+        TOOL_DESCRIPTORS,
+        exact_tool,
+        ToolDescriptor(
+            name=exact_tool,
+            description="Open an app through an exact-action test adapter.",
+            properties={"app_name": {"type": "string"}},
+            required=("app_name",),
+        ),
+    )
+    monkeypatch.setitem(
+        TOOL_DISPATCH_REGISTRY,
+        exact_tool,
+        lambda _broker, _payload, _approved: {"ok": True},
+    )
+    register_tool_capability_binding(
+        exact_tool,
+        capability_ids=("desktop.app_control",),
+        action_ids=("open_app",),
+    )
+    try:
+        decision = RuntimePlanner().decision(
+            "打开 PixelForge",
+            allowed_tools=[
+                "desktop.list_apps",
+                "app.open",
+                "desktop.active_window",
+                exact_tool,
+            ],
+        )
+    finally:
+        unregister_tool_capability_binding(exact_tool)
+
+    selected = _step_by_id(decision, "open-or-focus-app")
+    assert selected.tool_name == exact_tool
+    capability = next(
+        item
+        for item in decision.plan.capability_plan.items
+        if item.capability_id == "desktop.app_control"
+    )
+    assert capability.selected_tools == [exact_tool]
+
+
+def test_planner_execution_first_allowed_rejects_allowlisted_name_without_runtime_adapter() -> None:
+    assert planner_execution_module._first_allowed(
+        ("plugin.unregistered.open", "app.open"),
+        {"plugin.unregistered.open", "app.open"},
+    ) == "app.open"

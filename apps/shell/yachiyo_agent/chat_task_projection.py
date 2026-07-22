@@ -97,19 +97,16 @@ class ChatTaskLifecycleProjector:
         current = getattr(self._app_runtime, "chat_session", None)
         if not conversation_id:
             return current
-        if str(getattr(current, "session_id", "") or "") == conversation_id:
-            return current
         try:
-            from apps.core.chat_session import ChatSession
+            from apps.core.chat_session import load_existing_chat_session
             from apps.core.chat_store import get_chat_store
 
             store = getattr(self._app_runtime, "store", None) or get_chat_store()
-            session = ChatSession(session_id=conversation_id)
-            session.attach_store(
+            return load_existing_chat_session(
                 store,
-                load_existing=True,
+                conversation_id,
+                current=current,
                 fail_active_messages=False,
             )
-            return session
         except Exception:
-            return current
+            return None

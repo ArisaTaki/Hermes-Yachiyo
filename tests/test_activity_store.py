@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+import sqlite3
 
 import apps.shell.activity_api as activity_api_mod
 from apps.core.activity_store import ActivityRetentionPolicy, ActivityStore, redact_sensitive_text
@@ -35,8 +36,59 @@ def test_activity_store_persists_searches_and_redacts(tmp_path):
         assert len(events) == 1
         assert events[0].title == "运行脚本"
         assert events[0].duration_seconds == 1.25
+        assert events[0].visibility == "user"
     finally:
         reopened.close()
+
+
+def test_activity_store_persists_internal_visibility_and_migrates_legacy_rows(tmp_path):
+    db_path = tmp_path / "activity.db"
+    conn = sqlite3.connect(db_path)
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE activity_events (
+                event_id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL DEFAULT '',
+                task_id TEXT NOT NULL DEFAULT '',
+                tool_name TEXT NOT NULL DEFAULT '',
+                phase TEXT NOT NULL DEFAULT '',
+                title TEXT NOT NULL DEFAULT '',
+                detail TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT '',
+                duration_seconds REAL,
+                created_at TEXT NOT NULL,
+                metadata_json TEXT NOT NULL DEFAULT '{}'
+            );
+            INSERT INTO activity_events (
+                event_id, task_id, tool_name, phase, title, status, created_at
+            ) VALUES (
+                'legacy-event', 'task-1', 'terminal', 'tool_start', 'Legacy', 'running',
+                '2026-07-12T00:00:00+00:00'
+            );
+            """
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    store = ActivityStore(db_path=str(db_path))
+    try:
+        internal = store.record_event(
+            task_id="task-1",
+            tool_name="desktop.verify",
+            phase="tool_complete",
+            title="Verifier",
+            status="completed",
+            visibility="internal",
+        )
+        events = {event.event_id: event for event in store.list_events(limit=10)}
+
+        assert events["legacy-event"].visibility == "user"
+        assert events[internal.event_id].visibility == "internal"
+        assert events[internal.event_id].to_dict()["visibility"] == "internal"
+    finally:
+        store.close()
 
 
 def test_redact_sensitive_text_handles_inline_tokens():
@@ -71,6 +123,64 @@ def test_activity_store_finalizes_in_flight_task_events(tmp_path):
         assert updated == 2
         assert [event.status for event in events].count("completed") == 2
         assert [event.status for event in events].count("failed") == 1
+    finally:
+        store.close()
+
+
+def test_activity_store_reconciles_only_authoritative_interrupted_tasks(tmp_path):
+    store = ActivityStore(db_path=str(tmp_path / "activity.db"))
+    cutoff = "2026-07-12T00:00:00+00:00"
+    try:
+        for event_id, task_id, status, created_at in (
+            ("linked-completed", "task-completed", "running", "2026-07-11T23:00:00+00:00"),
+            ("linked-failed", "task-failed", "progress", "2026-07-11T23:01:00+00:00"),
+            ("linked-approval", "task-approval", "running", "2026-07-11T23:02:00+00:00"),
+            ("orphan", "task-orphan", "pending", "2026-07-11T23:03:00+00:00"),
+            ("future", "task-future", "running", "2026-07-12T01:00:00+00:00"),
+        ):
+            store.record_event(
+                event_id=event_id,
+                task_id=task_id,
+                phase="tool_progress",
+                status=status,
+                created_at=created_at,
+            )
+
+        assert set(store.list_interrupted_task_ids(cutoff)) == {
+            "task-completed",
+            "task-failed",
+            "task-approval",
+            "task-orphan",
+        }
+        assert store.reconcile_interrupted_tasks(
+            cutoff,
+            terminal_status_by_task={
+                "task-completed": "completed",
+                "task-failed": "failed",
+            },
+            orphan_task_ids={"task-orphan"},
+        ) == 3
+
+        events = {event.event_id: event for event in store.list_events(limit=20)}
+        assert events["linked-completed"].status == "completed"
+        assert events["linked-failed"].status == "failed"
+        assert events["linked-approval"].status == "running"
+        assert events["orphan"].status == "failed"
+        assert events["future"].status == "running"
+        assert events["linked-completed"].to_dict()["metadata"][
+            "recovery_reason"
+        ] == "runtime_status_reconciled"
+        assert events["orphan"].to_dict()["metadata"]["recovery_reason"] == (
+            "runtime_restarted"
+        )
+        assert store.reconcile_interrupted_tasks(
+            cutoff,
+            terminal_status_by_task={
+                "task-completed": "completed",
+                "task-failed": "failed",
+            },
+            orphan_task_ids={"task-orphan"},
+        ) == 0
     finally:
         store.close()
 

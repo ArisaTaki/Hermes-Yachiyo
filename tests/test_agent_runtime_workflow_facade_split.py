@@ -296,6 +296,10 @@ def test_native_runtime_keeps_workflow_facade_methods_available_after_split(tmp_
                 "start_index": 1,
                 "root_group": True,
                 "start_node_id": "node-1",
+                "runtime_execution_envelope": None,
+                "runtime_execution_metadata": None,
+                "direct_tool_requests": None,
+                "daily_desktop_planning_context": None,
             },
         ) in calls
         assert ("workflow-for-resume", workflow_run) in calls

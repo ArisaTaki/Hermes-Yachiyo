@@ -16,6 +16,7 @@ type AgentStudioPageFrameProps = {
   onBack: () => void;
   onCancelConfirmDialog: () => void;
   onConfirmCurrentDialog: () => void;
+  onPreloadTab: (tab: StudioTab) => void;
 };
 
 export function AgentStudioPageFrame({
@@ -29,6 +30,7 @@ export function AgentStudioPageFrame({
   onBack,
   onCancelConfirmDialog,
   onConfirmCurrentDialog,
+  onPreloadTab,
 }: AgentStudioPageFrameProps) {
   return (
     <section className="agent-studio-page hy-route-page">
@@ -39,6 +41,7 @@ export function AgentStudioPageFrame({
         tab={tab}
         onActivateTab={onActivateTab}
         onBack={onBack}
+        onPreloadTab={onPreloadTab}
       />
 
       {children}

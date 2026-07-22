@@ -155,13 +155,11 @@ DESKTOP_PLANNER_CASES: tuple[dict[str, Any], ...] = (
             "discover-desktop-state",
             "open-or-focus-app",
             "operate-foreground-ui",
-            "verify-desktop-result",
         ],
         "expected_request_tools": [
             "desktop.list_apps",
             "app.focus",
             "desktop.hotkey",
-            "desktop.ui_elements",
         ],
     },
     {
@@ -197,12 +195,12 @@ DESKTOP_PLANNER_CASES: tuple[dict[str, Any], ...] = (
         ],
         "expected_app": "PixelForge",
         "expected_steps": [
-            "inspect-app",
+            "discover-desktop-state",
             "operate-foreground-ui",
             "verify-desktop-result",
         ],
         "expected_request_tools": [
-            "desktop.inspect_app",
+            "desktop.list_apps",
             "app.focus_and_safe_shortcut",
             "desktop.ui_elements",
         ],

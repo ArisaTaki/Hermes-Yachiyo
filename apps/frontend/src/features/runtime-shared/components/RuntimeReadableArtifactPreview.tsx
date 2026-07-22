@@ -3,6 +3,11 @@ import { useState } from 'react';
 
 import { UiIcon } from '../../../components/UiIcon';
 import {
+  runtimeArtifactPresentation,
+  runtimeArtifactReadError,
+  type RuntimeArtifactPresentationMode,
+} from '../artifactPresentation';
+import {
   RuntimeArtifactPreview,
   type RuntimeArtifactSnapshot,
   type RuntimeArtifactVariant,
@@ -57,6 +62,7 @@ type RuntimeReadableArtifactPreviewProps = {
   previewClassName?: string;
   previewTestId?: string;
   previewVariant?: RuntimeArtifactVariant;
+  presentationMode?: RuntimeArtifactPresentationMode;
   imagePointLabel?: string;
   onSelectImagePoint?: (selection: RuntimeImageArtifactPointSelection) => void;
   readArtifact?: (
@@ -76,7 +82,7 @@ export function RuntimeReadableArtifactPreview({
   className = 'runtime-readable-artifact',
   contentClassName = 'runtime-readable-artifact-content',
   contentTestId = 'runtime-readable-artifact-content',
-  emptyContentLabel = '(empty artifact)',
+  emptyContentLabel = 'Artifact 暂无内容',
   errorClassName = 'runtime-readable-artifact-status error',
   errorFallback = '读取 artifact 失败',
   errorTestId = 'runtime-readable-artifact-error',
@@ -85,6 +91,7 @@ export function RuntimeReadableArtifactPreview({
   previewClassName = 'runtime-artifact-preview',
   previewTestId = 'runtime-artifact-preview',
   previewVariant = 'compact',
+  presentationMode = 'diagnostic',
   imagePointLabel = '点击截图补齐坐标',
   onSelectImagePoint,
   readArtifact,
@@ -99,12 +106,14 @@ export function RuntimeReadableArtifactPreview({
   const [preview, setPreview] = useState<RuntimeReadableArtifactContent | null>(null);
   const path = String(artifact.path || '').trim();
   const canReadArtifact = Boolean(readArtifact && path);
+  const presentation = runtimeArtifactPresentation(artifact, presentationMode);
 
   if (!canReadArtifact) {
     return (
       <RuntimeArtifactPreview
         artifact={artifact}
         className={previewClassName}
+        presentationMode={presentationMode}
         testId={previewTestId}
         variant={previewVariant}
       />
@@ -123,13 +132,11 @@ export function RuntimeReadableArtifactPreview({
     try {
       setPreview(await readArtifact(path, artifact));
     } catch (err) {
-      setError(err instanceof Error ? err.message : errorFallback);
+      setError(runtimeArtifactReadError(err, presentationMode, errorFallback));
     } finally {
       setBusy(false);
     }
   }
-
-  const label = artifact.title || path || artifact.kind || 'Artifact';
 
   return (
     <div
@@ -144,7 +151,7 @@ export function RuntimeReadableArtifactPreview({
         className={triggerClassName}
         disabled={busy}
         onClick={() => void togglePreview()}
-        title={path || label}
+        title={presentation.tooltip || undefined}
       >
         <RuntimeArtifactPreview
           actions={<UiIcon name={preview ? 'close' : 'paperclip'} />}
@@ -154,6 +161,7 @@ export function RuntimeReadableArtifactPreview({
           artifact={artifact}
           as="span"
           className={previewClassName}
+          presentationMode={presentationMode}
           testId={previewTestId}
           variant={previewVariant}
         />
@@ -175,6 +183,7 @@ export function RuntimeReadableArtifactPreview({
           contentTestId={contentTestId}
           emptyContentLabel={emptyContentLabel}
           imagePointLabel={imagePointLabel}
+          label={presentation.label}
           onSelectImagePoint={onSelectImagePoint}
           preview={preview}
           selectedImagePoint={selectedImagePoint}
@@ -188,7 +197,7 @@ export function RuntimeReadableArtifactContentPreview({
   artifact,
   className = 'runtime-readable-artifact-content',
   contentTestId = 'runtime-readable-artifact-content',
-  emptyContentLabel = '(empty artifact)',
+  emptyContentLabel = 'Artifact 暂无内容',
   imagePointLabel = '点击截图补齐坐标',
   label = artifact.title || artifact.path || artifact.kind || 'Artifact',
   onSelectImagePoint,

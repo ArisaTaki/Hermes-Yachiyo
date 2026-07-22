@@ -128,9 +128,20 @@ def run_budget_from_timeline(
         event_name = str(event.get("event") or "")
         if event_name in {"agent.model.response", "model.output.completed"}:
             model_calls += 1
-        if event_name in {"agent.tool.call", "agent.tool.skipped", "agent.tool.denied"}:
+        canonical_approval_receipt = bool(
+            event.get("approval_resume_result_canonical")
+        )
+        if (
+            event_name
+            in {"agent.tool.call", "agent.tool.skipped", "agent.tool.denied"}
+            and not canonical_approval_receipt
+        ):
             tool_calls += 1
-        if event_name == "agent.tool.call" and str(event.get("detail") or "") == "terminal.run":
+        if (
+            event_name == "agent.tool.call"
+            and not canonical_approval_receipt
+            and str(event.get("detail") or "") == "terminal.run"
+        ):
             result = event.get("result") if isinstance(event.get("result"), dict) else {}
             if not result.get("approval_required"):
                 terminal_calls += 1

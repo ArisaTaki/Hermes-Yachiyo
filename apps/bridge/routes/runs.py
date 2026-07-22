@@ -56,6 +56,11 @@ async def create_run(
     http_request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
     payload = _create_payload(request, http_request)
+    if str(payload.get("run_group_id") or "").strip():
+        raise HTTPException(
+            status_code=400,
+            detail="public_run_group_attachment_forbidden",
+        )
     try:
         service = _native_run_engine(http_request)
         return await asyncio.to_thread(

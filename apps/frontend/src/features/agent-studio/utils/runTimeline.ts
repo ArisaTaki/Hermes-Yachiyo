@@ -131,6 +131,12 @@ export function timelineEventTitle(event: Record<string, unknown>): string {
     const toolLabel = plannedDesktopToolLabel(event, detail);
     return toolLabel ? `已执行 · ${toolLabel}` : '已执行桌面动作';
   }
+  if (runtimeEventIsDesktopIntent(name, 'unverified')) {
+    const toolLabel = plannedDesktopToolLabel(event, detail);
+    return toolLabel
+      ? `操作效果未能验证 · ${toolLabel}`
+      : '桌面操作效果未能验证';
+  }
   if (runtimeEventIsDesktopPermissionRecovery(name)) {
     const toolLabel = plannedDesktopToolLabel(event, detail);
     return toolLabel ? `权限恢复 · ${toolLabel}` : '桌面权限恢复';
@@ -251,6 +257,7 @@ export function timelineEventTone(event: Record<string, unknown>): string {
   if (runtimeEventIsDesktopReadinessRecovered(name)) return 'ready';
   if (runtimeEventIsDesktopIntent(name, 'completed')) return 'ready';
   if (runtimeEventIsDesktopIntent(name, 'unavailable')) return 'danger';
+  if (runtimeEventIsDesktopIntent(name, 'unverified')) return 'danger';
   if (runtimeEventIsDesktopProviderSessionEvent(name, 'failed')) return 'danger';
   if (
     runtimeEventIsDesktopProviderSessionEvent(name, 'started')

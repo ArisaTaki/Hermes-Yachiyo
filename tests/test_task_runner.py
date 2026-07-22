@@ -170,6 +170,8 @@ async def test_task_runner_writes_final_reply_to_original_background_session(tmp
     monkeypatch.setattr(chat_store_mod, "get_chat_store", lambda: store)
     monkeypatch.setattr(activity_store_mod, "get_activity_store", lambda: activity_store)
     state = AppState()
+    background = ChatSession(session_id="background-session")
+    background.attach_store(store, load_existing=False)
     task = state.create_task(
         task_type=TaskType.GENERAL,
         description="后台任务",
@@ -191,6 +193,34 @@ async def test_task_runner_writes_final_reply_to_original_background_session(tmp
         assert "Yachiyo 回复完成" in activity_titles
     finally:
         activity_store.close()
+        store.close()
+
+
+def test_task_runner_does_not_recreate_deleted_background_session(tmp_path, monkeypatch):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    monkeypatch.setattr(chat_store_mod, "get_chat_store", lambda: store)
+    state = AppState()
+    target_session_id = "deleted-background-session"
+    target = ChatSession(session_id=target_session_id)
+    target.attach_store(store, load_existing=False)
+    task = state.create_task(
+        task_type=TaskType.GENERAL,
+        description="late background result",
+        chat_session_id=target_session_id,
+    )
+    state.update_task_status(
+        task.task_id,
+        TaskStatus.COMPLETED,
+        result="must not resurrect deleted chat",
+    )
+    store.delete_session(target_session_id)
+
+    try:
+        TaskRunner(state)._sync_task_message(task.task_id)
+
+        assert store.get_session(target_session_id) is None
+        assert store.load_messages(target_session_id, limit=0) == []
+    finally:
         store.close()
 
 
@@ -332,7 +362,10 @@ async def test_task_runner_executes_daily_desktop_intent_when_model_profile_miss
     )
     api = ChatAPI(runtime)
     try:
-        sent = api.send_message("打开 Apple Music")
+        sent = api.send_message(
+            "打开 Apple Music",
+            metadata={"allow_user_foreground_takeover": True},
+        )
         assert sent["ok"] is True
 
         await runner._execute_with_state(sent["task_id"])

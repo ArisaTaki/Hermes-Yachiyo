@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -32,6 +33,41 @@ _TEXT_SUFFIXES = {
     ".txt",
     ".wal",
 }
+_SQLITE_BINARY_SUFFIXES = {".db", ".sqlite", ".sqlite3", ".wal"}
+_SQLITE_SIDECAR_ENDINGS = ("-wal", "-journal")
+_PRINTABLE_BYTE_RUN_RE = re.compile(rb"[\x20-\x7e]{6,}")
+# SQLite can place adjacent text columns in one printable run, so the known
+# prefix/field/rotation shape is the boundary; a leading word boundary is not.
+_STRICT_KEYCHAIN_CREDENTIAL_REF_RE = re.compile(
+    rb"(?:"
+    rb"(?:model_source|model_profile):[A-Za-z0-9][A-Za-z0-9._-]{0,127}:api_key"
+    rb"|agent:[A-Za-z0-9][A-Za-z0-9._-]{0,127}:model_api_key"
+    rb")"
+    rb":[0-9a-f]{32}"
+    rb"(?![A-Za-z0-9_.:-])"
+)
+_TRAILING_PARTIAL_KEYCHAIN_CREDENTIAL_REF_RE = re.compile(
+    rb"(?:"
+    rb"(?:model_source|model_profile):[A-Za-z0-9][A-Za-z0-9._-]{0,127}:api_key"
+    rb"|agent:[A-Za-z0-9][A-Za-z0-9._-]{0,127}:model_api_key"
+    rb")"
+    rb":[0-9a-f]{0,31}$"
+)
+# A long live SQLite value can continue on an overflow page.  The four-byte
+# overflow-page header breaks the preceding printable run, so the safe runtime
+# ids ``task-workspace-<12 hex>`` and ``task-core-<12 hex>`` can appear to
+# begin with an otherwise secret-looking ``sk-`` fragment. Exempt only those
+# exact continuation shapes
+# at the start of a printable run; normal sk-* values and longer tokens remain
+# findings.
+_STRICT_RUNTIME_ID_OVERFLOW_CONTINUATION_RE = re.compile(
+    rb"\Ask-(?:workspace|core)-[0-9a-f]{12}(?=[\"}\],])"
+)
+_TRAILING_PARTIAL_RUNTIME_ID_OVERFLOW_CONTINUATION_RE = re.compile(
+    rb"\Ask-(?:workspace|core)-[0-9a-f]{0,11}$"
+)
+_SQLITE_SCAN_CHUNK_BYTES = 1024 * 1024
+_SQLITE_SCAN_OVERLAP_BYTES = 512
 _SKIP_DIR_NAMES = {
     ".git",
     "__pycache__",
@@ -115,13 +151,22 @@ def _scan_file(path: Path, *, max_file_bytes: int) -> list[SecretFinding]:
         return [SecretFinding(path, "scan target is missing")]
     if not path.is_file():
         return []
-    if path.suffix.lower() not in _TEXT_SUFFIXES:
+    if path.suffix.lower() not in _TEXT_SUFFIXES and not _is_sqlite_binary_path(path):
         return []
+    sqlite_binary = _is_sqlite_binary_path(path)
     try:
-        if path.stat().st_size > max_file_bytes:
+        if not sqlite_binary and path.stat().st_size > max_file_bytes:
             return [SecretFinding(path, f"file exceeds max scan size {max_file_bytes} bytes")]
     except OSError as exc:
         return [SecretFinding(path, f"could not stat file: {exc.__class__.__name__}")]
+    if sqlite_binary:
+        try:
+            contains_secret = _sqlite_file_contains_sensitive_binary_run(path)
+        except OSError as exc:
+            return [SecretFinding(path, f"could not read file: {exc.__class__.__name__}")]
+        if not contains_secret:
+            return []
+        return [SecretFinding(path, "contains unredacted secret-like text")]
     try:
         data = path.read_bytes()
     except OSError as exc:
@@ -131,6 +176,78 @@ def _scan_file(path: Path, *, max_file_bytes: int) -> list[SecretFinding]:
         return []
     line = _first_sensitive_line(text)
     return [SecretFinding(path, "contains unredacted secret-like text", line=line)]
+
+
+def _is_sqlite_binary_path(path: Path) -> bool:
+    name = path.name.lower()
+    return (
+        path.suffix.lower() in _SQLITE_BINARY_SUFFIXES
+        or name.endswith(_SQLITE_SIDECAR_ENDINGS)
+    )
+
+
+def _contains_sensitive_binary_run(
+    data: bytes,
+    *,
+    defer_trailing_credential_ref: bool = False,
+) -> bool:
+    """Scan SQLite/WAL bytes without joining unrelated page fragments.
+
+    SQLite free pages and partially overwritten cells can interleave control
+    bytes with old text. Treating the whole file as one decoded string can turn
+    fragments of a safe ``[redacted]`` placeholder into a false secret match.
+    Real API keys and assignment values are stored as contiguous printable
+    bytes, so scanning each printable run preserves detection without joining
+    unrelated fragments.
+    """
+
+    for match in _PRINTABLE_BYTE_RUN_RE.finditer(data):
+        printable_run = _STRICT_RUNTIME_ID_OVERFLOW_CONTINUATION_RE.sub(
+            b"[runtime-id-continuation]",
+            match.group(),
+        )
+        printable_run = _STRICT_KEYCHAIN_CREDENTIAL_REF_RE.sub(
+            b"[credential-reference]",
+            printable_run,
+        )
+        if defer_trailing_credential_ref and match.end() == len(data):
+            printable_run = (
+                _TRAILING_PARTIAL_RUNTIME_ID_OVERFLOW_CONTINUATION_RE.sub(
+                    b"[pending-runtime-id-continuation]",
+                    printable_run,
+                )
+            )
+            printable_run = _TRAILING_PARTIAL_KEYCHAIN_CREDENTIAL_REF_RE.sub(
+                b"[pending-credential-reference]",
+                printable_run,
+            )
+        if contains_sensitive_text(printable_run.decode("ascii")):
+            return True
+    return False
+
+
+def _sqlite_file_contains_sensitive_binary_run(path: Path) -> bool:
+    """Stream a SQLite database or sidecar while preserving chunk boundaries."""
+
+    chunk_bytes = max(1, int(_SQLITE_SCAN_CHUNK_BYTES))
+    carry = b""
+    with path.open("rb") as handle:
+        while chunk := handle.read(chunk_bytes):
+            data = carry + chunk
+            if _contains_sensitive_binary_run(
+                data,
+                defer_trailing_credential_ref=True,
+            ):
+                return True
+            carry = _trailing_printable_bytes(data)[-_SQLITE_SCAN_OVERLAP_BYTES:]
+    return bool(carry and _contains_sensitive_binary_run(carry))
+
+
+def _trailing_printable_bytes(data: bytes) -> bytes:
+    start = len(data)
+    while start > 0 and 0x20 <= data[start - 1] <= 0x7E:
+        start -= 1
+    return data[start:]
 
 
 def _first_sensitive_line(text: str) -> int | None:

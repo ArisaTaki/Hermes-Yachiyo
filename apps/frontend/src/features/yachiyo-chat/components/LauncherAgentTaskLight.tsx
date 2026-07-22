@@ -1,23 +1,10 @@
-import { useState } from 'react';
+import { useState, type MutableRefObject } from 'react';
 
 import { openAppView } from '../../../lib/bridge';
-import { runtimeToolDisplayLabelOrName } from '../../runtime-shared/approval';
-import { RuntimeDebugSummary } from '../../runtime-shared/components/RuntimeDebugSummary';
-import { runtimeTimelineEventLabel } from '../../runtime-shared/components/RuntimeTimelineSummary';
-import { taskPermissionRecoveryFromTaskFacts, type TaskPermissionRecoveryAction } from './AgentTaskCard';
-import {
-  yachiyoTaskPrimaryReplanRecoveryAction,
-  yachiyoTaskRuntimeExecutionRetryActions,
-  type YachiyoTaskReplanRecoverySnapshot,
-} from '../taskRecoveryActions';
-import {
-  plannerSummaryChips,
-  plannerSummaryDetail,
-  plannerSummaryFromTask,
-  type TaskPlannerSummarySnapshot,
-} from '../taskPlannerSummary';
-import { yachiyoTaskStudioTarget, yachiyoTaskStudioUrl } from '../taskSnapshots';
-import type { AgentTaskLightSnapshot, AgentTaskSnapshot, ApprovalCardSnapshot, PublicRunEvent } from '../types';
+import { consumerTaskPresentation } from '../consumerTaskPresentation';
+import type { TaskPermissionRecoveryAction } from '../taskPermissionRecovery';
+import { yachiyoTaskStudioUrl } from '../taskSnapshots';
+import type { AgentTaskLightSnapshot, AgentTaskSnapshot, ApprovalCardSnapshot } from '../types';
 
 type LauncherTaskMode = 'bubble' | 'live2d';
 type LauncherTaskApprovalAction = 'approve' | 'reject';
@@ -38,12 +25,10 @@ type LauncherAgentTaskTestIds = {
   detail: string;
   diagnostics: string;
   light: string;
+  compact: string;
   openChat: string;
-  openStudio: string;
-  plannerSummary: string;
   recovery: string;
   reject: string;
-  runtimeDebug: string;
 };
 
 export type LauncherAgentTask = AgentTaskSnapshot | null | undefined;
@@ -56,12 +41,10 @@ const DEFAULT_LAUNCHER_AGENT_TASK_TEST_IDS: Record<LauncherTaskMode, LauncherAge
     detail: 'bubble-launcher-agent-task-detail',
     diagnostics: 'bubble-launcher-agent-task-open-diagnostics',
     light: 'bubble-launcher-agent-task-light',
+    compact: 'bubble-launcher-agent-task-compact',
     openChat: 'bubble-launcher-agent-task-open-chat',
-    openStudio: 'bubble-launcher-agent-task-open-studio',
-    plannerSummary: 'bubble-launcher-agent-task-planner-summary',
     recovery: 'bubble-launcher-agent-task-run-recovery-action',
     reject: 'bubble-launcher-agent-task-reject',
-    runtimeDebug: 'bubble-launcher-agent-task-runtime-debug',
   },
   live2d: {
     approvalActions: 'live2d-launcher-agent-task-approval-actions',
@@ -70,12 +53,10 @@ const DEFAULT_LAUNCHER_AGENT_TASK_TEST_IDS: Record<LauncherTaskMode, LauncherAge
     detail: 'live2d-launcher-agent-task-detail',
     diagnostics: 'live2d-launcher-agent-task-open-diagnostics',
     light: 'live2d-launcher-agent-task-light',
+    compact: 'live2d-launcher-agent-task-compact',
     openChat: 'live2d-launcher-agent-task-open-chat',
-    openStudio: 'live2d-launcher-agent-task-open-studio',
-    plannerSummary: 'live2d-launcher-agent-task-planner-summary',
     recovery: 'live2d-launcher-agent-task-run-recovery-action',
     reject: 'live2d-launcher-agent-task-reject',
-    runtimeDebug: 'live2d-launcher-agent-task-runtime-debug',
   },
 };
 
@@ -93,182 +74,7 @@ export function launcherAgentTaskTitle(task: LauncherAgentTask, fallback = '八�
 
 export function launcherAgentTaskDetail(task: LauncherAgentTask) {
   if (!task) return '';
-  const approval = task.pending_approvals?.find((item) => item.tool_name || item.title);
-  if (approval) {
-    const approvalTitle = approval.tool_name
-      ? runtimeToolDisplayLabelOrName(approval.tool_name)
-      : String(approval.title || '').trim();
-    return `审批 · ${approvalTitle || '人工确认'}`;
-  }
-  const step = String(task.current_step || task.progress_text || '').trim();
-  if (step) return step;
-  const toolCall = task.tool_calls?.find((item) => item.tool_name);
-  if (toolCall) return launcherAgentTaskToolCallLabel(toolCall);
-  const event = task.recent_events?.find((item) => item.title || item.detail || item.event_type);
-  if (event) return launcherAgentTaskEventLabel(event);
-  const artifact = task.artifacts?.find((item) => item.title || item.path || item.kind);
-  if (artifact) return `产物 · ${artifact.title || artifact.path || artifact.kind}`;
-  return String(task.summary || '').trim();
-}
-
-function launcherAgentTaskEventLabel(event: PublicRunEvent) {
-  const label = runtimeTimelineEventLabel(event);
-  if (label && label !== '运行事件') return label;
-  const detail = String(event.detail || '').trim();
-  if (detail) return runtimeToolDisplayLabelOrName(detail);
-  return label || '运行事件';
-}
-
-function launcherAgentTaskToolCallLabel(toolCall: { status?: string; tool_name?: string }) {
-  const toolName = String(toolCall.tool_name || '').trim();
-  const label = runtimeToolDisplayLabelOrName(toolName || 'tool');
-  const status = launcherAgentTaskToolCallStatusLabel(String(toolCall.status || '').trim());
-  return status ? `${status} · ${label}` : `执行 · ${label}`;
-}
-
-function launcherAgentTaskToolCallStatusLabel(status: string) {
-  if (status === 'completed') return '已执行';
-  if (status === 'waiting_approval' || status === 'approval_required') return '待审批';
-  if (status === 'blocked') return '被占用';
-  if (status === 'failed') return '失败';
-  if (status === 'running') return '执行中';
-  if (status === 'queued' || status === 'planned') return '准备执行';
-  if (status === 'unavailable') return '不可用';
-  return '';
-}
-
-type LauncherAgentTaskProgressChip = {
-  kind: string;
-  label: string;
-  title?: string;
-  tone: 'ready' | 'running' | 'warning' | 'muted';
-};
-
-function launcherAgentTaskProgressChips(
-  task: AgentTaskSnapshot,
-  limit: number,
-): LauncherAgentTaskProgressChip[] {
-  const progress = task.task_progress || null;
-  const todos = task.task_core?.todos || [];
-  const checkpoints = task.task_core?.checkpoints || [];
-  const workspaceItems = task.task_core?.workspace?.items || [];
-  const totalTodos = progress?.total_todos ?? todos.length;
-  const completedTodos = progress?.completed_todos
-    ?? todos.filter((todo) => todo.status === 'completed').length;
-  const activeTodos = progress?.active_todos
-    ?? todos.filter((todo) => todo.status === 'in_progress').length;
-  const blockedTodos = progress?.blocked_todos
-    ?? todos.filter((todo) => todo.status === 'blocked').length;
-  const totalCheckpoints = progress?.total_checkpoints ?? checkpoints.length;
-  const completedCheckpoints = progress?.completed_checkpoints
-    ?? checkpoints.filter((checkpoint) => checkpoint.status === 'completed').length;
-  const totalWorkspaceItems = progress?.total_workspace_items ?? workspaceItems.length;
-  const completedWorkspaceItems = progress?.completed_workspace_items
-    ?? workspaceItems.filter((item) => item.status === 'completed').length;
-  const blockedWorkspaceItems = progress?.blocked_workspace_items
-    ?? workspaceItems.filter((item) => item.status === 'blocked').length;
-  const failedVerificationCount = progress?.failed_verification_count ?? 0;
-  const pendingVerificationCount = progress?.pending_verification_count ?? 0;
-  const executionEnvelope = task.runtime_execution_envelope || null;
-  const executionRequestCount = executionEnvelope?.requests?.length || 0;
-  const executionRiskCounts = launcherAgentTaskRuntimeRiskCounts(executionEnvelope);
-  const executionRiskLabel = launcherAgentTaskRuntimeRiskLabel(executionRiskCounts);
-  const chips: LauncherAgentTaskProgressChip[] = [];
-
-  if (executionRequestCount > 0) {
-    chips.push({
-      kind: 'execution',
-      label: executionRiskLabel
-        ? `exec ${executionRequestCount} ${executionRiskLabel}`
-        : `exec ${executionRequestCount}`,
-      title: [
-        executionEnvelope?.requests?.map((request) => request.tool_name).filter(Boolean).join(' · '),
-        launcherAgentTaskRuntimeRiskTitle(executionRiskCounts),
-      ].filter(Boolean).join(' · ') || undefined,
-      tone: executionEnvelope?.approvals_required?.length ? 'warning' : 'running',
-    });
-  }
-  if (totalTodos > 0) {
-    chips.push({
-      kind: 'todo',
-      label: `todo ${completedTodos}/${totalTodos}`,
-      title: progress?.current_step_title || progress?.progress_text || undefined,
-      tone: blockedTodos > 0 ? 'warning' : activeTodos > 0 ? 'running' : completedTodos >= totalTodos ? 'ready' : 'muted',
-    });
-  }
-  if (totalCheckpoints > 0) {
-    chips.push({
-      kind: 'checkpoint',
-      label: `check ${completedCheckpoints}/${totalCheckpoints}`,
-      title: progress?.latest_verification_step_id || undefined,
-      tone: failedVerificationCount > 0 ? 'warning' : completedCheckpoints >= totalCheckpoints ? 'ready' : 'muted',
-    });
-  }
-  if (totalWorkspaceItems > 0) {
-    chips.push({
-      kind: 'workspace',
-      label: `work ${completedWorkspaceItems}/${totalWorkspaceItems}`,
-      title: task.task_core?.workspace?.title || progress?.workspace_id || undefined,
-      tone: blockedWorkspaceItems > 0 ? 'warning' : completedWorkspaceItems >= totalWorkspaceItems ? 'ready' : 'muted',
-    });
-  }
-  if (progress?.needs_replan || progress?.latest_replan_request_id) {
-    chips.push({
-      kind: 'replan',
-      label: 'replan',
-      title: [
-        progress.latest_replan_trigger,
-        progress.latest_replan_step_id,
-      ].filter(Boolean).join(' · '),
-      tone: 'warning',
-    });
-  }
-  if (failedVerificationCount > 0 || pendingVerificationCount > 0) {
-    chips.push({
-      kind: 'verification',
-      label: failedVerificationCount > 0 ? `verify !${failedVerificationCount}` : `verify ${pendingVerificationCount}`,
-      title: progress?.latest_verification_status || undefined,
-      tone: failedVerificationCount > 0 ? 'warning' : 'muted',
-    });
-  }
-  if (progress?.needs_user_action) {
-    chips.push({
-      kind: 'user_action',
-      label: 'action',
-      title: progress.approval_step_ids?.join(' · ') || undefined,
-      tone: 'warning',
-    });
-  }
-  return chips.slice(0, Math.max(0, limit));
-}
-
-function launcherAgentTaskRuntimeRiskCounts(
-  runtimeEnvelope: AgentTaskSnapshot['runtime_execution_envelope'],
-): Array<[string, number]> {
-  const counts = new Map<string, number>();
-  for (const request of runtimeEnvelope?.requests || []) {
-    const risk = String(request.risk_level || '').trim();
-    if (!risk) continue;
-    counts.set(risk, (counts.get(risk) || 0) + 1);
-  }
-  return ['high', 'medium', 'low']
-    .map((risk): [string, number] => [risk, counts.get(risk) || 0])
-    .filter(([, count]) => count > 0);
-}
-
-function launcherAgentTaskRuntimeRiskLabel(risks: Array<[string, number]>): string {
-  return risks[0]?.[0] || '';
-}
-
-function launcherAgentTaskRuntimeRiskTitle(risks: Array<[string, number]>): string {
-  return risks.map(([risk, count]) => `risk ${risk}:${count}`).join(' · ');
-}
-
-function launcherAgentTaskPlannerChips(
-  summary: TaskPlannerSummarySnapshot,
-  limit: number,
-) {
-  return plannerSummaryChips(summary).slice(0, Math.max(0, limit));
+  return consumerTaskPresentation(task, 'panel').detail;
 }
 
 export function launcherAgentTaskChatParams(task: LauncherAgentTask): Record<string, string> | undefined {
@@ -283,15 +89,15 @@ export function launcherAgentTaskChatParams(task: LauncherAgentTask): Record<str
 
 export function launcherAgentTaskLightSnapshot(task: LauncherAgentTask): AgentTaskLightSnapshot | null {
   if (!task) return null;
-  const approval = launcherAgentTaskPendingApproval(task);
+  const presentation = consumerTaskPresentation(task, 'panel');
   return {
     task_id: task.task_id,
     conversation_id: task.conversation_id,
     title: launcherAgentTaskTitle(task),
     status: task.status || 'running',
-    detail: launcherAgentTaskDetail(task) || null,
-    needs_user_action: Boolean(task.needs_user_action || approval),
-    pending_approval: approval,
+    detail: presentation.detail || null,
+    needs_user_action: ['approval', 'permission', 'recovery', 'failed'].includes(presentation.state),
+    pending_approval: presentation.approval,
     task_progress: task.task_progress || null,
     runtime_debug: task.runtime_debug || null,
     runtime_execution_envelope: task.runtime_execution_envelope || null,
@@ -313,16 +119,15 @@ function launcherAgentTaskTestIds(
     detail: `${testIdPrefix}-agent-task-detail`,
     diagnostics: `${testIdPrefix}-agent-task-open-diagnostics`,
     light: `${testIdPrefix}-agent-task-light`,
+    compact: `${testIdPrefix}-agent-task-compact`,
     openChat: `${testIdPrefix}-agent-task-open-chat`,
-    openStudio: `${testIdPrefix}-agent-task-open-studio`,
-    plannerSummary: `${testIdPrefix}-agent-task-planner-summary`,
     recovery: `${testIdPrefix}-agent-task-run-recovery-action`,
     reject: `${testIdPrefix}-agent-task-reject`,
-    runtimeDebug: `${testIdPrefix}-agent-task-runtime-debug`,
   };
 }
 
 export function LauncherAgentTaskLight({
+  containerRef,
   mode,
   onApproveApproval,
   onCancelTask,
@@ -332,6 +137,7 @@ export function LauncherAgentTaskLight({
   testIdPrefix = `${mode}-launcher`,
   variant = 'launcher',
 }: {
+  containerRef?: MutableRefObject<HTMLElement | null>;
   mode: LauncherTaskMode;
   onApproveApproval?: LauncherTaskApprovalHandler;
   onCancelTask?: LauncherTaskCancelHandler;
@@ -342,56 +148,47 @@ export function LauncherAgentTaskLight({
   variant?: 'launcher' | 'panel';
 }) {
   const [taskAction, setTaskAction] = useState<LauncherTaskAction | ''>('');
+  const rememberContainer = (element: HTMLElement | null) => {
+    if (containerRef) containerRef.current = element;
+  };
   if (!task) return null;
   const currentTask = task;
-  const lightTask = launcherAgentTaskLightSnapshot(currentTask);
-  if (!lightTask) return null;
-  const studioTarget = yachiyoTaskStudioTarget(currentTask, lightTask.open_in_studio_url || '');
-  const { runId, studioUrl } = studioTarget;
-  const studioParams = studioTarget.routeParams;
-  const status = String(lightTask.status || currentTask.status || '');
-  const approval = lightTask.pending_approval || launcherAgentTaskPendingApproval(currentTask);
-  const taskTitle = launcherAgentTaskTitle(currentTask);
-  const permissionRecovery = taskPermissionRecoveryFromTaskFacts(
-    currentTask.recent_events,
-    currentTask.tool_calls,
-  );
-  const replanRecoveryAction = yachiyoTaskPrimaryReplanRecoveryAction(currentTask);
-  const runtimeRetryAction = yachiyoTaskRuntimeExecutionRetryActions(currentTask, 1)[0] || null;
-  const needsAction = Boolean(
-    lightTask.needs_user_action
-    || approval
-    || permissionRecovery
-    || replanRecoveryAction
-    || runtimeRetryAction
-  );
-  const detail = permissionRecovery
-    ? `${permissionRecovery.kind === 'permission' ? '需要权限' : '需要处理'} · ${permissionRecovery.labels.join('、')}`
-    : replanRecoveryAction
-      ? `恢复计划 · ${launcherReplanRecoveryLabel(replanRecoveryAction.recovery)}`
-    : runtimeRetryAction
-      ? `运行重试 · ${runtimeRetryAction.tool}`
-    : lightTask.detail || launcherAgentTaskDetail(currentTask);
-  const canHandleApproval = Boolean(approval && (onApproveApproval || onRejectApproval));
-  const canCancel = Boolean(onCancelTask && launcherAgentTaskCanCancel(currentTask));
+  const presentation = consumerTaskPresentation(currentTask, variant === 'panel' ? 'panel' : 'launcher');
   const testIds = launcherAgentTaskTestIds(mode, testIdPrefix);
+  if (presentation.visibility === 'hidden') return null;
+  if (presentation.visibility === 'compact') {
+    if (mode === 'bubble') return null;
+    return (
+      <button
+        ref={rememberContainer}
+        type="button"
+        className="launcher-agent-task-compact"
+        data-task-id={currentTask.task_id}
+        data-testid={testIds.compact}
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          void openAppView('chat', launcherAgentTaskChatParams(currentTask));
+        }}
+        title="在 Chat 中查看任务"
+      >
+        <span className="launcher-agent-task-compact-dots" aria-hidden="true"><i /><i /><i /></span>
+        <span>{presentation.statusLabel}</span>
+      </button>
+    );
+  }
+
+  const approval = presentation.approval;
+  const permissionRecovery = presentation.permissionRecovery;
+  const replanRecoveryAction = presentation.replanRecoveryAction;
+  const runtimeRetryAction = presentation.runtimeRetryAction;
+  const staleApproval = Boolean(approval && !String(approval.approval_id || '').trim());
+  const canHandleApproval = Boolean(approval && !staleApproval && (onApproveApproval || onRejectApproval));
+  const canCancel = Boolean(onCancelTask && launcherAgentTaskCanCancel(currentTask));
   const permissionRecoveryAction = permissionRecovery?.actions[0] || null;
   const primaryReplanRecoveryAction = permissionRecoveryAction ? null : replanRecoveryAction;
   const primaryRuntimeRetryAction = permissionRecoveryAction || primaryReplanRecoveryAction ? null : runtimeRetryAction;
   const primaryRecoveryAction = permissionRecoveryAction || primaryReplanRecoveryAction?.action || primaryRuntimeRetryAction || null;
-  const progressChips = launcherAgentTaskProgressChips(
-    currentTask,
-    mode === 'bubble' ? 2 : variant === 'panel' ? 5 : 4,
-  );
-  const runtimeEnvelope = lightTask.runtime_execution_envelope
-    || currentTask.runtime_execution_envelope
-    || null;
-  const runtimeRiskCounts = launcherAgentTaskRuntimeRiskCounts(runtimeEnvelope);
-  const progress = lightTask.task_progress || currentTask.task_progress || null;
-  const plannerSummary = plannerSummaryFromTask(currentTask);
-  const plannerChips = plannerSummary
-    ? launcherAgentTaskPlannerChips(plannerSummary, mode === 'bubble' ? 2 : variant === 'panel' ? 4 : 3)
-    : [];
   async function handleApproval(action: LauncherTaskApprovalAction) {
     if (!approval || taskAction) return;
     const handler = action === 'approve' ? onApproveApproval : onRejectApproval;
@@ -414,20 +211,12 @@ export function LauncherAgentTaskLight({
   }
   return (
     <div
-      className={`launcher-agent-task-light ${launcherAgentTaskTone(status)} ${variant === 'panel' ? 'is-panel' : ''}`}
-      data-run-id={runId}
+      ref={rememberContainer}
+      className={`launcher-agent-task-light ${presentation.tone} ${variant === 'panel' ? 'is-panel' : ''}`}
+      data-presentation-state={presentation.state}
+      data-presentation-visibility={presentation.visibility}
+      data-run-id={approval?.run_id || ''}
       data-task-id={currentTask.task_id}
-      data-planner-intent-kind={plannerSummary?.intentKind || ''}
-      data-plan-approvals={plannerSummary?.approvals.join(',') || ''}
-      data-plan-capabilities={plannerSummary?.capabilities.join(',') || ''}
-      data-plan-missing-capabilities={plannerSummary?.missingCapabilities.join(',') || ''}
-      data-plan-tools={plannerSummary?.tools.join(',') || ''}
-      data-route-to-studio={plannerSummary ? plannerSummary.routeToStudio === null ? '' : String(plannerSummary.routeToStudio) : ''}
-      data-runtime-approval-count={runtimeEnvelope?.approvals_required?.length || 0}
-      data-runtime-request-count={runtimeEnvelope?.requests?.length || 0}
-      data-runtime-risk-levels={runtimeRiskCounts.map(([risk, count]) => `${risk}:${count}`).join(',')}
-      data-task-progress-status={progress?.status || ''}
-      data-task-needs-replan={String(progress?.needs_replan === true)}
       data-testid={testIds.light}
     >
       <button
@@ -441,69 +230,14 @@ export function LauncherAgentTaskLight({
         }}
         title="在 Chat 中查看任务"
       >
-        <span>{launcherAgentTaskStatusLabel(status)}</span>
-        <strong>{taskTitle}</strong>
-        {detail ? (
-          <small data-testid={testIds.detail}>{detail}</small>
-        ) : null}
-        {progressChips.length ? (
-          <div className="launcher-agent-task-progress" data-testid={`${testIdPrefix}-agent-task-progress`}>
-            {progressChips.map((chip) => (
-              <small
-                className={`launcher-agent-task-progress-chip ${chip.tone}`}
-                data-progress-chip-kind={chip.kind}
-                key={`${chip.kind}:${chip.label}`}
-                title={chip.title || chip.label}
-              >
-                {chip.label}
-              </small>
-            ))}
-          </div>
-        ) : null}
-        {plannerSummary && plannerChips.length ? (
-          <div
-            className="launcher-agent-task-planner"
-            data-testid={testIds.plannerSummary}
-            title={plannerSummaryDetail(plannerSummary)}
-          >
-            {plannerChips.map((chip) => (
-              <small
-                className={`launcher-agent-task-planner-chip ${chip.kind}`}
-                data-planner-chip-kind={chip.kind}
-                data-planner-chip-value={chip.value}
-                key={`${chip.kind}:${chip.value}`}
-                title={chip.value}
-              >
-                {chip.label} · {chip.value}
-              </small>
-            ))}
-          </div>
-        ) : null}
-        {needsAction ? <em>待处理</em> : null}
+        <span>{presentation.statusLabel}</span>
+        <strong>{presentation.title}</strong>
+        <small data-testid={testIds.detail}>{presentation.detail}</small>
       </button>
-      <RuntimeDebugSummary
-        className="launcher-agent-task-runtime-debug"
-        compact
-        sourceLabel={mode === 'bubble' ? 'Bubble runtime' : 'Live2D runtime'}
-        summary={lightTask.runtime_debug || currentTask.runtime_debug}
-        testId={testIds.runtimeDebug}
-      />
-      {runId && studioUrl && studioParams ? (
-        <a
-          href={studioUrl}
-          className="launcher-agent-task-studio"
-          data-run-id={runId}
-          data-studio-url={studioUrl}
-          data-testid={testIds.openStudio}
-          onClick={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            void openAppView('agents', studioParams);
-          }}
-          title="在 Agent Studio 中查看"
-        >
-          Agent Studio
-        </a>
+      {staleApproval ? (
+        <small className="message-error" data-testid={`${testIdPrefix}-agent-task-approval-stale`}>
+          确认信息已更新，请打开对话查看。
+        </small>
       ) : null}
       {permissionRecovery ? (
         <button
@@ -527,9 +261,9 @@ export function LauncherAgentTaskLight({
               return_to: mode,
             });
           }}
-          title={`打开诊断：${permissionRecovery.labels.join('、')}`}
+          title="打开权限设置与解决办法"
         >
-          {permissionRecovery.kind === 'permission' ? '权限' : '诊断'}
+          {permissionRecovery.kind === 'blocking_condition' ? '解决' : '授权'}
         </button>
       ) : null}
       {primaryRecoveryAction ? (
@@ -550,9 +284,9 @@ export function LauncherAgentTaskLight({
             event.stopPropagation();
             void onRunRecoveryAction?.(currentTask, primaryRecoveryAction);
           }}
-          title={primaryRecoveryAction.prompt}
+          title="重试当前任务"
         >
-          {permissionRecovery?.kind === 'blocking_condition' || primaryRuntimeRetryAction ? '重试' : '恢复'}
+          重试
         </button>
       ) : null}
       {canHandleApproval || canCancel ? (
@@ -569,9 +303,9 @@ export function LauncherAgentTaskLight({
                   event.stopPropagation();
                   void handleApproval('approve');
                 }}
-                title="批准任务审批"
+                title="确认并继续任务"
               >
-                {taskAction === 'approve' ? '处理中' : '批准'}
+                {taskAction === 'approve' ? '处理中' : '确认继续'}
               </button>
               <button
                 type="button"
@@ -583,7 +317,7 @@ export function LauncherAgentTaskLight({
                   event.stopPropagation();
                   void handleApproval('reject');
                 }}
-                title="拒绝任务审批"
+                title="拒绝并停止当前操作"
               >
                 {taskAction === 'reject' ? '处理中' : '拒绝'}
               </button>
@@ -600,9 +334,9 @@ export function LauncherAgentTaskLight({
                 event.stopPropagation();
                 void handleCancel();
               }}
-              title="取消任务"
+              title="停止任务"
             >
-              {taskAction === 'cancel' ? '取消中' : '取消'}
+              {taskAction === 'cancel' ? '停止中' : '停止任务'}
             </button>
           ) : null}
         </div>
@@ -611,42 +345,15 @@ export function LauncherAgentTaskLight({
   );
 }
 
-function launcherReplanRecoveryLabel(recovery: YachiyoTaskReplanRecoverySnapshot): string {
-  return String(
-    recovery.recovery_action_label
-    || recovery.selected_tool_name
-    || recovery.target_capability_id
-    || recovery.source_tool_name
-    || recovery.trigger
-    || recovery.request_id
-    || 'recovery',
-  ).trim();
-}
-
-function launcherAgentTaskPendingApproval(task: AgentTaskSnapshot): ApprovalCardSnapshot | null {
-  return task.pending_approvals?.find((approval) => !approval.status || approval.status === 'pending')
-    || task.pending_approvals?.[0]
-    || null;
-}
-
 function launcherAgentTaskCanCancel(task: AgentTaskSnapshot): boolean {
   return ['queued', 'running', 'waiting_approval'].includes(String(task.status || ''));
 }
 
 function launcherAgentTaskStatusLabel(status: string) {
-  if (status === 'waiting_approval') return '等待审批';
-  if (status === 'running' || status === 'queued') return 'Agent 运行中';
-  if (status === 'completed') return 'Agent 已完成';
-  if (status === 'failed') return 'Agent 失败';
-  if (status === 'cancelled') return 'Agent 已取消';
-  return 'Agent Task';
-}
-
-function launcherAgentTaskTone(status: string) {
-  if (status === 'waiting_approval') return 'approval';
-  if (status === 'running' || status === 'queued') return 'running';
-  if (status === 'completed') return 'completed';
-  if (status === 'failed') return 'failed';
-  if (status === 'cancelled') return 'cancelled';
-  return 'neutral';
+  if (status === 'waiting_approval') return '需要确认';
+  if (status === 'running' || status === 'queued') return '处理中';
+  if (status === 'completed') return '已完成';
+  if (status === 'failed') return '未完成';
+  if (status === 'cancelled') return '已取消';
+  return '任务';
 }

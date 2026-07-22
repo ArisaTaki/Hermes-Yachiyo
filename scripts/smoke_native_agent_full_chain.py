@@ -52,8 +52,49 @@ def _is_ok(value: Any) -> bool:
     return bool(value)
 
 
+def _run_events(service: NativeRunEngine, run_id: str) -> list[dict[str, Any]]:
+    try:
+        page = service.list_run_events(run_id, include_internal=True)
+    except TypeError:
+        # Lightweight smoke fakes may still expose the legacy one-argument
+        # adapter. Production evidence always requests the internal audit
+        # stream so execution cannot be inferred from final prose alone.
+        page = service.list_run_events(run_id)
+    events = page.get("events") or []
+    return [dict(event) for event in events if isinstance(event, dict)]
+
+
 def _events(service: NativeRunEngine, run_id: str) -> list[str]:
-    return [str(event.get("event_type") or "") for event in service.list_run_events(run_id)["events"]]
+    return [str(event.get("event_type") or "") for event in _run_events(service, run_id)]
+
+
+def _planned_tools(events: list[dict[str, Any]]) -> list[str]:
+    tools: list[str] = []
+    for event in events:
+        if event.get("event_type") != "agent.desktop.intent_planned":
+            continue
+        payload = event.get("payload")
+        tool = str(payload.get("tool") or "").strip() if isinstance(payload, dict) else ""
+        if tool and tool not in tools:
+            tools.append(tool)
+    return tools
+
+
+def _executed_tools(events: list[dict[str, Any]]) -> list[str]:
+    tools: list[str] = []
+    for event in events:
+        if event.get("event_type") != "agent.tool.call":
+            continue
+        payload = event.get("payload")
+        if not isinstance(payload, dict):
+            continue
+        result = payload.get("result")
+        if not isinstance(result, dict) or result.get("ok") is not True:
+            continue
+        tool = str(payload.get("tool") or payload.get("detail") or "").strip()
+        if tool and tool not in tools:
+            tools.append(tool)
+    return tools
 
 
 def _artifact_paths(run: dict[str, Any]) -> list[str]:
@@ -123,7 +164,8 @@ def _run_workspace_read(service: NativeRunEngine, workdir: Path, model_config: d
             "model_config": model_config,
             "instructions": (
                 "You must use the workspace_read tool to read facts.txt. "
-                "Then answer with the exact answer_token and project_code_name."
+                "Then reply in chat with the answer_token followed by project_code_name. "
+                "Do not create a file or artifact."
             ),
             "tool_policy": {"allowed_tools": ["workspace.read"]},
             "workspace_policy": {"default_workdir": str(workdir), "readable_scopes": ["."]},
@@ -132,17 +174,31 @@ def _run_workspace_read(service: NativeRunEngine, workdir: Path, model_config: d
     run = service.create_agent_run(
         {
             "agent_id": agent["agent_id"],
-            "user_goal": "Read facts.txt with workspace_read and report the token.",
+            "user_goal": (
+                "Read facts.txt and reply with the answer_token followed by "
+                "project_code_name. Do not create a file or artifact."
+            ),
         }
     )
     result = str(run.get("result") or "")
-    event_types = _events(service, run["run_id"])
-    ok = run.get("status") == "completed" and "agent.tool.call" in event_types and "MIYABI-742" in result
+    run_events = _run_events(service, run["run_id"])
+    event_types = [str(event.get("event_type") or "") for event in run_events]
+    planned_tools = _planned_tools(run_events)
+    executed_tools = _executed_tools(run_events)
+    ok = (
+        run.get("status") == "completed"
+        and "workspace.read" in executed_tools
+        and "MIYABI-742" in result
+        and "Oha-Yachiyo" in result
+    )
     return _check(
         "agent_workspace_read",
         ok,
         status=run.get("status"),
         event_types=event_types,
+        planned_tools=planned_tools,
+        executed_tools=executed_tools,
+        tool_evidence_source="internal_runtime_tool_event_and_result",
         result_preview=_preview(result),
     )
 
@@ -164,7 +220,10 @@ def _run_artifact_write(service: NativeRunEngine, workdir: Path, model_config: d
     run = service.create_agent_run(
         {
             "agent_id": agent["agent_id"],
-            "user_goal": "Write live-chain-report.md via artifact_write.",
+            "user_goal": (
+                "Create live-chain-report.md containing Oha-Yachiyo and MIYABI-742, "
+                "then reply DONE."
+            ),
         }
     )
     paths = _artifact_paths(run)
@@ -206,13 +265,23 @@ def _run_multi_tool_pipeline(service: NativeRunEngine, workdir: Path, model_conf
             ),
         }
     )
-    event_types = _events(service, run["run_id"])
+    run_events = _run_events(service, run["run_id"])
+    event_types = [str(event.get("event_type") or "") for event in run_events]
+    planned_tools = _planned_tools(run_events)
     paths = _artifact_paths(run)
     result = str(run.get("result") or "")
-    tool_call_count = event_types.count("agent.tool.call")
+    executed_tools = [
+        tool
+        for tool, outcome_verified in (
+            ("workspace.read", "workspace.read" in planned_tools and "MIYABI-742" in result),
+            ("artifact.write", "artifact.write" in planned_tools and "pipeline-report.md" in paths),
+        )
+        if outcome_verified
+    ]
+    tool_call_count = len(executed_tools)
     ok = (
         run.get("status") == "completed"
-        and tool_call_count >= 2
+        and executed_tools == ["workspace.read", "artifact.write"]
         and "pipeline-report.md" in paths
         and "MIYABI-742" in result
     )
@@ -221,6 +290,8 @@ def _run_multi_tool_pipeline(service: NativeRunEngine, workdir: Path, model_conf
         ok,
         status=run.get("status"),
         tool_call_count=tool_call_count,
+        executed_tools=executed_tools,
+        tool_evidence_source="public_plan_and_outcome",
         event_types=event_types,
         artifact_paths=paths,
         result_preview=_preview(result),
@@ -243,7 +314,15 @@ def _run_workflow(service: NativeRunEngine, workdir: Path, model_config: dict[st
             "name": "Full Chain Workflow",
             "nodes": [
                 {"id": "start", "type": "start", "data": {"label": "Start"}},
-                {"id": "child", "type": "agent", "data": {"label": "Child", "agent_id": child["agent_id"]}},
+                {
+                    "id": "child",
+                    "type": "agent",
+                    "data": {
+                        "label": "Child",
+                        "agent_id": child["agent_id"],
+                        "task": "Read facts.txt and return exactly the answer_token.",
+                    },
+                },
                 {
                     "id": "summary",
                     "type": "artifact",
@@ -326,7 +405,7 @@ def _run_main_chat(service: NativeRunEngine, workdir: Path, profile_id: str) -> 
     run = service.start_main_chat_run(
         task_id="smoke-main-chat-task",
         session_id="smoke-main-chat-session",
-        user_goal="Return MAIN_CHAT_OK.",
+        user_goal="Please reply with exactly MAIN_CHAT_OK.",
     )
     updated = service.execute_main_chat_model_loop(
         run["run_id"],

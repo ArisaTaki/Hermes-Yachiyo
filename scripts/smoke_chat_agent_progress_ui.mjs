@@ -552,53 +552,24 @@ async function main() {
   console.log('[electron-smoke] chat loaded');
   await waitFor(win, () => {
     const smoke = window.__ohaSmoke || {};
+    const userMessages = Array.from(document.querySelectorAll('.message.user'))
+      .filter((node) => (node.textContent || '').includes(smoke.runGoal));
+    const typing = document.querySelector('.message.assistant.processing .loading-dots');
     const card = document.querySelector('[data-testid="chat-agent-run-progress-card"]');
     const button = document.querySelector('[data-testid="chat-agent-run-progress-open-run-detail"]');
-    return Boolean(card)
-      && card.getAttribute('data-run-id') === smoke.runId
-      && card.getAttribute('data-run-status') === 'processing'
-      && card.getAttribute('data-run-group-id') === smoke.runGroupId
-      && card.textContent.includes(smoke.progressTitle)
-      && button?.getAttribute('data-run-id') === smoke.runId
-      && button?.getAttribute('data-run-status') === 'processing'
-      && button.textContent.includes('Agent Studio');
-  }, 'Chat Agent progress card');
-  await win.webContents.executeJavaScript(
-    "const openRun = document.querySelector('[data-testid=\"chat-agent-run-progress-open-run-detail\"]');" +
-      "const smoke = window.__ohaSmoke || {};" +
-      "if (!openRun) throw new Error('missing Chat Agent progress Run Detail button');" +
-      "if (openRun.getAttribute('data-run-id') !== smoke.runId) throw new Error('Chat Agent progress Run Detail button has wrong run id');" +
-      "if (openRun.getAttribute('data-run-status') !== 'processing') throw new Error('Chat Agent progress Run Detail button has wrong status');" +
-      "if (!openRun.textContent.includes('Agent Studio')) throw new Error('Chat Agent progress handoff should point to Agent Studio');" +
-      "openRun.click();",
-    true
-  );
-  await waitFor(win, () => (
-    (() => {
-      const smoke = window.__ohaSmoke || {};
-      return (
-    window.location.hash.includes('/agents')
-    && window.location.hash.includes(smoke.runId)
-    && document.querySelector('[data-testid="agent-run-detail"]')?.getAttribute('data-run-id') === smoke.runId
-    && document.querySelector('[data-testid="agent-run-detail"]')?.getAttribute('data-run-status') === 'running'
-    && document.querySelector('[data-testid="agent-run-detail"]')?.getAttribute('data-task-id') === smoke.taskId
-    && document.querySelector('[data-testid="agent-run-detail"]')?.getAttribute('data-session-id') === smoke.sessionId
-    && document.querySelector('[data-testid="agent-run-detail-task"]')?.textContent.includes(smoke.runGoal)
-      );
-    })()
-  ), 'running Run Detail handoff');
-  await waitFor(win, () => {
-    const smoke = window.__ohaSmoke || {};
-    const events = Array.from(document.querySelectorAll('[data-testid="agent-run-detail-execution-event"]'));
-    const startedEvent = events[0];
-    return events.length === 1
-      && startedEvent.getAttribute('data-run-event') === 'agent.run.started'
-      && startedEvent.getAttribute('data-run-event-sequence') === '1'
-      && startedEvent.getAttribute('data-run-event-run-id') === smoke.runId
-      && startedEvent.textContent.includes(smoke.taskId)
-      && startedEvent.textContent.includes(smoke.runGoal);
-  }, 'running Run Detail replay events');
-  console.log('[electron-smoke] Chat Agent progress opened matching running Run Detail');
+    const activity = document.querySelector('[data-testid="chat-message-activity-list"]');
+    const taskCard = document.querySelector('[data-testid="yachiyo-agent-task-card"]');
+    const runDetail = document.querySelector('[data-testid="agent-run-detail"]');
+    return userMessages.length === 1
+      && Boolean(typing)
+      && !card
+      && !button
+      && !activity
+      && !taskCard
+      && !runDetail
+      && window.location.hash === '#/chat';
+  }, 'consumer Chat shows typing without technical execution UI');
+  console.log('[electron-smoke] consumer Chat suppresses technical progress surfaces');
   await win.webContents.executeJavaScript(
     "fetch(" + JSON.stringify(bridgeUrl + '/__smoke/complete-run') + ").then((response) => {" +
       "if (!response.ok) throw new Error('complete-run failed: ' + response.status);" +
@@ -607,28 +578,21 @@ async function main() {
     true
   );
   await waitFor(win, () => {
-    const smoke = window.__ohaSmoke || {};
-    const detail = document.querySelector('[data-testid="agent-run-detail"]');
-    const result = document.querySelector('[data-testid="agent-run-detail-result"]');
-    const events = Array.from(document.querySelectorAll('[data-testid="agent-run-detail-execution-event"]'));
-    const eventTypes = events.map((node) => node.getAttribute('data-run-event'));
-    const outputEvent = events.find((node) => node.getAttribute('data-run-event') === 'model.output.completed');
-    const completedEvent = events.find((node) => node.getAttribute('data-run-event') === 'agent.run.completed');
-    return detail?.getAttribute('data-run-id') === smoke.runId
-      && detail?.getAttribute('data-run-status') === 'completed'
-      && detail?.getAttribute('data-task-id') === smoke.taskId
-      && result?.textContent.includes(smoke.runResult)
-      && events.length === 3
-      && eventTypes.includes('agent.run.started')
-      && eventTypes.includes('model.output.completed')
-      && eventTypes.includes('agent.run.completed')
-      && outputEvent?.getAttribute('data-run-event-sequence') === '2'
-      && completedEvent?.getAttribute('data-run-event-sequence') === '3'
-      && outputEvent?.textContent.includes(smoke.runResult)
-      && completedEvent?.textContent.includes(smoke.runResult)
-      && events.every((node) => node.getAttribute('data-run-event-run-id') === smoke.runId);
-  }, 'completed Run Detail polling and replay refresh', 8000);
-  console.log('[electron-smoke] Chat Agent progress completed Run Detail replay verified');
+    const typing = document.querySelector('.message.assistant.processing .loading-dots');
+    const card = document.querySelector('[data-testid="chat-agent-run-progress-card"]');
+    const button = document.querySelector('[data-testid="chat-agent-run-progress-open-run-detail"]');
+    const activity = document.querySelector('[data-testid="chat-message-activity-list"]');
+    const taskCard = document.querySelector('[data-testid="yachiyo-agent-task-card"]');
+    const runDetail = document.querySelector('[data-testid="agent-run-detail"]');
+    return Boolean(typing)
+      && !card
+      && !button
+      && !activity
+      && !taskCard
+      && !runDetail
+      && window.location.hash === '#/chat';
+  }, 'completed reply stays free of technical execution UI', 8000);
+  console.log('[electron-smoke] consumer Chat completed without technical execution surfaces');
   clearTimeout(watchdog);
   await win.close();
   app.quit();

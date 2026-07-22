@@ -440,10 +440,19 @@ async function main() {
   ), 'proactive TTS settings loaded');
   console.log('[electron-smoke] proactive TTS loaded');
   await waitFor(win, () => document.querySelector('[data-testid="proactive-tts-runtime-status"]')?.textContent.includes('TTS runtime smoke ready'), 'runtime status');
+  await waitFor(win, () => {
+    const advanced = document.querySelector('[data-testid="tts-gsv-advanced-settings"]');
+    return Boolean(advanced && !advanced.open);
+  }, 'GPT-SoVITS advanced settings collapsed by default');
+  await win.webContents.executeJavaScript(
+    \`document.querySelector('[data-testid="tts-gsv-advanced-settings"] > summary').click()\`,
+    true,
+  );
   await waitFor(win, () => (
-    document.querySelector('[data-testid="tts-gsv-service-panel"]')
-    && document.querySelector('[data-testid="tts-gsv-service-status"]')?.textContent.includes('API 已可达')
-    && document.querySelector('[data-testid="tts-gsv-service-refresh"]')
+    document.querySelector('[data-testid="tts-gsv-advanced-settings"]')?.open
+    && document.querySelector('[data-testid="tts-gsv-service-panel"]')
+    && document.querySelector('[data-testid="tts-gsv-service-status"]')?.textContent.includes('可以使用')
+    && document.querySelector('[data-testid="tts-gsv-service-refresh"]')?.getClientRects().length
     && document.querySelector('[data-testid="tts-gsv-service-install"]')
     && document.querySelector('[data-testid="tts-gsv-service-uninstall"]')
   ), 'GPT-SoVITS service controls');
@@ -459,7 +468,7 @@ async function main() {
   await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"confirm-action\\"]').click()", true);
   await waitFor(win, () => (
     document.querySelector('[data-testid="proactive-tts-status"]')?.textContent.includes('GPT-SoVITS service stopped from UI smoke')
-    && document.querySelector('[data-testid="tts-gsv-service-status"]')?.textContent.includes('API 已可达')
+    && document.querySelector('[data-testid="tts-gsv-service-status"]')?.textContent.includes('可以使用')
   ), 'GPT-SoVITS service uninstall');
   await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"proactive-screen-permission-check\\"]').click()", true);
   await waitFor(win, () => (

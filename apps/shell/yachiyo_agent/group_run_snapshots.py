@@ -779,6 +779,7 @@ _GROUP_PLANNER_EVENT_TYPES = {
     "agent.desktop.intent_approval_required": "group.run.desktop.intent_approval_required",
     "agent.desktop.intent_completed": "group.run.desktop.intent_completed",
     "agent.desktop.intent_unavailable": "group.run.desktop.intent_unavailable",
+    "agent.desktop.intent_unverified": "group.run.desktop.intent_unverified",
     "agent.desktop.permission_recovery": "group.run.desktop.permission_recovery",
     "agent.desktop.readiness_recovered": "group.run.desktop.readiness_recovered",
     "agent.task.workspace_item.updated": "group.run.task.workspace_item.updated",

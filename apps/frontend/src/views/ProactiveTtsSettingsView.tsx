@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 
 import { useConfirmDialog } from '../components/ConfirmDialog';
+import { SettingsDisclosure } from '../components/SettingsDisclosure';
 import {
   apiGet,
   apiPost,
@@ -695,18 +696,17 @@ export function ProactiveTtsSettingsView() {
   const busy = Boolean(busyAction);
   const interactionBusy = busy || loading || resourceBusy;
   const externalGsvServiceDetected = hasExternalGsvService(serviceStatus);
-  const externalGsvAgent = firstExternalGsvLaunchAgent(serviceStatus);
   const registryReady = shouldSyncTtsRegistry(form, ttsRegistryReady);
 
   return (
     <section className="hy-route-page hy-tts-page" data-testid="proactive-tts-settings">
       <header className="hy-page-header hy-tts-page-header hy-stagger">
         <div>
-          <span className="hy-eyebrow">Proactive Care · Desktop Watch</span>
-          <h2>主动关怀与桌面观察</h2>
-          <p>配置八千代主动关怀、桌面观察触发、语音播报链路、音色资源与本地 GPT-SoVITS 服务。普通聊天回复仍保持文本，不会自动转语音。</p>
+          <span className="hy-eyebrow">Care & Voice</span>
+          <h2>主动关怀与语音</h2>
+          <p>让八千代在合适的时候主动提醒你，并选择提醒时使用文字还是语音。普通聊天仍保持文字回复。</p>
           <div className="hy-tts-hero-actions">
-            <button type="button" className="hy-btn hy-btn-ghost" onClick={() => navigateTo('diagnostics')}>诊断工具</button>
+            <button type="button" className="hy-btn hy-btn-ghost" onClick={() => navigateTo('diagnostics')}>遇到问题？</button>
           </div>
         </div>
       </header>
@@ -718,14 +718,14 @@ export function ProactiveTtsSettingsView() {
           <small>{proactiveForm.desktop_watch_enabled ? '允许桌面观察触发' : '仅手动测试触发'}</small>
         </article>
         <article className={enabled ? 'hy-tts-status-card ready' : 'hy-tts-status-card muted'}>
-          <span>TTS Provider</span>
-          <strong>{enabled ? ttsProviderLabel(provider) : 'Text Only'}</strong>
+          <span>提醒方式</span>
+          <strong>{enabled ? ttsProviderLabel(provider) : '只显示文字'}</strong>
           <small>{isDirty ? '有未保存更改' : '设置已同步'}</small>
         </article>
         <article className={isGsvProvider && serviceStatus?.reachable ? 'hy-tts-status-card ready' : isGsvProvider ? 'hy-tts-status-card pending' : 'hy-tts-status-card muted'}>
           <span>本地服务</span>
-          <strong>{isGsvProvider ? (serviceStatus?.reachable ? 'API 可达' : '待连接') : '未启用'}</strong>
-          <small>{isGsvProvider ? gsvServiceStatusText(serviceStatus) : '选择 GPT-SoVITS 后显示运行时状态'}</small>
+          <strong>{isGsvProvider ? (serviceStatus?.reachable ? '可以使用' : '需要准备') : '未启用'}</strong>
+          <small>{isGsvProvider ? (serviceStatus?.reachable ? '语音服务已经准备好' : '可在下方一键准备') : '选择本地语音后显示状态'}</small>
         </article>
       </section>
 
@@ -744,7 +744,7 @@ export function ProactiveTtsSettingsView() {
             <div>
               <h2>主动关怀</h2>
               <p className="section-caption">
-                统一控制 Bubble 与 Live2D 的主动观察触发；具体单模式细节也可以在对应模式设置页单独微调。
+                允许八千代留意桌面状态，在合适的时候给你一条简短提醒。
               </p>
             </div>
             <span className={proactiveForm.enabled ? 'hy-tts-pill active' : 'hy-tts-pill'}>{loading ? '读取中' : proactiveForm.enabled ? '已启用' : '已关闭'}</span>
@@ -772,53 +772,63 @@ export function ProactiveTtsSettingsView() {
                 />
                 <span>允许桌面观察触发</span>
               </label>
-              <label className="settings-field" htmlFor="proactive-interval-page">
-                <span>触发间隔秒</span>
-                <input
-                  id="proactive-interval-page"
-                  type="number"
-                  min={MIN_PROACTIVE_INTERVAL_SECONDS}
-                  max={3600}
-                  value={proactiveForm.interval_seconds}
-                  disabled={interactionBusy}
-                  onChange={(event) => updateProactiveField('interval_seconds', event.target.value)}
-                />
-              </label>
-              <label className="settings-field" htmlFor="proactive-probability-page">
-                <span>触发概率 %</span>
-                <input
-                  id="proactive-probability-page"
-                  type="number"
-                  min={0}
-                  max={100}
-                  step={1}
-                  value={proactiveForm.trigger_probability_percent}
-                  disabled={interactionBusy}
-                  onChange={(event) => updateProactiveField('trigger_probability_percent', event.target.value)}
-                />
-              </label>
-              <label className="settings-field" htmlFor="proactive-target-mode-page">
-                <span>立即测试目标</span>
-                <select
-                  id="proactive-target-mode-page"
-                  value={proactiveForm.target_mode}
-                  disabled={interactionBusy}
-                  onChange={(event) => updateProactiveField('target_mode', event.target.value as ProactiveForm['target_mode'])}
-                >
-                  <option value="live2d">Live2D</option>
-                  <option value="bubble">Bubble</option>
-                </select>
-              </label>
-              <p className="capability-note wide-form-note">
-                保存会同时写入 bubble_mode 与 live2d_mode 的 proactive 字段；不会修改 TTS Provider 或其它模式行为。
-              </p>
             </div>
+
+            <SettingsDisclosure
+              summary="高级触发设置"
+              description="调整检查间隔、触发概率与测试显示位置"
+              testId="proactive-trigger-advanced-settings"
+            >
+              <div className="native-config-form-grid hy-tts-form-grid">
+                <label className="settings-field" htmlFor="proactive-interval-page">
+                  <span>触发间隔（秒）</span>
+                  <input
+                    id="proactive-interval-page"
+                    type="number"
+                    min={MIN_PROACTIVE_INTERVAL_SECONDS}
+                    max={3600}
+                    value={proactiveForm.interval_seconds}
+                    disabled={interactionBusy}
+                    onChange={(event) => updateProactiveField('interval_seconds', event.target.value)}
+                  />
+                </label>
+                <label className="settings-field" htmlFor="proactive-probability-page">
+                  <span>触发概率 %</span>
+                  <input
+                    id="proactive-probability-page"
+                    type="number"
+                    min={0}
+                    max={100}
+                    step={1}
+                    value={proactiveForm.trigger_probability_percent}
+                    disabled={interactionBusy}
+                    onChange={(event) => updateProactiveField('trigger_probability_percent', event.target.value)}
+                  />
+                </label>
+                <label className="settings-field" htmlFor="proactive-target-mode-page">
+                  <span>测试显示位置</span>
+                  <select
+                    id="proactive-target-mode-page"
+                    value={proactiveForm.target_mode}
+                    disabled={interactionBusy}
+                    onChange={(event) => updateProactiveField('target_mode', event.target.value as ProactiveForm['target_mode'])}
+                  >
+                    <option value="live2d">桌面角色</option>
+                    <option value="bubble">桌面气泡</option>
+                  </select>
+                </label>
+              </div>
+            </SettingsDisclosure>
 
             {proactiveResult ? (
               <div className={`native-test-result ${proactiveResult.success || proactiveResult.ok || proactiveResult.allowed ? 'success' : 'danger'}`} data-testid="proactive-test-result">
                 <strong>{proactiveResult.error || proactiveResult.message || (proactiveResult.allowed ? '权限可用' : '主动关怀已触发')}</strong>
-                <span>{proactiveResult.mode || proactiveForm.target_mode}</span>
-                {proactiveResult.response || proactiveResult.prompt ? <pre>{proactiveResult.response || proactiveResult.prompt}</pre> : null}
+                <span>{proactiveResult.success || proactiveResult.ok || proactiveResult.allowed ? '测试已完成' : '请按提示处理后重试'}</span>
+                {proactiveResult.response || proactiveResult.prompt ? (
+                  <SettingsDisclosure summary="查看测试详情" description="显示本次测试返回的完整内容">
+                    <pre>{proactiveResult.response || proactiveResult.prompt}</pre>
+                  </SettingsDisclosure>
+                ) : null}
               </div>
             ) : null}
 
@@ -847,9 +857,9 @@ export function ProactiveTtsSettingsView() {
           <div className="corner-frame-inner" />
           <div className="section-heading-row">
             <div>
-              <h2>语音开关</h2>
+              <h2>提醒语音</h2>
               <p className="section-caption">
-                这里配置的是 Yachiyo 主动关怀播报链路；Tools 里的“文本转语音”是 Native Agent 自己的工具能力，二者互不覆盖。
+                选择主动提醒时是否播放语音。普通聊天回复不会因此自动朗读。
               </p>
             </div>
             <span className={enabled ? 'hy-tts-pill active' : 'hy-tts-pill'}>{loading ? '读取中' : enabled ? `已启用：${ttsProviderLabel(provider)}` : '只发文本'}</span>
@@ -871,10 +881,10 @@ export function ProactiveTtsSettingsView() {
                   disabled={interactionBusy}
                   onChange={(event) => updateField('enabled', event.target.checked)}
                 />
-                <span>启用主动关怀 TTS 语音</span>
+                <span>为主动提醒播放语音</span>
               </label>
               <label className="settings-field wide" htmlFor="proactive-tts-provider">
-                <span>TTS Provider</span>
+                <span>语音方式</span>
                 <select
                   id="proactive-tts-provider"
                   data-testid="proactive-tts-provider"
@@ -882,10 +892,10 @@ export function ProactiveTtsSettingsView() {
                   disabled={interactionBusy}
                   onChange={(event) => updateField('provider', event.target.value)}
                 >
-                  <option value="none">none（关闭，主动关怀只发文本）</option>
-                  <option value="gpt-sovits">GPT-SoVITS 本地服务</option>
-                  <option value="http">HTTP POST</option>
-                  <option value="command">本地命令</option>
+                  <option value="none">只显示文字</option>
+                  <option value="gpt-sovits">本地自然语音（GPT-SoVITS）</option>
+                  <option value="http">自定义在线语音服务</option>
+                  <option value="command">自定义本地语音服务</option>
                 </select>
               </label>
               {provider === 'none' ? (
@@ -895,53 +905,69 @@ export function ProactiveTtsSettingsView() {
               ) : null}
 
               {provider === 'http' ? (
-                <>
-                  <label className="settings-field wide" htmlFor="tts-endpoint-page">
-                    <span>HTTP Endpoint</span>
-                    <input
-                      id="tts-endpoint-page"
-                      value={form.endpoint}
-                      placeholder="http://127.0.0.1:9000/tts"
-                      disabled={interactionBusy}
-                      onChange={(event) => updateField('endpoint', event.target.value)}
-                    />
-                  </label>
-                  <label className="settings-field" htmlFor="tts-http-voice-page">
-                    <span>音色</span>
-                    <input
-                      id="tts-http-voice-page"
-                      value={form.voice}
-                      placeholder="可选"
-                      disabled={interactionBusy}
-                      onChange={(event) => updateField('voice', event.target.value)}
-                    />
-                  </label>
-                </>
+                <div className="wide">
+                  <SettingsDisclosure
+                    summary="高级在线语音设置"
+                    description="填写自定义服务地址和音色标识"
+                    testId="tts-http-advanced-settings"
+                  >
+                    <div className="native-config-form-grid hy-tts-form-grid">
+                    <label className="settings-field wide" htmlFor="tts-endpoint-page">
+                      <span>服务地址</span>
+                      <input
+                        id="tts-endpoint-page"
+                        value={form.endpoint}
+                        placeholder="http://127.0.0.1:9000/tts"
+                        disabled={interactionBusy}
+                        onChange={(event) => updateField('endpoint', event.target.value)}
+                      />
+                    </label>
+                    <label className="settings-field" htmlFor="tts-http-voice-page">
+                      <span>音色标识</span>
+                      <input
+                        id="tts-http-voice-page"
+                        value={form.voice}
+                        placeholder="可选"
+                        disabled={interactionBusy}
+                        onChange={(event) => updateField('voice', event.target.value)}
+                      />
+                    </label>
+                    </div>
+                  </SettingsDisclosure>
+                </div>
               ) : null}
 
               {provider === 'command' ? (
-                <>
-                  <label className="settings-field wide" htmlFor="tts-command-page">
-                    <span>本地命令</span>
-                    <input
-                      id="tts-command-page"
-                      value={form.command}
-                      placeholder="say {text}"
-                      disabled={interactionBusy}
-                      onChange={(event) => updateField('command', event.target.value)}
-                    />
-                  </label>
-                  <label className="settings-field" htmlFor="tts-command-voice-page">
-                    <span>音色</span>
-                    <input
-                      id="tts-command-voice-page"
-                      value={form.voice}
-                      placeholder="{voice}"
-                      disabled={interactionBusy}
-                      onChange={(event) => updateField('voice', event.target.value)}
-                    />
-                  </label>
-                </>
+                <div className="wide">
+                  <SettingsDisclosure
+                    summary="高级本地语音设置"
+                    description="填写自定义命令模板和音色参数"
+                    testId="tts-command-advanced-settings"
+                  >
+                    <div className="native-config-form-grid hy-tts-form-grid">
+                    <label className="settings-field wide" htmlFor="tts-command-page">
+                      <span>本地命令</span>
+                      <input
+                        id="tts-command-page"
+                        value={form.command}
+                        placeholder="say {text}"
+                        disabled={interactionBusy}
+                        onChange={(event) => updateField('command', event.target.value)}
+                      />
+                    </label>
+                    <label className="settings-field" htmlFor="tts-command-voice-page">
+                      <span>音色参数</span>
+                      <input
+                        id="tts-command-voice-page"
+                        value={form.voice}
+                        placeholder="{voice}"
+                        disabled={interactionBusy}
+                        onChange={(event) => updateField('voice', event.target.value)}
+                      />
+                    </label>
+                    </div>
+                  </SettingsDisclosure>
+                </div>
               ) : null}
 
               {isGsvProvider ? (
@@ -981,9 +1007,9 @@ export function ProactiveTtsSettingsView() {
                   </div>
                   <div className="settings-resource-panel wide" data-testid="tts-gsv-service-panel">
                     <div>
-                      <strong>GPT-SoVITS 本地服务</strong>
-                      <p>{voiceResource?.service_help_text || '音色包不包含 GPT-SoVITS 基础预训练模型与运行时；本地 API 服务需要单独部署并启动。'}</p>
-                      <span data-testid="tts-gsv-service-status">{gsvServiceStatusText(serviceStatus)}</span>
+                      <strong>本地语音服务</strong>
+                      <p>{serviceStatus?.reachable ? '语音服务已经准备好，可以直接保存并测试。' : '首次使用时，先准备并启动本地语音服务。'}</p>
+                      <span data-testid="tts-gsv-service-status">{serviceStatus?.reachable ? '可以使用' : '尚未准备好'}</span>
                     </div>
                     <div className="settings-resource-actions compact-actions">
                       <button
@@ -993,7 +1019,7 @@ export function ProactiveTtsSettingsView() {
                         disabled={interactionBusy}
                         onClick={requestOpenGsvSetupTerminal}
                       >
-                        {busyAction === 'service-setup' ? '部署中...' : '部署运行时/基础模型'}
+                        {busyAction === 'service-setup' ? '准备中...' : '准备语音服务'}
                       </button>
                       <button
                         type="button"
@@ -1002,7 +1028,7 @@ export function ProactiveTtsSettingsView() {
                         disabled={interactionBusy}
                         onClick={() => void openGsvServiceTerminal()}
                       >
-                        {busyAction === 'service' ? '打开中...' : '打开调试终端'}
+                        {busyAction === 'service' ? '打开中...' : '打开排错窗口'}
                       </button>
                       {!externalGsvServiceDetected ? (
                         <button
@@ -1012,7 +1038,7 @@ export function ProactiveTtsSettingsView() {
                           disabled={interactionBusy}
                           onClick={() => void installGsvLaunchAgent()}
                         >
-                          {busyAction === 'service-install' ? '启动中...' : '启动本地后台/自启'}
+                          {busyAction === 'service-install' ? '启动中...' : '在后台运行'}
                         </button>
                       ) : null}
                       <button
@@ -1022,15 +1048,14 @@ export function ProactiveTtsSettingsView() {
                         disabled={interactionBusy || !serviceStatus?.launch_agent_installed}
                         onClick={requestUninstallGsvLaunchAgent}
                       >
-                        {busyAction === 'service-uninstall' ? '停止中...' : '停止本地后台'}
+                        {busyAction === 'service-uninstall' ? '停止中...' : '停止后台运行'}
                       </button>
                       <button type="button" data-testid="tts-gsv-service-refresh" disabled={interactionBusy} onClick={() => void refreshGsvServiceStatus()}>刷新状态</button>
                     </div>
                     {externalGsvServiceDetected ? (
                       <div className="settings-resource-fallback">
                         <p className="settings-note">
-                          检测到外部 GPT-SoVITS 服务：{externalGsvAgent?.label || '未知 LaunchAgent'}。
-                          复用会保留原服务；接管会停用该自启项并改由 Oha-Yachiyo 管理。
+                          检测到另一套本地语音服务。你可以继续使用它，或改由八千代负责后台运行。
                         </p>
                         <button
                           type="button"
@@ -1048,10 +1073,18 @@ export function ProactiveTtsSettingsView() {
                           disabled={interactionBusy}
                           onClick={requestAdoptGsvLaunchAgent}
                         >
-                          {busyAction === 'service-adopt' ? '接管中...' : '交由 Yachiyo 管理'}
+                          {busyAction === 'service-adopt' ? '切换中...' : '交由八千代管理'}
                         </button>
                       </div>
                     ) : null}
+                  </div>
+                  <div className="wide">
+                    <SettingsDisclosure
+                      summary="高级 GPT-SoVITS 设置"
+                      description="服务目录、启动命令、模型文件与语音推理参数"
+                      testId="tts-gsv-advanced-settings"
+                    >
+                      <div className="native-config-form-grid hy-tts-form-grid">
                     <p className="capability-note wide-form-note">
                       运行时部署会准备 Python 环境和 GPT-SoVITS 基础预训练模型；调试终端是前台临时运行；本地后台/自启会使用 macOS LaunchAgent 管理服务。
                     </p>
@@ -1107,7 +1140,6 @@ export function ProactiveTtsSettingsView() {
                         </div>
                       </div>
                     ) : null}
-                  </div>
                   <label className="settings-field wide" htmlFor="tts-gsv-base-url-page">
                     <span>API Base URL</span>
                     <input
@@ -1256,45 +1288,58 @@ export function ProactiveTtsSettingsView() {
                       <option value="flac">flac</option>
                     </select>
                   </label>
+                      </div>
+                    </SettingsDisclosure>
+                  </div>
                 </>
               ) : null}
 
               {provider !== 'none' ? (
                 <>
-                  <label className="settings-field" htmlFor="tts-max-chars-page">
-                    <span>播报最大字数</span>
-                    <input
-                      id="tts-max-chars-page"
-                      type="number"
-                      min={20}
-                      max={240}
-                      value={form.max_chars}
-                      disabled={interactionBusy}
-                      onChange={(event) => updateField('max_chars', Number(event.target.value))}
-                    />
-                  </label>
-                  <label className="settings-field" htmlFor="tts-timeout-page">
-                    <span>超时秒</span>
-                    <input
-                      id="tts-timeout-page"
-                      type="number"
-                      min={1}
-                      max={600}
-                      value={form.timeout_seconds}
-                      disabled={interactionBusy}
-                      onChange={(event) => updateField('timeout_seconds', Number(event.target.value))}
-                    />
-                  </label>
-                  <label className="settings-field wide" htmlFor="tts-prompt-page">
-                    <span>主动播报提示词</span>
-                    <textarea
-                      id="tts-prompt-page"
-                      value={form.notification_prompt}
-                      rows={3}
-                      disabled={interactionBusy}
-                      onChange={(event) => updateField('notification_prompt', event.target.value)}
-                    />
-                  </label>
+                  <div className="wide">
+                    <SettingsDisclosure
+                      summary="高级播报设置"
+                      description="限制字数、等待时间并自定义播报提示词"
+                      testId="tts-delivery-advanced-settings"
+                    >
+                      <div className="native-config-form-grid hy-tts-form-grid">
+                      <label className="settings-field" htmlFor="tts-max-chars-page">
+                        <span>播报最大字数</span>
+                        <input
+                          id="tts-max-chars-page"
+                          type="number"
+                          min={20}
+                          max={240}
+                          value={form.max_chars}
+                          disabled={interactionBusy}
+                          onChange={(event) => updateField('max_chars', Number(event.target.value))}
+                        />
+                      </label>
+                      <label className="settings-field" htmlFor="tts-timeout-page">
+                        <span>等待时间（秒）</span>
+                        <input
+                          id="tts-timeout-page"
+                          type="number"
+                          min={1}
+                          max={600}
+                          value={form.timeout_seconds}
+                          disabled={interactionBusy}
+                          onChange={(event) => updateField('timeout_seconds', Number(event.target.value))}
+                        />
+                      </label>
+                      <label className="settings-field wide" htmlFor="tts-prompt-page">
+                        <span>主动播报提示词</span>
+                        <textarea
+                          id="tts-prompt-page"
+                          value={form.notification_prompt}
+                          rows={3}
+                          disabled={interactionBusy}
+                          onChange={(event) => updateField('notification_prompt', event.target.value)}
+                        />
+                      </label>
+                      </div>
+                    </SettingsDisclosure>
+                  </div>
                   <label className="settings-field wide" htmlFor="tts-test-text-page">
                     <span>测试文本</span>
                     <input

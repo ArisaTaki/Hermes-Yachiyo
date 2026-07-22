@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "name": "cua-driver",
+  "version": "0.7.1",
+  "tag": "cua-driver-rs-v0.7.1",
+  "platform": "darwin-universal",
+  "architectures": [
+    "arm64",
+    "x86_64"
+  ],
+  "archive": {
+    "name": "cua-driver-rs-0.7.1-darwin-universal-binary.tar.gz",
+    "url": "https://github.com/trycua/cua/releases/download/cua-driver-rs-v0.7.1/cua-driver-rs-0.7.1-darwin-universal-binary.tar.gz",
+    "sha256": "43a78c1789c6f0fff12f87b5d4089e4d4da5f256832ca9a7c5f5fdaa79ba76d4",
+    "binary_member": "cua-driver",
+    "binary_content_hash_algorithm": "mach-o-without-code-signature-v1",
+    "binary_content_sha256": "7e9c8a57f060883e4c45cabb25fa2b4bf0fca850107316cee344a4c18ffed191"
+  },
+  "license": {
+    "name": "LICENSE.md",
+    "url": "https://raw.githubusercontent.com/trycua/cua/cua-driver-rs-v0.7.1/LICENSE.md",
+    "sha256": "c0779290c1d4783169aa3dbfb55feb505e563ef8a004bbf55298ceffcfbda8d9",
+    "spdx": "MIT"
+  }
+}

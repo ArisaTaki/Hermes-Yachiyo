@@ -8,6 +8,9 @@ from typing import Any
 from .contracts import DesktopRecoveryActionMetadataSnapshot
 
 RECOVERY_RETRY_CONTEXT_EVENT_TYPE = "agent.desktop.recovery_retry_context"
+COMPILED_RECOVERY_CONTINUATION_METADATA_KEY = (
+    "_runtime_compiled_replan_continuation"
+)
 RECOVERY_ACTION_TASK_METADATA_KEYS = (
     "daily_desktop_intent",
     "desktop_permission_recovery",

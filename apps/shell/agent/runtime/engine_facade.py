@@ -29,6 +29,29 @@ class RuntimeEngineFacadeMixin:
             cleanup_plugins()
         self.runtime_shutdown.shutdown(close_db=close_db)
 
+    def reconcile_startup_runs(
+        self,
+        cutoff: str,
+        *,
+        observed_at: str | None = None,
+    ) -> dict[str, Any]:
+        """Reconcile pre-start runs, evaluating leases at ``observed_at``."""
+        return self.runtime_startup_reconciler.reconcile(
+            cutoff,
+            observed_at=observed_at,
+        )
+
+    def reconcile_runtime_leases(self, observed_at: str) -> dict[str, Any]:
+        """Fail expired leased runs owned by this runtime database."""
+        return self.runtime_startup_reconciler.reconcile_runtime_leases(observed_at)
+
+    def get_task_run_projections(
+        self,
+        task_ids: list[str],
+    ) -> dict[str, dict[str, Any]]:
+        """Return canonical Run projections for cross-store startup recovery."""
+        return self.task_run_links.projections_for_tasks(task_ids)
+
     def _ensure_row_factory(self) -> None:
         if self._conn.row_factory is not _named_row_factory:
             self._conn.row_factory = _named_row_factory

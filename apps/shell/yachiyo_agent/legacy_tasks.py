@@ -5,25 +5,22 @@ from __future__ import annotations
 import inspect
 from typing import Any
 
-from apps.shell.agent.runtime.desktop_execution_providers import (
-    local_desktop_execution_runtime_probe,
-)
 from apps.shell.agent.runtime.errors import AgentRuntimeError
+from apps.shell.agent.runtime.outcome_evaluator import evaluate_main_chat_outcome
 
-from .desktop_permissions import (
-    desktop_permission_missing_by_capability,
-    desktop_runtime_blocking_conditions_by_capability,
-)
 from .desktop_execution_policy import (
     sandbox_desktop_provider_status,
     with_daily_entrypoint_desktop_execution_policy,
 )
+from .desktop_permissions import (
+    cached_desktop_permission_diagnostics as _cached_desktop_permission_diagnostics,
+)
+from .legacy_group_runs import start_legacy_group_run
 from .legacy_groups import (
     chat_group_snapshot,
     chat_group_snapshots,
     group_definition_from_run_group,
 )
-from .legacy_group_runs import start_legacy_group_run
 from .legacy_runs import LegacyRunPayloadProjector
 from .planner_projection import (
     planner_run_event_payloads,
@@ -38,6 +35,36 @@ from .runtime_execution import (
 from .workflow_run_snapshots import workflow_run_snapshot_from_payload
 
 MAIN_CHAT_AGENT_ID = "builtin:yachiyo-main"
+
+
+def desktop_permission_missing_by_capability() -> dict[str, list[str]]:
+    """Compatibility seam backed only by passive cached diagnostics."""
+
+    return dict(
+        _cached_desktop_permission_diagnostics().get("missing_permissions") or {}
+    )
+
+
+def desktop_runtime_blocking_conditions_by_capability() -> dict[str, list[str]]:
+    """Compatibility seam backed only by passive cached diagnostics."""
+
+    return dict(
+        _cached_desktop_permission_diagnostics().get("blocking_conditions") or {}
+    )
+
+
+def _passive_desktop_permission_diagnostics() -> dict[str, Any]:
+    missing_permissions = desktop_permission_missing_by_capability()
+    blocking_conditions = desktop_runtime_blocking_conditions_by_capability()
+    not_checked = "desktop_permission_diagnostics_not_checked" in (
+        blocking_conditions.get("desktop_execution") or []
+    )
+    return {
+        "missing_permissions": missing_permissions,
+        "blocking_conditions": blocking_conditions,
+        "checked": not not_checked,
+        "status": "not_checked" if not_checked else "cached",
+    }
 
 
 def _rejection_reason(decision: dict[str, Any] | str | None) -> str:
@@ -58,7 +85,7 @@ def _assert_matching_pending_approval(
     requested_approval_id: str,
 ) -> None:
     if not requested_approval_id:
-        return
+        raise AgentRuntimeError("approval_expected_id_required")
     pending = run.get("pending_approval")
     pending_approval_id = ""
     if isinstance(pending, dict):
@@ -67,7 +94,7 @@ def _assert_matching_pending_approval(
         return
     run_id = str(run.get("run_id") or "").strip()
     raise AgentRuntimeError(
-        "审批 ID 与当前待审批项不匹配"
+        "approval_generation_mismatch: 审批 ID 与当前待审批项不匹配"
         f"：{requested_approval_id}"
         f"{f' for run {run_id}' if run_id else ''}"
     )
@@ -79,29 +106,45 @@ def _planner_metadata_with_desktop_readiness(metadata: dict[str, Any]) -> dict[s
         surface=_daily_entrypoint_surface(metadata),
     )
     enriched.setdefault("runtime_planner_request_trace", True)
+    try:
+        permission_diagnostics = _passive_desktop_permission_diagnostics()
+    except Exception:
+        permission_diagnostics = {
+            "missing_permissions": {
+                "desktop_execution": ["permission_probe_failed"]
+            },
+            "blocking_conditions": {},
+            "checked": False,
+            "status": "not_checked",
+        }
     if not isinstance(enriched.get("desktop_missing_permissions_by_capability"), dict):
-        try:
-            missing_permissions = desktop_permission_missing_by_capability()
-        except Exception:
-            missing_permissions = {"desktop_execution": ["permission_probe_failed"]}
+        missing_permissions = permission_diagnostics.get("missing_permissions") or {}
         if missing_permissions:
             enriched["desktop_missing_permissions_by_capability"] = missing_permissions
     if not isinstance(enriched.get("desktop_blocking_conditions_by_capability"), dict):
-        try:
-            blocking_conditions = desktop_runtime_blocking_conditions_by_capability()
-        except Exception:
-            blocking_conditions = {}
+        blocking_conditions = permission_diagnostics.get("blocking_conditions") or {}
         if blocking_conditions:
             enriched["desktop_blocking_conditions_by_capability"] = blocking_conditions
+    enriched.setdefault(
+        "desktop_permission_diagnostics_status",
+        str(permission_diagnostics.get("status") or "not_checked"),
+    )
     return enriched
 
 
 def _desktop_provider_runtime_ready(provider: dict[str, Any]) -> bool:
     if not provider.get("available") or not provider.get("adapter_ready"):
         return False
-    if str(provider.get("provider_kind") or "") != "local_desktop":
+    provider_kind = str(provider.get("provider_kind") or "")
+    if provider_kind not in {"local_desktop", "background_desktop"}:
         return True
     health = provider.get("health")
+    if provider_kind == "background_desktop":
+        return bool(
+            isinstance(health, dict)
+            and health.get("checked") is True
+            and health.get("ok") is True
+        )
     return bool(
         isinstance(health, dict)
         and health.get("checked") is True
@@ -279,18 +322,25 @@ class LegacyRuntimePort:
         else:
             known_tools = set(KNOWN_AGENT_TOOLS)
         try:
-            missing_permissions = desktop_permission_missing_by_capability()
+            permission_diagnostics = _passive_desktop_permission_diagnostics()
         except Exception:
-            missing_permissions = {"desktop_execution": ["permission_probe_failed"]}
-        try:
-            blocking_conditions = desktop_runtime_blocking_conditions_by_capability()
-        except Exception:
-            blocking_conditions = {}
+            permission_diagnostics = {
+                "missing_permissions": {
+                    "desktop_execution": ["permission_probe_failed"]
+                },
+                "blocking_conditions": {},
+                "checked": False,
+                "status": "not_checked",
+            }
+        missing_permissions = permission_diagnostics.get("missing_permissions") or {}
+        blocking_conditions = permission_diagnostics.get("blocking_conditions") or {}
+        # Chat/Launcher readiness reflects the same background-first lane used by
+        # daily execution.  Discovery stays side-effect free; the driver performs
+        # its permission/health handshake lazily when an actual task needs it.
         sandbox_provider = sandbox_desktop_provider_status(
             {
-                "desktop_provider_health_probe": True,
-                "desktop_provider_local_native": True,
-                "local_desktop_runtime_probe": local_desktop_execution_runtime_probe(),
+                "prefer_background_desktop": True,
+                "desktop_provider_health_probe": False,
             }
         )
         return {
@@ -312,6 +362,12 @@ class LegacyRuntimePort:
                 "desktop_provider_requires_real_sandbox_for": list(
                     sandbox_provider.get("requires_real_sandbox_for") or []
                 ),
+                "desktop_permission_diagnostics": {
+                    "checked": permission_diagnostics.get("checked") is True,
+                    "status": str(
+                        permission_diagnostics.get("status") or "not_checked"
+                    ),
+                },
                 **desktop_execution_capability_snapshots(
                     registered_tools=known_tools,
                     missing_permissions=missing_permissions,
@@ -351,6 +407,13 @@ class LegacyRuntimePort:
             or metadata.get("client_task_id")
             or ""
         ).strip()
+        client_run_id = str(
+            request.get("client_run_id")
+            or requested_task_id
+            or request.get("client_message_id")
+            or metadata.get("client_message_id")
+            or ""
+        ).strip()
         if group_id:
             return self._start_group_chat_task(
                 request,
@@ -360,6 +423,7 @@ class LegacyRuntimePort:
                 metadata=metadata,
                 execution_kwargs=execution_kwargs,
                 requested_task_id=requested_task_id,
+                client_run_id=client_run_id,
             )
         if workflow_id:
             run = self._runtime.create_workflow_run(
@@ -367,7 +431,7 @@ class LegacyRuntimePort:
                     "workflow_id": workflow_id,
                     "user_goal": prompt,
                     "source": "yachiyo_chat",
-                    "client_run_id": request.get("client_run_id") or requested_task_id or None,
+                    "client_run_id": client_run_id or None,
                     **execution_kwargs,
                 }
             )
@@ -376,6 +440,7 @@ class LegacyRuntimePort:
             run_payload = {
                 "runnable_id": runnable_id,
                 "user_goal": prompt,
+                "client_run_id": client_run_id or None,
                 **_runnable_chat_execution_kwargs(execution_kwargs),
             }
             if callable(create_run):
@@ -386,12 +451,16 @@ class LegacyRuntimePort:
                     run_payload,
                 )
         run_id = str(run.get("run_id") or "").strip()
-        self._append_planner_run_events(run_id, planner_decision)
+        if not bool(run.get("idempotent")):
+            self._append_planner_run_events(run_id, planner_decision)
         task_id = requested_task_id or run_id
         if task_id and run_id:
-            link_task_run = getattr(self._runtime, "link_task_run", None)
-            if callable(link_task_run):
-                link = link_task_run(task_id=task_id, run_id=run_id, session_id=conversation_id)
+            link, conversation_id = self._link_task_run_preserving_session(
+                task_id=task_id,
+                run_id=run_id,
+                conversation_id=conversation_id,
+            )
+            if link:
                 try:
                     run = self._runtime.get_run(run_id)
                 except KeyError:
@@ -423,6 +492,7 @@ class LegacyRuntimePort:
         metadata: dict[str, Any],
         execution_kwargs: dict[str, Any],
         requested_task_id: str,
+        client_run_id: str,
     ) -> dict[str, Any]:
         if not group_id:
             raise ValueError("缺少 group_id")
@@ -434,7 +504,7 @@ class LegacyRuntimePort:
             "objective": prompt,
             "goal": prompt,
             "title": request.get("title") or prompt,
-            "client_run_id": request.get("client_run_id") or requested_task_id or None,
+            "client_run_id": client_run_id or None,
             **execution_kwargs,
         }
         start_agent_group_run = getattr(self._runtime, "start_agent_group_run", None)
@@ -462,12 +532,11 @@ class LegacyRuntimePort:
         run_id = self._first_group_child_run_id(group_run) or run_group_id
         task_id = requested_task_id or run_id or run_group_id
         if task_id and run_id:
-            link_task_run = getattr(self._runtime, "link_task_run", None)
-            if callable(link_task_run):
-                try:
-                    link_task_run(task_id=task_id, run_id=run_id, session_id=conversation_id)
-                except Exception:
-                    pass
+            _, conversation_id = self._link_task_run_preserving_session(
+                task_id=task_id,
+                run_id=run_id,
+                conversation_id=conversation_id,
+            )
 
         pending_approvals = [
             dict(item)
@@ -501,6 +570,44 @@ class LegacyRuntimePort:
             payload,
             conversation_id=conversation_id,
             runtime=self._runtime,
+        )
+
+    def _link_task_run_preserving_session(
+        self,
+        *,
+        task_id: str,
+        run_id: str,
+        conversation_id: str,
+    ) -> tuple[dict[str, Any], str]:
+        get_task_run_link = getattr(self._runtime, "get_task_run_link", None)
+        if callable(get_task_run_link):
+            try:
+                existing = get_task_run_link(task_id)
+            except KeyError:
+                existing = None
+            if isinstance(existing, dict):
+                existing_run_id = str(existing.get("run_id") or "").strip()
+                if existing_run_id and existing_run_id != run_id:
+                    raise AgentRuntimeError("task_run_link_conflict")
+                return existing, str(
+                    existing.get("session_id") or conversation_id or ""
+                ).strip()
+
+        link_task_run = getattr(self._runtime, "link_task_run", None)
+        if not callable(link_task_run):
+            return {}, conversation_id
+        link = link_task_run(
+            task_id=task_id,
+            run_id=run_id,
+            session_id=conversation_id,
+        )
+        return (
+            dict(link) if isinstance(link, dict) else {},
+            str(
+                (link.get("session_id") if isinstance(link, dict) else "")
+                or conversation_id
+                or ""
+            ).strip(),
         )
 
     def _append_planner_run_events(self, run_id: str, planner_decision: Any | None) -> None:
@@ -759,7 +866,11 @@ class LegacyRuntimePort:
     def approve(self, task_id: str, decision: dict[str, Any] | None = None) -> dict[str, Any]:
         run_id = self._run_id_for_task_approval(task_id, decision)
         self._assert_task_approval(run_id, decision)
-        approved = self._run_action_payload(run_id, self._runtime.approve_run_approval(run_id))
+        expected_approval_id = _approval_id_from_decision(decision)
+        approved = self._run_action_payload(
+            run_id,
+            self._runtime.approve_run_approval(run_id, expected_approval_id),
+        )
         approved = self._complete_main_chat_daily_desktop_approval_if_ready(run_id, approved)
         payload = self._payload_with_task_link(task_id, approved)
         group_payload = self._group_chat_task_payload(task_id, payload)
@@ -772,12 +883,17 @@ class LegacyRuntimePort:
     def reject(self, task_id: str, decision: dict[str, Any] | str | None = None) -> dict[str, Any]:
         run_id = self._run_id_for_task_approval(task_id, decision)
         self._assert_task_approval(run_id, decision)
+        expected_approval_id = _approval_id_from_decision(decision)
         reason = _rejection_reason(decision)
         payload = self._payload_with_task_link(
             task_id,
             self._run_action_payload(
                 run_id,
-                self._runtime.reject_run_approval(run_id, reason),
+                self._runtime.reject_run_approval(
+                    run_id,
+                    reason,
+                    expected_approval_id,
+                ),
             ),
         )
         group_payload = self._group_chat_task_payload(task_id, payload)
@@ -807,7 +923,7 @@ class LegacyRuntimePort:
     ) -> None:
         requested_approval_id = _approval_id_from_decision(decision)
         if not requested_approval_id:
-            return
+            raise AgentRuntimeError("approval_expected_id_required")
         _assert_matching_pending_approval(
             self._runtime.get_run(run_id),
             requested_approval_id,
@@ -1362,33 +1478,83 @@ class LegacyRuntimePort:
             return payload
         if payload.get("pending_approval"):
             return payload
+        payload, action_allowed = self._fresh_main_chat_terminal_action_gate(
+            run_id,
+            payload,
+        )
+        if not action_allowed:
+            return payload
         result_text = str(payload.get("result") or "").strip()
         if not result_text:
             return payload
+        outcome = evaluate_main_chat_outcome(payload)
+        if outcome.kind == "failed":
+            # A planned action is not yet a terminal outcome. The Native
+            # executor may reject final model prose at this point, but the
+            # approval-resume projector must leave an in-flight run running.
+            if (
+                outcome.reason == "outcome_event_history_incomplete"
+                or not outcome.desktop_observed
+            ):
+                return payload
+            fail_main_chat_run = getattr(self._runtime, "fail_main_chat_run", None)
+            if not callable(fail_main_chat_run):
+                return payload
+            fresh_payload, action_allowed = self._fresh_main_chat_terminal_action_gate(
+                run_id,
+                payload,
+            )
+            if not action_allowed:
+                return fresh_payload
+            failed = fail_main_chat_run(
+                run_id,
+                outcome.message or "桌面操作未达到可验证的完成状态。",
+            )
+            if not isinstance(failed, dict):
+                return payload
+            return self._run_action_payload(run_id, failed)
         if not self._has_daily_desktop_intent_completed(payload):
             return payload
         complete_main_chat_run = getattr(self._runtime, "complete_main_chat_run", None)
         if not callable(complete_main_chat_run):
             return payload
+        fresh_payload, action_allowed = self._fresh_main_chat_terminal_action_gate(
+            run_id,
+            payload,
+        )
+        if not action_allowed:
+            return fresh_payload
         completed = complete_main_chat_run(run_id, result_text)
         if not isinstance(completed, dict):
             return payload
         return self._run_action_payload(run_id, completed)
 
+    def _fresh_main_chat_terminal_action_gate(
+        self,
+        run_id: str,
+        payload: dict[str, Any],
+    ) -> tuple[dict[str, Any], bool]:
+        get_run = getattr(self._runtime, "get_run", None)
+        if not callable(get_run):
+            return payload, True
+        try:
+            current = get_run(run_id)
+        except Exception:
+            return payload, False
+        if not isinstance(current, dict):
+            return payload, False
+        status = str(current.get("status") or "").strip().lower()
+        pending = current.get("pending_approval")
+        blocked = status not in {"running", "processing"} or bool(
+            isinstance(pending, dict) and pending
+        )
+        if blocked:
+            return {**payload, **current}, False
+        return payload, True
+
     def _has_daily_desktop_intent_completed(self, payload: dict[str, Any]) -> bool:
-        if _has_runtime_planner_desktop_tool_completion(payload):
-            return True
-        for event in payload.get("timeline") or []:
-            if not isinstance(event, dict):
-                continue
-            event_type = str(event.get("event_type") or event.get("event") or "").strip()
-            if event_type != "agent.desktop.intent_completed":
-                continue
-            event_payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
-            source = str(event.get("source") or event_payload.get("source") or "").strip()
-            if source in {"daily_desktop_intent", "runtime_planner", "daily_desktop_metadata"}:
-                return True
-        return False
+        outcome = evaluate_main_chat_outcome(payload)
+        return outcome.allows_completion and outcome.desktop_observed
 
     def _payload_items(self, payload: Any, key: str) -> list[dict[str, Any]]:
         items = payload.get(key) if isinstance(payload, dict) else payload

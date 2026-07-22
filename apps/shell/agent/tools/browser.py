@@ -5,18 +5,57 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
+import shlex
+import shutil
 import socket
 import ssl
 import subprocess
 import sys
 from collections.abc import Callable
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 from urllib.parse import quote, urlparse
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 
-def open_url(url: str) -> dict[str, Any]:
+_OWNED_BROWSER_TARGET_ID: ContextVar[str] = ContextVar(
+    "oha_yachiyo_owned_browser_target_id",
+    default="",
+)
+_BROWSER_TARGET_ID_PATTERN = re.compile(r"\A[A-Za-z0-9._:-]{1,128}\Z")
+
+
+def is_valid_target_id(value: Any) -> bool:
+    """Return whether a CDP target id is safe to bind into a run context."""
+
+    return bool(_BROWSER_TARGET_ID_PATTERN.fullmatch(str(value or "").strip()))
+
+
+@contextmanager
+def owned_browser_target(target_id: str) -> Iterator[None]:
+    """Bind CDP operations to one run-owned page target for this call context."""
+
+    clean_target_id = str(target_id or "").strip()
+    if not is_valid_target_id(clean_target_id):
+        raise RuntimeError("No run-owned browser target is bound")
+    token = _OWNED_BROWSER_TARGET_ID.set(clean_target_id)
+    try:
+        yield
+    finally:
+        _OWNED_BROWSER_TARGET_ID.reset(token)
+
+
+def open_url(
+    url: str,
+    *,
+    allow_system_browser_fallback: bool = False,
+) -> dict[str, Any]:
+    # macOS `open` can activate the user's real browser.  Keep it as an
+    # explicit internal escape hatch; model-routed browser tools are CDP-only.
     clean_url = _clean_url(url)
     cdp_url = _configured_browser_cdp_url()
     if cdp_url:
@@ -31,12 +70,16 @@ def open_url(url: str) -> dict[str, Any]:
                 "fallback_used": False,
             }
         except Exception as exc:
-            fallback = _open_url_fallback(clean_url)
-            return {
-                **fallback,
-                "fallback_reason": str(exc),
-            }
-    return _open_url_fallback(clean_url)
+            if allow_system_browser_fallback:
+                fallback = _open_url_fallback(clean_url)
+                return {
+                    **fallback,
+                    "fallback_reason": str(exc),
+                }
+            return _cdp_unavailable("browser.open_url", exc)
+    if allow_system_browser_fallback:
+        return _open_url_fallback(clean_url)
+    return _cdp_unavailable("browser.open_url")
 
 
 def current_page() -> dict[str, Any]:
@@ -53,6 +96,51 @@ def current_page() -> dict[str, Any]:
         "permission_error": False,
         "fallback_used": False,
     }
+
+
+def close_target(target_id: str) -> dict[str, Any]:
+    """Close one exact run-owned CDP page without touching browser focus."""
+
+    clean_target_id = str(target_id or "").strip()
+    if not is_valid_target_id(clean_target_id):
+        return {
+            "ok": False,
+            "action": "browser.close_target",
+            "error": "browser_owned_target_invalid",
+            "fallback_used": False,
+        }
+    cdp_url = _configured_browser_cdp_url()
+    if not cdp_url:
+        return _cdp_unavailable("browser.close_target")
+    try:
+        pages = _cdp_list_pages(cdp_url)
+        target = next(
+            (
+                page
+                for page in pages
+                if str(page.get("id") or "").strip() == clean_target_id
+                and str(page.get("webSocketDebuggerUrl") or "").strip()
+            ),
+            None,
+        )
+        if target is None:
+            return {
+                "ok": True,
+                "action": "browser.close_target",
+                "summary": "Run-owned browser target was already unavailable",
+                "data": {"target_id": clean_target_id, "already_closed": True},
+                "fallback_used": False,
+            }
+        _cdp_close_page(cdp_url, clean_target_id)
+        return {
+            "ok": True,
+            "action": "browser.close_target",
+            "summary": "Closed run-owned browser target",
+            "data": {"target_id": clean_target_id, "already_closed": False},
+            "fallback_used": False,
+        }
+    except Exception as exc:
+        return _cdp_unavailable("browser.close_target", exc)
 
 
 def click(
@@ -169,7 +257,11 @@ def click(
     try:
         value = _evaluate_current_page(expression)
     except Exception as exc:
-        fallback = foreground_fallback or _click_foreground_fallback
+        # Never turn a failed browser-profile action into a global desktop
+        # click unless a trusted caller supplied that foreground capability.
+        if foreground_fallback is None:
+            return _cdp_unavailable("browser.click", exc)
+        fallback = foreground_fallback
         return _click_fallback(
             clean_selector,
             fallback_x,
@@ -338,13 +430,26 @@ def type_text(
         el.textContent = text;
         el.dispatchEvent(new Event('input', {{ bubbles: true }}));
       }}
-      return {{ ok: true, selector, tag: el.tagName, length: text.length, x: point && point.x, y: point && point.y }};
+      const observedText = 'value' in el ? el.value : el.textContent;
+      return {{
+        ok: true,
+        selector,
+        tag: el.tagName,
+        length: text.length,
+        content_verified: observedText === text,
+        x: point && point.x,
+        y: point && point.y,
+      }};
     }})()
     """
     try:
         value = _evaluate_current_page(expression)
     except Exception as exc:
-        fallback = foreground_fallback or _type_text_foreground_fallback
+        # A CDP failure must not type into whichever app the user currently
+        # has focused.  Foreground fallback is an explicit internal capability.
+        if foreground_fallback is None:
+            return _cdp_unavailable("browser.type_text", exc)
+        fallback = foreground_fallback
         return _type_text_fallback(clean_selector, clean_text, fallback_x, fallback_y, exc, fallback)
     if not value.get("ok"):
         return {
@@ -484,20 +589,68 @@ def _foreground_fallback_unavailable(
 
 def extract_text(selector: str = "") -> dict[str, Any]:
     clean_selector = str(selector or "").strip()
-    if clean_selector:
-        selector_json = json.dumps(clean_selector)
-        expression = f"""
-        (() => {{
-          const selector = {selector_json};
-          const el = document.querySelector(selector);
-          if (!el) return {{ ok: false, error: 'selector_not_found', selector }};
-          return {{ ok: true, text: (el.innerText || el.textContent || '').trim() }};
-        }})()
-        """
-    else:
-        expression = """
-        (() => ({ ok: true, text: (document.body ? document.body.innerText : '').trim() }))()
-        """
+    selector_json = json.dumps(clean_selector)
+    expression = f"""
+    (() => {{
+      const selector = {selector_json};
+      const root = selector
+        ? document.querySelector(selector)
+        : (document.body || document.documentElement);
+      if (!root) {{
+        if (selector) return {{ ok: false, error: 'selector_not_found', selector }};
+        const rawPageUrl = String(location.href || '');
+        return {{
+          ok: true,
+          text: '',
+          page_url: rawPageUrl.slice(0, 2048),
+          page_url_truncated: rawPageUrl.length > 2048,
+          link_contexts: [],
+        }};
+      }}
+      const compactText = (value) => String(value || '')
+        .replace(/[\\r\\n]+/g, ' · ')
+        .replace(/\\s+/g, ' ')
+        .trim();
+      const anchors = [];
+      if (root.matches && root.matches('a[href]')) anchors.push(root);
+      if (root.querySelectorAll) {{
+        for (const anchor of root.querySelectorAll('a[href]')) {{
+          if (anchors.length >= 40) break;
+          anchors.push(anchor);
+        }}
+      }}
+      const seen = new Set();
+      const linkContexts = [];
+      for (const anchor of anchors) {{
+        if (linkContexts.length >= 40) break;
+        const rawHref = String(anchor.href || '').trim();
+        if (!rawHref || rawHref.length > 2048) continue;
+        const href = rawHref;
+        let node = anchor;
+        let contextText = compactText(anchor.innerText || anchor.textContent);
+        if (contextText.length > 800) continue;
+        for (let depth = 0; depth < 4 && node.parentElement; depth += 1) {{
+          const parent = node.parentElement;
+          const candidate = compactText(parent.innerText || parent.textContent);
+          if (candidate.length > 800) break;
+          if (candidate) contextText = candidate;
+          node = parent;
+        }}
+        const key = `${{href}}\\n${{contextText}}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        linkContexts.push({{ href, text: contextText }});
+      }}
+      const rawPageUrl = String(location.href || '');
+      return {{
+        ok: true,
+        text: (root.innerText || root.textContent || '').trim().slice(0, 20001),
+        page_url: rawPageUrl.slice(0, 2048),
+        page_url_truncated: rawPageUrl.length > 2048,
+        link_contexts: linkContexts,
+      }};
+    }})()
+    """
     try:
         value = _evaluate_current_page(expression)
     except Exception as exc:
@@ -515,17 +668,41 @@ def extract_text(selector: str = "") -> dict[str, Any]:
     truncated = len(text_value) > 20000
     if truncated:
         text_value = text_value[:20000]
+    raw_page_url = str(value.get("page_url") or "").strip()
+    page_url_truncated = bool(value.get("page_url_truncated")) or len(raw_page_url) > 2048
+    page_url = "" if page_url_truncated else raw_page_url
+    link_contexts: list[dict[str, str]] = []
+    raw_link_contexts = value.get("link_contexts")
+    if isinstance(raw_link_contexts, list):
+        for raw_context in raw_link_contexts[:40]:
+            if not isinstance(raw_context, dict):
+                continue
+            href = str(raw_context.get("href") or "").strip()
+            context_text = " ".join(str(raw_context.get("text") or "").split())
+            if href and len(href) <= 2048 and len(context_text) <= 800:
+                link_contexts.append({"href": href, "text": context_text})
     return {
         "ok": True,
         "action": "browser.extract_text",
         "summary": f"Extracted {len(text_value)} characters from browser page",
-        "data": {"selector": clean_selector, "text": text_value, "truncated": truncated},
+        "data": {
+            "selector": clean_selector,
+            "text": text_value,
+            "truncated": truncated,
+            "page_url": page_url,
+            "page_url_truncated": page_url_truncated,
+            "link_contexts": link_contexts,
+        },
         "permission_error": False,
         "fallback_used": False,
     }
 
 
-def screenshot(target_path: Path) -> dict[str, Any]:
+def screenshot(
+    target_path: Path,
+    *,
+    allow_screen_fallback: bool = False,
+) -> dict[str, Any]:
     target = Path(target_path)
     try:
         websocket_url = _page_websocket_url()
@@ -535,7 +712,9 @@ def screenshot(target_path: Path) -> dict[str, Any]:
             {"format": "png", "fromSurface": True},
         )
     except Exception as exc:
-        return _screenshot_fallback(target, exc)
+        if allow_screen_fallback:
+            return _screenshot_fallback(target, exc)
+        return _cdp_unavailable("browser.screenshot", exc)
     data = str(result.get("data") or "")
     if not data:
         return {
@@ -635,8 +814,24 @@ def _current_page() -> dict[str, Any]:
     if not cdp_url:
         raise RuntimeError("browser.cdp_url is not configured")
     pages = _cdp_list_pages(cdp_url)
-    page = _select_page(pages)
+    owned_target_id = _OWNED_BROWSER_TARGET_ID.get().strip()
+    page = (
+        next(
+            (
+                candidate
+                for candidate in pages
+                if str(candidate.get("id") or "").strip() == owned_target_id
+            ),
+            None,
+        )
+        if owned_target_id
+        else _select_page(pages)
+    )
     if page is None:
+        if owned_target_id:
+            raise RuntimeError(
+                f"Run-owned browser target is unavailable: {owned_target_id}"
+            )
         raise RuntimeError("No debuggable browser page found")
     return page
 
@@ -653,7 +848,12 @@ def _cdp_new_page(cdp_url: str, url: str) -> dict[str, Any]:
     endpoint = _cdp_endpoint(cdp_url, f"/json/new?{quote(url, safe='')}")
     try:
         return _http_json(endpoint, method="PUT")
-    except Exception:
+    except HTTPError as exc:
+        # Older CDP endpoints accepted GET.  Retry only when the server
+        # explicitly rejects PUT; a timeout may already have created a page,
+        # so retrying it could leave an unowned duplicate tab behind.
+        if exc.code not in {404, 405}:
+            raise
         return _http_json(endpoint, method="GET")
 
 
@@ -662,6 +862,13 @@ def _cdp_list_pages(cdp_url: str) -> list[dict[str, Any]]:
     if not isinstance(payload, list):
         raise RuntimeError("CDP /json/list did not return a list")
     return [item for item in payload if isinstance(item, dict)]
+
+
+def _cdp_close_page(cdp_url: str, target_id: str) -> None:
+    endpoint = _cdp_endpoint(cdp_url, f"/json/close/{quote(target_id, safe='')}")
+    request = Request(endpoint, method="GET")
+    with urlopen(request, timeout=2.0) as response:
+        response.read()
 
 
 def _http_json(url: str, *, method: str = "GET") -> Any:
@@ -692,7 +899,30 @@ def _configured_browser_cdp_url() -> str:
     for env_name in ("YACHIYO_BROWSER_CDP_URL", "BROWSER_CDP_URL"):
         value = str(os.environ.get(env_name) or "").strip()
         if value:
-            return value
+            if not _browser_cdp_url_is_loopback(value):
+                return (
+                    value
+                    if _truthy_config_value(
+                        os.environ.get("YACHIYO_BROWSER_CDP_EXTERNAL_EXPLICIT")
+                    )
+                    else ""
+                )
+            profile_dir = str(
+                os.environ.get("YACHIYO_BROWSER_CDP_PROFILE_DIR") or ""
+            ).strip()
+            pid = _positive_int(os.environ.get("YACHIYO_BROWSER_CDP_PID"))
+            return (
+                value
+                if _truthy_config_value(
+                    os.environ.get("YACHIYO_BROWSER_CDP_OWNED")
+                )
+                and _browser_cdp_process_matches(
+                    value,
+                    pid=pid,
+                    profile_dir=profile_dir,
+                )
+                else ""
+            )
     try:
         from apps.shell import config as shell_config
 
@@ -705,7 +935,196 @@ def _configured_browser_cdp_url() -> str:
     config = data.get("config")
     if not isinstance(config, dict):
         return ""
-    return str(config.get("browser.cdp_url") or "").strip()
+    value = str(config.get("browser.cdp_url") or "").strip()
+    if not value:
+        return ""
+    if not _browser_cdp_url_is_loopback(value):
+        return value if _truthy_config_value(
+            config.get("browser.cdp_external_explicit")
+        ) else ""
+    if str(config.get("browser.cdp_owner") or "").strip() != "oha-yachiyo":
+        return ""
+    pid = _positive_int(config.get("browser.cdp_pid"))
+    profile_dir = str(config.get("browser.cdp_profile_dir") or "").strip()
+    return (
+        value
+        if _browser_cdp_process_matches(
+            value,
+            pid=pid,
+            profile_dir=profile_dir,
+        )
+        else ""
+    )
+
+
+def _browser_cdp_url_is_loopback(value: str) -> bool:
+    try:
+        hostname = str(urlparse(value).hostname or "").strip().lower()
+    except ValueError:
+        return False
+    return hostname in {"127.0.0.1", "localhost", "::1"}
+
+
+def _browser_cdp_process_matches(
+    cdp_url: str,
+    *,
+    pid: int | None,
+    profile_dir: str,
+    run: Callable[..., Any] | None = None,
+    which: Callable[[str], str | None] | None = None,
+    path_is_file: Callable[[str], bool] | None = None,
+    home_dir: str | Path | None = None,
+) -> bool:
+    if pid is None or pid <= 0 or not profile_dir:
+        return False
+    runner = run or subprocess.run
+    resolve_executable = which or shutil.which
+    is_file = path_is_file or os.path.isfile
+    try:
+        parsed = urlparse(cdp_url)
+        port = parsed.port
+        expected_profile = Path(profile_dir).expanduser().resolve(strict=False)
+        dedicated_profile = (
+            Path(home_dir or Path.home()) / ".oha-yachiyo" / "chrome-debug"
+        ).resolve(strict=False)
+    except (OSError, ValueError):
+        return False
+    if (
+        port is None
+        or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}
+        or expected_profile != dedicated_profile
+    ):
+        return False
+    try:
+        result = runner(
+            ["ps", "-p", str(pid), "-o", "command="],
+            capture_output=True,
+            text=True,
+            timeout=1.0,
+            check=False,
+        )
+    except Exception:
+        return False
+    if result.returncode != 0:
+        return False
+    try:
+        tokens = shlex.split(result.stdout.strip())
+    except ValueError:
+        return False
+    if not tokens or not _browser_cdp_executable_is_google_chrome(
+        tokens[0],
+        path_is_file=is_file,
+    ):
+        return False
+    expected_port_arg = f"--remote-debugging-port={port}"
+    profile_args = [
+        token.split("=", 1)[1]
+        for token in tokens
+        if token.startswith("--user-data-dir=")
+    ]
+    if expected_port_arg not in tokens or len(profile_args) != 1:
+        return False
+    try:
+        actual_profile = Path(profile_args[0]).expanduser().resolve(strict=False)
+    except OSError:
+        return False
+    if actual_profile != expected_profile:
+        return False
+    return _browser_cdp_pid_owns_loopback_listener(
+        pid,
+        host=str(parsed.hostname or ""),
+        port=port,
+        run=runner,
+        which=resolve_executable,
+        path_is_file=is_file,
+    )
+
+
+def _browser_cdp_executable_is_google_chrome(
+    executable: str,
+    *,
+    path_is_file: Callable[[str], bool],
+) -> bool:
+    try:
+        path = Path(executable).expanduser().resolve(strict=False)
+    except OSError:
+        return False
+    parts = path.parts
+    expected_suffix = (
+        "Google Chrome.app",
+        "Contents",
+        "MacOS",
+        "Google Chrome",
+    )
+    return (
+        len(parts) >= len(expected_suffix)
+        and tuple(parts[-4:]) == expected_suffix
+        and path_is_file(str(path))
+    )
+
+
+def _browser_cdp_pid_owns_loopback_listener(
+    pid: int,
+    *,
+    host: str,
+    port: int,
+    run: Callable[..., Any],
+    which: Callable[[str], str | None],
+    path_is_file: Callable[[str], bool],
+) -> bool:
+    lsof = str(which("lsof") or "").strip()
+    if not lsof and path_is_file("/usr/sbin/lsof"):
+        lsof = "/usr/sbin/lsof"
+    if not lsof:
+        return False
+    try:
+        result = run(
+            [
+                lsof,
+                "-nP",
+                "-a",
+                "-p",
+                str(pid),
+                f"-iTCP:{port}",
+                "-sTCP:LISTEN",
+                "-Fpn",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=1.0,
+            check=False,
+        )
+    except Exception:
+        return False
+    if result.returncode != 0:
+        return False
+    lines = {line.strip() for line in result.stdout.splitlines() if line.strip()}
+    if f"p{pid}" not in lines:
+        return False
+    accepted_hosts = {host}
+    if host == "localhost":
+        accepted_hosts.update({"127.0.0.1", "::1"})
+    expected_names = {
+        f"n{candidate}:{port}" if ":" not in candidate else f"n[{candidate}]:{port}"
+        for candidate in accepted_hosts
+    }
+    return bool(lines & expected_names)
+
+
+def _positive_int(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed > 0 else None
+
+
+def _truthy_config_value(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _open_url_fallback(url: str) -> dict[str, Any]:
@@ -871,7 +1290,10 @@ def _select_page(pages: list[dict[str, Any]]) -> dict[str, Any] | None:
 
 def _page_summary(page: dict[str, Any], *, fallback_url: str = "") -> dict[str, Any]:
     return {
-        "target_id": str(page.get("id") or ""),
+        "target_id": str(page.get("id") or "").strip(),
+        "target_websocket_available": bool(
+            str(page.get("webSocketDebuggerUrl") or "").strip()
+        ),
         "title": str(page.get("title") or ""),
         "url": str(page.get("url") or fallback_url),
         "type": str(page.get("type") or ""),

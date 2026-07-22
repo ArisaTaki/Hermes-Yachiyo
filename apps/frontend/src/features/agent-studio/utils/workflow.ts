@@ -987,7 +987,7 @@ export function workflowStepSummary(step: WorkflowStepRef, childRun: RunSpec | n
   }
   if (step.kind === 'unknown') return step.payload || '未知 Workflow 节点，建议检查 Workflow 定义或导入数据。';
   return appendWorkflowPlannerSummary(
-    childRun?.result || step.payload || 'No result yet.',
+    childRun?.result || step.payload || '暂无结果。',
     plannerSummary,
   );
 }

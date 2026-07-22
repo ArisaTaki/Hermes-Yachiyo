@@ -276,6 +276,11 @@ def test_installation_facade_installs_agent_chat_entrypoints(monkeypatch) -> Non
     engine._update_run = "update-run"
     engine.task_run_links = "task-run-links"
     engine.runtime_task_events = "task-events"
+    engine._db_lock = "db-lock"
+    engine.run_request_parser = SimpleNamespace(
+        client_request_id_from_payload="client-request-parser"
+    )
+    engine._conn = SimpleNamespace(transaction="transaction-scope")
 
     engine._install_runtime_agent_chat_entrypoints(
         runtime_timeline_factory="timeline-factory",
@@ -284,6 +289,7 @@ def test_installation_facade_installs_agent_chat_entrypoints(monkeypatch) -> Non
     assert engine.agent_run_async_coordinator.kwargs["agent_run_starter"] == "starter"
     assert engine.agent_model_tester.kwargs["call_custom_api"] == "custom-api-call"
     assert engine.run_timeline.kwargs["runs"] == "runs"
+    assert engine.main_chat_runs.kwargs["transaction_scope"] == "transaction-scope"
     assert engine.main_chat_config.kwargs["agent_workspaces_dir"] == "agent-workspaces"
     assert engine.tool_brokers.kwargs["memory_store"] == "memory-store"
     assert engine.main_chat_runs.kwargs["runtime_timeline_factory"] == "timeline-factory"
@@ -407,6 +413,8 @@ def test_installation_facade_installs_tooling_bundle_attributes() -> None:
 
 
 def test_installation_facade_installs_agent_and_approval_services(monkeypatch) -> None:
+    approval_builder_kwargs = {}
+
     class CapturedAgentRunExecutor:
         def __init__(self, **kwargs) -> None:
             self.kwargs = kwargs
@@ -427,6 +435,7 @@ def test_installation_facade_installs_agent_and_approval_services(monkeypatch) -
         )
 
     def fake_build_runtime_approval_services(**kwargs):
+        approval_builder_kwargs.update(kwargs)
         return SimpleNamespace(
             kwargs=kwargs,
             approval_pause="approval-pause",
@@ -462,6 +471,7 @@ def test_installation_facade_installs_agent_and_approval_services(monkeypatch) -
     engine.runtime_trace_events = "trace-events"
     engine.append_run_event = "append-run-event"
     engine.runtime_task_model_events = "task-model-events"
+    engine.get_run = "get-run"
     engine._update_run = "update-run"
     engine.tool_brokers = "tool-brokers"
     engine.approval_snapshots = "approval-snapshots"
@@ -471,6 +481,7 @@ def test_installation_facade_installs_agent_and_approval_services(monkeypatch) -
     engine._run_tool_requests = "run-tool-requests"
     engine.run_approvals = SimpleNamespace(claim_pending_approval="claim-pending-approval")
     engine._run_custom_api_agent = "run-custom-api-agent"
+    engine._conn = SimpleNamespace(transaction="transaction-scope")
 
     engine._install_runtime_agent_and_approval_services(
         runtime_timeline_factory="timeline-factory",
@@ -495,6 +506,8 @@ def test_installation_facade_installs_agent_and_approval_services(monkeypatch) -
         is installation_facade_mod.model_output_metadata
     )
     assert engine.agent_run_preparer.kwargs["redact_secrets"] is installation_facade_mod.redact_secrets
+    assert engine.agent_run_preparer.kwargs["get_run"] == "get-run"
+    assert engine.agent_run_preparer.kwargs["transaction_scope"] == "transaction-scope"
     assert (
         engine.agent_run_preparer.kwargs["agent_desk_context"]
         is installation_facade_mod.build_agent_desk_context
@@ -502,6 +515,7 @@ def test_installation_facade_installs_agent_and_approval_services(monkeypatch) -
     assert engine.approval_pause == "approval-pause"
     assert engine.approvals == "approvals"
     assert engine.approval_resume == "approval-resume"
+    assert approval_builder_kwargs["transaction_scope"] == "transaction-scope"
     assert isinstance(engine.agent_run_executor, CapturedAgentRunExecutor)
     assert engine.agent_run_executor.kwargs["preparer"] is engine.agent_run_preparer
     assert engine.agent_run_executor.kwargs["continue_custom_api_agent"] == "run-custom-api-agent"
@@ -527,16 +541,34 @@ def test_installation_facade_installs_approval_runtime_services(monkeypatch) -> 
     engine = object.__new__(agent_runtime.NativeRunEngine)
     engine.get_run = "get-run"
     engine.runs = SimpleNamespace(pending_approval_private="pending-approval-private")
+    engine.run_approvals = SimpleNamespace(
+        assert_approval_resume_active="assert-approval-resume-active",
+        claim_pending_rejection="claim-pending-rejection",
+        claim_pending_timeout="claim-pending-timeout",
+    )
     engine.approvals = "approvals"
     engine.cancel_run = "cancel-run"
     engine.tool_brokers = "tool-brokers"
     engine.runtime_run_budget = "run-budget"
     engine._approval_execution_lock = "approval-execution-lock"
     engine._approval_execution_in_progress = "approval-execution-in-progress"
+    engine._conn = SimpleNamespace(transaction="approval-transaction-scope")
 
     engine._install_runtime_approval_runtime_services()
 
     assert engine.approval_transitions.kwargs["approvals"] == "approvals"
+    assert (
+        engine.approval_transitions.kwargs["assert_approval_resume_active"]
+        == "assert-approval-resume-active"
+    )
+    assert (
+        engine.approval_transitions.kwargs["claim_pending_rejection"]
+        == "claim-pending-rejection"
+    )
+    assert (
+        engine.approval_transitions.kwargs["claim_pending_timeout"]
+        == "claim-pending-timeout"
+    )
     assert engine.tool_approval_resume.kwargs["tool_brokers"] == "tool-brokers"
     assert engine.tool_approval_resume.kwargs["run_budget"] == "run-budget"
     assert "approve_workflow_run" in engine.approval_resume_dispatcher.kwargs
@@ -544,6 +576,10 @@ def test_installation_facade_installs_approval_runtime_services(monkeypatch) -> 
     assert engine.tool_approval_resume.approve_agent_run == "approve-agent-run"
     assert engine.approval_resume_dispatcher.approve_once == "approve-once"
     assert engine.approval_execution.kwargs["execution_lock"] == "approval-execution-lock"
+    assert (
+        engine.approval_transitions.kwargs["transaction_scope"]
+        == "approval-transaction-scope"
+    )
 
 
 def test_installation_facade_installs_main_chat_model_loop_runner(monkeypatch) -> None:
@@ -570,7 +606,9 @@ def test_installation_facade_installs_main_chat_model_loop_runner(monkeypatch) -
     engine._run_custom_api_agent = "run-custom-api-agent"
     engine._main_chat_pending_approval = "main-chat-pending-approval"
     engine.approval_pause = "approval-pause"
+    engine.main_chat_runs = SimpleNamespace(fail="fail-main-chat-run")
     engine.terminal_run_resolver = SimpleNamespace(terminal_run_or_none="terminal-run-or-none")
+    engine._conn = SimpleNamespace(transaction="transaction-scope")
 
     engine._install_runtime_main_chat_model_loop_runner(
         runtime_timeline_factory="timeline-factory",
@@ -584,6 +622,7 @@ def test_installation_facade_installs_main_chat_model_loop_runner(monkeypatch) -
     assert engine.main_chat_model_loop.kwargs["tool_brokers"] == "tool-brokers"
     assert engine.main_chat_model_loop.kwargs["approval_pause"] == "approval-pause"
     assert engine.main_chat_model_loop.kwargs["terminal_run_or_none"] == "terminal-run-or-none"
+    assert engine.main_chat_model_loop.kwargs["transaction_scope"] == "transaction-scope"
 
 
 def test_installation_facade_installs_workflow_planning_and_coordinator(monkeypatch) -> None:
@@ -771,6 +810,7 @@ def test_installation_facade_installs_workflow_execution_and_async(monkeypatch) 
     engine.resolve_runnable = "resolve-runnable"
     engine._workflow_for_run_resume = "workflow-for-run-resume"
     engine._workflow_run_is_group_root = "workflow-run-is-group-root"
+    engine._conn = SimpleNamespace(transaction="workflow-transaction-scope")
 
     engine._install_runtime_workflow_execution_and_async(
         runtime_timeline_factory="timeline-factory",
@@ -779,6 +819,10 @@ def test_installation_facade_installs_workflow_execution_and_async(monkeypatch) 
     assert engine.workflow_continuation.project_background_failure == "project-background-failure"
     assert engine.workflow_continuation.kwargs["iso_epoch"] is installation_facade_mod.iso_epoch
     assert engine.workflow_approval_resume == "workflow-approval-resume"
+    assert (
+        engine.workflow_continuation.kwargs["transaction_scope"]
+        == "workflow-transaction-scope"
+    )
     assert engine.workflow_cancellation == "workflow-cancellation"
     assert engine.workflow_child_outcomes == "workflow-child-outcomes"
     assert isinstance(engine.workflow_run_async_coordinator, CapturedWorkflowRunAsyncCoordinator)
@@ -923,6 +967,7 @@ def test_installation_facade_installs_workflow_transitions(monkeypatch) -> None:
     engine._mark_parent_workflows_child_running = "mark-parent-workflows-child-running"
     engine._resume_parent_workflows_after_child_update = "resume-parent-workflows-after-child-update"
     engine.get_run = "get-run"
+    engine._conn = SimpleNamespace(transaction="transaction-scope")
 
     engine._install_runtime_workflow_transitions(
         runtime_timeline_factory="timeline-factory",
@@ -930,6 +975,7 @@ def test_installation_facade_installs_workflow_transitions(monkeypatch) -> None:
 
     assert engine.workflow_parent_resume.kwargs["timeline_factory"] == "timeline-factory"
     assert callable(engine.workflow_parent_resume.kwargs["get_run"])
+    assert engine.workflow_parent_resume.kwargs["transaction_scope"] == "transaction-scope"
     assert engine.approval_resume_projection == "approval-resume-projection"
     assert engine.run_transition_projection == "run-transition-projection"
 
@@ -983,7 +1029,10 @@ def test_installation_facade_installs_run_control_and_shutdown(monkeypatch) -> N
     )
     engine.runs = SimpleNamespace(delete_rows="delete-run-rows")
     engine.run_artifacts = SimpleNamespace(delete_files="delete-artifacts")
-    engine._conn = SimpleNamespace(commit=lambda: "commit")
+    engine._conn = SimpleNamespace(
+        commit=lambda: "commit",
+        transaction="transaction-scope",
+    )
     engine._credential_store = "credential-store"
     engine._closed = False
     engine.cancel_run = "cancel-run"
@@ -1042,6 +1091,7 @@ def test_installation_facade_installs_post_db_support_services(monkeypatch) -> N
     calls: list[str] = []
     engine = object.__new__(agent_runtime.NativeRunEngine)
     engine._conn = "conn"
+    engine._db_lock = "db-lock"
     engine.agent_workspaces_dir = "agent-workspaces"
     engine.trusted_workspaces = "trusted-workspaces"
     engine._compile_tool_policy = "compile-tool-policy"

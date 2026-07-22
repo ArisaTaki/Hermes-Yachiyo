@@ -499,8 +499,10 @@ def _browser_url_prompt(tool_name: str, recovery_input: Mapping[str, Any]) -> st
         return ""
     label = {
         "browser.open_url_and_extract_text": "打开并读取",
-        "browser.open_url_and_screenshot": "打开并截取",
+        "browser.open_url_and_screenshot": "打开",
     }.get(tool_name, "")
+    if tool_name == "browser.open_url_and_screenshot":
+        return f"{label} {url} 并截图"
     return f"{label} {url}" if label else ""
 
 

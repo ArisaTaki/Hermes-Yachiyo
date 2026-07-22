@@ -60,7 +60,7 @@ export function ApprovalInspector({
           actionsClassName="run-approval-actions"
           actionsTestId="agent-run-detail-approval-actions"
           approval={{
-            approval_id: selectedRunApproval.approval_id || selectedRun.run_id,
+            approval_id: selectedRunApproval.approval_id || '',
             description: selectedRunApproval.tool === 'workflow.approval'
               ? '这个 Workflow 审批节点需要人工确认后才会继续。'
               : '这个工具调用需要人工确认后才会继续当前 Run。',

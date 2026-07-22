@@ -5,9 +5,16 @@ from __future__ import annotations
 import logging
 import threading
 from collections.abc import Callable
-from contextlib import AbstractContextManager
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
 from typing import Any
+
+from apps.shell.agent.runtime.run_group_attachments import (
+    RUN_GROUP_ATTACHMENT_PAYLOAD_KEY,
+    require_internal_run_group_attachment,
+    validate_existing_run_group_child_attachment,
+    validate_run_group_child_attachment,
+)
 
 
 @dataclass(frozen=True)
@@ -24,16 +31,21 @@ class RuntimeWorkflowRunStarter:
         self,
         *,
         get_run_group: Callable[[str], dict[str, Any]],
+        get_run: Callable[[str], dict[str, Any]],
         insert_run_group: Callable[..., dict[str, Any]],
         insert_run: Callable[..., dict[str, Any]],
         run_by_client_request_id: Callable[[str], dict[str, Any] | None],
         client_request_id_from_payload: Callable[[dict[str, Any]], str],
+        run_group_attachment_transaction: Callable[[], AbstractContextManager[Any]]
+        | None = None,
     ) -> None:
         self._get_run_group = get_run_group
+        self._get_run = get_run
         self._insert_run_group = insert_run_group
         self._insert_run = insert_run
         self._run_by_client_request_id = run_by_client_request_id
         self._client_request_id_from_payload = client_request_id_from_payload
+        self._run_group_attachment_transaction = run_group_attachment_transaction
 
     def start_sync(
         self,
@@ -46,17 +58,69 @@ class RuntimeWorkflowRunStarter:
         client_request_id = self._client_request_id_from_payload(payload)
         existing = self._run_by_client_request_id(client_request_id)
         if existing is not None:
-            return WorkflowRunStart(existing, root_group=False, existing=True)
+            return self._existing_start(
+                existing,
+                payload=payload,
+                workflow_id=workflow_id,
+                client_request_id=client_request_id,
+            )
         with lock:
             existing = self._run_by_client_request_id(client_request_id)
             if existing is not None:
-                return WorkflowRunStart(existing, root_group=False, existing=True)
+                return self._existing_start(
+                    existing,
+                    payload=payload,
+                    workflow_id=workflow_id,
+                    client_request_id=client_request_id,
+                )
             return self._insert_new_run(
                 payload,
                 workflow=workflow,
                 workflow_id=workflow_id,
                 client_request_id=client_request_id,
             )
+
+    def _existing_start(
+        self,
+        existing: dict[str, Any],
+        *,
+        payload: dict[str, Any],
+        workflow_id: str,
+        client_request_id: str,
+    ) -> WorkflowRunStart:
+        run_group_id = str(payload.get("run_group_id") or "").strip()
+        if not run_group_id:
+            # Preserve legacy root Workflow idempotency semantics.  The
+            # authority boundary applies only to attaching into an existing
+            # RunGroup.
+            return WorkflowRunStart(existing, root_group=False, existing=True)
+        user_goal = str(payload.get("user_goal") or payload.get("goal") or "").strip()
+        if (
+            str(existing.get("kind") or "").strip() != "workflow_run"
+            or str(existing.get("runnable_id") or "").strip() != workflow_id
+            or str(existing.get("user_goal") or "").strip() != user_goal
+        ):
+            raise RuntimeError(
+                "idempotency key conflict: existing run identity does not match request"
+            )
+        attachment_scope = (
+            self._run_group_attachment_transaction()
+            if self._run_group_attachment_transaction is not None
+            else nullcontext()
+        )
+        with attachment_scope:
+            group = self._get_run_group(run_group_id)
+            validate_existing_run_group_child_attachment(
+                payload.get(RUN_GROUP_ATTACHMENT_PAYLOAD_KEY),
+                group=group,
+                run_group_id=run_group_id,
+                existing_child=existing,
+                child_kind="workflow_run",
+                child_runnable_id=workflow_id,
+                expected_child_identity=client_request_id,
+                get_run=self._get_run,
+            )
+        return WorkflowRunStart(existing, root_group=False, existing=True)
 
     def start_async(
         self,
@@ -65,11 +129,20 @@ class RuntimeWorkflowRunStarter:
         workflow: dict[str, Any],
         workflow_id: str,
     ) -> WorkflowRunStart:
+        client_request_id = (
+            str(
+                payload.get("client_run_id")
+                or payload.get("client_request_id")
+                or ""
+            ).strip()
+            if str(payload.get("run_group_id") or "").strip()
+            else ""
+        )
         return self._insert_new_run(
             payload,
             workflow=workflow,
             workflow_id=workflow_id,
-            client_request_id="",
+            client_request_id=client_request_id,
         )
 
     def _insert_new_run(
@@ -83,23 +156,42 @@ class RuntimeWorkflowRunStarter:
         user_goal = str(payload.get("user_goal") or payload.get("goal") or "").strip()
         run_group_id = str(payload.get("run_group_id") or "").strip()
         root_group = False
-        if run_group_id:
-            self._get_run_group(run_group_id)
-        else:
-            group = self._insert_run_group(
-                title=f"{workflow['name']}: {user_goal[:80]}",
-                source=str(payload.get("source") or "workflow"),
-                workspace_dir="",
-            )
-            run_group_id = group["run_group_id"]
-            root_group = True
-        run = self._insert_run(
-            kind="workflow_run",
-            runnable_id=workflow_id,
-            user_goal=user_goal,
-            run_group_id=run_group_id,
-            client_request_id=client_request_id,
+        attachment_scope = (
+            self._run_group_attachment_transaction()
+            if run_group_id and self._run_group_attachment_transaction is not None
+            else nullcontext()
         )
+        with attachment_scope:
+            if run_group_id:
+                attachment = require_internal_run_group_attachment(
+                    payload.get(RUN_GROUP_ATTACHMENT_PAYLOAD_KEY),
+                )
+                group = self._get_run_group(run_group_id)
+                validate_run_group_child_attachment(
+                    attachment,
+                    group=group,
+                    run_group_id=run_group_id,
+                    child_kind="workflow_run",
+                    child_runnable_id=workflow_id,
+                    expected_child_identity=client_request_id,
+                    get_run=self._get_run,
+                )
+            else:
+                group = self._insert_run_group(
+                    title=f"{workflow['name']}: {user_goal[:80]}",
+                    source=str(payload.get("source") or "workflow"),
+                    workspace_dir="",
+                )
+                run_group_id = group["run_group_id"]
+                root_group = True
+            run = self._insert_run(
+                kind="workflow_run",
+                runnable_id=workflow_id,
+                user_goal=user_goal,
+                run_group_id=run_group_id,
+                client_request_id=client_request_id,
+                project_root_group=root_group,
+            )
         return WorkflowRunStart(run, root_group=root_group)
 
 
@@ -227,6 +319,8 @@ class RuntimeWorkflowRunAsyncCoordinator:
         payload: dict[str, Any],
         *,
         on_complete: Callable[[dict[str, Any]], None] | None = None,
+        deferred_execution_start_sink: Callable[[Callable[[], None]], None]
+        | None = None,
     ) -> dict[str, Any]:
         workflow_id = str(payload.get("workflow_id") or payload.get("runnable_id") or "")
         user_goal = str(payload.get("user_goal") or payload.get("goal") or "").strip()
@@ -299,7 +393,19 @@ class RuntimeWorkflowRunAsyncCoordinator:
             name=f"workflow-run-{run['run_id'][:8]}",
             daemon=True,
         )
-        thread.start()
+        activated = False
+
+        def activate() -> None:
+            nonlocal activated
+            if activated:
+                return
+            activated = True
+            thread.start()
+
+        if deferred_execution_start_sink is not None:
+            deferred_execution_start_sink(activate)
+        else:
+            activate()
         return result
 
 

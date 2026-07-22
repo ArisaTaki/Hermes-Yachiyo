@@ -4,12 +4,25 @@ import {
 } from './approvalItems';
 import { participantDisplayName } from './sessionState';
 import { latestGroupAgentSummaryNotice } from './messageGroups';
-import { runtimeToolDisplayLabelOrName } from '../runtime-shared/approval';
 import { studioRunUrl } from '../runtime-shared/studioLinks';
 import type { ChatActivityEvent, ChatMessage } from './types';
 
 export type YachiyoChatActivityEvent = ChatActivityEvent;
 export type YachiyoChatMessage = ChatMessage;
+
+const CONSUMER_ACTIVITY_LABEL_BY_PHASE: Record<string, string> = {
+  task_start: '处理中...',
+  reasoning: '正在思考...',
+  thinking: '正在思考...',
+  tool_start: '处理中...',
+  tool_progress: '处理中...',
+  tool_complete: '正在整理结果...',
+  subagent: '处理中...',
+  desktop_snapshot: '正在确认操作...',
+  task_complete: '正在整理回复...',
+  task_failed: '正在更新状态...',
+  task_cancelled: '正在更新状态...',
+};
 
 export function messageText(message: YachiyoChatMessage) {
   return String(message.content || message.text || '');
@@ -24,6 +37,43 @@ export function isRetryableMessage(message: YachiyoChatMessage, messages: Yachiy
     candidate.role === 'assistant'
     && candidate.task_id === message.task_id
   ));
+}
+
+export function retrySourceUserMessage(
+  message: YachiyoChatMessage,
+  messages: YachiyoChatMessage[],
+) {
+  if (message.role === 'user') return message;
+  const messageIndex = message.id
+    ? messages.findIndex((candidate) => candidate.id === message.id)
+    : messages.indexOf(message);
+  const searchEnd = messageIndex >= 0 ? messageIndex : messages.length;
+  const taskId = String(message.task_id || '').trim();
+  if (taskId) {
+    for (let index = searchEnd - 1; index >= 0; index -= 1) {
+      const candidate = messages[index];
+      if (candidate?.role === 'user' && candidate.task_id === taskId) return candidate;
+    }
+  }
+  for (let index = searchEnd - 1; index >= 0; index -= 1) {
+    const candidate = messages[index];
+    if (candidate?.role === 'user') return candidate;
+  }
+  return null;
+}
+
+export function shouldShowPendingAssistantReply(
+  messages: YachiyoChatMessage[],
+  submitting: boolean,
+) {
+  if (!submitting) return false;
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index];
+    const role = message?.role;
+    if (role === 'assistant') return message?.status === 'failed';
+    if (role === 'user') return true;
+  }
+  return false;
 }
 
 export function messageMatchesPendingAssistantReply(message: YachiyoChatMessage, taskId: string) {
@@ -128,9 +178,8 @@ export function latestVisibleActivity(messages: YachiyoChatMessage[]) {
 
 export function activityLabel(event?: YachiyoChatActivityEvent | null) {
   if (!event) return '';
-  const label = String(event.title || event.detail || '').trim();
-  if (label) return runtimeToolDisplayLabelOrName(label);
-  return runtimeToolDisplayLabelOrName(String(event.tool_name || '').trim());
+  const phase = String(event.phase || '').trim().toLowerCase();
+  return CONSUMER_ACTIVITY_LABEL_BY_PHASE[phase] || '处理中...';
 }
 
 export function activityRunId(event?: YachiyoChatActivityEvent | null) {

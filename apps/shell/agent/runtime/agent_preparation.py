@@ -7,7 +7,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from apps.shell.agent.repositories.memories import MemoryQuery
 from apps.shell.agent.runtime.foreground_lock_scope import foreground_lock_broker_kwargs
+from apps.shell.agent.runtime.goal_runtime import planned_goal_contract_payload
 
 
 @dataclass
@@ -18,6 +20,7 @@ class AgentRunPreparation:
     artifact_root: Path
     skills: list[dict[str, Any]]
     context: str
+    goal_contract: dict[str, Any]
     broker: Any
     artifacts: list[dict[str, Any]]
 
@@ -95,7 +98,19 @@ class RuntimeAgentRunPreparer:
         )
         artifact_root = self._agent_artifacts_dir / run_id
         skills = self._load_agent_skills(agent.get("skill_ids") or [])
-        context = self._agent_context(agent, user_goal, upstream, skills=skills)
+        model_goal_context = str(
+            agent.get("_runtime_agent_goal_context") or user_goal
+        ).strip()
+        context = self._agent_context(
+            agent,
+            model_goal_context,
+            upstream,
+            skills=skills,
+        )
+        goal_contract = planned_goal_contract_payload(
+            user_goal,
+            allowed_tools=runtime["tool_policy"].get("allowed_tools") or [],
+        )
         default_runnable_id = str(agent.get("agent_id") or "")
         approval_required = runtime["tool_policy"].get("approval_required") or {}
         if self._tool_brokers is not None:
@@ -140,14 +155,14 @@ class RuntimeAgentRunPreparer:
             artifact_root=artifact_root,
             skills=skills,
             context=context,
+            goal_contract=goal_contract,
             broker=broker,
             artifacts=[],
         )
 
     def write_context_artifact(self, run_id: str, preparation: AgentRunPreparation) -> dict[str, Any]:
-        retrieved_memories = self._memory_store().list_items(
-            include_deleted=False,
-            limit=self._memory_context_limit,
+        retrieved_memories = self._memory_store().query(
+            MemoryQuery(limit=self._memory_context_limit),
         )
         self._append_run_event(
             run_id,

@@ -6,6 +6,7 @@ import json
 import re
 from typing import Any
 
+from apps.shell.agent.runtime.callbacks import supports_keyword
 from packages.security import (
     contains_sensitive_text,
     redact_api_error_text,
@@ -14,6 +15,9 @@ from packages.security import (
 )
 
 RUNTIME_JSON_REDACTION_MAX_ITEMS = 1000
+RUNTIME_EXECUTION_PROVENANCE_KEY = "_runtime_execution_provenance"
+RUNTIME_LOCAL_TOOL_BROKER_PROVENANCE_SOURCE = "local_tool_broker"
+RUNTIME_EXECUTION_PROVENANCE_VERSION = 1
 _MEMORY_TOOL_NAMES = {"memory.add", "memory.replace", "memory.remove"}
 _SENSITIVE_PREVALIDATION_PREVIEW_RE = re.compile(
     r"(?i)\b(?:authorization|bearer|[A-Z0-9_]*(?:API_KEY|TOKEN|SECRET|PASSWORD|PASSWD))\b"
@@ -60,12 +64,15 @@ def _run_event_payload_redaction_depth(value: Any) -> int:
     if keys.intersection(
         {
             "candidate_intents",
+            "goal_assessment",
+            "goal_contract",
             "intent",
             "plan",
             "planner_event_type",
             "runtime_execution_envelope",
             "runtime_plan",
             "step",
+            "subgoal",
             "task_verification_targets",
             "verification_targets",
             "task_core",
@@ -375,8 +382,14 @@ class RuntimeTaskEventRecorder:
         task_id: str = "",
         session_id: str = "",
         result: Any = None,
-    ) -> None:
+        expected_status: str | None = None,
+        expected_updated_at: str | None = None,
+    ) -> Any:
         clean_run_id = str(run_id or "")
+        event_fence = _optional_run_event_fence(
+            expected_status=expected_status,
+            expected_updated_at=expected_updated_at,
+        )
         safe_payload = self._payload_builder.task_run_event_payload(
             task_id=task_id,
             run_id=clean_run_id,
@@ -384,8 +397,20 @@ class RuntimeTaskEventRecorder:
             status="completed",
             result=result,
         )
-        self._append_run_event(clean_run_id, "task.completed", safe_payload)
-        self._append_run_event(clean_run_id, "run.completed", {"result": redact_secrets(result)})
+        event = self._append_run_event(
+            clean_run_id,
+            "task.completed",
+            safe_payload,
+            **event_fence,
+        )
+        if event is None and event_fence:
+            return None
+        return self._append_run_event(
+            clean_run_id,
+            "run.completed",
+            {"result": redact_secrets(result)},
+            **event_fence,
+        )
 
     def failed(
         self,
@@ -394,8 +419,14 @@ class RuntimeTaskEventRecorder:
         task_id: str = "",
         session_id: str = "",
         error: Any = None,
-    ) -> None:
+        expected_status: str | None = None,
+        expected_updated_at: str | None = None,
+    ) -> Any:
         clean_run_id = str(run_id or "")
+        event_fence = _optional_run_event_fence(
+            expected_status=expected_status,
+            expected_updated_at=expected_updated_at,
+        )
         safe_payload = self._payload_builder.task_run_event_payload(
             task_id=task_id,
             run_id=clean_run_id,
@@ -403,8 +434,33 @@ class RuntimeTaskEventRecorder:
             status="failed",
             error=error,
         )
-        self._append_run_event(clean_run_id, "task.failed", safe_payload)
-        self._append_run_event(clean_run_id, "run.failed", {"error": redact_secrets(error)})
+        event = self._append_run_event(
+            clean_run_id,
+            "task.failed",
+            safe_payload,
+            **event_fence,
+        )
+        if event is None and event_fence:
+            return None
+        return self._append_run_event(
+            clean_run_id,
+            "run.failed",
+            {"error": redact_secrets(error)},
+            **event_fence,
+        )
+
+
+def _optional_run_event_fence(
+    *,
+    expected_status: str | None,
+    expected_updated_at: str | None,
+) -> dict[str, str]:
+    fence: dict[str, str] = {}
+    if expected_status is not None:
+        fence["expected_status"] = expected_status
+    if expected_updated_at is not None:
+        fence["expected_updated_at"] = expected_updated_at
+    return fence
 
 
 def agent_run_started_payload(
@@ -516,6 +572,16 @@ class RuntimeToolCallEventRecorder:
     ) -> dict[str, Any] | None:
         if not run_id:
             return None
+        if (
+            str(payload.get("visibility") or "").strip() == "internal"
+            and supports_keyword(self._append_run_event, "visibility")
+        ):
+            return self._append_run_event(
+                run_id,
+                event_type,
+                payload,
+                visibility="internal",
+            )
         return self._append_run_event(run_id, event_type, payload)
 
     def denied(
@@ -936,7 +1002,9 @@ class RuntimeRunEventRecorder:
         actor: str = "native_runtime",
         visibility: str = "user",
         sensitivity: str = "public",
-    ) -> dict[str, Any]:
+        expected_status: str | None = None,
+        expected_updated_at: str | None = None,
+    ) -> dict[str, Any] | None:
         event = self._repository.append(
             run_id,
             event_type,
@@ -944,16 +1012,24 @@ class RuntimeRunEventRecorder:
             actor=actor,
             visibility=visibility,
             sensitivity=sensitivity,
+            expected_status=expected_status,
+            expected_updated_at=expected_updated_at,
         )
+        if event is None:
+            return None
         for alias in canonical_run_event_aliases(event_type, payload):
-            self._repository.append(
+            alias_event = self._repository.append(
                 run_id,
                 alias,
                 payload,
                 actor=actor,
                 visibility=visibility,
                 sensitivity=sensitivity,
+                expected_status=expected_status,
+                expected_updated_at=expected_updated_at,
             )
+            if alias_event is None:
+                return None
         return event
 
     def list(

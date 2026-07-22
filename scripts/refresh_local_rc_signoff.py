@@ -67,7 +67,12 @@ def _provider_smoke_configured() -> bool:
     return all(os.getenv(name, "").strip() for name in PROVIDER_SMOKE_ENV_VARS)
 
 
-def _build_release_candidate_artifacts(*, channel: str, repository: str | None) -> None:
+def _build_release_candidate_artifacts(
+    *,
+    channel: str,
+    repository: str | None,
+    allow_dirty_local_rc: bool = False,
+) -> None:
     venv_python = _project_venv_python()
     if venv_python.exists() and not _same_python(Path(sys.executable), venv_python):
         command = [
@@ -78,9 +83,15 @@ def _build_release_candidate_artifacts(*, channel: str, repository: str | None) 
         ]
         if repository:
             command.extend(["--repository", repository])
+        if allow_dirty_local_rc:
+            command.append("--allow-dirty-local-rc")
         _run(command)
         return
-    build_release_candidate_artifacts(channel=channel, repository=repository)
+    build_release_candidate_artifacts(
+        channel=channel,
+        repository=repository,
+        allow_dirty_local_rc=allow_dirty_local_rc,
+    )
 
 
 def _non_manual_findings(report: dict[str, object]) -> list[tuple[str, object]]:
@@ -235,7 +246,11 @@ def _print_missing_current_signoff_guidance(
     )
 
 
-def _preview_failure_is_only_manual_incomplete(report_path: Path) -> bool:
+def _preview_failure_is_only_manual_incomplete(
+    report_path: Path,
+    *,
+    allow_dirty_local_rc: bool = False,
+) -> bool:
     report = _load_report(report_path)
     summary = report.get("manual_release_candidate_check_summary")
     remaining_count = (
@@ -243,9 +258,39 @@ def _preview_failure_is_only_manual_incomplete(report_path: Path) -> bool:
         if isinstance(summary, dict)
         else 0
     )
-    if remaining_count <= 0:
+    non_manual = _non_manual_findings(report)
+    if not allow_dirty_local_rc:
+        return remaining_count > 0 and not non_manual
+
+    allowed_finding_keys = {
+        "source_revision_final_signoff_findings",
+        "manual_release_candidate_check_source_revision_findings",
+    }
+    if any(key not in allowed_finding_keys for key, _value in non_manual):
         return False
-    return not _non_manual_findings(report)
+    built_guards = report.get("built_artifact_guards")
+    if isinstance(built_guards, dict) and built_guards.get("status") == "failed":
+        raw_findings = built_guards.get("findings")
+        if not isinstance(raw_findings, list) or not raw_findings:
+            return False
+        expected_message = (
+            "public/latest/final release verification requires clean, "
+            "publishable source provenance"
+        )
+        if any(
+            not isinstance(finding, dict)
+            or finding.get("message") != expected_message
+            for finding in raw_findings
+        ):
+            return False
+    for key, value in report.items():
+        if key == "built_artifact_guards" or not isinstance(value, dict):
+            continue
+        if value.get("status") == "failed":
+            return False
+    return remaining_count > 0 or bool(non_manual) or (
+        isinstance(built_guards, dict) and built_guards.get("status") == "failed"
+    )
 
 
 def _remaining_check_ids(report_path: Path) -> list[str]:
@@ -477,6 +522,7 @@ def refresh_local_rc_signoff(
     reuse_current_reports: bool = False,
     provider_manifest: Path | None = None,
     public_demo_reports: tuple[Path, ...] = (),
+    allow_dirty_local_rc: bool = False,
 ) -> dict[str, Path]:
     label = short_commit or _git_short_commit()
     tmp_dir = ROOT / "tmp"
@@ -521,7 +567,11 @@ def refresh_local_rc_signoff(
     )
 
     if not skip_build and not batch_report_is_current:
-        _build_release_candidate_artifacts(channel=channel, repository=repository)
+        _build_release_candidate_artifacts(
+            channel=channel,
+            repository=repository,
+            allow_dirty_local_rc=allow_dirty_local_rc,
+        )
         screen_report_is_current = False
 
     if not skip_source_capability_smoke and not source_capability_report_is_current:
@@ -660,7 +710,10 @@ def refresh_local_rc_signoff(
         str(signoff_preview.relative_to(ROOT)),
     ]
     preview_code = _run(preview_command, allow_failure=True)
-    if preview_code and not _preview_failure_is_only_manual_incomplete(signoff_preview):
+    if preview_code and not _preview_failure_is_only_manual_incomplete(
+        signoff_preview,
+        allow_dirty_local_rc=allow_dirty_local_rc,
+    ):
         raise subprocess.CalledProcessError(preview_code, preview_command)
 
     for stale_release_smoke in (
@@ -1230,6 +1283,14 @@ def main(argv: list[str] | None = None) -> int:
         help="Release channel metadata for local artifact rebuilds.",
     )
     parser.add_argument("--repository", help="GitHub owner/repo for build metadata.")
+    parser.add_argument(
+        "--allow-dirty-local-rc",
+        action="store_true",
+        help=(
+            "Explicitly allow a dirty, non-publishable local RC build. Public/latest/"
+            "final signoff remains blocked until a clean rebuild."
+        ),
+    )
     parser.add_argument("--skip-build", action="store_true")
     parser.add_argument("--skip-source-capability-smoke", action="store_true")
     parser.add_argument(
@@ -1371,6 +1432,7 @@ def main(argv: list[str] | None = None) -> int:
             reuse_current_reports=args.reuse_current_reports,
             provider_manifest=args.provider_manifest,
             public_demo_reports=tuple(args.public_demo_report),
+            allow_dirty_local_rc=args.allow_dirty_local_rc,
         )
     except subprocess.CalledProcessError as exc:
         print(

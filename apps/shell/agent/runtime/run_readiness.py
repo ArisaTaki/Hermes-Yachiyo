@@ -16,6 +16,7 @@ def native_agent_readiness(
     redact_error: Callable[[Any], str],
 ) -> dict[str, Any]:
     """Project native main-agent readiness from the model profile service."""
+    private_profile: dict[str, Any] | None = None
     try:
         profile_service = profile_service_factory()
         profile_id = str(profile_service.get_defaults().get("chat") or "").strip()
@@ -25,11 +26,11 @@ def native_agent_readiness(
                 message="请先配置并选择默认对话模型。",
             )
         get_profile = getattr(profile_service, "get_profile", None)
-        profile = (
-            get_profile(profile_id)
-            if callable(get_profile)
-            else profile_service.get_profile_private(profile_id)
-        )
+        if callable(get_profile):
+            profile = get_profile(profile_id)
+        else:
+            private_profile = profile_service.get_profile_private(profile_id)
+            profile = private_profile
     except KeyError:
         return native_agent_not_ready(
             reason="model_profile_required",
@@ -52,13 +53,33 @@ def native_agent_readiness(
         reason = "Native Agent 当前仅支持 OpenAI-compatible 对话模型。"
     elif not (
         all(str(profile.get(key) or "").strip() for key in ("base_url", "model"))
-        and (
-            bool(profile.get("api_key_configured"))
+        and bool(
+            profile.get("api_key_configured")
             if "api_key_configured" in profile
-            else bool(str(profile.get("api_key") or "").strip())
+            else str(profile.get("api_key") or "").strip()
         )
     ):
         reason = "默认对话模型配置不完整。"
+
+    if not reason:
+        try:
+            if private_profile is None:
+                private_profile = profile_service.get_profile_private(profile_id)
+            credential_accessible = bool(
+                str(private_profile.get("api_key") or "").strip()
+            )
+        except KeyError:
+            return native_agent_not_ready(
+                reason="model_profile_required",
+                message="默认对话模型不存在，请重新选择。",
+            )
+        except Exception as exc:
+            return native_agent_not_ready(
+                reason="model_profile_unavailable",
+                message=redact_error(exc),
+            )
+        if not credential_accessible:
+            reason = "默认对话模型配置不完整。"
 
     ready = not reason
     return {

@@ -14,7 +14,7 @@
 ```bash
 python -m pip install -e ".[packaging]"
 npm ci --prefix apps/frontend
-python scripts/build_release_candidate_artifacts.py --channel experimental --repository kuguya-AI-app-develop/oha-yachiyo
+python scripts/build_release_candidate_artifacts.py --channel experimental --repository kuguya-AI-app-develop/Hermes-Yachiyo
 ```
 
 输出位置：
@@ -51,7 +51,7 @@ scripts/build_macos_self_signed_dmg.sh "Oha-Yachiyo Self Signed"
 
 `MACOS_CODESIGN_IDENTITY` 是证书名，不是发布渠道名。自签名阶段建议使用中性的 `Oha-Yachiyo Self Signed`；`main` 和 `oha-develop` 可以共用同一张自签名证书。发布渠道由分支、release tag、DMG 文件名和下载链接区分。
 
-CI 中如果检测到 `MACOS_CODESIGN_CERTIFICATE_BASE64`，会自动导入证书、构建 `.app`、签名 `.app`，再打包未签名 `.dmg`。如果没有配置该 Secret，workflow 会退回完全 unsigned DMG，发布流程不会因此失败。
+CI 中如果检测到 `MACOS_CODESIGN_CERTIFICATE_BASE64`，会自动导入证书、构建 `.app`、签名 `.app`，再打包未签名 `.dmg`。如果没有配置该 Secret，workflow 会正常使用免证书发布路径，不会因缺少 Developer ID 或公证凭据失败。Electron 可能为 `.app` 生成 ad-hoc 签名；workflow 会对最终 DMG 做只读挂载检查，在 latest JSON 中分别记录 `signing=unsigned` 和实际 `signature_kind=adhoc|unsigned`，不把 ad-hoc 冒充成 Developer ID。
 
 ## Developer ID 与 notarization
 
@@ -105,6 +105,15 @@ Oha-Yachiyo.app/Contents/Resources/backend/oha-yachiyo-backend
 
 这由 `apps/frontend/electron/main.ts` 中的 packaged backend 路径控制。`scripts/build_backend.py` 使用 PyInstaller 把 `apps.desktop_backend.app` 冻结为单文件后端，`apps/frontend/electron-builder.yml` 再把它放进 Electron Resources。
 
+嵌入在 `.app` 内的 backend 与单独分发/验收时使用的 standalone backend 现在都固定使用
+稳定 identifier `io.github.arisataki.oha-yachiyo.backend`，并与 `Oha-Yachiyo.app`
+复用同一条长期签名身份链。backend 的专用 entitlement 只保留最小所需的
+`com.apple.security.cs.disable-library-validation`，原因是要让同一 identifier +
+同一长期签名身份在重建后仍能稳定命中同一组 Keychain ACL。`identity=-` 或其他
+unsigned / ad-hoc fallback 只适合无证书构建回退；它们不保证跨版本继续访问同一批
+Keychain 凭据。只有真正的 self-signed 证书或 Apple Developer ID 签名，才保证这条
+跨版本 Keychain 访问路径稳定。
+
 同一发布构建还会生成可复制到 macOS VM 的独立桌面 guest-agent：
 
 ```text
@@ -121,6 +130,82 @@ SSH bridge 部署方式见 `docs/desktop-provider-contract.md`。
 分配一个空闲本地端口并传给内置 Python backend，避免连接到本地开发
 环境的旧 backend。
 
+### 内置后台操作组件（Cua Driver）
+
+macOS 发布包把 Cua Driver 作为 Oha-Yachiyo 的内置 sidecar；终端用户不需要
+另外安装 `CuaDriver.app`、CLI 或 pip 包，应用运行时也不会联网下载驱动。发布
+构建以 `packaging/cua-driver.lock.json` 为唯一版本与来源记录，固定官方 archive、
+许可证和各自 SHA256。`python scripts/prepare_cua_driver.py` 校验 lock、下载或读取
+缓存、验证 universal binary 后，只生成以下三个打包输入：
+
+```text
+dist/cua-driver/macos/cua-driver
+dist/cua-driver/macos/LICENSE.md
+dist/cua-driver/macos/manifest.json
+```
+
+electron-builder 将它们复制到
+`Oha-Yachiyo.app/Contents/Resources/computer-use/macos/`。打包版只从这个固定资源
+路径启动。负责直接创建子进程的是 Electron 主进程，不是 Python backend 或额外的
+gateway：
+
+```text
+cua-driver mcp --embedded --host-bundle-id io.github.arisataki.oha-yachiyo
+```
+
+Python backend 不再创建 driver 子进程，只通过带随机 token 的 loopback JSONL bridge
+使用 Electron 创建的 child。每次 backend restart 都会轮换 token 和不含密钥的
+generation，并断开上一代连接。bridge 最多同时接受两条会话：一条长期执行会话和
+一条短时健康探测会话；backend 重启或应用退出会关闭 socket、停止 listener，并清理
+对应 driver child。
+
+`--embedded` 与这条直接父子进程链建立了 Oha-Yachiyo 作为权限责任主体所需的进程
+结构，但仍须用最终包完成下文真实 TCC 验收，不能仅凭源码结构宣称权限归属已经验证。
+打包模式的 transport sentinel 是权威配置：内置资源缺失、listener 启动失败或 bridge
+配置损坏时必须失败关闭，不能退回 `PATH`、自定义命令或开发机上偶然存在的全局
+驱动，也不会在运行时下载驱动。只有没有该 sentinel 的源码开发环境仍可通过显式
+命令、`PATH` 或已有 Cua Driver 安装进行 fallback。
+
+这个能力不是 VM、远程桌面、独立用户会话、独立光标或第二套键盘：它仍在当前
+macOS 登录会话中，使用面向目标应用/窗口的后台事件投递。可用范围受 Cua API 和
+目标应用自身的辅助功能/事件支持限制；不支持的应用或动作必须失败关闭，不能悄悄
+降级成前台鼠标、键盘或焦点抢占，也不能把“后台投递”描述成与用户桌面完全隔离。
+
+在线构建会把 lock 指定的 archive 和许可证写入构建缓存；离线构建必须预先提供
+完全匹配 SHA256 的缓存，或同时使用 `--archive` 与 `--license` 指向本地副本，再加
+`--offline`。macOS CI 在打包前显式运行 prepare 和 focused tests；release verifier
+及 workflow 的 packaged-app 门禁检查三个资源均为普通非符号链接文件、二进制可执行、
+许可证/manifest 与 lock 一致、`--version` 和 `manifest` 契约正确、架构同时包含
+`arm64` 与 `x86_64`，并验证嵌套二进制签名。
+
+Cua Driver 不继承 Electron 的 JIT entitlement。二进制作为
+`OhaCuaDriver.app/Contents/MacOS/cua-driver` 的主执行文件打包；Helper 的
+`LSBackgroundOnly=true` 是发布门禁的一部分，防止 driver 注册成前台应用并抢占键盘
+焦点。electron-builder 只对该精确嵌套路径使用 `signIgnore`，避免通用的
+`allow-jit`、`allow-unsigned-executable-memory` 或 `disable-library-validation` 污染
+Helper。`packaging/entitlements.cua-driver.plist` 是专用策略，且必须精确只含
+`com.apple.security.automation.apple-events=true` 与
+`com.apple.security.device.screen-capture=true`。本地自签名和 Developer ID 构建会
+把嵌套 Helper 作为独立签名单元，先用同一发布身份及该专用 entitlement 显式签名，
+再以非递归方式只签名外层 app（递归 `--deep --force` 会覆盖 Helper 的专用权限）；
+无证书 CI 构建也会按同样顺序显式使用 ad-hoc 身份。最终门禁始终
+执行 sidecar `codesign --verify`、精确 entitlement 比较和 app
+`codesign --verify --deep --strict`，不会因没有 Developer ID 而跳过。
+打包桥接还固定以 `--no-overlay` 启动嵌入式 MCP；CuaDriver 的可视化 Agent 光标
+会创建 AppKit UI runloop 并把 Helper 注册成前台应用，而后台 AX/CGEvent 投递不依赖该覆盖层。
+
+lock 除 archive/license SHA256 外，还以 `mach-o-without-code-signature-v1` 固定
+剥离代码签名后的内容 SHA256。Electron/codesign 重签会合理地改变 raw Mach-O 的
+签名字节，因此 verifier 只在临时副本上移除签名并比对 canonical hash，不修改正式
+包原件。官方二进制含 Hermes 兼容帮助文本；legacy token 扫描豁免仅适用于上述精确
+内置资源路径，并仍以该 canonical hash 门禁兜底。
+
+升级内置驱动时：先审阅新的官方 release 与许可证；再一次性更新 lock 中的 version、
+tag、URL、SHA256 和架构；运行 `python scripts/prepare_cua_driver.py --clean`；运行
+prepare/runtime/release-verifier 测试及 `npm --prefix apps/frontend run pack:mac`；最后
+对这次生成的 `.app` 完成下述真实 TCC 和后台行为验收。不要直接替换 `dist/` 二进制，
+也不要只改版本号而沿用旧 hash。
+
 ## 权限与首次启动
 
 主动桌面观察依赖 macOS 屏幕录制权限。开发模式下，TCC 权限可能落在 Terminal、Python、Electron 或启动器进程上，表现会不稳定；打包后用户只需要给 `Oha-Yachiyo.app` 授权，链路更清楚。
@@ -132,20 +217,43 @@ SSH bridge 部署方式见 `docs/desktop-provider-contract.md`。
 - Web/Image/TTS provider 与模型配置仍按工具中心和主控台读取用户本机配置。
 - GPT-SoVITS 等本地 TTS 服务不会被打进 DMG，仍需要用户自己启动服务并填写地址。
 
+每一个最终发布候选包都要在安装后的真实 macOS 上重新完成以下检查；本文不把尚未
+执行的本机检查写成已经通过：
+
+- “屏幕录制”和“辅助功能”列表中只需要看到并授权 Oha-Yachiyo，不应要求添加
+  CuaDriver、Python 或 Terminal。
+- 如果重装、换签名或替换 app 后旧授权失效，先移除旧的 Oha-Yachiyo 条目，再把
+  当前安装路径的 `Oha-Yachiyo.app` 加回并重新授权，然后重启应用。
+- 首次从旧的 ad-hoc backend 迁移到上述稳定签名 backend 后，现有用户需要在“模型配置”
+  中把 API Key 重新保存一次；Agent 自定义 API 则在 Agent Studio 的对应 Agent 中重新
+  保存一次。完成这次迁移后，只要后续升级继续使用同一张证书和
+  `io.github.arisataki.oha-yachiyo.backend`，就不应重复要求用户重存同一凭据。
+- 如果当前构建仍走 `identity=-`、unsigned 或 ad-hoc fallback，则不要把跨版本
+  Keychain 凭据可读性当成发布契约；出现凭据不可访问时，恢复方式仍是让用户重新保存
+  对应 API Key。确认恢复流程不读取或显示旧 Key 的明文，并且只在数据库成功切换到新
+  凭据后尝试清理旧钥匙串项。
+- 从打包版读取 embedded driver 的权限状态，确认 host bundle id 是
+  `io.github.arisataki.oha-yachiyo`，而且权限来源归属于 host。
+- 用一个不会破坏用户数据的目标应用验证打开、读取、搜索/输入和结果确认；全过程
+  观察当前前台窗口、系统鼠标指针和用户键盘输入，确认没有焦点或键鼠抢占。
+- 拒绝或撤销权限后再测一次，确认任务给出可恢复的权限说明，而不是误报 Oha-Yachiyo
+  自身执行失败，或偷偷使用前台 fallback。
+
 ## 自动发布
 
 `.github/workflows/release-macos.yml` 会在 `main` 和 `oha-develop` push 后执行：
 
 1. 先运行 release-facing product identity and security guards，确认发布配置、旧产品身份扫描、debug route、CredentialStore fallback 和关键 smoke 清单没有退化。
 2. 安装 Python 与 Node 依赖。
-3. 运行关键 smoke tests。
-4. 通过 `python scripts/prepare_app_build_metadata.py` 写入当前 channel / commit / latest URL 的 build metadata。
-5. PyInstaller 构建主后端和独立 virtual desktop guest provider，并把 build metadata 打入主后端可执行文件。
-6. 如果配置了自签名证书，electron-builder 生成 `.app` 目录后由脚本签名 `.app` 并创建未签名 DMG；否则 electron-builder 直接生成 unsigned DMG。
-7. Verify packaged app resources 会检查 `.app` 结构、主后端、virtual desktop guest provider、`app.asar`、关键 UI selector 和 packaged resources 旧身份扫描；启用自签名时，还会对最终 packaged `.app` 运行 `codesign --verify --deep --strict --verbose=2`。
-8. 生成版本化 DMG、latest DMG、SHA256、latest JSON 和 release notes。
-9. 对 `release/` 目录执行 binary-safe release artifact scan，确认最终 DMG、JSON、checksum 和 notes 没有旧产品身份或旧执行内核 token，并校验每个 DMG 的 `.sha256` 文件、latest JSON 的 `name` / `channel` / `branch` / `source_branch` / `version` / `commit` / `short_commit` / `build_number` / `run_number` / `run_id` / `tag` / `signing` / `published_at` / `changelog` 元数据格式和一致性，以及 latest JSON 的 `dmg_name` / `sha256` 均与同目录 DMG 内容一致；随后运行最终 RC gate，并在配置真实 provider smoke secrets 时把 opt-in streaming/tool-call/native Agent/native Workflow full-chain provider smoke 结果写入 `release/rc-verification.json`。
-10. 上传 workflow artifact，并创建或更新 GitHub Release 与 latest channel release。
+3. 按 Cua Driver lock 准备内置后台操作组件，并运行其 focused distribution/runtime tests；下载、hash、manifest、架构或 embedded 契约任一不匹配即失败。
+4. 运行其余关键 smoke tests。
+5. 通过 `python scripts/prepare_app_build_metadata.py` 写入当前 channel / commit / latest URL 的 build metadata。
+6. PyInstaller 构建主后端和独立 virtual desktop guest provider，并把 build metadata 打入主后端可执行文件。
+7. electron-builder 生成 `.app` 目录后，由脚本以配置的自签名 / Developer ID 身份签名；未配置证书时使用 ad-hoc 身份。脚本对 Cua Driver 应用专用 entitlement，再签名外层 `.app` 并创建未签名 DMG。
+8. Verify packaged app resources 会检查 `.app` 结构、主后端、virtual desktop guest provider、内置 Cua Driver 三文件、`app.asar`、关键 UI selector 和 packaged resources 旧身份扫描；所有签名模式都必须通过 Cua Driver 签名及精确 entitlement 校验，并对最终 packaged `.app` 运行 `codesign --verify --deep --strict --verbose=2`。
+9. 生成带版本、commit 和架构的版本化 DMG / `.app.zip`，同时生成固定 latest DMG / ZIP、各自 SHA256、latest JSON 和 release notes。ZIP 使用 macOS `ditto --sequesterRsrc --keepParent` 创建，保留 app bundle 结构与扩展属性。
+10. 对 `release/` 目录执行 binary-safe release artifact scan，确认最终 DMG、ZIP、JSON、checksum 和 notes 没有旧产品身份或旧执行内核 token，并校验每个 DMG / Oha ZIP 的 `.sha256` 文件、latest JSON 的 `name` / `channel` / `branch` / `source_branch` / `version` / `commit` / `short_commit` / `build_number` / `run_number` / `run_id` / `tag` / `signing` / `signature_kind` / `architecture` / `published_at` / `changelog` / `dirty` / `source_tree_fingerprint` / `release_publishable` 元数据格式和一致性，以及 latest JSON 的 DMG / ZIP 文件名、SHA 和同目录内容一致；可发布 metadata 的 DMG、ZIP 与 JSON URL 必须精确指向官方 HTTPS GitHub release，`signing` / `signature_kind` 还必须与只读挂载 DMG 后实测的 App 签名一致；随后运行最终 RC gate，并在配置真实 provider smoke secrets 时把 opt-in streaming/tool-call/native Agent/native Workflow full-chain provider smoke 结果写入 `release/rc-verification.json`。
+11. 上传 workflow artifact，并创建或更新 GitHub Release 与 latest channel release。
 
 Release tag 格式：
 
@@ -162,13 +270,20 @@ python scripts/app_version.py set 0.4.0
 python scripts/app_version.py check
 ```
 
-本地重新打包 RC 时，优先使用 `build_release_candidate_artifacts.py`。它会临时刷新 `.app` 和 packaged backend 共用的 build metadata、运行 PyInstaller、清理旧 `dist/electron` 后运行 electron-builder，并在结束或失败时恢复 tracked `apps/frontend/public/oha-yachiyo-build.json` 开发占位，避免旧产品 DMG/app 混入 Oha RC evidence，也避免本地 RC evidence 因工作区 dirty 变成不可签核：
+本地重新打包 RC 时，优先使用 `build_release_candidate_artifacts.py`。它会先记录 HEAD、dirty 状态和包含 tracked diff / untracked 内容的 `source_tree_fingerprint`，临时刷新 `.app` 和 packaged backend 共用的 build metadata、运行 PyInstaller、清理旧 `dist/electron` 后进入与 CI 相同的 macOS 签名脚本；即使没有证书，也会用 ad-hoc 身份分别签名后台 Helper 和外层 App，避免 electron-builder 的通用签名覆盖 Helper 专用权限。构建器只接受唯一且 version/arch 精确匹配的 DMG 及唯一 unpacked `.app`；构建结束和 rolling metadata 落盘后还会再次核对源码指纹没有漂移。随后它把实际 DMG 与 `.app.zip` 投影为 `release/` 下当前 rolling channel 的 DMG、ZIP、各自 SHA256、git changelog 与完整 latest JSON，并恢复 tracked `apps/frontend/public/oha-yachiyo-build.json` 开发占位。默认 dirty 工作树会在构建命令执行前失败；仅需本地检查时可以显式加 `--allow-dirty-local-rc`，此时 App 内外 metadata 都固定记录 `dirty=true`、实际 fingerprint 和 `release_publishable=false`，普通 local-inspection smoke 可读取它，但 public/latest/final signoff 必然拒绝。`signing` 始终由只读挂载最终 DMG 并检查其中 App 的 codesign / Developer ID stapler 结果推导；ad-hoc 归类为 `unsigned` 并另行记录 `signature_kind=adhoc`，`--signing-mode` 只作为预期值断言，不能覆盖实测结果：
 
 ```bash
-python scripts/build_release_candidate_artifacts.py --channel experimental --repository kuguya-AI-app-develop/oha-yachiyo
+python scripts/build_release_candidate_artifacts.py --channel experimental --repository kuguya-AI-app-develop/Hermes-Yachiyo
 ```
 
-CI 仍直接运行 `python scripts/prepare_app_build_metadata.py`、`python scripts/build_backend.py --clean` 和 `npm --prefix apps/frontend run dist:mac`，因为 workflow 工作区不会把临时 metadata 改动提交回仓库。macOS release workflow 会在安装 frontend dependencies 后、smoke tests 前运行 `python scripts/run_public_release_gate.py`，并上传 `release/public-release-gate.json`、`release/public-release-gate.md` 与 `release/public-release-gate/*.json` / `.md` / `.zip` nested evidence；手动触发 workflow 时可把 `public_demo` 输入设为 `full`，显式启用 required UI public-demo evidence；真实桌面和 provider Workflow 仍可作为 optional diagnostics 单独收证。
+显式检查 dirty 本地工作树时使用：
+
+```bash
+python scripts/build_release_candidate_artifacts.py --channel experimental --repository kuguya-AI-app-develop/Hermes-Yachiyo --allow-dirty-local-rc
+python scripts/verify_release_artifacts.py --allow-binary --allow-nonpublishable-local-rc release
+```
+
+CI 仍直接运行 `python scripts/prepare_app_build_metadata.py` 和 `python scripts/build_backend.py --clean`，随后使用 `scripts/build_macos_self_signed_dmg.sh` 构建、签名 `.app` 并生成未签名 DMG；workflow 工作区不会把临时 metadata 改动提交回仓库。macOS release workflow 会在安装 frontend dependencies 后、smoke tests 前运行 `python scripts/run_public_release_gate.py`，并上传 `release/public-release-gate.json`、`release/public-release-gate.md` 与 `release/public-release-gate/*.json` / `.md` / `.zip` nested evidence；手动触发 workflow 时可把 `public_demo` 输入设为 `full`，显式启用 required UI public-demo evidence。手动运行默认 `publish_release=false`，只生成可下载的 GitHub Actions DMG / ZIP artifact；只有显式设为 `true` 且 `stable -> main`、`alpha -> alpha`、`experimental -> oha-develop` 分支匹配时才会更新 GitHub Release。同一 ref 的发布使用 workflow concurrency 串行，避免 rolling JSON、DMG 和 ZIP 被并发 run 交错覆盖；真实桌面和 provider Workflow 仍可作为 optional diagnostics 单独收证。
 
 在真正刷新本地 RC evidence 前，可以先跑低成本 public-release preflight：
 
@@ -179,6 +294,16 @@ python scripts/run_public_release_gate.py \
 ```
 
 该入口会运行 release artifact guard、secret redaction、Agent market-parity、Planner-to-runtime tool parity、Oha desktop-agent product smoke、focused release pytest、安全 public-demo smoke 和本轮 gate evidence 的脱敏 diagnostics bundle，并把 public-demo JSON、Oha 产品级 smoke JSON 与 diagnostics zip 投影成非阻断的 `tmp/public-release-gate/release-smoke.json` / `.md` 评估。默认模式用于快速发现文档、secret、Oha 主链路、release-smoke/public-demo/diagnostics 回归；当 public demo 仍是 `partial_demo_ready` 或 10 项 release-smoke 用户路径证据不完整时，报告会显示 `status=needs_release_evidence`、缺失 demo flow、缺失 user path 和下一步命令，但不会因为缺少 opt-in/RC 证据返回失败。已有 RC report、Oha smoke report 和 diagnostics bundle 可通过重复 `--release-smoke-report` 与 `--diagnostics-zip` 合入同一份 assessment。最终发布前加 `--require-release-ready`，让缺少完整 public-demo release evidence 或完整 10 项 release-smoke evidence 的候选版本直接失败。
+
+通用桌面 Agent 的恢复与执行闭环可以单独做低成本回归：
+
+```bash
+python scripts/smoke_generic_agent_release.py \
+  --report-json tmp/generic-agent-release-smoke.json
+```
+
+该 smoke 覆盖文件定位、应用定位、浏览器检索、媒体别名恢复、权限恢复、后台不抢占、有界恢复和内部执行细节隐藏 8 类场景。它已经嵌入 Oha desktop-agent product smoke 和 public release gate；单独运行主要用于快速定位某一类通用 Agent 行为回归。
+
 安全 public-demo smoke 包含隔离桌面 provider 的 app 打开、UI 读取、点击、输入、快捷键和 verify 序列证据，用来证明默认发布门禁可以验证桌面执行工具链而不抢占用户当前鼠标键盘；真实 macOS app 打开、UI 读取和交互仍然必须显式 opt-in 补证。发布级 virtual desktop provider 必须满足 `docs/desktop-provider-contract.md` 中的 `oha-yachiyo.desktop-provider.v1` contract；loopback harness 只能作为安全工具链证据，不能作为真实可发布后端证据。
 
 当剩余项依赖本机授权或 provider 凭证时，gate JSON 会额外写入 `external_requirement_count` 和 `external_requirements`，Markdown 会写入 `External Requirements` 小节。这里会把缺口归并成 `real_desktop_smoke_opt_in`、`provider_smoke_credentials` 等可执行类别，并列出缺失的 demo flow、缺失的 `OHA_YACHIYO_SMOKE_*` 环境变量、blocking condition 和补证命令。
@@ -192,8 +317,10 @@ python scripts/run_public_release_gate.py \
 如果要一次刷新当前 HEAD 的本地 RC evidence、Gatekeeper readiness diagnostics、Screen Recording attempt、provider-not-applicable 草稿和 final signoff preview，运行：
 
 ```bash
-python scripts/refresh_local_rc_signoff.py --channel experimental --repository kuguya-AI-app-develop/oha-yachiyo
+python scripts/refresh_local_rc_signoff.py --channel experimental --repository kuguya-AI-app-develop/Hermes-Yachiyo
 ```
+
+该入口默认同样拒绝 dirty source；仅为本地调试收集 evidence 时，必须由操作者显式附加 `--allow-dirty-local-rc`。refresh 会把 flag 原样传给 venv 或当前解释器中的 builder，并保留 final preview 的 clean/publishable blocker，不能把 dirty evidence 误标成最终签核通过。
 
 如果项目 `.venv/bin/python` 存在，该 helper 的构建阶段会优先用 `.venv` 解释器运行 `scripts/build_release_candidate_artifacts.py`，因此维护者可以从普通 `python` 启动刷新命令，而不必手动记住 PyInstaller 安装在哪个解释器里。
 
@@ -248,10 +375,10 @@ python scripts/refresh_local_rc_signoff.py --reuse-current-reports
 
 固定下载链接：
 
-- 最新正式版 DMG：<https://github.com/kuguya-AI-app-develop/oha-yachiyo/releases/latest/download/Oha-Yachiyo-main-latest.dmg>
-- 最新正式版滚动 release：<https://github.com/kuguya-AI-app-develop/oha-yachiyo/releases/download/main-latest/Oha-Yachiyo-main-latest.dmg>
-- 最新 Alpha 版 DMG：<https://github.com/kuguya-AI-app-develop/oha-yachiyo/releases/download/alpha-latest/Oha-Yachiyo-alpha-latest.dmg>
-- 最新实验版 DMG：<https://github.com/kuguya-AI-app-develop/oha-yachiyo/releases/download/oha-develop-latest/Oha-Yachiyo-oha-develop-latest.dmg>
+- 最新正式版 DMG：<https://github.com/kuguya-AI-app-develop/Hermes-Yachiyo/releases/latest/download/Oha-Yachiyo-main-latest.dmg>
+- 最新正式版滚动 release：<https://github.com/kuguya-AI-app-develop/Hermes-Yachiyo/releases/download/main-latest/Oha-Yachiyo-main-latest.dmg>
+- 最新 Alpha 版 DMG：<https://github.com/kuguya-AI-app-develop/Hermes-Yachiyo/releases/download/alpha-latest/Oha-Yachiyo-alpha-latest.dmg>
+- 最新实验版 DMG：<https://github.com/kuguya-AI-app-develop/Hermes-Yachiyo/releases/download/oha-develop-latest/Oha-Yachiyo-oha-develop-latest.dmg>
 
 `main` 的版本化 release 会显式标记为 GitHub Latest，并额外上传 `Oha-Yachiyo-main-latest.dmg`，因此门户网站可以使用 `releases/latest/download/...`。`alpha` 与 `oha-develop` 都是 prerelease，GitHub 的 `releases/latest` 不会稳定指向它们，所以 workflow 分别维护 `alpha-latest` 与 `oha-develop-latest` 滚动 release。
 
@@ -261,7 +388,7 @@ python scripts/refresh_local_rc_signoff.py --reuse-current-reports
 - 手动 `alpha` -> `alpha` prerelease，固定 DMG 名为 `Oha-Yachiyo-alpha-latest.dmg`。
 - `oha-develop` -> `experimental` prerelease，固定 DMG 名为 `Oha-Yachiyo-oha-develop-latest.dmg`。
 
-固定 DMG 旁边会同时发布同名 `.sha256` 和 `.json` 文件，门户或安装页可以用它们展示版本、commit 和校验值。
+固定 DMG 旁边会同时发布架构明确的 `.app.zip`、两种包的同名 `.sha256` 和 `.json` 文件，门户或安装页可以用它们展示版本、commit、架构、实际签名类型和校验值。应用内 updater 仍只使用 latest JSON 中经官方 HTTPS URL 与 SHA256 绑定的 DMG，不会因增加 ZIP 而放宽下载来源。
 
 Release workflow 会基于当前渠道上一条 `stable-v*` / `alpha-v*` / `experimental-v*` tag 生成更新日志。更新日志来源是 `git log`，会按 commit 前缀粗分为“新增/改进”“修复”“工程/发布”“文档”“测试”“重构/优化”等分组，并同时写入：
 
@@ -353,13 +480,13 @@ python scripts/verify_release_candidate.py --require-artifacts --run-dmg-ui-samp
 
 `--run-dmg-ui-sampling-smoke` 会启动 DMG 内 `.app`、等待 packaged Bridge `/status`，再通过 Chromium DevTools 端口抽样 Chat、Agent Studio、Workflow、Activity、Diagnostics、Proactive TTS 和 Live2D settings 的稳定 selector。通过时同一轮 gate 会把 `packaged_bridge_isolation` 和 `packaged_ui_sampling` 自动标为 `passed`；该 gate 不会打开系统原生文件选择器，因此 `chat_native_file_upload` 仍需人工确认 packaged app 的 OS file picker 弹窗。
 
-需要从 DMG 内真实 `.app` 验证 Chat 原生图片选择、预览、发送、图片查看器和 Run Detail handoff 时运行：
+需要从 DMG 内真实 `.app` 验证 Chat 原生图片选择、预览、发送、图片查看器，以及“Chat 隐藏执行细节、Agent Studio 保留内部 replay”的界面边界时运行：
 
 ```bash
 python scripts/verify_release_candidate.py --require-artifacts --run-dmg-chat-native-file-smoke
 ```
 
-`--run-dmg-chat-native-file-smoke` 会启动 DMG 内 packaged Electron app，并在显式 smoke mode 下让主进程 `chooseChatImages` IPC 读取脚本生成的本地图片路径；随后通过 Chromium DevTools 点击 Chat 图片附件按钮，验证 attachment preview、发送 payload、message attachment、image viewer open/close 和 Run Detail replay handoff。report 会同时归档 packaged Electron app 的 `app_build_metadata`，并在当前 `source_revision.commit` 可用时拒绝 stale app build。通过时同一轮 gate 会把 `chat_native_file_upload` 自动标为 `passed`。正常用户运行不设置 smoke env，仍使用系统原生 file picker。
+`--run-dmg-chat-native-file-smoke` 会启动 DMG 内 packaged Electron app，并在显式 smoke mode 下让主进程 `chooseChatImages` IPC 读取脚本生成的本地图片路径；随后通过 Chromium DevTools 验证 attachment preview、发送 payload、message attachment 和 image viewer open/close。smoke 会在 mock 回复中注入 internal activity、tool 和 recovery 证据，断言 Chat 回复与当前页面都不出现这些内部文本、技术 activity/tool/recovery 卡片、黄色警告 item 或 Run Detail action，再直接导航到 Agent Studio 验证同一 run 的内部 replay 仍可审计。这份证据仅覆盖固定 mock 负载与 packaged Chat 路由，不等于对所有真实 provider 输出的穷尽证明。为避免碰撞用户正在运行的实例，smoke 使用独立临时 Electron `userData` 与单实例隔离，所有 UI 等待共享一次全局 deadline；Node 正常退出时执行 TERM→KILL 有界清理，Python 外层超时时仅会在严格校验本轮 `pid`/`pgid`/executable/smoke root ledger 后终止对应进程组，不使用模糊 `pkill`。report 会归档 `internal_execution_hidden=true` 和 packaged Electron app 的 `app_build_metadata`，并在当前 `source_revision.commit` 可用时拒绝 stale app build。通过时同一轮 gate 会把 `chat_native_file_upload` 自动标为 `passed`。正常用户运行不设置 smoke env，仍使用系统原生 file picker。
 
 需要从 DMG 内真实 `.app` 验证屏幕录制权限和 `/screen/current` 路径时运行：
 
@@ -471,7 +598,7 @@ python scripts/verify_release_candidate.py --source-only --report-json tmp/sourc
 `--source-only` 会跳过本机已有 `dist/` 或 `release/` 旧产物，避免 stale `.app` / DMG 干扰源码验收判断；最终 RC 仍必须重新打包并运行 `--require-artifacts`。
 `--source-only` 不能和 artifact path、`--require-artifacts`、`--run-full-local-native-agent-rc`、`--check-dmg-mount`、`--check-gatekeeper-readiness`、`--run-packaged-backend-bridge-smoke`、`--run-dmg-app-smoke`、`--run-dmg-screen-smoke`、`--run-dmg-ui-sampling-smoke`、`--run-dmg-chat-native-file-smoke`、`--run-provider-smoke` 或 `--run-ui-smoke` 混用；DMG mount、Gatekeeper readiness、packaged backend bridge smoke、DMG app startup smoke、DMG screen recording smoke、DMG packaged UI sampling smoke、DMG Chat native file smoke、真实 provider smoke 和 Electron UI smoke 只属于完整本地 RC 复验。`--run-real-desktop-app-open-smoke`、`--run-real-desktop-ui-inspection-smoke` 和 `--run-real-desktop-interaction-smoke` 可与 `--source-only` 混用；前两者会真实打开本机系统 app，interaction smoke 还会输入和点击，因此只应在需要收集桌面执行 evidence 时显式启用。
 
-macOS release workflow 会在生成 release metadata 后、上传 DMG 前运行 `python scripts/verify_release_candidate.py --require-artifacts --check-dmg-mount --check-gatekeeper-readiness --run-packaged-backend-bridge-smoke --run-dmg-app-smoke --report-json release/rc-verification.json`，确保 CI 与本地 RC 验收入口一致，并把 `release/rc-verification.json` 作为可归档验收报告随 release artifacts 上传；RC report 会写入 `source_revision`，记录当前 git commit、short commit 和 dirty 状态。同一轮 RC report 生成后，workflow 会合并 `release/rc-verification.json`、`release/public-release-gate/oha-desktop-agent-release-smoke.json`、`release/public-release-gate/public-demo.json` 和 `release/public-release-gate/diagnostics.zip` 生成 `release/release-smoke.json` / `.md`，让 Oha 产品级 smoke、packaged launch、public demo、diagnostics 和 provider workflow evidence 进入同一份 10 项用户路径视图；该 summary 允许保持 `incomplete`，但如果没有写出 JSON 会让 workflow 失败。同一轮 RC report 生成后，workflow 也会生成并上传 `release/manual-rc-checks.template.json`，用于发布签核人从零填写 Gatekeeper、屏幕录制、原生图片上传、packaged UI 抽样、真实外部集成 smoke 以及任何未被自动 gate 证明的真实 provider evidence；随后输出的 `release/manual-rc-checks.draft.json` 已合并 `automated_rc_gate` evidence、source revision 摘要和 `release/electron-ui-smoke.json` 的 supporting notes，可直接补人工 evidence 后交给 `--manual-checks-json` 做最终签核；最终 RC report 也会把这些 manual evidence source revision 写入 `manual_release_candidate_check_source_revisions`，方便追溯 Gatekeeper / Screen Recording / external integration evidence 对应的源码版本；随后还会输出 `release/manual-rc-checks.md`，作为可读人工签核 checklist，并用同一个 `manual_release_candidate_check_source_revisions` 注释保留 source revision 链，避免 Markdown 签核路径丢失 traceability。打包前的 Electron UI smoke 由 `python scripts/run_electron_ui_smokes.py --report-json release/electron-ui-smoke.json` 动态发现并运行所有 `scripts/smoke_*_ui.mjs`，其结构化结果会作为 `release/electron-ui-smoke.json` 随 artifacts 上传。本地最终 Native Agent RC 复验优先运行 `python scripts/verify_release_candidate.py --run-full-local-native-agent-rc --report-json tmp/full-local-native-agent-rc.json`；该组合入口会启用 `--require-artifacts`、`--check-dmg-mount`、`--check-gatekeeper-readiness`、`--run-packaged-backend-bridge-smoke`、`--run-dmg-app-smoke`、`--run-dmg-ui-sampling-smoke`、`--run-dmg-chat-native-file-smoke`、`--run-real-desktop-app-open-smoke`、`--run-real-desktop-ui-inspection-smoke`、`--run-real-desktop-interaction-smoke` 和 `--allow-real-desktop-interaction-existing-app`，但不会默认运行需要额外系统授权的 `--run-dmg-screen-smoke`、需要真实凭据的 `--run-provider-smoke` 或外部 Live2D/GPT-SoVITS/AstrBot 集成 smoke。`--check-dmg-mount` 会只读挂载发现到的 DMG，并对 DMG 内真实 `.app` 的 `Contents/Resources` 再执行 packaged app scan；`--check-gatekeeper-readiness` 会把 codesign / spctl / quarantine 诊断写进同一份 RC report，但仍要求签核人手动完成 Gatekeeper 首启 evidence；`--run-packaged-backend-bridge-smoke` 会从 `dist/backend/oha-yachiyo-backend` 启动 packaged backend 并把正确 Oha Bridge 身份作为外部集成前置 supporting note；`--run-dmg-app-smoke` 会从 DMG 内启动真实 `.app` 并等待 packaged Bridge `/status`，通过后同一份 RC report 会把 `packaged_bridge_isolation` 标为 `passed`；`--run-dmg-ui-sampling-smoke` 会用真实 DMG 内 `.app` 自动填充 `packaged_ui_sampling` evidence；`--run-dmg-chat-native-file-smoke` 会用真实 DMG 内 packaged Electron app 自动填充 `chat_native_file_upload` evidence。如果 `OHA_YACHIYO_SMOKE_BASE_URL`、`OHA_YACHIYO_SMOKE_MODEL` 和 `OHA_YACHIYO_SMOKE_API_KEY` 都已配置，workflow 会向同一个 RC gate 传入 `--run-provider-smoke`，让 report 的 `provider_smoke` 字段记录真实 provider 文本流、tool-call follow-up、native Agent full-chain 与 native Workflow full-chain 结果；如果这些 secrets 未完整配置，workflow 会向 RC report、draft 和 Markdown 传入 `--mark-provider-smoke-not-applicable-if-missing`，把归档签核材料中的 `real_provider_smoke` 标为 `not_applicable` 并写入缺失变量 evidence。现场生成的 `tmp/external-integrations-smoke.json` 可作为额外 `--manual-checks-json` 输入，完整通过 Live2D、GPT-SoVITS 与 AstrBot plugin bridge 后会自动填充 `external_integrations_smoke`；失败 report 会把该项标成 `failed`，只跑子集则保留为 `manual_required` 并写入 supporting note。带 `--run-dmg-screen-smoke` 的屏幕录制权限检查和带 `--run-ui-smoke` 的完整 Electron UI smoke 仍保留为单独本地 RC 复验，因为它们分别需要 Screen Recording 授权或会启动额外 BrowserWindow。
+macOS release workflow 会在生成 release metadata 后、上传 DMG 前运行 `python scripts/verify_release_candidate.py --require-artifacts --check-dmg-mount --check-gatekeeper-readiness --run-packaged-backend-bridge-smoke --run-dmg-app-smoke --run-dmg-chat-native-file-smoke --report-json release/rc-verification.json`，确保 CI 与本地 RC 验收入口一致，并把 `release/rc-verification.json` 作为可归档验收报告随 release artifacts 上传；RC report 会写入 `source_revision`，记录当前 git commit、short commit 和 dirty 状态。同一轮 RC report 生成后，workflow 会合并 `release/rc-verification.json`、`release/public-release-gate/oha-desktop-agent-release-smoke.json`、`release/public-release-gate/public-demo.json`、`release/electron-ui-smoke.json` 和 `release/public-release-gate/diagnostics.zip` 生成 `release/release-smoke.json` / `.md`，让 Oha 产品级 smoke、packaged launch、public demo、Electron UI、diagnostics 和 provider workflow evidence 进入同一份 10 项用户路径视图。`chat_desktop_task` 同时要求 source desktop-entrypoint evidence 与 `dmg_chat_native_file_smoke.status=passed`；后者缺失、跳过或失败都会让 summary 变为 `incomplete` 并阻止 publication。最终 RC summary 完成后，workflow 会先以 `always()` 上传 DMG、JSON、Markdown 和其他 evidence，保证失败报告也可下载排查；随后只在分支 push 或手动触发且 `publish_release=true` 时强制要求 `release_smoke_status=0`，缺失、无效或 `incomplete` 的 summary 都会阻止 GitHub Release 更新。手动触发且 `publish_release=false` 时仍可完成构建并下载 evidence，不会因为尚未达到发布就绪而被该 publication hard gate 阻断。同一轮 RC report 生成后，workflow 也会生成并上传 `release/manual-rc-checks.template.json`，用于发布签核人从零填写 Gatekeeper、屏幕录制、原生图片上传、packaged UI 抽样、真实外部集成 smoke 以及任何未被自动 gate 证明的真实 provider evidence；随后输出的 `release/manual-rc-checks.draft.json` 已合并 `automated_rc_gate` evidence、source revision 摘要和 `release/electron-ui-smoke.json` 的 supporting notes，可直接补人工 evidence 后交给 `--manual-checks-json` 做最终签核；最终 RC report 也会把这些 manual evidence source revision 写入 `manual_release_candidate_check_source_revisions`，方便追溯 Gatekeeper / Screen Recording / external integration evidence 对应的源码版本；随后还会输出 `release/manual-rc-checks.md`，作为可读人工签核 checklist，并用同一个 `manual_release_candidate_check_source_revisions` 注释保留 source revision 链，避免 Markdown 签核路径丢失 traceability。打包前的 Electron UI smoke 由 `python scripts/run_electron_ui_smokes.py --report-json release/electron-ui-smoke.json` 动态发现并运行所有 `scripts/smoke_*_ui.mjs`，其结构化结果会作为 `release/electron-ui-smoke.json` 随 artifacts 上传。本地最终 Native Agent RC 复验优先运行 `python scripts/verify_release_candidate.py --run-full-local-native-agent-rc --report-json tmp/full-local-native-agent-rc.json`；该组合入口会启用 `--require-artifacts`、`--check-dmg-mount`、`--check-gatekeeper-readiness`、`--run-packaged-backend-bridge-smoke`、`--run-dmg-app-smoke`、`--run-dmg-ui-sampling-smoke`、`--run-dmg-chat-native-file-smoke`、`--run-real-desktop-app-open-smoke`、`--run-real-desktop-ui-inspection-smoke`、`--run-real-desktop-interaction-smoke` 和 `--allow-real-desktop-interaction-existing-app`，但不会默认运行需要额外系统授权的 `--run-dmg-screen-smoke`、需要真实凭据的 `--run-provider-smoke` 或外部 Live2D/GPT-SoVITS/AstrBot 集成 smoke。`--check-dmg-mount` 会只读挂载发现到的 DMG，并对 DMG 内真实 `.app` 的 `Contents/Resources` 再执行 packaged app scan；`--check-gatekeeper-readiness` 会把 codesign / spctl / quarantine 诊断写进同一份 RC report，但仍要求签核人手动完成 Gatekeeper 首启 evidence；`--run-packaged-backend-bridge-smoke` 会从 `dist/backend/oha-yachiyo-backend` 启动 packaged backend 并把正确 Oha Bridge 身份作为外部集成前置 supporting note；`--run-dmg-app-smoke` 会从 DMG 内启动真实 `.app` 并等待 packaged Bridge `/status`，通过后同一份 RC report 会把 `packaged_bridge_isolation` 标为 `passed`；`--run-dmg-ui-sampling-smoke` 会用真实 DMG 内 `.app` 自动填充 `packaged_ui_sampling` evidence；`--run-dmg-chat-native-file-smoke` 会用真实 DMG 内 packaged Electron app 自动填充 `chat_native_file_upload` evidence。如果 `OHA_YACHIYO_SMOKE_BASE_URL`、`OHA_YACHIYO_SMOKE_MODEL` 和 `OHA_YACHIYO_SMOKE_API_KEY` 都已配置，workflow 会向同一个 RC gate 传入 `--run-provider-smoke`，让 report 的 `provider_smoke` 字段记录真实 provider 文本流、tool-call follow-up、native Agent full-chain 与 native Workflow full-chain 结果；如果这些 secrets 未完整配置，workflow 会向 RC report、draft 和 Markdown 传入 `--mark-provider-smoke-not-applicable-if-missing`，把归档签核材料中的 `real_provider_smoke` 标为 `not_applicable` 并写入缺失变量 evidence。现场生成的 `tmp/external-integrations-smoke.json` 可作为额外 `--manual-checks-json` 输入，完整通过 Live2D、GPT-SoVITS 与 AstrBot plugin bridge 后会自动填充 `external_integrations_smoke`；失败 report 会把该项标成 `failed`，只跑子集则保留为 `manual_required` 并写入 supporting note。带 `--run-dmg-screen-smoke` 的屏幕录制权限检查和带 `--run-ui-smoke` 的完整 Electron UI smoke 仍保留为单独本地 RC 复验，因为它们分别需要 Screen Recording 授权或会启动额外 BrowserWindow。
 
 脚本仍会列出首次启动 / Gatekeeper、屏幕录制权限、Chat 原生图片上传、packaged UI 抽样、packaged bridge、真实 provider 和外部集成 smoke 的最终签核项，并在 `release/rc-verification.json` 中写入结构化 `manual_release_candidate_check_statuses` 与 `manual_release_candidate_check_summary`。这些条目默认是 `manual_required`，并带有稳定 id、证据说明和下一步动作；当前固定 id 包括 `gatekeeper_first_launch`、`packaged_bridge_isolation`、`screen_recording_permission`、`chat_native_file_upload`、`packaged_ui_sampling`、`real_provider_smoke` 和 `external_integrations_smoke`。summary 会给出 `remaining_count`、`remaining_check_ids`、`remaining_next_actions`、`remaining_commands`、`remaining_notes`、`failed_check_ids` 和 `automated_evidence_check_ids`，用于快速判断最终签核还差多少项、下一步该跑哪个 gate、可直接复制哪条自动收证命令，以及某个剩余项是否已有失败 gate 的 supporting notes。如果同一次 RC gate 中 `--check-gatekeeper-readiness` 通过，`gatekeeper_first_launch` 会保留 `manual_required`，但会写入 codesign / spctl / quarantine 诊断 supporting note；如果 `--run-packaged-backend-bridge-smoke` 通过，`external_integrations_smoke` 会保留 `manual_required`，但会写入 packaged backend Bridge 身份 supporting note；如果 `--run-dmg-app-smoke` 通过，`packaged_bridge_isolation` 会自动标为 `passed` 并写入 `evidence_source=automated_rc_gate`；如果 `--run-dmg-screen-smoke` 通过，`packaged_bridge_isolation` 和 `screen_recording_permission` 会自动标为 `passed`；如果 `--run-dmg-screen-smoke` 已到达 packaged Bridge 但 `/screen/current` 因权限失败，summary/status 输出会保留 `screen_recording_permission` 的 supporting note，直到授权后重新跑通；如果 `--run-dmg-ui-sampling-smoke` 通过，`packaged_bridge_isolation` 和 `packaged_ui_sampling` 会自动标为 `passed`；如果 `--run-dmg-chat-native-file-smoke` 通过，`chat_native_file_upload` 会自动标为 `passed`；如果 `--run-provider-smoke` 通过，`real_provider_smoke` 也会自动标为 `passed`；如果外部集成 smoke report 完整通过 `live2d_resource`、`gpt_sovits_tts` 和 `astrbot_plugin_bridge`，`external_integrations_smoke` 会自动标为 `passed`。自动 evidence 只填充仍为 `manual_required` 的项，不会覆盖签核人已经写入的 `passed`、`failed` 或 `not_applicable`。可先生成人工验收模板：
 

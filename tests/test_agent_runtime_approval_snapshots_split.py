@@ -72,6 +72,123 @@ def test_approval_snapshot_uses_input_when_preview_is_missing() -> None:
     assert "sk-approval-input-secret123456" not in serialized
 
 
+def test_approval_snapshot_keeps_private_planner_trace_out_of_public_projection() -> None:
+    pending = {
+        "approval_id": "approval-traced",
+        "tool": "desktop.type_into_ui_element",
+        "input": {"target": "Search", "text": "yachiyo", "limit": 80},
+        "input_preview": {
+            "target": "Search",
+            "text": "yachiyo",
+            "limit": 80,
+            "core_id": "core-private",
+            "plan_id": "plan-private",
+            "runtime_stage": "operate",
+        },
+        "core_id": "core-private",
+        "plan_id": "plan-private",
+        "runtime_stage": "operate",
+        "requested_at": "2026-06-15T00:00:00+00:00",
+    }
+
+    snapshot = public_pending_approval(pending)
+
+    assert snapshot["input_preview"] == {
+        "target": "Search",
+        "text": "yachiyo",
+        "limit": 80,
+    }
+    assert "plan_id" not in snapshot
+    assert "runtime_stage" not in snapshot
+
+
+def test_approval_snapshot_schema_projects_submit_and_paste_inputs() -> None:
+    planner_trace = {
+        "plan_id": "plan-private",
+        "step_id": "step-private",
+        "depends_on": ["focus-editor"],
+        "desktop_loop": {"verification_target_step_ids": ["verify-send"]},
+        "action_target": {"kind": "chat", "recipient": "private-recipient"},
+        "observation_evidence": {"private": "window-title"},
+        "observation_retry": {"private": "retry-state"},
+    }
+
+    for tool_name, action in (
+        ("desktop.submit_foreground", "send"),
+        ("desktop.safe_shortcut", "paste"),
+    ):
+        contaminated_input = {"action": action, **planner_trace}
+        snapshot = public_pending_approval(
+            {
+                "approval_id": f"approval-{action}",
+                "tool": tool_name,
+                "input": contaminated_input,
+                "input_preview": contaminated_input,
+                "tool_request": {
+                    "tool": tool_name,
+                    "input": contaminated_input,
+                    **planner_trace,
+                },
+                **planner_trace,
+            }
+        )
+
+        assert snapshot["input_preview"] == {"action": action}
+        serialized = json.dumps(snapshot, ensure_ascii=False)
+        for private_value in (
+            "plan-private",
+            "step-private",
+            "focus-editor",
+            "verify-send",
+            "private-recipient",
+            "window-title",
+            "retry-state",
+        ):
+            assert private_value not in serialized
+
+
+def test_approval_snapshot_schema_projection_preserves_other_legal_tool_inputs() -> None:
+    terminal_snapshot = public_pending_approval(
+        {
+            "approval_id": "approval-terminal",
+            "tool": "terminal.run",
+            "input": {
+                "command": "printf ok",
+                "timeout_seconds": 30,
+                "shell": False,
+                "plan_id": "plan-private",
+            },
+        }
+    )
+
+    assert terminal_snapshot["input_preview"] == {
+        "command": "printf ok",
+        "timeout_seconds": 30,
+        "shell": False,
+    }
+
+    desktop_snapshot = public_pending_approval(
+        {
+            "approval_id": "approval-target",
+            "tool": "desktop.type_into_ui_element",
+            "input": {
+                "target": "Search",
+                "text": "yachiyo",
+                "role_filter": "text field",
+                "limit": 80,
+                "action_target": {"private": "planner-target"},
+            },
+        }
+    )
+
+    assert desktop_snapshot["input_preview"] == {
+        "target": "Search",
+        "text": "yachiyo",
+        "role_filter": "text field",
+        "limit": 80,
+    }
+
+
 def test_approval_snapshot_preserves_explicit_policy_reason_and_risk() -> None:
     pending = {
         "approval_id": "approval-plugin",
@@ -137,6 +254,25 @@ def test_approval_snapshot_marks_foreground_submit_high_risk() -> None:
     assert snapshot["risk_level"] == "high"
     assert snapshot["policy_reason"] == (
         "将发送当前前台输入框中的内容，可能向外部对象发出消息，按工具策略必须人工确认。"
+    )
+
+
+def test_approval_snapshot_describes_app_quit_high_risk_target() -> None:
+    snapshot = public_pending_approval(
+        {
+            "approval_id": "approval-app-quit",
+            "tool": "app.quit",
+            "risk_level": "high",
+            "input_preview": {"app_name": "Slack"},
+            "requested_at": "2026-06-15T00:00:00+00:00",
+        }
+    )
+
+    assert snapshot["approval_id"] == "approval-app-quit"
+    assert snapshot["input_preview"]["app_name"] == "Slack"
+    assert snapshot["risk_level"] == "high"
+    assert snapshot["policy_reason"] == (
+        "将退出应用 Slack，可能导致未保存内容丢失，按工具策略必须人工确认。"
     )
 
 

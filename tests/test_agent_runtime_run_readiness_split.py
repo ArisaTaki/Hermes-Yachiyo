@@ -8,6 +8,7 @@ from apps.shell import agent_runtime
 from apps.shell.agent.runtime.errors import AgentRuntimeError
 from apps.shell.agent.runtime.run_readiness import RuntimeRunReadinessValidator, native_agent_readiness
 from apps.shell.agent.tools.policy import RuntimePolicyCompiler
+from apps.shell.model_profiles import ModelProfileError
 
 
 def test_run_readiness_validator_remains_exported_from_legacy_module() -> None:
@@ -80,8 +81,10 @@ def test_native_agent_readiness_projects_model_profile_state() -> None:
     assert unsupported["capabilities"]["model"] is False
 
 
-def test_native_agent_readiness_does_not_resolve_model_secret() -> None:
+def test_native_agent_readiness_probes_model_credential_without_exposing_it() -> None:
     class StartupProfileService:
+        private_reads = 0
+
         def get_defaults(self) -> dict[str, str]:
             return {"chat": "chat-1"}
 
@@ -97,17 +100,64 @@ def test_native_agent_readiness_does_not_resolve_model_secret() -> None:
                 "api_key_configured": True,
             }
 
-        def get_profile_private(self, _profile_id: str) -> dict[str, object]:
-            raise AssertionError("startup readiness must not read the model secret")
+        def get_profile_private(self, profile_id: str) -> dict[str, object]:
+            assert profile_id == "chat-1"
+            self.private_reads += 1
+            return {
+                **self.get_profile(profile_id),
+                "api_key": "sk-readiness-probe-secret",
+            }
 
+    service = StartupProfileService()
     readiness = native_agent_readiness(
-        profile_service_factory=StartupProfileService,
+        profile_service_factory=lambda: service,
         supports_openai_compatible_api=lambda provider: provider == "openai_compatible",
         redact_error=str,
     )
 
     assert readiness["ready"] is True
     assert readiness["profile_id"] == "chat-1"
+    assert service.private_reads == 1
+    assert "sk-readiness-probe-secret" not in str(readiness)
+
+
+def test_native_agent_readiness_reports_inaccessible_keychain_credential() -> None:
+    class InaccessibleCredentialProfileService:
+        def get_defaults(self) -> dict[str, str]:
+            return {"chat": "chat-1"}
+
+        def get_profile(self, profile_id: str) -> dict[str, object]:
+            assert profile_id == "chat-1"
+            return {
+                "enabled": True,
+                "status": "available",
+                "capability": "chat",
+                "provider": "openai_compatible",
+                "base_url": "https://api.example.test/v1",
+                "model": "demo-model",
+                "api_key_configured": True,
+            }
+
+        def get_profile_private(self, profile_id: str) -> dict[str, object]:
+            assert profile_id == "chat-1"
+            raise ModelProfileError(
+                "应用更新后无法读取原有钥匙串中的 API Key。"
+                "请在「模型配置」中重新保存 API Key，然后重新测试连接。",
+                code="credential_reentry_required",
+            )
+
+    readiness = native_agent_readiness(
+        profile_service_factory=InaccessibleCredentialProfileService,
+        supports_openai_compatible_api=lambda provider: provider == "openai_compatible",
+        redact_error=str,
+    )
+
+    assert readiness["ready"] is False
+    assert readiness["code"] == "native_agent_not_ready"
+    assert readiness["reason"] == "model_profile_unavailable"
+    assert "重新保存 API Key" in readiness["message"]
+    assert "重新测试连接" in readiness["message"]
+    assert readiness["capabilities"]["model"] is False
 
 
 def test_run_readiness_validator_projects_workflow_agent_node() -> None:

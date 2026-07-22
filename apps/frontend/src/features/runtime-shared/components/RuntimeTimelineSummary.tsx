@@ -81,6 +81,12 @@ export function runtimeTimelineEventLabel(event: RuntimeTimelineEventSnapshot): 
     const toolLabel = runtimeTimelinePlannedDesktopToolLabel(event);
     return toolLabel ? `已执行 · ${toolLabel}` : '已执行桌面动作';
   }
+  if (runtimeEventIsDesktopIntent(type, 'unverified')) {
+    const toolLabel = runtimeTimelinePlannedDesktopToolLabel(event);
+    return toolLabel
+      ? `操作效果未能验证 · ${toolLabel}`
+      : '桌面操作效果未能验证';
+  }
   if (runtimeEventIsDesktopPermissionRecovery(type)) {
     const toolLabel = runtimeTimelinePlannedDesktopToolLabel(event);
     return toolLabel ? `权限恢复 · ${toolLabel}` : '桌面权限恢复';
@@ -320,6 +326,7 @@ function runtimeTimelineEventTypeLabel(type: string): string {
   if (type === 'task.linked') return 'Task 已关联';
   if (type === 'model.request.started' || type === 'model.requested') return '模型请求';
   if (type === 'model.request.failed') return '模型请求失败';
+  if (runtimeEventIsDesktopIntent(type, 'unverified')) return '操作效果未能验证';
   if (type === 'model.output.ready') return '模型输出就绪';
   if (type === 'model.output.completed' || type === 'model.completed') return '模型完成';
   if (type === 'agent.model.followup_context') return '模型后续上下文';

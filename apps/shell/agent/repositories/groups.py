@@ -106,24 +106,42 @@ class RunGroupRepository:
         *,
         status: str | None = None,
         summary: str | None = None,
-    ) -> None:
+        expected_status: str | None = None,
+        expected_updated_at: str | None = None,
+    ) -> dict[str, Any] | None:
         if not run_group_id:
-            return
+            return None
         current = self.get(run_group_id)
-        self._conn.execute(
-            """
+        where_clause = "run_group_id=?"
+        params: list[Any] = [
+            status or current["status"],
+            self._redact_secrets(summary) if summary is not None else current["summary"],
+            self._now(),
+            run_group_id,
+        ]
+        clean_expected_status = str(expected_status or "").strip()
+        clean_expected_updated_at = (
+            None if expected_updated_at is None else str(expected_updated_at)
+        )
+        if clean_expected_status:
+            where_clause += " AND status=?"
+            params.append(clean_expected_status)
+        if clean_expected_updated_at is not None:
+            where_clause += " AND updated_at=?"
+            params.append(clean_expected_updated_at)
+        cursor = self._conn.execute(
+            f"""
             UPDATE run_groups
                SET status=?, summary=?, updated_at=?
-             WHERE run_group_id=?
+             WHERE {where_clause}
             """,
-            (
-                status or current["status"],
-                self._redact_secrets(summary) if summary is not None else current["summary"],
-                self._now(),
-                run_group_id,
-            ),
+            tuple(params),
         )
+        if (clean_expected_status or clean_expected_updated_at is not None) and cursor.rowcount != 1:
+            self._conn.rollback()
+            return None
         self._conn.commit()
+        return self.get(run_group_id)
 
     def runs(self, run_group_id: str) -> list[dict[str, Any]]:
         if not run_group_id:
@@ -167,3 +185,19 @@ class RunGroupRepository:
         if not run_group_id:
             return
         self._conn.execute("DELETE FROM run_groups WHERE run_group_id=?", (run_group_id,))
+
+    def delete_if_empty(self, run_group_id: str) -> bool:
+        if not run_group_id:
+            return False
+        cursor = self._conn.execute(
+            """
+            DELETE FROM run_groups
+             WHERE run_group_id=?
+               AND NOT EXISTS (
+                   SELECT 1 FROM runs WHERE runs.run_group_id=run_groups.run_group_id
+               )
+            """,
+            (run_group_id,),
+        )
+        self._conn.commit()
+        return int(cursor.rowcount or 0) > 0

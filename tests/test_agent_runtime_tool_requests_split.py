@@ -41,22 +41,48 @@ def test_tool_request_parser_parses_native_tool_calls_and_aliases() -> None:
     )
 
     assert normalize_tool_name("workspace_read") == "workspace.read"
-    assert requests == [
-        {
-            "protocol": "tool_calls",
-            "tool": "workspace.read",
-            "input": {"path": "README.md"},
-            "tool_call_id": "call_read",
-            "function_name": "workspace_read",
-        },
-        {
-            "protocol": "tool_calls",
-            "tool": "memory.add",
-            "input": {"content": "Remember", "kind": "fact"},
-            "tool_call_id": "call_3",
-            "function_name": "memory_add",
-        },
-    ]
+    assert requests[0] == {
+        "protocol": "tool_calls",
+        "tool": "workspace.read",
+        "input": {"path": "README.md"},
+        "tool_call_id": "call_read",
+        "function_name": "workspace_read",
+    }
+    assert requests[1]["protocol"] == "tool_calls"
+    assert requests[1]["tool"] == "memory.add"
+    assert requests[1]["input"] == {"content": "Remember", "kind": "fact"}
+    assert requests[1]["tool_call_id"].startswith("call_")
+    assert requests[1]["function_name"] == "memory_add"
+
+
+def test_tool_request_parser_preserves_provider_call_id_over_item_id() -> None:
+    parser = ToolRequestParser()
+
+    requests = parser.parse_tool_calls(
+        [
+            {
+                "id": "fc_response_item",
+                "call_id": "call_response_item",
+                "function": {"name": "workspace_read", "arguments": '{"path":"README.md"}'},
+            }
+        ]
+    )
+
+    assert requests[0]["tool_call_id"] == "call_response_item"
+
+
+def test_tool_request_parser_generates_distinct_ids_for_idless_calls() -> None:
+    parser = ToolRequestParser()
+    idless_call = {
+        "function": {"name": "workspace_read", "arguments": '{"path":"README.md"}'},
+    }
+
+    first_id = parser.parse_tool_calls([idless_call])[0]["tool_call_id"]
+    second_id = parser.parse_tool_calls([idless_call])[0]["tool_call_id"]
+
+    assert first_id.startswith("call_")
+    assert second_id.startswith("call_")
+    assert first_id != second_id
 
 
 def test_tool_request_normalizes_iteration_bounds() -> None:
@@ -97,14 +123,19 @@ def test_tool_request_parser_parses_json_fallback_and_prefers_native_calls() -> 
         fallback_content,
     )
 
+    assert fallback is not None
+    assert str(fallback.pop("tool_call_id")).startswith("call_")
     assert fallback == {
-        "action": "tool",
         "tool": "artifact.write",
         "input": {"path": "report.md", "content": "ok"},
         "protocol": "json_fallback",
     }
-    assert parser.parse_json_fallback('{"action":"tool","tool":"workspace_read","input":"bad"}') == {
-        "action": "tool",
+    invalid_input = parser.parse_json_fallback(
+        '{"action":"tool","tool":"workspace_read","input":"bad"}'
+    )
+    assert invalid_input is not None
+    assert str(invalid_input.pop("tool_call_id")).startswith("call_")
+    assert invalid_input == {
         "tool": "workspace.read",
         "input": {},
         "protocol": "json_fallback",

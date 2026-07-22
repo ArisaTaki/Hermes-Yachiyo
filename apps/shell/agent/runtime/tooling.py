@@ -20,7 +20,17 @@ from apps.shell.agent.runtime.model_messages import (
     message_visible_content_text,
     model_message_metadata,
 )
-from apps.shell.agent.runtime.tool_execution import RuntimeToolCallExecutor, RuntimeToolRequestRunner
+from apps.shell.agent.runtime.recovery_actions import RecoveryActionRegistry
+from apps.shell.agent.runtime.recovery_adapters import (
+    BackgroundWindowRecoveryAdapter,
+    DesktopAppResolutionAdapter,
+    EntityAliasRecoveryAdapter,
+    WorkspaceFileResolutionAdapter,
+)
+from apps.shell.agent.runtime.tool_execution import (
+    RuntimeToolCallExecutor,
+    RuntimeToolRequestRunner,
+)
 from apps.shell.agent.runtime.tool_loop import RuntimeToolLoopProjectionBuilder
 from apps.shell.agent.runtime.tool_operations import RuntimeToolOperations
 from apps.shell.agent.runtime.tool_requests import (
@@ -66,6 +76,7 @@ def build_runtime_tooling(
     call_agent_tool: Callable[..., dict[str, Any]],
     allows_tool: Callable[[str, list[str]], bool] | None = None,
     desktop_provider_registry: Any | None = None,
+    execution_lease_checker: Callable[[str], None] | None = None,
 ) -> RuntimeToolingBundle:
     tool_loop_projection = RuntimeToolLoopProjectionBuilder()
     return RuntimeToolingBundle(
@@ -82,6 +93,7 @@ def build_runtime_tooling(
             append_run_event=append_run_event,
             allows_tool=allows_tool,
             desktop_provider_registry=desktop_provider_registry,
+            execution_lease_checker=execution_lease_checker,
         ),
         tool_request_runner=RuntimeToolRequestRunner(
             normalize_tool_name=normalize_tool_name,
@@ -94,6 +106,7 @@ def build_runtime_tooling(
             tool_loop_projection=tool_loop_projection,
             pending_approval_builder=pending_approval_builder,
             call_agent_tool=call_agent_tool,
+            execution_lease_checker=execution_lease_checker,
         ),
     )
 
@@ -116,6 +129,7 @@ def build_runtime_tooling_stack(
     tool_requests_from_message: Callable[[dict[str, Any], str], list[dict[str, Any]]],
     run_tool_requests: Callable[..., None],
     desktop_provider_registry: Any | None = None,
+    execution_lease_checker: Callable[[str], None] | None = None,
 ) -> RuntimeToolingStack:
     tooling = build_runtime_tooling(
         normalize_tool_name=normalize_tool_name,
@@ -136,6 +150,7 @@ def build_runtime_tooling_stack(
         pending_approval_builder=pending_approval_builder,
         call_agent_tool=call_agent_tool,
         desktop_provider_registry=desktop_provider_registry,
+        execution_lease_checker=execution_lease_checker,
     )
     tool_operations = RuntimeToolOperations(
         tool_request_runner=tooling.tool_request_runner,
@@ -167,5 +182,13 @@ def build_runtime_tooling_stack(
             run_tool_requests=run_tool_requests,
             error_type=AgentRuntimeError,
             append_run_event=append_run_event,
+            recovery_action_registry=RecoveryActionRegistry(
+                (
+                    EntityAliasRecoveryAdapter(),
+                    WorkspaceFileResolutionAdapter(),
+                    DesktopAppResolutionAdapter(),
+                    BackgroundWindowRecoveryAdapter(),
+                )
+            ),
         ),
     )

@@ -31,14 +31,25 @@ export function isStudioTopTabActive(currentTab: StudioTab, item: StudioTab): bo
 }
 
 export function studioTabLabel(item: StudioTab): string {
-  if (item === 'agents') return 'Agents';
-  if (item === 'groups') return 'Groups';
-  if (item === 'skills') return 'Skill Library';
-  if (item === 'workflows') return 'Workflow Studio';
-  if (item === 'tools') return 'Tools';
-  if (item === 'runs') return 'Runs';
-  if (item === 'memory') return 'Memory';
+  if (item === 'agents') return '代理';
+  if (item === 'groups') return '群组';
+  if (item === 'skills') return '技能库';
+  if (item === 'workflows') return '工作流';
+  if (item === 'tools') return '工具';
+  if (item === 'runs') return '运行';
+  if (item === 'memory') return '记忆';
   return item;
+}
+
+export function studioTabTestId(item: StudioTab): string {
+  if (item === 'agents') return 'agent-studio-tab-agents';
+  if (item === 'groups') return 'agent-studio-tab-groups';
+  if (item === 'skills') return 'agent-studio-tab-skills';
+  if (item === 'skill-groups') return 'agent-studio-tab-skill-groups';
+  if (item === 'workflows') return 'agent-studio-tab-workflows';
+  if (item === 'tools') return 'agent-studio-tab-tools';
+  if (item === 'runs') return 'agent-studio-tab-runs';
+  return 'agent-studio-tab-memory';
 }
 
 export function AgentStudioLoadingState() {

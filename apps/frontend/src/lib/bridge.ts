@@ -1,6 +1,17 @@
 import { currentView, routePath, type AppView } from './view';
 
 export type ApiRecord = Record<string, unknown>;
+export type ApiRequestOptions = {
+  signal?: AbortSignal;
+  timeoutMs?: number;
+};
+
+export function shouldFallbackToLegacyRoute(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error || '');
+  const statusMatch = message.match(/\bHTTP\s+(\d{3})\b/i);
+  if (!statusMatch) return false;
+  return [404, 405, 501].includes(Number(statusMatch[1]));
+}
 export type LauncherHitRegionRect = {
   x: number;
   y: number;
@@ -209,31 +220,157 @@ async function bridgeJsonHeaders(): Promise<Record<string, string>> {
   };
 }
 
-export async function apiGet<T = ApiRecord>(path: string): Promise<T> {
-  const baseUrl = await bridgeUrl();
-  let response: Response;
-  try {
-    response = await fetch(`${baseUrl}${path}`);
-  } catch {
-    throw new Error(`无法连接本地 Bridge：${baseUrl}`);
-  }
-  return parseResponse<T>(response);
-}
+type BridgeAbortContext = {
+  signal?: AbortSignal;
+  timedOut: () => boolean;
+  dispose: () => void;
+};
 
-export async function apiPost<T = ApiRecord>(path: string, body?: unknown): Promise<T> {
-  const baseUrl = await bridgeUrl();
-  const headers = await bridgeJsonHeaders();
+async function bridgeFetch<T>(
+  baseUrl: string,
+  path: string,
+  init: RequestInit,
+  options: ApiRequestOptions,
+  abortContext: BridgeAbortContext,
+): Promise<T> {
   let response: Response;
   try {
     response = await fetch(`${baseUrl}${path}`, {
+      ...init,
+      ...(abortContext.signal ? { signal: abortContext.signal } : {}),
+    });
+  } catch {
+    throw bridgeFetchFailure(baseUrl, abortContext, options);
+  }
+  try {
+    return await parseResponse<T>(response);
+  } catch (error) {
+    if (abortContext.timedOut() || options.signal?.aborted) {
+      throw bridgeFetchFailure(baseUrl, abortContext, options);
+    }
+    throw error;
+  }
+}
+
+async function withBridgeAbortContext<T>(
+  options: ApiRequestOptions,
+  request: (abortContext: BridgeAbortContext) => Promise<T>,
+): Promise<T> {
+  const abortContext = createBridgeAbortContext(options);
+  try {
+    return await request(abortContext);
+  } finally {
+    abortContext.dispose();
+  }
+}
+
+function awaitBridgePreflight<T>(
+  promise: Promise<T>,
+  abortContext: BridgeAbortContext,
+  options: ApiRequestOptions,
+): Promise<T> {
+  if (!abortContext.signal) return promise;
+  if (abortContext.signal.aborted) {
+    return Promise.reject(bridgeFetchFailure('', abortContext, options));
+  }
+  return new Promise((resolve, reject) => {
+    const handleAbort = () => {
+      reject(bridgeFetchFailure('', abortContext, options));
+    };
+    abortContext.signal?.addEventListener('abort', handleAbort, { once: true });
+    promise.then(
+      (value) => {
+        abortContext.signal?.removeEventListener('abort', handleAbort);
+        resolve(value);
+      },
+      (error) => {
+        abortContext.signal?.removeEventListener('abort', handleAbort);
+        reject(error);
+      },
+    );
+  });
+}
+
+function createBridgeAbortContext(options: ApiRequestOptions): BridgeAbortContext {
+  const timeoutMs = normalizedRequestTimeout(options.timeoutMs);
+  if (!options.signal && timeoutMs === 0) {
+    return { signal: undefined, timedOut: () => false, dispose: () => undefined };
+  }
+
+  const controller = new AbortController();
+  let didTimeOut = false;
+  let timer: number | null = null;
+  const handleExternalAbort = () => controller.abort();
+  if (options.signal?.aborted) {
+    controller.abort();
+  } else {
+    options.signal?.addEventListener('abort', handleExternalAbort, { once: true });
+  }
+  if (timeoutMs > 0) {
+    timer = window.setTimeout(() => {
+      didTimeOut = true;
+      controller.abort();
+    }, timeoutMs);
+  }
+  return {
+    signal: controller.signal,
+    timedOut: () => didTimeOut,
+    dispose: () => {
+      if (timer !== null) window.clearTimeout(timer);
+      options.signal?.removeEventListener('abort', handleExternalAbort);
+    },
+  };
+}
+
+function normalizedRequestTimeout(value: number | undefined): number {
+  const timeout = Number(value || 0);
+  return Number.isFinite(timeout) && timeout > 0 ? Math.floor(timeout) : 0;
+}
+
+function bridgeFetchFailure(
+  baseUrl: string,
+  abortContext: BridgeAbortContext,
+  options: ApiRequestOptions,
+): Error {
+  if (abortContext.timedOut()) {
+    const error = new Error(`本地 Bridge 请求超时（${normalizedRequestTimeout(options.timeoutMs)}ms）`);
+    error.name = 'TimeoutError';
+    return error;
+  }
+  if (options.signal?.aborted || abortContext.signal?.aborted) {
+    const error = new Error('本地 Bridge 请求已取消');
+    error.name = 'AbortError';
+    return error;
+  }
+  return new Error(`无法连接本地 Bridge：${baseUrl}`);
+}
+
+export async function apiGet<T = ApiRecord>(
+  path: string,
+  options: ApiRequestOptions = {},
+): Promise<T> {
+  return withBridgeAbortContext(options, async (abortContext) => {
+    const baseUrl = await awaitBridgePreflight(bridgeUrl(), abortContext, options);
+    return bridgeFetch<T>(baseUrl, path, {}, options, abortContext);
+  });
+}
+
+export async function apiPost<T = ApiRecord>(
+  path: string,
+  body?: unknown,
+  options: ApiRequestOptions = {},
+): Promise<T> {
+  return withBridgeAbortContext(options, async (abortContext) => {
+    const [baseUrl, headers] = await Promise.all([
+      awaitBridgePreflight(bridgeUrl(), abortContext, options),
+      awaitBridgePreflight(bridgeJsonHeaders(), abortContext, options),
+    ]);
+    return bridgeFetch<T>(baseUrl, path, {
       method: 'POST',
       headers,
       body: body === undefined ? undefined : JSON.stringify(body),
-    });
-  } catch {
-    throw new Error(`无法连接本地 Bridge：${baseUrl}`);
-  }
-  return parseResponse<T>(response);
+    }, options, abortContext);
+  });
 }
 
 export async function apiPatch<T = ApiRecord>(path: string, body?: unknown): Promise<T> {

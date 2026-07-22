@@ -43,6 +43,113 @@ def test_native_runtime_installs_split_workflow_approval_execution_service(tmp_p
         service.close()
 
 
+def test_workflow_approval_authority_projects_group_only_for_persisted_owner(
+    tmp_path,
+) -> None:
+    runtime = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime-owner.db",
+        workspace_dir=tmp_path / "runtime-owner",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    try:
+        group = runtime._insert_run_group(title="Nested workflow", source="workflow")
+        parent = runtime._insert_run(
+            kind="workflow_run",
+            runnable_id="workflow-parent",
+            user_goal="own the group",
+            run_group_id=group["run_group_id"],
+        )
+        child = runtime._insert_run(
+            kind="workflow_run",
+            runnable_id="workflow-child",
+            user_goal="share the group",
+            run_group_id=group["run_group_id"],
+        )
+        pending_by_run: dict[str, dict[str, Any]] = {}
+        for run, label in ((parent, "Parent gate"), (child, "Child gate")):
+            pending = {
+                "approval_id": f"approval-{run['run_id']}",
+                "tool": "workflow.approval",
+                "workflow_node_id": "gate",
+                "workflow_node_label": label,
+                "workflow_node_approval_criteria": "approve",
+                "workflow_context": "ready",
+                "workflow_next_index": 1,
+                "input_preview": {"checkpoint": label},
+            }
+            pending_by_run[run["run_id"]] = pending
+            runtime._update_run(
+                run["run_id"],
+                status="approval_required",
+                result=f"waiting: {label}",
+                pending_approval=pending,
+            )
+
+        class OwnerAwareResume:
+            def __init__(self) -> None:
+                self.root_flags: list[tuple[str, bool]] = []
+
+            def resume_after_approval(
+                self,
+                run: dict[str, Any],
+                _pending: dict[str, Any],
+                context: WorkflowApprovalResumeContext,
+                *,
+                expected_approval_id: str,
+            ) -> dict[str, Any]:
+                assert expected_approval_id == pending_by_run[run["run_id"]]["approval_id"]
+                self.root_flags.append((run["run_id"], context.root_group))
+                completed = runtime._update_run(
+                    run["run_id"],
+                    status="completed",
+                    result=f"completed: {run['run_id']}",
+                    pending_approval=None,
+                )
+                assert completed is not None
+                if context.root_group:
+                    runtime._update_run_group(
+                        group["run_group_id"],
+                        status="completed",
+                        summary=str(completed["result"]),
+                    )
+                return completed
+
+        resume = OwnerAwareResume()
+        approval_execution = RuntimeWorkflowApprovalExecutionService(
+            pending_approval_private=lambda run_id: pending_by_run[run_id],
+            workflow_for_run_resume=lambda run: {
+                "workflow_id": run["runnable_id"],
+                "nodes": [],
+                "edges": [],
+            },
+            workflow_run_is_group_root=runtime._workflow_run_is_group_root,
+            workflow_approval_resume=resume,  # type: ignore[arg-type]
+        )
+
+        child_result = approval_execution.approve_workflow_run(
+            runtime.get_run(child["run_id"]),
+            expected_approval_id=pending_by_run[child["run_id"]]["approval_id"],
+        )
+
+        assert child_result["status"] == "completed"
+        assert runtime.get_run_group(group["run_group_id"])["status"] == "running"
+
+        parent_result = approval_execution.approve_workflow_run(
+            runtime.get_run(parent["run_id"]),
+            expected_approval_id=pending_by_run[parent["run_id"]]["approval_id"],
+        )
+
+        assert parent_result["status"] == "completed"
+        assert runtime.get_run_group(group["run_group_id"])["status"] == "completed"
+        assert resume.root_flags == [
+            (child["run_id"], False),
+            (parent["run_id"], True),
+        ]
+    finally:
+        runtime.close()
+
+
 def test_runtime_workflow_approval_execution_builds_resume_context_and_handoffs() -> None:
     pending_calls: list[str] = []
     workflow_calls: list[dict[str, Any]] = []
@@ -57,6 +164,7 @@ def test_runtime_workflow_approval_execution_builds_resume_context_and_handoffs(
         "artifacts": [{"path": "summary.md"}],
     }
     pending = {
+        "approval_id": "approval-workflow",
         "tool": "workflow.approval",
         "workflow_node_id": "approval-1",
         "workflow_node_label": "Review",
@@ -89,7 +197,10 @@ def test_runtime_workflow_approval_execution_builds_resume_context_and_handoffs(
         workflow_approval_resume=resume,  # type: ignore[arg-type]
     )
 
-    result = service.approve_workflow_run(run)
+    result = service.approve_workflow_run(
+        run,
+        expected_approval_id="approval-workflow",
+    )
 
     assert result == {"run_id": "workflow-run-1", "status": "completed"}
     assert pending_calls == ["workflow-run-1"]
@@ -97,12 +208,14 @@ def test_runtime_workflow_approval_execution_builds_resume_context_and_handoffs(
     assert root_calls == [run]
     assert resume.calls[0]["run"] is run
     assert resume.calls[0]["pending"] is pending
+    assert resume.calls[0]["expected_approval_id"] == "approval-workflow"
     context = resume.calls[0]["context"]
     assert isinstance(context, WorkflowApprovalResumeContext)
     assert context.workflow == workflow
     assert context.root_group is True
     assert context.start_index == 3
     assert context.start_node_id == "agent-2"
+    assert context.expected_approval_id == "approval-workflow"
     assert context.approval.workflow_node_id == "approval-1"
     assert context.approval.label == "Review"
     assert context.result_context == "draft result"
@@ -137,6 +250,13 @@ class FakeWorkflowApprovalResume:
         run: dict[str, Any],
         pending: dict[str, Any],
         context: WorkflowApprovalResumeContext,
+        *,
+        expected_approval_id: str,
     ) -> dict[str, Any]:
-        self.calls.append({"run": run, "pending": pending, "context": context})
+        self.calls.append({
+            "run": run,
+            "pending": pending,
+            "context": context,
+            "expected_approval_id": expected_approval_id,
+        })
         return {"run_id": run["run_id"], "status": "completed"}

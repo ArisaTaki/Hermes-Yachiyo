@@ -57,7 +57,6 @@ export function WorkflowChildApprovalBridge({
           actionsTestId="agent-run-detail-workflow-child-approval-actions"
           approval={workflowChildApprovalCard(
             selectedWorkflowApprovalChildRun,
-            selectedWorkflowApprovalChildRunId,
           )}
           approveButtonClassName="primary-action"
           approveLabel="批准子 Agent"
@@ -117,7 +116,7 @@ export function WorkflowChildApprovalBridge({
         </RuntimeApprovalGate>
       ) : (
         <>
-          <pre>{selectedWorkflowApprovalChildRun ? (selectedWorkflowApprovalChildRun.result || 'Child run has no approval payload.') : 'Loading child run...'}</pre>
+          <pre>{selectedWorkflowApprovalChildRun ? (selectedWorkflowApprovalChildRun.result || '子 Run 暂无审批内容。') : '正在加载子 Run...'}</pre>
           <div className="run-approval-actions" data-testid="agent-run-detail-workflow-child-approval-actions">
             <button
               type="button"
@@ -138,12 +137,11 @@ export function WorkflowChildApprovalBridge({
 
 function workflowChildApprovalCard(
   childRun: RunSpec,
-  fallbackRunId: string,
 ): RuntimeApprovalCardSnapshot {
   const pendingApproval = childRun.pending_approval;
   const tool = pendingApproval?.tool || 'approval';
   return {
-    approval_id: pendingApproval?.approval_id || fallbackRunId,
+    approval_id: pendingApproval?.approval_id || '',
     description: '这个子 Agent 工具调用需要人工确认后，父 Workflow 才会继续。',
     input_preview: approvalInputPreview(pendingApproval?.input_preview),
     open_in_studio_url: pendingApproval?.open_in_studio_url,

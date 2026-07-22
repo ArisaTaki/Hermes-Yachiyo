@@ -8,7 +8,7 @@ Oha-Yachiyo 的 Live2D 模型资源包是可选内容。
 
 请从 GitHub Releases 下载 Live2D 资源包：
 
-- <https://github.com/kuguya-AI-app-develop/oha-yachiyo/releases>
+- <https://github.com/kuguya-AI-app-develop/Hermes-Yachiyo/releases>
 
 下载后，解压到下面的目录：
 

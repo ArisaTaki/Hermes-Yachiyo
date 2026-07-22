@@ -7,6 +7,7 @@ from typing import Any
 from apps.shell.yachiyo_agent.legacy_runs import LegacyRunPayloadProjector
 from apps.shell.yachiyo_agent.legacy_ports import (
     _chat_task_payload,
+    _dedupe_progress_timeline,
     _group_artifacts,
     _group_run_from_legacy_run_group,
 )
@@ -35,6 +36,36 @@ def test_legacy_run_projector_preserves_chat_task_payload_shape() -> None:
     assert payload["recent_events"] == [{"event_type": "run.started"}]
     assert payload["open_in_studio_url"] == "#/agents?run_id=run-123"
     assert payload["status"] == "completed"
+
+
+def test_progress_timeline_keeps_richer_current_tool_event_over_db_projection() -> None:
+    current = {
+        "event": "agent.tool.call",
+        "run_id": "run-current-tail",
+        "detail": "data.analyze",
+        "tool_call_id": "call-analyze",
+        "step_id": "analyze-data",
+        "action_target": {
+            "kind": "workspace_file",
+            "action": "analyze_data_file",
+        },
+        "result": {"ok": True, "postcondition_verified": True},
+    }
+    persisted_projection = {
+        "event_type": "agent.tool.call",
+        "run_id": "run-current-tail",
+        "sequence": 12,
+        "payload": {
+            "tool": "data.analyze",
+            "tool_call_id": "call-analyze",
+            "result": {"ok": True},
+        },
+    }
+
+    deduped = _dedupe_progress_timeline([current, persisted_projection])
+
+    assert deduped == [current]
+    assert deduped[0]["action_target"]["action"] == "analyze_data_file"
 
 
 def test_legacy_run_projector_prefers_explicit_chat_task_fields() -> None:

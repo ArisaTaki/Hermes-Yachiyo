@@ -14,6 +14,8 @@ export type DesktopIsolationKind =
   | 'none'
   | 'process'
   | 'browser_profile'
+  | 'browser_target'
+  | 'background_desktop'
   | 'sandbox_desktop'
   | 'headless'
   | 'user_handoff';
@@ -99,6 +101,7 @@ export type DesktopExecutionModeSnapshot = {
 export type DesktopExecutionPolicySnapshot = {
   mode?: DesktopExecutionPolicyMode | string;
   allow_live_foreground?: boolean | null;
+  prefer_background_desktop?: boolean;
   prefer_isolated_desktop?: boolean;
   avoid_user_foreground_takeover?: boolean;
   require_sandbox_for_keyboard_mouse?: boolean;
@@ -109,6 +112,7 @@ export type DesktopExecutionPolicySnapshot = {
 
 export type RuntimeExecutionPreferredEnvironment =
   | 'structured_runtime'
+  | 'background_desktop'
   | 'isolated_desktop'
   | 'user_foreground'
   | 'user_handoff'
@@ -126,6 +130,7 @@ export type RuntimeExecutionStrategySnapshot = {
   preferred_environment?: RuntimeExecutionPreferredEnvironment;
   interaction_mode?: RuntimeExecutionInteractionMode;
   policy_mode?: DesktopExecutionPolicyMode | string;
+  background_desktop_preferred?: boolean;
   isolated_desktop_preferred?: boolean;
   foreground_takeover_allowed?: boolean;
   user_foreground_takeover_risk?: boolean;
@@ -152,6 +157,9 @@ export type DesktopProviderHealthSnapshot = {
   provider_version?: string;
   endpoint_origin?: string;
   endpoint_path?: string;
+  transport?: string;
+  health_report?: Record<string, unknown>;
+  cached?: boolean;
   blocking_conditions?: string[];
   supported_tools?: string[];
   capabilities?: string[];
@@ -338,6 +346,7 @@ export type DesktopExecutionRouteSnapshot = {
   can_auto_start?: boolean;
   provider_execution_required?: boolean;
   sandbox_required?: boolean;
+  background_desktop_preferred?: boolean;
   isolated_desktop_preferred?: boolean;
   foreground_takeover_allowed?: boolean;
   desktop_execution_session_policy?: string;
@@ -904,6 +913,7 @@ export type RuntimeExecutionRequestSnapshot = {
   protocol?: string;
   input?: Record<string, unknown>;
   planning_reason?: string;
+  presentation?: string;
   approval_required?: boolean;
   risk_level?: string;
   execution_mode?: DesktopExecutionModeSnapshot | null;

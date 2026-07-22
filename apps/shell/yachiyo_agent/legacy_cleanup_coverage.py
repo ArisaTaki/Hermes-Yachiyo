@@ -201,7 +201,13 @@ AREA_PLANNER_CONTRACTS: dict[str, LegacyDesktopPlannerContract] = {
     "ui_targeting": LegacyDesktopPlannerContract(
         ("desktop_operation",),
         ("desktop.app_discovery", "desktop.ui_operation"),
-        ("desktop.list_apps", "desktop.inspect_app", "desktop.ui_elements"),
+        (
+            "desktop.list_apps",
+            "desktop.inspect_app",
+            "app.focus_and_click_ui_element",
+            "app.open_and_click_ui_element",
+            "desktop.ui_elements",
+        ),
     ),
 }
 

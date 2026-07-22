@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import threading
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -14,6 +15,10 @@ from urllib.parse import urlparse
 from urllib.request import Request
 
 from apps.core.tls import urlopen_with_bundled_ca
+from apps.shell.agent.runtime.cua_background_provider import (
+    CUA_BACKGROUND_PROVIDER_KIND,
+    cua_background_provider_adapter_from_env,
+)
 from apps.shell.agent.runtime.desktop_provider_credentials import (
     DESKTOP_PROVIDER_TOKEN_ENV,
     desktop_provider_token_from_manifest,
@@ -130,6 +135,7 @@ LOCAL_DESKTOP_PROVIDER_ID = "local-native-desktop"
 LOCAL_DESKTOP_PROVIDER_KIND = "local_desktop"
 LOCAL_DESKTOP_PROVIDER_BASE_TOOLS = (
     "desktop.permissions",
+    "desktop.permissions.verify",
     "desktop.permission_preflight",
     "desktop.active_window",
     "desktop.running_apps",
@@ -212,6 +218,7 @@ LOCAL_DESKTOP_RUNTIME_REQUIRED_CAPABILITIES = (
 )
 LOCAL_DESKTOP_DIRECT_FALLBACK_TOOLS = frozenset(
     {
+        "desktop.permissions.verify",
         "desktop.active_window",
         "desktop.running_apps",
         "desktop.list_apps",
@@ -236,6 +243,7 @@ LOCAL_DESKTOP_DIRECT_FALLBACK_TOOLS = frozenset(
 )
 LOCAL_DESKTOP_MUTATING_EFFECT_TOOLS = frozenset(
     {
+        "desktop.permissions.verify",
         "app.open",
         "desktop.open_app",
         "app.focus",
@@ -248,6 +256,46 @@ LOCAL_DESKTOP_MUTATING_EFFECT_TOOLS = frozenset(
     }
 )
 
+# Provider affinity protects an agent-owned desktop target from accidentally
+# falling through to the user's foreground desktop.  Structured tools in these
+# domains have their own execution boundary and must remain available to the
+# same Agent run (for example, browser recovery after a desktop lookup fails).
+# Every unlisted domain stays affinity-bound by default so a newly introduced
+# desktop-capable tool cannot silently escape the provider safety boundary.
+_DESKTOP_PROVIDER_AFFINITY_INDEPENDENT_DOMAINS = frozenset(
+    {
+        "artifact",
+        "browser",
+        "data",
+        "file",
+        "fs",
+        "future_task",
+        "memory",
+        "python",
+        "skill",
+        "terminal",
+        "workspace",
+    }
+)
+_DESKTOP_PROVIDER_AFFINITY_TARGET_DOMAINS = frozenset(
+    {
+        "app",
+        "desktop",
+        "media",
+        "screen",
+    }
+)
+
+
+def _tool_requires_desktop_provider_affinity(tool_name: str) -> bool:
+    clean_tool = str(tool_name or "").strip()
+    domain = clean_tool.partition(".")[0].lower()
+    if domain in _DESKTOP_PROVIDER_AFFINITY_INDEPENDENT_DOMAINS:
+        return False
+    if domain in _DESKTOP_PROVIDER_AFFINITY_TARGET_DOMAINS:
+        return True
+    return True
+
 
 class DesktopExecutionProviderRegistry:
     """Registry of optional desktop execution provider adapters."""
@@ -257,14 +305,141 @@ class DesktopExecutionProviderRegistry:
         adapters: Iterable[DesktopExecutionProviderAdapter] | None = None,
     ) -> None:
         self._adapters: dict[str, list[DesktopExecutionProviderAdapter]] = {}
+        self._retired_adapters: list[DesktopExecutionProviderAdapter] = []
+        self._lock = threading.RLock()
+        self._closed = False
         for adapter in adapters or ():
             self.register(adapter)
 
     def register(self, adapter: DesktopExecutionProviderAdapter) -> None:
-        provider_kind = _clean_provider_kind(getattr(adapter, "provider_kind", ""))
-        if not provider_kind:
-            raise ValueError("desktop execution provider adapter requires provider_kind")
-        self._adapters.setdefault(provider_kind, []).append(adapter)
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("desktop execution provider registry is closed")
+            provider_kind = _clean_provider_kind(getattr(adapter, "provider_kind", ""))
+            if not provider_kind:
+                raise ValueError("desktop execution provider adapter requires provider_kind")
+            self._adapters.setdefault(provider_kind, []).append(adapter)
+
+    def bind_tool_request_to_owned_provider(
+        self,
+        tool_name: str,
+        tool_request: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        """Pin a trusted runtime scope to the provider that owns its target.
+
+        Policy metadata may be stale or describe only the next logical tool.
+        Once a stateful provider has created an agent-owned desktop target, its
+        local authority record is stronger than a newly computed route.  A
+        missing capability must therefore fail closed instead of falling
+        through to the host foreground broker.
+        """
+
+        request = dict(tool_request)
+        if not _tool_requires_desktop_provider_affinity(tool_name):
+            return request
+        owner = self._task_scope_owner_adapter(request)
+        if owner is None:
+            return request
+        provider_kind = _clean_provider_kind(
+            getattr(owner, "provider_kind", "")
+        )
+        provider_id = str(getattr(owner, "provider_id", "") or "").strip()
+        route = desktop_execution_route_payload(request)
+        bound_route = {
+            **dict(route),
+            "tool_name": str(tool_name or "").strip(),
+            "selected_provider_kind": provider_kind,
+            "selected_provider_id": provider_id,
+            "provider_execution_required": True,
+            "desktop_provider_affinity": True,
+            "desktop_provider_affinity_source": "agent_owned_task_scope",
+            "foreground_takeover_allowed": False,
+            "foreground_takeover_required": False,
+            "requires_user_foreground_session": False,
+            "user_foreground_takeover_risk": False,
+            "fallback_mode": "user_handoff",
+        }
+        supported_tools = _string_list(getattr(owner, "supported_tools", None))
+        request["desktop_execution_provider"] = {
+            "provider_kind": provider_kind,
+            "provider_id": provider_id,
+            "supported_tools": supported_tools,
+            "source": "runtime_task_scope_affinity",
+        }
+        can_execute = getattr(owner, "can_execute", None)
+        executable = not callable(can_execute) or bool(
+            can_execute(tool_name, bound_route, request)
+        )
+        bound_route["can_execute"] = executable
+        bound_route["status"] = (
+            "provider_ready" if executable else "provider_tool_unavailable"
+        )
+        bound_route["blocking_conditions"] = (
+            []
+            if executable
+            else ["desktop_execution_provider_tool_unavailable"]
+        )
+        request["desktop_execution_route"] = bound_route
+        request["_desktop_provider_affinity_bound"] = True
+        return request
+
+    def _task_scope_owner_adapter(
+        self,
+        tool_request: Mapping[str, Any],
+    ) -> DesktopExecutionProviderAdapter | None:
+        with self._lock:
+            if self._closed:
+                return None
+            registered_adapters = [
+                adapter
+                for provider_adapters in self._adapters.values()
+                for adapter in provider_adapters
+            ]
+            registered_adapters.extend(self._retired_adapters)
+            adapters: list[DesktopExecutionProviderAdapter] = []
+            seen_adapters: set[int] = set()
+            for adapter in registered_adapters:
+                adapter_identity = id(adapter)
+                if adapter_identity in seen_adapters:
+                    continue
+                seen_adapters.add(adapter_identity)
+                adapters.append(adapter)
+        for adapter in adapters:
+            owns_task_scope = getattr(adapter, "owns_task_scope", None)
+            if not callable(owns_task_scope):
+                continue
+            try:
+                if owns_task_scope(tool_request):
+                    return adapter
+            except Exception:
+                # An ownership probe is local adapter state, but an extension
+                # adapter must not be able to break global provider routing.
+                continue
+        return None
+
+    def close(self) -> None:
+        with self._lock:
+            if self._closed:
+                return
+            self._closed = True
+            adapters = self._adapters
+            retired_adapters = self._retired_adapters
+            self._adapters = {}
+            self._retired_adapters = []
+        closed: set[int] = set()
+        for provider_adapters in [*adapters.values(), retired_adapters]:
+            for adapter in provider_adapters:
+                adapter_identity = id(adapter)
+                if adapter_identity in closed:
+                    continue
+                closed.add(adapter_identity)
+                close = getattr(adapter, "close", None)
+                if not callable(close):
+                    continue
+                try:
+                    close()
+                except Exception:
+                    continue
 
     def adapter_for(
         self,
@@ -274,23 +449,85 @@ class DesktopExecutionProviderRegistry:
         tool_request: Mapping[str, Any],
     ) -> DesktopExecutionProviderAdapter | None:
         clean_provider_kind = _clean_provider_kind(provider_kind)
+        with self._lock:
+            if self._closed:
+                return None
+            adapters = list(self._adapters.get(clean_provider_kind, []))
+            candidates = self._provider_identity_candidates(
+                clean_provider_kind,
+                route,
+                adapters=adapters,
+            )
+
+        # Adapter capability checks and health probes may cross a network seam.
+        # Never hold the registry lock while running them: shutdown and other
+        # provider selections must stay responsive if a provider times out.
         adapter = self._matching_adapter(
             clean_provider_kind,
             tool_name,
             route,
             tool_request,
+            adapters=candidates,
         )
         if adapter is not None:
             return adapter
-        env_adapter = self._refresh_env_adapter(clean_provider_kind)
-        if env_adapter is not None:
-            return self._matching_adapter(
-                clean_provider_kind,
-                tool_name,
-                route,
-                tool_request,
+
+        # can_execute=False may only mean this healthy, stateful adapter does
+        # not support the requested capability. Rebuilding it here discards
+        # task/window target state and can race an execution holding the old
+        # instance. Refresh only when the requested identity is absent or all
+        # matching adapters explicitly report a transport failure.
+        if candidates and not all(
+            _adapter_explicitly_unhealthy(candidate)
+            for candidate in candidates
+        ):
+            return None
+
+        with self._lock:
+            if self._closed:
+                return None
+            env_adapter = self._refresh_env_adapter(clean_provider_kind)
+        if env_adapter is None:
+            return None
+        with self._lock:
+            if self._closed:
+                return None
+            refreshed_adapters = list(
+                self._adapters.get(clean_provider_kind, [])
             )
-        return None
+        return self._matching_adapter(
+            clean_provider_kind,
+            tool_name,
+            route,
+            tool_request,
+            adapters=self._provider_identity_candidates(
+                clean_provider_kind,
+                route,
+                adapters=refreshed_adapters,
+            ),
+        )
+
+    def _provider_identity_candidates(
+        self,
+        provider_kind: str,
+        route: Mapping[str, Any],
+        *,
+        adapters: Iterable[DesktopExecutionProviderAdapter] | None = None,
+    ) -> list[DesktopExecutionProviderAdapter]:
+        provider_adapters = list(
+            adapters
+            if adapters is not None
+            else self._adapters.get(provider_kind, [])
+        )
+        selected_provider_id = str(route.get("selected_provider_id") or "").strip()
+        if not selected_provider_id:
+            return provider_adapters
+        return [
+            adapter
+            for adapter in provider_adapters
+            if str(getattr(adapter, "provider_id", "") or "").strip()
+            == selected_provider_id
+        ]
 
     def _matching_adapter(
         self,
@@ -298,8 +535,15 @@ class DesktopExecutionProviderRegistry:
         tool_name: str,
         route: Mapping[str, Any],
         tool_request: Mapping[str, Any],
+        *,
+        adapters: Iterable[DesktopExecutionProviderAdapter] | None = None,
     ) -> DesktopExecutionProviderAdapter | None:
-        for adapter in self._adapters.get(provider_kind, []):
+        provider_adapters = (
+            adapters
+            if adapters is not None
+            else self._adapters.get(provider_kind, [])
+        )
+        for adapter in provider_adapters:
             can_execute = getattr(adapter, "can_execute", None)
             if callable(can_execute) and not can_execute(tool_name, route, tool_request):
                 continue
@@ -310,24 +554,32 @@ class DesktopExecutionProviderRegistry:
         self,
         provider_kind: str,
     ) -> DesktopExecutionProviderAdapter | None:
-        if provider_kind != "sandbox_desktop":
+        if provider_kind == CUA_BACKGROUND_PROVIDER_KIND:
+            adapter = cua_background_provider_adapter_from_env()
+        elif provider_kind == "sandbox_desktop":
+            adapter = _http_desktop_execution_provider_adapter_from_env()
+        else:
             return None
-        adapter = _http_desktop_execution_provider_adapter_from_env()
         if adapter is None:
             return None
-        if self._has_equivalent_adapter(provider_kind, adapter):
-            return adapter
+        equivalent_adapter = self._replace_equivalent_adapter(
+            provider_kind,
+            adapter,
+        )
+        if equivalent_adapter is not None:
+            return equivalent_adapter
         self.register(adapter)
         return adapter
 
-    def _has_equivalent_adapter(
+    def _replace_equivalent_adapter(
         self,
         provider_kind: str,
         adapter: DesktopExecutionProviderAdapter,
-    ) -> bool:
+    ) -> DesktopExecutionProviderAdapter | None:
         provider_id = str(getattr(adapter, "provider_id", "") or "").strip()
         execute_url = str(getattr(adapter, "execute_url", "") or "").strip()
-        for existing in self._adapters.get(provider_kind, []):
+        adapters = self._adapters.get(provider_kind, [])
+        for index, existing in enumerate(adapters):
             existing_provider_id = str(
                 getattr(existing, "provider_id", "") or ""
             ).strip()
@@ -339,8 +591,47 @@ class DesktopExecutionProviderRegistry:
             if execute_url and execute_url != existing_execute_url:
                 continue
             if provider_id or execute_url:
-                return True
-        return False
+                existing_client = getattr(existing, "client", None)
+                replacement_client = getattr(adapter, "client", None)
+                existing_transport_kind = str(
+                    getattr(existing_client, "transport_kind", "") or ""
+                ).strip()
+                replacement_transport_kind = str(
+                    getattr(replacement_client, "transport_kind", "") or ""
+                ).strip()
+                existing_transport_identity = tuple(
+                    str(part)
+                    for part in (
+                        getattr(existing_client, "transport_identity", ()) or ()
+                    )
+                )
+                replacement_transport_identity = tuple(
+                    str(part)
+                    for part in (
+                        getattr(replacement_client, "transport_identity", ()) or ()
+                    )
+                )
+                if (
+                    existing_transport_kind == "electron_bridge"
+                    and replacement_transport_kind == "electron_bridge"
+                    and existing_transport_identity
+                    and existing_transport_identity == replacement_transport_identity
+                ):
+                    close_redundant = getattr(adapter, "close", None)
+                    if adapter is not existing and callable(close_redundant):
+                        try:
+                            close_redundant()
+                        except Exception:
+                            pass
+                    return existing
+                if existing is not adapter:
+                    adapters[index] = adapter
+                    # Keep replaced stateful transports alive until registry
+                    # shutdown. adapter_for() is a public selection API, so a
+                    # caller may still be about to execute the returned object.
+                    self._retired_adapters.append(existing)
+                return adapter
+        return None
 
     def execute_if_routed(
         self,
@@ -351,6 +642,10 @@ class DesktopExecutionProviderRegistry:
         broker: Any,
         approved: bool = False,
     ) -> dict[str, Any] | None:
+        tool_request = self.bind_tool_request_to_owned_provider(
+            tool_name,
+            tool_request,
+        )
         route = desktop_execution_route_payload(tool_request)
         if not desktop_execution_route_requires_provider(route):
             return None
@@ -358,10 +653,15 @@ class DesktopExecutionProviderRegistry:
         provider_kind = _route_provider_kind(route)
         adapter = self.adapter_for(provider_kind, tool_name, route, tool_request)
         if adapter is None:
+            capability_mismatch = self._has_healthy_provider_identity_candidate(
+                provider_kind,
+                route,
+            )
             return desktop_execution_provider_unavailable_result(
                 tool_name,
                 route=route,
                 tool_request=tool_request,
+                capability_mismatch=capability_mismatch,
             )
         simulated_blockers = _simulated_desktop_provider_blockers(
             route,
@@ -393,6 +693,64 @@ class DesktopExecutionProviderRegistry:
             tool_request=tool_request,
             adapter_registered=True,
         )
+
+    def _has_healthy_provider_identity_candidate(
+        self,
+        provider_kind: str,
+        route: Mapping[str, Any],
+    ) -> bool:
+        """Distinguish a missing provider from a per-tool capability miss."""
+
+        clean_provider_kind = _clean_provider_kind(provider_kind)
+        with self._lock:
+            if self._closed:
+                return False
+            candidates = self._provider_identity_candidates(
+                clean_provider_kind,
+                route,
+                adapters=list(self._adapters.get(clean_provider_kind, [])),
+            )
+        # Health checks may cross a provider seam; keep them outside the lock.
+        return bool(
+            candidates
+            and any(
+                not _adapter_explicitly_unhealthy(candidate)
+                for candidate in candidates
+            )
+        )
+
+
+def _adapter_explicitly_unhealthy(
+    adapter: DesktopExecutionProviderAdapter,
+) -> bool:
+    health_source = getattr(adapter, "health", None)
+    try:
+        health = health_source() if callable(health_source) else health_source
+    except Exception:
+        return True
+    if not isinstance(health, Mapping) or health.get("checked") is not True:
+        return False
+    status = str(health.get("status") or "").strip().lower()
+    transport_statuses = {
+        "closed",
+        "error",
+        "failed",
+        "provider_unhealthy",
+        "transport_failed",
+        "unhealthy",
+        "unreachable",
+    }
+    if status in transport_statuses:
+        return True
+    blockers = set(_string_list(health.get("blocking_conditions")))
+    return bool(
+        blockers
+        & {
+            "desktop_execution_provider_transport_failed",
+            "desktop_execution_provider_unreachable",
+            "provider_transport_failed",
+        }
+    )
 
 
 class HttpDesktopExecutionProviderAdapter:
@@ -1008,6 +1366,16 @@ class LocalDesktopExecutionProviderAdapter:
             return False
         if tool_name not in self.supported_tools:
             return False
+        request_payload = (
+            tool_request.get("input")
+            if isinstance(tool_request.get("input"), Mapping)
+            else {}
+        )
+        if _local_tool_requires_foreground_authorization(
+            tool_name,
+            request_payload,
+        ) and not _local_foreground_execution_authorized(route, tool_request):
+            return False
         provider_supported_tools = _string_list(
             sandbox_provider_payload(tool_request).get("supported_tools")
         )
@@ -1023,6 +1391,16 @@ class LocalDesktopExecutionProviderAdapter:
         broker: Any,
         approved: bool = False,
     ) -> dict[str, Any]:
+        if _local_tool_requires_foreground_authorization(
+            tool_name,
+            payload,
+        ) and not _local_foreground_execution_authorized(route, tool_request):
+            return self._failure(
+                tool_name,
+                "local_desktop_foreground_not_authorized",
+                "Local foreground desktop control requires explicit user authorization.",
+                retryable=False,
+            )
         call = getattr(broker, "call", None)
         transport = "runtime_tool_broker"
         if callable(call):
@@ -1081,6 +1459,11 @@ class LocalDesktopExecutionProviderAdapter:
         try:
             from apps.shell.agent.tools import desktop as desktop_tools
 
+            if tool_name == "desktop.permissions.verify":
+                return {
+                    **desktop_tools.permissions(active_verification=True),
+                    "action": "desktop.permissions.verify",
+                }
             if tool_name == "desktop.active_window":
                 return desktop_tools.active_window()
             if tool_name == "desktop.running_apps":
@@ -1101,8 +1484,8 @@ class LocalDesktopExecutionProviderAdapter:
             if tool_name == "desktop.inspect_app":
                 return desktop_tools.inspect_app(
                     str(payload.get("app_name") or ""),
-                    open_if_needed=payload.get("open_if_needed", True),
-                    focus=payload.get("focus", True),
+                    open_if_needed=payload.get("open_if_needed", False),
+                    focus=payload.get("focus", False),
                     role_filter=str(payload.get("role_filter") or ""),
                     limit=payload.get("limit", 80),
                 )
@@ -1257,6 +1640,74 @@ def _local_desktop_effect(tool_name: str) -> str:
     return "desktop_observation"
 
 
+def _local_tool_requires_foreground_authorization(
+    tool_name: str,
+    payload: Mapping[str, Any],
+) -> bool:
+    clean_tool = str(tool_name or "").strip()
+    if (
+        clean_tool in LOCAL_DESKTOP_MUTATING_EFFECT_TOOLS
+        or clean_tool in KEYBOARD_MOUSE_CAPTURE_TOOL_NAMES
+    ):
+        return True
+    if clean_tool != "desktop.inspect_app":
+        return False
+    return any(
+        _optional_bool_value(payload.get(key)) is True
+        for key in ("open_if_needed", "focus")
+    )
+
+
+def _local_foreground_execution_authorized(
+    route: Mapping[str, Any],
+    tool_request: Mapping[str, Any],
+) -> bool:
+    if route.get("foreground_takeover_allowed") is not True:
+        return False
+    if route.get("requires_user_foreground_session") is not True:
+        return False
+    isolation_keys = (
+        "prefer_background_desktop",
+        "prefer_isolated_desktop",
+        "avoid_user_foreground_takeover",
+        "require_sandbox_for_keyboard_mouse",
+        "desktop_provider_session_strict_foreground",
+        "desktop_provider_session_enforce_foreground",
+        "require_desktop_provider_for_foreground",
+        "require_isolated_desktop_for_foreground",
+    )
+    foreground_keys = (
+        "allow_user_foreground_takeover",
+        "desktop_allow_user_foreground_takeover",
+        "allow_nonisolated_desktop_provider",
+        "allow_live_foreground",
+    )
+    scopes: list[Mapping[str, Any]] = [tool_request]
+    metadata = tool_request.get("metadata")
+    if isinstance(metadata, Mapping):
+        scopes.append(metadata)
+    for scope in tuple(scopes):
+        for key in (
+            "desktop_execution_policy",
+            "yachiyo_desktop_execution_policy",
+            "desktop_interaction_policy",
+        ):
+            policy = scope.get(key)
+            if isinstance(policy, Mapping):
+                scopes.append(policy)
+    if any(
+        _optional_bool_value(scope.get(key)) is True
+        for scope in scopes
+        for key in isolation_keys
+    ):
+        return False
+    return any(
+        _optional_bool_value(scope.get(key)) is True
+        for scope in scopes
+        for key in foreground_keys
+    )
+
+
 def default_desktop_execution_provider_registry() -> DesktopExecutionProviderRegistry:
     return desktop_execution_provider_registry_from_env()
 
@@ -1270,10 +1721,14 @@ def desktop_execution_provider_registry_from_env(
         environ,
         urlopen=urlopen,
     )
+    background_adapter = cua_background_provider_adapter_from_env(environ)
     local_adapter = LocalDesktopExecutionProviderAdapter()
-    if adapter is None:
-        return DesktopExecutionProviderRegistry([local_adapter])
-    return DesktopExecutionProviderRegistry([adapter, local_adapter])
+    adapters = [
+        candidate
+        for candidate in (adapter, background_adapter, local_adapter)
+        if candidate is not None
+    ]
+    return DesktopExecutionProviderRegistry(adapters)
 
 
 def local_desktop_execution_provider_status(
@@ -1592,7 +2047,12 @@ def desktop_execution_route_payload(tool_request: Mapping[str, Any] | Any) -> di
 def sandbox_provider_payload(tool_request: Mapping[str, Any] | Any) -> dict[str, Any]:
     if not isinstance(tool_request, Mapping):
         return {}
-    for key in ("sandbox_provider", "sandbox_desktop_provider", "desktop_sandbox_provider"):
+    for key in (
+        "desktop_execution_provider",
+        "sandbox_provider",
+        "sandbox_desktop_provider",
+        "desktop_sandbox_provider",
+    ):
         value = tool_request.get(key)
         if isinstance(value, Mapping):
             return dict(value)
@@ -1613,13 +2073,19 @@ def desktop_execution_route_allows_provider_execution(
 
 
 def desktop_execution_route_requires_provider(route: Mapping[str, Any] | Any) -> bool:
-    if not isinstance(route, Mapping) or not bool(route.get("can_execute")):
+    if not isinstance(route, Mapping):
         return False
     provider_kind = _route_provider_kind(route)
     if not provider_kind or provider_kind in _DEFAULT_PROVIDER_KINDS:
         return False
+    # An authoritative affinity route remains provider-owned even when the
+    # selected adapter lacks the next capability.  Returning False here would
+    # make execute_if_routed() look like an unrouted request and invite the
+    # caller to fall through to the local foreground broker.
     if bool(route.get("provider_execution_required")):
         return True
+    if not bool(route.get("can_execute")):
+        return False
     if provider_kind == "sandbox_desktop":
         return True
     if bool(route.get("sandbox_required")):
@@ -1635,8 +2101,15 @@ def desktop_execution_provider_unavailable_result(
     *,
     route: Mapping[str, Any],
     tool_request: Mapping[str, Any],
+    capability_mismatch: bool = False,
 ) -> dict[str, Any]:
-    blocking_conditions = ["desktop_execution_provider_unavailable"]
+    background_provider = _route_provider_kind(route) == CUA_BACKGROUND_PROVIDER_KIND
+    primary_blocker = (
+        "desktop_execution_provider_tool_unavailable"
+        if capability_mismatch
+        else "desktop_execution_provider_unavailable"
+    )
+    blocking_conditions = [primary_blocker]
     route_blockers = [
         str(item).strip()
         for item in route.get("blocking_conditions", [])
@@ -1650,30 +2123,67 @@ def desktop_execution_provider_unavailable_result(
             "ok": False,
             "tool": tool_name,
             "action": tool_name,
-            "status": "provider_unavailable",
-            "error": "desktop_execution_provider_unavailable",
+            "status": (
+                "provider_capability_mismatch"
+                if capability_mismatch
+                else "provider_unavailable"
+            ),
+            "error": primary_blocker,
             "summary": (
-                "Desktop execution provider route was selected, but no adapter is "
+                "The selected desktop provider is available but cannot execute this "
+                "tool; choose another allowed capability without falling back to the "
+                "user's foreground desktop."
+                if capability_mismatch
+                else
+                "Background desktop control is not ready; the task was paused without "
+                "taking over the user's desktop."
+                if background_provider
+                else "Desktop execution provider route was selected, but no adapter is "
                 "registered in this runtime."
             ),
             "blocked_by_desktop_execution_provider": True,
+            "desktop_provider_capability_mismatch": capability_mismatch,
             "blocking_condition": blocking_conditions[0],
             "blocking_conditions": blocking_conditions,
             "hint": (
-                "Continue in supervised_live or configure a sandbox/headless desktop "
+                "Replan with an allowed tool supported by the selected provider, or "
+                "establish a compatible provider route."
+                if capability_mismatch
+                else
+                "Install or authorize the background control component, then retry."
+                if background_provider
+                else "Continue in supervised_live or configure a sandbox/headless desktop "
                 "execution provider adapter."
             ),
-            "recommended_tools": ["desktop.provider_session.start"],
-            "recovery_actions": _provider_unavailable_recovery_actions(
-                tool_name,
-                route=route,
-                tool_request=tool_request,
+            "recommended_tools": (
+                []
+                if capability_mismatch or background_provider
+                else ["desktop.provider_session.start"]
+            ),
+            "recovery_actions": (
+                []
+                if capability_mismatch
+                else _provider_unavailable_recovery_actions(
+                    tool_name,
+                    route=route,
+                    tool_request=tool_request,
+                )
+            ),
+            **(
+                {
+                    "retryable": True,
+                    "replan_allowed": True,
+                    "retry_with_alternative_capability": True,
+                    "replan_reason": "selected_provider_capability_mismatch",
+                }
+                if capability_mismatch
+                else {}
             ),
         },
         tool_name=tool_name,
         route=route,
         tool_request=tool_request,
-        adapter_registered=False,
+        adapter_registered=capability_mismatch,
     )
 
 
@@ -1728,6 +2238,8 @@ def _provider_unavailable_recovery_actions(
 ) -> list[dict[str, Any]]:
     clean_tool = str(tool_name or "").strip()
     if not clean_tool:
+        return []
+    if _route_provider_kind(route) == CUA_BACKGROUND_PROVIDER_KIND:
         return []
     sandbox_provider = sandbox_provider_payload(tool_request)
     provider_id = (

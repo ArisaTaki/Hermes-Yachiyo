@@ -83,6 +83,24 @@ def test_tool_payload_validation_rejects_unknown_and_undeclared_fields() -> None
         )
 
 
+def test_app_open_schema_accepts_explicit_background_delivery_hint() -> None:
+    ToolDescriptorRegistry.validate_payload(
+        "app.open",
+        {"app_name": "TextEdit", "bring_to_front": False},
+    )
+
+    schema = ToolDescriptorRegistry.model_tool_schemas(["app.open"])[0][
+        "function"
+    ]["parameters"]
+    assert schema["properties"]["bring_to_front"]["type"] == "boolean"
+
+    with pytest.raises(AgentRuntimeError, match="bring_to_front.*布尔"):
+        ToolDescriptorRegistry.validate_payload(
+            "app.open",
+            {"app_name": "TextEdit", "bring_to_front": "false"},
+        )
+
+
 def test_music_app_control_tool_is_low_risk_and_validates_payload() -> None:
     assert "media.music_app_control" in LOW_RISK_DESKTOP_TOOL_NAMES
     assert TOOL_FUNCTION_NAMES["media.music_app_control"] == "media_music_app_control"
@@ -261,6 +279,7 @@ def test_default_daily_agent_policy_exposes_desktop_tools_with_medium_risk_appro
         "app.focus_and_type_into_ui_element": True,
         "app.open_and_hotkey": True,
         "app.focus_and_hotkey": True,
+        "desktop.permissions.verify": True,
         "desktop.close_window": True,
         "desktop.quit_app": True,
         "desktop.hotkey": True,

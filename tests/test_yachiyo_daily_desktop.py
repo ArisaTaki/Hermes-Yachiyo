@@ -40,6 +40,129 @@ def test_daily_desktop_product_entrypoints_do_not_enable_legacy_intent_fallback(
         assert "allow_legacy_fallback=True" not in path.read_text(encoding="utf-8")
 
 
+def test_daily_desktop_safe_shortcut_avoids_redundant_inspect_focus() -> None:
+    plan = daily_desktop_entrypoint_runtime_plan(
+        "Chrome 打开搜索",
+        metadata={
+            "allow_user_foreground_takeover": True,
+            "desktop_provider_health_probe": False,
+            "desktop_provider_session_auto_start": False,
+        },
+        allowed_tools=[
+            "desktop.list_apps",
+            "desktop.inspect_app",
+            "app.focus",
+            "app.focus_and_safe_shortcut",
+            "desktop.ui_elements",
+        ],
+        allow_legacy_fallback=False,
+    )
+
+    assert [request["tool"] for request in plan.entrypoint_requests] == [
+        "desktop.list_apps",
+        "app.focus_and_safe_shortcut",
+        "desktop.ui_elements",
+    ]
+    operation = plan.entrypoint_requests[1]
+    assert operation["input"]["app_name"] == "Google Chrome"
+    assert operation["input"]["action"] == "find"
+    assert operation["depends_on"] == ["discover-desktop-state"]
+    assert operation["presentation"] == "summary"
+    assert plan.entrypoint_requests[-1]["depends_on"] == ["operate-foreground-ui"]
+
+
+def test_presented_app_safe_shortcut_stays_atomic_at_execution_boundary() -> None:
+    from apps.shell.agent.runtime.custom_api_agent import (
+        _split_combined_foreground_app_requests,
+    )
+
+    request = {
+        "tool": "app.focus_and_safe_shortcut",
+        "input": {"app_name": "Google Chrome", "action": "find"},
+        "presentation": "summary",
+    }
+
+    assert _split_combined_foreground_app_requests(
+        [request],
+        ["app.focus", "desktop.safe_shortcut"],
+    ) == [request]
+
+
+def test_unpresented_app_safe_shortcut_stays_atomic_at_execution_boundary() -> None:
+    from apps.shell.agent.runtime.custom_api_agent import (
+        _split_combined_foreground_app_requests,
+    )
+
+    request = {
+        "tool": "app.focus_and_safe_shortcut",
+        "input": {"app_name": "Google Chrome", "action": "find"},
+    }
+
+    assert _split_combined_foreground_app_requests(
+        [request],
+        ["app.focus", "desktop.safe_shortcut"],
+    ) == [request]
+
+
+def test_legacy_envelope_app_safe_shortcut_stays_atomic_at_execution_boundary() -> None:
+    from apps.shell.agent.runtime.custom_api_agent import (
+        _split_combined_foreground_app_requests,
+    )
+    from apps.shell.yachiyo_agent.runtime_execution import (
+        runtime_execution_requests_from_envelope_payload,
+    )
+
+    envelope = {
+        "requests": [
+            {
+                "tool_name": "app.open_and_safe_shortcut",
+                "input": {"app_name": "Finder", "action": "find"},
+                "approval_required": True,
+                "requires_post_action_verification": True,
+                "status": "planned",
+            }
+        ]
+    }
+    requests = runtime_execution_requests_from_envelope_payload(
+        envelope,
+        allowed_tools=["app.open_and_safe_shortcut"],
+    )
+
+    assert _split_combined_foreground_app_requests(
+        requests,
+        ["app.open", "app.focus", "desktop.safe_shortcut"],
+    ) == requests
+    assert requests[0]["tool"] == "app.open_and_safe_shortcut"
+    assert requests[0]["approval_required"] is True
+    assert requests[0]["requires_post_action_verification"] is True
+
+
+def test_app_safe_type_text_stays_atomic_at_execution_boundary() -> None:
+    from apps.shell.agent.runtime.custom_api_agent import (
+        _split_combined_foreground_app_requests,
+    )
+
+    requests = [
+        {
+            "tool": "app.open_and_safe_type_text",
+            "input": {"app_name": "Notes", "text": "first draft"},
+            "approval_required": True,
+            "requires_post_action_verification": True,
+        },
+        {
+            "tool": "app.focus_and_safe_type_text",
+            "input": {"app_name": "Notes", "text": "revised draft"},
+            "approval_required": True,
+            "requires_post_action_verification": True,
+        },
+    ]
+
+    assert _split_combined_foreground_app_requests(
+        requests,
+        ["app.open", "app.focus", "desktop.safe_type_text"],
+    ) == requests
+
+
 def test_planner_first_daily_entrypoint_discovers_generic_pull_up_target() -> None:
     requests = planner_first_daily_desktop_entrypoint_requests(
         "把浏览器拉起来",
@@ -594,6 +717,7 @@ def test_planner_first_daily_desktop_entrypoint_verifies_known_app_submit_when_n
         "runtime_stage": "verify",
         "runtime_role": "verify_result",
         "replan_triggers": ["verification_failed"],
+        "requires_post_action_verification": False,
     }
 
 
@@ -2330,13 +2454,6 @@ def test_planner_first_daily_desktop_entrypoint_requests_scope_foreground_safe_s
                 "source": "runtime_planner",
                 "planning_reason": "planner_desktop_operation",
             },
-            {
-                "protocol": "json_fallback",
-                "tool": "desktop.ui_elements",
-                "input": {},
-                "source": "runtime_planner",
-                "planning_reason": "planner_desktop_operation",
-            },
         ]
 
 
@@ -2585,7 +2702,7 @@ def test_daily_desktop_entrypoint_requests_use_planner_for_safe_app_actions(monk
         assert daily_desktop_entrypoint_requests(prompt) == expected
 
 
-def test_planner_first_daily_desktop_entrypoint_verifies_simple_media_playback() -> None:
+def test_planner_first_daily_desktop_entrypoint_uses_dedicated_media_state() -> None:
     requests = planner_first_daily_desktop_entrypoint_requests(
         "能帮我播放 Apple Music 吗",
         allowed_tools=["media.music_app_open_and_play", "desktop.ui_elements"],
@@ -2599,13 +2716,6 @@ def test_planner_first_daily_desktop_entrypoint_verifies_simple_media_playback()
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_media_playback",
         },
-        {
-            "protocol": "json_fallback",
-            "tool": "desktop.ui_elements",
-            "input": {"role_filter": "", "limit": 80},
-            "source": "runtime_planner",
-            "planning_reason": "planner_fallback_media_playback",
-        },
     ]
     assert daily_desktop_user_metadata(requests) == {
         "daily_desktop_intent": True,
@@ -2614,7 +2724,6 @@ def test_planner_first_daily_desktop_entrypoint_verifies_simple_media_playback()
         "daily_desktop_tool": "media.music_app_open_and_play",
         "daily_desktop_tools": [
             "media.music_app_open_and_play",
-            "desktop.ui_elements",
         ],
     }
 
@@ -4078,6 +4187,26 @@ def test_daily_desktop_entrypoint_routes_installed_app_discovery_language(monkey
         assert daily_desktop_user_metadata(requests)["daily_desktop_tool"] == "desktop.list_apps"
 
 
+def test_daily_desktop_entrypoint_respects_negative_open_constraint(monkeypatch) -> None:
+    _forbid_legacy_daily_parser(
+        monkeypatch,
+        "negative app-control constraints must stay planner-owned",
+    )
+
+    requests = daily_desktop_entrypoint_requests(
+        "使用后台桌面工具列出已安装的办公软件，只回复应用名称，"
+        "不要打开或切换任何应用。"
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {},
+        }
+    ]
+
+
 def test_daily_desktop_entrypoint_routes_window_list_language(monkeypatch) -> None:
     _forbid_legacy_daily_parser(monkeypatch, "window-list observation must be planner-owned")
     assert daily_desktop_entrypoint_requests("显示当前窗口列表") == [
@@ -4461,6 +4590,31 @@ def test_daily_desktop_entrypoint_routes_screen_and_visible_ui_language_to_deskt
             }
         ]
         assert daily_desktop_user_metadata(requests)["daily_desktop_tool"] == tool_name
+
+
+def test_semantic_ui_entrypoint_is_owned_by_runtime_planner(monkeypatch) -> None:
+    def fail_legacy_parser(*_args, **_kwargs):
+        raise AssertionError("semantic UI input must not fall back to the legacy parser")
+
+    monkeypatch.setattr(
+        "apps.shell.agent.runtime.desktop_intents.daily_desktop_entrypoint_tool_requests",
+        fail_legacy_parser,
+    )
+
+    assert daily_desktop_entrypoint_requests(
+        "Can you type hello into the search field?"
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.type_into_ui_element",
+            "input": {
+                "target": "search",
+                "text": "hello",
+                "role_filter": "text",
+                "limit": 80,
+            },
+        }
+    ]
 
 
 def test_daily_desktop_entrypoint_routes_browser_search_and_current_page_find() -> None:
@@ -6221,7 +6375,7 @@ def test_daily_desktop_entrypoint_routes_click_then_submit_sequences() -> None:
     assert daily_desktop_entrypoint_requests("打开 Linear 点击创建按钮然后确认") == [
         {
             "protocol": "json_fallback",
-            "tool": "app.open_and_click_ui_element",
+            "tool": "app.focus_and_click_ui_element",
             "input": {
                 "app_name": "Linear",
                 "target": "创建",
@@ -6319,7 +6473,7 @@ def test_daily_desktop_entrypoint_routes_click_type_submit_sequences() -> None:
     assert daily_desktop_entrypoint_requests("打开 Slack 点击消息框输入 hello 并发送") == [
         {
             "protocol": "json_fallback",
-            "tool": "app.open_and_click_ui_element",
+            "tool": "app.focus_and_click_ui_element",
             "input": {
                 "app_name": "Slack",
                 "target": "消息",
@@ -7774,8 +7928,8 @@ def test_daily_desktop_entrypoint_routes_music_control_language(monkeypatch) -> 
         assert daily_desktop_entrypoint_requests(prompt) == [
             {
                 "protocol": "json_fallback",
-                "tool": "media.music_app_control",
-                "input": {"app_name": "Music", "action": action},
+                "tool": "media.apple_music_control",
+                "input": {"action": action},
             }
         ]
     for prompt, app_name, action in (
@@ -7948,14 +8102,13 @@ def test_daily_desktop_entrypoint_routes_colloquial_music_queries_to_available_a
     for prompt, tool_input in explicit_app_cases:
         requests = daily_desktop_entrypoint_requests(prompt)
 
-        assert [request["tool"] for request in requests] == [
-            "app.open_and_safe_shortcut",
-            "desktop.safe_type_text",
-            "desktop.search_submit",
-            "media.music_app_open_and_play",
+        assert requests == [
+            {
+                "protocol": "json_fallback",
+                "tool": "media.apple_music_play",
+                "input": tool_input,
+            }
         ]
-        assert requests[0]["input"] == {"app_name": "Music", "action": "find"}
-        assert requests[1]["input"] == {"text": tool_input["query"]}
 
     assert daily_desktop_entrypoint_requests("播点音乐") == [
         {
@@ -8167,10 +8320,11 @@ def test_daily_desktop_structured_recovery_keeps_raw_and_execution_policy_bounda
         for key, value in direct_request.items()
         if key != "desktop_execution_policy"
     } == requests[0]
-    assert direct_request["desktop_execution_policy"]["mode"] == "preview_input"
+    assert direct_request["desktop_execution_policy"]["mode"] == "supervised_live"
+    assert direct_request["desktop_execution_policy"]["allow_live_foreground"] is True
     assert direct_request["desktop_execution_policy"][
         "require_sandbox_for_keyboard_mouse"
-    ] is True
+    ] is False
     assert daily_desktop_user_metadata(requests) == {
         "daily_desktop_intent": True,
         "daily_desktop_source": "daily_desktop_metadata",

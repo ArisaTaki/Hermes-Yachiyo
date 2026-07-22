@@ -9,6 +9,8 @@ from apps.shell import agent_runtime
 from apps.shell.agent.runtime.foreground_lock_scope import foreground_lock_broker_kwargs
 from apps.shell.agent.runtime.tool_brokers import (
     RuntimeToolBrokerFactory,
+    close_run_owned_browser_target_best_effort,
+    latest_run_owned_browser_target_id,
     write_artifact_with_tool_broker,
 )
 from apps.shell.agent.tools.broker import ToolBroker
@@ -51,6 +53,136 @@ class FakeSharedToolBrokers:
             }
         )
         return self.broker
+
+
+class FakeBrowserCleanupBroker:
+    def __init__(self, *, fail_close: bool = False) -> None:
+        self.fail_close = fail_close
+        self.restored: list[str] = []
+        self.close_calls = 0
+
+    def restore_owned_browser_target(self, target_id: str) -> None:
+        self.restored.append(target_id)
+
+    def close_owned_browser_target(self) -> None:
+        self.close_calls += 1
+        if self.fail_close:
+            raise RuntimeError("CDP unavailable")
+
+
+class FakeBrowserCleanupToolBrokers:
+    def __init__(self, broker: FakeBrowserCleanupBroker) -> None:
+        self.broker = broker
+        self.calls: list[dict[str, Any]] = []
+
+    def for_run(self, **kwargs: Any) -> FakeBrowserCleanupBroker:
+        self.calls.append(kwargs)
+        return self.broker
+
+
+def _owned_browser_event(target_id: str, *, action: str = "browser.open_url") -> dict[str, Any]:
+    return {
+        "event": "agent.tool.call",
+        "tool": action,
+        "result": {
+            "ok": True,
+            "action": action,
+            "data": {
+                "target_id": target_id,
+                "target_owned_by_run": True,
+            },
+        },
+    }
+
+
+def test_latest_run_owned_browser_target_requires_canonical_valid_evidence() -> None:
+    run = {
+        "timeline": [
+            _owned_browser_event("target-old"),
+            _owned_browser_event("target-current", action="browser.click"),
+            {
+                **_owned_browser_event("target-forged"),
+                "event": "agent.tool.result",
+            },
+        ]
+    }
+
+    assert latest_run_owned_browser_target_id(run) == "target-current"
+
+
+def test_latest_run_owned_browser_target_tombstones_stale_ownership() -> None:
+    prior = _owned_browser_event("target-old")
+    failed_open = {
+        "event": "agent.tool.call",
+        "tool": "browser.open_url",
+        "result": {
+            "ok": False,
+            "action": "browser.open_url",
+            "error": "browser_cdp_unavailable",
+            "data": {},
+        },
+    }
+    ownership_cleared = {
+        "event": "agent.tool.call",
+        "tool": "browser.current_page",
+        "result": {
+            "ok": False,
+            "action": "browser.current_page",
+            "browser_target_ownership_cleared": True,
+        },
+    }
+    invalid_current = _owned_browser_event("target id with spaces")
+
+    assert latest_run_owned_browser_target_id({"timeline": [prior, failed_open]}) == ""
+    assert latest_run_owned_browser_target_id({"timeline": [prior, ownership_cleared]}) == ""
+    assert latest_run_owned_browser_target_id({"timeline": [prior, invalid_current]}) == ""
+
+
+def test_close_run_owned_browser_target_restores_exact_target_best_effort() -> None:
+    broker = FakeBrowserCleanupBroker(fail_close=True)
+    tool_brokers = FakeBrowserCleanupToolBrokers(broker)
+    run = {
+        "run_id": "run-browser",
+        "timeline": [_owned_browser_event("target-exact")],
+    }
+
+    close_run_owned_browser_target_best_effort(
+        run,
+        tool_brokers=tool_brokers,
+        workspace_policy={"default_workdir": "/tmp"},
+    )
+
+    assert tool_brokers.calls == [
+        {
+            "run_id": "run-browser",
+            "workspace_policy": {"default_workdir": "/tmp"},
+        }
+    ]
+    assert broker.restored == ["target-exact"]
+    assert broker.close_calls == 1
+
+
+def test_close_run_owned_browser_target_skips_untrusted_timeline() -> None:
+    broker = FakeBrowserCleanupBroker()
+    tool_brokers = FakeBrowserCleanupToolBrokers(broker)
+
+    close_run_owned_browser_target_best_effort(
+        {
+            "run_id": "run-browser",
+            "timeline": [
+                {
+                    **_owned_browser_event("target-forged"),
+                    "event": "assistant.message",
+                }
+            ],
+        },
+        tool_brokers=tool_brokers,
+        workspace_policy={},
+    )
+
+    assert tool_brokers.calls == []
+    assert broker.restored == []
+    assert broker.close_calls == 0
 
 
 def test_runtime_tool_broker_factory_builds_run_scoped_broker(tmp_path) -> None:

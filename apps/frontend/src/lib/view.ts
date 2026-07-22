@@ -1,3 +1,5 @@
+import { preloadView } from './viewPreload';
+
 export type AppView =
   | 'main'
   | 'chat'
@@ -25,6 +27,14 @@ type RouteState = {
   params: Record<string, string>;
 };
 
+type ViewTransitionHandle = {
+  finished: Promise<void>;
+};
+
+type ViewTransitionDocument = Document & {
+  startViewTransition?: (update: () => void) => ViewTransitionHandle;
+};
+
 declare global {
   interface Window {
     ohaRouteLeaveGuard?: (nextView: AppView) => boolean;
@@ -32,6 +42,10 @@ declare global {
 }
 
 export const ROUTE_CHANGE_EVENT = 'oha-route-change';
+
+const ROUTE_TRANSITION_CLASS = 'hy-route-transition-active';
+const ROUTE_TRANSITION_EXCLUDED_VIEWS = new Set<AppView>(['bubble-menu', 'live2d']);
+let routeTransitionToken = 0;
 
 export function currentView(): AppView {
   return currentRoute().view;
@@ -68,8 +82,50 @@ export function navigateTo(
   });
   const route = routePath(view, nextParams);
   if (window.location.hash === route) return;
-  window.history.pushState(null, '', route);
-  window.dispatchEvent(new Event(ROUTE_CHANGE_EVENT));
+  void preloadView(view);
+
+  const commitRoute = () => {
+    window.history.pushState(null, '', route);
+    window.dispatchEvent(new Event(ROUTE_CHANGE_EVENT));
+  };
+  const transitionDocument = document as ViewTransitionDocument;
+  if (!shouldAnimateRouteTransition(currentView(), view, transitionDocument)) {
+    commitRoute();
+    return;
+  }
+
+  const token = ++routeTransitionToken;
+  document.documentElement.classList.add(ROUTE_TRANSITION_CLASS);
+  try {
+    const transition = transitionDocument.startViewTransition?.(commitRoute);
+    if (!transition) {
+      commitRoute();
+      document.documentElement.classList.remove(ROUTE_TRANSITION_CLASS);
+      return;
+    }
+    void transition.finished
+      .catch(() => undefined)
+      .finally(() => {
+        if (token === routeTransitionToken) {
+          document.documentElement.classList.remove(ROUTE_TRANSITION_CLASS);
+        }
+      });
+  } catch {
+    document.documentElement.classList.remove(ROUTE_TRANSITION_CLASS);
+    commitRoute();
+  }
+}
+
+function shouldAnimateRouteTransition(
+  current: AppView,
+  next: AppView,
+  transitionDocument: ViewTransitionDocument,
+): boolean {
+  if (!transitionDocument.startViewTransition) return false;
+  if (ROUTE_TRANSITION_EXCLUDED_VIEWS.has(current) || ROUTE_TRANSITION_EXCLUDED_VIEWS.has(next)) return false;
+  if (document.visibilityState !== 'visible') return false;
+  if (!document.querySelector('.hy-content')) return false;
+  return !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 }
 
 export function routePath(view: AppView, params: Record<string, string> = {}): string {

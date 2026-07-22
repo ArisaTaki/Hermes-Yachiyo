@@ -20,10 +20,11 @@ ChatSession 是 Bubble / Live2D / Chat Window / 主控台摘要共享的消息�
 
 from __future__ import annotations
 
-import logging
+import hashlib
 import json
+import logging
 import threading
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from enum import Enum
 from typing import TYPE_CHECKING, List, Optional
@@ -37,6 +38,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 _CHAT_TEXT_REDACTION_LIMIT = 0
 _CHAT_JSON_MAX_ITEMS = 200
+_ASSISTANT_PROJECTION_KEY = "assistant_projection_key"
 
 
 class MessageRole(str, Enum):
@@ -87,11 +89,13 @@ class ChatSession:
         store: "ChatStore",
         load_existing: bool = True,
         fail_active_messages: bool = True,
+        create_if_missing: bool = True,
     ) -> None:
         """绑定持久化层，并创建/加载会话。"""
         with self._lock:
             self._store = store
-            store.create_session(self.session_id)
+            if create_if_missing:
+                store.create_session(self.session_id)
             if load_existing:
                 self._load_messages_from_store(fail_active_messages=fail_active_messages)
                 # 恢复 execution_session_id
@@ -200,6 +204,130 @@ class ChatSession:
             self._ensure_summary_title_locked(safe_content, normalized_attachments)
         logger.info("用户消息已添加: %s (len=%d, attachments=%d)", msg_id, len(safe_content), len(normalized_attachments))
         return msg_id
+
+    def upsert_user_message_by_client_id(
+        self,
+        content: str,
+        *,
+        client_message_id: str,
+        task_id: str = "",
+        status: MessageStatus = MessageStatus.PROCESSING,
+        attachments: list[dict] | None = None,
+        metadata: dict | None = None,
+    ) -> str:
+        """Persist one canonical user message for an idempotent client send."""
+        normalized_client_id = str(client_message_id or "").strip()
+        if not normalized_client_id:
+            raise ValueError("client_message_id must not be empty")
+
+        safe_content = _redact_chat_text(content)
+        safe_attachments = _redact_chat_attachments(attachments or [])
+        safe_metadata = _redact_chat_metadata(metadata or {})
+        safe_metadata["client_message_id"] = normalized_client_id
+        deterministic_id = self._client_user_message_id(normalized_client_id)
+        clean_task_id = str(task_id or "").strip()
+
+        with self._lock:
+            existing = self._user_message_by_client_id_locked(
+                normalized_client_id,
+                deterministic_id,
+            )
+            if existing is not None:
+                next_status = (
+                    status
+                    if existing.status in (MessageStatus.PENDING, MessageStatus.PROCESSING)
+                    else existing.status
+                )
+                updated = replace(
+                    existing,
+                    task_id=existing.task_id or clean_task_id or None,
+                    status=next_status,
+                    attachments=(
+                        existing.attachments
+                        if existing.attachments or not safe_attachments
+                        else safe_attachments
+                    ),
+                    metadata={**dict(existing.metadata or {}), **safe_metadata},
+                )
+                self._persist_message(updated)
+                self.messages = [
+                    updated if message.message_id == existing.message_id else message
+                    for message in self.messages
+                ]
+                self._pending_message_id = self._find_active_message_id_locked()
+                return updated.message_id
+
+            message = ChatMessage(
+                message_id=deterministic_id,
+                role=MessageRole.USER,
+                content=safe_content,
+                status=status,
+                created_at=datetime.now(timezone.utc),
+                task_id=clean_task_id or None,
+                attachments=safe_attachments,
+                metadata=safe_metadata,
+            )
+            self._persist_message(message)
+            self.messages.append(message)
+            self._ensure_summary_title_locked(safe_content, safe_attachments)
+            self._pending_message_id = self._find_active_message_id_locked()
+            return message.message_id
+
+    def _client_user_message_id(self, client_message_id: str) -> str:
+        identity = "\x1f".join((self.session_id, MessageRole.USER.value, client_message_id))
+        digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()
+        return f"user_{digest[:24]}"
+
+    def _user_message_by_client_id_locked(
+        self,
+        client_message_id: str,
+        deterministic_id: str,
+    ) -> Optional[ChatMessage]:
+        loader = getattr(self._store, "load_messages", None)
+        if callable(loader):
+            for stored in loader(self.session_id, limit=0):
+                if stored.role != MessageRole.USER.value:
+                    continue
+                stored_metadata = _parse_metadata_json(
+                    getattr(stored, "metadata_json", "{}")
+                )
+                if (
+                    stored.message_id != deterministic_id
+                    and str(stored_metadata.get("client_message_id") or "")
+                    != client_message_id
+                ):
+                    continue
+                try:
+                    persisted = _chat_message_from_stored(
+                        stored,
+                        fail_active_message=False,
+                    )
+                except ValueError:
+                    continue
+                self.messages = [
+                    message
+                    for message in self.messages
+                    if not (
+                        message.role == MessageRole.USER
+                        and (
+                            message.message_id == deterministic_id
+                            or str((message.metadata or {}).get("client_message_id") or "")
+                            == client_message_id
+                        )
+                    )
+                ]
+                self.messages.append(persisted)
+                self.messages.sort(key=lambda item: item.created_at)
+                return persisted
+
+        for message in self.messages:
+            metadata = message.metadata if isinstance(message.metadata, dict) else {}
+            if message.role == MessageRole.USER and (
+                message.message_id == deterministic_id
+                or str(metadata.get("client_message_id") or "") == client_message_id
+            ):
+                return message
+        return None
     
     def link_message_to_task(self, message_id: str, task_id: str) -> bool:
         """将消息与任务关联。
@@ -287,6 +415,212 @@ class ChatSession:
             self._persist_message(msg)
         logger.info("Assistant 回复已添加: %s (task=%s)", msg_id, task_id)
         return msg_id
+
+    def upsert_assistant_projection_message(
+        self,
+        projection_key: str,
+        content: str,
+        status: MessageStatus = MessageStatus.COMPLETED,
+        error: Optional[str] = None,
+        metadata: dict | None = None,
+        *,
+        message_id: str = "",
+    ) -> str:
+        """Atomically create or update one derived assistant projection.
+
+        ``projection_key`` is scoped to this chat session and the assistant
+        role.  The deterministic message id also makes concurrent projections
+        from separate ``ChatSession`` instances converge on one persisted row.
+        Callers must include every source identity component in the key; for a
+        Workflow child that is the parent Workflow Run and child Agent Run.
+        """
+        normalized_key = str(projection_key or "").strip()
+        if not normalized_key:
+            raise ValueError("projection_key must not be empty")
+
+        safe_content = _redact_chat_text(content)
+        safe_error = _redact_optional_chat_text(error)
+        safe_metadata = _redact_chat_metadata(metadata or {})
+        safe_metadata[_ASSISTANT_PROJECTION_KEY] = normalized_key
+        message_id = (
+            str(message_id or "").strip()
+            or self._assistant_projection_message_id(normalized_key)
+        )
+
+        with self._lock:
+            projection_upserter = getattr(
+                self._store,
+                "upsert_projection_message",
+                None,
+            )
+            if callable(projection_upserter):
+                from apps.core.chat_store import StoredMessage
+
+                stored = projection_upserter(StoredMessage(
+                    message_id=message_id,
+                    session_id=self.session_id,
+                    role=MessageRole.ASSISTANT.value,
+                    content=safe_content,
+                    status=status.value,
+                    task_id=None,
+                    error=safe_error,
+                    created_at=datetime.now(timezone.utc).isoformat(),
+                    attachments_json="[]",
+                    metadata_json=json.dumps(safe_metadata, ensure_ascii=False),
+                ))
+                projected = _chat_message_from_stored(
+                    stored,
+                    fail_active_message=False,
+                )
+                next_messages: list[ChatMessage] = []
+                inserted = False
+                for item in self.messages:
+                    item_metadata = (
+                        item.metadata if isinstance(item.metadata, dict) else {}
+                    )
+                    is_same_projection = (
+                        item.role == MessageRole.ASSISTANT
+                        and (
+                            item.message_id == message_id
+                            or str(
+                                item_metadata.get(_ASSISTANT_PROJECTION_KEY) or ""
+                            )
+                            == normalized_key
+                        )
+                    )
+                    if not is_same_projection:
+                        next_messages.append(item)
+                        continue
+                    if not inserted:
+                        next_messages.append(projected)
+                        inserted = True
+                if not inserted:
+                    next_messages.append(projected)
+                self.messages = next_messages
+                self._pending_message_id = self._find_active_message_id_locked()
+                return projected.message_id
+
+            existing = self._assistant_projection_candidate_locked(
+                normalized_key,
+                message_id,
+            )
+            if existing is not None:
+                # A stale poll must not regress a terminal callback projection.
+                if (
+                    existing.status in (MessageStatus.COMPLETED, MessageStatus.FAILED)
+                    and status == MessageStatus.PROCESSING
+                ):
+                    self._pending_message_id = self._find_active_message_id_locked()
+                    return existing.message_id
+                existing.content = safe_content
+                existing.status = status
+                existing.error = safe_error
+                existing.metadata.update(safe_metadata)
+                self._persist_message(existing)
+                self._pending_message_id = self._find_active_message_id_locked()
+                return existing.message_id
+
+            message = ChatMessage(
+                message_id=message_id,
+                role=MessageRole.ASSISTANT,
+                content=safe_content,
+                status=status,
+                created_at=datetime.now(timezone.utc),
+                error=safe_error,
+                metadata=safe_metadata,
+            )
+            self.messages.append(message)
+            self._persist_message(message)
+            self._pending_message_id = self._find_active_message_id_locked()
+            return message_id
+
+    def _assistant_projection_message_id(self, projection_key: str) -> str:
+        identity = "\x1f".join(
+            (self.session_id, MessageRole.ASSISTANT.value, projection_key)
+        )
+        digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()
+        return f"projection_{digest[:24]}"
+
+    def _assistant_projection_candidate_locked(
+        self,
+        projection_key: str,
+        message_id: str,
+    ) -> Optional[ChatMessage]:
+        memory_candidate: Optional[ChatMessage] = None
+        memory_index = -1
+        for index, message in enumerate(self.messages):
+            if message.role != MessageRole.ASSISTANT:
+                continue
+            metadata = message.metadata if isinstance(message.metadata, dict) else {}
+            if (
+                message.message_id == message_id
+                or str(metadata.get(_ASSISTANT_PROJECTION_KEY) or "") == projection_key
+            ):
+                memory_candidate = message
+                memory_index = index
+                break
+
+        loader = getattr(self._store, "load_messages", None)
+        if not callable(loader):
+            return memory_candidate
+        try:
+            stored_messages = loader(self.session_id, limit=0)
+        except Exception:
+            logger.debug(
+                "加载持久化 assistant 投影失败: key=%s",
+                projection_key,
+                exc_info=True,
+            )
+            return memory_candidate
+        persisted_candidate: Optional[ChatMessage] = None
+        for stored in stored_messages:
+            if stored.role != MessageRole.ASSISTANT.value:
+                continue
+            stored_metadata = _parse_metadata_json(
+                getattr(stored, "metadata_json", "{}")
+            )
+            if (
+                stored.message_id != message_id
+                and str(stored_metadata.get(_ASSISTANT_PROJECTION_KEY) or "")
+                != projection_key
+            ):
+                continue
+            try:
+                message = _chat_message_from_stored(
+                    stored,
+                    fail_active_message=False,
+                )
+            except ValueError:
+                logger.warning("跳过无法恢复的 assistant 投影: %s", stored.message_id)
+                continue
+            if (
+                persisted_candidate is None
+                or (
+                    persisted_candidate.status
+                    not in (MessageStatus.COMPLETED, MessageStatus.FAILED)
+                    and message.status
+                    in (MessageStatus.COMPLETED, MessageStatus.FAILED)
+                )
+            ):
+                persisted_candidate = message
+
+        if persisted_candidate is None:
+            return memory_candidate
+        if memory_candidate is None:
+            self.messages.append(persisted_candidate)
+            return persisted_candidate
+        if (
+            memory_candidate.status in (MessageStatus.COMPLETED, MessageStatus.FAILED)
+            and persisted_candidate.status
+            not in (MessageStatus.COMPLETED, MessageStatus.FAILED)
+        ):
+            return memory_candidate
+
+        # The store is the shared concurrency boundary between ChatSession
+        # instances.  Refresh a stale in-memory projection before deciding
+        # whether the incoming write may change its status.
+        self.messages[memory_index] = persisted_candidate
+        return persisted_candidate
 
     def upsert_assistant_message(
         self,
@@ -686,6 +1020,49 @@ class ChatSession:
         return None
 
 
+def load_existing_chat_session(
+    store: "ChatStore",
+    session_id: str,
+    *,
+    current: ChatSession | None = None,
+    fail_active_messages: bool = False,
+) -> ChatSession | None:
+    """Load an explicit projection target without creating or falling back.
+
+    Background completions must never turn a stale session identifier into a
+    new conversation, and must never redirect that completion to whichever
+    conversation happens to be current.
+    """
+    clean_session_id = str(session_id or "").strip()
+    if not clean_session_id:
+        return None
+    try:
+        if store.get_session(clean_session_id) is None:
+            return None
+        if current is not None and current.session_id == clean_session_id:
+            return current
+        session = ChatSession(session_id=clean_session_id)
+        session.attach_store(
+            store,
+            load_existing=True,
+            fail_active_messages=fail_active_messages,
+            create_if_missing=False,
+        )
+        # A concurrent delete between the first lookup and load must still
+        # suppress the late projection. Subsequent writes also remain guarded
+        # by the store's foreign-key boundary because no session is recreated.
+        if store.get_session(clean_session_id) is None:
+            return None
+        return session
+    except Exception:
+        logger.debug(
+            "Unable to load existing ChatSession: %s",
+            clean_session_id,
+            exc_info=True,
+        )
+        return None
+
+
 # 全局会话实例（单会话 MVP）
 # 后续可扩展为多会话管理器
 _global_session: Optional[ChatSession] = None
@@ -710,7 +1087,7 @@ def get_chat_session() -> ChatSession:
             session = ChatSession(session_id=sessions[0].session_id)
         else:
             session = ChatSession()
-        session.attach_store(store)
+        session.attach_store(store, fail_active_messages=False)
         _global_session = session
         logger.info("初始化全局 ChatSession: %s", session.session_id)
         return session

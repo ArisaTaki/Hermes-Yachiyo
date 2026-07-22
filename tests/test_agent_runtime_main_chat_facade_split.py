@@ -14,6 +14,7 @@ def test_runtime_main_chat_facade_mixin_remains_exported_from_legacy_module() ->
     assert agent_runtime.RuntimeMainChatFacadeMixin is RuntimeMainChatFacadeMixin
     assert issubclass(agent_runtime.NativeRunEngine, RuntimeMainChatFacadeMixin)
     assert "start_main_chat_run" not in agent_runtime.NativeRunEngine.__dict__
+    assert "latest_awaiting_user_main_chat_run" not in agent_runtime.NativeRunEngine.__dict__
     assert "execute_main_chat_model_loop" not in agent_runtime.NativeRunEngine.__dict__
     assert "complete_main_chat_run" not in agent_runtime.NativeRunEngine.__dict__
 
@@ -47,3 +48,62 @@ def test_native_runtime_keeps_main_chat_facade_methods_available_after_split(tmp
         assert completed["status"] == "completed"
     finally:
         service.close()
+
+
+def test_main_chat_pending_approval_keeps_existing_runtime_authority_on_repause() -> None:
+    envelope = {
+        "envelope_id": "repause-authority",
+        "requests": [
+            {
+                "request_id": "open-notes",
+                "tool_name": "app.open",
+                "input": {"app_name": "Notes"},
+                "status": "blocked",
+            }
+        ],
+    }
+    metadata = {"yachiyo_runtime_planner": True}
+
+    pending = RuntimeMainChatFacadeMixin._main_chat_pending_approval(
+        {
+            "approval_id": "approval-next",
+            "tool": "artifact.write",
+            "runtime_execution_envelope": envelope,
+            "runtime_execution_metadata": metadata,
+        },
+        model_profile_id="profile-chat",
+        tool_policy={"allowed_tools": ["artifact.write", "app.open"]},
+        workspace_policy={"default_workdir": "/tmp/project"},
+        runtime_execution_envelope={},
+        runtime_execution_metadata={},
+    )
+
+    assert pending["runtime_execution_envelope"] == envelope
+    assert pending["runtime_execution_metadata"] == metadata
+    envelope["requests"][0]["input"]["app_name"] = "Slack"
+    metadata["yachiyo_runtime_planner"] = False
+    assert pending["runtime_execution_envelope"]["requests"][0]["input"] == {
+        "app_name": "Notes"
+    }
+    assert pending["runtime_execution_metadata"]["yachiyo_runtime_planner"] is True
+
+
+def test_main_chat_facade_delegates_pending_clarification_lookup() -> None:
+    calls: list[str] = []
+
+    class TaskRunLinks:
+        def latest_awaiting_user_main_chat_for_session(
+            self,
+            session_id: str,
+        ) -> dict[str, str]:
+            calls.append(session_id)
+            return {"run_id": "run-pending", "session_id": session_id}
+
+    runtime = RuntimeMainChatFacadeMixin()
+    runtime.task_run_links = TaskRunLinks()
+
+    assert runtime.latest_awaiting_user_main_chat_run("session-a") == {
+        "run_id": "run-pending",
+        "session_id": "session-a",
+    }
+    assert calls == ["session-a"]

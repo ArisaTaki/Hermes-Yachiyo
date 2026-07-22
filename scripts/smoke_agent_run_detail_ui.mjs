@@ -2011,6 +2011,7 @@ function runElectronSmoke(devUrl, bridgeUrl) {
 const { app, BrowserWindow } = require('electron');
 const devUrl = ${JSON.stringify(devUrl)};
 const bridgeUrl = ${JSON.stringify(bridgeUrl)};
+const resetUrl = 'data:text/html,<meta%20http-equiv%3D%22Content-Security-Policy%22%20content%3D%22default-src%20%27none%27%22><title>Reset</title>';
 const runId = ${JSON.stringify(RUN_ID)};
 const approvalRunId = ${JSON.stringify(APPROVAL_RUN_ID)};
 const workflowRunId = ${JSON.stringify(WORKFLOW_RUN_ID)};
@@ -2369,7 +2370,7 @@ async function main() {
   ), 'workflow parent detail restored after scoped rerun');
   await win.webContents.executeJavaScript("document.querySelector('[data-testid=\\"agent-run-detail-workflow-step-open-run\\"]').click()", true);
   await waitFor(win, () => window.location.hash.includes(${JSON.stringify(WORKFLOW_CHILD_RUN_ID)}), 'workflow child route hash');
-  await win.loadURL('about:blank');
+  await win.loadURL(resetUrl);
   await win.loadURL(devUrl + '?bridge=' + encodeURIComponent(bridgeUrl) + '#/agents/' + encodeURIComponent(${JSON.stringify(WORKFLOW_CHILD_RUN_ID)}));
   await waitFor(win, () => {
     const detail = document.querySelector('[data-testid="agent-run-detail"]');
@@ -2404,7 +2405,7 @@ async function main() {
   }, 'workflow child run detail replay');
   console.log('[electron-smoke] workflow child run detail rendered');
 
-  await win.loadURL('about:blank');
+  await win.loadURL(resetUrl);
   await win.loadURL(devUrl + '?bridge=' + encodeURIComponent(bridgeUrl) + '#/agents/' + encodeURIComponent(runId));
   console.log('[electron-smoke] run detail loaded');
   await waitFor(win, () => {

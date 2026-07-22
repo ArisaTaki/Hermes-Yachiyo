@@ -88,7 +88,9 @@ def build_runtime_run_services(
         db_lock,
         now=now,
         json_dump=json_dump,
+        json_load=json_load,
         public_pending_approval=approval_snapshots.public_pending_approval,
+        error_type=error_type,
     )
     run_artifacts = RunArtifactRepository(
         conn,
@@ -133,6 +135,10 @@ def build_runtime_run_services(
         error_type=error_type,
         ensure_run_exists=get_run,
         sync_event_cursor=run_projections.sync_event_cursor,
+        assert_write_active=lambda run_id: runs.assert_bound_async_execution_active(
+            run_id,
+            require_running=False,
+        ),
     )
     return RuntimeRunServiceBundle(
         approval_snapshots=approval_snapshots,
@@ -144,11 +150,28 @@ def build_runtime_run_services(
         run_events=run_events,
         agent_run_starter=RuntimeAgentRunStarter(
             get_run_group=get_run_group,
+            get_run=get_run,
             insert_run_group=insert_run_group,
             insert_run=insert_run,
             run_by_client_request_id=run_by_client_request_id,
             client_request_id_from_payload=client_request_id_from_payload,
             agent_workspace_dir=agent_workspace_dir,
+            delete_empty_run_group=run_groups.delete_if_empty,
+            normalize_user_goal=redact_secrets,
+            error_type=error_type,
+            async_execution_lease_by_client_request_id=(
+                runs.async_execution_lease_by_client_request_id
+            ),
+            try_take_over_async_execution_lease=(
+                runs.try_take_over_async_execution_lease
+            ),
+            renew_async_execution_lease=runs.renew_async_execution_lease,
+            owns_async_execution_lease=runs.owns_async_execution_lease,
+            release_async_execution_lease=runs.release_async_execution_lease,
+            bind_async_execution_lease=runs.bind_async_execution_lease,
+            run_group_attachment_transaction=(
+                conn.transaction if callable(getattr(conn, "transaction", None)) else None
+            ),
         ),
     )
 

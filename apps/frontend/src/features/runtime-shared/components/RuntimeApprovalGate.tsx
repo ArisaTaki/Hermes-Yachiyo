@@ -51,7 +51,9 @@ export function RuntimeApprovalGate({
   rejectTestId,
   testId = 'runtime-approval-gate',
 }: RuntimeApprovalGateProps) {
-  const actionable = runtimeApprovalIsPending(approval);
+  const pending = runtimeApprovalIsPending(approval);
+  const hasApprovalId = Boolean(String(approval.approval_id || '').trim());
+  const actionable = pending && hasApprovalId;
   const actions = actionable && (onApprove || onReject) ? (
     <>
       {onApprove ? (
@@ -96,6 +98,11 @@ export function RuntimeApprovalGate({
         testId={cardTestId}
         variant={cardVariant}
       />
+      {pending && !hasApprovalId ? (
+        <p className="runtime-approval-stale" data-testid="runtime-approval-stale">
+          审批信息已过期，请刷新后重试。
+        </p>
+      ) : null}
       {children}
     </section>
   );
